@@ -27,6 +27,7 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.index({ storeId: 1, createdAt: -1 });
 orderSchema.index({ studentId: 1, createdAt: -1 });
+orderSchema.index({ schoolId: 1, studentId: 1, createdAt: -1 });
 orderSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

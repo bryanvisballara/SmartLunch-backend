@@ -10,3 +10,5 @@ require('./order.model');
 require('./inventoryMovement.model');
 require('./inventoryRequest.model');
 require('./dailyClosure.model');
+require('./deviceToken.model');
+require('./notification.model');

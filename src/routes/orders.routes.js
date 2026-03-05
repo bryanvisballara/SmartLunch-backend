@@ -9,6 +9,7 @@ const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const Order = require('../models/order.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
+const { queueOrderCreatedNotifications } = require('../services/notification.service');
 
 const router = express.Router();
 
@@ -179,6 +180,18 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
     }
 
     await session.commitTransaction();
+
+    // Push notifications are queued outside the HTTP request path.
+    setImmediate(async () => {
+      try {
+        const result = await queueOrderCreatedNotifications({ schoolId, student, order });
+        console.info(
+          `[ORDER_NOTIFICATION_QUEUED] orderId=${order._id} notifications=${result.notificationsCreated} tokens=${result.tokensFound} queued=${result.queued} queuedCount=${result.queuedCount} queueReason=${result.queueReason || 'none'}`
+        );
+      } catch (notificationError) {
+        console.error(`[ORDER_NOTIFICATION_FAILED] orderId=${order._id} error=${notificationError.message}`);
+      }
+    });
 
     console.info(
       `[ORDER_CREATED] studentId=${studentId} vendorId=${userId} storeId=${storeId} paymentMethod=${paymentMethod} total=${total}`

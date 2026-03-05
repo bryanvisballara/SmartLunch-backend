@@ -20,5 +20,6 @@ const walletTransactionSchema = new mongoose.Schema(
 );
 
 walletTransactionSchema.index({ studentId: 1, createdAt: -1 });
+walletTransactionSchema.index({ schoolId: 1, studentId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('WalletTransaction', walletTransactionSchema);

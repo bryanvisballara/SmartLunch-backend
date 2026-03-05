@@ -11,6 +11,7 @@ const orderRoutes = require('./routes/orders.routes');
 const inventoryRoutes = require('./routes/inventory.routes');
 const dailyClosureRoutes = require('./routes/dailyClosure.routes');
 const statsRoutes = require('./routes/stats.routes');
+const notificationsRoutes = require('./routes/notifications.routes');
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use('/inventory', inventoryRoutes);
 app.use('/daily-closure', dailyClosureRoutes);
 app.use('/stats', statsRoutes);
 app.use('/kpi', statsRoutes);
+app.use('/notifications', notificationsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
