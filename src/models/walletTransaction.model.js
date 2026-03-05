@@ -1,0 +1,24 @@
+const mongoose = require('mongoose');
+
+const walletTransactionSchema = new mongoose.Schema(
+  {
+    schoolId: { type: String, required: true, index: true },
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
+    walletId: { type: mongoose.Schema.Types.ObjectId, ref: 'Wallet', required: true },
+    type: {
+      type: String,
+      enum: ['recharge', 'purchase', 'refund', 'adjustment'],
+      required: true,
+    },
+    amount: { type: Number, required: true },
+    method: { type: String, enum: ['system', 'cash', 'transfer', 'dataphone'], required: true },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    notes: { type: String, trim: true },
+  },
+  { timestamps: true }
+);
+
+walletTransactionSchema.index({ studentId: 1, createdAt: -1 });
+
+module.exports = mongoose.model('WalletTransaction', walletTransactionSchema);

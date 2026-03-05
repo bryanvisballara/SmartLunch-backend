@@ -1,0 +1,12 @@
+require('./user.model');
+require('./student.model');
+require('./parentStudentLink.model');
+require('./wallet.model');
+require('./walletTransaction.model');
+require('./store.model');
+require('./category.model');
+require('./product.model');
+require('./order.model');
+require('./inventoryMovement.model');
+require('./inventoryRequest.model');
+require('./dailyClosure.model');
