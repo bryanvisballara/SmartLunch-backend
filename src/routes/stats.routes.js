@@ -27,7 +27,7 @@ function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
-router.get('/kpi', async (req, res) => {
+async function getKpi(req, res) {
   try {
     const { schoolId } = req.user;
     const lowStockThreshold = Number(req.query.lowStockThreshold || 10);
@@ -64,6 +64,8 @@ router.get('/kpi', async (req, res) => {
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
-});
+}
+
+router.get(['/kpi', '/'], getKpi);
 
 module.exports = router;

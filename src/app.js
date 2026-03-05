@@ -59,6 +59,7 @@ app.use('/orders', limiter, orderRoutes);
 app.use('/inventory', inventoryRoutes);
 app.use('/daily-closure', dailyClosureRoutes);
 app.use('/stats', statsRoutes);
+app.use('/kpi', statsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
