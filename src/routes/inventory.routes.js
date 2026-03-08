@@ -7,6 +7,7 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const Product = require('../models/product.model');
 const InventoryRequest = require('../models/inventoryRequest.model');
 const InventoryMovement = require('../models/inventoryMovement.model');
+const { queueApprovalPendingNotificationForAdmins } = require('../services/notification.service');
 
 const router = express.Router();
 
@@ -178,6 +179,32 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
     }
 
     const requests = await InventoryRequest.insertMany(documents);
+
+    try {
+      const requestCount = Number(requests.length || 0);
+      const typeLabelMap = {
+        in: 'ingreso',
+        out: 'egreso',
+        transfer: 'traslado',
+      };
+      const typeLabel = typeLabelMap[type] || 'inventario';
+
+      await queueApprovalPendingNotificationForAdmins({
+        schoolId,
+        title: 'Nueva autorizacion pendiente',
+        body: `Hay ${requestCount} solicitud(es) de ${typeLabel} pendiente(s) de aprobacion.`,
+        payload: {
+          type: 'approval.inventory.pending',
+          batchId,
+          requestType: String(type || ''),
+          requestsCount: requestCount,
+          storeId: String(storeId || ''),
+          targetStoreId: String(targetStoreId || ''),
+        },
+      });
+    } catch (notificationError) {
+      console.warn(`[APPROVAL_PUSH_WARNING] inventory batch=${batchId} error=${notificationError.message}`);
+    }
 
     return res.status(201).json({
       count: requests.length,

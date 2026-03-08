@@ -8,7 +8,10 @@ const Student = require('../models/student.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const WalletTopupRequest = require('../models/walletTopupRequest.model');
-const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
+const {
+  queueAutoDebitRechargeNotification,
+  queueApprovalPendingNotificationForAdmins,
+} = require('../services/notification.service');
 
 const router = express.Router();
 
@@ -272,6 +275,23 @@ router.post('/topup-requests', roleMiddleware('vendor', 'admin'), async (req, re
       requestDate,
       status: 'pending',
     });
+
+    try {
+      const amountText = Number(request.amount || 0).toLocaleString('es-CO');
+      await queueApprovalPendingNotificationForAdmins({
+        schoolId,
+        title: 'Nueva autorizacion pendiente',
+        body: `Hay una solicitud de recarga pendiente por $${amountText}.`,
+        payload: {
+          type: 'approval.topup.pending',
+          requestId: String(request._id),
+          studentId: String(student._id),
+          storeId: String(storeId || ''),
+        },
+      });
+    } catch (notificationError) {
+      console.warn(`[APPROVAL_PUSH_WARNING] topup request=${request._id} error=${notificationError.message}`);
+    }
 
     return res.status(201).json(request);
   } catch (error) {

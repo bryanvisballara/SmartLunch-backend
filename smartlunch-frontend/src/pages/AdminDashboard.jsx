@@ -676,6 +676,11 @@ function AdminDashboard() {
     [pendingInGroups.length, pendingOutGroups.length, pendingTransferGroups.length, pendingTopups.length, pendingCancellations.length]
   );
 
+  const pendingApprovalsCount = useMemo(
+    () => approvalModules.reduce((sum, moduleItem) => sum + Number(moduleItem.count || 0), 0),
+    [approvalModules]
+  );
+
   const filteredSalesStudents = useMemo(() => {
     const query = String(salesStudentQuery || '').trim().toLowerCase();
     if (!query) {
@@ -3120,7 +3125,9 @@ function AdminDashboard() {
             onClick={() => setActiveModule(moduleItem.id)}
             type="button"
           >
-            {moduleItem.label}
+            {moduleItem.id === 'approvals'
+              ? `${moduleItem.label}${pendingApprovalsCount > 0 ? ` (${pendingApprovalsCount})` : ''}`
+              : moduleItem.label}
           </button>
         ))}
       </section>

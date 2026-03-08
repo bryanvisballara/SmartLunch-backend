@@ -3,6 +3,7 @@ const Wallet = require('../models/wallet.model');
 const Notification = require('../models/notification.model');
 const DeviceToken = require('../models/deviceToken.model');
 const Student = require('../models/student.model');
+const User = require('../models/user.model');
 const { enqueueNotificationJobs } = require('../config/queue');
 
 function formatCurrency(value) {
@@ -237,10 +238,43 @@ async function queueTutorCommentNotification({
   });
 }
 
+async function queueApprovalPendingNotificationForAdmins({
+  schoolId,
+  title,
+  body,
+  payload = {},
+}) {
+  const admins = await User.find({
+    schoolId,
+    role: 'admin',
+    status: 'active',
+    deletedAt: null,
+  })
+    .select('_id')
+    .lean();
+
+  const adminIds = admins.map((admin) => admin._id).filter(Boolean);
+  if (!adminIds.length) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  return queueNotificationsForParents({
+    schoolId,
+    parentIds: adminIds,
+    title,
+    body,
+    payload: {
+      ...payload,
+      audience: 'admin',
+    },
+  });
+}
+
 module.exports = {
   queueOrderCreatedNotifications,
   queueNotificationsForParents,
   queueLowBalanceAlertNotification,
   queueAutoDebitRechargeNotification,
   queueTutorCommentNotification,
+  queueApprovalPendingNotificationForAdmins,
 };
