@@ -9,9 +9,15 @@ const studentRoutes = require('./routes/students.routes');
 const walletRoutes = require('./routes/wallet.routes');
 const orderRoutes = require('./routes/orders.routes');
 const inventoryRoutes = require('./routes/inventory.routes');
+const productsRoutes = require('./routes/products.routes');
+const storesRoutes = require('./routes/stores.routes');
 const dailyClosureRoutes = require('./routes/dailyClosure.routes');
 const statsRoutes = require('./routes/stats.routes');
 const notificationsRoutes = require('./routes/notifications.routes');
+const adminRoutes = require('./routes/admin.routes');
+const meriendasRoutes = require('./routes/meriendas.routes');
+const parentRoutes = require('./routes/parent.routes');
+const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
 
@@ -21,9 +27,33 @@ const defaultOrigins = [
   'https://www.comergio.com',
 ];
 
+const defaultOriginRegexes = [/^https:\/\/[a-z0-9-]+\.hostingersite\.com$/i];
+
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
   : defaultOrigins;
+
+const allowedOriginRegexes = (process.env.CORS_ORIGIN_REGEX || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
+  .map((pattern) => {
+    try {
+      return new RegExp(pattern);
+    } catch (error) {
+      console.warn(`Ignoring invalid CORS_ORIGIN_REGEX pattern: ${pattern}`);
+      return null;
+    }
+  })
+  .filter(Boolean)
+  .concat(defaultOriginRegexes);
+
+function isAllowedOrigin(origin) {
+  return (
+    allowedOrigins.includes(origin) ||
+    allowedOriginRegexes.some((regex) => regex.test(origin))
+  );
+}
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -33,16 +63,18 @@ const limiter = rateLimit({
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || isAllowedOrigin(origin)) {
         return callback(null, true);
       }
 
-      return callback(new Error('Not allowed by CORS'));
+      // Return false instead of throwing to avoid surfacing as a 500 response.
+      return callback(null, false);
     },
   })
 );
 app.use(helmet());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('dev'));
 
 app.get('/health', (req, res) => {
@@ -58,10 +90,29 @@ app.use('/students', studentRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/orders', limiter, orderRoutes);
 app.use('/inventory', inventoryRoutes);
+app.use('/products', productsRoutes);
+app.use('/stores', storesRoutes);
 app.use('/daily-closure', dailyClosureRoutes);
 app.use('/stats', statsRoutes);
 app.use('/kpi', statsRoutes);
 app.use('/notifications', notificationsRoutes);
+app.use('/admin', adminRoutes);
+app.use('/admin/meriendas', meriendasRoutes);
+app.use('/meriendas', meriendasRoutes);
+app.use('/parent', parentRoutes);
+app.use('/payments', paymentsRoutes);
+
+app.use((error, req, res, next) => {
+  if (error?.type === 'entity.too.large') {
+    return res.status(413).json({ message: 'La imagen es muy grande. Intenta con una foto mas liviana.' });
+  }
+
+  if (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Unexpected server error' });
+  }
+
+  return next();
+});
 
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });

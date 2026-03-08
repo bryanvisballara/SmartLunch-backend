@@ -1,4 +1,6 @@
 const express = require('express');
+const crypto = require('crypto');
+const mongoose = require('mongoose');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -11,82 +13,176 @@ const router = express.Router();
 router.use(authMiddleware);
 
 async function approveInventoryRequest({ schoolId, userId, requestId }) {
-  const request = await InventoryRequest.findOne({ _id: requestId, schoolId, status: 'pending' });
-  if (!request) {
-    return { status: 404, body: { message: 'Pending request not found' } };
-  }
+  let session;
+  try {
+    session = await mongoose.startSession();
+    session.startTransaction();
 
-  if (request.type === 'in') {
-    await Product.updateOne({ _id: request.productId, schoolId, storeId: request.storeId }, { $inc: { stock: request.quantity } });
-  }
-
-  if (request.type === 'out') {
-    const product = await Product.findOne({ _id: request.productId, schoolId, storeId: request.storeId });
-    if (!product || product.stock < request.quantity) {
-      return { status: 400, body: { message: 'Insufficient stock to approve out request' } };
+    const request = await InventoryRequest.findOne({ _id: requestId, schoolId, status: 'pending' }).session(session);
+    if (!request) {
+      await session.abortTransaction();
+      return { status: 404, body: { message: 'Pending request not found' } };
     }
 
-    await Product.updateOne({ _id: request.productId, schoolId, storeId: request.storeId }, { $inc: { stock: -request.quantity } });
-  }
+    if (request.type === 'in') {
+      const result = await Product.updateOne(
+        { _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null },
+        { $inc: { stock: request.quantity } },
+        { session }
+      );
 
-  if (request.type === 'transfer') {
-    if (!request.targetStoreId) {
-      return { status: 400, body: { message: 'targetStoreId is required for transfer request' } };
+      if (result.matchedCount === 0) {
+        await session.abortTransaction();
+        return { status: 404, body: { message: 'Product not found for in request' } };
+      }
     }
 
-    const sourceProduct = await Product.findOne({ _id: request.productId, schoolId, storeId: request.storeId });
-    if (!sourceProduct || sourceProduct.stock < request.quantity) {
-      return { status: 400, body: { message: 'Insufficient stock to transfer' } };
+    if (request.type === 'out') {
+      const product = await Product.findOne({ _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null }).session(session);
+      if (!product || product.stock < request.quantity) {
+        await session.abortTransaction();
+        return { status: 400, body: { message: 'Insufficient stock to approve out request' } };
+      }
+
+      await Product.updateOne(
+        { _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null },
+        { $inc: { stock: -request.quantity } },
+        { session }
+      );
     }
 
-    await Product.updateOne({ _id: request.productId, schoolId, storeId: request.storeId }, { $inc: { stock: -request.quantity } });
+    if (request.type === 'transfer') {
+      if (!request.targetStoreId) {
+        await session.abortTransaction();
+        return { status: 400, body: { message: 'targetStoreId is required for transfer request' } };
+      }
 
-    await Product.updateOne(
-      { _id: request.productId, schoolId, storeId: request.targetStoreId },
-      { $inc: { stock: request.quantity } }
+      const sourceProduct = await Product.findOne({ _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null }).session(session);
+      if (!sourceProduct || sourceProduct.stock < request.quantity) {
+        await session.abortTransaction();
+        return { status: 400, body: { message: 'Insufficient stock to transfer' } };
+      }
+
+      await Product.updateOne(
+        { _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null },
+        { $inc: { stock: -request.quantity } },
+        { session }
+      );
+
+      // Destination stock must also be persisted even if destination uses a different product _id.
+      let targetProduct = await Product.findOne({
+        schoolId,
+        storeId: request.targetStoreId,
+        categoryId: sourceProduct.categoryId,
+        name: sourceProduct.name,
+        deletedAt: null,
+      }).session(session);
+
+      if (!targetProduct) {
+        targetProduct = await Product.create(
+          [
+            {
+              schoolId,
+              name: sourceProduct.name,
+              categoryId: sourceProduct.categoryId,
+              storeId: request.targetStoreId,
+              price: sourceProduct.price,
+              cost: sourceProduct.cost,
+              stock: 0,
+              inventoryAlertStock: sourceProduct.inventoryAlertStock,
+              imageUrl: sourceProduct.imageUrl,
+              tags: sourceProduct.tags,
+              status: sourceProduct.status,
+            },
+          ],
+          { session }
+        ).then((created) => created[0]);
+      }
+
+      await Product.updateOne({ _id: targetProduct._id }, { $inc: { stock: request.quantity } }, { session });
+    }
+
+    request.status = 'approved';
+    request.approvedBy = userId;
+    request.approvedAt = new Date();
+    await request.save({ session });
+
+    await InventoryMovement.create(
+      [
+        {
+          schoolId,
+          storeId: request.storeId,
+          targetStoreId: request.targetStoreId,
+          productId: request.productId,
+          type: request.type,
+          quantity: request.quantity,
+          createdBy: userId,
+          notes: request.notes,
+        },
+      ],
+      { session }
     );
+
+    await session.commitTransaction();
+
+    return { status: 200, body: request };
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return { status: 500, body: { message: error.message } };
+  } finally {
+    if (session) {
+      session.endSession();
+    }
   }
-
-  request.status = 'approved';
-  request.approvedBy = userId;
-  request.approvedAt = new Date();
-  await request.save();
-
-  await InventoryMovement.create({
-    schoolId,
-    storeId: request.storeId,
-    targetStoreId: request.targetStoreId,
-    productId: request.productId,
-    type: request.type,
-    quantity: request.quantity,
-    createdBy: userId,
-    notes: request.notes,
-  });
-
-  return { status: 200, body: request };
 }
 
 router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
-    const { storeId, targetStoreId = null, productId, type, quantity, notes } = req.body;
+    const { storeId, targetStoreId = null, productId, type, quantity, notes, items } = req.body;
 
-    if (!storeId || !productId || !type || !quantity) {
-      return res.status(400).json({ message: 'storeId, productId, type and quantity are required' });
+    if (!storeId || !type) {
+      return res.status(400).json({ message: 'storeId and type are required' });
     }
 
-    const request = await InventoryRequest.create({
+    if (type === 'transfer' && !targetStoreId) {
+      return res.status(400).json({ message: 'targetStoreId is required for transfer requests' });
+    }
+
+    const payloadItems = Array.isArray(items) && items.length > 0
+      ? items
+      : [{ productId, quantity, notes }];
+
+    const invalidItem = payloadItems.find((item) => !item?.productId || Number(item?.quantity) <= 0);
+    if (invalidItem) {
+      return res.status(400).json({ message: 'Each item requires productId and positive quantity' });
+    }
+
+    const documents = payloadItems.map((item) => ({
+      batchId: crypto.randomUUID(),
       schoolId,
       storeId,
       targetStoreId,
-      productId,
+      productId: item.productId,
       type,
-      quantity,
+      quantity: Number(item.quantity),
       requestedBy: userId,
-      notes,
-    });
+      notes: item.notes || notes,
+    }));
 
-    return res.status(201).json(request);
+    const batchId = documents[0].batchId;
+    for (const document of documents) {
+      document.batchId = batchId;
+    }
+
+    const requests = await InventoryRequest.insertMany(documents);
+
+    return res.status(201).json({
+      count: requests.length,
+      requests,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -113,6 +209,61 @@ router.post('/approve', roleMiddleware('admin'), async (req, res) => {
 
     const result = await approveInventoryRequest({ schoolId, userId, requestId });
     return res.status(result.status).json(result.body);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/reject/:id', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const request = await InventoryRequest.findOne({ _id: req.params.id, schoolId, status: 'pending' });
+
+    if (!request) {
+      return res.status(404).json({ message: 'Pending request not found' });
+    }
+
+    request.status = 'rejected';
+    request.approvedBy = userId;
+    request.approvedAt = new Date();
+    await request.save();
+
+    return res.status(200).json(request);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/requests', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const { status = 'pending', type, storeId } = req.query;
+
+    const filter = { schoolId };
+    if (status) {
+      filter.status = status;
+    }
+    if (type) {
+      filter.type = type;
+    }
+    if (storeId) {
+      filter.storeId = storeId;
+    }
+
+    if (role === 'vendor') {
+      filter.requestedBy = userId;
+    }
+
+    const requests = await InventoryRequest.find(filter)
+      .populate('productId', 'name')
+      .populate('storeId', 'name')
+      .populate('targetStoreId', 'name')
+      .populate('requestedBy', 'name username')
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return res.status(200).json(requests);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

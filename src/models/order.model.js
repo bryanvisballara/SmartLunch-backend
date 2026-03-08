@@ -14,10 +14,11 @@ const orderItemSchema = new mongoose.Schema(
 const orderSchema = new mongoose.Schema(
   {
     schoolId: { type: String, required: true, index: true },
-    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null },
+    guestSale: { type: Boolean, default: false },
     storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    paymentMethod: { type: String, enum: ['system', 'cash', 'transfer', 'dataphone'], required: true },
+    paymentMethod: { type: String, enum: ['system', 'cash', 'transfer', 'qr', 'dataphone'], required: true },
     items: { type: [orderItemSchema], required: true },
     total: { type: Number, required: true },
     status: { type: String, enum: ['completed', 'cancelled'], default: 'completed' },

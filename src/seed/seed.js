@@ -11,6 +11,12 @@ const Wallet = require('../models/wallet.model');
 const Store = require('../models/store.model');
 const Category = require('../models/category.model');
 const Product = require('../models/product.model');
+const MeriendaSubscription = require('../models/meriendaSubscription.model');
+const MeriendaFailedPayment = require('../models/meriendaFailedPayment.model');
+const MeriendaSchedule = require('../models/meriendaSchedule.model');
+const MeriendaOperation = require('../models/meriendaOperation.model');
+const MeriendaSnack = require('../models/meriendaSnack.model');
+const MeriendaIntakeRecord = require('../models/meriendaIntakeRecord.model');
 
 async function seed() {
   try {
@@ -27,31 +33,44 @@ async function seed() {
       Store.deleteMany({ schoolId }),
       Category.deleteMany({ schoolId }),
       Product.deleteMany({ schoolId }),
+      MeriendaSubscription.deleteMany({ schoolId }),
+      MeriendaFailedPayment.deleteMany({ schoolId }),
+      MeriendaSchedule.deleteMany({ schoolId }),
+      MeriendaOperation.deleteMany({ schoolId }),
+      MeriendaSnack.deleteMany({ schoolId }),
+      MeriendaIntakeRecord.deleteMany({ schoolId }),
     ]);
 
     const passwordHash = await bcrypt.hash('123456', 10);
 
-    const [admin, vendor, parent] = await User.create([
+    const [admin, vendor, parent, meriendaOperator] = await User.create([
       {
         schoolId,
         name: 'Admin SmartLunch',
-        email: 'admin@smartlunch.com',
+        username: 'admin',
         passwordHash,
         role: 'admin',
       },
       {
         schoolId,
         name: 'Vendor SmartLunch',
-        email: 'vendor@smartlunch.com',
+        username: 'vendor',
         passwordHash,
         role: 'vendor',
       },
       {
         schoolId,
         name: 'Parent SmartLunch',
-        email: 'parent@smartlunch.com',
+        username: 'parent',
         passwordHash,
         role: 'parent',
+      },
+      {
+        schoolId,
+        name: 'Operario Meriendas',
+        username: 'operario',
+        passwordHash,
+        role: 'merienda_operator',
       },
     ]);
 
@@ -101,11 +120,58 @@ async function seed() {
       { schoolId, name: 'Sandwich', categoryId: catSnacks._id, storeId: store._id, price: 7000, stock: 60 },
     ]);
 
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const [subA, subB] = await MeriendaSubscription.create([
+      {
+        schoolId,
+        parentUserId: parent._id,
+        parentName: parent.name,
+        parentUsername: parent.username,
+        childName: studentA.name,
+        childGrade: studentA.grade,
+        childDocument: 'CC-ALU-001',
+        parentRecommendations: 'Prefiere porciones pequenas y pausas cortas entre bocados.',
+        childAllergies: 'Restriccion alimentaria leve al mani.',
+        paymentStatus: true,
+        currentPeriodMonth: month,
+        status: 'active',
+        lastPaymentAt: now,
+      },
+      {
+        schoolId,
+        parentUserId: parent._id,
+        parentName: parent.name,
+        parentUsername: parent.username,
+        childName: studentB.name,
+        childGrade: studentB.grade,
+        childDocument: 'CC-ALU-002',
+        parentRecommendations: 'Motivarla con ejemplos visuales antes de cada bocado.',
+        childAllergies: 'Sin restricciones alimentarias reportadas.',
+        paymentStatus: true,
+        currentPeriodMonth: month,
+        status: 'active',
+        lastPaymentAt: now,
+      },
+    ]);
+
+    await MeriendaIntakeRecord.create({
+      schoolId,
+      subscriptionId: subA._id,
+      month,
+      date: `${month}-${String(now.getDate()).padStart(2, '0')}`,
+      ateStatus: 'ate',
+      observations: 'Comio bien toda la porcion, buen comportamiento.',
+      handledByUserId: meriendaOperator._id,
+      handledByName: meriendaOperator.name,
+    });
+
     console.log('Seed completed successfully.');
     console.log('Users:');
-    console.log('  admin@smartlunch.com / 123456');
-    console.log('  vendor@smartlunch.com / 123456');
-    console.log('  parent@smartlunch.com / 123456');
+    console.log('  admin / 123456');
+    console.log('  vendor / 123456');
+    console.log('  parent / 123456');
+    console.log('  operario / 123456');
 
     await mongoose.connection.close();
     process.exit(0);

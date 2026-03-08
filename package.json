@@ -8,22 +8,31 @@
     "start": "node src/server.js",
     "worker:notifications": "node src/workers/notification.worker.js",
     "init:collections": "node src/scripts/initCollections.js",
+    "migrate:usernames": "node src/scripts/migrateUsernames.js",
+    "migrate:schoolid-international-berckley": "node src/scripts/migrateSchoolIdToInternationalBerckley.js",
+    "migrate:schoolid-all-collections": "node src/scripts/migrateAllSchoolIdsToInternationalBerckley.js",
+    "backfill:products-all-stores": "node src/scripts/backfillZeroStockProductsToAllStores.js",
+    "migrate:meriendas-indexes": "node src/scripts/migrateMeriendasIndexes.js",
+    "migrate:legacy-students": "node src/scripts/migrateLegacyStudents.js",
     "seed": "node src/scripts/seed.js"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.2.3",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.12.15",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
-    "express-rate-limit": "^7.5.0",
     "express": "^4.22.1",
+    "express-rate-limit": "^7.5.0",
+    "firebase-admin": "^13.7.0",
     "helmet": "^8.1.0",
     "ioredis": "^5.4.1",
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.23.0",
     "morgan": "^1.10.1",
-    "multer": "^2.1.1"
+    "multer": "^2.1.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
@@ -32,6 +41,4 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs"
-
-  
 }

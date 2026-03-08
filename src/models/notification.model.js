@@ -3,9 +3,9 @@ const mongoose = require('mongoose');
 const notificationSchema = new mongoose.Schema(
   {
     schoolId: { type: String, required: true, index: true },
-    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null },
     parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
     title: { type: String, required: true, trim: true },
     body: { type: String, required: true, trim: true },
     payload: { type: Object, default: {} },

@@ -8,8 +8,13 @@ const Product = require('../models/product.model');
 const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const Order = require('../models/order.model');
+const DailyClosure = require('../models/dailyClosure.model');
+const OrderCancellationRequest = require('../models/orderCancellationRequest.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
-const { queueOrderCreatedNotifications } = require('../services/notification.service');
+const {
+  queueOrderCreatedNotifications,
+  queueLowBalanceAlertNotification,
+} = require('../services/notification.service');
 
 const router = express.Router();
 
@@ -34,23 +39,65 @@ async function parentCanSeeStudent(user, studentId) {
   return Boolean(link);
 }
 
+function resolveLowBalanceAlertTransition({ currentLevel = 'none', nextBalance = 0 }) {
+  const normalizedCurrentLevel = ['none', 'lt20', 'lt10'].includes(String(currentLevel))
+    ? String(currentLevel)
+    : 'none';
+
+  if (Number(nextBalance) < 10000) {
+    const shouldNotify = normalizedCurrentLevel !== 'lt10';
+    return {
+      nextLevel: 'lt10',
+      shouldNotify,
+      threshold: 'lt10',
+    };
+  }
+
+  if (Number(nextBalance) < 20000) {
+    const shouldNotify = normalizedCurrentLevel === 'none';
+    return {
+      nextLevel: normalizedCurrentLevel === 'lt10' ? 'lt10' : 'lt20',
+      shouldNotify,
+      threshold: 'lt20',
+    };
+  }
+
+  return {
+    nextLevel: 'none',
+    shouldNotify: false,
+    threshold: null,
+  };
+}
+
 router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
   let session;
   try {
     const { schoolId, userId } = req.user;
-    const { studentId, storeId, paymentMethod, items } = req.body;
+    const { studentId, storeId, paymentMethod, items, guestSale = false } = req.body;
+    const isGuestSale = Boolean(guestSale);
 
-    if (!studentId || !storeId || !paymentMethod || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: 'studentId, storeId, paymentMethod and items are required' });
+    if (!storeId || !paymentMethod || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'storeId, paymentMethod and items are required' });
+    }
+
+    if (!isGuestSale && !studentId) {
+      return res.status(400).json({ message: 'studentId is required for student sales' });
+    }
+
+    if (isGuestSale && paymentMethod === 'system') {
+      return res.status(400).json({ message: 'Guest sales cannot use system payment method' });
     }
 
     session = await mongoose.startSession();
     session.startTransaction();
 
-    const student = await Student.findOne({ _id: studentId, schoolId, status: 'active', deletedAt: null }).session(session);
-    if (!student) {
-      await session.abortTransaction();
-      return res.status(404).json({ message: 'Student not found' });
+    let student = null;
+    if (!isGuestSale) {
+      student = await Student.findOne({ _id: studentId, schoolId, status: 'active', deletedAt: null }).session(session);
+      if (!student) {
+        await session.abortTransaction();
+        return res.status(404).json({ message: 'Student not found' });
+      }
     }
 
     const productIds = items.map((item) => item.productId);
@@ -61,20 +108,23 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       return res.status(400).json({ message: 'One or more products are invalid for this store' });
     }
 
-    const now = new Date();
-    const dailySpent = await Order.aggregate([
-      {
-        $match: {
-          schoolId,
-          studentId: student._id,
-          status: 'completed',
-          createdAt: { $gte: startOfDay(now), $lt: endOfDay(now) },
+    let totalSpentToday = 0;
+    if (student) {
+      const now = new Date();
+      const dailySpent = await Order.aggregate([
+        {
+          $match: {
+            schoolId,
+            studentId: student._id,
+            status: 'completed',
+            createdAt: { $gte: startOfDay(now), $lt: endOfDay(now) },
+          },
         },
-      },
-      { $group: { _id: null, total: { $sum: '$total' } } },
-    ]).session(session);
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]).session(session);
 
-    const totalSpentToday = dailySpent[0]?.total || 0;
+      totalSpentToday = dailySpent[0]?.total || 0;
+    }
 
     let total = 0;
     const orderItems = [];
@@ -86,12 +136,12 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
         return res.status(400).json({ message: `Invalid product ${item.productId}` });
       }
 
-      if (student.blockedProducts.some((id) => String(id) === String(product._id))) {
+      if (student && student.blockedProducts.some((id) => String(id) === String(product._id))) {
         await session.abortTransaction();
         return res.status(400).json({ message: `Product blocked: ${product.name}` });
       }
 
-      if (student.blockedCategories.some((id) => String(id) === String(product.categoryId))) {
+      if (student && student.blockedCategories.some((id) => String(id) === String(product.categoryId))) {
         await session.abortTransaction();
         return res.status(400).json({ message: `Category blocked for product: ${product.name}` });
       }
@@ -119,12 +169,13 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       });
     }
 
-    if (student.dailyLimit > 0 && totalSpentToday + total > student.dailyLimit) {
+    if (student && student.dailyLimit > 0 && totalSpentToday + total > student.dailyLimit) {
       await session.abortTransaction();
       return res.status(400).json({ message: 'Daily spending limit exceeded' });
     }
 
     let wallet = null;
+    let lowBalanceTransition = null;
     if (paymentMethod === 'system') {
       wallet = await Wallet.findOne({ schoolId, studentId }).session(session);
       if (!wallet) {
@@ -136,6 +187,13 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
         await session.abortTransaction();
         return res.status(400).json({ message: 'Insufficient wallet balance' });
       }
+
+      const currentLevel = wallet.lowBalanceAlertLevel || 'none';
+      const nextBalance = Number(wallet.balance) - Number(total);
+      lowBalanceTransition = resolveLowBalanceAlertTransition({
+        currentLevel,
+        nextBalance,
+      });
     }
 
     for (const item of orderItems) {
@@ -146,7 +204,8 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       [
         {
           schoolId,
-          studentId,
+          studentId: student?._id || null,
+          guestSale: isGuestSale,
           storeId,
           vendorId: userId,
           paymentMethod,
@@ -160,6 +219,7 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
     if (paymentMethod === 'system' && wallet) {
       wallet.balance -= total;
+      wallet.lowBalanceAlertLevel = lowBalanceTransition?.nextLevel || wallet.lowBalanceAlertLevel || 'none';
       await wallet.save({ session });
 
       await WalletTransaction.create(
@@ -182,19 +242,41 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
     await session.commitTransaction();
 
     // Push notifications are queued outside the HTTP request path.
-    setImmediate(async () => {
-      try {
-        const result = await queueOrderCreatedNotifications({ schoolId, student, order });
-        console.info(
-          `[ORDER_NOTIFICATION_QUEUED] orderId=${order._id} notifications=${result.notificationsCreated} tokens=${result.tokensFound} queued=${result.queued} queuedCount=${result.queuedCount} queueReason=${result.queueReason || 'none'}`
-        );
-      } catch (notificationError) {
-        console.error(`[ORDER_NOTIFICATION_FAILED] orderId=${order._id} error=${notificationError.message}`);
+    if (student) {
+      setImmediate(async () => {
+        try {
+          const result = await queueOrderCreatedNotifications({ schoolId, student, order });
+          console.info(
+            `[ORDER_NOTIFICATION_QUEUED] orderId=${order._id} notifications=${result.notificationsCreated} tokens=${result.tokensFound} queued=${result.queued} queuedCount=${result.queuedCount} queueReason=${result.queueReason || 'none'}`
+          );
+        } catch (notificationError) {
+          console.error(`[ORDER_NOTIFICATION_FAILED] orderId=${order._id} error=${notificationError.message}`);
+        }
+      });
+
+      if (paymentMethod === 'system' && wallet && lowBalanceTransition?.shouldNotify && lowBalanceTransition.threshold) {
+        setImmediate(async () => {
+          try {
+            const balanceResult = await queueLowBalanceAlertNotification({
+              schoolId,
+              student,
+              balance: wallet.balance,
+              threshold: lowBalanceTransition.threshold,
+            });
+            console.info(
+              `[LOW_BALANCE_NOTIFICATION_QUEUED] orderId=${order._id} threshold=${lowBalanceTransition.threshold} notifications=${balanceResult.notificationsCreated} tokens=${balanceResult.tokensFound} queued=${balanceResult.queued} queuedCount=${balanceResult.queuedCount}`
+            );
+          } catch (balanceNotificationError) {
+            console.error(
+              `[LOW_BALANCE_NOTIFICATION_FAILED] orderId=${order._id} threshold=${lowBalanceTransition.threshold} error=${balanceNotificationError.message}`
+            );
+          }
+        });
       }
-    });
+    }
 
     console.info(
-      `[ORDER_CREATED] studentId=${studentId} vendorId=${userId} storeId=${storeId} paymentMethod=${paymentMethod} total=${total}`
+      `[ORDER_CREATED] studentId=${student ? studentId : 'guest'} vendorId=${userId} storeId=${storeId} paymentMethod=${paymentMethod} total=${total}`
     );
 
     return res.status(201).json(order);
@@ -213,9 +295,22 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { schoolId, role } = req.user;
-    const { studentId, from, to } = req.query;
+    const {
+      studentId,
+      from,
+      to,
+      status,
+      includeCancelled,
+    } = req.query;
 
     const filter = { schoolId };
+
+    // Default behavior keeps cancelled orders out of operational sales history.
+    if (status) {
+      filter.status = status;
+    } else if (String(includeCancelled).toLowerCase() !== 'true') {
+      filter.status = 'completed';
+    }
 
     if (studentId) {
       filter.studentId = studentId;
@@ -236,10 +331,297 @@ router.get('/', async (req, res) => {
       filter.studentId = { $in: links.map((link) => link.studentId) };
     }
 
-    const orders = await Order.find(filter).sort({ createdAt: -1 }).limit(300);
+    const orders = await Order.find(filter)
+      .populate('studentId', 'name schoolCode')
+      .populate('storeId', 'name')
+      .sort({ createdAt: -1 })
+      .limit(300);
     return res.status(200).json(orders);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/cancel-request', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const { orderId, reason } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({ message: 'orderId is required' });
+    }
+
+    const order = await Order.findOne({ _id: orderId, schoolId });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (order.status !== 'completed') {
+      return res.status(400).json({ message: 'Only completed orders can be requested for cancellation' });
+    }
+
+    if (role === 'vendor') {
+      const now = new Date();
+      const dateKey = startOfDay(now).toISOString().slice(0, 10);
+      const dayClosure = await DailyClosure.findOne({
+        schoolId,
+        storeId: order.storeId,
+        vendorId: userId,
+        date: dateKey,
+      }).lean();
+
+      if (dayClosure) {
+        return res.status(409).json({ message: 'El dia ya fue cerrado. No se pueden solicitar anulaciones.' });
+      }
+    }
+
+    const existingPending = await OrderCancellationRequest.findOne({ orderId, schoolId, status: 'pending' });
+    if (existingPending) {
+      return res.status(409).json({ message: 'This order already has a pending cancellation request' });
+    }
+
+    const request = await OrderCancellationRequest.create({
+      schoolId,
+      orderId,
+      storeId: order.storeId,
+      requestedBy: userId,
+      reason,
+      status: 'pending',
+    });
+
+    return res.status(201).json(request);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/cancel-requests/list', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const { status = 'pending' } = req.query;
+
+    const filter = { schoolId };
+    if (status) {
+      filter.status = status;
+    }
+    if (role === 'vendor') {
+      filter.requestedBy = userId;
+    }
+
+    const requests = await OrderCancellationRequest.find(filter)
+      .populate({
+        path: 'orderId',
+        select: 'studentId total paymentMethod status createdAt',
+        populate: { path: 'studentId', select: 'name schoolCode' },
+      })
+      .populate('storeId', 'name')
+      .populate('requestedBy', 'name username')
+      .populate('approvedBy', 'name username')
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return res.status(200).json(requests);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/cancel-requests/:id/approve', roleMiddleware('admin'), async (req, res) => {
+  let session;
+  try {
+    const { schoolId, userId } = req.user;
+    const requestId = req.params.id;
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const cancelRequest = await OrderCancellationRequest.findOne({ _id: requestId, schoolId, status: 'pending' }).session(session);
+    if (!cancelRequest) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Pending cancellation request not found' });
+    }
+
+    const order = await Order.findOne({ _id: cancelRequest.orderId, schoolId }).session(session);
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (order.status !== 'completed') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Order is already cancelled' });
+    }
+
+    order.status = 'cancelled';
+    await order.save({ session });
+
+    for (const item of order.items) {
+      await Product.updateOne({ _id: item.productId, schoolId, storeId: order.storeId }, { $inc: { stock: item.quantity } }, { session });
+    }
+
+    if (order.paymentMethod === 'system') {
+      const wallet = await Wallet.findOne({ schoolId, studentId: order.studentId }).session(session);
+      if (!wallet) {
+        await session.abortTransaction();
+        return res.status(404).json({ message: 'Wallet not found for refund' });
+      }
+
+      wallet.balance += order.total;
+      await wallet.save({ session });
+
+      await WalletTransaction.create(
+        [
+          {
+            schoolId,
+            studentId: order.studentId,
+            walletId: wallet._id,
+            type: 'refund',
+            amount: Math.abs(order.total),
+            method: 'system',
+            orderId: order._id,
+            createdBy: userId,
+            notes: 'Order cancellation approved by admin',
+          },
+        ],
+        { session }
+      );
+    }
+
+    cancelRequest.status = 'approved';
+    cancelRequest.approvedBy = userId;
+    cancelRequest.approvedAt = new Date();
+    await cancelRequest.save({ session });
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message: 'Order cancellation approved',
+      orderId: order._id,
+      cancellationRequestId: cancelRequest._id,
+      paymentMethod: order.paymentMethod,
+      refunded: order.paymentMethod === 'system',
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
+router.post('/cancel-requests/:id/reject', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const requestId = req.params.id;
+
+    const cancelRequest = await OrderCancellationRequest.findOne({ _id: requestId, schoolId, status: 'pending' });
+    if (!cancelRequest) {
+      return res.status(404).json({ message: 'Pending cancellation request not found' });
+    }
+
+    cancelRequest.status = 'rejected';
+    cancelRequest.rejectedBy = userId;
+    cancelRequest.rejectedAt = new Date();
+    await cancelRequest.save();
+
+    return res.status(200).json(cancelRequest);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/:id/cancel', roleMiddleware('admin'), async (req, res) => {
+  let session;
+  try {
+    const { schoolId, userId } = req.user;
+    const orderId = req.params.id;
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const order = await Order.findOne({ _id: orderId, schoolId }).session(session);
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (order.status !== 'completed') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Order is already cancelled' });
+    }
+
+    order.status = 'cancelled';
+    await order.save({ session });
+
+    for (const item of order.items) {
+      await Product.updateOne({ _id: item.productId, schoolId, storeId: order.storeId }, { $inc: { stock: item.quantity } }, { session });
+    }
+
+    if (order.paymentMethod === 'system') {
+      const wallet = await Wallet.findOne({ schoolId, studentId: order.studentId }).session(session);
+      if (!wallet) {
+        await session.abortTransaction();
+        return res.status(404).json({ message: 'Wallet not found for refund' });
+      }
+
+      wallet.balance += order.total;
+      await wallet.save({ session });
+
+      await WalletTransaction.create(
+        [
+          {
+            schoolId,
+            studentId: order.studentId,
+            walletId: wallet._id,
+            type: 'refund',
+            amount: Math.abs(order.total),
+            method: 'system',
+            orderId: order._id,
+            createdBy: userId,
+            notes: 'Order cancellation from admin sales history',
+          },
+        ],
+        { session }
+      );
+    }
+
+    await OrderCancellationRequest.create(
+      [
+        {
+          schoolId,
+          orderId: order._id,
+          storeId: order.storeId,
+          requestedBy: userId,
+          reason: 'Anulacion directa desde historial admin',
+          status: 'approved',
+          approvedBy: userId,
+          approvedAt: new Date(),
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message: 'Order cancelled successfully',
+      orderId: order._id,
+      refunded: order.paymentMethod === 'system',
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
   }
 });
 

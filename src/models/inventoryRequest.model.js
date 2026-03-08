@@ -6,6 +6,7 @@ const inventoryRequestSchema = new mongoose.Schema(
     storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
     targetStoreId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', default: null },
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    batchId: { type: String, trim: true, index: true },
     type: { type: String, enum: ['in', 'out', 'transfer'], required: true },
     quantity: { type: Number, required: true, min: 1 },
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },

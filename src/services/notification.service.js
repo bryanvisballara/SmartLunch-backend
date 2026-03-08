@@ -2,6 +2,7 @@ const ParentStudentLink = require('../models/parentStudentLink.model');
 const Wallet = require('../models/wallet.model');
 const Notification = require('../models/notification.model');
 const DeviceToken = require('../models/deviceToken.model');
+const Student = require('../models/student.model');
 const { enqueueNotificationJobs } = require('../config/queue');
 
 function formatCurrency(value) {
@@ -44,10 +45,10 @@ async function queueOrderCreatedNotifications({ schoolId, student, order }) {
 
   const parentIds = parentLinks.map((link) => link.parentId);
 
-  const notifications = parentIds.map((parentId) => ({
+  return queueNotificationsForParents({
     schoolId,
+    parentIds,
     studentId: student._id,
-    parentId,
     orderId: order._id,
     title,
     body,
@@ -59,6 +60,31 @@ async function queueOrderCreatedNotifications({ schoolId, student, order }) {
       remainingBalance,
       paymentMethod: order.paymentMethod,
     },
+  });
+}
+
+async function queueNotificationsForParents({
+  schoolId,
+  parentIds,
+  studentId = null,
+  orderId = null,
+  title,
+  body,
+  payload = {},
+}) {
+  const normalizedParentIds = (parentIds || []).filter(Boolean);
+  if (!normalizedParentIds.length) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const notifications = normalizedParentIds.map((parentId) => ({
+    schoolId,
+    studentId,
+    parentId,
+    orderId,
+    title,
+    body,
+    payload,
     status: 'pending',
   }));
 
@@ -66,7 +92,7 @@ async function queueOrderCreatedNotifications({ schoolId, student, order }) {
 
   const tokensFound = await DeviceToken.countDocuments({
     schoolId,
-    userId: { $in: parentIds },
+    userId: { $in: normalizedParentIds },
     status: 'active',
   });
 
@@ -87,4 +113,134 @@ async function queueOrderCreatedNotifications({ schoolId, student, order }) {
   };
 }
 
-module.exports = { queueOrderCreatedNotifications };
+function firstName(name) {
+  return String(name || '').trim().split(/\s+/)[0] || 'El alumno';
+}
+
+async function queueLowBalanceAlertNotification({ schoolId, student, balance, threshold }) {
+  if (!student?._id) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const parentLinks = await ParentStudentLink.find({
+    schoolId,
+    studentId: student._id,
+    status: 'active',
+  }).select('parentId');
+
+  if (!parentLinks.length) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const parentIds = parentLinks.map((link) => link.parentId);
+  const childName = firstName(student.name);
+  const normalizedThreshold = String(threshold || 'lt20');
+
+  const messageByThreshold = {
+    lt20: {
+      title: 'Saldo bajo',
+      body: `${childName} tiene bajo saldo y se puede quedar sin merendar. Recarga cuanto antes.`,
+    },
+    lt10: {
+      title: 'Ultimo aviso de saldo',
+      body: `Ultimo aviso! ${childName} esta a punto de quedarse sin saldo. Recarga AHORA!`,
+    },
+  };
+
+  const message = messageByThreshold[normalizedThreshold] || messageByThreshold.lt20;
+
+  return queueNotificationsForParents({
+    schoolId,
+    parentIds,
+    studentId: student._id,
+    title: message.title,
+    body: message.body,
+    payload: {
+      type: 'wallet.low_balance',
+      studentId: student._id,
+      threshold: normalizedThreshold,
+      balance,
+    },
+  });
+}
+
+async function queueAutoDebitRechargeNotification({ schoolId, studentId, amount, newBalance, method = '' }) {
+  if (!studentId) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('name').lean();
+  if (!student) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const parentLinks = await ParentStudentLink.find({
+    schoolId,
+    studentId,
+    status: 'active',
+  }).select('parentId');
+
+  if (!parentLinks.length) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const parentIds = parentLinks.map((link) => link.parentId);
+  const childName = firstName(student.name);
+
+  return queueNotificationsForParents({
+    schoolId,
+    parentIds,
+    studentId,
+    title: 'Recarga automatica realizada',
+    body: `Se realizo una recarga para ${childName}. Nuevo saldo disponible: $${formatCurrency(newBalance)}.`,
+    payload: {
+      type: 'wallet.auto_recharge',
+      studentId,
+      amount,
+      balance: newBalance,
+      method,
+    },
+  });
+}
+
+async function queueTutorCommentNotification({
+  schoolId,
+  parentId,
+  studentId = null,
+  childName,
+  tutorName,
+  observations,
+  date,
+}) {
+  if (!parentId || !String(observations || '').trim()) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const normalizedChildName = firstName(childName || 'Tu hijo');
+  const comment = String(observations || '').trim();
+  const who = String(tutorName || '').trim();
+
+  return queueNotificationsForParents({
+    schoolId,
+    parentIds: [parentId],
+    studentId,
+    title: 'Nuevo comentario del Tutor de alimentacion',
+    body: `${normalizedChildName}: ${comment}${who ? ` (Tutor: ${who})` : ''}`,
+    payload: {
+      type: 'meriendas.tutor_comment',
+      studentId,
+      childName: normalizedChildName,
+      comment,
+      date: String(date || ''),
+      tutorName: who,
+    },
+  });
+}
+
+module.exports = {
+  queueOrderCreatedNotifications,
+  queueNotificationsForParents,
+  queueLowBalanceAlertNotification,
+  queueAutoDebitRechargeNotification,
+  queueTutorCommentNotification,
+};

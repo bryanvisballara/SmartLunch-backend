@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -61,6 +62,101 @@ router.post('/device-tokens/revoke', async (req, res) => {
     }
 
     return res.status(200).json(updated);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/audit', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const {
+      studentId,
+      parentId,
+      type,
+      status,
+      from,
+      to,
+      q,
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const limitNumber = Math.min(200, Math.max(1, Number(limit) || 50));
+
+    const filter = { schoolId };
+
+    if (studentId) {
+      if (!mongoose.Types.ObjectId.isValid(studentId)) {
+        return res.status(400).json({ message: 'studentId is invalid' });
+      }
+      filter.studentId = studentId;
+    }
+
+    if (parentId) {
+      if (!mongoose.Types.ObjectId.isValid(parentId)) {
+        return res.status(400).json({ message: 'parentId is invalid' });
+      }
+      filter.parentId = parentId;
+    }
+
+    if (status) {
+      filter.status = status;
+    }
+
+    if (type) {
+      filter['payload.type'] = type;
+    }
+
+    const createdAtRange = {};
+    if (from) {
+      const fromDate = new Date(`${from}T00:00:00.000Z`);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ message: 'from date is invalid' });
+      }
+      createdAtRange.$gte = fromDate;
+    }
+    if (to) {
+      const toDate = new Date(`${to}T23:59:59.999Z`);
+      if (Number.isNaN(toDate.getTime())) {
+        return res.status(400).json({ message: 'to date is invalid' });
+      }
+      createdAtRange.$lte = toDate;
+    }
+    if (Object.keys(createdAtRange).length > 0) {
+      filter.createdAt = createdAtRange;
+    }
+
+    if (q) {
+      const textFilter = {
+        $or: [
+          { title: { $regex: q, $options: 'i' } },
+          { body: { $regex: q, $options: 'i' } },
+          { lastError: { $regex: q, $options: 'i' } },
+        ],
+      };
+      filter.$and = filter.$and || [];
+      filter.$and.push(textFilter);
+    }
+
+    const [items, total] = await Promise.all([
+      Notification.find(filter)
+        .populate('studentId', 'name schoolCode grade')
+        .populate('parentId', 'name username')
+        .sort({ createdAt: -1 })
+        .skip((pageNumber - 1) * limitNumber)
+        .limit(limitNumber),
+      Notification.countDocuments(filter),
+    ]);
+
+    return res.status(200).json({
+      items,
+      page: pageNumber,
+      limit: limitNumber,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limitNumber)),
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

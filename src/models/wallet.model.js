@@ -7,6 +7,7 @@ const walletSchema = new mongoose.Schema(
     balance: { type: Number, required: true, default: 0 },
     autoDebitEnabled: { type: Boolean, default: false },
     autoDebitLimit: { type: Number, default: 0 },
+    lowBalanceAlertLevel: { type: String, enum: ['none', 'lt20', 'lt10'], default: 'none' },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
   },
   { timestamps: true }

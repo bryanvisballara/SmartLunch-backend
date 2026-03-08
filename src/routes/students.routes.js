@@ -14,15 +14,42 @@ router.get('/', async (req, res) => {
   try {
     const { role, schoolId, userId } = req.user;
 
+    const attachWalletBalances = async (students) => {
+      const normalizedStudents = Array.isArray(students) ? students : [];
+      if (normalizedStudents.length === 0) {
+        return [];
+      }
+
+      const studentIds = normalizedStudents.map((student) => student._id);
+      const wallets = await Wallet.find({ schoolId, studentId: { $in: studentIds } })
+        .select('studentId balance')
+        .lean();
+
+      const walletBalanceByStudentId = wallets.reduce((acc, wallet) => {
+        acc[String(wallet.studentId)] = Number(wallet.balance || 0);
+        return acc;
+      }, {});
+
+      return normalizedStudents.map((student) => {
+        const rawStudent = typeof student.toObject === 'function' ? student.toObject() : student;
+        return {
+          ...rawStudent,
+          walletBalance: Number(walletBalanceByStudentId[String(student._id)] || 0),
+        };
+      });
+    };
+
     if (role === 'parent') {
       const links = await ParentStudentLink.find({ parentId: userId, schoolId, status: 'active' }).select('studentId');
       const studentIds = links.map((link) => link.studentId);
       const students = await Student.find({ _id: { $in: studentIds }, status: 'active', deletedAt: null }).sort({ name: 1 });
-      return res.status(200).json(students);
+      const studentsWithBalance = await attachWalletBalances(students);
+      return res.status(200).json(studentsWithBalance);
     }
 
     const students = await Student.find({ schoolId, deletedAt: null }).sort({ createdAt: -1 });
-    return res.status(200).json(students);
+    const studentsWithBalance = await attachWalletBalances(students);
+    return res.status(200).json(studentsWithBalance);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -62,7 +89,9 @@ router.get('/:id', async (req, res) => {
     const { role, schoolId, userId } = req.user;
     const { id } = req.params;
 
-    const student = await Student.findOne({ _id: id, schoolId, deletedAt: null });
+    const student = await Student.findOne({ _id: id, schoolId, deletedAt: null })
+      .populate('blockedProducts', 'name')
+      .populate('blockedCategories', 'name');
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
