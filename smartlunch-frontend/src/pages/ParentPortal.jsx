@@ -1622,7 +1622,7 @@ function ParentPortal() {
                     </div>
                   </article>
                 ))}
-                {(overview?.recentTopups || []).length === 0 ? <p className="empty">No hay recargas registradas por este usuario.</p> : null}
+                {(overview?.recentTopups || []).length === 0 ? <p className="empty">No hay recargas registradas para los alumnos vinculados.</p> : null}
               </div>
             </section>
           </section>
@@ -2701,7 +2701,7 @@ function ParentPortal() {
                     </div>
                   </article>
                 ))}
-                {(overview?.recentTopups || []).length === 0 ? <p className="empty">No hay recargas registradas por este usuario.</p> : null}
+                {(overview?.recentTopups || []).length === 0 ? <p className="empty">No hay recargas registradas para los alumnos vinculados.</p> : null}
               </div>
             </section>
 

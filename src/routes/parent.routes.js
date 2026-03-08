@@ -286,14 +286,14 @@ router.get('/portal/overview', async (req, res) => {
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfCurrentMonth() }),
       WalletTransaction.find({
         schoolId,
-        createdBy: parentUserId,
         type: 'recharge',
         cancelledAt: null,
         studentId: { $in: studentIds },
       })
+        .populate('createdBy', 'name username role')
         .populate('studentId', 'name schoolCode')
         .sort({ createdAt: -1 })
-        .limit(3)
+        .limit(10)
         .lean(),
       Order.find({
         schoolId,
@@ -325,6 +325,14 @@ router.get('/portal/overview', async (req, res) => {
         amount: Number(topup.amount || 0),
         method: topup.method || 'cash',
         createdAt: topup.createdAt,
+        createdBy: topup.createdBy
+          ? {
+              _id: topup.createdBy._id,
+              name: topup.createdBy.name || '',
+              username: topup.createdBy.username || '',
+              role: topup.createdBy.role || '',
+            }
+          : null,
         student: topup.studentId
           ? {
               _id: topup.studentId._id,
