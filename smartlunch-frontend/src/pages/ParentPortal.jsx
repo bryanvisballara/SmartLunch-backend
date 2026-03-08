@@ -67,6 +67,25 @@ function parseYearMonth(value) {
   return { year, month };
 }
 
+function dedupeParentMenuProducts(products) {
+  const map = new Map();
+
+  for (const product of Array.isArray(products) ? products : []) {
+    const name = String(product?.name || '').trim().toLowerCase();
+    const categoryId = String(product?.categoryId || '').trim();
+    const price = Number(product?.price || 0);
+    const imageUrl = String(product?.imageUrl || '').trim();
+    const shortDescription = String(product?.shortDescription || '').trim().toLowerCase();
+    const key = `${name}|${categoryId}|${price}|${imageUrl}|${shortDescription}`;
+
+    if (!map.has(key)) {
+      map.set(key, product);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 function ParentPortal() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -482,7 +501,7 @@ function ParentPortal() {
       try {
         const response = await getProducts({ categoryId: menuCategoryId });
         if (!isCancelled) {
-          setMenuProducts(Array.isArray(response.data) ? response.data : []);
+          setMenuProducts(dedupeParentMenuProducts(response.data));
         }
       } catch (requestError) {
         if (!isCancelled) {
