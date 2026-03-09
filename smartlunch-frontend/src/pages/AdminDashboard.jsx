@@ -400,6 +400,7 @@ function AdminDashboard() {
   const [editEntity, setEditEntity] = useState('product');
   const [editTableDrafts, setEditTableDrafts] = useState({});
   const [editTablePage, setEditTablePage] = useState(1);
+  const [selectedProductRowIds, setSelectedProductRowIds] = useState([]);
   const [editItemId, setEditItemId] = useState('');
   const [editSearchQuery, setEditSearchQuery] = useState('');
   const [editProductStoreFilter, setEditProductStoreFilter] = useState('');
@@ -600,6 +601,18 @@ function AdminDashboard() {
     const start = (editTablePage - 1) * 20;
     return filteredEditEntityItems.slice(start, start + 20);
   }, [filteredEditEntityItems, editTablePage]);
+
+  const isBulkProductMode = activeModule === 'modify' && editEntity === 'product';
+
+  const selectedProductRowsCount = useMemo(() => selectedProductRowIds.length, [selectedProductRowIds]);
+
+  const areAllVisibleProductRowsSelected = useMemo(() => {
+    if (!isBulkProductMode || paginatedEditEntityItems.length === 0) {
+      return false;
+    }
+
+    return paginatedEditEntityItems.every((item) => selectedProductRowIds.includes(String(item._id)));
+  }, [isBulkProductMode, paginatedEditEntityItems, selectedProductRowIds]);
 
   const editProductProfit = useMemo(() => {
     const price = Number(editProductForm.price || 0);
@@ -1679,8 +1692,19 @@ function AdminDashboard() {
     setEditProductStoreFilter('');
     setShowEditRegistryOptions(false);
     setEditTableDrafts({});
+    setSelectedProductRowIds([]);
     setEditTablePage(1);
   }, [editEntity]);
+
+  useEffect(() => {
+    if (!isBulkProductMode) {
+      setSelectedProductRowIds([]);
+      return;
+    }
+
+    const availableIds = new Set(filteredEditEntityItems.map((item) => String(item._id)));
+    setSelectedProductRowIds((prev) => prev.filter((id) => availableIds.has(String(id))));
+  }, [isBulkProductMode, filteredEditEntityItems]);
 
   useEffect(() => {
     setEditTablePage(1);
@@ -3061,6 +3085,75 @@ function AdminDashboard() {
     }
 
     runAction(() => deleteAdminStudent(itemId), 'Registro eliminado.', reloadEditEntityData);
+  };
+
+  const onToggleProductRowSelection = (itemId, checked) => {
+    const normalizedId = String(itemId || '');
+    if (!normalizedId) {
+      return;
+    }
+
+    setSelectedProductRowIds((prev) => {
+      const next = new Set(prev.map((id) => String(id)));
+      if (checked) {
+        next.add(normalizedId);
+      } else {
+        next.delete(normalizedId);
+      }
+      return Array.from(next);
+    });
+  };
+
+  const onToggleSelectAllVisibleProducts = (checked) => {
+    if (!isBulkProductMode) {
+      return;
+    }
+
+    const visibleIds = paginatedEditEntityItems.map((item) => String(item._id));
+    setSelectedProductRowIds((prev) => {
+      const next = new Set(prev.map((id) => String(id)));
+      if (checked) {
+        visibleIds.forEach((id) => next.add(id));
+      } else {
+        visibleIds.forEach((id) => next.delete(id));
+      }
+      return Array.from(next);
+    });
+  };
+
+  const onDeleteSelectedProductRows = () => {
+    if (!isBulkProductMode || selectedProductRowIds.length === 0) {
+      setError('Selecciona al menos un producto para aplicar acciones en masa.');
+      return;
+    }
+
+    const selectedSet = new Set(selectedProductRowIds.map((id) => String(id)));
+    const selectedItems = filteredEditEntityItems.filter((item) => selectedSet.has(String(item._id)));
+
+    const targetProductIds = new Set();
+    for (const item of selectedItems) {
+      if (item.isAggregated) {
+        const sourceIds = Array.isArray(item.sourceProductIds) ? item.sourceProductIds : [];
+        sourceIds.forEach((sourceId) => targetProductIds.add(String(sourceId)));
+      } else {
+        targetProductIds.add(String(item._id));
+      }
+    }
+
+    const idsToDelete = Array.from(targetProductIds).filter(Boolean);
+    if (idsToDelete.length === 0) {
+      setError('No se encontraron productos válidos para eliminar.');
+      return;
+    }
+
+    runAction(
+      () => Promise.all(idsToDelete.map((productId) => deleteAdminProduct(productId))),
+      `Se eliminaron ${idsToDelete.length} productos en masa.`,
+      async () => {
+        await reloadEditEntityData();
+        setSelectedProductRowIds([]);
+      }
+    );
   };
 
   const resetEditSection = () => {
@@ -4601,6 +4694,24 @@ function AdminDashboard() {
             <button className="btn" onClick={onExportEditPdf} type="button">
               Descargar PDF
             </button>
+            {isBulkProductMode ? (
+              <div style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={areAllVisibleProductRowsSelected}
+                    onChange={(event) => onToggleSelectAllVisibleProducts(event.target.checked)}
+                  />
+                  <span>Seleccionar visibles</span>
+                </label>
+                <button className="btn" type="button" onClick={() => setSelectedProductRowIds([])} disabled={selectedProductRowsCount === 0}>
+                  Limpiar selección
+                </button>
+                <button className="btn" type="button" onClick={onDeleteSelectedProductRows} disabled={selectedProductRowsCount === 0}>
+                  Eliminar seleccionados ({selectedProductRowsCount})
+                </button>
+              </div>
+            ) : null}
             {activeModule === 'modify' && editEntity === 'student' ? (
               <div style={{ marginLeft: 'auto', display: 'inline-flex', gap: '0.25rem' }}>
                 <button className="btn btn-primary" onClick={onOpenLegacyMigrationPicker} type="button" disabled={loading}>
@@ -5022,6 +5133,16 @@ function AdminDashboard() {
                       {activeModule === 'modify' ? (
                         <td>
                           <div className="row gap">
+                            {editEntity === 'product' ? (
+                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedProductRowIds.includes(String(item._id))}
+                                  onChange={(event) => onToggleProductRowSelection(item._id, event.target.checked)}
+                                />
+                                <span>Seleccionar</span>
+                              </label>
+                            ) : null}
                             <button
                               className="btn btn-primary"
                               type="button"
