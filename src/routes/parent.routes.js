@@ -825,6 +825,8 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
       return res.status(404).json({ message: 'Parent user not found' });
     }
 
+    const incomingCardToken = String(req.body?.cardToken || '').trim();
+    const incomingDeviceId = String(req.body?.deviceId || '').trim();
     const cardNumber = String(req.body?.cardNumber || '').replace(/\D/g, '');
     const expiry = parseExpiry(req.body?.cardExpiry);
     const cvv = String(req.body?.cardCvv || '').replace(/\D/g, '');
@@ -833,15 +835,6 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     const docType = String(req.body?.documentType || '').trim().toUpperCase();
     const document = String(req.body?.documentNumber || '').replace(/\D/g, '');
 
-    if (cardNumber.length < 13 || cardNumber.length > 19) {
-      return res.status(400).json({ message: 'cardNumber must contain 13 to 19 digits' });
-    }
-    if (!expiry) {
-      return res.status(400).json({ message: 'cardExpiry must have MM/YY format' });
-    }
-    if (cvv.length < 3 || cvv.length > 4) {
-      return res.status(400).json({ message: 'cardCvv must contain 3 or 4 digits' });
-    }
     if (firstName.length < 2 || lastName.length < 2) {
       return res.status(400).json({ message: 'Card holder firstName and lastName are required' });
     }
@@ -852,8 +845,20 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
       return res.status(400).json({ message: 'documentNumber is required' });
     }
 
-    const fallbackBrand = detectCardBrand(cardNumber);
-    const fallbackLast4 = cardNumber.slice(-4);
+    if (!incomingCardToken) {
+      if (cardNumber.length < 13 || cardNumber.length > 19) {
+        return res.status(400).json({ message: 'cardNumber must contain 13 to 19 digits' });
+      }
+      if (!expiry) {
+        return res.status(400).json({ message: 'cardExpiry must have MM/YY format' });
+      }
+      if (cvv.length < 3 || cvv.length > 4) {
+        return res.status(400).json({ message: 'cardCvv must contain 3 or 4 digits' });
+      }
+    }
+
+    const fallbackBrand = cardNumber ? detectCardBrand(cardNumber) : 'unknown';
+    const fallbackLast4 = cardNumber ? cardNumber.slice(-4) : '0000';
 
     let paymentMethod;
     if (isMercadoPagoConfigured()) {
@@ -870,23 +875,33 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         return res.status(502).json({ message: 'No fue posible crear el cliente en Mercado Pago.' });
       }
 
-      const cardToken = await createCardToken({
-        cardNumber,
-        expirationMonth: expiry.month,
-        expirationYear: expiry.year,
-        securityCode: cvv,
-        cardholder: {
-          name: `${firstName} ${lastName}`.trim(),
-          identification: {
-            type: docType,
-            number: document,
-          },
-        },
-      });
+      const cardTokenId = incomingCardToken
+        ? incomingCardToken
+        : String(
+          (
+            await createCardToken({
+              cardNumber,
+              expirationMonth: expiry.month,
+              expirationYear: expiry.year,
+              securityCode: cvv,
+              cardholder: {
+                name: `${firstName} ${lastName}`.trim(),
+                identification: {
+                  type: docType,
+                  number: document,
+                },
+              },
+            })
+          )?.id || ''
+        ).trim();
+
+      if (!cardTokenId) {
+        return res.status(400).json({ message: 'No se pudo tokenizar la tarjeta.' });
+      }
 
       const customerCard = await createCustomerCard({
         customerId,
-        cardToken: cardToken?.id,
+        cardToken: cardTokenId,
       });
 
       const providerCardId = String(customerCard?.id || '').trim();
@@ -923,12 +938,12 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         providerCustomerId: customerId,
         providerCardId,
         providerPaymentMethodId: String(customerCard?.payment_method?.id || '').trim(),
-        providerCardToken: String(cardToken?.id || '').trim(),
+        providerDeviceId: incomingDeviceId,
         fingerprint,
         brand: String(customerCard?.payment_method?.name || fallbackBrand || 'unknown').toLowerCase(),
         last4: String(customerCard?.last_four_digits || fallbackLast4),
-        expMonth: Number(customerCard?.expiration_month || expiry.month),
-        expYear: Number(customerCard?.expiration_year || expiry.year),
+        expMonth: Number(customerCard?.expiration_month || expiry?.month || 1),
+        expYear: Number(customerCard?.expiration_year || expiry?.year || 2099),
         holderFirstName: firstName,
         holderLastName: lastName,
         holderDocType: docType,

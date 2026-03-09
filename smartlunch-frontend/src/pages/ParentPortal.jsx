@@ -20,6 +20,7 @@ import {
 } from '../services/parent.service';
 import { createDaviPlataPayment } from '../services/payments.service';
 import { getProducts } from '../services/products.service';
+import { createMercadoPagoCardToken } from '../lib/mercadopago';
 import daviplataLogo from '../assets/daviplata.png';
 import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
@@ -278,6 +279,7 @@ function ParentPortal() {
     cardDocumentDigits.length >= 5
   );
   const autoTopupPresetOptions = [30000, 50000, 100000];
+  const mercadopagoPublicKey = String(import.meta.env.VITE_MERCADOPAGO_PUBLIC_KEY || '').trim();
   const autoTopupMinBalanceNumber = Number(autoTopupMinBalance || 0);
   const autoTopupCustomAmountNumber = Number(autoTopupCustomAmount || 0);
   const autoTopupRechargeAmount = autoTopupPresetAmount === 0 ? autoTopupCustomAmountNumber : autoTopupPresetAmount;
@@ -1002,19 +1004,58 @@ function ParentPortal() {
     setAddCardSuccess('');
 
     try {
-      const response = await createParentCardPaymentMethod({
-        cardNumber: cardDigits,
-        cardExpiry: cardExpiry,
-        cardCvv: cardCvvDigits,
-        firstName: String(cardFirstName || '').trim(),
-        lastName: String(cardLastName || '').trim(),
-        documentType: String(cardDocType || '').trim().toUpperCase(),
-        documentNumber: cardDocumentDigits,
-      });
+      const firstName = String(cardFirstName || '').trim();
+      const lastName = String(cardLastName || '').trim();
+      const documentType = String(cardDocType || '').trim().toUpperCase();
+      const documentNumber = cardDocumentDigits;
+      const expMonth = cardExpiryDigits.slice(0, 2);
+      const expYearShort = cardExpiryDigits.slice(2, 4);
+      const expYear = String(2000 + Number(expYearShort || 0));
+
+      let payload = {
+        firstName,
+        lastName,
+        documentType,
+        documentNumber,
+      };
+
+      if (mercadopagoPublicKey) {
+        const tokenizedCard = await createMercadoPagoCardToken({
+          publicKey: mercadopagoPublicKey,
+          cardNumber: cardDigits,
+          cardholderName: `${firstName} ${lastName}`.trim(),
+          expirationMonth: expMonth,
+          expirationYear: expYear,
+          securityCode: cardCvvDigits,
+          identificationType: documentType,
+          identificationNumber: documentNumber,
+        });
+
+        payload = {
+          ...payload,
+          cardToken: String(tokenizedCard?.id || '').trim(),
+          deviceId: String(tokenizedCard?.deviceId || '').trim(),
+        };
+      } else {
+        // Fallback for environments without Mercado Pago public key.
+        payload = {
+          ...payload,
+          cardNumber: cardDigits,
+          cardExpiry: cardExpiry,
+          cardCvv: cardCvvDigits,
+        };
+      }
+
+      const response = await createParentCardPaymentMethod(payload);
 
       const createdCard = response?.data?.paymentMethod || null;
       const last4 = createdCard?.last4 || cardDigits.slice(-4);
-      setAddCardSuccess(`Tarjeta terminada en ${last4} registrada. Completa la verificación para habilitarla.`);
+      const isVerifiedCard = String(createdCard?.verificationStatus || '').toLowerCase() === 'verified';
+      setAddCardSuccess(
+        isVerifiedCard
+          ? `Tarjeta terminada en ${last4} guardada y verificada. Ya puedes activar recarga automática.`
+          : `Tarjeta terminada en ${last4} registrada. Completa la verificación para habilitarla.`
+      );
       setCardNumber('');
       setCardExpiry('');
       setCardCvv('');

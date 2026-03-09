@@ -10,7 +10,7 @@ const parentPaymentMethodSchema = new mongoose.Schema(
     providerCustomerId: { type: String, trim: true, default: '' },
     providerCardId: { type: String, trim: true, default: '' },
     providerPaymentMethodId: { type: String, trim: true, default: '' },
-    providerCardToken: { type: String, trim: true, default: '' },
+    providerDeviceId: { type: String, trim: true, default: '' },
     fingerprint: { type: String, required: true, trim: true },
     brand: { type: String, trim: true, default: 'unknown' },
     last4: { type: String, required: true, trim: true },

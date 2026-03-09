@@ -114,18 +114,27 @@ function toInternalStatus(providerStatus) {
   return 'pending';
 }
 
-async function createPayment({ amount, paymentMethodId, cardToken, payerEmail, externalReference, description, idempotencyKey }) {
+async function createPayment({ amount, paymentMethodId, customerId, cardId, externalReference, description, idempotencyKey, deviceId }) {
+  const headers = {};
+  if (idempotencyKey) {
+    headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
+  }
+  if (deviceId) {
+    headers['X-meli-session-id'] = String(deviceId).trim();
+  }
+
   return mercadopagoRequest('/v1/payments', {
     method: 'POST',
-    extraHeaders: idempotencyKey ? { 'X-Idempotency-Key': String(idempotencyKey).trim() } : {},
+    extraHeaders: headers,
     body: {
       transaction_amount: Number(amount),
       payment_method_id: String(paymentMethodId || '').trim(),
-      token: String(cardToken || '').trim(),
+      card_id: String(cardId || '').trim(),
       installments: 1,
       description: String(description || 'Recarga automatica SmartLunch').trim(),
       payer: {
-        email: String(payerEmail || '').trim().toLowerCase(),
+        type: 'customer',
+        id: String(customerId || '').trim(),
       },
       external_reference: String(externalReference || '').trim(),
     },

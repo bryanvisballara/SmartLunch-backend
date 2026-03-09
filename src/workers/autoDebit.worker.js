@@ -1,6 +1,5 @@
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
-const User = require('../models/user.model');
 const Wallet = require('../models/wallet.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
 const {
@@ -214,7 +213,7 @@ async function runAutoDebitCycle() {
         deletedAt: null,
         verificationStatus: 'verified',
       })
-        .select('_id provider providerPaymentMethodId providerCardToken')
+        .select('_id provider providerCustomerId providerCardId providerPaymentMethodId providerDeviceId')
         .lean();
 
       if (!card) {
@@ -227,27 +226,10 @@ async function runAutoDebitCycle() {
 
       if (
         card.provider !== 'mercadopago' ||
-        !String(card.providerPaymentMethodId || '').trim() ||
-        !String(card.providerCardToken || '').trim()
+        !String(card.providerCustomerId || '').trim() ||
+        !String(card.providerCardId || '').trim() ||
+        !String(card.providerPaymentMethodId || '').trim()
       ) {
-        await Wallet.updateOne(
-          { _id: lockedWallet._id },
-          { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
-        );
-        continue;
-      }
-
-      const parentUser = await User.findOne({
-        _id: parentId,
-        schoolId,
-        role: 'parent',
-        deletedAt: null,
-      })
-        .select('email')
-        .lean();
-
-      const payerEmail = String(parentUser?.email || '').trim().toLowerCase();
-      if (!payerEmail) {
         await Wallet.updateOne(
           { _id: lockedWallet._id },
           { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
@@ -275,11 +257,12 @@ async function runAutoDebitCycle() {
         const providerPayment = await createPayment({
           amount,
           paymentMethodId: card.providerPaymentMethodId,
-          cardToken: card.providerCardToken,
-          payerEmail,
+          customerId: card.providerCustomerId,
+          cardId: card.providerCardId,
           externalReference: String(studentId),
           description: 'Recarga automatica SmartLunch',
           idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
+          deviceId: card.providerDeviceId,
         });
 
         paymentRecord.providerTransactionId = String(providerPayment?.id || '').trim();
