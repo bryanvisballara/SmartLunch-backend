@@ -969,6 +969,8 @@ router.post('/products', async (req, res) => {
       cost = 0,
       stock = 0,
       initialStockStoreId = '',
+      initialStockStoreIds = [],
+      createInAllStores = false,
       inventoryAlertStock = 10,
       imageUrl = '',
       shortDescription = '',
@@ -990,10 +992,36 @@ router.post('/products', async (req, res) => {
     }
 
     const initialStockValue = Number(stock || 0);
-    const destinationStoreId = String(initialStockStoreId || '').trim();
+    const validStoreIds = new Set(stores.map((store) => String(store._id)));
+    const legacyStoreId = String(initialStockStoreId || '').trim();
+    const normalizedStoreIds = Array.isArray(initialStockStoreIds)
+      ? Array.from(new Set(initialStockStoreIds.map((id) => String(id || '').trim()).filter(Boolean)))
+      : [];
 
-    if (destinationStoreId && !stores.some((store) => String(store._id) === destinationStoreId)) {
+    const shouldCreateInAllStores =
+      createInAllStores === true ||
+      normalizedStoreIds.includes('all') ||
+      normalizedStoreIds.includes('__all__');
+
+    let selectedStoreIds;
+    if (shouldCreateInAllStores) {
+      selectedStoreIds = Array.from(validStoreIds);
+    } else if (normalizedStoreIds.length > 0) {
+      selectedStoreIds = normalizedStoreIds;
+    } else if (legacyStoreId) {
+      selectedStoreIds = [legacyStoreId];
+    } else if (stores.length === 1) {
+      selectedStoreIds = [String(stores[0]._id)];
+    } else {
+      selectedStoreIds = [];
+    }
+
+    if (selectedStoreIds.some((id) => !validStoreIds.has(id))) {
       return res.status(400).json({ message: 'Invalid initial stock destination store' });
+    }
+
+    if (selectedStoreIds.length === 0) {
+      return res.status(400).json({ message: 'Selecciona al menos una tienda para crear el producto' });
     }
 
     const basePayload = {
@@ -1009,21 +1037,17 @@ router.post('/products', async (req, res) => {
       status,
     };
 
-    const resolvedStoreId = destinationStoreId || (stores.length === 1 ? String(stores[0]._id) : '');
-
-    if (!resolvedStoreId) {
-      return res.status(400).json({ message: 'initialStockStoreId is required when multiple stores exist' });
-    }
-
-    const createdProduct = await Product.create({
+    const productsPayload = selectedStoreIds.map((storeId) => ({
       ...basePayload,
-      storeId: resolvedStoreId,
+      storeId,
       stock: initialStockValue,
-    });
+    }));
+
+    const createdProducts = await Product.insertMany(productsPayload);
 
     return res.status(201).json({
-      createdCount: 1,
-      products: [createdProduct],
+      createdCount: createdProducts.length,
+      products: createdProducts,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
