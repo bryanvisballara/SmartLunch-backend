@@ -1,12 +1,24 @@
 import { create } from 'zustand';
 
+function safeParse(rawValue, fallback = null) {
+  if (!rawValue) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(rawValue);
+  } catch (error) {
+    return fallback;
+  }
+}
+
 const savedUserRaw = localStorage.getItem('user');
 const savedStoreRaw = localStorage.getItem('currentStore');
 
 const useAuthStore = create((set) => ({
   token: localStorage.getItem('token') || '',
-  user: savedUserRaw ? JSON.parse(savedUserRaw) : null,
-  currentStore: savedStoreRaw ? JSON.parse(savedStoreRaw) : null,
+  user: safeParse(savedUserRaw, null),
+  currentStore: safeParse(savedStoreRaw, null),
   setAuth: ({ token, user }) => {
     const assignedStore = user?.role === 'vendor' ? user?.assignedStore || null : null;
     localStorage.setItem('token', token);
