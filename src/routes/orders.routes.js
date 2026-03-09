@@ -435,6 +435,7 @@ router.get('/cancel-requests/list', async (req, res) => {
       .populate('storeId', 'name')
       .populate('requestedBy', 'name username')
       .populate('approvedBy', 'name username')
+      .populate('rejectedBy', 'name username')
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();

@@ -13,6 +13,110 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+async function applyInventoryMutation({
+  schoolId,
+  userId,
+  storeId,
+  targetStoreId,
+  productId,
+  type,
+  quantity,
+  notes,
+  session,
+}) {
+  if (type === 'in') {
+    const result = await Product.updateOne(
+      { _id: productId, schoolId, storeId, deletedAt: null },
+      { $inc: { stock: quantity } },
+      { session }
+    );
+
+    if (result.matchedCount === 0) {
+      return { status: 404, body: { message: 'Product not found for in request' } };
+    }
+  }
+
+  if (type === 'out') {
+    const product = await Product.findOne({ _id: productId, schoolId, storeId, deletedAt: null }).session(session);
+    if (!product || product.stock < quantity) {
+      return { status: 400, body: { message: 'Insufficient stock to approve out request' } };
+    }
+
+    await Product.updateOne(
+      { _id: productId, schoolId, storeId, deletedAt: null },
+      { $inc: { stock: -quantity } },
+      { session }
+    );
+  }
+
+  if (type === 'transfer') {
+    if (!targetStoreId) {
+      return { status: 400, body: { message: 'targetStoreId is required for transfer request' } };
+    }
+
+    const sourceProduct = await Product.findOne({ _id: productId, schoolId, storeId, deletedAt: null }).session(session);
+    if (!sourceProduct || sourceProduct.stock < quantity) {
+      return { status: 400, body: { message: 'Insufficient stock to transfer' } };
+    }
+
+    await Product.updateOne(
+      { _id: productId, schoolId, storeId, deletedAt: null },
+      { $inc: { stock: -quantity } },
+      { session }
+    );
+
+    // Destination stock must also be persisted even if destination uses a different product _id.
+    let targetProduct = await Product.findOne({
+      schoolId,
+      storeId: targetStoreId,
+      categoryId: sourceProduct.categoryId,
+      name: sourceProduct.name,
+      deletedAt: null,
+    }).session(session);
+
+    if (!targetProduct) {
+      targetProduct = await Product.create(
+        [
+          {
+            schoolId,
+            name: sourceProduct.name,
+            categoryId: sourceProduct.categoryId,
+            storeId: targetStoreId,
+            price: sourceProduct.price,
+            cost: sourceProduct.cost,
+            stock: 0,
+            inventoryAlertStock: sourceProduct.inventoryAlertStock,
+            imageUrl: sourceProduct.imageUrl,
+            tags: sourceProduct.tags,
+            status: sourceProduct.status,
+          },
+        ],
+        { session }
+      ).then((created) => created[0]);
+    }
+
+    await Product.updateOne({ _id: targetProduct._id }, { $inc: { stock: quantity } }, { session });
+  }
+
+  await InventoryMovement.create(
+    [
+      {
+        schoolId,
+        storeId,
+        targetStoreId,
+        productId,
+        type,
+        quantity,
+        createdBy: userId,
+        notes,
+      },
+    ],
+    { session }
+  );
+
+  return { status: 200, body: null };
+}
+
 async function approveInventoryRequest({ schoolId, userId, requestId }) {
   let session;
   try {
@@ -25,104 +129,27 @@ async function approveInventoryRequest({ schoolId, userId, requestId }) {
       return { status: 404, body: { message: 'Pending request not found' } };
     }
 
-    if (request.type === 'in') {
-      const result = await Product.updateOne(
-        { _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null },
-        { $inc: { stock: request.quantity } },
-        { session }
-      );
+    const applyResult = await applyInventoryMutation({
+      schoolId,
+      userId,
+      storeId: request.storeId,
+      targetStoreId: request.targetStoreId,
+      productId: request.productId,
+      type: request.type,
+      quantity: request.quantity,
+      notes: request.notes,
+      session,
+    });
 
-      if (result.matchedCount === 0) {
-        await session.abortTransaction();
-        return { status: 404, body: { message: 'Product not found for in request' } };
-      }
-    }
-
-    if (request.type === 'out') {
-      const product = await Product.findOne({ _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null }).session(session);
-      if (!product || product.stock < request.quantity) {
-        await session.abortTransaction();
-        return { status: 400, body: { message: 'Insufficient stock to approve out request' } };
-      }
-
-      await Product.updateOne(
-        { _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null },
-        { $inc: { stock: -request.quantity } },
-        { session }
-      );
-    }
-
-    if (request.type === 'transfer') {
-      if (!request.targetStoreId) {
-        await session.abortTransaction();
-        return { status: 400, body: { message: 'targetStoreId is required for transfer request' } };
-      }
-
-      const sourceProduct = await Product.findOne({ _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null }).session(session);
-      if (!sourceProduct || sourceProduct.stock < request.quantity) {
-        await session.abortTransaction();
-        return { status: 400, body: { message: 'Insufficient stock to transfer' } };
-      }
-
-      await Product.updateOne(
-        { _id: request.productId, schoolId, storeId: request.storeId, deletedAt: null },
-        { $inc: { stock: -request.quantity } },
-        { session }
-      );
-
-      // Destination stock must also be persisted even if destination uses a different product _id.
-      let targetProduct = await Product.findOne({
-        schoolId,
-        storeId: request.targetStoreId,
-        categoryId: sourceProduct.categoryId,
-        name: sourceProduct.name,
-        deletedAt: null,
-      }).session(session);
-
-      if (!targetProduct) {
-        targetProduct = await Product.create(
-          [
-            {
-              schoolId,
-              name: sourceProduct.name,
-              categoryId: sourceProduct.categoryId,
-              storeId: request.targetStoreId,
-              price: sourceProduct.price,
-              cost: sourceProduct.cost,
-              stock: 0,
-              inventoryAlertStock: sourceProduct.inventoryAlertStock,
-              imageUrl: sourceProduct.imageUrl,
-              tags: sourceProduct.tags,
-              status: sourceProduct.status,
-            },
-          ],
-          { session }
-        ).then((created) => created[0]);
-      }
-
-      await Product.updateOne({ _id: targetProduct._id }, { $inc: { stock: request.quantity } }, { session });
+    if (applyResult.status !== 200) {
+      await session.abortTransaction();
+      return applyResult;
     }
 
     request.status = 'approved';
     request.approvedBy = userId;
     request.approvedAt = new Date();
     await request.save({ session });
-
-    await InventoryMovement.create(
-      [
-        {
-          schoolId,
-          storeId: request.storeId,
-          targetStoreId: request.targetStoreId,
-          productId: request.productId,
-          type: request.type,
-          quantity: request.quantity,
-          createdBy: userId,
-          notes: request.notes,
-        },
-      ],
-      { session }
-    );
 
     await session.commitTransaction();
 
@@ -241,6 +268,66 @@ router.post('/approve', roleMiddleware('admin'), async (req, res) => {
   }
 });
 
+router.post('/apply', roleMiddleware('admin'), async (req, res) => {
+  let session;
+  try {
+    const { schoolId, userId } = req.user;
+    const { storeId, targetStoreId = null, type, notes, items } = req.body;
+
+    if (!storeId || !type || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: 'storeId, type and items are required' });
+    }
+
+    if (type === 'transfer' && !targetStoreId) {
+      return res.status(400).json({ message: 'targetStoreId is required for transfer requests' });
+    }
+
+    const invalidItem = items.find((item) => !item?.productId || Number(item?.quantity) <= 0);
+    if (invalidItem) {
+      return res.status(400).json({ message: 'Each item requires productId and positive quantity' });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    for (const item of items) {
+      const result = await applyInventoryMutation({
+        schoolId,
+        userId,
+        storeId,
+        targetStoreId,
+        productId: item.productId,
+        type,
+        quantity: Number(item.quantity),
+        notes: item.notes || notes,
+        session,
+      });
+
+      if (result.status !== 200) {
+        await session.abortTransaction();
+        return res.status(result.status).json(result.body);
+      }
+    }
+
+    await session.commitTransaction();
+
+    return res.status(200).json({
+      message: 'Inventory movement applied successfully',
+      count: items.length,
+      type,
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
 router.post('/reject/:id', roleMiddleware('admin'), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
@@ -251,8 +338,8 @@ router.post('/reject/:id', roleMiddleware('admin'), async (req, res) => {
     }
 
     request.status = 'rejected';
-    request.approvedBy = userId;
-    request.approvedAt = new Date();
+    request.rejectedBy = userId;
+    request.rejectedAt = new Date();
     await request.save();
 
     return res.status(200).json(request);
@@ -286,6 +373,8 @@ router.get('/requests', async (req, res) => {
       .populate('storeId', 'name')
       .populate('targetStoreId', 'name')
       .populate('requestedBy', 'name username')
+      .populate('approvedBy', 'name username')
+      .populate('rejectedBy', 'name username')
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();
