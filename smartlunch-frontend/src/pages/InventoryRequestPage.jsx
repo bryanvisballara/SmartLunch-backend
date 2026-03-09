@@ -13,6 +13,7 @@ const modeTitle = {
 
 function InventoryRequestPage({ mode }) {
   const { currentStore, setCurrentStore, user } = useAuthStore();
+  const isVendorTransfer = mode === 'transfer' && user?.role === 'vendor';
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [sourceStoreId, setSourceStoreId] = useState('');
@@ -106,29 +107,48 @@ function InventoryRequestPage({ mode }) {
   }, [mode]);
 
   const storeProducts = useMemo(() => {
-    const activeStoreId = mode === 'transfer' ? sourceStoreId : currentStore?._id;
+    const activeStoreId = mode === 'transfer'
+      ? (isVendorTransfer ? currentStore?._id : sourceStoreId)
+      : currentStore?._id;
     if (!activeStoreId) {
       return [];
     }
 
     return products.filter((product) => String(product.storeId) === String(activeStoreId));
-  }, [products, currentStore?._id, mode, sourceStoreId]);
+  }, [products, currentStore?._id, mode, sourceStoreId, isVendorTransfer]);
 
   const sourceStore = useMemo(() => {
     if (mode !== 'transfer') {
       return currentStore || null;
     }
 
+    if (isVendorTransfer) {
+      return currentStore || null;
+    }
+
     return stores.find((store) => String(store._id) === String(sourceStoreId)) || null;
-  }, [currentStore, mode, sourceStoreId, stores]);
+  }, [currentStore, mode, sourceStoreId, stores, isVendorTransfer]);
 
   const targetStores = useMemo(() => {
-    const activeSourceStoreId = mode === 'transfer' ? sourceStoreId : currentStore?._id;
+    const activeSourceStoreId = mode === 'transfer'
+      ? (isVendorTransfer ? currentStore?._id : sourceStoreId)
+      : currentStore?._id;
     if (!activeSourceStoreId) {
       return stores;
     }
     return stores.filter((store) => String(store._id) !== String(activeSourceStoreId));
-  }, [stores, currentStore?._id, mode, sourceStoreId]);
+  }, [stores, currentStore?._id, mode, sourceStoreId, isVendorTransfer]);
+
+  useEffect(() => {
+    if (!isVendorTransfer) {
+      return;
+    }
+
+    // For vendors, the transfer source is always their assigned/current store.
+    if (String(sourceStoreId || '') !== String(currentStore?._id || '')) {
+      setSourceStoreId(String(currentStore?._id || ''));
+    }
+  }, [currentStore?._id, isVendorTransfer, sourceStoreId]);
 
   useEffect(() => {
     if (mode !== 'transfer') {
@@ -227,7 +247,7 @@ function InventoryRequestPage({ mode }) {
     setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
     setObservations('');
     setTargetStoreId('');
-    if (mode === 'transfer') {
+    if (mode === 'transfer' && !isVendorTransfer) {
       setSourceStoreId('');
     }
   };
@@ -242,7 +262,7 @@ function InventoryRequestPage({ mode }) {
       return;
     }
 
-    if (mode === 'transfer' && !sourceStoreId) {
+    if (mode === 'transfer' && !sourceStoreId && !isVendorTransfer) {
       setMessage('Selecciona tienda origen');
       return;
     }
@@ -271,7 +291,14 @@ function InventoryRequestPage({ mode }) {
       return;
     }
 
-    const requestStoreId = mode === 'transfer' ? sourceStoreId : currentStore._id;
+    const requestStoreId = mode === 'transfer'
+      ? (isVendorTransfer ? currentStore?._id : sourceStoreId)
+      : currentStore._id;
+
+    if (!requestStoreId) {
+      setMessage('No se encontró una tienda origen válida para el traslado.');
+      return;
+    }
 
     const payload = {
       storeId: requestStoreId,
@@ -320,7 +347,7 @@ function InventoryRequestPage({ mode }) {
           </p>
         </div>
 
-        {mode === 'transfer' ? (
+        {mode === 'transfer' && !isVendorTransfer ? (
           <label>
             Tienda origen
             <select
