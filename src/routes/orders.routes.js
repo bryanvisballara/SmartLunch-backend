@@ -74,7 +74,15 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
   let session;
   try {
     const { schoolId, userId } = req.user;
-    const { studentId, storeId, paymentMethod, items, guestSale = false } = req.body;
+    const {
+      studentId,
+      storeId,
+      paymentMethod,
+      items,
+      guestSale = false,
+      schoolBillingFor = '',
+      schoolBillingResponsible = '',
+    } = req.body;
     const isGuestSale = Boolean(guestSale);
 
     if (!storeId || !paymentMethod || !Array.isArray(items) || items.length === 0) {
@@ -87,6 +95,12 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
     if (isGuestSale && paymentMethod === 'system') {
       return res.status(400).json({ message: 'Guest sales cannot use system payment method' });
+    }
+
+    if (paymentMethod === 'school_billing') {
+      if (!String(schoolBillingFor || '').trim() || !String(schoolBillingResponsible || '').trim()) {
+        return res.status(400).json({ message: 'schoolBillingFor and schoolBillingResponsible are required for school billing orders' });
+      }
     }
 
     session = await mongoose.startSession();
@@ -205,6 +219,8 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
           storeId,
           vendorId: userId,
           paymentMethod,
+          schoolBillingFor: paymentMethod === 'school_billing' ? String(schoolBillingFor || '').trim() : '',
+          schoolBillingResponsible: paymentMethod === 'school_billing' ? String(schoolBillingResponsible || '').trim() : '',
           items: orderItems,
           total,
           status: 'completed',
@@ -297,6 +313,7 @@ router.get('/', async (req, res) => {
       to,
       status,
       includeCancelled,
+      paymentMethod,
     } = req.query;
 
     const filter = { schoolId };
@@ -310,6 +327,10 @@ router.get('/', async (req, res) => {
 
     if (studentId) {
       filter.studentId = studentId;
+    }
+
+    if (paymentMethod) {
+      filter.paymentMethod = String(paymentMethod);
     }
 
     if (from || to) {
@@ -330,6 +351,7 @@ router.get('/', async (req, res) => {
     const orders = await Order.find(filter)
       .populate('studentId', 'name schoolCode')
       .populate('storeId', 'name')
+      .populate('vendorId', 'name username')
       .sort({ createdAt: -1 })
       .limit(300);
     return res.status(200).json(orders);
