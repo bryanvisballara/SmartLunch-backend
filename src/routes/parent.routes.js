@@ -860,8 +860,15 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     const fallbackBrand = cardNumber ? detectCardBrand(cardNumber) : 'unknown';
     const fallbackLast4 = cardNumber ? cardNumber.slice(-4) : '0000';
 
+    const mercadopagoConfigured = isMercadoPagoConfigured();
+    if (incomingCardToken && !mercadopagoConfigured) {
+      return res.status(503).json({
+        message: 'Mercado Pago no está configurado en el backend. No se puede registrar la tarjeta con tokenización.',
+      });
+    }
+
     let paymentMethod;
-    if (isMercadoPagoConfigured()) {
+    if (mercadopagoConfigured) {
       const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@smartlunch.local`;
       const customer = await findOrCreateCustomer({
         email: parentEmail,
@@ -956,7 +963,14 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         verifiedAt: new Date(),
       });
     } else {
-      // Fallback path for environments without Mercado Pago credentials.
+      const allowInternalFallback = String(process.env.ALLOW_INTERNAL_CARD_FALLBACK || '').toLowerCase() === 'true';
+      if (!allowInternalFallback) {
+        return res.status(503).json({
+          message: 'Registro manual de tarjetas deshabilitado. Configura Mercado Pago para continuar.',
+        });
+      }
+
+      // Fallback path for controlled environments only.
       const fingerprint = crypto
         .createHash('sha256')
         .update(`${schoolId}|${String(parentUserId)}|${cardNumber}|${expiry.month}|${expiry.year}|${docType}|${document}`)

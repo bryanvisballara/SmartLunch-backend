@@ -1019,32 +1019,28 @@ function ParentPortal() {
         documentNumber,
       };
 
-      if (mercadopagoPublicKey) {
-        const tokenizedCard = await createMercadoPagoCardToken({
-          publicKey: mercadopagoPublicKey,
-          cardNumber: cardDigits,
-          cardholderName: `${firstName} ${lastName}`.trim(),
-          expirationMonth: expMonth,
-          expirationYear: expYear,
-          securityCode: cardCvvDigits,
-          identificationType: documentType,
-          identificationNumber: documentNumber,
-        });
-
-        payload = {
-          ...payload,
-          cardToken: String(tokenizedCard?.id || '').trim(),
-          deviceId: String(tokenizedCard?.deviceId || '').trim(),
-        };
-      } else {
-        // Fallback for environments without Mercado Pago public key.
-        payload = {
-          ...payload,
-          cardNumber: cardDigits,
-          cardExpiry: cardExpiry,
-          cardCvv: cardCvvDigits,
-        };
+      if (!mercadopagoPublicKey) {
+        setAddCardError('Falta configurar VITE_MERCADOPAGO_PUBLIC_KEY. No se puede tokenizar la tarjeta.');
+        setAddCardLoading(false);
+        return;
       }
+
+      const tokenizedCard = await createMercadoPagoCardToken({
+        publicKey: mercadopagoPublicKey,
+        cardNumber: cardDigits,
+        cardholderName: `${firstName} ${lastName}`.trim(),
+        expirationMonth: expMonth,
+        expirationYear: expYear,
+        securityCode: cardCvvDigits,
+        identificationType: documentType,
+        identificationNumber: documentNumber,
+      });
+
+      payload = {
+        ...payload,
+        cardToken: String(tokenizedCard?.id || '').trim(),
+        deviceId: String(tokenizedCard?.deviceId || '').trim(),
+      };
 
       const response = await createParentCardPaymentMethod(payload);
 
