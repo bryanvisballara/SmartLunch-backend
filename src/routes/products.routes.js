@@ -33,6 +33,7 @@ router.get('/', async (req, res) => {
       includeInactive = 'false',
       includeImageData = 'false',
     } = req.query;
+    const shouldIncludeImageData = String(includeImageData || 'false').toLowerCase() === 'true';
 
     if (requestedSchoolId && requestedSchoolId !== tokenSchoolId) {
       return res.status(403).json({ message: 'Forbidden schoolId' });
@@ -55,8 +56,12 @@ router.get('/', async (req, res) => {
       filter.status = status;
     }
 
+    const selectFields = shouldIncludeImageData
+      ? '_id name price stock status storeId categoryId imageUrl shortDescription'
+      : '_id name price stock status storeId categoryId shortDescription';
+
     const products = await Product.find(filter)
-      .select('_id name price stock status storeId categoryId imageUrl shortDescription')
+      .select(selectFields)
       .populate({ path: 'categoryId', select: 'name', options: { lean: true } })
       .populate({ path: 'storeId', select: 'name', options: { lean: true } })
       .sort({ name: 1 })
@@ -64,7 +69,7 @@ router.get('/', async (req, res) => {
 
     const normalized = products.map((product) => ({
       ...product,
-      imageUrl: normalizeImageUrl(product.imageUrl, includeImageData === 'true'),
+      imageUrl: normalizeImageUrl(product.imageUrl, shouldIncludeImageData),
       categoryName: product.categoryId?.name || 'Sin categoria',
       categoryId: String(product.categoryId?._id || product.categoryId || ''),
       storeName: product.storeId?.name || '',

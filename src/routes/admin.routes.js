@@ -83,7 +83,11 @@ router.get('/categories', async (req, res) => {
   try {
     const { schoolId } = req.user;
     const includeImageData = String(req.query?.includeImageData || 'false').toLowerCase() === 'true';
-    const categories = await Category.find({ schoolId, deletedAt: null }).sort({ name: 1 }).lean();
+    const categorySelect = includeImageData ? null : '-imageUrl';
+    const categories = await Category.find({ schoolId, deletedAt: null })
+      .select(categorySelect)
+      .sort({ name: 1 })
+      .lean();
     return res.status(200).json(
       categories.map((category) => ({
         ...category,
@@ -277,6 +281,7 @@ router.get('/products', async (req, res) => {
   try {
     const { schoolId } = req.user;
     const { includeInactive = 'true', status = 'active', includeImageData = 'false' } = req.query;
+    const shouldIncludeImageData = String(includeImageData || 'false').toLowerCase() === 'true';
 
     const filter = {
       schoolId,
@@ -287,8 +292,12 @@ router.get('/products', async (req, res) => {
       filter.status = status;
     }
 
+    const productSelect = shouldIncludeImageData
+      ? '_id name price cost stock inventoryAlertStock status storeId categoryId imageUrl shortDescription'
+      : '_id name price cost stock inventoryAlertStock status storeId categoryId shortDescription';
+
     const products = await Product.find(filter)
-      .select('_id name price cost stock inventoryAlertStock status storeId categoryId imageUrl shortDescription')
+      .select(productSelect)
       .populate({ path: 'categoryId', select: 'name', options: { lean: true } })
       .populate({ path: 'storeId', select: 'name', options: { lean: true } })
       .lean();
@@ -296,7 +305,7 @@ router.get('/products', async (req, res) => {
     const normalized = products
       .map((product) => ({
         ...product,
-        imageUrl: normalizeImageUrl(product.imageUrl, includeImageData === 'true'),
+        imageUrl: normalizeImageUrl(product.imageUrl, shouldIncludeImageData),
         categoryName: product.categoryId?.name || 'Sin categoria',
         categoryId: String(product.categoryId?._id || product.categoryId || ''),
         storeName: product.storeId?.name || '',
