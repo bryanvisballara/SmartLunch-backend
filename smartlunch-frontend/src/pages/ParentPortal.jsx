@@ -155,6 +155,8 @@ function ParentPortal() {
   const [autoTopupSubmitLoading, setAutoTopupSubmitLoading] = useState(false);
   const [autoTopupSubmitError, setAutoTopupSubmitError] = useState('');
   const [autoTopupSubmitSuccess, setAutoTopupSubmitSuccess] = useState('');
+  const [showAutoTopupCongratsModal, setShowAutoTopupCongratsModal] = useState(false);
+  const [autoTopupCongratsStudentName, setAutoTopupCongratsStudentName] = useState('');
   const [savedCards, setSavedCards] = useState([]);
   const [savedCardsLoading, setSavedCardsLoading] = useState(false);
   const [savedCardsError, setSavedCardsError] = useState('');
@@ -283,6 +285,12 @@ function ParentPortal() {
   const autoTopupMinBalanceNumber = Number(autoTopupMinBalance || 0);
   const autoTopupCustomAmountNumber = Number(autoTopupCustomAmount || 0);
   const autoTopupRechargeAmount = autoTopupPresetAmount === 0 ? autoTopupCustomAmountNumber : autoTopupPresetAmount;
+  const autoDebitLimitConfigured = Number(selectedStudent?.wallet?.autoDebitLimit || 0);
+  const showAutoDebitEstablishedNotice = Boolean(
+    selectedStudent?.wallet?.autoDebitEnabled &&
+    Number.isFinite(autoDebitLimitConfigured) &&
+    autoDebitLimitConfigured > 0
+  );
   const autoTopupFeeAmount = Number.isFinite(autoTopupRechargeAmount) && autoTopupRechargeAmount > 0
     ? Math.round(autoTopupRechargeAmount * rechargeFeeRate)
     : 0;
@@ -1108,11 +1116,17 @@ function ParentPortal() {
         },
       });
       setAutoTopupSubmitSuccess('Recarga automática activada correctamente.');
+      setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
+      setShowAutoTopupCongratsModal(true);
     } catch (requestError) {
       setAutoTopupSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo activar la recarga automática.');
     } finally {
       setAutoTopupSubmitLoading(false);
     }
+  };
+
+  const closeAutoTopupCongratsModal = () => {
+    setShowAutoTopupCongratsModal(false);
   };
 
   const onSubmitMeriendas = async () => {
@@ -1558,6 +1572,11 @@ function ParentPortal() {
             <div className="parent-topups-balance-card">
               <p className="parent-topups-kicker">Saldo disponible</p>
               <h3>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h3>
+              {showAutoDebitEstablishedNotice ? (
+                <p className="parent-autodebit-established">
+                  Recarga automatica establecida: saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}
+                </p>
+              ) : null}
               <div className="parent-topups-pill">
                 <span className="dot" aria-hidden="true" />
                 <span>Saldo minimo sugerido {formatCurrency(selectedStudent?.wallet?.autoDebitLimit || 20000)}</span>
@@ -2684,6 +2703,11 @@ function ParentPortal() {
             <section className="parent-balance-hero" id="parent-balance-section">
               <p className="meta">Saldo actual</p>
               <h2>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h2>
+              {showAutoDebitEstablishedNotice ? (
+                <p className="parent-autodebit-established">
+                  Recarga automatica establecida: saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}
+                </p>
+              ) : null}
               <p>
                 Alumno: <strong>{selectedStudent?.name || 'N/A'}</strong>
               </p>
@@ -2795,6 +2819,36 @@ function ParentPortal() {
           </>
         ) : null}
       </main>
+
+      {showAutoTopupCongratsModal ? (
+        <div
+          className="parent-autotopup-congrats-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Recarga automática configurada"
+        >
+          <div className="parent-autotopup-congrats-modal">
+            <div className="parent-autotopup-congrats-burst" aria-hidden="true">
+              <span className="dot dot-a" />
+              <span className="dot dot-b" />
+              <span className="dot dot-c" />
+            </div>
+            <div className="parent-autotopup-congrats-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2 3 8v8l9 6 9-6V8l-9-6Zm4.4 8.8-5 5a1 1 0 0 1-1.4 0l-2.4-2.4 1.4-1.4 1.7 1.7 4.3-4.3 1.4 1.4Z" fill="currentColor"/>
+              </svg>
+            </div>
+            <h3>Felicidades!</h3>
+            <p>
+              Tus recargas automaticas ya se encuentran configuradas, ahora despreocupate por el saldo de{' '}
+              <strong>{autoTopupCongratsStudentName || selectedStudentFirstName}</strong>.
+            </p>
+            <button className="parent-autotopup-congrats-cta" onClick={closeAutoTopupCongratsModal} type="button">
+              Entendido
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {showCardVerificationModal ? (
         <div className="parent-card-verification-overlay" role="dialog" aria-modal="true" aria-label="Verificación de tarjeta">

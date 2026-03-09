@@ -2697,6 +2697,14 @@ label {
   color: #0f172a;
 }
 
+.parent-autodebit-established {
+  margin: 0.1rem 0 0.52rem;
+  color: #0f4f8a;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
 .parent-topups-pill {
   border: 1px solid #d5e5f8;
   border-radius: 999px;
@@ -4262,6 +4270,125 @@ label {
 .parent-meriendas-cancel-modal-actions button:disabled {
   opacity: 0.68;
   cursor: not-allowed;
+}
+
+.parent-autotopup-congrats-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 12, 28, 0.62);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 1300;
+}
+
+.parent-autotopup-congrats-modal {
+  width: min(460px, 100%);
+  border-radius: 24px;
+  border: 1px solid #bae6fd;
+  background:
+    radial-gradient(circle at 12% 12%, #ecfeff 0%, rgba(236, 254, 255, 0) 36%),
+    radial-gradient(circle at 88% 8%, #cffafe 0%, rgba(207, 250, 254, 0) 34%),
+    linear-gradient(168deg, #f8fdff 0%, #ffffff 55%, #f0f9ff 100%);
+  box-shadow: 0 30px 60px rgba(7, 89, 133, 0.3);
+  padding: 1.2rem 1.1rem 1.05rem;
+  display: grid;
+  gap: 0.7rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.parent-autotopup-congrats-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.parent-autotopup-congrats-burst .dot {
+  position: absolute;
+  border-radius: 999px;
+  opacity: 0.65;
+}
+
+.parent-autotopup-congrats-burst .dot-a {
+  width: 14px;
+  height: 14px;
+  top: 18px;
+  right: 24px;
+  background: #22d3ee;
+}
+
+.parent-autotopup-congrats-burst .dot-b {
+  width: 10px;
+  height: 10px;
+  top: 42px;
+  right: 56px;
+  background: #38bdf8;
+}
+
+.parent-autotopup-congrats-burst .dot-c {
+  width: 12px;
+  height: 12px;
+  top: 30px;
+  left: 28px;
+  background: #67e8f9;
+}
+
+.parent-autotopup-congrats-icon {
+  width: 86px;
+  height: 86px;
+  border-radius: 999px;
+  background: linear-gradient(140deg, #67e8f9 0%, #06b6d4 44%, #0284c7 100%);
+  color: #ecfeff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 28px rgba(8, 145, 178, 0.34);
+}
+
+.parent-autotopup-congrats-icon svg {
+  width: 42px;
+  height: 42px;
+}
+
+.parent-autotopup-congrats-modal h3 {
+  margin: 0;
+  font-size: clamp(2rem, 8vw, 2.7rem);
+  color: #0f172a;
+  line-height: 1.03;
+  letter-spacing: -0.02em;
+}
+
+.parent-autotopup-congrats-modal p {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.parent-autotopup-congrats-modal p strong {
+  color: #0369a1;
+}
+
+.parent-autotopup-congrats-cta {
+  border: 0;
+  border-radius: 14px;
+  min-height: 50px;
+  background: linear-gradient(138deg, #67e8f9 0%, #22d3ee 40%, #0ea5e9 100%);
+  color: #082f49;
+  font-size: 0.98rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.parent-autotopup-congrats-cta:hover {
+  filter: brightness(1.03);
+}
+
+.parent-autotopup-congrats-cta:focus-visible {
+  outline: 3px solid rgba(14, 165, 233, 0.36);
+  outline-offset: 2px;
 }
 
 .parent-meriendas-day-page {
