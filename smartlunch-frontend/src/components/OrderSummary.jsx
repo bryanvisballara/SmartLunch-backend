@@ -3,6 +3,7 @@ const PAYMENT_OPTIONS = [
   { value: 'cash', label: 'Efectivo' },
   { value: 'qr', label: 'QR' },
   { value: 'dataphone', label: 'Datáfono' },
+  { value: 'school_billing', label: 'Cuenta de cobro colegio' },
 ];
 
 function OrderSummary({
@@ -15,8 +16,17 @@ function OrderSummary({
   paymentMethod = 'system',
   onPaymentMethodChange,
   disabledPaymentMethods = [],
+  cashTendered = '',
+  onCashTenderedChange,
+  schoolBillingFor = '',
+  onSchoolBillingForChange,
+  schoolBillingResponsible = '',
+  onSchoolBillingResponsibleChange,
 }) {
   const total = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  const cashTenderedValue = Number(cashTendered || 0);
+  const cashDiff = cashTenderedValue - total;
+  const hasCashValue = String(cashTendered || '').trim() !== '';
 
   return (
     <div className="panel order-summary-panel">
@@ -80,6 +90,55 @@ function OrderSummary({
           ))}
         </div>
       </div>
+
+      {paymentMethod === 'cash' ? (
+        <div className="cash-change-panel">
+          <label>
+            Billete recibido
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={cashTendered}
+              onChange={(event) => onCashTenderedChange?.(event.target.value)}
+              placeholder="Ej: 10000"
+            />
+          </label>
+          {hasCashValue ? (
+            <p className="cash-change-result">
+              {cashDiff >= 0
+                ? `Vuelto: $${Number(cashDiff).toLocaleString('es-CO')}`
+                : `Falta: $${Number(Math.abs(cashDiff)).toLocaleString('es-CO')}`}
+            </p>
+          ) : (
+            <p className="cash-change-result">Ingresa el billete para calcular el vuelto.</p>
+          )}
+        </div>
+      ) : null}
+
+      {paymentMethod === 'school_billing' ? (
+        <div className="cash-change-panel">
+          <label>
+            Dirigido a
+            <input
+              type="text"
+              value={schoolBillingFor}
+              onChange={(event) => onSchoolBillingForChange?.(event.target.value)}
+              placeholder="Ej: Coordinación académica"
+            />
+          </label>
+          <label>
+            Responsable
+            <input
+              type="text"
+              value={schoolBillingResponsible}
+              onChange={(event) => onSchoolBillingResponsibleChange?.(event.target.value)}
+              placeholder="Ej: Nombre del responsable"
+            />
+          </label>
+        </div>
+      ) : null}
+
       <button className="btn btn-primary order-summary-submit" disabled={loading || items.length === 0 || disabled} onClick={onSubmit} type="button">
         {loading ? 'Procesando...' : 'Cobrar'}
       </button>

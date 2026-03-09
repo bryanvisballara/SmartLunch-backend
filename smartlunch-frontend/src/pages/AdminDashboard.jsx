@@ -44,7 +44,7 @@ import {
   updateAdminStudent,
   updateAdminUser,
 } from '../services/admin.service';
-import { createInventoryRequest, getInventoryRequests, approveInventoryRequest, rejectInventoryRequest } from '../services/inventory.service';
+import { applyInventoryMovement, getInventoryRequests, approveInventoryRequest, rejectInventoryRequest } from '../services/inventory.service';
 import { getOrders, getOrderCancellationRequests, approveOrderCancellation, rejectOrderCancellation, cancelOrderDirect } from '../services/orders.service';
 import { getStudents } from '../services/students.service';
 import {
@@ -63,6 +63,7 @@ import { getNotificationsAudit } from '../services/notifications.service';
 import DismissibleNotice from '../components/DismissibleNotice';
 
 const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
+const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
 
 const formatDescriptionForTwoLines = (value) => {
   const description = String(value || '').trim();
@@ -89,6 +90,7 @@ const paymentMethodLabel = {
   qr: 'QR',
   dataphone: 'Datáfono',
   transfer: 'Transferencia',
+  school_billing: 'Cuenta de cobro colegio',
 };
 
 const pushTypeLabel = {
@@ -239,6 +241,7 @@ const meriendasFailedStatusValid = (value) => {
 const modules = [
   { id: 'home', label: 'Homepage KPI' },
   { id: 'sales', label: 'Historial de ventas & recargas' },
+  { id: 'school_billing', label: 'Cuentas de cobro colegio' },
   { id: 'notifications', label: 'Auditoria push' },
   { id: 'topups', label: 'Recargas' },
   { id: 'creation', label: 'Creaciones' },
@@ -279,12 +282,16 @@ function AdminDashboard() {
   const [pendingInventory, setPendingInventory] = useState([]);
   const [pendingCancellations, setPendingCancellations] = useState([]);
   const [pendingTopups, setPendingTopups] = useState([]);
+  const [approvalHistory, setApprovalHistory] = useState([]);
+  const [selectedApprovalHistoryId, setSelectedApprovalHistoryId] = useState('');
   const [approvalModule, setApprovalModule] = useState('in');
 
   const [closures, setClosures] = useState([]);
 
   const [salesFilters, setSalesFilters] = useState({ studentId: '', from: '', to: '' });
   const [historyType, setHistoryType] = useState('sales');
+  const [schoolBillingFilters, setSchoolBillingFilters] = useState({ from: '', to: '', q: '' });
+  const [schoolBillingOrders, setSchoolBillingOrders] = useState([]);
   const [salesStudentQuery, setSalesStudentQuery] = useState('');
   const [showSalesStudentOptions, setShowSalesStudentOptions] = useState(false);
   const [salesPage, setSalesPage] = useState(1);
@@ -325,7 +332,7 @@ function AdminDashboard() {
     price: '',
     cost: '',
     stock: '',
-    initialStockStoreId: '',
+    initialStockStoreIds: [],
     inventoryAlertStock: '10',
     imageUrl: '',
   });
@@ -394,6 +401,7 @@ function AdminDashboard() {
   const [deleteTargetLabel, setDeleteTargetLabel] = useState('');
   const [legacyMigrationLoading, setLegacyMigrationLoading] = useState(false);
   const [legacyMigrationLoadingTitle, setLegacyMigrationLoadingTitle] = useState('Migrando base de datos');
+  const [inventoryApplyModal, setInventoryApplyModal] = useState({ open: false, fading: false, title: '', message: '' });
 
   useEffect(() => {
     if (!snackSavePopup.open) {
@@ -436,6 +444,25 @@ function AdminDashboard() {
       clearTimeout(closeTimer);
     };
   }, [ok]);
+
+  useEffect(() => {
+    if (!inventoryApplyModal.open) {
+      return undefined;
+    }
+
+    const fadeTimer = setTimeout(() => {
+      setInventoryApplyModal((prev) => ({ ...prev, fading: true }));
+    }, 2700);
+
+    const closeTimer = setTimeout(() => {
+      setInventoryApplyModal({ open: false, fading: false, title: '', message: '' });
+    }, 3000);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(closeTimer);
+    };
+  }, [inventoryApplyModal.open]);
   const [editCategoryForm, setEditCategoryForm] = useState({ name: '', status: 'active' });
   const [editStoreForm, setEditStoreForm] = useState({ name: '', location: '', status: 'active' });
   const [editProductForm, setEditProductForm] = useState({
@@ -477,54 +504,6 @@ function AdminDashboard() {
     editEntity === 'vendor' ||
     editEntity === 'admin' ||
     editEntity === 'merienda_operator';
-  const isAggregatedProductView = editEntity === 'product' && !editProductStoreFilter;
-
-  const aggregatedProducts = useMemo(() => {
-    if (!isAggregatedProductView) {
-      return [];
-    }
-
-    const grouped = products.reduce((acc, product) => {
-      const key = normalizeProductName(product.name);
-      if (!key) {
-        return acc;
-      }
-
-      if (!acc[key]) {
-        acc[key] = {
-          _id: `agg:${key}`,
-          isAggregated: true,
-          name: product.name || 'Producto',
-          categoryId: String(product.categoryId || ''),
-          categoryName: product.categoryName || 'Sin categoría',
-          shortDescription: product.shortDescription || '',
-          storeId: '',
-          storeName: 'Todas las tiendas',
-          price: Number(product.price || 0),
-          cost: Number(product.cost || 0),
-          stock: Number(product.stock || 0),
-          inventoryAlertStock: Number(product.inventoryAlertStock ?? 10),
-          status: product.status || 'active',
-          imageUrl: product.imageUrl || '',
-          storeCount: 1,
-          sourceProductIds: [String(product._id)],
-        };
-        return acc;
-      }
-
-      acc[key].stock += Number(product.stock || 0);
-      acc[key].storeCount += 1;
-      acc[key].sourceProductIds.push(String(product._id));
-      return acc;
-    }, {});
-
-    return Object.values(grouped)
-      .map((item) => ({
-        ...item,
-        storeName: `Todas las tiendas (${item.storeCount})`,
-      }))
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
-  }, [products, isAggregatedProductView]);
 
   const productProfit = useMemo(() => {
     const price = Number(productForm.price || 0);
@@ -558,7 +537,7 @@ function AdminDashboard() {
     }
     if (editEntity === 'product') {
       if (!editProductStoreFilter) {
-        return aggregatedProducts;
+        return products;
       }
 
       return products.filter((product) => String(product.storeId) === String(editProductStoreFilter));
@@ -579,7 +558,7 @@ function AdminDashboard() {
       return users;
     }
     return students;
-  }, [editEntity, categories, stores, products, users, students, editProductStoreFilter, aggregatedProducts]);
+  }, [editEntity, categories, stores, products, users, students, editProductStoreFilter]);
 
   const getEditItemLabel = (item) => {
     if (!item) {
@@ -679,6 +658,11 @@ function AdminDashboard() {
   const pendingApprovalsCount = useMemo(
     () => approvalModules.reduce((sum, moduleItem) => sum + Number(moduleItem.count || 0), 0),
     [approvalModules]
+  );
+
+  const selectedApprovalHistory = useMemo(
+    () => approvalHistory.find((item) => item.id === selectedApprovalHistoryId) || null,
+    [approvalHistory, selectedApprovalHistoryId]
   );
 
   const filteredSalesStudents = useMemo(() => {
@@ -1327,15 +1311,97 @@ function AdminDashboard() {
   };
 
   const loadApprovals = async () => {
-    const [inventoryRes, cancelRes, topupRes] = await Promise.all([
+    const [
+      inventoryRes,
+      inventoryApprovedRes,
+      inventoryRejectedRes,
+      cancelRes,
+      cancelApprovedRes,
+      cancelRejectedRes,
+      topupRes,
+      topupApprovedRes,
+      topupRejectedRes,
+    ] = await Promise.all([
       getInventoryRequests({ status: 'pending' }),
+      getInventoryRequests({ status: 'approved' }),
+      getInventoryRequests({ status: 'rejected' }),
       getOrderCancellationRequests({ status: 'pending' }),
+      getOrderCancellationRequests({ status: 'approved' }),
+      getOrderCancellationRequests({ status: 'rejected' }),
       getTopupRequests({ status: 'pending' }),
+      getTopupRequests({ status: 'approved' }),
+      getTopupRequests({ status: 'rejected' }),
     ]);
 
     setPendingInventory(inventoryRes.data || []);
     setPendingCancellations(cancelRes.data || []);
     setPendingTopups(topupRes.data || []);
+
+    const inventoryHistory = [...(inventoryApprovedRes.data || []), ...(inventoryRejectedRes.data || [])].map((item) => {
+      const decision = item.status === 'approved' ? 'approved' : 'rejected';
+      return {
+        id: `inventory:${item._id}`,
+        domain: 'inventory',
+        decision,
+        decidedAt: item.approvedAt || item.rejectedAt || item.updatedAt || item.createdAt,
+        createdAt: item.createdAt,
+        title: `Inventario ${item.type === 'in' ? 'Ingreso' : item.type === 'out' ? 'Egreso' : 'Traslado'}`,
+        summary: `${item.storeId?.name || 'Tienda'}${item.targetStoreId?.name ? ` -> ${item.targetStoreId.name}` : ''}`,
+        decidedBy: decision === 'approved'
+          ? item.approvedBy?.name || item.approvedBy?.username || 'N/A'
+          : item.rejectedBy?.name || item.rejectedBy?.username || item.approvedBy?.name || item.approvedBy?.username || 'N/A',
+        statusLabel: decision === 'approved' ? 'Aprobada' : 'Rechazada',
+        detail: item,
+      };
+    });
+
+    const cancellationHistory = [...(cancelApprovedRes.data || []), ...(cancelRejectedRes.data || [])].map((item) => {
+      const decision = item.status === 'approved' ? 'approved' : 'rejected';
+      return {
+        id: `cancellation:${item._id}`,
+        domain: 'cancellation',
+        decision,
+        decidedAt: item.approvedAt || item.rejectedAt || item.updatedAt || item.createdAt,
+        createdAt: item.createdAt,
+        title: 'Anulación de venta',
+        summary: `Orden ${item.orderId?._id || item.orderId || 'N/A'}`,
+        decidedBy: decision === 'approved'
+          ? item.approvedBy?.name || item.approvedBy?.username || 'N/A'
+          : item.rejectedBy?.name || item.rejectedBy?.username || 'N/A',
+        statusLabel: decision === 'approved' ? 'Aprobada' : 'Rechazada',
+        detail: item,
+      };
+    });
+
+    const topupHistory = [...(topupApprovedRes.data || []), ...(topupRejectedRes.data || [])].map((item) => {
+      const decision = item.status === 'approved' ? 'approved' : 'rejected';
+      return {
+        id: `topup:${item._id}`,
+        domain: 'topup',
+        decision,
+        decidedAt: item.approvedAt || item.rejectedAt || item.updatedAt || item.createdAt,
+        createdAt: item.createdAt,
+        title: 'Recarga',
+        summary: `${item.studentId?.name || 'Alumno'} - ${formatCurrency(item.amount)}`,
+        decidedBy: decision === 'approved'
+          ? item.approvedBy?.name || item.approvedBy?.username || 'N/A'
+          : item.rejectedBy?.name || item.rejectedBy?.username || 'N/A',
+        statusLabel: decision === 'approved' ? 'Aprobada' : 'Rechazada',
+        detail: item,
+      };
+    });
+
+    const history = [...inventoryHistory, ...cancellationHistory, ...topupHistory]
+      .sort((a, b) => new Date(b.decidedAt || b.createdAt) - new Date(a.decidedAt || a.createdAt))
+      .slice(0, 300);
+
+    setApprovalHistory(history);
+    setSelectedApprovalHistoryId((prev) => {
+      if (prev && history.some((item) => item.id === prev)) {
+        return prev;
+      }
+      return history[0]?.id || '';
+    });
   };
 
   const loadHomepage = async (storeId = homeStoreId) => {
@@ -1423,6 +1489,50 @@ function AdminDashboard() {
     setTopupHistory(fallbackRows);
   };
 
+  const loadSchoolBillingOrders = async (filters = schoolBillingFilters) => {
+    const params = {
+      paymentMethod: 'school_billing',
+      includeCancelled: 'true',
+    };
+
+    if (filters.from) {
+      params.from = `${filters.from}T00:00:00.000Z`;
+    }
+
+    if (filters.to) {
+      params.to = `${filters.to}T23:59:59.999Z`;
+    }
+
+    const response = await getOrders(params);
+    const rows = (response.data || []).filter(
+      (order) => String(order?.paymentMethod || '').toLowerCase() === 'school_billing'
+    );
+    const query = String(filters.q || '').trim().toLowerCase();
+
+    if (!query) {
+      setSchoolBillingOrders(rows);
+      return;
+    }
+
+    const filtered = rows.filter((order) => {
+      const haystack = [
+        order._id,
+        order.studentId?.name,
+        order.storeId?.name,
+        order.vendorId?.name,
+        order.schoolBillingFor,
+        order.schoolBillingResponsible,
+        ...(order.items || []).map((item) => item?.nameSnapshot),
+      ]
+        .map((item) => String(item || '').toLowerCase())
+        .join(' ');
+
+      return haystack.includes(query);
+    });
+
+    setSchoolBillingOrders(filtered);
+  };
+
   const loadClosures = async (filters = closureFilters) => {
     if (!filters.storeId) {
       setClosures([]);
@@ -1500,6 +1610,43 @@ function AdminDashboard() {
   }, [activeModule]);
 
   useEffect(() => {
+    if (activeModule !== 'approvals') {
+      return;
+    }
+
+    setLoading(true);
+    clearMessages();
+    loadApprovals()
+      .catch((requestError) => {
+        setError(requestError?.response?.data?.message || 'No se pudieron cargar las autorizaciones.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [activeModule]);
+
+  useEffect(() => {
+    if (activeModule !== 'school_billing') {
+      return;
+    }
+
+    setLoading(true);
+    clearMessages();
+    loadSchoolBillingOrders(schoolBillingFilters)
+      .catch((requestError) => {
+        setError(requestError?.response?.data?.message || 'No se pudieron cargar las cuentas de cobro colegio.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [activeModule]);
+
+  const onApplySchoolBillingFilters = (event) => {
+    event.preventDefault();
+    runAction(() => loadSchoolBillingOrders(schoolBillingFilters), 'Cuentas de cobro actualizadas.');
+  };
+
+  useEffect(() => {
     setEditItemId('');
     setEditSearchQuery('');
     setEditProductStoreFilter('');
@@ -1507,12 +1654,6 @@ function AdminDashboard() {
     setEditTableDrafts({});
     setEditTablePage(1);
   }, [editEntity]);
-
-  useEffect(() => {
-    if (activeModule === 'modify' && editEntity === 'product' && editProductStoreFilter) {
-      setEditProductStoreFilter('');
-    }
-  }, [activeModule, editEntity, editProductStoreFilter]);
 
   useEffect(() => {
     setEditTablePage(1);
@@ -1765,10 +1906,22 @@ function AdminDashboard() {
 
   const onCreateProduct = (event) => {
     event.preventDefault();
+
+    const selectedStoreIds = Array.isArray(productForm.initialStockStoreIds)
+      ? productForm.initialStockStoreIds
+      : [];
+
+    if (stores.length > 0 && selectedStoreIds.length === 0) {
+      setError('Selecciona al menos una tienda para crear el producto.');
+      return;
+    }
+
     runAction(
       () =>
         createAdminProduct({
           ...productForm,
+          createInAllStores: selectedStoreIds.includes('all'),
+          initialStockStoreIds: selectedStoreIds.filter((id) => id !== 'all'),
           shortDescription: String(productForm.shortDescription || '').trim(),
           price: Number(productForm.price || 0),
           cost: Number(productForm.cost || 0),
@@ -1786,7 +1939,7 @@ function AdminDashboard() {
           price: '',
           cost: '',
           stock: '',
-          initialStockStoreId: '',
+          initialStockStoreIds: [],
           inventoryAlertStock: '10',
           imageUrl: '',
         });
@@ -1885,31 +2038,54 @@ function AdminDashboard() {
       return;
     }
 
-    runAction(
-      async () => {
-        const createResponse = await createInventoryRequest({
-          type: inventoryForm.type,
-          storeId: inventoryForm.storeId,
-          targetStoreId: inventoryForm.type === 'transfer' ? inventoryForm.targetStoreId : undefined,
-          items: inventoryRequestItems.map((item) => ({
-            productId: item.productId,
-            quantity: Number(item.quantity || 0),
-          })),
-          notes: inventoryForm.notes,
-        });
+    if (!inventoryForm.storeId) {
+      setError('Selecciona una tienda de origen.');
+      return;
+    }
 
-        const requestIds = (createResponse?.data?.requests || []).map((request) => request?._id).filter(Boolean);
-        await Promise.all(requestIds.map((id) => approveInventoryRequest(id)));
-      },
-      'Movimiento de inventario aplicado y guardado en stock.',
-      async () => {
-        await loadBaseData();
-        await loadApprovals();
+    if (inventoryForm.type === 'transfer' && !inventoryForm.targetStoreId) {
+      setError('Selecciona una tienda de destino para el traslado.');
+      return;
+    }
+
+    clearMessages();
+    setLoading(true);
+
+    applyInventoryMovement({
+      type: inventoryForm.type,
+      storeId: inventoryForm.storeId,
+      targetStoreId: inventoryForm.type === 'transfer' ? inventoryForm.targetStoreId : undefined,
+      items: inventoryRequestItems.map((item) => ({
+        productId: item.productId,
+        quantity: Number(item.quantity || 0),
+      })),
+      notes: inventoryForm.notes,
+    })
+      .then(async () => {
+        await Promise.all([
+          loadApprovals(),
+          loadHomepage(homeStoreId),
+          getAdminProducts({ includeInactive: true }).then((response) => {
+            setProducts(response.data || []);
+          }),
+        ]);
+
         setInventoryForm((prev) => ({ ...prev, productId: '', quantity: '1', notes: '' }));
         setInventoryRequestItems([]);
         setInventoryProductQuery('');
-      }
-    );
+        setInventoryApplyModal({
+          open: true,
+          fading: false,
+          title: 'Registro aplicado',
+          message: 'El movimiento de inventario fue aplicado de manera exitosa.',
+        });
+      })
+      .catch((requestError) => {
+        setError(requestError?.response?.data?.message || 'No se pudo aplicar el movimiento de inventario.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   };
 
   const onAddInventoryItem = () => {
@@ -2821,11 +2997,6 @@ function AdminDashboard() {
   const onDeleteEditTableRow = (item) => {
     const itemId = String(item._id);
 
-    if (editEntity === 'product' && item.isAggregated) {
-      setError('La vista "Todas las tiendas" es consolidada. Selecciona una tienda especifica para eliminar productos.');
-      return;
-    }
-
     if (editEntity === 'category') {
       runAction(() => deleteAdminCategory(itemId), 'Registro eliminado.', reloadEditEntityData);
       return;
@@ -2837,6 +3008,22 @@ function AdminDashboard() {
     }
 
     if (editEntity === 'product') {
+      if (item.isAggregated) {
+        const sourceIds = Array.isArray(item.sourceProductIds) ? item.sourceProductIds : [];
+
+        if (sourceIds.length === 0) {
+          setError('No se encontraron productos asociados para eliminar este registro consolidado.');
+          return;
+        }
+
+        runAction(
+          () => Promise.all(sourceIds.map((productId) => deleteAdminProduct(productId))),
+          'Registros eliminados.',
+          reloadEditEntityData
+        );
+        return;
+      }
+
       runAction(() => deleteAdminProduct(itemId), 'Registro eliminado.', reloadEditEntityData);
       return;
     }
@@ -3282,7 +3469,7 @@ function AdminDashboard() {
               <h4>Alumnos con poco saldo</h4>
               {(homeData?.lowBalanceStudents || []).length === 0 ? <p>Sin alumnos con poco saldo.</p> : null}
               {(homeData?.lowBalanceStudents || []).length > 0 ? (
-                <div className="admin-low-balance-table-wrap">
+                <div className="admin-low-balance-table-wrap admin-card-scroll">
                   <table className="admin-low-balance-table">
                     <thead>
                       <tr>
@@ -3291,7 +3478,7 @@ function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(homeData?.lowBalanceStudents || []).map((item) => (
+                      {(homeData?.lowBalanceStudents || []).slice(0, 10).map((item) => (
                         <tr key={String(item.studentId)}>
                           <td>{item.studentName || 'Alumno'}</td>
                           <td>{formatCurrency(item.balance)}</td>
@@ -3312,11 +3499,29 @@ function AdminDashboard() {
             </div>
             <div className="card">
               <h4>Alertas de inventario</h4>
-              {(homeData?.lowStockProducts || []).map((item) => (
-                <p key={item._id}>
-                  {item.name} ({item.storeId?.name || 'Tienda'}) - stock {item.stock} / alerta {item.inventoryAlertStock ?? 10}
-                </p>
-              ))}
+              {(homeData?.lowStockProducts || []).length === 0 ? <p>Sin alertas de inventario.</p> : null}
+              {(homeData?.lowStockProducts || []).length > 0 ? (
+                <div className="admin-low-balance-table-wrap admin-card-scroll">
+                  <table className="admin-low-balance-table">
+                    <thead>
+                      <tr>
+                        <th>Tienda</th>
+                        <th>Producto</th>
+                        <th>Stock</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(homeData?.lowStockProducts || []).slice(0, 10).map((item) => (
+                        <tr key={String(item._id)}>
+                          <td>{item.storeId?.name || 'Tienda'}</td>
+                          <td>{item.name || 'Producto'}</td>
+                          <td>{Number(item.stock || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
             </div>
             <div className="card admin-compact-value-card">
               <h4>Utilidad teorica del mes</h4>
@@ -3604,6 +3809,118 @@ function AdminDashboard() {
               </button>
             </div>
           </div>
+        </section>
+      ) : null}
+
+      {activeModule === 'school_billing' ? (
+        <section className="panel admin-section">
+          <h3>Cuentas de cobro colegio</h3>
+
+          <form className="admin-form-grid" onSubmit={onApplySchoolBillingFilters}>
+            <label>
+              Desde
+              <input
+                type="date"
+                value={schoolBillingFilters.from}
+                onChange={(event) => setSchoolBillingFilters((prev) => ({ ...prev, from: event.target.value }))}
+              />
+            </label>
+            <label>
+              Hasta
+              <input
+                type="date"
+                value={schoolBillingFilters.to}
+                onChange={(event) => setSchoolBillingFilters((prev) => ({ ...prev, to: event.target.value }))}
+              />
+            </label>
+            <label>
+              Buscar
+              <input
+                value={schoolBillingFilters.q}
+                onChange={(event) => setSchoolBillingFilters((prev) => ({ ...prev, q: event.target.value }))}
+                placeholder="Orden, tienda, vendedor, dirigido a, responsable o producto"
+              />
+            </label>
+            <button className="btn btn-primary" type="submit">
+              Filtrar
+            </button>
+          </form>
+
+          <button className="btn" type="button" onClick={() => runAction(() => loadSchoolBillingOrders(schoolBillingFilters), 'Cuentas de cobro actualizadas.') }>
+            Actualizar
+          </button>
+
+          {schoolBillingOrders.length === 0 ? <p>No hay cuentas de cobro colegio para los filtros seleccionados.</p> : null}
+
+          {schoolBillingOrders.length > 0 ? (
+            <div className="card">
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th>Tienda</th>
+                    <th>Vendedor</th>
+                    <th>Alumno</th>
+                    <th>Dirigido a</th>
+                    <th>Responsable</th>
+                    <th>Total</th>
+                    <th>Fecha y hora</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schoolBillingOrders.map((order) => (
+                    <tr key={`summary-${order._id}`}>
+                      <td>{order.orderNumber || order._id}</td>
+                      <td>{order.storeId?.name || 'N/A'}</td>
+                      <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
+                      <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
+                      <td>{order.schoolBillingFor || 'N/A'}</td>
+                      <td>{order.schoolBillingResponsible || 'N/A'}</td>
+                      <td>{formatCurrency(order.total)}</td>
+                      <td>{formatDateTime(order.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {schoolBillingOrders.length > 0 ? (
+            <div className="approval-history-scroll">
+              {schoolBillingOrders.map((order) => (
+                <div className="card" key={order._id}>
+                  <p><strong>Detalle de productos</strong></p>
+                  <p>Orden: {order.orderNumber || order._id}</p>
+                  <p>Tienda: {order.storeId?.name || 'N/A'}</p>
+                  <p>Vendedor: {order.vendorId?.name || order.vendorId?.username || 'N/A'}</p>
+                  <p>Alumno: {order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</p>
+                  <p>Dirigido a: {order.schoolBillingFor || 'N/A'}</p>
+                  <p>Responsable: {order.schoolBillingResponsible || 'N/A'}</p>
+                  <p>Total: {formatCurrency(order.total)}</p>
+                  <p>Fecha y hora: {formatDateTime(order.createdAt)}</p>
+
+                  <table className="simple-table">
+                    <thead>
+                      <tr>
+                        <th>Producto</th>
+                        <th>Cantidad</th>
+                        <th>Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(order.items || []).map((item, index) => (
+                        <tr key={`${order._id}-${index}`}>
+                          <td>{item.nameSnapshot || 'Producto'}</td>
+                          <td>{item.quantity}</td>
+                          <td>{formatCurrency(item.subtotal)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -4009,16 +4326,60 @@ function AdminDashboard() {
                 <input type="number" min="0" value={productForm.stock} onChange={(event) => setProductForm((prev) => ({ ...prev, stock: event.target.value }))} />
               </label>
               <label>
-                Destino del stock de ingreso
-                <select
-                  value={productForm.initialStockStoreId}
-                  onChange={(event) => setProductForm((prev) => ({ ...prev, initialStockStoreId: event.target.value }))}
-                >
-                  <option value="">Selecciona tienda destino</option>
-                  {stores.map((store) => (
-                    <option key={store._id} value={store._id}>{store.name}</option>
-                  ))}
-                </select>
+                Tiendas del producto
+                <div className="admin-store-checklist" role="group" aria-label="Tiendas del producto">
+                  <label className="payment-option">
+                    <input
+                      type="checkbox"
+                      checked={productForm.initialStockStoreIds.includes('all')}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setProductForm((prev) => ({
+                          ...prev,
+                          initialStockStoreIds: checked ? ['all'] : [],
+                        }));
+                      }}
+                    />
+                    <span>Todas las tiendas</span>
+                  </label>
+
+                  {stores.map((store) => {
+                    const checked =
+                      productForm.initialStockStoreIds.includes('all') ||
+                      productForm.initialStockStoreIds.includes(String(store._id));
+
+                    return (
+                      <label className="payment-option" key={store._id}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const storeId = String(store._id);
+                            const isChecked = event.target.checked;
+
+                            setProductForm((prev) => {
+                              const previousIds = Array.isArray(prev.initialStockStoreIds) ? prev.initialStockStoreIds : [];
+                              const withoutAll = previousIds.filter((id) => id !== 'all');
+                              const nextSet = new Set(withoutAll);
+
+                              if (isChecked) {
+                                nextSet.add(storeId);
+                              } else {
+                                nextSet.delete(storeId);
+                              }
+
+                              return {
+                                ...prev,
+                                initialStockStoreIds: Array.from(nextSet),
+                              };
+                            });
+                          }}
+                        />
+                        <span>{store.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </label>
               <label>
                 Alerta inventario (stock minimo)
@@ -4135,7 +4496,7 @@ function AdminDashboard() {
                 <option value="merienda_operator">Tutores de alimentación</option>
               </select>
             </label>
-            {activeModule === 'edit' && editEntity === 'product' ? (
+            {(activeModule === 'edit' || activeModule === 'modify') && editEntity === 'product' ? (
               <label>
                 Tienda (filtro)
                 <select value={editProductStoreFilter} onChange={(event) => setEditProductStoreFilter(event.target.value)}>
@@ -4232,6 +4593,7 @@ function AdminDashboard() {
                     <th>Nombre</th>
                     <th>Descripción</th>
                     <th>Foto</th>
+                    <th>Tienda</th>
                     <th>Categoría</th>
                     <th>Precio</th>
                     <th>Costo</th>
@@ -4270,7 +4632,6 @@ function AdminDashboard() {
               <tbody>
                 {paginatedEditEntityItems.map((item) => {
                   const draft = getEditTableDraft(item);
-                  const isAggregatedProductRow = editEntity === 'product' && Boolean(draft.isAggregated);
                   const utility = getProductUtility(draft.price, draft.cost);
                   const utilityPercent = getProductUtilityPercent(draft.price, draft.cost);
                   return (
@@ -4347,6 +4708,11 @@ function AdminDashboard() {
                                   />
                                 </>
                               ) : null}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="admin-db-cell-text">
+                              {stores.find((store) => String(store._id) === String(draft.storeId))?.name || draft.storeName || 'Sin tienda'}
                             </div>
                           </td>
                           <td>
@@ -4586,7 +4952,7 @@ function AdminDashboard() {
                             >
                               Guardar modificaciones
                             </button>
-                            <button className="btn" type="button" onClick={() => onDeleteEditTableRow(item)} disabled={isAggregatedProductRow}>
+                            <button className="btn" type="button" onClick={() => onDeleteEditTableRow(item)}>
                               Eliminar registro
                             </button>
                           </div>
@@ -5491,6 +5857,89 @@ function AdminDashboard() {
           {approvalModule !== 'topups' && approvalModule === 'transfer' && pendingTransferGroups.length === 0 ? <p>No hay traslados pendientes.</p> : null}
           {approvalModule === 'topups' && pendingTopups.length === 0 ? <p>No hay recargas pendientes.</p> : null}
           {approvalModule === 'cancellations' && pendingCancellations.length === 0 ? <p>No hay anulaciones pendientes.</p> : null}
+
+          <div className="card">
+            <h4>Historial de autorizaciones</h4>
+            {approvalHistory.length === 0 ? <p>No hay autorizaciones aprobadas o rechazadas.</p> : null}
+
+            {approvalHistory.length > 0 ? (
+              <div className="approval-history-scroll approval-history-table-scroll">
+                <table className="simple-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha y hora</th>
+                      <th>Tipo</th>
+                      <th>Estado</th>
+                      <th>Resumen</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {approvalHistory.map((item) => (
+                      <tr key={item.id}>
+                        <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
+                        <td>{item.title}</td>
+                        <td>{item.statusLabel}</td>
+                        <td>{item.summary}</td>
+                        <td>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() => setSelectedApprovalHistoryId(item.id)}
+                          >
+                            Ver detalle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {selectedApprovalHistory ? (
+              <div className="card">
+                <h4>Detalle de autorización</h4>
+                <p>Tipo: {selectedApprovalHistory.title}</p>
+                <p>Estado: {selectedApprovalHistory.statusLabel}</p>
+                <p>Resuelto por: {selectedApprovalHistory.decidedBy}</p>
+                <p>Fecha y hora: {formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</p>
+
+                {selectedApprovalHistory.domain === 'inventory' ? (
+                  <>
+                    <p>Tienda origen: {selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</p>
+                    <p>Tienda destino: {selectedApprovalHistory.detail?.targetStoreId?.name || 'N/A'}</p>
+                    <p>Producto: {selectedApprovalHistory.detail?.productId?.name || 'N/A'}</p>
+                    <p>Cantidad: {selectedApprovalHistory.detail?.quantity || 0}</p>
+                    <p>Solicitado por: {selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</p>
+                    <p>Observaciones: {selectedApprovalHistory.detail?.notes || 'Sin observaciones'}</p>
+                  </>
+                ) : null}
+
+                {selectedApprovalHistory.domain === 'topup' ? (
+                  <>
+                    <p>Alumno: {selectedApprovalHistory.detail?.studentId?.name || 'N/A'}</p>
+                    <p>Monto: {formatCurrency(selectedApprovalHistory.detail?.amount || 0)}</p>
+                    <p>Método: {selectedApprovalHistory.detail?.method || 'N/A'}</p>
+                    <p>Tienda: {selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</p>
+                    <p>Solicitado por: {selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</p>
+                    <p>Observaciones: {selectedApprovalHistory.detail?.notes || 'Sin observaciones'}</p>
+                  </>
+                ) : null}
+
+                {selectedApprovalHistory.domain === 'cancellation' ? (
+                  <>
+                    <p>Orden: {selectedApprovalHistory.detail?.orderId?._id || selectedApprovalHistory.detail?.orderId || 'N/A'}</p>
+                    <p>Alumno: {selectedApprovalHistory.detail?.orderId?.studentId?.name || 'Venta externa'}</p>
+                    <p>Total: {formatCurrency(selectedApprovalHistory.detail?.orderId?.total || 0)}</p>
+                    <p>Tienda: {selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</p>
+                    <p>Solicitado por: {selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</p>
+                    <p>Motivo: {selectedApprovalHistory.detail?.reason || 'Sin motivo'}</p>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </section>
       ) : null}
 
@@ -5556,6 +6005,15 @@ function AdminDashboard() {
                 Eliminar
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {inventoryApplyModal.open ? (
+        <div className={`brand-popup-overlay ${inventoryApplyModal.fading ? 'inventory-apply-overlay-fading' : ''}`} role="status" aria-live="polite">
+          <div className={`brand-popup brand-popup-success ${inventoryApplyModal.fading ? 'inventory-apply-popup-fading' : ''}`}>
+            <h3>{inventoryApplyModal.title}</h3>
+            <p>{inventoryApplyModal.message}</p>
           </div>
         </div>
       ) : null}

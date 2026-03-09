@@ -673,6 +673,29 @@ label {
   flex-shrink: 0;
 }
 
+.cash-change-panel {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.cash-change-panel label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.88rem;
+}
+
+.cash-change-result {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .order-summary-submit {
   margin-top: 0;
   padding: 0.34rem 0.62rem;
@@ -866,6 +889,27 @@ label {
   overflow: auto;
 }
 
+.admin-store-checklist {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 190px;
+  overflow: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  padding: 0.45rem 0.55rem;
+  background: #fff;
+}
+
+.approval-history-scroll {
+  max-height: 700px;
+  overflow: auto;
+  padding-right: 0.35rem;
+}
+
+.approval-history-table-scroll {
+  max-height: 520px;
+}
+
 .student-parent-picker {
   display: grid;
   gap: 0.3rem;
@@ -969,6 +1013,29 @@ label {
 .admin-products-table th:nth-child(6),
 .admin-products-table td:nth-child(6) {
   min-width: 120px;
+}
+
+.admin-products-table th:nth-child(7),
+.admin-products-table td:nth-child(7),
+.admin-products-table th:nth-child(10),
+.admin-products-table td:nth-child(10),
+.admin-products-table th:nth-child(11),
+.admin-products-table td:nth-child(11) {
+  min-width: 90px;
+}
+
+.admin-products-table th:nth-child(8),
+.admin-products-table td:nth-child(8),
+.admin-products-table th:nth-child(9),
+.admin-products-table td:nth-child(9) {
+  min-width: 84px;
+}
+
+.admin-products-table td:nth-child(6) input,
+.admin-products-table td:nth-child(7) input,
+.admin-products-table td:nth-child(10) input,
+.admin-products-table td:nth-child(11) input {
+  min-width: 84px;
 }
 
 .admin-db-cell-text {
@@ -1142,6 +1209,17 @@ label {
 
 .brand-popup .btn {
   min-width: 110px;
+}
+
+.inventory-apply-overlay-fading {
+  transition: opacity 300ms ease-in;
+  opacity: 0;
+}
+
+.inventory-apply-popup-fading {
+  transition: opacity 300ms ease-in, transform 300ms ease-in;
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
 }
 
 .snack-save-toast {
@@ -1483,13 +1561,20 @@ label {
 
 .admin-list-cards {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: start;
 }
 
 .admin-list-cards .card {
-  gap: 0.1rem;
+  align-self: start;
+  align-content: start;
+  gap: 0.4rem;
 }
 
 .admin-list-cards .card p {
+  margin: 0;
+}
+
+.admin-list-cards .card h4 {
   margin: 0;
 }
 
@@ -1513,6 +1598,11 @@ label {
 .admin-low-balance-table-wrap {
   width: 100%;
   overflow-x: auto;
+}
+
+.admin-card-scroll {
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .admin-low-balance-table {

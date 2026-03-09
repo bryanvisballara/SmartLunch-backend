@@ -12,7 +12,7 @@ const modeTitle = {
 };
 
 function InventoryRequestPage({ mode }) {
-  const { currentStore, setCurrentStore } = useAuthStore();
+  const { currentStore, setCurrentStore, user } = useAuthStore();
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
   const [requestItems, setRequestItems] = useState([]);
@@ -20,48 +20,93 @@ function InventoryRequestPage({ mode }) {
   const [targetStoreId, setTargetStoreId] = useState('');
   const [observations, setObservations] = useState('');
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [historyRequests, setHistoryRequests] = useState([]);
   const [message, setMessage] = useState('');
-  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [successModal, setSuccessModal] = useState({ open: false, fading: false });
+  const [submitting, setSubmitting] = useState(false);
+
+  const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [storesRes, productsRes] = await Promise.all([getStores(), getProducts()]);
+        const storesRes = await getStores();
         const storesData = storesRes.data || [];
-        const productsData = productsRes.data || [];
-
         setStores(storesData);
-        setProducts(productsData);
 
-        if (!currentStore && storesData[0]) {
-          setCurrentStore(storesData[0]);
+        const assignedStoreId = String(user?.assignedStore?._id || user?.assignedStoreId || '');
+        const assignedStoreFromList = assignedStoreId
+          ? storesData.find((store) => String(store._id) === assignedStoreId) || null
+          : null;
+
+        const nextStore =
+          assignedStoreFromList ||
+          user?.assignedStore ||
+          currentStore ||
+          storesData[0] ||
+          null;
+
+        if (nextStore && String(currentStore?._id || '') !== String(nextStore?._id || '')) {
+          setCurrentStore(nextStore);
         }
+
+        const productsRes = await getProducts({
+          includeInactive: 'true',
+          ...(nextStore?._id ? { storeId: String(nextStore._id) } : {}),
+        });
+        setProducts(productsRes.data || []);
       } catch (error) {
         setMessage(error?.response?.data?.message || 'No se pudo cargar inventario');
       }
     };
 
     load();
-  }, [currentStore, setCurrentStore]);
+  }, [currentStore?._id, setCurrentStore, user?.role, user?.assignedStore?._id, user?.assignedStoreId]);
 
-  const loadPendingRequests = async () => {
+  useEffect(() => {
+    if (!successModal.open) {
+      return undefined;
+    }
+
+    const fadeTimer = setTimeout(() => {
+      setSuccessModal((prev) => ({ ...prev, fading: true }));
+    }, 2700);
+
+    const closeTimer = setTimeout(() => {
+      setSuccessModal({ open: false, fading: false });
+    }, 3000);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(closeTimer);
+    };
+  }, [successModal.open]);
+
+  const loadRequestsData = async () => {
     try {
-      const response = await getInventoryRequests({ status: 'pending', type: mode });
-      setPendingRequests(response.data || []);
+      const [pendingResponse, approvedResponse, rejectedResponse] = await Promise.all([
+        getInventoryRequests({ status: 'pending', type: mode }),
+        getInventoryRequests({ status: 'approved', type: mode }),
+        getInventoryRequests({ status: 'rejected', type: mode }),
+      ]);
+
+      setPendingRequests(pendingResponse.data || []);
+      setHistoryRequests([...(approvedResponse.data || []), ...(rejectedResponse.data || [])]);
     } catch (error) {
       setPendingRequests([]);
+      setHistoryRequests([]);
     }
   };
 
   useEffect(() => {
-    loadPendingRequests();
-    const intervalId = setInterval(loadPendingRequests, 12000);
+    loadRequestsData();
+    const intervalId = setInterval(loadRequestsData, 12000);
     return () => clearInterval(intervalId);
   }, [mode]);
 
   const storeProducts = useMemo(() => {
     if (!currentStore?._id) {
-      return products;
+      return [];
     }
 
     return products.filter((product) => String(product.storeId) === String(currentStore._id));
@@ -97,6 +142,33 @@ function InventoryRequestPage({ mode }) {
     [pendingRequests]
   );
 
+  const groupedHistoryRequests = useMemo(
+    () =>
+      Object.values(
+        historyRequests.reduce((accumulator, request) => {
+          const key = request.batchId || request._id;
+          if (!accumulator[key]) {
+            accumulator[key] = {
+              key,
+              status: request.status,
+              notes: request.notes || '',
+              requestedBy: request.requestedBy,
+              approvedBy: request.approvedBy,
+              rejectedBy: request.rejectedBy,
+              store: request.storeId,
+              targetStore: request.targetStoreId,
+              createdAt: request.createdAt,
+              resolvedAt: request.approvedAt || request.rejectedAt || request.updatedAt,
+              requests: [],
+            };
+          }
+          accumulator[key].requests.push(request);
+          return accumulator;
+        }, {})
+      ).sort((a, b) => new Date(b.resolvedAt || b.createdAt) - new Date(a.resolvedAt || a.createdAt)),
+    [historyRequests]
+  );
+
   const removeRequestItem = (indexToRemove) => {
     setRequestItems((previous) => previous.filter((_, index) => index !== indexToRemove));
   };
@@ -125,14 +197,25 @@ function InventoryRequestPage({ mode }) {
     setMessage('');
   };
 
+  const resetRequestForm = () => {
+    setRequestItems([]);
+    setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
+    setObservations('');
+    setTargetStoreId('');
+  };
+
   const submitRequest = async () => {
+    if (submitting) {
+      return;
+    }
+
     if (requestItems.length === 0) {
       setMessage('Debe agregar productos en la tabla antes de solicitar ingresos.');
       return;
     }
 
     if (!currentStore?._id) {
-      setMessage('Selecciona la tienda para continuar.');
+      setMessage('No se encontró una tienda asignada para continuar.');
       return;
     }
 
@@ -155,21 +238,30 @@ function InventoryRequestPage({ mode }) {
       return;
     }
 
+    const payload = {
+      storeId: currentStore._id,
+      targetStoreId: mode === 'transfer' ? targetStoreId : null,
+      type: mode,
+      items: normalizedItems,
+      notes: observations,
+    };
+
+    // Reset immediately after clicking submit so the vendor starts a fresh request.
+    resetRequestForm();
+
     try {
-      await createInventoryRequest({
-        storeId: currentStore._id,
-        targetStoreId: mode === 'transfer' ? targetStoreId : null,
-        type: mode,
-        items: normalizedItems,
-        notes: observations,
-      });
-      setShowSuccessPopup(true);
+      setSubmitting(true);
+      await createInventoryRequest(payload);
+      setSuccessModal({ open: true, fading: false });
       setMessage('Solicitud enviada. Debe ser autorizada por el administrador.');
-      setRequestItems([]);
-      setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
-      setObservations('');
-      await loadPendingRequests();
+      // Refresh in background so UI loading state is tied only to submission.
+      loadRequestsData().catch(() => {});
     } catch (error) {
+      if (String(error?.code || '') === 'ECONNABORTED') {
+        setMessage('La solicitud fue enviada pero la respuesta tardó demasiado. Actualiza la página para validar el estado.');
+        return;
+      }
+
       const backendMessage = error?.response?.data?.message || '';
       if (backendMessage === 'storeId, productId, type and quantity are required') {
         setMessage('El backend está desactualizado. Reinicia el servidor para habilitar solicitudes por tabla de productos.');
@@ -177,6 +269,8 @@ function InventoryRequestPage({ mode }) {
       }
 
       setMessage(backendMessage || 'No se pudo enviar la solicitud');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -185,25 +279,11 @@ function InventoryRequestPage({ mode }) {
       <section className="panel">
         <h2>{(modeTitle[mode] || 'movimiento').toUpperCase()}</h2>
 
-        <label>
-          {mode === 'transfer' ? 'Tienda origen' : 'Tienda'}
-          <select
-            value={currentStore?._id || ''}
-            onChange={(event) => {
-              const selected = stores.find((store) => String(store._id) === event.target.value) || null;
-              setCurrentStore(selected);
-              setRequestItems([]);
-              setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
-            }}
-          >
-            <option value="">Selecciona tienda</option>
-            {stores.map((store) => (
-              <option key={store._id} value={store._id}>
-                {store.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="card">
+          <p>
+            {mode === 'transfer' ? 'Tienda origen' : 'Tienda'}: <strong>{currentStore?.name || 'Sin tienda asignada'}</strong>
+          </p>
+        </div>
 
         <div className="card">
           <label>
@@ -246,7 +326,6 @@ function InventoryRequestPage({ mode }) {
                       type="button"
                     >
                       {product.name}
-                      {currentStore?._id ? '' : ` (${product.storeName || 'Tienda'})`}
                     </button>
                   ))}
                   {filteredProductsForItem.length === 0 ? (
@@ -332,13 +411,19 @@ function InventoryRequestPage({ mode }) {
           )}
         </div>
 
-        <button className="btn btn-primary" type="button" onClick={submitRequest}>
-          {mode === 'in' ? 'Solicitar ingresos' : mode === 'transfer' ? 'Solicitar traslados' : `Enviar ${modeTitle[mode] || 'solicitud'}`}
+        <button className="btn btn-primary" type="button" onClick={submitRequest} disabled={submitting}>
+          {submitting
+            ? 'Enviando...'
+            : mode === 'in'
+              ? 'Solicitar ingresos'
+              : mode === 'transfer'
+                ? 'Solicitar traslados'
+                : `Enviar ${modeTitle[mode] || 'solicitud'}`}
         </button>
 
         <section className="panel soft">
           <h3>Solicitudes pendientes</h3>
-          <button className="btn" type="button" onClick={loadPendingRequests}>
+          <button className="btn" type="button" onClick={loadRequestsData}>
             Actualizar
           </button>
 
@@ -372,19 +457,71 @@ function InventoryRequestPage({ mode }) {
           ))}
         </section>
 
+        <section className="panel soft">
+          <h3>Historial</h3>
+          {groupedHistoryRequests.length === 0 ? <p>No hay solicitudes aprobadas o rechazadas.</p> : null}
+
+          {groupedHistoryRequests.length > 0 ? (
+            <div className="approval-history-scroll">
+              {groupedHistoryRequests.map((group) => (
+                <div className="card" key={group.key}>
+                  <p>
+                    Estado: {group.status === 'approved' ? 'Aprobada' : 'Rechazada'}
+                    {' | '}
+                    Fecha: {formatDateTime(group.resolvedAt)}
+                  </p>
+                  <p>
+                    Tienda: {group.store?.name || 'N/A'}
+                    {group.targetStore?.name ? ` -> ${group.targetStore.name}` : ''}
+                  </p>
+                  <p>Solicitado por: {group.requestedBy?.name || 'N/A'}</p>
+                  <p>
+                    {group.status === 'approved' ? 'Aprobado por' : 'Rechazado por'}:{' '}
+                    {group.status === 'approved'
+                      ? group.approvedBy?.name || group.approvedBy?.username || 'N/A'
+                      : group.rejectedBy?.name || group.rejectedBy?.username || 'N/A'}
+                  </p>
+                  {group.notes ? <p>Observaciones: {group.notes}</p> : null}
+                  <table className="simple-table">
+                    <thead>
+                      <tr>
+                        <th>Producto</th>
+                        <th>Cantidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.requests.map((request) => (
+                        <tr key={request._id}>
+                          <td>{request.productId?.name || 'Producto'}</td>
+                          <td>{request.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
         <DismissibleNotice text={message} type="info" onClose={() => setMessage('')} />
       </section>
 
-      {showSuccessPopup ? (
-        <div className="brand-popup-overlay" role="dialog" aria-modal="true" aria-label="Solicitud enviada">
-          <div className="brand-popup brand-popup-success">
+      {successModal.open ? (
+        <div className={`brand-popup-overlay ${successModal.fading ? 'inventory-apply-overlay-fading' : ''}`} role="status" aria-live="polite">
+          <div className={`brand-popup brand-popup-success ${successModal.fading ? 'inventory-apply-popup-fading' : ''}`}>
             <h3>Solicitud enviada</h3>
             <p>La solicitud fue registrada con éxito y quedó pendiente de aprobación del administrador.</p>
-            <div className="brand-popup-actions">
-              <button className="btn btn-primary" type="button" onClick={() => setShowSuccessPopup(false)}>
-                Entendido
-              </button>
-            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {submitting ? (
+        <div className="brand-popup-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="brand-popup">
+            <div className="legacy-migration-spinner" aria-hidden="true" />
+            <h3>Cargando...</h3>
+            <p>Estamos procesando tu solicitud. Por favor espera.</p>
           </div>
         </div>
       ) : null}

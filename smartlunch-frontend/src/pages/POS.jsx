@@ -51,6 +51,9 @@ function POS() {
   const [balance, setBalance] = useState(null);
   const [spentToday, setSpentToday] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('system');
+  const [cashTendered, setCashTendered] = useState('');
+  const [schoolBillingFor, setSchoolBillingFor] = useState('');
+  const [schoolBillingResponsible, setSchoolBillingResponsible] = useState('');
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [items, setItems] = useState([]);
@@ -74,6 +77,7 @@ function POS() {
     qr: 'QR',
     dataphone: 'Datáfono',
     transfer: 'Transferencia',
+    school_billing: 'Cuenta de cobro colegio',
   };
 
   const loadProducts = async () => {
@@ -287,6 +291,9 @@ function POS() {
     if (!navigator.onLine) {
       enqueueOfflineOrder(payload, orderSummary);
       setItems([]);
+      setCashTendered('');
+      setSchoolBillingFor('');
+      setSchoolBillingResponsible('');
       setMessage('Sin internet: la orden quedo guardada en caché y se enviará automáticamente al volver la conexión.');
       return;
     }
@@ -311,6 +318,9 @@ function POS() {
       }
 
       setItems([]);
+      setCashTendered('');
+      setSchoolBillingFor('');
+      setSchoolBillingResponsible('');
       setMessage('');
       setShowSuccessPopup(true);
       if (student?._id) {
@@ -321,6 +331,9 @@ function POS() {
       if (isNetworkError(error)) {
         enqueueOfflineOrder(payload, orderSummary);
         setItems([]);
+        setCashTendered('');
+        setSchoolBillingFor('');
+        setSchoolBillingResponsible('');
         setMessage('Internet inestable: la orden quedó en caché y se sincronizará automáticamente.');
       } else {
         setMessage(error?.response?.data?.message || 'No se pudo crear la orden');
@@ -352,6 +365,25 @@ function POS() {
     () => items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0),
     [items]
   );
+
+  const cashTenderedValue = Number(cashTendered || 0);
+
+  useEffect(() => {
+    if (paymentMethod !== 'cash' && cashTendered !== '') {
+      setCashTendered('');
+    }
+  }, [paymentMethod, cashTendered]);
+
+  useEffect(() => {
+    if (paymentMethod !== 'school_billing') {
+      if (schoolBillingFor !== '') {
+        setSchoolBillingFor('');
+      }
+      if (schoolBillingResponsible !== '') {
+        setSchoolBillingResponsible('');
+      }
+    }
+  }, [paymentMethod, schoolBillingFor, schoolBillingResponsible]);
 
   const blockedProductIds = useMemo(
     () => new Set((studentDetails?.blockedProducts || []).map((item) => String(item._id || item))),
@@ -456,19 +488,9 @@ function POS() {
     setItems((previous) => {
       const found = previous.find((item) => item._id === product._id);
       if (found) {
-        if (found.quantity >= product.stock) {
-          setMessage(`Sin stock adicional para ${product.name}`);
-          return previous;
-        }
-
         return previous.map((item) =>
           item._id === product._id ? { ...item, quantity: item.quantity + 1 } : item
         );
-      }
-
-      if (product.stock <= 0) {
-        setMessage(`Sin stock para ${product.name}`);
-        return previous;
       }
 
       setMessage('');
@@ -492,11 +514,6 @@ function POS() {
 
       if (nextQuantity <= 0) {
         return previous.filter((item) => item._id !== productId);
-      }
-
-      if (nextQuantity > found.stock) {
-        setMessage(`Sin stock adicional para ${found.name}`);
-        return previous;
       }
 
       if (delta > 0 && dailyLimit > 0) {
@@ -529,9 +546,11 @@ function POS() {
       guestSale: sellToGuest,
       storeId: selectedStoreId,
       paymentMethod,
+      schoolBillingFor: paymentMethod === 'school_billing' ? String(schoolBillingFor || '').trim() : '',
+      schoolBillingResponsible: paymentMethod === 'school_billing' ? String(schoolBillingResponsible || '').trim() : '',
       items: items.map((item) => ({ productId: item._id, quantity: item.quantity })),
     };
-  }, [student, sellToGuest, items, selectedStoreId, paymentMethod]);
+  }, [student, sellToGuest, items, selectedStoreId, paymentMethod, schoolBillingFor, schoolBillingResponsible]);
 
   const canCheckout = items.length > 0;
 
@@ -706,8 +725,7 @@ function POS() {
             {filteredProducts.map((product) => {
               const reason = productBlockReason(product);
               const quantityInCart = getCartQuantity(product._id);
-              const outOfStock = product.stock <= 0 || quantityInCart >= product.stock;
-              const disabledLabel = reason || (outOfStock || product.status !== 'active' ? 'No disponible' : 'Agregar');
+              const disabledLabel = reason || (product.status !== 'active' ? 'No disponible' : 'Agregar');
 
               return (
                 <ProductCard
@@ -749,9 +767,22 @@ function POS() {
             return;
           }
 
+          if (paymentMethod === 'school_billing') {
+            if (!String(schoolBillingFor || '').trim() || !String(schoolBillingResponsible || '').trim()) {
+              setMessage('Para cuenta de cobro colegio debes indicar dirigido a y responsable.');
+              return;
+            }
+          }
+
           submitOrder(orderPayload, items);
         }}
         disabled={!canCheckout}
+        cashTendered={cashTendered}
+        onCashTenderedChange={setCashTendered}
+        schoolBillingFor={schoolBillingFor}
+        onSchoolBillingForChange={setSchoolBillingFor}
+        schoolBillingResponsible={schoolBillingResponsible}
+        onSchoolBillingResponsibleChange={setSchoolBillingResponsible}
       />
 
       {showSuccessPopup ? (

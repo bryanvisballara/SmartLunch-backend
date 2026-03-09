@@ -6,8 +6,7 @@ function ProductCard({
   disabledLabel = 'No disponible',
   disabledReason = '',
 }) {
-  const outOfStock = product.stock <= 0 || quantityInCart >= product.stock;
-  const disabled = product.status !== 'active' || outOfStock || forceDisabled;
+  const disabled = product.status !== 'active' || forceDisabled;
   const cardClassName = `card product-card-compact ${forceDisabled ? 'product-card-blocked' : ''}`;
 
   return (

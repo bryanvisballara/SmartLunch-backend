@@ -14,9 +14,14 @@ function CancelSale() {
   const [showStudentSuggestions, setShowStudentSuggestions] = useState(false);
   const [students, setStudents] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [historyRequests, setHistoryRequests] = useState([]);
   const [message, setMessage] = useState('');
   const [dayClosed, setDayClosed] = useState(false);
   const [onlyExternalSales, setOnlyExternalSales] = useState(false);
+  const [successModal, setSuccessModal] = useState({ open: false, fading: false });
+  const [submitting, setSubmitting] = useState(false);
+
+  const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
 
   const resetPage = () => {
     setOrders([]);
@@ -57,12 +62,38 @@ function CancelSale() {
 
   const loadPendingRequests = async () => {
     try {
-      const response = await getOrderCancellationRequests({ status: 'pending' });
-      setPendingRequests(response.data || []);
+      const [pendingResponse, approvedResponse, rejectedResponse] = await Promise.all([
+        getOrderCancellationRequests({ status: 'pending' }),
+        getOrderCancellationRequests({ status: 'approved' }),
+        getOrderCancellationRequests({ status: 'rejected' }),
+      ]);
+
+      setPendingRequests(pendingResponse.data || []);
+      setHistoryRequests([...(approvedResponse.data || []), ...(rejectedResponse.data || [])]);
     } catch (error) {
       setPendingRequests([]);
+      setHistoryRequests([]);
     }
   };
+
+  useEffect(() => {
+    if (!successModal.open) {
+      return undefined;
+    }
+
+    const fadeTimer = setTimeout(() => {
+      setSuccessModal((prev) => ({ ...prev, fading: true }));
+    }, 2700);
+
+    const closeTimer = setTimeout(() => {
+      setSuccessModal({ open: false, fading: false });
+    }, 3000);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(closeTimer);
+    };
+  }, [successModal.open]);
 
   useEffect(() => {
     const init = async () => {
@@ -110,17 +141,25 @@ function CancelSale() {
   };
 
   const requestCancel = async (orderId) => {
+    if (submitting) {
+      return;
+    }
+
     if (dayClosed) {
       setMessage('Ya cerraste el día. No puedes solicitar anulaciones.');
       return;
     }
 
     try {
+      setSubmitting(true);
       await requestOrderCancellation({ orderId, reason: 'Solicitud desde portal vendedor' });
+      setSuccessModal({ open: true, fading: false });
       setMessage('Solicitud enviada. Debe ser autorizada por el administrador.');
       await loadPendingRequests();
     } catch (error) {
       setMessage(error?.response?.data?.message || 'No se pudo solicitar anulación');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -235,8 +274,8 @@ function CancelSale() {
               {pendingOrderIds.has(String(order._id)) ? (
                 <p>Anulación pendiente</p>
               ) : (
-                <button className="btn btn-primary" type="button" onClick={() => requestCancel(order._id)} disabled={dayClosed}>
-                  Solicitar anulación
+                <button className="btn btn-primary" type="button" onClick={() => requestCancel(order._id)} disabled={dayClosed || submitting}>
+                  {submitting ? 'Enviando...' : 'Solicitar anulación'}
                 </button>
               )}
             </div>
@@ -276,8 +315,49 @@ function CancelSale() {
           </div>
         </section>
 
+        <section className="panel soft">
+          <h3>HISTORIAL DE ANULACIONES</h3>
+          {historyRequests.length === 0 ? <p>No hay anulaciones aprobadas o rechazadas.</p> : null}
+
+          <div className="approval-history-scroll">
+            {historyRequests.map((request) => (
+              <div className="card" key={request._id}>
+                <p>Orden: {request.orderId?._id || request.orderId}</p>
+                <p>
+                  Alumno: {resolveStudent(request.orderId?.studentId).name}
+                  {resolveStudent(request.orderId?.studentId).schoolCode ? ` (${resolveStudent(request.orderId?.studentId).schoolCode})` : ''}
+                </p>
+                {request.orderId?.guestSale ? <p>Tipo: Venta externa</p> : null}
+                <p>Método: {request.orderId?.paymentMethod || 'N/A'}</p>
+                <p>Total: ${Number(request.orderId?.total || 0).toLocaleString('es-CO')}</p>
+                <p>Estado: {request.status === 'approved' ? 'Aprobada' : 'Rechazada'}</p>
+                <p>Fecha: {formatDateTime(request.approvedAt || request.rejectedAt || request.updatedAt)}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <DismissibleNotice text={message} type="info" onClose={() => setMessage('')} />
       </section>
+
+      {successModal.open ? (
+        <div className={`brand-popup-overlay ${successModal.fading ? 'inventory-apply-overlay-fading' : ''}`} role="status" aria-live="polite">
+          <div className={`brand-popup brand-popup-success ${successModal.fading ? 'inventory-apply-popup-fading' : ''}`}>
+            <h3>Solicitud enviada</h3>
+            <p>La solicitud de anulación fue registrada correctamente.</p>
+          </div>
+        </div>
+      ) : null}
+
+      {submitting ? (
+        <div className="brand-popup-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="brand-popup">
+            <div className="legacy-migration-spinner" aria-hidden="true" />
+            <h3>Cargando...</h3>
+            <p>Estamos procesando tu solicitud. Por favor espera.</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
