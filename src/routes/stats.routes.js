@@ -340,40 +340,93 @@ router.get('/admin-home', async (req, res) => {
         balance: wallet.balance,
       }));
 
-    const catalogProfitability = (activeProductsRaw || []).map((product) => {
-      const price = Number(product.price || 0);
-      const cost = Number(product.cost || 0);
-      const utilityValue = price - cost;
-      const utilityPercent = price > 0 ? (utilityValue / price) * 100 : 0;
+    const toProductKey = (name, fallbackId = '') => {
+      const normalizedName = String(name || '').trim().toLowerCase();
+      return normalizedName || String(fallbackId || '');
+    };
 
-      return {
-        productId: product._id,
-        productName: product.name,
-        quantitySold: 0,
-        revenue: 0,
-        utilityValue,
-        utilityPercent,
-      };
-    });
+    const mergeTopProductsByName = (items = []) => {
+      const grouped = new Map();
 
-    const catalogProfitabilityById = new Map(
-      catalogProfitability.map((item) => [String(item.productId), item])
-    );
+      for (const item of items) {
+        const key = toProductKey(item.productName, item.productId);
+        if (!key) {
+          continue;
+        }
 
-    // Merge sold-products profitability into catalog so Top 10 always has full product universe.
-    for (const soldItem of profitabilityRaw) {
-      const productId = String(soldItem.productId || '');
-      if (!productId) {
-        continue;
+        const existing = grouped.get(key);
+        if (!existing) {
+          grouped.set(key, {
+            productId: item.productId,
+            productName: item.productName || 'Producto',
+            quantity: Number(item.quantity || 0),
+            revenue: Number(item.revenue || 0),
+          });
+          continue;
+        }
+
+        existing.quantity += Number(item.quantity || 0);
+        existing.revenue += Number(item.revenue || 0);
       }
 
-      catalogProfitabilityById.set(productId, {
-        ...(catalogProfitabilityById.get(productId) || {}),
-        ...soldItem,
-      });
-    }
+      return Array.from(grouped.values())
+        .sort((a, b) => (b.quantity || 0) - (a.quantity || 0) || (b.revenue || 0) - (a.revenue || 0))
+        .slice(0, 10);
+    };
 
-    const profitabilitySource = Array.from(catalogProfitabilityById.values());
+    const mergeProfitabilityByName = (catalogItems = [], soldItems = []) => {
+      const grouped = new Map();
+
+      for (const product of catalogItems) {
+        const price = Number(product.price || 0);
+        const cost = Number(product.cost || 0);
+        const utilityValue = price - cost;
+        const utilityPercent = price > 0 ? (utilityValue / price) * 100 : 0;
+        const key = toProductKey(product.name, product._id);
+
+        if (!key || grouped.has(key)) {
+          continue;
+        }
+
+        grouped.set(key, {
+          productId: product._id,
+          productName: product.name || 'Producto',
+          quantitySold: 0,
+          revenue: 0,
+          utilityValue,
+          utilityPercent,
+        });
+      }
+
+      for (const soldItem of soldItems) {
+        const key = toProductKey(soldItem.productName, soldItem.productId);
+        if (!key) {
+          continue;
+        }
+
+        const current = grouped.get(key) || {
+          productId: soldItem.productId,
+          productName: soldItem.productName || 'Producto',
+          quantitySold: 0,
+          revenue: 0,
+          utilityValue: 0,
+          utilityPercent: 0,
+        };
+
+        current.quantitySold += Number(soldItem.quantitySold || 0);
+        current.revenue += Number(soldItem.revenue || 0);
+        current.utilityValue += Number(soldItem.utilityValue || 0);
+        current.utilityPercent =
+          current.revenue > 0 ? (current.utilityValue / current.revenue) * 100 : Number(current.utilityPercent || 0);
+
+        grouped.set(key, current);
+      }
+
+      return Array.from(grouped.values());
+    };
+
+    const profitabilitySource = mergeProfitabilityByName(activeProductsRaw || [], profitabilityRaw || []);
+    const topProducts = mergeTopProductsByName(topProductsRaw || []);
 
     const topProductsByPercent = [...profitabilitySource]
       .sort((a, b) => (b.utilityPercent || 0) - (a.utilityPercent || 0) || (b.utilityValue || 0) - (a.utilityValue || 0))
@@ -407,7 +460,7 @@ router.get('/admin-home', async (req, res) => {
       lowStockCount: lowStockProducts.length,
       lowBalanceCount: normalizedBalances.length,
       topStudents: topStudentsRaw,
-      topProducts: topProductsRaw,
+      topProducts,
       topProductsByPercent,
       topProductsByValue,
       leastProfitableProductsByPercent,

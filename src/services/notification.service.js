@@ -6,6 +6,29 @@ const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { enqueueNotificationJobs } = require('../config/queue');
 
+function withTimeout(promise, timeoutMs, timeoutMessage) {
+  const parsedTimeout = Number(timeoutMs || 0);
+  if (!Number.isFinite(parsedTimeout) || parsedTimeout <= 0) {
+    return promise;
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage || 'Operation timed out'));
+    }, parsedTimeout);
+
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 function formatCurrency(value) {
   return Number(value || 0).toLocaleString('es-CO');
 }
@@ -97,13 +120,26 @@ async function queueNotificationsForParents({
     status: 'active',
   });
 
-  const queueResult = await enqueueNotificationJobs(
-    insertedNotifications.map((notification) => ({
-      notificationId: String(notification._id),
-      schoolId,
-      parentId: String(notification.parentId),
-    }))
-  );
+  let queueResult = { queued: false, reason: 'enqueue_not_attempted', count: 0 };
+  try {
+    queueResult = await withTimeout(
+      enqueueNotificationJobs(
+        insertedNotifications.map((notification) => ({
+          notificationId: String(notification._id),
+          schoolId,
+          parentId: String(notification.parentId),
+        }))
+      ),
+      process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
+      'Notification queue timeout'
+    );
+  } catch (queueError) {
+    queueResult = {
+      queued: false,
+      reason: queueError.message || 'enqueue_failed',
+      count: 0,
+    };
+  }
 
   return {
     notificationsCreated: notifications.length,

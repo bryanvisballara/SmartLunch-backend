@@ -1009,29 +1009,21 @@ router.post('/products', async (req, res) => {
       status,
     };
 
-    let productsPayload;
+    const resolvedStoreId = destinationStoreId || (stores.length === 1 ? String(stores[0]._id) : '');
 
-    if (destinationStoreId) {
-      productsPayload = [
-        {
-          ...basePayload,
-          storeId: destinationStoreId,
-          stock: initialStockValue,
-        },
-      ];
-    } else {
-      productsPayload = stores.map((store) => ({
-        ...basePayload,
-        storeId: store._id,
-        stock: initialStockValue,
-      }));
+    if (!resolvedStoreId) {
+      return res.status(400).json({ message: 'initialStockStoreId is required when multiple stores exist' });
     }
 
-    const createdProducts = await Product.insertMany(productsPayload);
+    const createdProduct = await Product.create({
+      ...basePayload,
+      storeId: resolvedStoreId,
+      stock: initialStockValue,
+    });
 
     return res.status(201).json({
-      createdCount: createdProducts.length,
-      products: createdProducts,
+      createdCount: 1,
+      products: [createdProduct],
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
