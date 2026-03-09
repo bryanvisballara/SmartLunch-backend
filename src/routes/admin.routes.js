@@ -272,16 +272,17 @@ router.get('/products', async (req, res) => {
       .select('_id name price cost stock inventoryAlertStock status storeId categoryId imageUrl shortDescription')
       .populate({ path: 'categoryId', select: 'name', options: { lean: true } })
       .populate({ path: 'storeId', select: 'name', options: { lean: true } })
-      .sort({ name: 1 })
       .lean();
 
-    const normalized = products.map((product) => ({
-      ...product,
-      categoryName: product.categoryId?.name || 'Sin categoria',
-      categoryId: String(product.categoryId?._id || product.categoryId || ''),
-      storeName: product.storeId?.name || '',
-      storeId: String(product.storeId?._id || product.storeId || ''),
-    }));
+    const normalized = products
+      .map((product) => ({
+        ...product,
+        categoryName: product.categoryId?.name || 'Sin categoria',
+        categoryId: String(product.categoryId?._id || product.categoryId || ''),
+        storeName: product.storeId?.name || '',
+        storeId: String(product.storeId?._id || product.storeId || ''),
+      }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 
     return res.status(200).json(normalized);
   } catch (error) {
