@@ -69,8 +69,13 @@ async function applyInventoryMutation({
     let targetProduct = await Product.findOne({
       schoolId,
       storeId: targetStoreId,
-      categoryId: sourceProduct.categoryId,
-      name: sourceProduct.name,
+      $or: [
+        { sharedProductId: String(sourceProduct.sharedProductId || sourceProduct._id) },
+        {
+          categoryId: sourceProduct.categoryId,
+          name: sourceProduct.name,
+        },
+      ],
       deletedAt: null,
     }).session(session);
 
@@ -79,6 +84,7 @@ async function applyInventoryMutation({
         [
           {
             schoolId,
+            sharedProductId: String(sourceProduct.sharedProductId || sourceProduct._id),
             name: sourceProduct.name,
             categoryId: sourceProduct.categoryId,
             storeId: targetStoreId,

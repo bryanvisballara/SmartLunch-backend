@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -28,6 +29,10 @@ function normalizeImageUrl(value, includeImageData) {
   }
 
   return imageUrl;
+}
+
+function normalizeProductName(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
 const normalizeLegacyHeader = (value) =>
@@ -1053,9 +1058,22 @@ router.post('/products', async (req, res) => {
       return res.status(400).json({ message: 'Selecciona al menos una tienda para crear el producto' });
     }
 
+    const normalizedName = normalizeProductName(name);
+    const existingLogicalProduct = await Product.findOne({
+      schoolId,
+      categoryId,
+      deletedAt: null,
+      name: new RegExp(`^${String(name).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    })
+      .select('_id sharedProductId')
+      .lean();
+
+    const sharedProductId = String(existingLogicalProduct?.sharedProductId || existingLogicalProduct?._id || new mongoose.Types.ObjectId());
+
     const basePayload = {
       schoolId,
       name: String(name).trim(),
+      sharedProductId,
       categoryId,
       price: Number(price),
       cost: Number(cost || 0),
@@ -1066,16 +1084,45 @@ router.post('/products', async (req, res) => {
       status,
     };
 
-    const productsPayload = selectedStoreIds.map((storeId) => ({
+    const existingInSelectedStores = await Product.find({
+      schoolId,
+      categoryId,
+      storeId: { $in: selectedStoreIds },
+      deletedAt: null,
+      name: new RegExp(`^${normalizedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    })
+      .select('_id storeId')
+      .lean();
+
+    const existingStoreIds = new Set(existingInSelectedStores.map((item) => String(item.storeId)));
+    const missingStoreIds = selectedStoreIds.filter((storeId) => !existingStoreIds.has(String(storeId)));
+
+    const productsPayload = missingStoreIds.map((storeId) => ({
       ...basePayload,
       storeId,
       stock: initialStockValue,
     }));
 
-    const createdProducts = await Product.insertMany(productsPayload);
+    let createdProducts = [];
+    if (productsPayload.length > 0) {
+      createdProducts = await Product.insertMany(productsPayload);
+    }
+
+    // Keep sharedProductId aligned across existing same logical products.
+    await Product.updateMany(
+      {
+        schoolId,
+        categoryId,
+        deletedAt: null,
+        name: new RegExp(`^${normalizedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+      },
+      { $set: { sharedProductId } }
+    );
 
     return res.status(201).json({
       createdCount: createdProducts.length,
+      skippedCount: existingStoreIds.size,
+      sharedProductId,
       products: createdProducts,
     });
   } catch (error) {
