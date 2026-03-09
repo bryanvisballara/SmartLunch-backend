@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
+import smartLogo from '../assets/smartlogo.png';
 
 const menuItems = [
   { key: 'Inicio', label: 'Inicio', icon: 'home' },
@@ -115,7 +116,7 @@ function ParentShellHeader({ title, hideSubtitle = false }) {
         </button>
 
         <div className="parent-title-wrap">
-          <p>SmartLunch</p>
+          <img className="parent-brand-logo" src={smartLogo} alt="SmartLunch" />
           {!hideSubtitle ? <h1>{title || `Hola, ${firstName}!`}</h1> : null}
         </div>
 

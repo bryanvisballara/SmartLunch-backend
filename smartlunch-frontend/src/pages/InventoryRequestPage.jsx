@@ -15,6 +15,7 @@ function InventoryRequestPage({ mode }) {
   const { currentStore, setCurrentStore, user } = useAuthStore();
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
+  const [sourceStoreId, setSourceStoreId] = useState('');
   const [requestItems, setRequestItems] = useState([]);
   const [currentItem, setCurrentItem] = useState({ productId: '', quantity: '1', productQuery: '', showOptions: false });
   const [targetStoreId, setTargetStoreId] = useState('');
@@ -105,19 +106,43 @@ function InventoryRequestPage({ mode }) {
   }, [mode]);
 
   const storeProducts = useMemo(() => {
-    if (!currentStore?._id) {
+    const activeStoreId = mode === 'transfer' ? sourceStoreId : currentStore?._id;
+    if (!activeStoreId) {
       return [];
     }
 
-    return products.filter((product) => String(product.storeId) === String(currentStore._id));
-  }, [products, currentStore?._id]);
+    return products.filter((product) => String(product.storeId) === String(activeStoreId));
+  }, [products, currentStore?._id, mode, sourceStoreId]);
+
+  const sourceStore = useMemo(() => {
+    if (mode !== 'transfer') {
+      return currentStore || null;
+    }
+
+    return stores.find((store) => String(store._id) === String(sourceStoreId)) || null;
+  }, [currentStore, mode, sourceStoreId, stores]);
 
   const targetStores = useMemo(() => {
-    if (!currentStore?._id) {
+    const activeSourceStoreId = mode === 'transfer' ? sourceStoreId : currentStore?._id;
+    if (!activeSourceStoreId) {
       return stores;
     }
-    return stores.filter((store) => String(store._id) !== String(currentStore._id));
-  }, [stores, currentStore?._id]);
+    return stores.filter((store) => String(store._id) !== String(activeSourceStoreId));
+  }, [stores, currentStore?._id, mode, sourceStoreId]);
+
+  useEffect(() => {
+    if (mode !== 'transfer') {
+      return;
+    }
+
+    if (!targetStoreId) {
+      return;
+    }
+
+    if (String(targetStoreId) === String(sourceStoreId)) {
+      setTargetStoreId('');
+    }
+  }, [mode, sourceStoreId, targetStoreId]);
 
   const groupedPendingRequests = useMemo(
     () =>
@@ -202,6 +227,9 @@ function InventoryRequestPage({ mode }) {
     setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
     setObservations('');
     setTargetStoreId('');
+    if (mode === 'transfer') {
+      setSourceStoreId('');
+    }
   };
 
   const submitRequest = async () => {
@@ -214,7 +242,12 @@ function InventoryRequestPage({ mode }) {
       return;
     }
 
-    if (!currentStore?._id) {
+    if (mode === 'transfer' && !sourceStoreId) {
+      setMessage('Selecciona tienda origen');
+      return;
+    }
+
+    if (mode !== 'transfer' && !currentStore?._id) {
       setMessage('No se encontró una tienda asignada para continuar.');
       return;
     }
@@ -238,8 +271,10 @@ function InventoryRequestPage({ mode }) {
       return;
     }
 
+    const requestStoreId = mode === 'transfer' ? sourceStoreId : currentStore._id;
+
     const payload = {
-      storeId: currentStore._id,
+      storeId: requestStoreId,
       targetStoreId: mode === 'transfer' ? targetStoreId : null,
       type: mode,
       items: normalizedItems,
@@ -281,9 +316,31 @@ function InventoryRequestPage({ mode }) {
 
         <div className="card">
           <p>
-            {mode === 'transfer' ? 'Tienda origen' : 'Tienda'}: <strong>{currentStore?.name || 'Sin tienda asignada'}</strong>
+            {mode === 'transfer' ? 'Tienda origen' : 'Tienda'}: <strong>{sourceStore?.name || 'Sin tienda seleccionada'}</strong>
           </p>
         </div>
+
+        {mode === 'transfer' ? (
+          <label>
+            Tienda origen
+            <select
+              value={sourceStoreId}
+              onChange={(event) => {
+                setSourceStoreId(event.target.value);
+                setRequestItems([]);
+                setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
+                setMessage('');
+              }}
+            >
+              <option value="">Selecciona origen</option>
+              {stores.map((store) => (
+                <option key={store._id} value={store._id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <div className="card">
           <label>

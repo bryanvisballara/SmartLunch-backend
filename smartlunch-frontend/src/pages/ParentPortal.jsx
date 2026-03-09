@@ -24,6 +24,7 @@ import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
 import pseLogo from '../assets/PSE.png';
 import warningLogo from '../assets/warning.png';
+import smartLogo from '../assets/smartlogo.png';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -1252,7 +1253,7 @@ function ParentPortal() {
         </button>
 
         <div className="parent-title-wrap">
-          <p>SmartLunch</p>
+          <img className="parent-brand-logo" src={smartLogo} alt="SmartLunch" />
           <h1>Hola, {headerName}!</h1>
         </div>
 
@@ -2648,7 +2649,7 @@ function ParentPortal() {
                     </svg>
                   </span>
                 </span>
-                <span className="parent-autodebit-banner-text">Protege el saldo de {selectedStudent?.name || 'tu hijo'} y evita que se quede sin fondos.</span>
+                <span className="parent-autodebit-banner-text">Protege el saldo de {selectedStudentFirstName} y evita que se quede sin fondos.</span>
               </button>
             ) : null}
 
