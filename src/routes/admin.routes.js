@@ -17,6 +17,19 @@ const router = express.Router();
 router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
 
+function normalizeImageUrl(value, includeImageData) {
+  const imageUrl = String(value || '').trim();
+  if (!imageUrl) {
+    return '';
+  }
+
+  if (!includeImageData && imageUrl.startsWith('data:')) {
+    return '';
+  }
+
+  return imageUrl;
+}
+
 const normalizeLegacyHeader = (value) =>
   String(value || '')
     .normalize('NFD')
@@ -69,8 +82,14 @@ const pickLegacyValue = (row, keys) => {
 router.get('/categories', async (req, res) => {
   try {
     const { schoolId } = req.user;
+    const includeImageData = String(req.query?.includeImageData || 'false').toLowerCase() === 'true';
     const categories = await Category.find({ schoolId, deletedAt: null }).sort({ name: 1 }).lean();
-    return res.status(200).json(categories);
+    return res.status(200).json(
+      categories.map((category) => ({
+        ...category,
+        imageUrl: normalizeImageUrl(category.imageUrl, includeImageData),
+      }))
+    );
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -257,7 +276,7 @@ router.get('/stores', async (req, res) => {
 router.get('/products', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { includeInactive = 'true', status = 'active' } = req.query;
+    const { includeInactive = 'true', status = 'active', includeImageData = 'false' } = req.query;
 
     const filter = {
       schoolId,
@@ -277,6 +296,7 @@ router.get('/products', async (req, res) => {
     const normalized = products
       .map((product) => ({
         ...product,
+        imageUrl: normalizeImageUrl(product.imageUrl, includeImageData === 'true'),
         categoryName: product.categoryId?.name || 'Sin categoria',
         categoryId: String(product.categoryId?._id || product.categoryId || ''),
         storeName: product.storeId?.name || '',

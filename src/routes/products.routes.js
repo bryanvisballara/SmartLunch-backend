@@ -9,6 +9,19 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+function normalizeImageUrl(value, includeImageData) {
+  const imageUrl = String(value || '').trim();
+  if (!imageUrl) {
+    return '';
+  }
+
+  if (!includeImageData && imageUrl.startsWith('data:')) {
+    return '';
+  }
+
+  return imageUrl;
+}
+
 router.get('/', async (req, res) => {
   try {
     const { schoolId: tokenSchoolId } = req.user;
@@ -18,6 +31,7 @@ router.get('/', async (req, res) => {
       categoryId,
       status = 'active',
       includeInactive = 'false',
+      includeImageData = 'false',
     } = req.query;
 
     if (requestedSchoolId && requestedSchoolId !== tokenSchoolId) {
@@ -50,6 +64,7 @@ router.get('/', async (req, res) => {
 
     const normalized = products.map((product) => ({
       ...product,
+      imageUrl: normalizeImageUrl(product.imageUrl, includeImageData === 'true'),
       categoryName: product.categoryId?.name || 'Sin categoria',
       categoryId: String(product.categoryId?._id || product.categoryId || ''),
       storeName: product.storeId?.name || '',
