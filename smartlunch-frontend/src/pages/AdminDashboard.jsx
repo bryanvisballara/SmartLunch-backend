@@ -3121,7 +3121,7 @@ function AdminDashboard() {
     });
   };
 
-  const onDeleteSelectedProductRows = () => {
+  const onDeleteSelectedProductRows = async () => {
     if (!isBulkProductMode || selectedProductRowIds.length === 0) {
       setError('Selecciona al menos un producto para aplicar acciones en masa.');
       return;
@@ -3146,14 +3146,24 @@ function AdminDashboard() {
       return;
     }
 
-    runAction(
-      () => Promise.all(idsToDelete.map((productId) => deleteAdminProduct(productId))),
-      `Se eliminaron ${idsToDelete.length} productos en masa.`,
-      async () => {
+    clearMessages();
+    setLoading(true);
+
+    try {
+      await Promise.all(idsToDelete.map((productId) => deleteAdminProduct(productId)));
+      setOk(`Se eliminaron ${idsToDelete.length} productos en masa.`);
+      setSelectedProductRowIds([]);
+
+      try {
         await reloadEditEntityData();
-        setSelectedProductRowIds([]);
+      } catch (reloadError) {
+        // No marcamos la accion como fallida si el borrado ya fue exitoso.
       }
-    );
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo completar la accion.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetEditSection = () => {
