@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const morgan = require('morgan');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -20,6 +21,9 @@ const parentRoutes = require('./routes/parent.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
+
+// Render runs behind a proxy; trust first hop so rate-limit/IP detection works.
+app.set('trust proxy', 1);
 
 // API responses should be fresh to avoid browser conditional caching (304),
 // which can break Axios flows expecting 2xx payloads.
@@ -77,6 +81,11 @@ app.use(
   })
 );
 app.use(helmet());
+app.use(
+  compression({
+    threshold: 1024,
+  })
+);
 app.use((req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
