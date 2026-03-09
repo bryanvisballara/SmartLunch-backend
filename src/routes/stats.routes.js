@@ -356,7 +356,24 @@ router.get('/admin-home', async (req, res) => {
       };
     });
 
-    const profitabilitySource = profitabilityRaw.length > 0 ? profitabilityRaw : catalogProfitability;
+    const catalogProfitabilityById = new Map(
+      catalogProfitability.map((item) => [String(item.productId), item])
+    );
+
+    // Merge sold-products profitability into catalog so Top 10 always has full product universe.
+    for (const soldItem of profitabilityRaw) {
+      const productId = String(soldItem.productId || '');
+      if (!productId) {
+        continue;
+      }
+
+      catalogProfitabilityById.set(productId, {
+        ...(catalogProfitabilityById.get(productId) || {}),
+        ...soldItem,
+      });
+    }
+
+    const profitabilitySource = Array.from(catalogProfitabilityById.values());
 
     const topProductsByPercent = [...profitabilitySource]
       .sort((a, b) => (b.utilityPercent || 0) - (a.utilityPercent || 0) || (b.utilityValue || 0) - (a.utilityValue || 0))

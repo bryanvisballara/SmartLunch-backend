@@ -153,11 +153,6 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
         return res.status(400).json({ message: `Invalid quantity for product: ${product.name}` });
       }
 
-      if (product.stock < quantity) {
-        await session.abortTransaction();
-        return res.status(400).json({ message: `Insufficient stock: ${product.name}` });
-      }
-
       const subtotal = quantity * product.price;
       total += subtotal;
 
