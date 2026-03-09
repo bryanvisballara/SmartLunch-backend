@@ -45,7 +45,14 @@ import {
   updateAdminUser,
 } from '../services/admin.service';
 import { applyInventoryMovement, getInventoryRequests, approveInventoryRequest, rejectInventoryRequest } from '../services/inventory.service';
-import { getOrders, getOrderCancellationRequests, approveOrderCancellation, rejectOrderCancellation, cancelOrderDirect } from '../services/orders.service';
+import {
+  getOrders,
+  getOrderCancellationRequests,
+  approveOrderCancellation,
+  rejectOrderCancellation,
+  cancelOrderDirect,
+  markSchoolBillingCollected,
+} from '../services/orders.service';
 import { getStudents } from '../services/students.service';
 import {
   topup,
@@ -663,6 +670,16 @@ function AdminDashboard() {
   const selectedApprovalHistory = useMemo(
     () => approvalHistory.find((item) => item.id === selectedApprovalHistoryId) || null,
     [approvalHistory, selectedApprovalHistoryId]
+  );
+
+  const pendingSchoolBillingOrders = useMemo(
+    () => (schoolBillingOrders || []).filter((order) => String(order.schoolBillingStatus || 'pending') !== 'collected'),
+    [schoolBillingOrders]
+  );
+
+  const collectedSchoolBillingOrders = useMemo(
+    () => (schoolBillingOrders || []).filter((order) => String(order.schoolBillingStatus || 'pending') === 'collected'),
+    [schoolBillingOrders]
   );
 
   const filteredSalesStudents = useMemo(() => {
@@ -1644,6 +1661,16 @@ function AdminDashboard() {
   const onApplySchoolBillingFilters = (event) => {
     event.preventDefault();
     runAction(() => loadSchoolBillingOrders(schoolBillingFilters), 'Cuentas de cobro actualizadas.');
+  };
+
+  const onMarkSchoolBillingCollected = (orderId) => {
+    runAction(
+      () => markSchoolBillingCollected(orderId),
+      'Cuenta de cobro marcada como cobrada.',
+      async () => {
+        await loadSchoolBillingOrders(schoolBillingFilters);
+      }
+    );
   };
 
   useEffect(() => {
@@ -3852,8 +3879,9 @@ function AdminDashboard() {
 
           {schoolBillingOrders.length === 0 ? <p>No hay cuentas de cobro colegio para los filtros seleccionados.</p> : null}
 
-          {schoolBillingOrders.length > 0 ? (
+          {pendingSchoolBillingOrders.length > 0 ? (
             <div className="card">
+              <h4>Ordenes pendientes</h4>
               <table className="simple-table">
                 <thead>
                   <tr>
@@ -3865,10 +3893,12 @@ function AdminDashboard() {
                     <th>Responsable</th>
                     <th>Total</th>
                     <th>Fecha y hora</th>
+                    <th>Estado</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {schoolBillingOrders.map((order) => (
+                  {pendingSchoolBillingOrders.map((order) => (
                     <tr key={`summary-${order._id}`}>
                       <td>{order.orderNumber || order._id}</td>
                       <td>{order.storeId?.name || 'N/A'}</td>
@@ -3878,6 +3908,48 @@ function AdminDashboard() {
                       <td>{order.schoolBillingResponsible || 'N/A'}</td>
                       <td>{formatCurrency(order.total)}</td>
                       <td>{formatDateTime(order.createdAt)}</td>
+                      <td>PENDIENTE</td>
+                      <td>
+                        <button className="btn btn-primary" type="button" onClick={() => onMarkSchoolBillingCollected(order._id)}>
+                          Cobrado
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {collectedSchoolBillingOrders.length > 0 ? (
+            <div className="card">
+              <h4>Ordenes cobradas</h4>
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th>Tienda</th>
+                    <th>Vendedor</th>
+                    <th>Alumno</th>
+                    <th>Dirigido a</th>
+                    <th>Responsable</th>
+                    <th>Total</th>
+                    <th>Fecha y hora</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectedSchoolBillingOrders.map((order) => (
+                    <tr key={`collected-${order._id}`}>
+                      <td>{order.orderNumber || order._id}</td>
+                      <td>{order.storeId?.name || 'N/A'}</td>
+                      <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
+                      <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
+                      <td>{order.schoolBillingFor || 'N/A'}</td>
+                      <td>{order.schoolBillingResponsible || 'N/A'}</td>
+                      <td>{formatCurrency(order.total)}</td>
+                      <td>{formatDateTime(order.createdAt)}</td>
+                      <td>COBRADO</td>
                     </tr>
                   ))}
                 </tbody>

@@ -8,3 +8,4 @@ export const getOrderCancellationRequests = (params = {}) => api.get('/orders/ca
 export const approveOrderCancellation = (id) => api.post(`/orders/cancel-requests/${id}/approve`);
 export const rejectOrderCancellation = (id) => api.post(`/orders/cancel-requests/${id}/reject`);
 export const cancelOrderDirect = (id) => api.post(`/orders/${id}/cancel`);
+export const markSchoolBillingCollected = (id) => api.post(`/orders/${id}/school-billing/collect`);

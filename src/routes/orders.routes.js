@@ -221,6 +221,9 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
           paymentMethod,
           schoolBillingFor: paymentMethod === 'school_billing' ? String(schoolBillingFor || '').trim() : '',
           schoolBillingResponsible: paymentMethod === 'school_billing' ? String(schoolBillingResponsible || '').trim() : '',
+          schoolBillingStatus: paymentMethod === 'school_billing' ? 'pending' : 'pending',
+          schoolBillingCollectedAt: null,
+          schoolBillingCollectedBy: null,
           items: orderItems,
           total,
           status: 'completed',
@@ -658,6 +661,35 @@ router.post('/:id/cancel', roleMiddleware('admin'), async (req, res) => {
     if (session) {
       session.endSession();
     }
+  }
+});
+
+router.post('/:id/school-billing/collect', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const orderId = req.params.id;
+
+    const order = await Order.findOne({ _id: orderId, schoolId });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (order.paymentMethod !== 'school_billing') {
+      return res.status(400).json({ message: 'Order is not a school billing order' });
+    }
+
+    if (order.schoolBillingStatus === 'collected') {
+      return res.status(409).json({ message: 'Order is already marked as collected' });
+    }
+
+    order.schoolBillingStatus = 'collected';
+    order.schoolBillingCollectedAt = new Date();
+    order.schoolBillingCollectedBy = userId;
+    await order.save();
+
+    return res.status(200).json(order);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 });
 
