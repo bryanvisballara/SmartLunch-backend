@@ -4,9 +4,18 @@ const IORedis = require('ioredis');
 const NOTIFICATION_QUEUE_NAME = 'notifications';
 
 function buildRedisConnection() {
-  const redisUrl = process.env.REDIS_URL;
+  const redisUrl = String(process.env.REDIS_URL || '').trim();
 
   if (!redisUrl) {
+    return null;
+  }
+
+  // Ignore placeholders or malformed values to keep API healthy when Redis
+  // notifications are not configured in production yet.
+  const looksLikePlaceholder = /<\s*tu\s+redis\s+url\s*>/i.test(redisUrl) || redisUrl.includes('%3Ctu%20redis%20url%3E');
+  const hasValidScheme = redisUrl.startsWith('redis://') || redisUrl.startsWith('rediss://');
+  if (looksLikePlaceholder || !hasValidScheme) {
+    console.warn('REDIS_URL is invalid. Notification queue disabled until a valid redis:// or rediss:// URL is configured.');
     return null;
   }
 
