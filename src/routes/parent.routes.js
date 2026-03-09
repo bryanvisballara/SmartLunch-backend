@@ -17,6 +17,13 @@ const User = require('../models/user.model');
 const Category = require('../models/category.model');
 const Product = require('../models/product.model');
 const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
+const {
+  isMercadoPagoConfigured,
+  findOrCreateCustomer,
+  createCardToken,
+  createCustomerCard,
+  deleteCustomerCard,
+} = require('../services/mercadopago.service');
 
 const router = express.Router();
 
@@ -259,6 +266,17 @@ router.get('/portal/overview', async (req, res) => {
           balance: Number(wallet?.balance || 0),
           autoDebitEnabled: Boolean(wallet?.autoDebitEnabled),
           autoDebitLimit: Number(wallet?.autoDebitLimit || 0),
+          autoDebitAmount: Number(wallet?.autoDebitAmount || 0),
+          autoDebitPaymentMethodId: wallet?.autoDebitPaymentMethodId || null,
+          autoDebitInProgress: Boolean(wallet?.autoDebitInProgress),
+          autoDebitLockAt: wallet?.autoDebitLockAt || null,
+          autoDebitLastAttempt: wallet?.autoDebitLastAttempt || null,
+          autoDebitLastChargeAt: wallet?.autoDebitLastChargeAt || null,
+          autoDebitRetryAt: wallet?.autoDebitRetryAt || null,
+          autoDebitRetryCount: Number(wallet?.autoDebitRetryCount || 0),
+          autoDebitMonthlyLimit: Number(wallet?.autoDebitMonthlyLimit || 0),
+          autoDebitMonthlyUsed: Number(wallet?.autoDebitMonthlyUsed || 0),
+          autoDebitMonthlyPeriod: String(wallet?.autoDebitMonthlyPeriod || ''),
         },
         merienda: merienda
           ? {
@@ -801,7 +819,7 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     }
 
     const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: 'parent', deletedAt: null })
-      .select('_id')
+      .select('_id name email username')
       .lean();
     if (!parentUser) {
       return res.status(404).json({ message: 'Parent user not found' });
@@ -834,51 +852,136 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
       return res.status(400).json({ message: 'documentNumber is required' });
     }
 
-    const brand = detectCardBrand(cardNumber);
-    const last4 = cardNumber.slice(-4);
+    const fallbackBrand = detectCardBrand(cardNumber);
+    const fallbackLast4 = cardNumber.slice(-4);
 
-    // Fingerprint prevents duplicates without persisting raw PAN/CVV.
-    const fingerprint = crypto
-      .createHash('sha256')
-      .update(`${schoolId}|${String(parentUserId)}|${cardNumber}|${expiry.month}|${expiry.year}|${docType}|${document}`)
-      .digest('hex');
+    let paymentMethod;
+    if (isMercadoPagoConfigured()) {
+      const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@smartlunch.local`;
+      const customer = await findOrCreateCustomer({
+        email: parentEmail,
+        firstName,
+        lastName,
+        externalReference: `${schoolId}:${String(parentUserId)}`,
+      });
 
-    const existing = await ParentPaymentMethod.findOne({
-      schoolId,
-      parentUserId,
-      fingerprint,
-      deletedAt: null,
-    })
-      .select('_id')
-      .lean();
+      const customerId = String(customer?.id || customer?._id || '').trim();
+      if (!customerId) {
+        return res.status(502).json({ message: 'No fue posible crear el cliente en Mercado Pago.' });
+      }
 
-    if (existing) {
-      return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
+      const cardToken = await createCardToken({
+        cardNumber,
+        expirationMonth: expiry.month,
+        expirationYear: expiry.year,
+        securityCode: cvv,
+        cardholder: {
+          name: `${firstName} ${lastName}`.trim(),
+          identification: {
+            type: docType,
+            number: document,
+          },
+        },
+      });
+
+      const customerCard = await createCustomerCard({
+        customerId,
+        cardToken: cardToken?.id,
+      });
+
+      const providerCardId = String(customerCard?.id || '').trim();
+      if (!providerCardId) {
+        return res.status(502).json({ message: 'No fue posible guardar la tarjeta en Mercado Pago.' });
+      }
+
+      const existingProviderCard = await ParentPaymentMethod.findOne({
+        schoolId,
+        parentUserId,
+        provider: 'mercadopago',
+        providerCardId,
+        deletedAt: null,
+      })
+        .select('_id')
+        .lean();
+
+      if (existingProviderCard) {
+        return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
+      }
+
+      const cardFingerprint = String(customerCard?.fingerprint || customerCard?.first_six_digits || providerCardId);
+      const fingerprint = crypto
+        .createHash('sha256')
+        .update(`${schoolId}|${String(parentUserId)}|mp|${cardFingerprint}`)
+        .digest('hex');
+
+      paymentMethod = await ParentPaymentMethod.create({
+        schoolId,
+        parentUserId,
+        type: 'card',
+        provider: 'mercadopago',
+        token: `mp_${customerId}_${providerCardId}`,
+        providerCustomerId: customerId,
+        providerCardId,
+        providerPaymentMethodId: String(customerCard?.payment_method?.id || '').trim(),
+        providerCardToken: String(cardToken?.id || '').trim(),
+        fingerprint,
+        brand: String(customerCard?.payment_method?.name || fallbackBrand || 'unknown').toLowerCase(),
+        last4: String(customerCard?.last_four_digits || fallbackLast4),
+        expMonth: Number(customerCard?.expiration_month || expiry.month),
+        expYear: Number(customerCard?.expiration_year || expiry.year),
+        holderFirstName: firstName,
+        holderLastName: lastName,
+        holderDocType: docType,
+        holderDocument: document,
+        verificationStatus: 'verified',
+        verificationAmount: null,
+        verificationAttemptCount: 0,
+        verificationLastRequestedAt: null,
+        verificationExpiresAt: null,
+        verifiedAt: new Date(),
+      });
+    } else {
+      // Fallback path for environments without Mercado Pago credentials.
+      const fingerprint = crypto
+        .createHash('sha256')
+        .update(`${schoolId}|${String(parentUserId)}|${cardNumber}|${expiry.month}|${expiry.year}|${docType}|${document}`)
+        .digest('hex');
+
+      const existing = await ParentPaymentMethod.findOne({
+        schoolId,
+        parentUserId,
+        fingerprint,
+        deletedAt: null,
+      })
+        .select('_id')
+        .lean();
+
+      if (existing) {
+        return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
+      }
+
+      paymentMethod = await ParentPaymentMethod.create({
+        schoolId,
+        parentUserId,
+        type: 'card',
+        provider: 'internal',
+        token: `pm_${crypto.randomBytes(18).toString('hex')}`,
+        fingerprint,
+        brand: fallbackBrand,
+        last4: fallbackLast4,
+        expMonth: expiry.month,
+        expYear: expiry.year,
+        holderFirstName: firstName,
+        holderLastName: lastName,
+        holderDocType: docType,
+        holderDocument: document,
+        verificationStatus: 'pending',
+        verificationAmount: buildCardVerificationChallenge(),
+        verificationAttemptCount: 0,
+        verificationLastRequestedAt: new Date(),
+        verificationExpiresAt: getCardVerificationExpirationDate(),
+      });
     }
-
-    const token = `pm_${crypto.randomBytes(18).toString('hex')}`;
-
-    const paymentMethod = await ParentPaymentMethod.create({
-      schoolId,
-      parentUserId,
-      type: 'card',
-      provider: 'internal',
-      token,
-      fingerprint,
-      brand,
-      last4,
-      expMonth: expiry.month,
-      expYear: expiry.year,
-      holderFirstName: firstName,
-      holderLastName: lastName,
-      holderDocType: docType,
-      holderDocument: document,
-      verificationStatus: 'pending',
-      verificationAmount: buildCardVerificationChallenge(),
-      verificationAttemptCount: 0,
-      verificationLastRequestedAt: new Date(),
-      verificationExpiresAt: getCardVerificationExpirationDate(),
-    });
 
     return res.status(201).json({
       paymentMethod: {
@@ -886,7 +989,7 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         type: paymentMethod.type,
         provider: paymentMethod.provider,
       },
-      verificationRequired: true,
+      verificationRequired: paymentMethod.verificationStatus !== 'verified',
       verificationWindowHours: CARD_VERIFICATION_WINDOW_HOURS,
     });
   } catch (error) {
@@ -1067,11 +1170,170 @@ router.delete('/portal/payment-methods/cards/:cardId', async (req, res) => {
       return res.status(404).json({ message: 'Tarjeta no encontrada.' });
     }
 
+    if (
+      card.provider === 'mercadopago' &&
+      card.providerCustomerId &&
+      card.providerCardId &&
+      isMercadoPagoConfigured()
+    ) {
+      try {
+        await deleteCustomerCard({
+          customerId: card.providerCustomerId,
+          cardId: card.providerCardId,
+        });
+      } catch (providerError) {
+        return res.status(502).json({
+          message: providerError?.message || 'No fue posible eliminar la tarjeta en Mercado Pago.',
+        });
+      }
+    }
+
     card.status = 'inactive';
     card.deletedAt = new Date();
     await card.save();
 
     return res.status(200).json({ message: 'Tarjeta eliminada correctamente.' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.body.parentUserId || req.query.parentUserId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+    const studentId = toObjectId(req.params.studentId);
+
+    if (!parentUserId) {
+      return res.status(400).json({ message: 'Invalid parent user id' });
+    }
+
+    if (!studentId) {
+      return res.status(400).json({ message: 'Invalid student id' });
+    }
+
+    const link = await ParentStudentLink.findOne({
+      schoolId,
+      parentId: parentUserId,
+      studentId,
+      status: 'active',
+    }).lean();
+
+    if (!link) {
+      return res.status(403).json({ message: 'Forbidden studentId' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId });
+    if (!wallet) {
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    const enabled = Boolean(req.body?.enabled);
+    if (!enabled) {
+      wallet.autoDebitEnabled = false;
+      wallet.autoDebitLimit = 0;
+      wallet.autoDebitAmount = 0;
+      wallet.autoDebitPaymentMethodId = null;
+      wallet.autoDebitInProgress = false;
+      wallet.autoDebitLockAt = null;
+      wallet.autoDebitLastAttempt = null;
+      wallet.autoDebitLastChargeAt = null;
+      wallet.autoDebitRetryAt = null;
+      wallet.autoDebitRetryCount = 0;
+      wallet.autoDebitMonthlyUsed = 0;
+      wallet.autoDebitMonthlyPeriod = '';
+      await wallet.save();
+
+      return res.status(200).json({
+        student: {
+          _id: studentId,
+          wallet: {
+            autoDebitEnabled: false,
+            autoDebitLimit: 0,
+            autoDebitAmount: 0,
+            autoDebitPaymentMethodId: null,
+            autoDebitInProgress: false,
+            autoDebitLockAt: null,
+            autoDebitLastAttempt: null,
+            autoDebitLastChargeAt: null,
+            autoDebitRetryAt: null,
+            autoDebitRetryCount: 0,
+            autoDebitMonthlyLimit: Number(wallet.autoDebitMonthlyLimit || 0),
+            autoDebitMonthlyUsed: 0,
+            autoDebitMonthlyPeriod: '',
+          },
+        },
+      });
+    }
+
+    const autoDebitLimit = Number(req.body?.autoDebitLimit);
+    const autoDebitAmount = Number(req.body?.autoDebitAmount);
+    const requestedMonthlyLimit = Number(req.body?.autoDebitMonthlyLimit);
+    const defaultMonthlyLimit = Number(process.env.AUTO_DEBIT_DEFAULT_MONTHLY_LIMIT || 1000000);
+    const autoDebitMonthlyLimit = Number.isFinite(requestedMonthlyLimit) && requestedMonthlyLimit > 0
+      ? requestedMonthlyLimit
+      : (Number.isFinite(defaultMonthlyLimit) && defaultMonthlyLimit > 0 ? defaultMonthlyLimit : 1000000);
+    const paymentMethodId = toObjectId(req.body?.paymentMethodId);
+
+    if (!Number.isFinite(autoDebitLimit) || autoDebitLimit < 20000) {
+      return res.status(400).json({ message: 'autoDebitLimit must be at least 20000' });
+    }
+
+    if (!Number.isFinite(autoDebitAmount) || autoDebitAmount < 30000) {
+      return res.status(400).json({ message: 'autoDebitAmount must be at least 30000' });
+    }
+
+    if (!paymentMethodId) {
+      return res.status(400).json({ message: 'paymentMethodId is required' });
+    }
+
+    const paymentMethod = await ParentPaymentMethod.findOne({
+      _id: paymentMethodId,
+      schoolId,
+      parentUserId,
+      type: 'card',
+      provider: 'mercadopago',
+      status: 'active',
+      deletedAt: null,
+      verificationStatus: 'verified',
+    })
+      .select('_id')
+      .lean();
+
+    if (!paymentMethod) {
+      return res.status(404).json({ message: 'Tarjeta verificada no encontrada.' });
+    }
+
+    wallet.autoDebitEnabled = true;
+    wallet.autoDebitLimit = autoDebitLimit;
+    wallet.autoDebitAmount = autoDebitAmount;
+    wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
+    wallet.autoDebitPaymentMethodId = paymentMethodId;
+    wallet.autoDebitInProgress = false;
+    wallet.autoDebitLockAt = null;
+    wallet.autoDebitRetryAt = null;
+    wallet.autoDebitRetryCount = 0;
+    await wallet.save();
+
+    return res.status(200).json({
+      student: {
+        _id: studentId,
+        wallet: {
+          autoDebitEnabled: true,
+          autoDebitLimit,
+          autoDebitAmount,
+          autoDebitMonthlyLimit,
+          autoDebitPaymentMethodId: paymentMethodId,
+          autoDebitInProgress: false,
+          autoDebitLockAt: null,
+          autoDebitRetryAt: null,
+          autoDebitRetryCount: 0,
+          autoDebitMonthlyUsed: Number(wallet.autoDebitMonthlyUsed || 0),
+          autoDebitMonthlyPeriod: String(wallet.autoDebitMonthlyPeriod || ''),
+        },
+      },
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

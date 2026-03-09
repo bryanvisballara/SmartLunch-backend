@@ -16,6 +16,7 @@ import {
   updateParentMeriendasSubscription,
   updateParentPortalStudentBlock,
   updateParentPortalStudentDailyLimit,
+  updateParentPortalStudentAutoDebit,
 } from '../services/parent.service';
 import { createDaviPlataPayment } from '../services/payments.service';
 import { getProducts } from '../services/products.service';
@@ -1022,7 +1023,7 @@ function ParentPortal() {
       setCardDocType('CC');
       setCardDocument('');
       await loadSavedCards();
-      if (createdCard?._id) {
+      if (createdCard?._id && String(createdCard?.verificationStatus || '').toLowerCase() !== 'verified') {
         openCardVerificationModal(createdCard);
       }
     } catch (requestError) {
@@ -1038,6 +1039,11 @@ function ParentPortal() {
   };
 
   const onSubmitAutoTopup = async () => {
+    if (!selectedStudent?._id) {
+      setAutoTopupSubmitError('Selecciona un alumno para activar la recarga automática.');
+      return;
+    }
+
     if (!canActivateAutoTopup) {
       setAutoTopupSubmitError('Completa los datos para activar la recarga automática.');
       return;
@@ -1048,13 +1054,20 @@ function ParentPortal() {
     setAutoTopupSubmitSuccess('');
 
     try {
-      // Placeholder until backend endpoint for auto topups is enabled.
-      mergeStudentData({
+      const response = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
+        enabled: true,
+        autoDebitLimit: autoTopupMinBalanceNumber,
+        autoDebitAmount: autoTopupRechargeAmount,
+        paymentMethodId: autoTopupSelectedCardId,
+      });
+
+      mergeStudentData(response.data?.student || {
         _id: selectedStudent?._id || selectedStudentId,
         wallet: {
           autoDebitEnabled: true,
           autoDebitLimit: autoTopupMinBalanceNumber,
           autoDebitAmount: autoTopupRechargeAmount,
+          autoDebitPaymentMethodId: autoTopupSelectedCardId,
         },
       });
       setAutoTopupSubmitSuccess('Recarga automática activada correctamente.');

@@ -101,6 +101,7 @@ app.use('/admin/meriendas', meriendasRoutes);
 app.use('/meriendas', meriendasRoutes);
 app.use('/parent', parentRoutes);
 app.use('/payments', paymentsRoutes);
+app.use('/webhooks', paymentsRoutes);
 
 app.use((error, req, res, next) => {
   if (error?.type === 'entity.too.large') {

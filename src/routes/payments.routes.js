@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -9,6 +10,7 @@ const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
 const { createDaviplataPaymentOrder, mapProviderStatus } = require('../services/daviplata.service');
+const { getPaymentById, toInternalStatus: toMercadoPagoInternalStatus, isMercadoPagoConfigured } = require('../services/mercadopago.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
 const router = express.Router();
@@ -31,6 +33,75 @@ function toInternalStatus(providerStatus) {
 function buildReference() {
   const random = Math.floor(Math.random() * 1e6).toString().padStart(6, '0');
   return `SL-${Date.now()}-${random}`;
+}
+
+function verifyMercadoPagoWebhookSignature({ secret, signatureHeader, requestId, dataId }) {
+  const normalizedSecret = String(secret || '').trim();
+  if (!normalizedSecret) {
+    return true;
+  }
+
+  const rawSignature = String(signatureHeader || '').trim();
+  if (!rawSignature) {
+    return false;
+  }
+
+  const parts = rawSignature.split(',').reduce((acc, part) => {
+    const [key, value] = String(part || '').split('=');
+    if (key && value) {
+      acc[String(key).trim()] = String(value).trim();
+    }
+    return acc;
+  }, {});
+
+  const ts = String(parts.ts || '').trim();
+  const v1 = String(parts.v1 || '').trim().toLowerCase();
+  if (!ts || !v1 || !dataId || !requestId) {
+    return false;
+  }
+
+  const manifest = `id:${dataId};request-id:${requestId};ts:${ts};`;
+  const expected = crypto
+    .createHmac('sha256', normalizedSecret)
+    .update(manifest)
+    .digest('hex')
+    .toLowerCase();
+
+  return expected === v1;
+}
+
+function currentYearMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function resolveRetryDelayMs(nextRetryCount) {
+  if (nextRetryCount <= 1) return 0;
+  if (nextRetryCount === 2) return 10 * 60_000;
+  if (nextRetryCount === 3) return 60 * 60_000;
+  return 12 * 60 * 60_000;
+}
+
+async function releaseWalletAutoDebitWithRetry({ schoolId, studentId }) {
+  const wallet = await Wallet.findOne({ schoolId, studentId }).select('_id autoDebitRetryCount').lean();
+  if (!wallet?._id) {
+    return;
+  }
+
+  const nextRetryCount = Number(wallet.autoDebitRetryCount || 0) + 1;
+  const retryAt = new Date(Date.now() + Math.max(0, resolveRetryDelayMs(nextRetryCount)));
+
+  await Wallet.updateOne(
+    { _id: wallet._id },
+    {
+      $set: {
+        autoDebitInProgress: false,
+        autoDebitLockAt: null,
+        autoDebitRetryCount: nextRetryCount,
+        autoDebitRetryAt: retryAt,
+      },
+    }
+  );
 }
 
 function getCallbackUrl(req) {
@@ -187,6 +258,172 @@ router.post('/daviplata/callback', async (req, res) => {
           });
         } catch (notificationError) {
           console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=daviplata_callback paymentId=${lockedPayment._id} error=${notificationError.message}`);
+        }
+      });
+    }
+
+    return res.status(200).json({ received: true, credited: true, status: 'approved' });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
+router.post('/mercadopago', async (req, res) => {
+  let session;
+
+  try {
+    if (!isMercadoPagoConfigured()) {
+      return res.status(200).json({ received: true, ignored: true, reason: 'Mercado Pago not configured' });
+    }
+
+    const eventType = String(req.body?.type || req.query?.type || '').trim().toLowerCase();
+    const paymentId = String(req.body?.data?.id || req.query?.['data.id'] || '').trim();
+
+    const webhookSecret = String(process.env.MERCADOPAGO_WEBHOOK_SECRET || '').trim();
+    if (webhookSecret) {
+      const validSignature = verifyMercadoPagoWebhookSignature({
+        secret: webhookSecret,
+        signatureHeader: req.headers['x-signature'],
+        requestId: req.headers['x-request-id'],
+        dataId: paymentId,
+      });
+
+      if (!validSignature) {
+        return res.status(401).json({ message: 'Invalid Mercado Pago webhook signature' });
+      }
+    }
+
+    if (eventType !== 'payment' || !paymentId) {
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
+    const payment = await getPaymentById(paymentId);
+    const providerStatus = String(payment?.status || 'pending').trim();
+    const internalStatus = toMercadoPagoInternalStatus(providerStatus);
+    const reference = String(payment?.external_reference || '').trim();
+
+    const byProviderId = { providerTransactionId: paymentId };
+    const byReference = reference ? { reference } : null;
+    const paymentRecord = await PaymentTransaction.findOne(
+      byReference ? { $or: [byProviderId, byReference] } : byProviderId
+    );
+
+    if (!paymentRecord) {
+      return res.status(200).json({ received: true, ignored: true, reason: 'Payment record not found' });
+    }
+
+    if (internalStatus !== 'approved') {
+      paymentRecord.providerTransactionId = paymentId;
+      paymentRecord.providerStatus = providerStatus;
+      paymentRecord.status = internalStatus;
+      paymentRecord.callbackPayload = req.body;
+      paymentRecord.providerResponse = payment;
+      paymentRecord.failureReason = internalStatus === 'pending' ? null : String(payment?.status_detail || providerStatus);
+      await paymentRecord.save();
+
+      if (internalStatus !== 'pending') {
+        await releaseWalletAutoDebitWithRetry({
+          schoolId: paymentRecord.schoolId,
+          studentId: paymentRecord.studentId,
+        });
+      }
+
+      return res.status(200).json({ received: true, credited: false, status: internalStatus });
+    }
+
+    if (paymentRecord.walletTransactionId) {
+      return res.status(200).json({ received: true, credited: true, alreadyProcessed: true });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const lockedPayment = await PaymentTransaction.findById(paymentRecord._id).session(session);
+    if (!lockedPayment) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    if (lockedPayment.walletTransactionId) {
+      await session.commitTransaction();
+      return res.status(200).json({ received: true, credited: true, alreadyProcessed: true });
+    }
+
+    const wallet = await Wallet.findOne({
+      schoolId: lockedPayment.schoolId,
+      studentId: lockedPayment.studentId,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    const approvedAmount = Number(lockedPayment.amount || 0);
+    const period = currentYearMonth();
+    if (String(wallet.autoDebitMonthlyPeriod || '') !== period) {
+      wallet.autoDebitMonthlyPeriod = period;
+      wallet.autoDebitMonthlyUsed = 0;
+    }
+
+    wallet.balance += approvedAmount;
+    wallet.autoDebitMonthlyUsed = Number(wallet.autoDebitMonthlyUsed || 0) + approvedAmount;
+    wallet.autoDebitInProgress = false;
+    wallet.autoDebitLockAt = null;
+    wallet.autoDebitLastChargeAt = new Date();
+    wallet.autoDebitRetryAt = null;
+    wallet.autoDebitRetryCount = 0;
+    wallet.lowBalanceAlertLevel = getLowBalanceLevelForBalance(wallet.balance);
+    await wallet.save({ session });
+
+    const [walletTopup] = await WalletTransaction.create(
+      [
+        {
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          walletId: wallet._id,
+          type: 'recharge',
+          amount: Number(lockedPayment.amount || 0),
+          method: 'mercadopago',
+          createdBy: lockedPayment.parentId,
+          notes: `Recarga automatica aprobada por Mercado Pago (${paymentId})`,
+        },
+      ],
+      { session }
+    );
+
+    lockedPayment.providerTransactionId = paymentId;
+    lockedPayment.providerStatus = providerStatus;
+    lockedPayment.status = 'approved';
+    lockedPayment.callbackPayload = req.body;
+    lockedPayment.providerResponse = payment;
+    lockedPayment.walletTransactionId = walletTopup._id;
+    lockedPayment.approvedAt = new Date();
+    lockedPayment.failureReason = null;
+    await lockedPayment.save({ session });
+
+    await session.commitTransaction();
+
+    if (wallet.autoDebitEnabled) {
+      setImmediate(async () => {
+        try {
+          await queueAutoDebitRechargeNotification({
+            schoolId: lockedPayment.schoolId,
+            studentId: lockedPayment.studentId,
+            amount: Number(lockedPayment.amount || 0),
+            newBalance: Number(wallet.balance || 0),
+            method: 'mercadopago',
+          });
+        } catch (notificationError) {
+          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=mercadopago_webhook paymentId=${lockedPayment._id} error=${notificationError.message}`);
         }
       });
     }

@@ -13,6 +13,8 @@ export const cancelParentMeriendasSubscription = (subscriptionId, params = {}) =
 export const updateParentPortalStudentBlock = (studentId, data) => api.patch(`/parent/portal/students/${studentId}/blocks`, data);
 export const updateParentPortalStudentDailyLimit = (studentId, data) =>
 	api.patch(`/parent/portal/students/${studentId}/daily-limit`, data);
+export const updateParentPortalStudentAutoDebit = (studentId, data) =>
+	api.patch(`/parent/portal/students/${studentId}/auto-debit`, data);
 export const createParentCardPaymentMethod = (data) => api.post('/parent/portal/payment-methods/cards', data);
 export const requestParentCardVerification = (cardId, data = {}) =>
 	api.post(`/parent/portal/payment-methods/cards/${cardId}/verification/request`, data);
