@@ -3893,13 +3893,14 @@ function AdminDashboard() {
                     <th>Responsable</th>
                     <th>Total</th>
                     <th>Fecha y hora</th>
+                    <th>Detalle de productos</th>
                     <th>Estado</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {pendingSchoolBillingOrders.map((order) => (
-                    <tr key={`summary-${order._id}`}>
+                    <tr key={`summary-${order._id}`} className="school-billing-row-detail">
                       <td>{order.orderNumber || order._id}</td>
                       <td>{order.storeId?.name || 'N/A'}</td>
                       <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
@@ -3908,6 +3909,26 @@ function AdminDashboard() {
                       <td>{order.schoolBillingResponsible || 'N/A'}</td>
                       <td>{formatCurrency(order.total)}</td>
                       <td>{formatDateTime(order.createdAt)}</td>
+                      <td>
+                        <table className="simple-table school-billing-items-table">
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Cantidad</th>
+                              <th>Subtotal</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(order.items || []).map((item, index) => (
+                              <tr key={`${order._id}-pending-item-${index}`}>
+                                <td>{item.nameSnapshot || 'Producto'}</td>
+                                <td>{item.quantity}</td>
+                                <td>{formatCurrency(item.subtotal)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
                       <td>PENDIENTE</td>
                       <td>
                         <button className="btn btn-primary" type="button" onClick={() => onMarkSchoolBillingCollected(order._id)}>
@@ -3935,12 +3956,13 @@ function AdminDashboard() {
                     <th>Responsable</th>
                     <th>Total</th>
                     <th>Fecha y hora</th>
+                    <th>Detalle de productos</th>
                     <th>Estado</th>
                   </tr>
                 </thead>
                 <tbody>
                   {collectedSchoolBillingOrders.map((order) => (
-                    <tr key={`collected-${order._id}`}>
+                    <tr key={`collected-${order._id}`} className="school-billing-row-detail">
                       <td>{order.orderNumber || order._id}</td>
                       <td>{order.storeId?.name || 'N/A'}</td>
                       <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
@@ -3949,48 +3971,31 @@ function AdminDashboard() {
                       <td>{order.schoolBillingResponsible || 'N/A'}</td>
                       <td>{formatCurrency(order.total)}</td>
                       <td>{formatDateTime(order.createdAt)}</td>
+                      <td>
+                        <table className="simple-table school-billing-items-table">
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Cantidad</th>
+                              <th>Subtotal</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(order.items || []).map((item, index) => (
+                              <tr key={`${order._id}-collected-item-${index}`}>
+                                <td>{item.nameSnapshot || 'Producto'}</td>
+                                <td>{item.quantity}</td>
+                                <td>{formatCurrency(item.subtotal)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
                       <td>COBRADO</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          ) : null}
-
-          {schoolBillingOrders.length > 0 ? (
-            <div className="approval-history-scroll">
-              {schoolBillingOrders.map((order) => (
-                <div className="card" key={order._id}>
-                  <p><strong>Detalle de productos</strong></p>
-                  <p>Orden: {order.orderNumber || order._id}</p>
-                  <p>Tienda: {order.storeId?.name || 'N/A'}</p>
-                  <p>Vendedor: {order.vendorId?.name || order.vendorId?.username || 'N/A'}</p>
-                  <p>Alumno: {order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</p>
-                  <p>Dirigido a: {order.schoolBillingFor || 'N/A'}</p>
-                  <p>Responsable: {order.schoolBillingResponsible || 'N/A'}</p>
-                  <p>Total: {formatCurrency(order.total)}</p>
-                  <p>Fecha y hora: {formatDateTime(order.createdAt)}</p>
-
-                  <table className="simple-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Cantidad</th>
-                        <th>Subtotal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(order.items || []).map((item, index) => (
-                        <tr key={`${order._id}-${index}`}>
-                          <td>{item.nameSnapshot || 'Producto'}</td>
-                          <td>{item.quantity}</td>
-                          <td>{formatCurrency(item.subtotal)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
             </div>
           ) : null}
         </section>

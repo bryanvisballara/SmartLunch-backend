@@ -696,6 +696,20 @@ label {
   color: #0f172a;
 }
 
+.school-billing-row-detail td {
+  vertical-align: top;
+}
+
+.school-billing-items-table {
+  min-width: 300px;
+  font-size: 0.82rem;
+}
+
+.school-billing-items-table th,
+.school-billing-items-table td {
+  padding: 0.28rem 0.35rem;
+}
+
 .order-summary-submit {
   margin-top: 0;
   padding: 0.34rem 0.62rem;
@@ -1380,6 +1394,7 @@ label {
   display: grid;
   gap: 1rem;
   width: 100%;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.25rem);
 }
 
 .table-wrap {
@@ -2065,6 +2080,7 @@ label {
   font-family: 'Poppins', 'Segoe UI', Tahoma, sans-serif;
   position: relative;
   margin: -1rem;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.4rem);
   padding-bottom: 2rem;
 }
 

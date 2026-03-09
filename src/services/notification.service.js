@@ -300,6 +300,7 @@ async function queueApprovalPendingNotificationForAdmins({
     title,
     body,
     payload: {
+      url: '/admin',
       ...payload,
       audience: 'admin',
     },
