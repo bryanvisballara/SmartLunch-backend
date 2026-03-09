@@ -13,6 +13,8 @@ const router = express.Router();
 router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
 
+const orderAggregate = (pipeline) => Order.aggregate(pipeline).allowDiskUse(true);
+
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
@@ -37,15 +39,15 @@ async function getKpi(req, res) {
     const now = new Date();
 
     const [salesToday, salesWeek, salesMonth] = await Promise.all([
-      Order.aggregate([
+      orderAggregate([
         { $match: { schoolId, status: 'completed', createdAt: { $gte: startOfDay(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
-      Order.aggregate([
+      orderAggregate([
         { $match: { schoolId, status: 'completed', createdAt: { $gte: startOfWeek(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
-      Order.aggregate([
+      orderAggregate([
         { $match: { schoolId, status: 'completed', createdAt: { $gte: startOfMonth(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
@@ -81,7 +83,7 @@ function resolveStoreFilter(storeIdRaw) {
 }
 
 async function getUtilityForPeriod(baseMatch, periodStart) {
-  const data = await Order.aggregate([
+  const data = await orderAggregate([
     { $match: { ...baseMatch, createdAt: { $gte: periodStart } } },
     { $unwind: '$items' },
     {
@@ -161,22 +163,22 @@ router.get('/admin-home', async (req, res) => {
     }
 
     const [salesToday, salesWeek, salesMonth, utilityToday, utilityWeek, utilityMonth, topStudentsRaw, topProductsRaw, profitabilityRaw, lowStockProducts, lowBalanceStudents, fixedCosts, activeProductsRaw] = await Promise.all([
-      Order.aggregate([
+      orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
-      Order.aggregate([
+      orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfWeek(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
-      Order.aggregate([
+      orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfMonth(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       getUtilityForPeriod(orderMatch, startOfDay(now)),
       getUtilityForPeriod(orderMatch, startOfWeek(now)),
       getUtilityForPeriod(orderMatch, startOfMonth(now)),
-      Order.aggregate([
+      orderAggregate([
         {
           $match: {
             ...orderMatch,
@@ -217,7 +219,7 @@ router.get('/admin-home', async (req, res) => {
           },
         },
       ]),
-      Order.aggregate([
+      orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: thirtyDaysAgo } } },
         { $unwind: '$items' },
         {
@@ -248,7 +250,7 @@ router.get('/admin-home', async (req, res) => {
           },
         },
       ]),
-      Order.aggregate([
+      orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: thirtyDaysAgo } } },
         { $unwind: '$items' },
         {
@@ -306,11 +308,13 @@ router.get('/admin-home', async (req, res) => {
       })
         .select('_id name stock inventoryAlertStock storeId categoryId')
         .populate('storeId', 'name')
+        .setOptions({ allowDiskUse: true })
         .sort({ stock: 1, name: 1 })
         .limit(20)
         .lean(),
       Wallet.find({ schoolId, status: 'active', balance: { $lte: lowBalanceThreshold } })
         .populate('studentId', 'name schoolCode grade status')
+        .setOptions({ allowDiskUse: true })
         .sort({ balance: 1 })
         .limit(20)
         .lean(),
@@ -320,6 +324,7 @@ router.get('/admin-home', async (req, res) => {
         .lean(),
       Product.find(inventoryFilter)
         .select('_id name price cost')
+        .setOptions({ allowDiskUse: true })
         .sort({ name: 1 })
         .lean(),
     ]);
