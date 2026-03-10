@@ -40,7 +40,8 @@ function slugifyFilename(value) {
 function getUploadsRootPath() {
   const configured = String(process.env.UPLOADS_ROOT_PATH || '').trim();
   if (configured) {
-    return configured;
+    // Backward compatibility: if env still points to /uploads, force /assets.
+    return configured.replace(/\/uploads\/?$/i, '/assets');
   }
 
   return path.resolve(process.cwd(), 'public', 'assets');
@@ -50,7 +51,10 @@ function getUploadsPublicBaseUrl() {
   const configured = String(process.env.UPLOADS_PUBLIC_BASE_URL || '').trim();
   if (configured) {
     // Guard against accidental spaces in env var values like "https://site.com /uploads".
-    return configured.replace(/\s+/g, '').replace(/\/+$/, '');
+    return configured
+      .replace(/\s+/g, '')
+      .replace(/\/uploads\/?$/i, '/assets')
+      .replace(/\/+$/, '');
   }
 
   return '/assets';
