@@ -12,6 +12,7 @@ const productSchema = new mongoose.Schema(
     stock: { type: Number, required: true, default: 0 },
     inventoryAlertStock: { type: Number, required: true, default: 10 },
     imageUrl: { type: String, trim: true, default: '' },
+    thumbUrl: { type: String, trim: true, default: '' },
     shortDescription: { type: String, trim: true, default: '' },
     tags: [{ type: String, trim: true }],
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },

@@ -78,8 +78,9 @@ function dedupeParentMenuProducts(products) {
     const categoryId = String(product?.categoryId || '').trim();
     const price = Number(product?.price || 0);
     const imageUrl = String(product?.imageUrl || '').trim();
+    const thumbUrl = String(product?.thumbUrl || '').trim();
     const shortDescription = String(product?.shortDescription || '').trim().toLowerCase();
-    const key = `${name}|${categoryId}|${price}|${imageUrl}|${shortDescription}`;
+    const key = `${name}|${categoryId}|${price}|${thumbUrl}|${imageUrl}|${shortDescription}`;
 
     if (!map.has(key)) {
       map.set(key, product);
@@ -1406,7 +1407,7 @@ function ParentPortal() {
                   >
                     <div className="parent-category-image-wrap">
                       {category.imageUrl ? (
-                        <img alt={category.name} loading="lazy" src={category.imageUrl} />
+                        <img alt={category.name} decoding="async" loading="lazy" src={category.thumbUrl || category.imageUrl} />
                       ) : (
                         <div className="parent-category-image-fallback">{String(category.name || 'C').charAt(0).toUpperCase()}</div>
                       )}
@@ -1464,7 +1465,7 @@ function ParentPortal() {
                   <article className="parent-product-row" key={product._id}>
                     <div className="parent-product-thumb-wrap">
                       {product.imageUrl ? (
-                        <img alt={product.name} loading="lazy" src={product.imageUrl} />
+                        <img alt={product.name} decoding="async" loading="lazy" src={product.thumbUrl || product.imageUrl} />
                       ) : (
                         <div className="parent-product-thumb-fallback">{String(product.name || 'P').charAt(0).toUpperCase()}</div>
                       )}
@@ -1573,9 +1574,16 @@ function ParentPortal() {
               <p className="parent-topups-kicker">Saldo disponible</p>
               <h3>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h3>
               {showAutoDebitEstablishedNotice ? (
-                <p className="parent-autodebit-established">
-                  Recarga automatica establecida: saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}
-                </p>
+                <div className="parent-autodebit-established" role="status" aria-live="polite">
+                  <span className="parent-autodebit-established-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
+                    </svg>
+                  </span>
+                  <span>
+                    Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
+                  </span>
+                </div>
               ) : null}
               <div className="parent-topups-pill">
                 <span className="dot" aria-hidden="true" />
@@ -2105,7 +2113,9 @@ function ParentPortal() {
                     {selectedMeriendaDayDetails.firstSnack.imageUrl ? (
                       <img
                         alt={selectedMeriendaDayDetails.firstSnack.title || 'Snack principal'}
-                        src={selectedMeriendaDayDetails.firstSnack.imageUrl}
+                        decoding="async"
+                        loading="lazy"
+                        src={selectedMeriendaDayDetails.firstSnack.thumbUrl || selectedMeriendaDayDetails.firstSnack.imageUrl}
                       />
                     ) : (
                       <div className="image-fallback">Snack principal</div>
@@ -2123,7 +2133,9 @@ function ParentPortal() {
                     {selectedMeriendaDayDetails.secondSnack.imageUrl ? (
                       <img
                         alt={selectedMeriendaDayDetails.secondSnack.title || 'Complemento'}
-                        src={selectedMeriendaDayDetails.secondSnack.imageUrl}
+                        decoding="async"
+                        loading="lazy"
+                        src={selectedMeriendaDayDetails.secondSnack.thumbUrl || selectedMeriendaDayDetails.secondSnack.imageUrl}
                       />
                     ) : (
                       <div className="image-fallback">Complemento</div>
@@ -2704,9 +2716,16 @@ function ParentPortal() {
               <p className="meta">Saldo actual</p>
               <h2>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h2>
               {showAutoDebitEstablishedNotice ? (
-                <p className="parent-autodebit-established">
-                  Recarga automatica establecida: saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}
-                </p>
+                <div className="parent-autodebit-established" role="status" aria-live="polite">
+                  <span className="parent-autodebit-established-check" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
+                    </svg>
+                  </span>
+                  <span>
+                    Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
+                  </span>
+                </div>
               ) : null}
               <p>
                 Alumno: <strong>{selectedStudent?.name || 'N/A'}</strong>

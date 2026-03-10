@@ -4,6 +4,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const authRoutes = require('./routes/auth.routes');
 const studentRoutes = require('./routes/students.routes');
@@ -21,6 +22,8 @@ const parentRoutes = require('./routes/parent.routes');
 const paymentsRoutes = require('./routes/payments.routes');
 
 const app = express();
+
+const uploadsRootPath = String(process.env.UPLOADS_ROOT_PATH || '').trim() || path.resolve(process.cwd(), 'public', 'uploads');
 
 // Render runs behind a proxy; trust first hop so rate-limit/IP detection works.
 app.set('trust proxy', 1);
@@ -87,6 +90,10 @@ app.use(
   })
 );
 app.use((req, res, next) => {
+  if (String(req.path || '').startsWith('/uploads/')) {
+    return next();
+  }
+
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -95,6 +102,16 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('dev'));
+app.use(
+  '/uploads',
+  express.static(uploadsRootPath, {
+    maxAge: '1y',
+    immutable: true,
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  })
+);
 
 app.get('/health', (req, res) => {
   res.status(200).json({

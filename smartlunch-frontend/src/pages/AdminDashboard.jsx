@@ -43,6 +43,7 @@ import {
   updateAdminStore,
   updateAdminStudent,
   updateAdminUser,
+  uploadAdminImage,
 } from '../services/admin.service';
 import { applyInventoryMovement, getInventoryRequests, approveInventoryRequest, rejectInventoryRequest } from '../services/inventory.service';
 import {
@@ -331,6 +332,7 @@ function AdminDashboard() {
   const [fixedCostForm, setFixedCostForm] = useState({ name: '', amount: '', storeId: '', type: 'fixed' });
 
   const [categoryForm, setCategoryForm] = useState({ name: '', imageUrl: '' });
+  const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false);
   const [storeForm, setStoreForm] = useState({ name: '', location: '' });
   const [productForm, setProductForm] = useState({
     name: '',
@@ -343,6 +345,8 @@ function AdminDashboard() {
     inventoryAlertStock: '10',
     imageUrl: '',
   });
+  const [uploadingProductImage, setUploadingProductImage] = useState(false);
+  const [uploadingEditProductImageId, setUploadingEditProductImageId] = useState('');
   const [userForm, setUserForm] = useState({ name: '', username: '', phone: '', password: '', role: 'parent', assignedStoreId: '' });
   const [studentForm, setStudentForm] = useState({ name: '', grade: '', parentId: '' });
 
@@ -1847,6 +1851,11 @@ function AdminDashboard() {
     }
   };
 
+  const uploadSingleImageToHosting = async (file, { folder, preferredName }) => {
+    const response = await uploadAdminImage(file, { folder, preferredName });
+    return String(response?.data?.url || '').trim();
+  };
+
   const onManualTopup = (event) => {
     event.preventDefault();
     runAction(
@@ -1933,17 +1942,30 @@ function AdminDashboard() {
     });
   };
 
-  const onCategoryImageSelected = (event) => {
+  const onCategoryImageSelected = async (event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setCategoryForm((prev) => ({ ...prev, imageUrl: String(reader.result || '') }));
-    };
-    reader.readAsDataURL(file);
+    clearMessages();
+    setUploadingCategoryImage(true);
+    try {
+      const imageUrl = await uploadSingleImageToHosting(file, {
+        folder: 'categories',
+        preferredName: categoryForm.name || file.name,
+      });
+      if (!imageUrl) {
+        throw new Error('No se recibio URL de imagen.');
+      }
+      setCategoryForm((prev) => ({ ...prev, imageUrl }));
+      setOk('Imagen de categoria cargada.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la imagen.');
+    } finally {
+      setUploadingCategoryImage(false);
+    }
   };
 
   const onCreateStore = (event) => {
@@ -1999,20 +2021,33 @@ function AdminDashboard() {
     );
   };
 
-  const onProductImageSelected = (event) => {
+  const onProductImageSelected = async (event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setProductForm((prev) => ({ ...prev, imageUrl: String(reader.result || '') }));
-    };
-    reader.readAsDataURL(file);
+    clearMessages();
+    setUploadingProductImage(true);
+    try {
+      const imageUrl = await uploadSingleImageToHosting(file, {
+        folder: 'products',
+        preferredName: productForm.name || file.name,
+      });
+      if (!imageUrl) {
+        throw new Error('No se recibio URL de imagen.');
+      }
+      setProductForm((prev) => ({ ...prev, imageUrl }));
+      setOk('Imagen de producto cargada.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la imagen.');
+    } finally {
+      setUploadingProductImage(false);
+    }
   };
 
-  const onEditTableProductImageSelected = (item, event) => {
+  const onEditTableProductImageSelected = async (item, event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
 
@@ -2020,11 +2055,24 @@ function AdminDashboard() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      onEditTableDraftChange(item, 'imageUrl', String(reader.result || ''));
-    };
-    reader.readAsDataURL(file);
+    const itemId = String(item?._id || '');
+    clearMessages();
+    setUploadingEditProductImageId(itemId);
+    try {
+      const imageUrl = await uploadSingleImageToHosting(file, {
+        folder: 'products',
+        preferredName: item?.name || file.name,
+      });
+      if (!imageUrl) {
+        throw new Error('No se recibio URL de imagen.');
+      }
+      onEditTableDraftChange(item, 'imageUrl', imageUrl);
+      setOk('Imagen del producto cargada.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la imagen.');
+    } finally {
+      setUploadingEditProductImageId('');
+    }
   };
 
   const onCreateUser = (event) => {
@@ -4437,8 +4485,9 @@ function AdminDashboard() {
               </label>
               <label>
                 Foto de la categoría
-                <input type="file" accept="image/*" onChange={onCategoryImageSelected} />
+                <input type="file" accept="image/*" onChange={onCategoryImageSelected} disabled={uploadingCategoryImage} />
               </label>
+              {uploadingCategoryImage ? <p>Subiendo imagen (se optimiza a WEBP 600px)...</p> : null}
               {categoryForm.imageUrl ? <img alt="Vista previa categoría" className="admin-product-preview" src={categoryForm.imageUrl} /> : null}
               <button className="btn btn-primary admin-create-btn" type="submit">Crear</button>
             </form>
@@ -4498,8 +4547,9 @@ function AdminDashboard() {
               </label>
               <label>
                 Foto del producto
-                <input type="file" accept="image/*" onChange={onProductImageSelected} />
+                <input type="file" accept="image/*" onChange={onProductImageSelected} disabled={uploadingProductImage} />
               </label>
+              {uploadingProductImage ? <p>Subiendo imagen (se optimiza a WEBP 600px)...</p> : null}
               {productForm.imageUrl ? <img alt="Vista previa" className="admin-product-preview" src={productForm.imageUrl} /> : null}
               <label>
                 Stock inicial
@@ -4897,8 +4947,10 @@ function AdminDashboard() {
                                   <input
                                     type="file"
                                     accept="image/*"
+                                    disabled={uploadingEditProductImageId === String(item._id)}
                                     onChange={(event) => onEditTableProductImageSelected(item, event)}
                                   />
+                                  {uploadingEditProductImageId === String(item._id) ? <p>Subiendo imagen...</p> : null}
                                   <input
                                     placeholder="URL de imagen"
                                     value={draft.imageUrl || ''}

@@ -9,6 +9,20 @@ export const getAdminCategories = () => api.get('/admin/categories');
 export const createAdminCategory = (data) => api.post('/admin/categories', data);
 export const updateAdminCategory = (id, data) => api.patch(`/admin/categories/${id}`, data);
 export const deleteAdminCategory = (id) => api.delete(`/admin/categories/${id}`);
+export const uploadAdminImage = (file, { folder = 'products', preferredName = '' } = {}) => {
+	const formData = new FormData();
+	formData.append('image', file);
+	formData.append('folder', folder);
+	if (preferredName) {
+		formData.append('preferredName', preferredName);
+	}
+
+	return api.post('/admin/uploads/image', formData, {
+		headers: {
+			'Content-Type': 'multipart/form-data',
+		},
+	});
+};
 
 export const getAdminStores = () => api.get('/admin/stores');
 export const getAdminProducts = (params = {}) => api.get('/admin/products', { params });

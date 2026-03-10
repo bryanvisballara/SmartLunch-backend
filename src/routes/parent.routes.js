@@ -24,6 +24,8 @@ const {
   createCustomerCard,
   deleteCustomerCard,
 } = require('../services/mercadopago.service');
+const { DEFAULT_TTL_SECONDS, getMenuCache, setMenuCache } = require('../services/menuCache.service');
+const { deriveThumbUrlFromImageUrl, normalizeStoredImageUrl } = require('../utils/imageUpload');
 
 const router = express.Router();
 
@@ -378,23 +380,32 @@ router.get('/portal/overview', async (req, res) => {
 router.get('/portal/categories', async (req, res) => {
   try {
     const { schoolId } = req.user;
+    const cacheKey = `${schoolId}:parent-categories`;
+    const cachedPayload = await getMenuCache(cacheKey);
+    if (cachedPayload) {
+      res.setHeader('X-Menu-Cache', 'HIT');
+      return res.status(200).json(cachedPayload);
+    }
 
     const categories = await Category.find({
       schoolId,
       deletedAt: null,
       status: 'active',
     })
-      .select('_id name imageUrl')
+      .select('_id name imageUrl thumbUrl')
       .sort({ name: 1 })
       .lean();
 
-    return res.status(200).json(
-      categories.map((category) => ({
-        _id: category._id,
-        name: category.name || 'Sin nombre',
-        imageUrl: category.imageUrl || '',
-      }))
-    );
+    const normalizedCategories = categories.map((category) => ({
+      _id: category._id,
+      name: category.name || 'Sin nombre',
+      imageUrl: category.imageUrl || '',
+      thumbUrl: normalizeStoredImageUrl(category.thumbUrl) || deriveThumbUrlFromImageUrl(category.imageUrl),
+    }));
+
+    await setMenuCache(cacheKey, normalizedCategories, DEFAULT_TTL_SECONDS);
+    res.setHeader('X-Menu-Cache', 'MISS');
+    return res.status(200).json(normalizedCategories);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -565,6 +576,7 @@ router.get('/portal/meriendas', async (req, res) => {
                       title: item.firstSnackId.title || '',
                       type: item.firstSnackId.type || '',
                       imageUrl: item.firstSnackId.imageUrl || '',
+                      thumbUrl: deriveThumbUrlFromImageUrl(item.firstSnackId.imageUrl),
                       description: item.firstSnackId.description || '',
                     }
                   : null,
@@ -574,6 +586,7 @@ router.get('/portal/meriendas', async (req, res) => {
                       title: item.secondSnackId.title || '',
                       type: item.secondSnackId.type || '',
                       imageUrl: item.secondSnackId.imageUrl || '',
+                      thumbUrl: deriveThumbUrlFromImageUrl(item.secondSnackId.imageUrl),
                       description: item.secondSnackId.description || '',
                     }
                   : null,

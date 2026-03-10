@@ -8,12 +8,13 @@ function ProductCard({
 }) {
   const disabled = product.status !== 'active' || forceDisabled;
   const cardClassName = `card product-card-compact ${forceDisabled ? 'product-card-blocked' : ''}`;
+  const thumbSrc = product.thumbUrl || product.imageUrl || '';
 
   return (
     <div className={cardClassName}>
       <h4>{product.name}</h4>
-      {product.imageUrl ? (
-        <img alt={product.name || 'Producto'} className="product-card-thumb" loading="lazy" src={product.imageUrl} />
+      {thumbSrc ? (
+        <img alt={product.name || 'Producto'} className="product-card-thumb" decoding="async" loading="lazy" src={thumbSrc} />
       ) : (
         <div className="product-card-thumb product-card-thumb-empty">Sin foto</div>
       )}

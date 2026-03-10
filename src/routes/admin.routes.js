@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
+const multer = require('multer');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -12,6 +13,14 @@ const User = require('../models/user.model');
 const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const FixedCost = require('../models/fixedCost.model');
+const {
+  uploadImageMiddleware,
+  processAndStoreUploadedImage,
+  normalizeStoredImageUrl,
+  deriveThumbUrlFromImageUrl,
+  validateIncomingImageUrl,
+} = require('../utils/imageUpload');
+const { invalidateSchoolMenuCache } = require('../services/menuCache.service');
 
 const router = express.Router();
 
@@ -19,16 +28,10 @@ router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
 
 function normalizeImageUrl(value, includeImageData) {
-  const imageUrl = String(value || '').trim();
-  if (!imageUrl) {
-    return '';
+  if (includeImageData) {
+    return normalizeStoredImageUrl(value);
   }
-
-  if (!includeImageData && imageUrl.startsWith('data:')) {
-    return '';
-  }
-
-  return imageUrl;
+  return normalizeStoredImageUrl(value);
 }
 
 function normalizeProductName(value) {
@@ -84,19 +87,48 @@ const pickLegacyValue = (row, keys) => {
   return '';
 };
 
+const uploadSingleImage = uploadImageMiddleware.single('image');
+
+router.post('/uploads/image', (req, res) => {
+  uploadSingleImage(req, res, async (error) => {
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        message: 'La imagen supera el limite permitido. Usa una imagen mas liviana.',
+      });
+    }
+
+    if (error) {
+      return res.status(400).json({ message: error.message || 'No se pudo cargar la imagen.' });
+    }
+
+    try {
+      const folder = req.body?.folder || 'products';
+      const preferredName = req.body?.preferredName || req.file?.originalname;
+      const saved = await processAndStoreUploadedImage({
+        file: req.file,
+        folder,
+        preferredName,
+      });
+
+      return res.status(201).json(saved);
+    } catch (processingError) {
+      return res.status(400).json({ message: processingError.message });
+    }
+  });
+});
+
 router.get('/categories', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const includeImageData = String(req.query?.includeImageData || 'false').toLowerCase() === 'true';
-    const categorySelect = includeImageData ? null : '-imageUrl';
     const categories = await Category.find({ schoolId, deletedAt: null })
-      .select(categorySelect)
+      .select('_id name imageUrl thumbUrl status createdAt updatedAt')
       .sort({ name: 1 })
       .lean();
     return res.status(200).json(
       categories.map((category) => ({
         ...category,
-        imageUrl: normalizeImageUrl(category.imageUrl, includeImageData),
+        imageUrl: normalizeImageUrl(category.imageUrl, false),
+        thumbUrl: normalizeStoredImageUrl(category.thumbUrl) || deriveThumbUrlFromImageUrl(category.imageUrl),
       }))
     );
   } catch (error) {
@@ -107,7 +139,7 @@ router.get('/categories', async (req, res) => {
 router.post('/categories', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { name, imageUrl = '' } = req.body;
+    const { name, imageUrl = '', thumbUrl = '' } = req.body;
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ message: 'name is required' });
@@ -116,9 +148,12 @@ router.post('/categories', async (req, res) => {
     const category = await Category.create({
       schoolId,
       name: String(name).trim(),
-      imageUrl: String(imageUrl || '').trim(),
+      imageUrl: validateIncomingImageUrl(imageUrl),
+      thumbUrl: validateIncomingImageUrl(thumbUrl) || deriveThumbUrlFromImageUrl(imageUrl),
       status: 'active',
     });
+
+    await invalidateSchoolMenuCache(schoolId);
 
     return res.status(201).json(category);
   } catch (error) {
@@ -132,7 +167,7 @@ router.post('/categories', async (req, res) => {
 router.patch('/categories/:id', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { name, status, imageUrl } = req.body;
+    const { name, status, imageUrl, thumbUrl } = req.body;
 
     const category = await Category.findOne({ _id: req.params.id, schoolId, deletedAt: null });
     if (!category) {
@@ -154,10 +189,18 @@ router.patch('/categories/:id', async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'imageUrl')) {
-      category.imageUrl = String(imageUrl || '').trim();
+      category.imageUrl = validateIncomingImageUrl(imageUrl);
+      if (!Object.prototype.hasOwnProperty.call(req.body, 'thumbUrl')) {
+        category.thumbUrl = deriveThumbUrlFromImageUrl(imageUrl);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'thumbUrl')) {
+      category.thumbUrl = validateIncomingImageUrl(thumbUrl);
     }
 
     await category.save();
+    await invalidateSchoolMenuCache(schoolId);
     return res.status(200).json(category);
   } catch (error) {
     if (error?.code === 11000) {
@@ -178,6 +221,7 @@ router.delete('/categories/:id', async (req, res) => {
     category.deletedAt = new Date();
     category.status = 'inactive';
     await category.save();
+    await invalidateSchoolMenuCache(schoolId);
 
     return res.status(200).json({ message: 'Category deleted' });
   } catch (error) {
@@ -285,8 +329,7 @@ router.get('/stores', async (req, res) => {
 router.get('/products', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { includeInactive = 'true', status = 'active', includeImageData = 'false' } = req.query;
-    const shouldIncludeImageData = String(includeImageData || 'false').toLowerCase() === 'true';
+    const { includeInactive = 'true', status = 'active' } = req.query;
 
     const filter = {
       schoolId,
@@ -297,9 +340,7 @@ router.get('/products', async (req, res) => {
       filter.status = status;
     }
 
-    const productSelect = shouldIncludeImageData
-      ? '_id name price cost stock inventoryAlertStock status storeId categoryId imageUrl shortDescription'
-      : '_id name price cost stock inventoryAlertStock status storeId categoryId shortDescription';
+    const productSelect = '_id name price cost stock inventoryAlertStock status storeId categoryId imageUrl thumbUrl shortDescription';
 
     const products = await Product.find(filter)
       .select(productSelect)
@@ -310,7 +351,8 @@ router.get('/products', async (req, res) => {
     const normalized = products
       .map((product) => ({
         ...product,
-        imageUrl: normalizeImageUrl(product.imageUrl, shouldIncludeImageData),
+        imageUrl: normalizeImageUrl(product.imageUrl, false),
+        thumbUrl: normalizeStoredImageUrl(product.thumbUrl) || deriveThumbUrlFromImageUrl(product.imageUrl),
         categoryName: product.categoryId?.name || 'Sin categoria',
         categoryId: String(product.categoryId?._id || product.categoryId || ''),
         storeName: product.storeId?.name || '',
@@ -1007,6 +1049,7 @@ router.post('/products', async (req, res) => {
       createInAllStores = false,
       inventoryAlertStock = 10,
       imageUrl = '',
+      thumbUrl = '',
       shortDescription = '',
       tags = [],
       status = 'active',
@@ -1078,7 +1121,8 @@ router.post('/products', async (req, res) => {
       price: Number(price),
       cost: Number(cost || 0),
       inventoryAlertStock: Number(inventoryAlertStock ?? 10),
-      imageUrl: String(imageUrl || '').trim(),
+      imageUrl: validateIncomingImageUrl(imageUrl),
+      thumbUrl: validateIncomingImageUrl(thumbUrl) || deriveThumbUrlFromImageUrl(imageUrl),
       shortDescription: String(shortDescription || '').trim(),
       tags,
       status,
@@ -1119,6 +1163,8 @@ router.post('/products', async (req, res) => {
       { $set: { sharedProductId } }
     );
 
+    await invalidateSchoolMenuCache(schoolId);
+
     return res.status(201).json({
       createdCount: createdProducts.length,
       skippedCount: existingStoreIds.size,
@@ -1142,6 +1188,7 @@ router.patch('/products/:id', async (req, res) => {
       stock,
       inventoryAlertStock,
       imageUrl,
+      thumbUrl,
       shortDescription,
       status,
       tags,
@@ -1196,7 +1243,14 @@ router.patch('/products/:id', async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'imageUrl')) {
-      product.imageUrl = String(imageUrl || '').trim();
+      product.imageUrl = validateIncomingImageUrl(imageUrl);
+      if (!Object.prototype.hasOwnProperty.call(req.body, 'thumbUrl')) {
+        product.thumbUrl = deriveThumbUrlFromImageUrl(imageUrl);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'thumbUrl')) {
+      product.thumbUrl = validateIncomingImageUrl(thumbUrl);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'shortDescription')) {
@@ -1215,6 +1269,7 @@ router.patch('/products/:id', async (req, res) => {
     }
 
     await product.save();
+    await invalidateSchoolMenuCache(schoolId);
     return res.status(200).json(product);
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -1232,6 +1287,7 @@ router.delete('/products/:id', async (req, res) => {
     product.deletedAt = new Date();
     product.status = 'inactive';
     await product.save();
+    await invalidateSchoolMenuCache(schoolId);
 
     return res.status(200).json({ message: 'Product deleted' });
   } catch (error) {
