@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { completeRegister } from '../services/auth.service';
+import smartLogo from '../assets/smartlogo.png';
 
 function createStudentDraft() {
   return {
@@ -85,9 +86,9 @@ function RegisterVerifiedNext() {
   };
 
   return (
-    <div className="page-center login-page">
+    <div className="page-center login-page login-page-auth">
       <form className="panel login-panel register-students-panel" onSubmit={onSubmit}>
-        <h1 className="login-brand-title">SmartLunch</h1>
+        <img className="register-smartlogo" src={smartLogo} alt="SmartLunch" />
         <h2>Completa tu registro</h2>
         <p className="login-register-cta">Correo verificado: <strong>{profile?.email || 'no disponible'}</strong></p>
 

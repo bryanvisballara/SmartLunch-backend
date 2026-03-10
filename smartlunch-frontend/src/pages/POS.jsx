@@ -430,6 +430,12 @@ function POS() {
     return found ? found.quantity : 0;
   };
 
+  const getAvailableStock = (product) => {
+    const stock = Math.max(0, Number(product?.stock || 0));
+    const inCart = getCartQuantity(product?._id);
+    return Math.max(0, stock - inCart);
+  };
+
   const selectStudent = (studentItem) => {
     setStudent(studentItem);
     setQuery(studentItem.name);
@@ -485,9 +491,21 @@ function POS() {
       return;
     }
 
+    if (getAvailableStock(product) <= 0) {
+      setMessage('No hay stock disponible para este producto');
+      return;
+    }
+
     setItems((previous) => {
       const found = previous.find((item) => item._id === product._id);
       if (found) {
+        const nextQuantity = Number(found.quantity || 0) + 1;
+        const maxStock = Math.max(0, Number(product.stock || 0));
+        if (nextQuantity > maxStock) {
+          setMessage('No hay stock disponible para este producto');
+          return previous;
+        }
+
         return previous.map((item) =>
           item._id === product._id ? { ...item, quantity: item.quantity + 1 } : item
         );
@@ -511,9 +529,15 @@ function POS() {
       }
 
       const nextQuantity = found.quantity + delta;
+      const maxStock = Math.max(0, Number(found.stock || 0));
 
       if (nextQuantity <= 0) {
         return previous.filter((item) => item._id !== productId);
+      }
+
+      if (delta > 0 && nextQuantity > maxStock) {
+        setMessage('No hay stock disponible para este producto');
+        return previous;
       }
 
       if (delta > 0 && dailyLimit > 0) {
@@ -725,6 +749,7 @@ function POS() {
             {filteredProducts.map((product) => {
               const reason = productBlockReason(product);
               const quantityInCart = getCartQuantity(product._id);
+              const availableStock = getAvailableStock(product);
               const disabledLabel = reason || (product.status !== 'active' ? 'No disponible' : 'Agregar');
 
               return (
@@ -733,6 +758,7 @@ function POS() {
                   onAdd={addItem}
                   product={product}
                   quantityInCart={quantityInCart}
+                  availableStock={availableStock}
                   forceDisabled={Boolean(reason)}
                   disabledLabel={disabledLabel}
                   disabledReason={reason || ''}

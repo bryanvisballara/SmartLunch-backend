@@ -10,8 +10,12 @@ function Orders() {
   const [filters, setFilters] = useState({
     from: '',
     to: '',
+    searchType: 'student',
     studentId: '',
+    productKey: '',
   });
+  const [productQuery, setProductQuery] = useState('');
+  const [showProductOptions, setShowProductOptions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -42,7 +46,7 @@ function Orders() {
 
     try {
       const params = {};
-      if (nextFilters.studentId) {
+      if (nextFilters.searchType === 'student' && nextFilters.studentId) {
         params.studentId = nextFilters.studentId;
       }
       if (nextFilters.from) {
@@ -77,6 +81,59 @@ function Orders() {
     return orders.filter((order) => String(order?.storeId?._id || '') === String(currentStore._id));
   }, [orders, isVendor, currentStore?._id]);
 
+  const productOptions = useMemo(() => {
+    const map = new Map();
+
+    for (const order of visibleOrders) {
+      for (const item of order?.items || []) {
+        const key = String(item?.productId?._id || item?.productId || item?._id || '').trim();
+        const label = String(item?.nameSnapshot || item?.productId?.name || '').trim();
+
+        if (!label) {
+          continue;
+        }
+
+        const normalizedKey = key || `name:${label.toLowerCase()}`;
+        if (!map.has(normalizedKey)) {
+          map.set(normalizedKey, {
+            key: normalizedKey,
+            label,
+          });
+        }
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  }, [visibleOrders]);
+
+  const filteredProductOptions = useMemo(() => {
+    const queryText = String(productQuery || '').trim().toLowerCase();
+    if (!queryText) {
+      return productOptions;
+    }
+
+    return productOptions.filter((option) => option.label.toLowerCase().includes(queryText));
+  }, [productOptions, productQuery]);
+
+  const finalVisibleOrders = useMemo(() => {
+    if (filters.searchType !== 'product' || !filters.productKey) {
+      return visibleOrders;
+    }
+
+    return visibleOrders.filter((order) =>
+      (order?.items || []).some((item) => {
+        const itemProductId = String(item?.productId?._id || item?.productId || item?._id || '').trim();
+        const itemName = String(item?.nameSnapshot || item?.productId?.name || '').trim().toLowerCase();
+
+        if (filters.productKey.startsWith('name:')) {
+          return `name:${itemName}` === filters.productKey;
+        }
+
+        return itemProductId === filters.productKey;
+      })
+    );
+  }, [visibleOrders, filters.searchType, filters.productKey]);
+
   const onChangeFilter = (key, value) => {
     setFilters((prev) => ({
       ...prev,
@@ -84,13 +141,45 @@ function Orders() {
     }));
   };
 
+  const onChangeSearchType = (value) => {
+    if (value === 'product') {
+      setFilters((prev) => ({
+        ...prev,
+        searchType: 'product',
+        studentId: '',
+      }));
+      setProductQuery('');
+      setShowProductOptions(true);
+      return;
+    }
+
+    setFilters((prev) => ({
+      ...prev,
+      searchType: 'student',
+      productKey: '',
+    }));
+    setProductQuery('');
+    setShowProductOptions(false);
+  };
+
+  const onSelectProductOption = (option) => {
+    setFilters((prev) => ({
+      ...prev,
+      productKey: option.key,
+    }));
+    setProductQuery(option.label);
+    setShowProductOptions(false);
+  };
+
   const onSearch = () => {
     loadOrders(filters);
   };
 
   const onClear = () => {
-    const emptyFilters = { from: '', to: '', studentId: '' };
+    const emptyFilters = { from: '', to: '', searchType: 'student', studentId: '', productKey: '' };
     setFilters(emptyFilters);
+    setProductQuery('');
+    setShowProductOptions(false);
     loadOrders(emptyFilters);
   };
 
@@ -143,6 +232,17 @@ function Orders() {
 
         <div className="admin-form-grid">
           <label>
+            Buscar por
+            <select
+              value={filters.searchType}
+              onChange={(event) => onChangeSearchType(event.target.value)}
+            >
+              <option value="student">Alumno</option>
+              <option value="product">Producto</option>
+            </select>
+          </label>
+
+          <label>
             Fecha desde
             <input
               type="date"
@@ -160,20 +260,61 @@ function Orders() {
             />
           </label>
 
-          <label>
-            Alumno
-            <select
-              value={filters.studentId}
-              onChange={(event) => onChangeFilter('studentId', event.target.value)}
-            >
-              <option value="">Todos</option>
-              {students.map((student) => (
-                <option key={student._id} value={student._id}>
-                  {student.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {filters.searchType === 'student' ? (
+            <label>
+              Alumno
+              <select
+                value={filters.studentId}
+                onChange={(event) => onChangeFilter('studentId', event.target.value)}
+              >
+                <option value="">Todos</option>
+                {students.map((student) => (
+                  <option key={student._id} value={student._id}>
+                    {student.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label>
+              Producto
+              <div className="product-picker">
+                <input
+                  type="text"
+                  value={productQuery}
+                  placeholder="Escribe para filtrar productos"
+                  onFocus={() => setShowProductOptions(true)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setProductQuery(nextValue);
+                    setShowProductOptions(true);
+                    setFilters((prev) => ({
+                      ...prev,
+                      productKey: '',
+                    }));
+                  }}
+                />
+                {showProductOptions ? (
+                  <div className="product-picker-menu">
+                    {filteredProductOptions.length > 0 ? (
+                      filteredProductOptions.map((option) => (
+                        <button
+                          className="product-picker-option"
+                          key={option.key}
+                          type="button"
+                          onClick={() => onSelectProductOption(option)}
+                        >
+                          {option.label}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="product-picker-empty">No hay productos que coincidan.</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </label>
+          )}
 
           <div className="admin-cost-summary-row">
             <button className="btn btn-primary" type="button" onClick={onSearch} disabled={loading}>
@@ -200,12 +341,12 @@ function Orders() {
               </tr>
             </thead>
             <tbody>
-              {visibleOrders.length === 0 ? (
+              {finalVisibleOrders.length === 0 ? (
                 <tr>
                   <td colSpan={6}>{loading ? 'Cargando ordenes...' : 'No hay ordenes para mostrar.'}</td>
                 </tr>
               ) : (
-                visibleOrders.map((order) => (
+                finalVisibleOrders.map((order) => (
                   <tr key={order._id}>
                     <td title={order._id}>{formatOrderNumber(order._id)}</td>
                     <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'Sin alumno')}</td>

@@ -370,8 +370,15 @@ label {
   text-shadow: 0 2px 8px rgba(2, 6, 23, 0.42);
 }
 
+.login-page .register-smartlogo {
+  width: min(230px, 62vw);
+  height: auto;
+  display: block;
+  margin: 0 auto -0.45rem;
+}
+
 .login-page .login-panel h2 {
-  margin: 0.2rem 0 0.01rem;
+  margin: 0 0 0.01rem;
   font-size: clamp(1.28rem, 6.1vw, 1.5rem);
 }
 
@@ -591,6 +598,7 @@ label {
   width: 59.375%;
   height: auto;
   display: block;
+  margin-bottom: -3.1rem;
   transform-origin: 50% 55%;
   animation: loginLogoReveal 700ms ease-out both, loginLogoFloat 3.2s ease-in-out 0.7s infinite;
 }
@@ -599,15 +607,15 @@ label {
   width: 115%;
   height: auto;
   display: block;
-  margin-top: -0.35rem;
-  margin-bottom: -0.95rem;
+  margin-top: 0;
+  margin-bottom: -0.25rem;
   transform-origin: 50% 50%;
   animation: smartLogoScaleInOnce 3s ease-out 1 both;
 }
 
 .login-page-auth .login-panel.login-auth-card {
   width: min(470px, 95vw);
-  margin-top: 0.25rem;
+  margin-top: -1.1rem;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -764,6 +772,66 @@ label {
   margin-top: 0.9rem;
   color: rgba(230, 242, 255, 0.9);
   font-size: 0.92rem;
+}
+
+.login-page-auth .register-verification-overlay {
+  background: rgba(7, 19, 33, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.login-page-auth .register-verification-modal {
+  width: min(470px, 100%);
+  background: linear-gradient(180deg, #f9fcff 0%, #eef5fc 100%);
+  border: 1px solid #c9d8e8;
+  border-radius: 18px;
+  box-shadow: 0 20px 45px rgba(7, 25, 45, 0.35);
+  padding: 1.15rem;
+  gap: 0.85rem;
+}
+
+.login-page-auth .register-verification-modal h3 {
+  color: #10273f;
+  font-size: clamp(1.75rem, 4.2vw, 2.05rem);
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.login-page-auth .register-verification-modal p,
+.login-page-auth .register-verification-modal .login-register-cta {
+  color: #2f4c67;
+  font-size: 0.96rem;
+}
+
+.login-page-auth .register-verification-modal input {
+  background: #f7fbff;
+  border: 1px solid #b8cbde;
+  color: #0f2a44;
+  border-radius: 16px;
+  min-height: 48px;
+  padding-inline: 0.85rem;
+}
+
+.login-page-auth .register-verification-modal input::placeholder {
+  color: #6c8198;
+}
+
+.login-page-auth .register-verification-modal .register-resend-btn {
+  color: #1e90ff;
+  font-weight: 600;
+}
+
+.login-page-auth .register-verification-modal .register-resend-btn:hover:not(:disabled) {
+  color: #1675cd;
+}
+
+.login-page-auth .register-verification-modal .register-verification-actions {
+  margin-top: 0.2rem;
+}
+
+.login-page-auth .register-verification-modal .register-verification-actions .btn:not(.btn-primary) {
+  background: #d9e2ec;
+  color: #111827;
+  border: 0;
 }
 
 .login-page-auth .login-meta-links {
@@ -1168,7 +1236,10 @@ label {
 }
 
 .student-list-panel {
-  max-height: 280px;
+  height: clamp(210px, 34vh, 300px);
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   align-content: start;
   gap: 0.4rem;
 }
@@ -1415,6 +1486,8 @@ label {
 
 .success-modal {
   width: min(420px, 92vw);
+  max-height: 86vh;
+  overflow: hidden;
   background: #ffffff;
   border: 1px solid #dbeafe;
   border-radius: 16px;
@@ -1450,6 +1523,9 @@ label {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 0.6rem;
+  max-height: min(42vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #f8fafc;
   display: grid;
   gap: 0.3rem;
