@@ -11,7 +11,7 @@ const walletTransactionSchema = new mongoose.Schema(
       required: true,
     },
     amount: { type: Number, required: true },
-    method: { type: String, enum: ['system', 'cash', 'qr', 'transfer', 'dataphone', 'daviplata', 'mercadopago'], required: true },
+    method: { type: String, enum: ['system', 'cash', 'qr', 'transfer', 'dataphone', 'daviplata', 'bancolombia', 'mercadopago'], required: true },
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     notes: { type: String, trim: true },

@@ -78,6 +78,10 @@ function App() {
     location.pathname !== '/register/next-step' &&
     !location.pathname.startsWith('/parent') &&
     !['/privacy', '/contact'].includes(location.pathname);
+  const hideFooter =
+    location.pathname === '/login' ||
+    location.pathname === '/register' ||
+    location.pathname === '/register/next-step';
 
   return (
     <div>
@@ -232,7 +236,7 @@ function App() {
           <Route element={<Navigate replace to="/login" />} path="*" />
         </Routes>
       </main>
-      <AppFooter />
+      {!hideFooter ? <AppFooter /> : null}
     </div>
   );
 }

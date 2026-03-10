@@ -133,7 +133,7 @@ router.get('/summary', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
 router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const {
       storeId,
       date,
@@ -142,6 +142,7 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       systemTransfer = 0,
       systemDataphone = 0,
       systemWallet = 0,
+      baseInitial,
       baseFinal = 0,
       countedCash = 0,
       notes,
@@ -187,10 +188,19 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
     });
 
     const carriedBaseInitial = Number(previous?.baseFinal || 0);
+    const requestedBaseInitial = Number(baseInitial);
+    const vendorProvidedBaseInitial =
+      role === 'vendor' && Number.isFinite(requestedBaseInitial) ? requestedBaseInitial : null;
+
+    if (vendorProvidedBaseInitial != null && vendorProvidedBaseInitial < 0) {
+      return res.status(400).json({ message: 'La base inicial no puede ser negativa' });
+    }
+
+    const resolvedBaseInitial = vendorProvidedBaseInitial != null ? vendorProvidedBaseInitial : carriedBaseInitial;
     const totalSales = Number(systemCash) + Number(systemQr) + Number(systemTransfer) + Number(systemDataphone) + Number(systemWallet);
     const cashAccordingSystem = Number(systemCash);
-    const expectedCash = cashAccordingSystem + carriedBaseInitial - Number(baseFinal);
-    const balanceReferenceCash = cashAccordingSystem + carriedBaseInitial;
+    const expectedCash = cashAccordingSystem + resolvedBaseInitial - Number(baseFinal);
+    const balanceReferenceCash = cashAccordingSystem + resolvedBaseInitial;
     const cashDifference = Number(countedCash) - balanceReferenceCash;
     const totalCashSaved = Number(countedCash) - Number(baseFinal);
 
@@ -206,7 +216,7 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       systemWallet,
       totalSales,
       cashAccordingSystem,
-      baseInitial: carriedBaseInitial,
+      baseInitial: resolvedBaseInitial,
       baseFinal,
       countedCash,
       totalCashSaved,

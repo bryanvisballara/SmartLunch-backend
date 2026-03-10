@@ -13,7 +13,8 @@ import {
   verifyBiometricRegistration,
 } from '../services/auth.service';
 import useAuthStore from '../store/auth.store';
-import loginImage from '../assets/imagenlogin.png';
+import loginLogo from '../assets/loginlogo.png';
+import smartLogo from '../assets/smartlogo.png';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensureParentPushNotifications } from '../lib/pushNotifications';
 import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
@@ -24,6 +25,30 @@ function normalizeUsername(value) {
 
 function canUseBiometricAuth() {
   return typeof window !== 'undefined' && window.isSecureContext && typeof window.PublicKeyCredential !== 'undefined';
+}
+
+function InputAdornment({ kind }) {
+  if (kind === 'school') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M12 3 2 8l10 5 10-5-10-5Zm-6 8.8V15c0 2.7 2.7 4 6 4s6-1.3 6-4v-3.2l-6 3-6-3Z" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (kind === 'password') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M17 10h-1V8a4 4 0 1 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2Zm-6 0V8a2 2 0 1 1 4 0v2h-4Z" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5Z" fill="currentColor" />
+    </svg>
+  );
 }
 
 function Login() {
@@ -55,7 +80,6 @@ function Login() {
   const [forgotError, setForgotError] = useState('');
   const [forgotInfo, setForgotInfo] = useState('');
   const [forgotResendCountdown, setForgotResendCountdown] = useState(0);
-
   useEffect(() => {
     if (forgotResendCountdown <= 0) {
       return;
@@ -393,35 +417,50 @@ function Login() {
   const supportsBiometric = canUseBiometricAuth();
 
   return (
-    <div className="page-center login-page">
-      <section className="login-hero" aria-label="Encabezado de login">
-        <div className="login-hero-media">
-          <img alt="Mamá con niño en comedor" className="login-hero-image" src={loginImage} />
+    <div className="page-center login-page login-page-auth">
+      <section className="login-auth-hero" aria-label="Encabezado de login">
+        <div className="login-auth-logo-wrap" aria-hidden="true">
+          <img className="login-auth-logo-image" src={loginLogo} alt="SmartLunch" />
+          <img className="login-auth-sublogo-image" src={smartLogo} alt="SmartLunch" />
         </div>
       </section>
-      <form className="panel login-panel" onSubmit={onSubmit}>
-        <h1 className="login-brand-title">SmartLunch</h1>
-        <h2>Ingresa a tu cuenta</h2>
+
+      <form className="login-panel login-auth-card" onSubmit={onSubmit}>
+        <div className="login-auth-card-head">
+          <h2>Bienvenido,</h2>
+          <p>Administra el consumo escolar de forma simple y segura.</p>
+        </div>
+
         <label>
-          Colegio
-          <select value={selectedSchoolId} onChange={(e) => setSelectedSchoolId(e.target.value)}>
-            <option value="">Selecciona tu colegio</option>
-            {SCHOOL_OPTIONS.map((school) => (
-              <option key={school.id} value={school.id}>
-                {school.label}
-              </option>
-            ))}
-          </select>
+          <span>Colegio</span>
+          <div className="login-input-shell">
+            <span className="login-input-icon"><InputAdornment kind="school" /></span>
+            <select value={selectedSchoolId} onChange={(e) => setSelectedSchoolId(e.target.value)}>
+              <option value="">Selecciona tu colegio</option>
+              {SCHOOL_OPTIONS.map((school) => (
+                <option key={school.id} value={school.id}>
+                  {school.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </label>
+
         <label>
-          Nombre de usuario
-          <input value={username} onChange={(e) => setUsername(e.target.value)} />
+          <span>Usuario</span>
+          <div className="login-input-shell">
+            <span className="login-input-icon"><InputAdornment kind="username" /></span>
+            <input placeholder="Tu usuario" value={username} onChange={(e) => setUsername(e.target.value)} />
+          </div>
         </label>
+
         <label>
-          Password
-          <div className="password-field">
+          <span>Password</span>
+          <div className="password-field login-input-shell">
+            <span className="login-input-icon"><InputAdornment kind="password" /></span>
             <input
               type={showPassword ? 'text' : 'password'}
+              placeholder="Tu contraseña"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -442,23 +481,43 @@ function Login() {
             </button>
           </div>
         </label>
+
         <button className="login-inline-link login-inline-link-button" onClick={openForgotPasswordPopup} type="button">
           ¿Olvidaste tu contraseña?
         </button>
-        <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
-        <button className="btn btn-primary" disabled={loading || biometricLoading} type="submit">
-          {loading ? 'Entrando...' : 'Entrar'}
-        </button>
-        {supportsBiometric ? (
-          <button
-            className="btn login-biometric-btn"
-            disabled={loading || biometricLoading}
-            onClick={onBiometricLogin}
-            type="button"
-          >
-            {biometricLoading ? 'Validando...' : 'Entrar con Face ID / Huella'}
+
+        <div className={`login-actions-row${supportsBiometric ? ' has-biometric' : ''}`}>
+          <button className="btn btn-primary login-primary-btn" disabled={loading || biometricLoading} type="submit">
+            {loading ? 'Entrando...' : 'Entrar'}
           </button>
-        ) : null}
+
+          {supportsBiometric ? (
+            <button
+              className="btn login-biometric-btn login-biometric-outline"
+              disabled={loading || biometricLoading}
+              onClick={onBiometricLogin}
+              aria-label={biometricLoading ? 'Validando biometria' : 'Entrar con Face ID o huella'}
+              title={biometricLoading ? 'Validando...' : 'Entrar con Face ID / Huella'}
+              type="button"
+            >
+              {biometricLoading ? (
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22" className="login-biometric-icon-spin">
+                  <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="30 18" />
+                </svg>
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24">
+                  <path d="M8 3.8A2.8 2.8 0 0 0 5.2 6.6v2.1M16 3.8a2.8 2.8 0 0 1 2.8 2.8v2.1M8 20.2a2.8 2.8 0 0 1-2.8-2.8v-2.1M16 20.2a2.8 2.8 0 0 0 2.8-2.8v-2.1" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                  <circle cx="9" cy="10" r="1.1" fill="currentColor" />
+                  <circle cx="15" cy="10" r="1.1" fill="currentColor" />
+                  <path d="M9 15c.9.9 1.8 1.3 3 1.3s2.1-.4 3-1.3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              )}
+            </button>
+          ) : null}
+        </div>
+
+        <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
+
         <p className="login-register-cta">
           ¿Aún no estás registrado?{' '}
           <Link className="login-inline-link" to="/register">
@@ -466,7 +525,14 @@ function Login() {
           </Link>
           .
         </p>
+
       </form>
+
+      <p className="login-meta-links" aria-label="Informacion legal">
+        <span>Privacy</span>
+        <span aria-hidden="true"> | </span>
+        <span>Contact</span>
+      </p>
 
       {showForgotPasswordPopup ? (
         <div className="register-verification-overlay" role="dialog" aria-modal="true" aria-label="Recuperar contrasena">

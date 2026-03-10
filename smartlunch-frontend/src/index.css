@@ -544,6 +544,338 @@ label {
   }
 }
 
+.login-page-auth {
+  --login-primary: #1e90ff;
+  --login-secondary: #2bb5e8;
+  --login-dark: #0f2a44;
+  --login-bg-soft: #f4f7fb;
+  --login-accent: #7ed957;
+  --login-text: #10273f;
+  font-family: 'Poppins', 'Segoe UI', sans-serif;
+  margin: -1rem;
+  width: calc(100% + 2rem);
+  padding: 0 1rem 2.5rem;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #12324b 0%, #102739 48%, #0b121b 100%);
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0;
+  position: relative;
+}
+
+.login-page-auth .login-auth-hero {
+  width: min(520px, 100%);
+  margin-top: 1rem;
+  padding: 0.5rem 1rem 0.25rem;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+  display: grid;
+  gap: 0;
+  animation: loginHeroReveal 300ms ease-out both;
+}
+
+.login-page-auth .login-auth-logo-wrap {
+  position: relative;
+  width: min(280px, 68vw);
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  gap: 0;
+  padding: 0;
+}
+
+.login-page-auth .login-auth-logo-image {
+  width: 59.375%;
+  height: auto;
+  display: block;
+  transform-origin: 50% 55%;
+  animation: loginLogoReveal 700ms ease-out both, loginLogoFloat 3.2s ease-in-out 0.7s infinite;
+}
+
+.login-page-auth .login-auth-sublogo-image {
+  width: 115%;
+  height: auto;
+  display: block;
+  margin-top: -0.35rem;
+  margin-bottom: -0.95rem;
+  transform-origin: 50% 50%;
+  animation: smartLogoScaleInOnce 3s ease-out 1 both;
+}
+
+.login-page-auth .login-panel.login-auth-card {
+  width: min(470px, 95vw);
+  margin-top: 0.25rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 1.15rem 1rem;
+  color: #eef6ff;
+  gap: 0.72rem;
+  animation: loginCardReveal 300ms ease-out both;
+}
+
+.login-page-auth .login-auth-card-head {
+  margin-bottom: 0.2rem;
+}
+
+.login-page-auth .login-auth-card-head h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(1.35rem, 4vw, 1.72rem);
+  line-height: 1.2;
+}
+
+.login-page-auth .login-auth-card-head p {
+  margin: 0.28rem 0 0;
+  color: rgba(194, 205, 218, 0.92);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.login-page-auth .login-auth-card label {
+  color: #e6f2ff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.login-page-auth .login-input-shell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  border: 1px solid rgba(219, 233, 248, 0.45);
+  padding: 0.1rem 0.55rem;
+}
+
+.login-page-auth .login-input-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: #d4e9ff;
+  flex-shrink: 0;
+}
+
+.login-page-auth .login-input-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.login-page-auth .login-auth-card input,
+.login-page-auth .login-auth-card select {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  padding: 0.15rem 0;
+  font-size: 0.96rem;
+}
+
+.login-page-auth .login-auth-card input::placeholder {
+  color: rgba(231, 243, 255, 0.75);
+}
+
+.login-page-auth .login-auth-card select option {
+  color: #0f2a44;
+}
+
+.login-page-auth .login-auth-card input:focus,
+.login-page-auth .login-auth-card select:focus {
+  outline: none;
+}
+
+.login-page-auth .login-auth-card .password-field input {
+  padding-right: 2.2rem;
+}
+
+.login-page-auth .password-toggle {
+  color: #d4e9ff;
+  right: 0.35rem;
+}
+
+.login-page-auth .login-inline-link {
+  color: #d4ecff;
+  font-weight: 600;
+}
+
+.login-page-auth .login-inline-link:hover {
+  color: #ffffff;
+}
+
+.login-page-auth .login-primary-btn {
+  width: 100%;
+  margin-top: 0;
+  min-height: 50px;
+  padding-inline: 1.1rem;
+  border: 0;
+  border-radius: 14px;
+  font-weight: 700;
+  background: linear-gradient(90deg, #2bb5e8 0%, #1e90ff 100%);
+  box-shadow: 0 10px 22px rgba(30, 144, 255, 0.3);
+}
+
+.login-page-auth .login-actions-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+
+.login-page-auth .login-actions-row.has-biometric {
+  grid-template-columns: minmax(0, 1fr) 50px;
+}
+
+.login-page-auth .login-inline-link-button {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.login-page-auth .login-biometric-outline {
+  width: 50px;
+  min-height: 50px;
+  padding: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(214, 226, 241, 0.7);
+  color: #eaf4ff;
+  background: transparent;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+}
+
+.login-page-auth .login-biometric-outline:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.login-page-auth .login-register-cta {
+  margin-top: 0.9rem;
+  color: rgba(230, 242, 255, 0.9);
+  font-size: 0.92rem;
+}
+
+.login-page-auth .login-meta-links {
+  position: fixed;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  margin: 0;
+  text-align: center;
+  color: #374151;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  z-index: 5;
+}
+
+.login-page-auth .login-biometric-icon-spin {
+  animation: loginBiometricSpin 900ms linear infinite;
+}
+
+.login-page-auth .login-register-cta .login-inline-link {
+  color: #7ed957;
+}
+
+.login-page-auth .login-register-cta .login-inline-link:hover {
+  color: #9aec74;
+}
+
+@keyframes loginHeroReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes loginLogoReveal {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes loginLogoFloat {
+  0% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes smartLogoScaleInOnce {
+  from {
+    transform: scale(0.82);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes loginCardReveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes loginBiometricSpin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (min-width: 820px) {
+  .login-page-auth .login-auth-hero {
+    min-height: auto;
+  }
+
+  .login-page-auth .login-auth-logo-wrap {
+    width: min(300px, 22vw);
+  }
+
+  .login-page-auth .login-panel.login-auth-card {
+    margin-top: 0.35rem;
+  }
+}
+
 .panel.soft {
   background: #f9fafb;
 }

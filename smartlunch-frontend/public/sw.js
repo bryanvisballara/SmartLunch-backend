@@ -23,8 +23,8 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(title, {
       body,
       data,
-      icon: '/vite.svg',
-      badge: '/vite.svg',
+      icon: '/iconosmartlunch.jpg',
+      badge: '/iconosmartlunch.jpg',
       tag: data.type || 'smartlunch-notification',
       renotify: false,
     })

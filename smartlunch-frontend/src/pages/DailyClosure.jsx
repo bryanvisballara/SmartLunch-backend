@@ -19,7 +19,7 @@ function todayLongEs() {
 }
 
 function DailyClosure() {
-  const { currentStore } = useAuthStore();
+  const { currentStore, user } = useAuthStore();
   const [summary, setSummary] = useState(null);
   const [date] = useState(todayYmd());
   const [baseInitial, setBaseInitial] = useState('0');
@@ -31,6 +31,7 @@ function DailyClosure() {
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [savedClosure, setSavedClosure] = useState(null);
   const todayLabel = todayLongEs();
+  const canEditBaseInitial = user?.role === 'vendor';
 
   const baseInitialNumber = Number(baseInitial || 0);
   const baseFinalNumber = Number(baseFinal || 0);
@@ -84,6 +85,7 @@ function DailyClosure() {
         systemTransfer: summary.ingresosTransfer,
         systemDataphone: summary.ingresosDatafono,
         systemWallet: summary.ingresosSistema,
+        baseInitial: Number(baseInitial),
         baseFinal: Number(baseFinal),
         countedCash: Number(countedCash),
         notes,
@@ -150,7 +152,13 @@ function DailyClosure() {
         <div className="row gap">
           <label>
             Base inicial
-            <input value={baseInitial} type="number" readOnly disabled />
+            <input
+              value={baseInitial}
+              onChange={(event) => setBaseInitial(event.target.value)}
+              type="number"
+              readOnly={!canEditBaseInitial}
+              disabled={dayClosed || !canEditBaseInitial}
+            />
           </label>
           <label>
             Efectivo real contado
