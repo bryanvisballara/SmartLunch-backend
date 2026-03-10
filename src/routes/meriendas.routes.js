@@ -10,6 +10,7 @@ const MeriendaSchedule = require('../models/meriendaSchedule.model');
 const MeriendaOperation = require('../models/meriendaOperation.model');
 const MeriendaIntakeRecord = require('../models/meriendaIntakeRecord.model');
 const { queueTutorCommentNotification } = require('../services/notification.service');
+const { normalizeStoredImageUrl, validateIncomingImageUrl } = require('../utils/imageUpload');
 
 const router = express.Router();
 
@@ -62,6 +63,44 @@ const normalizeScheduleDays = (daysInput) => {
 const normalizeStatus = (value) => {
   const normalized = String(value || '').trim();
   return ['pending_contact', 'contacted', 'resolved'].includes(normalized) ? normalized : 'pending_contact';
+};
+
+const sanitizeSnackImage = (value) => normalizeStoredImageUrl(value);
+
+const sanitizeSnackDoc = (snack) => {
+  if (!snack) {
+    return snack;
+  }
+
+  return {
+    ...snack,
+    imageUrl: sanitizeSnackImage(snack.imageUrl),
+  };
+};
+
+const sanitizeScheduleDoc = (schedule) => {
+  if (!schedule || !Array.isArray(schedule.days)) {
+    return schedule;
+  }
+
+  return {
+    ...schedule,
+    days: schedule.days.map((day) => ({
+      ...day,
+      firstSnackId: day.firstSnackId
+        ? {
+            ...day.firstSnackId,
+            imageUrl: sanitizeSnackImage(day.firstSnackId.imageUrl),
+          }
+        : day.firstSnackId,
+      secondSnackId: day.secondSnackId
+        ? {
+            ...day.secondSnackId,
+            imageUrl: sanitizeSnackImage(day.secondSnackId.imageUrl),
+          }
+        : day.secondSnackId,
+    })),
+  };
 };
 
 const normalizeFoodRestrictionsInput = (payload = {}) => {
@@ -819,7 +858,7 @@ router.get('/snacks', roleMiddleware('admin'), async (req, res) => {
   try {
     const { schoolId } = req.user;
     const snacks = await MeriendaSnack.find({ schoolId, status: 'active' }).sort({ type: 1 }).lean();
-    return res.status(200).json(snacks);
+    return res.status(200).json(snacks.map(sanitizeSnackDoc));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -845,13 +884,13 @@ router.post('/snacks', roleMiddleware('admin'), async (req, res) => {
         type: String(type),
         title: String(title).trim(),
         description: String(description || '').trim(),
-        imageUrl: String(imageUrl || '').trim(),
+        imageUrl: validateIncomingImageUrl(imageUrl),
         status: 'active',
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    return res.status(201).json(snack);
+    return res.status(201).json(sanitizeSnackDoc(snack.toObject()));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -884,7 +923,7 @@ router.patch('/snacks/:id', roleMiddleware('admin'), async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'imageUrl')) {
-      snack.imageUrl = String(imageUrl || '').trim();
+      snack.imageUrl = validateIncomingImageUrl(imageUrl);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
@@ -892,7 +931,7 @@ router.patch('/snacks/:id', roleMiddleware('admin'), async (req, res) => {
     }
 
     await snack.save();
-    return res.status(200).json(snack);
+    return res.status(200).json(sanitizeSnackDoc(snack.toObject()));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -912,7 +951,7 @@ router.get('/schedule', roleMiddleware('admin'), async (req, res) => {
       .populate('days.secondSnackId', 'title type imageUrl')
       .lean();
 
-    return res.status(200).json(schedule || { schoolId, month, days: [] });
+    return res.status(200).json(sanitizeScheduleDoc(schedule) || { schoolId, month, days: [] });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -942,7 +981,7 @@ router.put('/schedule/:month', roleMiddleware('admin'), async (req, res) => {
       .populate('days.firstSnackId', 'title type imageUrl')
       .populate('days.secondSnackId', 'title type imageUrl');
 
-    return res.status(200).json(schedule);
+    return res.status(200).json(sanitizeScheduleDoc(schedule.toObject()));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

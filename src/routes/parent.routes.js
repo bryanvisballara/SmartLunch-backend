@@ -399,7 +399,7 @@ router.get('/portal/categories', async (req, res) => {
     const normalizedCategories = categories.map((category) => ({
       _id: category._id,
       name: category.name || 'Sin nombre',
-      imageUrl: category.imageUrl || '',
+      imageUrl: normalizeStoredImageUrl(category.imageUrl),
       thumbUrl: normalizeStoredImageUrl(category.thumbUrl) || deriveThumbUrlFromImageUrl(category.imageUrl),
     }));
 
@@ -575,7 +575,7 @@ router.get('/portal/meriendas', async (req, res) => {
                       _id: item.firstSnackId._id,
                       title: item.firstSnackId.title || '',
                       type: item.firstSnackId.type || '',
-                      imageUrl: item.firstSnackId.imageUrl || '',
+                      imageUrl: normalizeStoredImageUrl(item.firstSnackId.imageUrl),
                       thumbUrl: deriveThumbUrlFromImageUrl(item.firstSnackId.imageUrl),
                       description: item.firstSnackId.description || '',
                     }
@@ -585,7 +585,7 @@ router.get('/portal/meriendas', async (req, res) => {
                       _id: item.secondSnackId._id,
                       title: item.secondSnackId.title || '',
                       type: item.secondSnackId.type || '',
-                      imageUrl: item.secondSnackId.imageUrl || '',
+                      imageUrl: normalizeStoredImageUrl(item.secondSnackId.imageUrl),
                       thumbUrl: deriveThumbUrlFromImageUrl(item.secondSnackId.imageUrl),
                       description: item.secondSnackId.description || '',
                     }

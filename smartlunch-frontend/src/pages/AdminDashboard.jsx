@@ -988,15 +988,26 @@ function AdminDashboard() {
     }
   };
 
-  const onSnackImageSelected = (type, event) => {
+  const onSnackImageSelected = async (type, event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const imageUrl = String(reader.result || '');
+    clearMessages();
+    try {
+      const imageUrl = await uploadSingleImageToHosting(file, {
+        folder: 'meriendas',
+        preferredName: file.name,
+      });
+
+      if (!imageUrl) {
+        throw new Error('No se recibio URL de imagen.');
+      }
+
+      setOk('Imagen de snack cargada.');
+
       if (type === 'first') {
         setFirstSnackDraft((prev) => ({ ...prev, imageUrl }));
         return;
@@ -1006,8 +1017,9 @@ function AdminDashboard() {
         return;
       }
       setSecondSnackDraft((prev) => ({ ...prev, imageUrl }));
-    };
-    reader.readAsDataURL(file);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la imagen.');
+    }
   };
 
   const onSaveSnackByType = async (type) => {
