@@ -110,7 +110,10 @@ router.post('/uploads/image', (req, res) => {
         preferredName,
       });
 
-      return res.status(201).json(saved);
+      return res.status(201).json({
+        ...saved,
+        imageUrl: saved.url,
+      });
     } catch (processingError) {
       return res.status(400).json({ message: processingError.message });
     }

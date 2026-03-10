@@ -1876,7 +1876,11 @@ function AdminDashboard() {
 
   const uploadSingleImageToHosting = async (file, { folder, preferredName }) => {
     const response = await uploadAdminImage(file, { folder, preferredName });
-    return String(response?.data?.url || '').trim();
+    const candidate = String(response?.data?.url || response?.data?.imageUrl || '').trim();
+    if (/^data:image\//i.test(candidate)) {
+      return '';
+    }
+    return candidate;
   };
 
   const onManualTopup = (event) => {
