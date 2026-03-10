@@ -92,6 +92,17 @@ const formatDescriptionForTwoLines = (value) => {
 
 const normalizeProductName = (value) => String(value || '').trim().toLowerCase();
 
+const sanitizePublicImageUrl = (value) => {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  if (/^data:image\//i.test(normalized)) {
+    return '';
+  }
+  return normalized;
+};
+
 const paymentMethodLabel = {
   system: 'Sistema',
   cash: 'Efectivo',
@@ -1028,7 +1039,7 @@ function AdminDashboard() {
     const normalizedDraft = {
       title: String(draft.title || '').trim(),
       description: String(draft.description || '').trim(),
-      imageUrl: draft.imageUrl || '',
+      imageUrl: sanitizePublicImageUrl(draft.imageUrl),
     };
 
     const typeLabel = type === 'first' ? '1er snack' : type === 'second' ? '2do snack' : 'bebida';
@@ -2848,7 +2859,7 @@ function AdminDashboard() {
           cost: String(item.cost ?? ''),
           stock: String(item.stock ?? ''),
           inventoryAlertStock: String(item.inventoryAlertStock ?? 10),
-          imageUrl: item.imageUrl || '',
+          imageUrl: sanitizePublicImageUrl(item.imageUrl),
           status: item.status || 'active',
           isAggregated: true,
           sourceProductIds: Array.isArray(item.sourceProductIds) ? item.sourceProductIds : [],
@@ -2864,7 +2875,7 @@ function AdminDashboard() {
         cost: String(item.cost ?? ''),
         stock: String(item.stock ?? ''),
         inventoryAlertStock: String(item.inventoryAlertStock ?? 10),
-        imageUrl: item.imageUrl || '',
+        imageUrl: sanitizePublicImageUrl(item.imageUrl),
         status: item.status || 'active',
       };
     }
@@ -2909,6 +2920,7 @@ function AdminDashboard() {
 
   const onEditTableDraftChange = (item, field, value) => {
     const itemId = String(item._id);
+    const nextValue = editEntity === 'product' && field === 'imageUrl' ? sanitizePublicImageUrl(value) : value;
     setEditTableDrafts((prev) => {
       const current = prev[itemId] || buildEditTableDraft(item);
 
@@ -2951,7 +2963,7 @@ function AdminDashboard() {
         ...prev,
         [itemId]: {
           ...current,
-          [field]: value,
+          [field]: nextValue,
         },
       };
     });
@@ -3009,7 +3021,7 @@ function AdminDashboard() {
                 price: Number(draft.price || 0),
                 cost: Number(draft.cost || 0),
                 inventoryAlertStock: Number(draft.inventoryAlertStock || 0),
-                imageUrl: draft.imageUrl || '',
+                imageUrl: sanitizePublicImageUrl(draft.imageUrl),
               })
             )
           ),
@@ -3052,7 +3064,7 @@ function AdminDashboard() {
             price: Number(draft.price || 0),
             cost: Number(draft.cost || 0),
             inventoryAlertStock: Number(draft.inventoryAlertStock || 0),
-            imageUrl: draft.imageUrl,
+            imageUrl: sanitizePublicImageUrl(draft.imageUrl),
           }),
         'Registro actualizado.',
         async () => {
@@ -4964,9 +4976,9 @@ function AdminDashboard() {
                                   />
                                   {uploadingEditProductImageId === String(item._id) ? <p>Subiendo imagen...</p> : null}
                                   <input
-                                    placeholder="URL de imagen"
-                                    value={draft.imageUrl || ''}
-                                    onChange={(event) => onEditTableDraftChange(item, 'imageUrl', event.target.value)}
+                                    placeholder="URL generada por upload"
+                                    value={sanitizePublicImageUrl(draft.imageUrl) || ''}
+                                    readOnly
                                   />
                                 </>
                               ) : null}
