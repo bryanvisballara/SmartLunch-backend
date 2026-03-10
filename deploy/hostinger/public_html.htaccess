@@ -4,6 +4,8 @@
 
   # Keep direct access to index and uploaded assets untouched.
   RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_URI} ^/assets/ [NC]
+  RewriteRule ^ - [L]
   RewriteCond %{REQUEST_URI} ^/uploads/ [NC]
   RewriteRule ^ - [L]
 
