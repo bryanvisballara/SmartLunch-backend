@@ -7,6 +7,7 @@ const Order = require('../models/order.model');
 const Product = require('../models/product.model');
 const Wallet = require('../models/wallet.model');
 const FixedCost = require('../models/fixedCost.model');
+const Student = require('../models/student.model');
 
 const router = express.Router();
 
@@ -162,7 +163,23 @@ router.get('/admin-home', async (req, res) => {
       fixedCostFilter.$or = [{ storeId: null }, { storeId: storeFilter }];
     }
 
-    const [salesToday, salesWeek, salesMonth, utilityToday, utilityWeek, utilityMonth, topStudentsRaw, topProductsRaw, profitabilityRaw, lowStockProducts, lowBalanceStudents, fixedCosts, activeProductsRaw] = await Promise.all([
+    const [
+      salesToday,
+      salesWeek,
+      salesMonth,
+      utilityToday,
+      utilityWeek,
+      utilityMonth,
+      topStudentsRaw,
+      topProductsRaw,
+      profitabilityRaw,
+      lowStockProducts,
+      lowBalanceStudents,
+      fixedCosts,
+      activeProductsRaw,
+      totalSubscribedStudents,
+      totalAutoDebitActiveStudents,
+    ] = await Promise.all([
       orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
@@ -188,16 +205,37 @@ router.get('/admin-home', async (req, res) => {
         },
         {
           $group: {
-            _id: '$studentId',
-            totalSpent: { $sum: '$total' },
+            _id: {
+              studentId: '$studentId',
+              day: {
+                $dateToString: {
+                  format: '%Y-%m-%d',
+                  date: '$createdAt',
+                },
+              },
+            },
+            dailySpent: { $sum: '$total' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.studentId',
+            totalSpent: { $sum: '$dailySpent' },
+            daysWithOrders: { $sum: 1 },
           },
         },
         {
           $addFields: {
-            averageDailySpent: { $divide: ['$totalSpent', 30] },
+            averageDailySpent: {
+              $cond: [
+                { $gt: ['$daysWithOrders', 0] },
+                { $divide: ['$totalSpent', '$daysWithOrders'] },
+                0,
+              ],
+            },
           },
         },
-        { $sort: { totalSpent: -1 } },
+        { $sort: { averageDailySpent: -1, totalSpent: -1 } },
         { $limit: 8 },
         {
           $lookup: {
@@ -215,6 +253,7 @@ router.get('/admin-home', async (req, res) => {
             studentName: '$student.name',
             schoolCode: '$student.schoolCode',
             totalSpent: 1,
+            daysWithOrders: 1,
             averageDailySpent: 1,
           },
         },
@@ -312,11 +351,10 @@ router.get('/admin-home', async (req, res) => {
         .sort({ stock: 1, name: 1 })
         .limit(20)
         .lean(),
-      Wallet.find({ schoolId, status: 'active', balance: { $lte: lowBalanceThreshold } })
+      Wallet.find({ schoolId, status: 'active', balance: { $lt: lowBalanceThreshold } })
         .populate('studentId', 'name schoolCode grade status')
         .setOptions({ allowDiskUse: true })
         .sort({ balance: 1 })
-        .limit(20)
         .lean(),
       FixedCost.find(fixedCostFilter)
         .populate('storeId', 'name')
@@ -327,6 +365,8 @@ router.get('/admin-home', async (req, res) => {
         .setOptions({ allowDiskUse: true })
         .sort({ name: 1 })
         .lean(),
+      Student.countDocuments({ schoolId, status: 'active', deletedAt: null }),
+      Wallet.countDocuments({ schoolId, status: 'active', autoDebitEnabled: true }),
     ]);
 
     const normalizedBalances = lowBalanceStudents
@@ -425,14 +465,53 @@ router.get('/admin-home', async (req, res) => {
       return Array.from(grouped.values());
     };
 
+    const mergeCatalogProfitabilityByName = (catalogItems = []) => {
+      const grouped = new Map();
+
+      for (const product of catalogItems) {
+        const price = Number(product.price || 0);
+        const cost = Number(product.cost || 0);
+        const utilityValue = price - cost;
+        const utilityPercent = price > 0 ? (utilityValue / price) * 100 : 0;
+        const key = toProductKey(product.name, product._id);
+
+        if (!key) {
+          continue;
+        }
+
+        const existing = grouped.get(key);
+        if (!existing) {
+          grouped.set(key, {
+            productId: product._id,
+            productName: product.name || 'Producto',
+            utilityValue,
+            utilityPercent,
+            revenue: 0,
+            quantitySold: 0,
+          });
+          continue;
+        }
+
+        // Keep the best utility snapshot for duplicated product names across stores.
+        if (utilityValue > Number(existing.utilityValue || 0)) {
+          existing.utilityValue = utilityValue;
+          existing.utilityPercent = utilityPercent;
+          existing.productId = product._id;
+        }
+      }
+
+      return Array.from(grouped.values());
+    };
+
     const profitabilitySource = mergeProfitabilityByName(activeProductsRaw || [], profitabilityRaw || []);
+    const catalogProfitabilitySource = mergeCatalogProfitabilityByName(activeProductsRaw || []);
     const topProducts = mergeTopProductsByName(topProductsRaw || []);
 
     const topProductsByPercent = [...profitabilitySource]
       .sort((a, b) => (b.utilityPercent || 0) - (a.utilityPercent || 0) || (b.utilityValue || 0) - (a.utilityValue || 0))
       .slice(0, 10);
 
-    const topProductsByValue = [...profitabilitySource]
+    const topProductsByValue = [...catalogProfitabilitySource]
       .sort((a, b) => (b.utilityValue || 0) - (a.utilityValue || 0) || (b.revenue || 0) - (a.revenue || 0))
       .slice(0, 10);
 
@@ -471,6 +550,8 @@ router.get('/admin-home', async (req, res) => {
       totalFixedCosts,
       totalVariableCosts,
       utilityNetMonth,
+      totalSubscribedStudents,
+      totalAutoDebitActiveStudents,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

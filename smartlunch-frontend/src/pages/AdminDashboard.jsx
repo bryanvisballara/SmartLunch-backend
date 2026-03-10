@@ -3684,9 +3684,14 @@ function AdminDashboard() {
               <h4>Alumnos con mayor consumo (promedio diario)</h4>
               {(homeData?.topStudents || []).map((item) => (
                 <p key={String(item.studentId)}>
-                  {(item.studentName || 'Alumno')} - {formatCurrency(item.averageDailySpent)} / día
+                  {(item.studentName || 'Alumno')} - {formatCurrency(item.averageDailySpent)} / día ({Number(item.daysWithOrders || 0)} días)
                 </p>
               ))}
+            </div>
+            <div className="card admin-compact-value-card">
+              <h4>Suscripción SmartLunch</h4>
+              <p>{Number(homeData?.totalSubscribedStudents || 0)} alumnos suscritos</p>
+              <small>{Number(homeData?.totalAutoDebitActiveStudents || 0)} con débito automático activo</small>
             </div>
             <div className="card">
               <h4>Productos más rentables por % (Top 10)</h4>
@@ -3773,7 +3778,7 @@ function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(homeData?.lowBalanceStudents || []).slice(0, 10).map((item) => (
+                      {(homeData?.lowBalanceStudents || []).map((item) => (
                         <tr key={String(item.studentId)}>
                           <td>{item.studentName || 'Alumno'}</td>
                           <td>{formatCurrency(item.balance)}</td>
