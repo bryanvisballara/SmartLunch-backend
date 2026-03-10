@@ -489,7 +489,7 @@ function AdminDashboard() {
       clearTimeout(closeTimer);
     };
   }, [inventoryApplyModal.open]);
-  const [editCategoryForm, setEditCategoryForm] = useState({ name: '', status: 'active' });
+  const [editCategoryForm, setEditCategoryForm] = useState({ name: '', imageUrl: '', status: 'active' });
   const [editStoreForm, setEditStoreForm] = useState({ name: '', location: '', status: 'active' });
   const [editProductForm, setEditProductForm] = useState({
     name: '',
@@ -1748,6 +1748,7 @@ function AdminDashboard() {
       if (category) {
         setEditCategoryForm({
           name: category.name || '',
+          imageUrl: sanitizePublicImageUrl(category.imageUrl),
           status: category.status || 'active',
         });
       }
@@ -2015,11 +2016,19 @@ function AdminDashboard() {
 
   const onCreateCategory = (event) => {
     event.preventDefault();
-    runAction(() => createAdminCategory(categoryForm), 'Categoría creada.', async () => {
+    runAction(
+      () =>
+        createAdminCategory({
+          ...categoryForm,
+          imageUrl: sanitizePublicImageUrl(categoryForm.imageUrl),
+        }),
+      'Categoría creada.',
+      async () => {
       const categoriesRes = await getAdminCategories();
       setCategories(categoriesRes.data || []);
       setCategoryForm({ name: '', imageUrl: '' });
-    });
+      }
+    );
   };
 
   const onCategoryImageSelected = async (event) => {
@@ -2076,6 +2085,7 @@ function AdminDashboard() {
           createInAllStores: selectedStoreIds.includes('all'),
           initialStockStoreIds: selectedStoreIds.filter((id) => id !== 'all'),
           shortDescription: String(productForm.shortDescription || '').trim(),
+          imageUrl: sanitizePublicImageUrl(productForm.imageUrl),
           price: Number(productForm.price || 0),
           cost: Number(productForm.cost || 0),
           stock: Number(productForm.stock || 0),
@@ -3335,7 +3345,7 @@ function AdminDashboard() {
     setEditItemId('');
     setEditSearchQuery('');
     setShowEditRegistryOptions(false);
-    setEditCategoryForm({ name: '', status: 'active' });
+    setEditCategoryForm({ name: '', imageUrl: '', status: 'active' });
     setEditStoreForm({ name: '', location: '', status: 'active' });
     setEditProductForm({
       name: '',
@@ -3383,6 +3393,7 @@ function AdminDashboard() {
         () =>
           updateAdminCategory(editItemId, {
             name: editCategoryForm.name,
+            imageUrl: sanitizePublicImageUrl(editCategoryForm.imageUrl),
             status: editCategoryForm.status,
           }),
         'Categoría actualizada.',
@@ -4672,6 +4683,10 @@ function AdminDashboard() {
               </label>
               {uploadingCategoryImage ? <p>Subiendo imagen (se optimiza a WEBP 600px)...</p> : null}
               {categoryForm.imageUrl ? <img alt="Vista previa categoría" className="admin-product-preview" src={categoryForm.imageUrl} /> : null}
+              <label>
+                URL de imagen (generada)
+                <input value={sanitizePublicImageUrl(categoryForm.imageUrl)} readOnly />
+              </label>
               <button className="btn btn-primary admin-create-btn" type="submit">Crear</button>
             </form>
 
@@ -4734,6 +4749,10 @@ function AdminDashboard() {
               </label>
               {uploadingProductImage ? <p>Subiendo imagen (se optimiza a WEBP 600px)...</p> : null}
               {productForm.imageUrl ? <img alt="Vista previa" className="admin-product-preview" src={productForm.imageUrl} /> : null}
+              <label>
+                URL de imagen (generada)
+                <input value={sanitizePublicImageUrl(productForm.imageUrl)} readOnly />
+              </label>
               <label>
                 Stock inicial
                 <input type="number" min="0" value={productForm.stock} onChange={(event) => setProductForm((prev) => ({ ...prev, stock: event.target.value }))} />

@@ -24,9 +24,63 @@ function normalizeImageUrl(value, includeImageData) {
   return imageUrl;
 }
 
+function normalizeNameForDedupe(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildParentProductDedupeKey(product) {
+  const sharedProductId = String(product?.sharedProductId || '').trim();
+  if (sharedProductId) {
+    return `shared:${sharedProductId}`;
+  }
+
+  const categoryId = String(product?.categoryId?._id || product?.categoryId || '').trim();
+  const name = normalizeNameForDedupe(product?.name);
+  return `fallback:${categoryId}:${name}`;
+}
+
+function pickPreferredParentProduct(currentProduct, candidateProduct) {
+  const currentStock = Number(currentProduct?.stock || 0);
+  const candidateStock = Number(candidateProduct?.stock || 0);
+  const currentHasStock = currentStock > 0;
+  const candidateHasStock = candidateStock > 0;
+
+  if (candidateHasStock && !currentHasStock) {
+    return candidateProduct;
+  }
+
+  if (candidateHasStock && currentHasStock && candidateStock > currentStock) {
+    return candidateProduct;
+  }
+
+  const currentPrice = Number(currentProduct?.price || 0);
+  const candidatePrice = Number(candidateProduct?.price || 0);
+  if (Number.isFinite(candidatePrice) && Number.isFinite(currentPrice) && candidatePrice < currentPrice) {
+    return candidateProduct;
+  }
+
+  return currentProduct;
+}
+
+function dedupeProductsForParent(products) {
+  const byKey = new Map();
+  for (const product of Array.isArray(products) ? products : []) {
+    const key = buildParentProductDedupeKey(product);
+    const current = byKey.get(key);
+    if (!current) {
+      byKey.set(key, product);
+      continue;
+    }
+
+    byKey.set(key, pickPreferredParentProduct(current, product));
+  }
+
+  return Array.from(byKey.values());
+}
+
 router.get('/', async (req, res) => {
   try {
-    const { schoolId: tokenSchoolId } = req.user;
+    const { schoolId: tokenSchoolId, role } = req.user;
     const {
       schoolId: requestedSchoolId,
       storeId,
@@ -66,6 +120,7 @@ router.get('/', async (req, res) => {
 
     const cacheKey = [
       tokenSchoolId,
+      String(role || ''),
       String(storeId || ''),
       String(categoryId || ''),
       String(status || ''),
@@ -81,7 +136,7 @@ router.get('/', async (req, res) => {
       return res.status(200).json(cachedPayload);
     }
 
-    const selectFields = '_id name price stock status storeId categoryId imageUrl thumbUrl shortDescription';
+    const selectFields = '_id name price stock status storeId categoryId sharedProductId imageUrl thumbUrl shortDescription';
 
     const query = Product.find(filter)
       .select(selectFields)
@@ -95,7 +150,9 @@ router.get('/', async (req, res) => {
 
     const products = await query.lean();
 
-    const normalized = products.map((product) => ({
+    const sourceProducts = role === 'parent' ? dedupeProductsForParent(products) : products;
+
+    const normalized = sourceProducts.map((product) => ({
       ...product,
       imageUrl: normalizeImageUrl(product.imageUrl, shouldIncludeImageData),
       thumbUrl: normalizeStoredImageUrl(product.thumbUrl) || deriveThumbUrlFromImageUrl(product.imageUrl),
