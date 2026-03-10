@@ -49,7 +49,8 @@ function getUploadsRootPath() {
 function getUploadsPublicBaseUrl() {
   const configured = String(process.env.UPLOADS_PUBLIC_BASE_URL || '').trim();
   if (configured) {
-    return configured.replace(/\/+$/, '');
+    // Guard against accidental spaces in env var values like "https://site.com /uploads".
+    return configured.replace(/\s+/g, '').replace(/\/+$/, '');
   }
 
   return '/uploads';
