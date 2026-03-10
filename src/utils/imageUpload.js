@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
 const sharp = require('sharp');
+const { v2: cloudinary } = require('cloudinary');
 
 const MAX_UPLOAD_BYTES = Number(process.env.UPLOADS_MAX_FILE_BYTES || 5 * 1024 * 1024);
 const MAX_WIDTH = Number(process.env.UPLOADS_MAX_WIDTH_PX || 600);
@@ -10,8 +11,48 @@ const WEBP_QUALITY = Number(process.env.UPLOADS_WEBP_QUALITY || 78);
 const THUMB_MAX_WIDTH = Number(process.env.UPLOADS_THUMB_MAX_WIDTH_PX || 250);
 const THUMB_WEBP_QUALITY = Number(process.env.UPLOADS_THUMB_WEBP_QUALITY || 70);
 const DEFAULT_FOLDER = '';
+const CLOUDINARY_FOLDER = String(process.env.CLOUDINARY_UPLOAD_FOLDER || 'smartlunch').trim();
 
 const storage = multer.memoryStorage();
+
+function isCloudinaryEnabled() {
+  return (
+    Boolean(String(process.env.CLOUDINARY_CLOUD_NAME || '').trim()) &&
+    Boolean(String(process.env.CLOUDINARY_API_KEY || '').trim()) &&
+    Boolean(String(process.env.CLOUDINARY_API_SECRET || '').trim())
+  );
+}
+
+function configureCloudinary() {
+  cloudinary.config({
+    cloud_name: String(process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
+    api_key: String(process.env.CLOUDINARY_API_KEY || '').trim(),
+    api_secret: String(process.env.CLOUDINARY_API_SECRET || '').trim(),
+    secure: true,
+  });
+}
+
+function uploadBufferToCloudinary(buffer, { publicId }) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: 'image',
+        folder: CLOUDINARY_FOLDER,
+        public_id: publicId,
+        format: 'webp',
+        overwrite: true,
+      },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+        return resolve(result);
+      }
+    );
+
+    stream.end(buffer);
+  });
+}
 
 const uploadImageMiddleware = multer({
   storage,
@@ -149,7 +190,7 @@ async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, pre
 
   const metadata = await sharp(file.buffer).rotate().metadata();
 
-  await sharp(file.buffer)
+  const fullBuffer = await sharp(file.buffer)
     .rotate()
     .resize({
       width: MAX_WIDTH,
@@ -157,9 +198,9 @@ async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, pre
       fit: 'inside',
     })
     .webp({ quality: WEBP_QUALITY })
-    .toFile(outputPath);
+    .toBuffer();
 
-  await sharp(file.buffer)
+  const thumbBuffer = await sharp(file.buffer)
     .rotate()
     .resize({
       width: THUMB_MAX_WIDTH,
@@ -167,7 +208,32 @@ async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, pre
       fit: 'inside',
     })
     .webp({ quality: THUMB_WEBP_QUALITY })
-    .toFile(thumbOutputPath);
+    .toBuffer();
+
+  if (isCloudinaryEnabled()) {
+    configureCloudinary();
+
+    const [fullUpload, thumbUpload] = await Promise.all([
+      uploadBufferToCloudinary(fullBuffer, { publicId: filenameBase }),
+      uploadBufferToCloudinary(thumbBuffer, { publicId: `${filenameBase}_thumb` }),
+    ]);
+
+    return {
+      filename,
+      thumbFilename,
+      folder: safeFolder,
+      width: Number(metadata?.width || 0),
+      height: Number(metadata?.height || 0),
+      format: 'webp',
+      url: String(fullUpload?.secure_url || '').trim(),
+      thumbUrl: String(thumbUpload?.secure_url || '').trim(),
+      storage: 'cloudinary',
+    };
+  }
+
+  await fs.mkdir(targetFolderPath, { recursive: true });
+  await fs.writeFile(outputPath, fullBuffer);
+  await fs.writeFile(thumbOutputPath, thumbBuffer);
 
   return {
     filename,
@@ -178,6 +244,7 @@ async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, pre
     format: 'webp',
     url: buildPublicImageUrl(safeFolder, filename),
     thumbUrl: buildPublicImageUrl(safeFolder, thumbFilename),
+    storage: 'local',
   };
 }
 
