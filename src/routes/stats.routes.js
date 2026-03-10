@@ -421,7 +421,7 @@ router.get('/admin-home', async (req, res) => {
         const price = Number(product.price || 0);
         const cost = Number(product.cost || 0);
         const utilityValue = price - cost;
-        const utilityPercent = price > 0 ? (utilityValue / price) * 100 : 0;
+        const utilityPercent = cost > 0 ? (utilityValue / cost) * 100 : 0;
         const key = toProductKey(product.name, product._id);
 
         if (!key || grouped.has(key)) {
@@ -456,8 +456,7 @@ router.get('/admin-home', async (req, res) => {
         current.quantitySold += Number(soldItem.quantitySold || 0);
         current.revenue += Number(soldItem.revenue || 0);
         current.utilityValue += Number(soldItem.utilityValue || 0);
-        current.utilityPercent =
-          current.revenue > 0 ? (current.utilityValue / current.revenue) * 100 : Number(current.utilityPercent || 0);
+        current.utilityPercent = Number(current.utilityPercent || 0);
 
         grouped.set(key, current);
       }
@@ -472,7 +471,7 @@ router.get('/admin-home', async (req, res) => {
         const price = Number(product.price || 0);
         const cost = Number(product.cost || 0);
         const utilityValue = price - cost;
-        const utilityPercent = price > 0 ? (utilityValue / price) * 100 : 0;
+        const utilityPercent = cost > 0 ? (utilityValue / cost) * 100 : 0;
         const key = toProductKey(product.name, product._id);
 
         if (!key) {
@@ -507,7 +506,7 @@ router.get('/admin-home', async (req, res) => {
     const catalogProfitabilitySource = mergeCatalogProfitabilityByName(activeProductsRaw || []);
     const topProducts = mergeTopProductsByName(topProductsRaw || []);
 
-    const topProductsByPercent = [...profitabilitySource]
+    const topProductsByPercent = [...catalogProfitabilitySource]
       .sort((a, b) => (b.utilityPercent || 0) - (a.utilityPercent || 0) || (b.utilityValue || 0) - (a.utilityValue || 0))
       .slice(0, 10);
 
@@ -515,7 +514,7 @@ router.get('/admin-home', async (req, res) => {
       .sort((a, b) => (b.utilityValue || 0) - (a.utilityValue || 0) || (b.revenue || 0) - (a.revenue || 0))
       .slice(0, 10);
 
-    const leastProfitableProductsByPercent = [...profitabilitySource]
+    const leastProfitableProductsByPercent = [...catalogProfitabilitySource]
       .sort((a, b) => (a.utilityPercent || 0) - (b.utilityPercent || 0) || (a.utilityValue || 0) - (b.utilityValue || 0))
       .slice(0, 10);
 
