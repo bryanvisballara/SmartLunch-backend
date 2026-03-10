@@ -9,7 +9,7 @@ const MAX_WIDTH = Number(process.env.UPLOADS_MAX_WIDTH_PX || 600);
 const WEBP_QUALITY = Number(process.env.UPLOADS_WEBP_QUALITY || 78);
 const THUMB_MAX_WIDTH = Number(process.env.UPLOADS_THUMB_MAX_WIDTH_PX || 250);
 const THUMB_WEBP_QUALITY = Number(process.env.UPLOADS_THUMB_WEBP_QUALITY || 70);
-const DEFAULT_FOLDER = 'products';
+const DEFAULT_FOLDER = '';
 
 const storage = multer.memoryStorage();
 
@@ -43,7 +43,7 @@ function getUploadsRootPath() {
     return configured;
   }
 
-  return path.resolve(process.cwd(), 'public', 'uploads');
+  return path.resolve(process.cwd(), 'public', 'assets');
 }
 
 function getUploadsPublicBaseUrl() {
@@ -53,7 +53,7 @@ function getUploadsPublicBaseUrl() {
     return configured.replace(/\s+/g, '').replace(/\/+$/, '');
   }
 
-  return '/uploads';
+  return '/assets';
 }
 
 function sanitizeFolder(value) {
@@ -62,13 +62,18 @@ function sanitizeFolder(value) {
     .trim()
     .replace(/[^a-z0-9-_]/g, '');
 
-  return folder || DEFAULT_FOLDER;
+  // Hostinger requirement: keep files directly under /assets (no subfolders).
+  return '';
 }
 
 function buildPublicImageUrl(folder, filename) {
   const base = getUploadsPublicBaseUrl();
   const cleanFolder = sanitizeFolder(folder);
   const cleanFilename = String(filename || '').trim().replace(/^\/+/, '');
+
+  if (!cleanFolder) {
+    return `${base}/${cleanFilename}`.replace(/([^:]\/)\/+/, '$1');
+  }
 
   return `${base}/${cleanFolder}/${cleanFilename}`.replace(/([^:]\/)\/+/, '$1');
 }
