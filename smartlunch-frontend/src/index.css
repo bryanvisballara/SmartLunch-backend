@@ -1972,6 +1972,17 @@ label {
   width: 28px;
   height: 28px;
   cursor: pointer;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.order-item-remove-icon {
+  display: inline-block;
+  line-height: 1;
+  font-size: 0.9rem;
 }
 
 .qty-controls {

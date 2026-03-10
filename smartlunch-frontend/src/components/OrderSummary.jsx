@@ -6,6 +6,21 @@ const PAYMENT_OPTIONS = [
   { value: 'school_billing', label: 'Cuenta de cobro colegio' },
 ];
 
+const toMoneyNumber = (value) => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const normalized = String(value || '')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 function OrderSummary({
   items,
   onRemoveItem,
@@ -23,7 +38,10 @@ function OrderSummary({
   schoolBillingResponsible = '',
   onSchoolBillingResponsibleChange,
 }) {
-  const total = items.reduce((acc, item) => acc + item.price * item.quantity, 0);
+  const total = items.reduce(
+    (acc, item) => acc + toMoneyNumber(item.price) * toMoneyNumber(item.quantity),
+    0
+  );
   const cashTenderedValue = Number(cashTendered || 0);
   const cashDiff = cashTenderedValue - total;
   const hasCashValue = String(cashTendered || '').trim() !== '';
@@ -32,17 +50,19 @@ function OrderSummary({
     <div className="panel order-summary-panel">
       <h3>Resumen de orden</h3>
       {items.length === 0 ? <p>No hay productos seleccionados.</p> : null}
-      {items.map((item) => (
+      {items.map((item) => {
+        const lineTotal = toMoneyNumber(item.price) * toMoneyNumber(item.quantity);
+        return (
         <div className="order-item-card" key={item._id}>
           <div className="order-item-main">
             <p className="order-item-title">
               {item.name} x{item.quantity}
             </p>
-            <p className="order-item-price">${Number(item.price * item.quantity).toLocaleString('es-CO')}</p>
+            <p className="order-item-price">${Number(lineTotal).toLocaleString('es-CO')}</p>
             <div className="qty-controls">
               <button
                 className="qty-btn"
-                onClick={() => onChangeQuantity?.(item._id, -1)}
+                onClick={() => onChangeQuantity && onChangeQuantity(item._id, -1)}
                 type="button"
               >
                 -
@@ -50,7 +70,7 @@ function OrderSummary({
               <span>{item.quantity}</span>
               <button
                 className="qty-btn"
-                onClick={() => onChangeQuantity?.(item._id, 1)}
+                onClick={() => onChangeQuantity && onChangeQuantity(item._id, 1)}
                 type="button"
               >
                 +
@@ -60,13 +80,14 @@ function OrderSummary({
           <button
             aria-label={`Quitar ${item.name}`}
             className="order-item-remove"
-            onClick={() => onRemoveItem?.(item._id)}
+            onClick={() => onRemoveItem && onRemoveItem(item._id)}
             type="button"
           >
-            X
+            <span aria-hidden="true" className="order-item-remove-icon">X</span>
           </button>
         </div>
-      ))}
+        );
+      })}
       <hr />
       <div className="row strong">
         <span>Total</span>
