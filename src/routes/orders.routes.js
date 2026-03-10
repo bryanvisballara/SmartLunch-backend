@@ -372,6 +372,11 @@ router.post('/cancel-request', roleMiddleware('vendor', 'admin'), async (req, re
       return res.status(400).json({ message: 'orderId is required' });
     }
 
+    const normalizedReason = String(reason || '').trim();
+    if (!normalizedReason) {
+      return res.status(400).json({ message: 'reason is required' });
+    }
+
     const order = await Order.findOne({ _id: orderId, schoolId });
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
@@ -406,7 +411,7 @@ router.post('/cancel-request', roleMiddleware('vendor', 'admin'), async (req, re
       orderId,
       storeId: order.storeId,
       requestedBy: userId,
-      reason,
+      reason: normalizedReason,
       status: 'pending',
     });
 
@@ -520,7 +525,9 @@ router.post('/cancel-requests/:id/approve', roleMiddleware('admin'), async (req,
             method: 'system',
             orderId: order._id,
             createdBy: userId,
-            notes: 'Order cancellation approved by admin',
+            notes: cancelRequest.reason
+              ? `Anulacion de venta aprobada: ${cancelRequest.reason}`
+              : 'Anulacion de venta aprobada por administrador',
           },
         ],
         { session }

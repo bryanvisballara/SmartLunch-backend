@@ -306,9 +306,13 @@ router.get('/portal/overview', async (req, res) => {
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfCurrentMonth() }),
       WalletTransaction.find({
         schoolId,
-        type: 'recharge',
         cancelledAt: null,
         studentId: { $in: studentIds },
+        $or: [
+          { type: 'recharge' },
+          { type: 'refund' },
+          { type: 'adjustment' },
+        ],
       })
         .populate('createdBy', 'name username role')
         .populate('studentId', 'name schoolCode')
@@ -342,8 +346,10 @@ router.get('/portal/overview', async (req, res) => {
       },
       recentTopups: recentTopups.map((topup) => ({
         _id: topup._id,
+        type: topup.type || 'recharge',
         amount: Number(topup.amount || 0),
         method: topup.method || 'cash',
+        notes: String(topup.notes || '').trim(),
         createdAt: topup.createdAt,
         createdBy: topup.createdBy
           ? {
@@ -366,6 +372,14 @@ router.get('/portal/overview', async (req, res) => {
         total: Number(order.total || 0),
         paymentMethod: order.paymentMethod || 'system',
         createdAt: order.createdAt,
+        items: Array.isArray(order.items)
+          ? order.items.map((item) => ({
+              name: item.nameSnapshot || 'Producto',
+              quantity: Number(item.quantity || 0),
+              unitPrice: Number(item.unitPriceSnapshot || 0),
+              subtotal: Number(item.subtotal || 0),
+            }))
+          : [],
         itemsCount: Array.isArray(order.items)
           ? order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
           : 0,
@@ -442,6 +456,7 @@ router.get('/portal/orders-history', async (req, res) => {
     const filter = {
       schoolId,
       studentId,
+      status: 'completed',
     };
 
     const from = String(req.query.from || '').trim();
@@ -483,6 +498,14 @@ router.get('/portal/orders-history', async (req, res) => {
         status: order.status || 'completed',
         paymentMethod: order.paymentMethod || 'system',
         createdAt: order.createdAt,
+        items: Array.isArray(order.items)
+          ? order.items.map((item) => ({
+              name: item.nameSnapshot || 'Producto',
+              quantity: Number(item.quantity || 0),
+              unitPrice: Number(item.unitPriceSnapshot || 0),
+              subtotal: Number(item.subtotal || 0),
+            }))
+          : [],
         itemsCount: Array.isArray(order.items)
           ? order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
           : 0,

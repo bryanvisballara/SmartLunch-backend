@@ -48,6 +48,13 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function formatSignedCurrency(value) {
+  const amount = Number(value || 0);
+  const absAmount = Math.abs(amount);
+  const prefix = amount < 0 ? '-' : '+';
+  return `${prefix} ${formatCurrency(absAmount)}`;
+}
+
 function currentYearMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -111,6 +118,7 @@ function ParentPortal() {
   const [historyOrders, setHistoryOrders] = useState([]);
   const [historyOrdersLoading, setHistoryOrdersLoading] = useState(false);
   const [historyOrdersError, setHistoryOrdersError] = useState('');
+  const [selectedOrderDetail, setSelectedOrderDetail] = useState(null);
   const [historyFilters, setHistoryFilters] = useState({ from: '', to: '' });
   const [blockActionError, setBlockActionError] = useState('');
   const [blockingTargetKey, setBlockingTargetKey] = useState('');
@@ -661,6 +669,17 @@ function ParentPortal() {
     if (label === 'Meriendas') {
       navigate('/parent/meriendas');
     }
+  };
+
+  const onOpenOrderDetail = (order) => {
+    if (!order?._id) {
+      return;
+    }
+    setSelectedOrderDetail(order);
+  };
+
+  const onCloseOrderDetail = () => {
+    setSelectedOrderDetail(null);
   };
 
   const goToAutoTopupPage = () => {
@@ -1545,9 +1564,21 @@ function ParentPortal() {
             {!historyOrdersLoading && !historyOrdersError ? (
               <div className="parent-history-list">
                 {historyOrders.map((order) => (
-                  <article key={order._id}>
+                  <article
+                    key={order._id}
+                    className="is-clickable"
+                    onClick={() => onOpenOrderDetail(order)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onOpenOrderDetail(order);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
                     <div>
-                      <strong>{formatCurrency(order.total)}</strong>
+                      <strong className="amount-negative">- {formatCurrency(order.total)}</strong>
                       <p>{order.storeName || 'Tienda'}</p>
                     </div>
                     <div>
@@ -1691,7 +1722,10 @@ function ParentPortal() {
                 {(overview?.recentTopups || []).map((topup) => (
                   <article key={topup._id}>
                     <div>
-                      <strong>{formatCurrency(topup.amount)}</strong>
+                      <strong className={Number(topup.amount || 0) < 0 ? 'amount-negative' : 'amount-positive'}>
+                        {formatSignedCurrency(topup.amount)}
+                      </strong>
+                      {String(topup.notes || '').trim() ? <p className="parent-amount-reason">{topup.notes}</p> : null}
                       <p>{topup.student?.name || 'Alumno'}</p>
                     </div>
                     <div>
@@ -2765,9 +2799,21 @@ function ParentPortal() {
               <h3>Últimas órdenes del alumno</h3>
               <div className="parent-list">
                 {(overview?.recentOrders || []).map((order) => (
-                  <article key={order._id}>
+                  <article
+                    key={order._id}
+                    className="is-clickable"
+                    onClick={() => onOpenOrderDetail(order)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onOpenOrderDetail(order);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
                     <div>
-                      <strong>{formatCurrency(order.total)}</strong>
+                      <strong className="amount-negative">- {formatCurrency(order.total)}</strong>
                       <p>{order.storeName || 'Tienda'}</p>
                     </div>
                     <div>
@@ -2786,7 +2832,10 @@ function ParentPortal() {
                 {(overview?.recentTopups || []).map((topup) => (
                   <article key={topup._id}>
                     <div>
-                      <strong>{formatCurrency(topup.amount)}</strong>
+                      <strong className={Number(topup.amount || 0) < 0 ? 'amount-negative' : 'amount-positive'}>
+                        {formatSignedCurrency(topup.amount)}
+                      </strong>
+                      {String(topup.notes || '').trim() ? <p className="parent-amount-reason">{topup.notes}</p> : null}
                       <p>{topup.student?.name || 'Alumno'}</p>
                     </div>
                     <div>
@@ -2838,6 +2887,42 @@ function ParentPortal() {
           </>
         ) : null}
       </main>
+
+      {selectedOrderDetail ? (
+        <div className="parent-order-detail-overlay" onClick={onCloseOrderDetail} role="dialog" aria-modal="true" aria-label="Detalle de orden">
+          <div className="parent-order-detail-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="parent-order-detail-header">
+              <h3>Detalle de orden</h3>
+              <button type="button" onClick={onCloseOrderDetail} aria-label="Cerrar detalle">
+                X
+              </button>
+            </div>
+
+            <p className="parent-order-detail-meta">
+              Hora: <strong>{formatDateTime(selectedOrderDetail.createdAt)}</strong>
+            </p>
+            <p className="parent-order-detail-meta">
+              Tienda: <strong>{selectedOrderDetail.storeName || 'Tienda'}</strong>
+            </p>
+
+            <div className="parent-order-detail-items">
+              {(selectedOrderDetail.items || []).map((item, index) => (
+                <article key={`${item.name}-${index}`}>
+                  <div>
+                    <strong>{item.name || 'Producto'}</strong>
+                    <p>{Number(item.quantity || 0)} x {formatCurrency(item.unitPrice || 0)}</p>
+                  </div>
+                  <strong>{formatCurrency(item.subtotal || 0)}</strong>
+                </article>
+              ))}
+
+              {(selectedOrderDetail.items || []).length === 0 ? (
+                <p className="empty">No hay detalle de productos disponible para esta orden.</p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showAutoTopupCongratsModal ? (
         <div

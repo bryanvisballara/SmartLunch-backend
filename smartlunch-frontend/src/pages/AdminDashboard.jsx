@@ -336,7 +336,9 @@ function AdminDashboard() {
   const [manualTopup, setManualTopup] = useState({ studentId: '', amount: '', method: 'cash', notes: '' });
   const [topupStudentQuery, setTopupStudentQuery] = useState('');
   const [showTopupStudentOptions, setShowTopupStudentOptions] = useState(false);
-  const [topupBalanceDrafts, setTopupBalanceDrafts] = useState({});
+  const [topupDebitDrafts, setTopupDebitDrafts] = useState({});
+  const [topupDebitReasonDrafts, setTopupDebitReasonDrafts] = useState({});
+  const [topupDebitModeRows, setTopupDebitModeRows] = useState({});
   const [topupBalanceSearchQuery, setTopupBalanceSearchQuery] = useState('');
   const [topupBalancePage, setTopupBalancePage] = useState(1);
   const [savingTopupStudentId, setSavingTopupStudentId] = useState('');
@@ -358,6 +360,7 @@ function AdminDashboard() {
   });
   const [uploadingProductImage, setUploadingProductImage] = useState(false);
   const [uploadingEditProductImageId, setUploadingEditProductImageId] = useState('');
+  const [uploadingEditCategoryImageId, setUploadingEditCategoryImageId] = useState('');
   const [userForm, setUserForm] = useState({ name: '', username: '', phone: '', password: '', role: 'parent', assignedStoreId: '' });
   const [studentForm, setStudentForm] = useState({ name: '', grade: '', parentId: '' });
 
@@ -1320,10 +1323,11 @@ function AdminDashboard() {
         return true;
       })
       .map((item) => ({
+        operationType: Number(item.amount || 0) < 0 ? 'descarga' : 'recarga',
         store: item.storeId?.name || 'N/A',
         orderNumber: item._id,
         student: item.studentId?.name || 'N/A',
-        pedidos: 'Recarga',
+        pedidos: Number(item.amount || 0) < 0 ? 'Descarga' : 'Recarga',
         paymentMethod: paymentMethodLabel[item.method] || item.method || 'N/A',
         amountRaw: Number(item.amount || 0),
         total: formatCurrency(item.amount),
@@ -1531,7 +1535,7 @@ function AdminDashboard() {
 
     const fallbackRows = historyResponses.flatMap(({ student, records }) =>
       (records || [])
-        .filter((record) => record.type === 'recharge')
+        .filter((record) => record.type === 'recharge' || record.type === 'adjustment')
         .map((record) => ({
           ...record,
           studentId: {
@@ -1618,20 +1622,6 @@ function AdminDashboard() {
   useEffect(() => {
     loadBaseData();
   }, []);
-
-  useEffect(() => {
-    setTopupBalanceDrafts(
-      (students || []).reduce((acc, student) => {
-        const studentId = String(student._id || '');
-        if (!studentId) {
-          return acc;
-        }
-
-        acc[studentId] = String(Number(student.walletBalance || 0));
-        return acc;
-      }, {})
-    );
-  }, [students]);
 
   useEffect(() => {
     setTopupBalancePage(1);
@@ -1902,59 +1892,122 @@ function AdminDashboard() {
     );
   };
 
-  const onChangeTopupBalanceDraft = (studentId, value) => {
-    setTopupBalanceDrafts((prev) => ({
+  const onOpenTopupDebitRow = (studentId) => {
+    const normalizedId = String(studentId || '');
+    if (!normalizedId) {
+      return;
+    }
+
+    setTopupDebitModeRows((prev) => ({
       ...prev,
-      [studentId]: value,
+      [normalizedId]: true,
+    }));
+
+    setTopupDebitDrafts((prev) => ({
+      ...prev,
+      [normalizedId]: prev[normalizedId] ?? '',
+    }));
+
+    setTopupDebitReasonDrafts((prev) => ({
+      ...prev,
+      [normalizedId]: prev[normalizedId] ?? '',
     }));
   };
 
-  const onSaveTopupBalance = async (student) => {
+  const onCancelTopupDebitRow = (studentId) => {
+    const normalizedId = String(studentId || '');
+    if (!normalizedId) {
+      return;
+    }
+
+    setTopupDebitModeRows((prev) => ({
+      ...prev,
+      [normalizedId]: false,
+    }));
+
+    setTopupDebitDrafts((prev) => ({
+      ...prev,
+      [normalizedId]: '',
+    }));
+
+    setTopupDebitReasonDrafts((prev) => ({
+      ...prev,
+      [normalizedId]: '',
+    }));
+  };
+
+  const onChangeTopupDebitDraft = (studentId, value) => {
+    const normalizedId = String(studentId || '');
+    setTopupDebitDrafts((prev) => ({
+      ...prev,
+      [normalizedId]: value,
+    }));
+  };
+
+  const onChangeTopupDebitReasonDraft = (studentId, value) => {
+    const normalizedId = String(studentId || '');
+    setTopupDebitReasonDrafts((prev) => ({
+      ...prev,
+      [normalizedId]: value,
+    }));
+  };
+
+  const onSaveTopupDebit = async (student) => {
     const studentId = String(student?._id || '');
     if (!studentId) {
-      setError('No se encontro el alumno para actualizar saldo.');
+      setError('No se encontro el alumno para debitar saldo.');
       return;
     }
 
-    const targetBalance = Number(topupBalanceDrafts[studentId]);
-    if (!Number.isFinite(targetBalance) || targetBalance < 0) {
-      setError('El saldo debe ser un numero mayor o igual a 0.');
+    const debitAmount = Number(topupDebitDrafts[studentId]);
+    if (!Number.isFinite(debitAmount) || debitAmount <= 0) {
+      setError('El valor a debitar debe ser un numero mayor a 0.');
       return;
     }
 
-    const roundedTarget = Math.round(targetBalance * 100) / 100;
     const currentBalance = Number(student.walletBalance || 0);
-    const diff = Math.round((roundedTarget - currentBalance) * 100) / 100;
+    const roundedDebit = Math.round(debitAmount * 100) / 100;
+    const nextBalance = Math.round((currentBalance - roundedDebit) * 100) / 100;
 
-    if (Math.abs(diff) < 0.01) {
-      setOk(`El saldo de ${student.name || 'Alumno'} ya está actualizado.`);
+    if (nextBalance < 0) {
+      setError('No puedes debitar un valor mayor al saldo actual.');
       return;
     }
+
+    const debitReason = String(topupDebitReasonDrafts[studentId] || '').trim();
+    if (!debitReason) {
+      setError('Debes escribir el motivo del debito para continuar.');
+      return;
+    }
+
 
     clearMessages();
     setSavingTopupStudentId(studentId);
     try {
-      if (diff > 0) {
-        await topup({
-          studentId,
-          amount: diff,
-          method: 'system',
-          notes: 'Ajuste de saldo desde Admin > Recargas',
-        });
-      } else {
-        await debit({
-          studentId,
-          amount: Math.abs(diff),
-          method: 'system',
-          notes: 'Ajuste de saldo desde Admin > Recargas',
-        });
-      }
+      await debit({
+        studentId,
+        amount: roundedDebit,
+        method: 'system',
+        notes: debitReason,
+      });
 
       const studentsRes = await getStudents();
       setStudents(studentsRes.data || []);
-      setOk(`Saldo actualizado para ${student.name || 'Alumno'}.`);
+      setTopupDebitModeRows((prev) => ({
+        ...prev,
+        [studentId]: false,
+      }));
+      setTopupDebitDrafts((prev) => ({
+        ...prev,
+        [studentId]: '',
+      }));
+      setTopupDebitReasonDrafts((prev) => ({
+        ...prev,
+        [studentId]: '',
+      }));
+      setOk(`Debito aplicado para ${student.name || 'Alumno'}.`);
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'No se pudo actualizar el saldo del alumno.');
+      setError(requestError?.response?.data?.message || 'No se pudo debitar saldo del alumno.');
     } finally {
       setSavingTopupStudentId('');
     }
@@ -2099,6 +2152,34 @@ function AdminDashboard() {
       setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la imagen.');
     } finally {
       setUploadingEditProductImageId('');
+    }
+  };
+
+  const onEditTableCategoryImageSelected = async (item, event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    const itemId = String(item?._id || '');
+    clearMessages();
+    setUploadingEditCategoryImageId(itemId);
+    try {
+      const imageUrl = await uploadSingleImageToHosting(file, {
+        folder: 'categories',
+        preferredName: item?.name || file.name,
+      });
+      if (!imageUrl) {
+        throw new Error('No se recibio URL de imagen.');
+      }
+      onEditTableDraftChange(item, 'imageUrl', imageUrl);
+      setOk('Imagen de categoria cargada.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la imagen.');
+    } finally {
+      setUploadingEditCategoryImageId('');
     }
   };
 
@@ -2381,11 +2462,11 @@ function AdminDashboard() {
 
     const header = historyType === 'sales'
       ? ['Tienda', 'Número de orden', 'Alumno', 'Pedidos', 'Método de pago', 'Total', 'Fecha y hora']
-      : ['Tienda', 'Id recarga', 'Alumno', 'Método', 'Monto', 'Estado', 'Solicitada por', 'Fecha y hora'];
+      : ['Tienda', 'Id recarga', 'Alumno', 'Tipo de operación', 'Método', 'Monto', 'Estado', 'Solicitada por', 'Fecha y hora'];
 
     const rows = historyType === 'sales'
       ? historyRows.map((row) => [row.store, row.orderNumber, row.student, row.pedidos, row.paymentMethod, row.total, row.dateTime])
-      : historyRows.map((row) => [row.store, row.orderNumber, row.student, row.paymentMethod, row.total, row.status, row.requestedBy, row.dateTime]);
+      : historyRows.map((row) => [row.store, row.orderNumber, row.student, row.operationType, row.paymentMethod, row.total, row.status, row.requestedBy, row.dateTime]);
 
     downloadExcelWorkbook(
       historyType === 'sales' ? 'Ventas' : 'Recargas',
@@ -2422,6 +2503,7 @@ function AdminDashboard() {
           <td>${escapeHtml(row.store)}</td>
           <td>${escapeHtml(row.orderNumber)}</td>
           <td>${escapeHtml(row.student)}</td>
+          <td>${escapeHtml(row.operationType)}</td>
           <td>${escapeHtml(row.paymentMethod)}</td>
           <td>${escapeHtml(row.total)}</td>
           <td>${escapeHtml(row.status)}</td>
@@ -2446,6 +2528,7 @@ function AdminDashboard() {
           <th>Tienda</th>
           <th>Id recarga</th>
           <th>Alumno</th>
+          <th>Tipo de operación</th>
           <th>Método</th>
           <th>Monto</th>
           <th>Estado</th>
@@ -2838,6 +2921,7 @@ function AdminDashboard() {
     if (editEntity === 'category') {
       return {
         name: item.name || '',
+        imageUrl: sanitizePublicImageUrl(item.imageUrl),
         status: item.status || 'active',
       };
     }
@@ -3039,7 +3123,12 @@ function AdminDashboard() {
 
     if (editEntity === 'category') {
       runAction(
-        () => updateAdminCategory(itemId, { name: draft.name, status: draft.status }),
+        () =>
+          updateAdminCategory(itemId, {
+            name: draft.name,
+            imageUrl: sanitizePublicImageUrl(draft.imageUrl),
+            status: draft.status,
+          }),
         'Registro actualizado.',
         async () => {
           await reloadEditEntityData();
@@ -3945,6 +4034,7 @@ function AdminDashboard() {
                     <th>Tienda</th>
                     <th>Id recarga</th>
                     <th>Alumno</th>
+                    <th>Tipo de operación</th>
                     <th>Método</th>
                     <th>Monto</th>
                     <th>Estado</th>
@@ -3977,15 +4067,20 @@ function AdminDashboard() {
                         <td>{row.store}</td>
                         <td>{row.orderNumber}</td>
                         <td>{row.student}</td>
+                        <td>{row.operationType}</td>
                         <td>{row.paymentMethod}</td>
                         <td>{row.total}</td>
                         <td>{row.status}</td>
                         <td>{row.requestedBy}</td>
                         <td>{row.dateTime}</td>
                         <td>
-                          <button className="btn" onClick={() => onCancelRechargeFromHistory(row._id)} type="button">
-                            Anular recarga
-                          </button>
+                          {row.operationType === 'recarga' ? (
+                            <button className="btn" onClick={() => onCancelRechargeFromHistory(row._id)} type="button">
+                              Anular recarga
+                            </button>
+                          ) : (
+                            <span className="muted">No aplica</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -4418,7 +4513,7 @@ function AdminDashboard() {
           </form>
 
           <h3>Modificar saldos</h3>
-          <p className="muted">Ajusta el saldo final de cada alumno y guarda por fila.</p>
+          <p className="muted">El saldo actual no se edita directamente. Usa "Debitar saldo" para registrar ajustes con motivo.</p>
           <div className="admin-balance-editor-toolbar">
             <input
               placeholder="Filtrar alumno por nombre o código"
@@ -4434,13 +4529,22 @@ function AdminDashboard() {
               <thead>
                 <tr>
                   <th>Nombre</th>
-                  <th>Saldo</th>
+                  <th>Saldo actual</th>
+                  <th>Debitar saldo</th>
+                  <th>Nuevo saldo</th>
+                  <th>Motivo del débito</th>
+                  <th>Acción</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedTopupBalanceRows.map((student) => {
                   const studentId = String(student._id || '');
-                  const draftValue = topupBalanceDrafts[studentId] ?? String(Number(student.walletBalance || 0));
+                  const debitDraftRaw = topupDebitDrafts[studentId] ?? '';
+                  const debitDraft = Number(debitDraftRaw || 0);
+                  const currentBalance = Number(student.walletBalance || 0);
+                  const computedNewBalance = Math.round((currentBalance - debitDraft) * 100) / 100;
+                  const reasonDraft = String(topupDebitReasonDrafts[studentId] || '');
+                  const isDebitMode = Boolean(topupDebitModeRows[studentId]);
                   const isSaving = savingTopupStudentId === studentId;
 
                   return (
@@ -4450,23 +4554,69 @@ function AdminDashboard() {
                         {student.schoolCode ? ` (${student.schoolCode})` : ''}
                       </td>
                       <td>
-                        <div className="admin-balance-editor-actions">
+                        <div className="admin-balance-editor-readonly">{formatCurrency(currentBalance)}</div>
+                      </td>
+                      <td>
+                        {isDebitMode ? (
                           <input
                             type="number"
                             min="0"
                             step="100"
-                            value={draftValue}
-                            onChange={(event) => onChangeTopupBalanceDraft(studentId, event.target.value)}
+                            placeholder="0"
+                            value={debitDraftRaw}
+                            onChange={(event) => onChangeTopupDebitDraft(studentId, event.target.value)}
                           />
+                        ) : (
                           <button
                             className="btn btn-primary"
                             type="button"
                             disabled={isSaving}
-                            onClick={() => onSaveTopupBalance(student)}
+                            onClick={() => onOpenTopupDebitRow(studentId)}
                           >
-                            {isSaving ? 'Guardando...' : 'Guardar'}
+                            Debitar saldo
                           </button>
+                        )}
+                      </td>
+                      <td>
+                        <div className={`admin-balance-editor-new-balance ${computedNewBalance < 0 ? 'is-negative' : ''}`}>
+                          {isDebitMode ? formatCurrency(computedNewBalance) : '-'}
                         </div>
+                      </td>
+                      <td>
+                        {isDebitMode ? (
+                          <input
+                            type="text"
+                            placeholder="Motivo obligatorio"
+                            value={reasonDraft}
+                            onChange={(event) => onChangeTopupDebitReasonDraft(studentId, event.target.value)}
+                          />
+                        ) : (
+                          <span className="muted">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {isDebitMode ? (
+                          <div className="admin-balance-editor-actions">
+                            <button
+                              className="btn btn-primary"
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() => onSaveTopupDebit(student)}
+                            >
+                              {isSaving ? 'Guardando...' : 'Guardar'}
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() => onCancelTopupDebitRow(studentId)}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="muted">-</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -4852,6 +5002,7 @@ function AdminDashboard() {
                 {editEntity === 'category' ? (
                   <tr>
                     <th>Nombre</th>
+                    <th>Foto</th>
                     <th>Estado</th>
                     {activeModule === 'modify' ? <th>Acciones</th> : null}
                   </tr>
@@ -4916,6 +5067,31 @@ function AdminDashboard() {
                         <>
                           <td>
                             <input value={draft.name} onChange={(event) => onEditTableDraftChange(item, 'name', event.target.value)} />
+                          </td>
+                          <td>
+                            <div className="admin-edit-product-image-cell">
+                              {draft.imageUrl ? (
+                                <img alt={draft.name || 'Categoria'} className="admin-edit-product-thumb" src={draft.imageUrl} />
+                              ) : (
+                                <div className="admin-edit-product-thumb admin-edit-product-thumb-empty">Sin foto</div>
+                              )}
+                              {activeModule === 'modify' ? (
+                                <>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={uploadingEditCategoryImageId === String(item._id)}
+                                    onChange={(event) => onEditTableCategoryImageSelected(item, event)}
+                                  />
+                                  {uploadingEditCategoryImageId === String(item._id) ? <p>Subiendo imagen...</p> : null}
+                                  <input
+                                    placeholder="URL generada por upload"
+                                    value={sanitizePublicImageUrl(draft.imageUrl) || ''}
+                                    readOnly
+                                  />
+                                </>
+                              ) : null}
+                            </div>
                           </td>
                           <td>
                             <select value={draft.status} onChange={(event) => onEditTableDraftChange(item, 'status', event.target.value)}>

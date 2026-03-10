@@ -125,7 +125,8 @@ router.get('/recharges', roleMiddleware('vendor', 'admin'), async (req, res) => 
 
     const filter = {
       schoolId,
-      type: 'recharge',
+      type: { $in: ['recharge', 'adjustment'] },
+      cancelledAt: null,
     };
 
     if (role === 'vendor') {
