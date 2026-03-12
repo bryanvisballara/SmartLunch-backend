@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createDailyClosure, getDailyClosureSummary } from '../services/dailyClosure.service';
+import { createDailyClosure, getDailyClosureSummary, getDailyClosures } from '../services/dailyClosure.service';
 import useAuthStore from '../store/auth.store';
 import DismissibleNotice from '../components/DismissibleNotice';
 
@@ -30,6 +30,9 @@ function DailyClosure() {
   const [dayClosed, setDayClosed] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [savedClosure, setSavedClosure] = useState(null);
+  const [historyDateFilter, setHistoryDateFilter] = useState('');
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const todayLabel = todayLongEs();
   const canEditBaseInitial = user?.role === 'vendor';
 
@@ -61,8 +64,30 @@ function DailyClosure() {
     }
   };
 
+  const loadHistory = async (dateFilter = historyDateFilter) => {
+    if (!currentStore?._id) {
+      setHistoryRows([]);
+      return;
+    }
+
+    try {
+      setHistoryLoading(true);
+      const response = await getDailyClosures({
+        storeId: currentStore._id,
+        ...(dateFilter ? { date: dateFilter } : {}),
+      });
+      setHistoryRows(response.data || []);
+    } catch (error) {
+      setHistoryRows([]);
+      setMessage(error?.response?.data?.message || 'No se pudo cargar historial de cierres');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadSummary();
+    loadHistory('');
   }, [currentStore?._id]);
 
   const saveClosure = async () => {
@@ -116,6 +141,7 @@ function DailyClosure() {
       setDayClosed(true);
       setShowSuccessPopup(true);
       setMessage('');
+      loadHistory(historyDateFilter);
     } catch (error) {
       setMessage(error?.response?.data?.message || 'No se pudo guardar cierre diario');
     }
@@ -186,6 +212,69 @@ function DailyClosure() {
         </button>
         {dayClosed ? <p>El cierre de hoy ya fue ejecutado.</p> : null}
         <DismissibleNotice text={message} type="info" onClose={() => setMessage('')} />
+
+        <section className="panel soft">
+          <h3>Historial de cierres</h3>
+          <div className="row gap">
+            <label>
+              Filtrar por día
+              <input
+                type="date"
+                value={historyDateFilter}
+                onChange={(event) => setHistoryDateFilter(event.target.value)}
+              />
+            </label>
+            <button className="btn" type="button" onClick={() => loadHistory(historyDateFilter)} disabled={!currentStore?._id || historyLoading}>
+              {historyLoading ? 'Filtrando...' : 'Filtrar historial'}
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setHistoryDateFilter('');
+                loadHistory('');
+              }}
+              disabled={!currentStore?._id || historyLoading}
+            >
+              Ver todos
+            </button>
+          </div>
+
+          {historyRows.length === 0 && !historyLoading ? <p>No hay cierres registrados para el filtro seleccionado.</p> : null}
+
+          {historyRows.length > 0 ? (
+            <div className="approval-history-scroll approval-history-table-scroll">
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Tienda</th>
+                    <th>Total ventas</th>
+                    <th>Efectivo sistema</th>
+                    <th>Base inicial</th>
+                    <th>Base final</th>
+                    <th>Efectivo real</th>
+                    <th>Diferencia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyRows.map((closure) => (
+                    <tr key={closure._id}>
+                      <td>{closure.date || 'N/A'}</td>
+                      <td>{closure.storeId?.name || currentStore?.name || 'N/A'}</td>
+                      <td>${Number(closure.totalSales || 0).toLocaleString('es-CO')}</td>
+                      <td>${Number(closure.cashAccordingSystem || 0).toLocaleString('es-CO')}</td>
+                      <td>${Number(closure.baseInitial || 0).toLocaleString('es-CO')}</td>
+                      <td>${Number(closure.baseFinal || 0).toLocaleString('es-CO')}</td>
+                      <td>${Number(closure.countedCash || 0).toLocaleString('es-CO')}</td>
+                      <td>${Number(closure.cashDifference || 0).toLocaleString('es-CO')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
       </section>
 
       {showSuccessPopup ? (
