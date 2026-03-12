@@ -38,6 +38,28 @@ const isNetworkError = (error) => {
   return ['ERR_NETWORK', 'ECONNABORTED', 'ETIMEDOUT'].includes(String(error.code || ''));
 };
 
+const toSafeNumber = (value) => {
+  if (typeof value === 'number') {
+    return isFinite(value) ? value : 0;
+  }
+
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return 0;
+  }
+
+  const normalized = raw
+    .replace(/\s+/g, '')
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+
+  const parsed = Number(normalized);
+  return isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeId = (value) => String(value || '');
+
 function POS() {
   const { currentStore, setCurrentStore } = useAuthStore();
   const [query, setQuery] = useState('');
@@ -211,8 +233,8 @@ function POS() {
   const buildOrderSummaryFromCart = (cartItems, method) => {
     const normalizedItems = (cartItems || []).map((item) => ({
       name: item.name || item.nameSnapshot || 'Producto',
-      quantity: Number(item.quantity || 0),
-      subtotal: Number(item.price || item.unitPriceSnapshot || 0) * Number(item.quantity || 0),
+      quantity: toSafeNumber(item.quantity),
+      subtotal: toSafeNumber(item.price || item.unitPriceSnapshot || 0) * toSafeNumber(item.quantity),
     }));
 
     return {
@@ -362,7 +384,7 @@ function POS() {
   }, [items]);
 
   const cartTotal = useMemo(
-    () => items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0), 0),
+    () => items.reduce((sum, item) => sum + toSafeNumber(item.price) * toSafeNumber(item.quantity), 0),
     [items]
   );
 
@@ -426,12 +448,13 @@ function POS() {
   };
 
   const getCartQuantity = (productId) => {
-    const found = items.find((item) => item._id === productId);
+    const targetId = normalizeId(productId);
+    const found = items.find((item) => normalizeId(item._id) === targetId);
     return found ? found.quantity : 0;
   };
 
   const getAvailableStock = (product) => {
-    const stock = Math.max(0, Number(product?.stock || 0));
+    const stock = Math.max(0, toSafeNumber(product?.stock));
     const inCart = getCartQuantity(product?._id);
     return Math.max(0, stock - inCart);
   };
@@ -497,17 +520,20 @@ function POS() {
     }
 
     setItems((previous) => {
-      const found = previous.find((item) => item._id === product._id);
+      const productId = normalizeId(product._id);
+      const found = previous.find((item) => normalizeId(item._id) === productId);
       if (found) {
-        const nextQuantity = Number(found.quantity || 0) + 1;
-        const maxStock = Math.max(0, Number(product.stock || 0));
+        const nextQuantity = toSafeNumber(found.quantity) + 1;
+        const maxStock = Math.max(0, toSafeNumber(product.stock));
         if (nextQuantity > maxStock) {
           setMessage('No hay stock disponible para este producto');
           return previous;
         }
 
         return previous.map((item) =>
-          item._id === product._id ? { ...item, quantity: item.quantity + 1 } : item
+          normalizeId(item._id) === productId
+            ? { ...item, quantity: toSafeNumber(item.quantity) + 1 }
+            : item
         );
       }
 
@@ -518,21 +544,23 @@ function POS() {
   };
 
   const removeItem = (productId) => {
-    setItems((previous) => previous.filter((item) => item._id !== productId));
+    const targetId = normalizeId(productId);
+    setItems((previous) => previous.filter((item) => normalizeId(item._id) !== targetId));
   };
 
   const changeItemQuantity = (productId, delta) => {
     setItems((previous) => {
-      const found = previous.find((item) => item._id === productId);
+      const targetId = normalizeId(productId);
+      const found = previous.find((item) => normalizeId(item._id) === targetId);
       if (!found) {
         return previous;
       }
 
-      const nextQuantity = found.quantity + delta;
-      const maxStock = Math.max(0, Number(found.stock || 0));
+      const nextQuantity = toSafeNumber(found.quantity) + delta;
+      const maxStock = Math.max(0, toSafeNumber(found.stock));
 
       if (nextQuantity <= 0) {
-        return previous.filter((item) => item._id !== productId);
+        return previous.filter((item) => normalizeId(item._id) !== targetId);
       }
 
       if (delta > 0 && nextQuantity > maxStock) {
@@ -542,10 +570,10 @@ function POS() {
 
       if (delta > 0 && dailyLimit > 0) {
         const currentTotal = previous.reduce(
-          (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 0),
+          (sum, item) => sum + toSafeNumber(item.price) * toSafeNumber(item.quantity),
           0
         );
-        const nextTotal = currentTotal + Number(found.price || 0);
+        const nextTotal = currentTotal + toSafeNumber(found.price);
         if (Number(spentToday) + nextTotal > dailyLimit) {
           setMessage('El alumno supera el tope diario configurado');
           return previous;
@@ -555,7 +583,7 @@ function POS() {
       setMessage('');
 
       return previous.map((item) =>
-        item._id === productId ? { ...item, quantity: nextQuantity } : item
+        normalizeId(item._id) === targetId ? { ...item, quantity: nextQuantity } : item
       );
     });
   };
@@ -632,17 +660,19 @@ function POS() {
         </label>
 
         {!student && students.length > 0 ? (
-          <div className="panel soft pos-scroll-area student-list-panel">
-            {students.map((studentItem) => (
-              <button
-                className="btn"
-                key={studentItem._id}
-                onClick={() => selectStudent(studentItem)}
-                type="button"
-              >
-                {studentItem.name} {studentItem.schoolCode ? `(${studentItem.schoolCode})` : ''}
-              </button>
-            ))}
+          <div className="panel soft student-list-panel">
+            <div className="student-list-scroll" role="listbox" aria-label="Lista de alumnos">
+              {students.map((studentItem) => (
+                <button
+                  className="btn"
+                  key={studentItem._id}
+                  onClick={() => selectStudent(studentItem)}
+                  type="button"
+                >
+                  {studentItem.name} {studentItem.schoolCode ? `(${studentItem.schoolCode})` : ''}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
 

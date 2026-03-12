@@ -8,17 +8,18 @@ const PAYMENT_OPTIONS = [
 
 const toMoneyNumber = (value) => {
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : 0;
+    return isFinite(value) ? value : 0;
   }
 
   const normalized = String(value || '')
     .trim()
     .replace(/\s+/g, '')
+    .replace(/[^\d,.-]/g, '')
     .replace(/\./g, '')
     .replace(',', '.');
 
   const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return isFinite(parsed) ? parsed : 0;
 };
 
 function OrderSummary({

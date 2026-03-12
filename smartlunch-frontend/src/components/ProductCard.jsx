@@ -7,7 +7,7 @@ function ProductCard({
   disabledLabel = 'No disponible',
   disabledReason = '',
 }) {
-  const safeStock = Number.isFinite(Number(availableStock)) ? Math.max(0, Number(availableStock)) : Math.max(0, Number(product.stock || 0));
+  const safeStock = isFinite(Number(availableStock)) ? Math.max(0, Number(availableStock)) : Math.max(0, Number(product.stock || 0));
   const outOfStock = safeStock <= 0;
   const disabled = product.status !== 'active' || forceDisabled || outOfStock;
   const cardClassName = `card product-card-compact ${forceDisabled ? 'product-card-blocked' : ''}`;
