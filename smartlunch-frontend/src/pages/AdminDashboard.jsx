@@ -304,6 +304,7 @@ function AdminDashboard() {
   const [approvalHistory, setApprovalHistory] = useState([]);
   const [selectedApprovalHistoryId, setSelectedApprovalHistoryId] = useState('');
   const [approvalModule, setApprovalModule] = useState('in');
+  const [expandedApprovalInventoryBatchIds, setExpandedApprovalInventoryBatchIds] = useState([]);
 
   const [closures, setClosures] = useState([]);
 
@@ -698,9 +699,75 @@ function AdminDashboard() {
     [approvalModules]
   );
 
+  const inventoryApprovalHistoryByBatch = useMemo(() => {
+    if (!['in', 'out', 'transfer'].includes(approvalModule)) {
+      return [];
+    }
+
+    const grouped = (approvalHistory || [])
+      .filter((item) => item.domain === 'inventory' && item?.detail?.type === approvalModule)
+      .reduce((acc, item) => {
+        const batchKey = String(item?.detail?.batchId || item?.detail?._id || item.id || '');
+        if (!batchKey) {
+          return acc;
+        }
+
+        if (!acc[batchKey]) {
+          acc[batchKey] = {
+            key: batchKey,
+            decision: item.decision,
+            statusLabel: item.statusLabel,
+            type: item?.detail?.type || approvalModule,
+            store: item?.detail?.storeId || null,
+            targetStore: item?.detail?.targetStoreId || null,
+            requestedBy: item?.detail?.requestedBy || null,
+            decidedBy: item.decidedBy,
+            decidedAt: item.decidedAt || item.createdAt,
+            notes: item?.detail?.notes || '',
+            requests: [],
+          };
+        }
+
+        if (acc[batchKey].decision !== item.decision) {
+          acc[batchKey].decision = 'mixed';
+          acc[batchKey].statusLabel = 'Mixta';
+        }
+
+        if (new Date(item.decidedAt || item.createdAt) > new Date(acc[batchKey].decidedAt || 0)) {
+          acc[batchKey].decidedAt = item.decidedAt || item.createdAt;
+          acc[batchKey].decidedBy = item.decidedBy;
+        }
+
+        acc[batchKey].requests.push({
+          id: item?.detail?._id || item.id,
+          productName: item?.detail?.productId?.name || 'Producto',
+          quantity: Number(item?.detail?.quantity || 0),
+          notes: item?.detail?.notes || '',
+        });
+
+        return acc;
+      }, {});
+
+    return Object.values(grouped).sort(
+      (a, b) => new Date(b.decidedAt || 0) - new Date(a.decidedAt || 0)
+    );
+  }, [approvalHistory, approvalModule]);
+
+  const approvalHistoryForActiveModule = useMemo(() => {
+    if (approvalModule === 'topups') {
+      return (approvalHistory || []).filter((item) => item.domain === 'topup');
+    }
+
+    if (approvalModule === 'cancellations') {
+      return (approvalHistory || []).filter((item) => item.domain === 'cancellation');
+    }
+
+    return [];
+  }, [approvalHistory, approvalModule]);
+
   const selectedApprovalHistory = useMemo(
-    () => approvalHistory.find((item) => item.id === selectedApprovalHistoryId) || null,
-    [approvalHistory, selectedApprovalHistoryId]
+    () => approvalHistoryForActiveModule.find((item) => item.id === selectedApprovalHistoryId) || null,
+    [approvalHistoryForActiveModule, selectedApprovalHistoryId]
   );
 
   const pendingSchoolBillingOrders = useMemo(
@@ -1673,6 +1740,29 @@ function AdminDashboard() {
   }, [activeModule]);
 
   useEffect(() => {
+    if (['in', 'out', 'transfer'].includes(approvalModule)) {
+      if (selectedApprovalHistoryId !== '') {
+        setSelectedApprovalHistoryId('');
+      }
+      return;
+    }
+
+    setSelectedApprovalHistoryId((previous) => {
+      if (previous && approvalHistoryForActiveModule.some((item) => item.id === previous)) {
+        return previous;
+      }
+
+      return approvalHistoryForActiveModule[0]?.id || '';
+    });
+  }, [approvalModule, approvalHistoryForActiveModule, selectedApprovalHistoryId]);
+
+  useEffect(() => {
+    setExpandedApprovalInventoryBatchIds((previous) =>
+      previous.filter((batchId) => inventoryApprovalHistoryByBatch.some((group) => group.key === batchId))
+    );
+  }, [inventoryApprovalHistoryByBatch]);
+
+  useEffect(() => {
     if (activeModule !== 'school_billing') {
       return;
     }
@@ -2339,6 +2429,14 @@ function AdminDashboard() {
       'Solicitud de inventario aprobada.',
       loadApprovals
     );
+
+  const onToggleInventoryHistoryBatch = (batchId) => {
+    setExpandedApprovalInventoryBatchIds((previous) =>
+      previous.includes(batchId)
+        ? previous.filter((value) => value !== batchId)
+        : [...previous, batchId]
+    );
+  };
 
   const onRejectInventoryBatch = (ids) =>
     runAction(
@@ -6348,44 +6446,99 @@ function AdminDashboard() {
 
           <div className="card">
             <h4>Historial de autorizaciones</h4>
-            {approvalHistory.length === 0 ? <p>No hay autorizaciones aprobadas o rechazadas.</p> : null}
+            {['in', 'out', 'transfer'].includes(approvalModule) ? (
+              <>
+                {inventoryApprovalHistoryByBatch.length === 0 ? <p>No hay autorizaciones aprobadas o rechazadas.</p> : null}
+                {inventoryApprovalHistoryByBatch.map((batch) => (
+                  <div className="card" key={batch.key}>
+                    <p>
+                      Lote: <strong>{String(batch.key || '').slice(0, 8) || 'N/A'}</strong>
+                    </p>
+                    <p>
+                      Estado: {batch.statusLabel}
+                      {' | '}
+                      Fecha: {formatDateTime(batch.decidedAt)}
+                    </p>
+                    <p>
+                      Tienda: {batch.store?.name || 'N/A'}
+                      {batch.targetStore?.name ? ` -> ${batch.targetStore.name}` : ''}
+                    </p>
+                    <p>Solicitado por: {batch.requestedBy?.name || batch.requestedBy?.username || 'N/A'}</p>
+                    <p>Resuelto por: {batch.decidedBy || 'N/A'}</p>
+                    {batch.notes ? <p>Observaciones: {batch.notes}</p> : null}
+                    <button className="btn" type="button" onClick={() => onToggleInventoryHistoryBatch(batch.key)}>
+                      {expandedApprovalInventoryBatchIds.includes(batch.key)
+                        ? 'Ocultar productos del lote'
+                        : `Ver productos del lote (${batch.requests.length})`}
+                    </button>
 
-            {approvalHistory.length > 0 ? (
-              <div className="approval-history-scroll approval-history-table-scroll">
-                <table className="simple-table">
-                  <thead>
-                    <tr>
-                      <th>Fecha y hora</th>
-                      <th>Tipo</th>
-                      <th>Estado</th>
-                      <th>Resumen</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {approvalHistory.map((item) => (
-                      <tr key={item.id}>
-                        <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
-                        <td>{item.title}</td>
-                        <td>{item.statusLabel}</td>
-                        <td>{item.summary}</td>
-                        <td>
-                          <button
-                            className="btn"
-                            type="button"
-                            onClick={() => setSelectedApprovalHistoryId(item.id)}
-                          >
-                            Ver detalle
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    {expandedApprovalInventoryBatchIds.includes(batch.key) ? (
+                      <table className="simple-table">
+                        <thead>
+                          <tr>
+                            <th>Producto</th>
+                            <th>Cantidad</th>
+                            <th>Observación</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {batch.requests.map((request) => (
+                            <tr key={request.id}>
+                              <td>{request.productName}</td>
+                              <td>{request.quantity}</td>
+                              <td>{request.notes || 'Sin observaciones'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : null}
+                  </div>
+                ))}
+              </>
             ) : null}
 
-            {selectedApprovalHistory ? (
+            {['topups', 'cancellations'].includes(approvalModule) ? (
+              <>
+                {approvalHistoryForActiveModule.length === 0 ? <p>No hay autorizaciones aprobadas o rechazadas.</p> : null}
+
+                {approvalHistoryForActiveModule.length > 0 ? (
+                  <div className="approval-history-scroll approval-history-table-scroll">
+                    <table className="simple-table">
+                      <thead>
+                        <tr>
+                          <th>Fecha y hora</th>
+                          <th>Tipo</th>
+                          <th>Estado</th>
+                          <th>Resumen</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {approvalHistoryForActiveModule.map((item) => (
+                          <tr key={item.id}>
+                            <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
+                            <td>{item.title}</td>
+                            <td>{item.statusLabel}</td>
+                            <td>{item.summary}</td>
+                            <td>
+                              <button
+                                className="btn"
+                                type="button"
+                                onClick={() => setSelectedApprovalHistoryId(item.id)}
+                              >
+                                Ver detalle
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {['topups', 'cancellations'].includes(approvalModule) && selectedApprovalHistory ? (
               <div className="card">
                 <h4>Detalle de autorización</h4>
                 <p>Tipo: {selectedApprovalHistory.title}</p>

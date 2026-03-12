@@ -23,6 +23,7 @@ function InventoryRequestPage({ mode }) {
   const [observations, setObservations] = useState('');
   const [pendingRequests, setPendingRequests] = useState([]);
   const [historyRequests, setHistoryRequests] = useState([]);
+  const [expandedHistoryBatchKeys, setExpandedHistoryBatchKeys] = useState([]);
   const [message, setMessage] = useState('');
   const [successModal, setSuccessModal] = useState({ open: false, fading: false });
   const [submitting, setSubmitting] = useState(false);
@@ -213,6 +214,20 @@ function InventoryRequestPage({ mode }) {
       ).sort((a, b) => new Date(b.resolvedAt || b.createdAt) - new Date(a.resolvedAt || a.createdAt)),
     [historyRequests]
   );
+
+  useEffect(() => {
+    setExpandedHistoryBatchKeys((previous) =>
+      previous.filter((key) => groupedHistoryRequests.some((group) => group.key === key))
+    );
+  }, [groupedHistoryRequests]);
+
+  const toggleHistoryBatch = (batchKey) => {
+    setExpandedHistoryBatchKeys((previous) =>
+      previous.includes(batchKey)
+        ? previous.filter((key) => key !== batchKey)
+        : [...previous, batchKey]
+    );
+  };
 
   const removeRequestItem = (indexToRemove) => {
     setRequestItems((previous) => previous.filter((_, index) => index !== indexToRemove));
@@ -549,6 +564,7 @@ function InventoryRequestPage({ mode }) {
             <div className="approval-history-scroll">
               {groupedHistoryRequests.map((group) => (
                 <div className="card" key={group.key}>
+                  <p>Lote: {String(group.key || '').slice(0, 8) || 'N/A'}</p>
                   <p>
                     Estado: {group.status === 'approved' ? 'Aprobada' : 'Rechazada'}
                     {' | '}
@@ -566,22 +582,29 @@ function InventoryRequestPage({ mode }) {
                       : group.rejectedBy?.name || group.rejectedBy?.username || 'N/A'}
                   </p>
                   {group.notes ? <p>Observaciones: {group.notes}</p> : null}
-                  <table className="simple-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Cantidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.requests.map((request) => (
-                        <tr key={request._id}>
-                          <td>{request.productId?.name || 'Producto'}</td>
-                          <td>{request.quantity}</td>
+                  <button className="btn" type="button" onClick={() => toggleHistoryBatch(group.key)}>
+                    {expandedHistoryBatchKeys.includes(group.key)
+                      ? 'Ocultar productos del lote'
+                      : `Ver productos del lote (${group.requests.length})`}
+                  </button>
+                  {expandedHistoryBatchKeys.includes(group.key) ? (
+                    <table className="simple-table">
+                      <thead>
+                        <tr>
+                          <th>Producto</th>
+                          <th>Cantidad</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {group.requests.map((request) => (
+                          <tr key={request._id}>
+                            <td>{request.productId?.name || 'Producto'}</td>
+                            <td>{request.quantity}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : null}
                 </div>
               ))}
             </div>
