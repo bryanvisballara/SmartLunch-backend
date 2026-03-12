@@ -6449,51 +6449,76 @@ function AdminDashboard() {
             {['in', 'out', 'transfer'].includes(approvalModule) ? (
               <>
                 {inventoryApprovalHistoryByBatch.length === 0 ? <p>No hay autorizaciones aprobadas o rechazadas.</p> : null}
-                {inventoryApprovalHistoryByBatch.map((batch) => (
-                  <div className="card" key={batch.key}>
-                    <p>
-                      Lote: <strong>{String(batch.key || '').slice(0, 8) || 'N/A'}</strong>
-                    </p>
-                    <p>
-                      Estado: {batch.statusLabel}
-                      {' | '}
-                      Fecha: {formatDateTime(batch.decidedAt)}
-                    </p>
-                    <p>
-                      Tienda: {batch.store?.name || 'N/A'}
-                      {batch.targetStore?.name ? ` -> ${batch.targetStore.name}` : ''}
-                    </p>
-                    <p>Solicitado por: {batch.requestedBy?.name || batch.requestedBy?.username || 'N/A'}</p>
-                    <p>Resuelto por: {batch.decidedBy || 'N/A'}</p>
-                    {batch.notes ? <p>Observaciones: {batch.notes}</p> : null}
-                    <button className="btn" type="button" onClick={() => onToggleInventoryHistoryBatch(batch.key)}>
-                      {expandedApprovalInventoryBatchIds.includes(batch.key)
-                        ? 'Ocultar productos del lote'
-                        : `Ver productos del lote (${batch.requests.length})`}
-                    </button>
+                {inventoryApprovalHistoryByBatch.length > 0 ? (
+                  <div className="approval-history-scroll approval-history-table-scroll">
+                    <table className="simple-table">
+                      <thead>
+                        <tr>
+                          <th>Lote</th>
+                          <th>Fecha</th>
+                          <th>Estado</th>
+                          <th>Tienda</th>
+                          <th>Solicitado por</th>
+                          {approvalModule === 'out' ? <th>Observaciones</th> : null}
+                          <th>Resuelto por</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inventoryApprovalHistoryByBatch.map((batch) => {
+                          const expanded = expandedApprovalInventoryBatchIds.includes(batch.key);
+                          const rows = [
+                            (
+                              <tr key={`${batch.key}-row`}>
+                                <td>{String(batch.key || '').slice(0, 8) || 'N/A'}</td>
+                                <td>{formatDateTime(batch.decidedAt)}</td>
+                                <td>{batch.statusLabel}</td>
+                                <td>{batch.store?.name || 'N/A'}{batch.targetStore?.name ? ` -> ${batch.targetStore.name}` : ''}</td>
+                                <td>{batch.requestedBy?.name || batch.requestedBy?.username || 'N/A'}</td>
+                                {approvalModule === 'out' ? <td>{batch.notes || 'Sin observaciones'}</td> : null}
+                                <td>{batch.decidedBy || 'N/A'}</td>
+                                <td>
+                                  <button className="btn" type="button" onClick={() => onToggleInventoryHistoryBatch(batch.key)}>
+                                    {expanded ? 'Ocultar lote' : 'Ver lote'}
+                                  </button>
+                                </td>
+                              </tr>
+                            ),
+                          ];
 
-                    {expandedApprovalInventoryBatchIds.includes(batch.key) ? (
-                      <table className="simple-table">
-                        <thead>
-                          <tr>
-                            <th>Producto</th>
-                            <th>Cantidad</th>
-                            <th>Observación</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {batch.requests.map((request) => (
-                            <tr key={request.id}>
-                              <td>{request.productName}</td>
-                              <td>{request.quantity}</td>
-                              <td>{request.notes || 'Sin observaciones'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : null}
+                          if (expanded) {
+                            rows.push(
+                              <tr key={`${batch.key}-details`}>
+                                <td colSpan={approvalModule === 'out' ? 8 : 7}>
+                                  <table className="simple-table">
+                                    <thead>
+                                      <tr>
+                                        <th>Producto</th>
+                                        <th>Cantidad</th>
+                                        <th>Observación</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {batch.requests.map((request) => (
+                                        <tr key={request.id}>
+                                          <td>{request.productName}</td>
+                                          <td>{request.quantity}</td>
+                                          <td>{request.notes || 'Sin observaciones'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return rows;
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
+                ) : null}
               </>
             ) : null}
 
@@ -6505,32 +6530,77 @@ function AdminDashboard() {
                   <div className="approval-history-scroll approval-history-table-scroll">
                     <table className="simple-table">
                       <thead>
-                        <tr>
-                          <th>Fecha y hora</th>
-                          <th>Tipo</th>
-                          <th>Estado</th>
-                          <th>Resumen</th>
-                          <th></th>
-                        </tr>
+                        {approvalModule === 'topups' ? (
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Estado</th>
+                            <th>Alumno</th>
+                            <th>Monto</th>
+                            <th>Método</th>
+                            <th>Tienda</th>
+                            <th>Resuelto por</th>
+                            <th></th>
+                          </tr>
+                        ) : null}
+                        {approvalModule === 'cancellations' ? (
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Estado</th>
+                            <th>Orden</th>
+                            <th>Alumno</th>
+                            <th>Total</th>
+                            <th>Tienda</th>
+                            <th>Resuelto por</th>
+                            <th></th>
+                          </tr>
+                        ) : null}
                       </thead>
                       <tbody>
-                        {approvalHistoryForActiveModule.map((item) => (
-                          <tr key={item.id}>
-                            <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
-                            <td>{item.title}</td>
-                            <td>{item.statusLabel}</td>
-                            <td>{item.summary}</td>
-                            <td>
-                              <button
-                                className="btn"
-                                type="button"
-                                onClick={() => setSelectedApprovalHistoryId(item.id)}
-                              >
-                                Ver detalle
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {approvalHistoryForActiveModule.map((item) => {
+                          if (approvalModule === 'topups') {
+                            return (
+                              <tr key={item.id}>
+                                <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
+                                <td>{item.statusLabel}</td>
+                                <td>{item.detail?.studentId?.name || 'N/A'}</td>
+                                <td>{formatCurrency(item.detail?.amount || 0)}</td>
+                                <td>{paymentMethodLabel[item.detail?.method] || item.detail?.method || 'N/A'}</td>
+                                <td>{item.detail?.storeId?.name || 'N/A'}</td>
+                                <td>{item.decidedBy || 'N/A'}</td>
+                                <td>
+                                  <button
+                                    className="btn"
+                                    type="button"
+                                    onClick={() => setSelectedApprovalHistoryId(item.id)}
+                                  >
+                                    Ver detalle
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return (
+                            <tr key={item.id}>
+                              <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
+                              <td>{item.statusLabel}</td>
+                              <td>{item.detail?.orderId?._id || item.detail?.orderId || 'N/A'}</td>
+                              <td>{item.detail?.orderId?.studentId?.name || 'Venta externa'}</td>
+                              <td>{formatCurrency(item.detail?.orderId?.total || 0)}</td>
+                              <td>{item.detail?.storeId?.name || 'N/A'}</td>
+                              <td>{item.decidedBy || 'N/A'}</td>
+                              <td>
+                                <button
+                                  className="btn"
+                                  type="button"
+                                  onClick={() => setSelectedApprovalHistoryId(item.id)}
+                                >
+                                  Ver detalle
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -6541,42 +6611,66 @@ function AdminDashboard() {
             {['topups', 'cancellations'].includes(approvalModule) && selectedApprovalHistory ? (
               <div className="card">
                 <h4>Detalle de autorización</h4>
-                <p>Tipo: {selectedApprovalHistory.title}</p>
-                <p>Estado: {selectedApprovalHistory.statusLabel}</p>
-                <p>Resuelto por: {selectedApprovalHistory.decidedBy}</p>
-                <p>Fecha y hora: {formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</p>
-
-                {selectedApprovalHistory.domain === 'inventory' ? (
-                  <>
-                    <p>Tienda origen: {selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</p>
-                    <p>Tienda destino: {selectedApprovalHistory.detail?.targetStoreId?.name || 'N/A'}</p>
-                    <p>Producto: {selectedApprovalHistory.detail?.productId?.name || 'N/A'}</p>
-                    <p>Cantidad: {selectedApprovalHistory.detail?.quantity || 0}</p>
-                    <p>Solicitado por: {selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</p>
-                    <p>Observaciones: {selectedApprovalHistory.detail?.notes || 'Sin observaciones'}</p>
-                  </>
-                ) : null}
-
                 {selectedApprovalHistory.domain === 'topup' ? (
-                  <>
-                    <p>Alumno: {selectedApprovalHistory.detail?.studentId?.name || 'N/A'}</p>
-                    <p>Monto: {formatCurrency(selectedApprovalHistory.detail?.amount || 0)}</p>
-                    <p>Método: {selectedApprovalHistory.detail?.method || 'N/A'}</p>
-                    <p>Tienda: {selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</p>
-                    <p>Solicitado por: {selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</p>
-                    <p>Observaciones: {selectedApprovalHistory.detail?.notes || 'Sin observaciones'}</p>
-                  </>
+                  <table className="simple-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Estado</th>
+                        <th>Alumno</th>
+                        <th>Monto</th>
+                        <th>Método</th>
+                        <th>Tienda</th>
+                        <th>Solicitado por</th>
+                        <th>Resuelto por</th>
+                        <th>Observaciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>{formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</td>
+                        <td>{selectedApprovalHistory.statusLabel}</td>
+                        <td>{selectedApprovalHistory.detail?.studentId?.name || 'N/A'}</td>
+                        <td>{formatCurrency(selectedApprovalHistory.detail?.amount || 0)}</td>
+                        <td>{paymentMethodLabel[selectedApprovalHistory.detail?.method] || selectedApprovalHistory.detail?.method || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.decidedBy || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.detail?.notes || 'Sin observaciones'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 ) : null}
 
                 {selectedApprovalHistory.domain === 'cancellation' ? (
-                  <>
-                    <p>Orden: {selectedApprovalHistory.detail?.orderId?._id || selectedApprovalHistory.detail?.orderId || 'N/A'}</p>
-                    <p>Alumno: {selectedApprovalHistory.detail?.orderId?.studentId?.name || 'Venta externa'}</p>
-                    <p>Total: {formatCurrency(selectedApprovalHistory.detail?.orderId?.total || 0)}</p>
-                    <p>Tienda: {selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</p>
-                    <p>Solicitado por: {selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</p>
-                    <p>Motivo: {selectedApprovalHistory.detail?.reason || 'Sin motivo'}</p>
-                  </>
+                  <table className="simple-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Estado</th>
+                        <th>Orden</th>
+                        <th>Alumno</th>
+                        <th>Total</th>
+                        <th>Tienda</th>
+                        <th>Solicitado por</th>
+                        <th>Resuelto por</th>
+                        <th>Motivo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>{formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</td>
+                        <td>{selectedApprovalHistory.statusLabel}</td>
+                        <td>{selectedApprovalHistory.detail?.orderId?._id || selectedApprovalHistory.detail?.orderId || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.detail?.orderId?.studentId?.name || 'Venta externa'}</td>
+                        <td>{formatCurrency(selectedApprovalHistory.detail?.orderId?.total || 0)}</td>
+                        <td>{selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.decidedBy || 'N/A'}</td>
+                        <td>{selectedApprovalHistory.detail?.reason || 'Sin motivo'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 ) : null}
               </div>
             ) : null}
