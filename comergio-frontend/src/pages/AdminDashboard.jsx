@@ -387,6 +387,7 @@ function AdminDashboard() {
     notes: '',
     productIds: [],
   });
+  const [supplierProductSearch, setSupplierProductSearch] = useState('');
   const [editingSupplierId, setEditingSupplierId] = useState('');
 
   const [categoryForm, setCategoryForm] = useState({ name: '', imageUrl: '' });
@@ -395,6 +396,7 @@ function AdminDashboard() {
   const [productForm, setProductForm] = useState({
     name: '',
     categoryId: '',
+    supplierId: '',
     shortDescription: '',
     price: '',
     cost: '',
@@ -569,6 +571,23 @@ function AdminDashboard() {
   const [loadingEditStudentBalance, setLoadingEditStudentBalance] = useState(false);
 
   const parentUsers = useMemo(() => users.filter((u) => u.role === 'parent'), [users]);
+  const supplierProductOptions = useMemo(() => {
+    const activeProducts = (products || [])
+      .filter((product) => String(product.status || 'active') === 'active')
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+
+    const query = String(supplierProductSearch || '').trim().toLowerCase();
+    if (!query) {
+      return activeProducts;
+    }
+
+    return activeProducts.filter((product) => {
+      const name = String(product.name || '').toLowerCase();
+      const storeName = String(product.storeName || '').toLowerCase();
+      return name.includes(query) || storeName.includes(query);
+    });
+  }, [products, supplierProductSearch]);
+
   const isUserRecordEntity =
     editEntity === 'user' ||
     editEntity === 'parent' ||
@@ -2341,6 +2360,7 @@ function AdminDashboard() {
       () =>
         createAdminProduct({
           ...productForm,
+          supplierId: String(productForm.supplierId || '').trim() || null,
           createInAllStores: selectedStoreIds.includes('all'),
           initialStockStoreIds: selectedStoreIds.filter((id) => id !== 'all'),
           shortDescription: String(productForm.shortDescription || '').trim(),
@@ -2357,6 +2377,7 @@ function AdminDashboard() {
         setProductForm({
           name: '',
           categoryId: '',
+          supplierId: '',
           shortDescription: '',
           price: '',
           cost: '',
@@ -5249,6 +5270,18 @@ function AdminDashboard() {
                 </select>
               </label>
               <label>
+                Proveedor (opcional)
+                <select
+                  value={productForm.supplierId}
+                  onChange={(event) => setProductForm((prev) => ({ ...prev, supplierId: event.target.value }))}
+                >
+                  <option value="">Sin proveedor</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier._id} value={supplier._id}>{supplier.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 Descripción corta
                 <input
                   maxLength={140}
@@ -7612,27 +7645,49 @@ function AdminDashboard() {
 
                 <div style={{ gridColumn: '1 / -1' }}>
                   <p style={{ marginBottom: 6, fontWeight: 600 }}>Productos que vende este proveedor</p>
-                  <div className="admin-card-scroll" style={{ maxHeight: 220, border: '1px solid #e2e8f0', borderRadius: 8, padding: 8 }}>
+                  <input
+                    value={supplierProductSearch}
+                    onChange={(event) => setSupplierProductSearch(event.target.value)}
+                    placeholder="Buscar producto o tienda"
+                    style={{ width: '100%', marginBottom: 8 }}
+                  />
+                  <div className="admin-card-scroll" style={{ maxHeight: 260, border: '1px solid #e2e8f0', borderRadius: 10, padding: 8, background: '#f8fafc' }}>
                     {products.filter((product) => String(product.status || 'active') === 'active').length === 0 ? (
                       <p>No hay productos activos para asociar.</p>
+                    ) : supplierProductOptions.length === 0 ? (
+                      <p>No hay productos que coincidan con la búsqueda.</p>
                     ) : (
-                      products
-                        .filter((product) => String(product.status || 'active') === 'active')
-                        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
-                        .map((product) => {
-                          const checked = supplierForm.productIds.includes(String(product._id));
-                          return (
-                            <label key={product._id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => onToggleSupplierProduct(product._id)}
-                              />
-                              <span>{product.name}</span>
-                              <small style={{ color: '#718096' }}>{product.storeName ? `(${product.storeName})` : ''}</small>
-                            </label>
-                          );
-                        })
+                      supplierProductOptions.map((product) => {
+                        const checked = supplierForm.productIds.includes(String(product._id));
+                        return (
+                          <label
+                            key={product._id}
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '22px 1fr auto',
+                              alignItems: 'center',
+                              gap: 10,
+                              marginBottom: 6,
+                              padding: '8px 10px',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: 8,
+                              background: checked ? '#ebf8ff' : '#ffffff',
+                              textAlign: 'left',
+                              width: '100%',
+                              boxSizing: 'border-box',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => onToggleSupplierProduct(product._id)}
+                              style={{ margin: 0 }}
+                            />
+                            <span style={{ fontWeight: 600, color: '#1a202c' }}>{product.name}</span>
+                            <small style={{ color: '#718096', fontWeight: 500 }}>{product.storeName ? `${product.storeName}` : 'Sin tienda'}</small>
+                          </label>
+                        );
+                      })
                     )}
                   </div>
                 </div>

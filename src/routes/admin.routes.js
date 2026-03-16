@@ -1309,6 +1309,7 @@ router.post('/products', async (req, res) => {
       shortDescription = '',
       tags = [],
       status = 'active',
+      supplierId = null,
     } = req.body;
 
     if (!name || !categoryId || Number(price) < 0) {
@@ -1325,6 +1326,24 @@ router.post('/products', async (req, res) => {
     }
 
     const initialStockValue = Number(stock || 0);
+    const normalizedSupplierIdText = String(supplierId || '').trim();
+    let supplierRecord = null;
+    if (normalizedSupplierIdText) {
+      if (!mongoose.Types.ObjectId.isValid(normalizedSupplierIdText)) {
+        return res.status(400).json({ message: 'Invalid supplierId' });
+      }
+
+      supplierRecord = await Supplier.findOne({
+        _id: normalizedSupplierIdText,
+        schoolId,
+        deletedAt: null,
+      }).select('_id').lean();
+
+      if (!supplierRecord) {
+        return res.status(404).json({ message: 'Supplier not found' });
+      }
+    }
+
     const validStoreIds = new Set(stores.map((store) => String(store._id)));
     const legacyStoreId = String(initialStockStoreId || '').trim();
     const normalizedStoreIds = Array.isArray(initialStockStoreIds)
@@ -1406,6 +1425,20 @@ router.post('/products', async (req, res) => {
     let createdProducts = [];
     if (productsPayload.length > 0) {
       createdProducts = await Product.insertMany(productsPayload);
+    }
+
+    if (supplierRecord) {
+      const supplierProductIds = [
+        ...createdProducts.map((product) => product._id),
+        ...existingInSelectedStores.map((product) => product._id),
+      ];
+
+      if (supplierProductIds.length > 0) {
+        await Supplier.updateOne(
+          { _id: supplierRecord._id, schoolId, deletedAt: null },
+          { $addToSet: { productIds: { $each: supplierProductIds } } }
+        );
+      }
     }
 
     // Keep sharedProductId aligned across existing same logical products.
