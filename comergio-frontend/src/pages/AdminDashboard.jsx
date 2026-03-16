@@ -357,7 +357,13 @@ function AdminDashboard() {
 
   const [closures, setClosures] = useState([]);
 
-  const [salesFilters, setSalesFilters] = useState({ studentId: '', from: '', to: '' });
+  const [salesFilters, setSalesFilters] = useState({
+    studentId: '',
+    from: '',
+    to: '',
+    storeId: '',
+    paymentMethod: '',
+  });
   const [historyType, setHistoryType] = useState('sales');
   const [schoolBillingFilters, setSchoolBillingFilters] = useState({ from: '', to: '', q: '' });
   const [schoolBillingOrders, setSchoolBillingOrders] = useState([]);
@@ -1787,7 +1793,25 @@ function AdminDashboard() {
   };
 
   const loadOrders = async (filters = salesFilters) => {
-    const response = await getOrders(filters);
+    const params = {};
+
+    if (filters.studentId) {
+      params.studentId = filters.studentId;
+    }
+    if (filters.from) {
+      params.from = filters.from;
+    }
+    if (filters.to) {
+      params.to = filters.to;
+    }
+    if (filters.storeId) {
+      params.storeId = filters.storeId;
+    }
+    if (filters.paymentMethod) {
+      params.paymentMethod = filters.paymentMethod;
+    }
+
+    const response = await getOrders(params);
     setOrders(response.data || []);
   };
 
@@ -4617,6 +4641,38 @@ function AdminDashboard() {
               Hasta
               <input type="date" value={salesFilters.to} onChange={(event) => setSalesFilters((prev) => ({ ...prev, to: event.target.value }))} />
             </label>
+            {historyType === 'sales' ? (
+              <label>
+                Tienda
+                <select
+                  value={salesFilters.storeId}
+                  onChange={(event) => setSalesFilters((prev) => ({ ...prev, storeId: event.target.value }))}
+                >
+                  <option value="">Todas</option>
+                  {stores.map((store) => (
+                    <option key={store._id} value={store._id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {historyType === 'sales' ? (
+              <label>
+                Método de pago
+                <select
+                  value={salesFilters.paymentMethod}
+                  onChange={(event) => setSalesFilters((prev) => ({ ...prev, paymentMethod: event.target.value }))}
+                >
+                  <option value="">Todos</option>
+                  <option value="cash">Efectivo</option>
+                  <option value="dataphone">Datáfono</option>
+                  <option value="system">Sistema</option>
+                  <option value="qr">QR</option>
+                  <option value="school_billing">Cuenta de cobro colegio</option>
+                </select>
+              </label>
+            ) : null}
             <button className="btn btn-primary" type="submit">
               {historyType === 'sales' ? 'Filtrar ventas' : 'Filtrar recargas'}
             </button>

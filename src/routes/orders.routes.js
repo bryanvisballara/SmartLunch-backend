@@ -21,12 +21,48 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
+
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 function endOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+}
+
+function bogotaLocalToUtcDate(year, monthIndex, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
+  return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond) - BOGOTA_UTC_OFFSET_MS);
+}
+
+function resolveDateQueryBoundary(value, boundary) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const [yearText, monthText, dayText] = normalized.split('-');
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+      return null;
+    }
+
+    if (boundary === 'end') {
+      return bogotaLocalToUtcDate(year, month - 1, day, 23, 59, 59, 999);
+    }
+
+    return bogotaLocalToUtcDate(year, month - 1, day, 0, 0, 0, 0);
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
 }
 
 async function parentCanSeeStudent(user, studentId) {
@@ -312,6 +348,7 @@ router.get('/', async (req, res) => {
     const { schoolId, role } = req.user;
     const {
       studentId,
+      storeId,
       from,
       to,
       status,
@@ -332,6 +369,10 @@ router.get('/', async (req, res) => {
       filter.studentId = studentId;
     }
 
+    if (storeId) {
+      filter.storeId = storeId;
+    }
+
     if (paymentMethod) {
       filter.paymentMethod = String(paymentMethod);
     }
@@ -339,10 +380,18 @@ router.get('/', async (req, res) => {
     if (from || to) {
       filter.createdAt = {};
       if (from) {
-        filter.createdAt.$gte = new Date(from);
+        const fromDate = resolveDateQueryBoundary(from, 'start');
+        if (!fromDate) {
+          return res.status(400).json({ message: 'Invalid from date' });
+        }
+        filter.createdAt.$gte = fromDate;
       }
       if (to) {
-        filter.createdAt.$lte = new Date(to);
+        const toDate = resolveDateQueryBoundary(to, 'end');
+        if (!toDate) {
+          return res.status(400).json({ message: 'Invalid to date' });
+        }
+        filter.createdAt.$lte = toDate;
       }
     }
 
