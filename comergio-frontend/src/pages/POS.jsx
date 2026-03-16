@@ -316,6 +316,7 @@ function POS() {
       setCashTendered('');
       setSchoolBillingFor('');
       setSchoolBillingResponsible('');
+      resetCustomerAfterSale();
       setMessage('Sin internet: la orden quedo guardada en caché y se enviará automáticamente al volver la conexión.');
       return;
     }
@@ -343,11 +344,9 @@ function POS() {
       setCashTendered('');
       setSchoolBillingFor('');
       setSchoolBillingResponsible('');
+      resetCustomerAfterSale();
       setMessage('');
       setShowSuccessPopup(true);
-      if (student?._id) {
-        balanceMutation.mutate(student._id);
-      }
       loadProducts();
     } catch (error) {
       if (isNetworkError(error)) {
@@ -356,6 +355,7 @@ function POS() {
         setCashTendered('');
         setSchoolBillingFor('');
         setSchoolBillingResponsible('');
+        resetCustomerAfterSale();
         setMessage('Internet inestable: la orden quedó en caché y se sincronizará automáticamente.');
       } else {
         setMessage(error?.response?.data?.message || 'No se pudo crear la orden');
@@ -495,6 +495,16 @@ function POS() {
     setQuery('');
     setStudents([]);
     setMessage('');
+  };
+
+  const resetCustomerAfterSale = () => {
+    setStudent(null);
+    setStudentDetails(null);
+    setBalance(null);
+    setSpentToday(0);
+    setSellToGuest(false);
+    setQuery('');
+    setStudents([]);
   };
 
   const addItem = (product) => {

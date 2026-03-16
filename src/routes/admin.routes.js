@@ -28,23 +28,49 @@ const router = express.Router();
 router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
 
+const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
+
+function getBogotaShiftedDate(date = new Date()) {
+  return new Date(date.getTime() + BOGOTA_UTC_OFFSET_MS);
+}
+
+function bogotaLocalToUtcDate(year, monthIndex, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
+  return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond) - BOGOTA_UTC_OFFSET_MS);
+}
+
 function normalizeWeekStartDate(value) {
-  const base = value ? new Date(value) : new Date();
+  const normalizedText = String(value || '').trim();
+  let base;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedText)) {
+    const [yearText, monthText, dayText] = normalizedText.split('-');
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const dayOfMonth = Number(dayText);
+    base = bogotaLocalToUtcDate(year, month - 1, dayOfMonth);
+  } else {
+    base = value ? new Date(value) : new Date();
+  }
+
   if (Number.isNaN(base.getTime())) {
     return null;
   }
 
-  const day = base.getDay();
+  const shifted = getBogotaShiftedDate(base);
+  const day = shifted.getUTCDay();
   const diff = (day === 0 ? -6 : 1) - day;
-  const normalized = new Date(base);
-  normalized.setDate(base.getDate() + diff);
-  normalized.setHours(0, 0, 0, 0);
-  return normalized;
+
+  return bogotaLocalToUtcDate(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() + diff
+  );
 }
 
 function monthKeyFromDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const shifted = getBogotaShiftedDate(date);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
 }
 

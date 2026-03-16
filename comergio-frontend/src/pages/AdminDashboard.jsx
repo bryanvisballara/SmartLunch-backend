@@ -239,14 +239,37 @@ const currentMonthIso = () => {
 
 const currentDateIso = () => new Date().toISOString().slice(0, 10);
 
+const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
+
 const currentWeekStartIso = () => {
-  const now = new Date();
-  const day = now.getDay();
+  const bogotaShifted = new Date(Date.now() + BOGOTA_UTC_OFFSET_MS);
+  const day = bogotaShifted.getUTCDay();
   const diff = (day === 0 ? -6 : 1) - day;
-  const start = new Date(now);
-  start.setDate(now.getDate() + diff);
-  start.setHours(0, 0, 0, 0);
-  return start.toISOString().slice(0, 10);
+  const mondayUtc = new Date(Date.UTC(
+    bogotaShifted.getUTCFullYear(),
+    bogotaShifted.getUTCMonth(),
+    bogotaShifted.getUTCDate() + diff
+  ));
+  return mondayUtc.toISOString().slice(0, 10);
+};
+
+const parseWeekKeyDateSafe = (weekKey) => {
+  const normalized = String(weekKey || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const fallback = new Date(normalized);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  const [yearText, monthText, dayText] = normalized.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  // Use noon UTC to avoid timezone rollover when formatting in America/Bogota.
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
 };
 
 const daysInIsoMonth = (monthIso) => {
@@ -276,7 +299,7 @@ const meriendasFailedStatusValid = (value) => {
 const modules = [
   { id: 'home', label: 'Homepage KPI' },
   { id: 'accounting', label: 'Contabilidad' },
-  { id: 'ai', label: '🤖 IA — Recomendaciones' },
+  { id: 'ai', label: 'GIO - IA' },
   { id: 'suppliers', label: 'Proveedores' },
   { id: 'sales', label: 'Historial de ventas & recargas' },
   { id: 'school_billing', label: 'Cuentas de cobro colegio' },
@@ -847,15 +870,33 @@ function AdminDashboard() {
     const apiRows = Array.isArray(homeData?.weeklyAccountingSummary) ? homeData.weeklyAccountingSummary : [];
     if (apiRows.length > 0) {
       return apiRows
-        .map((row) => ({
-          weekKey: String(row?.weekKey || ''),
-          fixedTotal: Number(row?.fixedTotal || 0),
-          variableTotal: Number(row?.variableTotal || 0),
-          salesTotal: Number(row?.salesTotal || 0),
-          utilityTotal: Number(row?.utilityTotal || 0),
-          topupsTotal: Number(row?.topupsTotal || 0),
-          total: Number(row?.fixedTotal || 0) + Number(row?.variableTotal || 0),
-        }))
+        .map((row) => {
+          const salesCashTotal = Number(row?.salesCashTotal || 0);
+          const salesQrTotal = Number(row?.salesQrTotal || 0);
+          const salesDataphoneTotal = Number(row?.salesDataphoneTotal || 0);
+          const topupsTotal = Number(row?.topupsTotal || 0);
+          const fixedTotal = Number(row?.fixedTotal || 0);
+          const variableTotal = Number(row?.variableTotal || 0);
+          const salesByMethod = salesCashTotal + salesQrTotal + salesDataphoneTotal;
+          const salesTotalFallback = Number(row?.salesTotal || 0);
+          const salesTotal = salesByMethod > 0 ? salesByMethod : salesTotalFallback;
+          const totalIncomeTotal = salesTotal + topupsTotal;
+          const totalCostsTotal = fixedTotal + variableTotal;
+          const utilityTotal = totalIncomeTotal - totalCostsTotal;
+
+          return {
+            weekKey: String(row?.weekKey || ''),
+            salesCashTotal,
+            salesQrTotal,
+            salesDataphoneTotal,
+            topupsTotal,
+            totalIncomeTotal,
+            fixedTotal,
+            variableTotal,
+            totalCostsTotal,
+            utilityTotal,
+          };
+        })
         .filter((row) => row.weekKey)
         .sort((a, b) => String(b.weekKey).localeCompare(String(a.weekKey)));
     }
@@ -875,9 +916,13 @@ function AdminDashboard() {
       if (!grouped.has(weekKey)) {
         grouped.set(weekKey, {
           weekKey,
+          salesCashTotal: 0,
+          salesQrTotal: 0,
+          salesDataphoneTotal: 0,
+          totalIncomeTotal: 0,
           fixedTotal: 0,
           variableTotal: 0,
-          salesTotal: 0,
+          totalCostsTotal: 0,
           utilityTotal: 0,
           topupsTotal: 0,
         });
@@ -885,17 +930,14 @@ function AdminDashboard() {
 
       const row = grouped.get(weekKey);
       row[field] += Number(item?.amount || 0);
-      row.utilityTotal = Number(row.salesTotal || 0) - Number(row.fixedTotal || 0) - Number(row.variableTotal || 0);
+      row.totalCostsTotal = Number(row.fixedTotal || 0) + Number(row.variableTotal || 0);
+      row.utilityTotal = Number(row.totalIncomeTotal || 0) - Number(row.totalCostsTotal || 0);
     };
 
     fixedCosts.forEach((item) => addCost(item, 'fixedTotal'));
     variableCosts.forEach((item) => addCost(item, 'variableTotal'));
 
     return Array.from(grouped.values())
-      .map((row) => ({
-        ...row,
-        total: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
-      }))
       .sort((a, b) => String(b.weekKey).localeCompare(String(a.weekKey)));
   }, [homeData?.weeklyAccountingSummary, homeData?.fixedCosts, homeData?.variableCosts]);
 
@@ -4427,31 +4469,43 @@ function AdminDashboard() {
                   <thead>
                     <tr>
                       <th>Semana</th>
+                      <th>Ventas efectivo</th>
+                      <th>Ventas QR</th>
+                      <th>Ventas datáfono</th>
+                      <th>Recargas semana</th>
+                      <th>Total ingresos semana</th>
                       <th>Costos fijos</th>
                       <th>Costos variables</th>
-                      <th>Total semana</th>
-                      <th>Ventas semana</th>
+                      <th>Total costos semana</th>
                       <th>Utilidades semana</th>
-                      <th>Recargas</th>
                     </tr>
                   </thead>
                   <tbody>
                     {accountingWeeklyRows.map((row) => {
-                      const startDate = new Date(`${row.weekKey}T00:00:00`);
-                      const endDate = new Date(startDate);
-                      endDate.setDate(startDate.getDate() + 6);
+                      const startDate = parseWeekKeyDateSafe(row.weekKey);
+                      if (!startDate) {
+                        return null;
+                      }
+
+                      const endDate = new Date(startDate.getTime());
+                      endDate.setUTCDate(endDate.getUTCDate() + 6);
 
                       return (
                         <tr key={row.weekKey}>
                           <td>
-                            {startDate.toLocaleDateString('es-CO')} - {endDate.toLocaleDateString('es-CO')}
+                            {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                            {' - '}
+                            {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
                           </td>
+                          <td>{formatCurrency(row.salesCashTotal)}</td>
+                          <td>{formatCurrency(row.salesQrTotal)}</td>
+                          <td>{formatCurrency(row.salesDataphoneTotal)}</td>
+                          <td>{formatCurrency(row.topupsTotal)}</td>
+                          <td>{formatCurrency(row.totalIncomeTotal)}</td>
                           <td>{formatCurrency(row.fixedTotal)}</td>
                           <td>{formatCurrency(row.variableTotal)}</td>
-                          <td>{formatCurrency(row.total)}</td>
-                          <td>{formatCurrency(row.salesTotal)}</td>
+                          <td>{formatCurrency(row.totalCostsTotal)}</td>
                           <td>{formatCurrency(row.utilityTotal)}</td>
-                          <td>{formatCurrency(row.topupsTotal)}</td>
                         </tr>
                       );
                     })}
@@ -7221,7 +7275,7 @@ function AdminDashboard() {
         <section className="panel admin-section">
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
             <div>
-              <h3>🤖 Recomendaciones por IA</h3>
+              <h3>GIO - IA</h3>
               <p style={{ color: '#718096', maxWidth: 600 }}>
                 Análisis inteligente basado en {aiData?.analysisDays || 30} días de operación:
                 velocidad de productos, categorías, alumnos, horarios y oportunidades de margen.

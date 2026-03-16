@@ -636,7 +636,6 @@ router.get('/admin-home', async (req, res) => {
         {
           $match: {
             ...orderMatch,
-            paymentMethod: { $in: ['cash', 'transfer', 'qr'] },
             createdAt: { $gte: monthStart, $lt: monthEnd },
           },
         },
@@ -645,6 +644,7 @@ router.get('/admin-home', async (req, res) => {
             _id: 0,
             createdAt: 1,
             total: 1,
+            paymentMethod: 1,
           },
         },
       ]),
@@ -859,10 +859,15 @@ router.get('/admin-home', async (req, res) => {
       if (!weeklyAccountingMap.has(weekKey)) {
         weeklyAccountingMap.set(weekKey, {
           weekKey,
+          salesCashTotal: 0,
+          salesQrTotal: 0,
+          salesDataphoneTotal: 0,
           fixedTotal: 0,
           variableTotal: 0,
           salesTotal: 0,
           topupsTotal: 0,
+          totalIncomeTotal: 0,
+          totalCostsTotal: 0,
           utilityTotal: 0,
         });
       }
@@ -871,7 +876,8 @@ router.get('/admin-home', async (req, res) => {
     };
 
     const addWeeklyCost = (item, field) => {
-      const baseDate = item?.weekStart || item?.createdAt;
+      // Prefer createdAt for weekly consolidation to avoid legacy weekStart timezone drift.
+      const baseDate = item?.createdAt || item?.weekStart;
       const parsedDate = baseDate ? new Date(baseDate) : null;
       if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
         return;
@@ -898,7 +904,15 @@ router.get('/admin-home', async (req, res) => {
 
       const weekKey = getBogotaWeekKey(parsedDate);
       const row = ensureWeeklyRow(weekKey);
-      row.salesTotal += Number(sale?.total || 0);
+      const paymentMethod = String(sale?.paymentMethod || '').toLowerCase();
+      const amount = Number(sale?.total || 0);
+      if (paymentMethod === 'cash') {
+        row.salesCashTotal += amount;
+      } else if (paymentMethod === 'qr') {
+        row.salesQrTotal += amount;
+      } else if (paymentMethod === 'dataphone') {
+        row.salesDataphoneTotal += amount;
+      }
     }
 
     for (const topup of topupsRaw || []) {
@@ -915,7 +929,23 @@ router.get('/admin-home', async (req, res) => {
     const weeklyAccountingSummary = Array.from(weeklyAccountingMap.values())
       .map((row) => ({
         ...row,
-        utilityTotal: Number(row.salesTotal || 0) - Number(row.fixedTotal || 0) - Number(row.variableTotal || 0),
+        salesTotal:
+          Number(row.salesCashTotal || 0)
+          + Number(row.salesQrTotal || 0)
+          + Number(row.salesDataphoneTotal || 0),
+        totalIncomeTotal:
+          Number(row.salesCashTotal || 0)
+          + Number(row.salesQrTotal || 0)
+          + Number(row.salesDataphoneTotal || 0)
+          + Number(row.topupsTotal || 0),
+        totalCostsTotal: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
+        utilityTotal:
+          (
+            Number(row.salesCashTotal || 0)
+            + Number(row.salesQrTotal || 0)
+            + Number(row.salesDataphoneTotal || 0)
+            + Number(row.topupsTotal || 0)
+          ) - (Number(row.fixedTotal || 0) + Number(row.variableTotal || 0)),
       }))
       .sort((a, b) => String(b.weekKey || '').localeCompare(String(a.weekKey || '')));
 
