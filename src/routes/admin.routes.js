@@ -336,14 +336,19 @@ router.post('/fixed-costs', async (req, res) => {
 router.delete('/fixed-costs/:id', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const fixedCost = await FixedCost.findOne({ _id: req.params.id, schoolId, deletedAt: null });
-    if (!fixedCost) {
+    const result = await FixedCost.updateOne(
+      { _id: req.params.id, schoolId, deletedAt: null },
+      {
+        $set: {
+          deletedAt: new Date(),
+          status: 'inactive',
+        },
+      }
+    );
+
+    if (!result.matchedCount) {
       return res.status(404).json({ message: 'Fixed cost not found' });
     }
-
-    fixedCost.deletedAt = new Date();
-    fixedCost.status = 'inactive';
-    await fixedCost.save();
 
     return res.status(200).json({ message: 'Fixed cost deleted' });
   } catch (error) {

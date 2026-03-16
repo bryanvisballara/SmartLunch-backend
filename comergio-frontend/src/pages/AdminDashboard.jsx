@@ -3845,18 +3845,6 @@ function AdminDashboard() {
               <h4>Ventas del mes</h4>
               <p>{formatCurrency(homeData?.salesMonth)}</p>
             </div>
-            <div className="card admin-kpi-card">
-              <h4>Utilidades del día</h4>
-              <p>{formatCurrency(homeData?.utilityToday)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Utilidades de la semana</h4>
-              <p>{formatCurrency(homeData?.utilityWeek)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Utilidades del mes</h4>
-              <p>{formatCurrency(homeData?.utilityMonth)}</p>
-            </div>
           </div>
 
           <div className="cards admin-list-cards">
