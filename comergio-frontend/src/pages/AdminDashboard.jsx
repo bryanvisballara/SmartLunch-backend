@@ -19,6 +19,7 @@ import {
   getAdminCategories,
   getAdminProducts,
   getAdminHomepage,
+  getAiInsights,
   getAdminStores,
   getAdminUsers,
   getParentStudentLinks,
@@ -270,6 +271,7 @@ const meriendasFailedStatusValid = (value) => {
 const modules = [
   { id: 'home', label: 'Homepage KPI' },
   { id: 'accounting', label: 'Contabilidad' },
+  { id: 'ai', label: '🤖 IA — Recomendaciones' },
   { id: 'sales', label: 'Historial de ventas & recargas' },
   { id: 'school_billing', label: 'Cuentas de cobro colegio' },
   { id: 'notifications', label: 'Auditoria push' },
@@ -301,6 +303,9 @@ function AdminDashboard() {
   const [okToastFading, setOkToastFading] = useState(false);
 
   const [homeData, setHomeData] = useState(null);
+  const [aiData, setAiData] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [orders, setOrders] = useState([]);
   const [students, setStudents] = useState([]);
   const [products, setProducts] = useState([]);
@@ -1615,6 +1620,20 @@ function AdminDashboard() {
     setHomeData(homeRes.data || null);
   };
 
+  const loadAiInsights = async (storeId = homeStoreId) => {
+    setAiLoading(true);
+    setAiError('');
+    try {
+      const params = storeId ? { storeId } : {};
+      const res = await getAiInsights(params);
+      setAiData(res.data || null);
+    } catch (err) {
+      setAiError(err?.response?.data?.message || 'No se pudo cargar el analisis de IA.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const loadBaseData = async () => {
     setLoading(true);
     clearMessages();
@@ -1814,6 +1833,12 @@ function AdminDashboard() {
       .finally(() => {
         setLoading(false);
       });
+  }, [activeModule]);
+
+  useEffect(() => {
+    if (activeModule === 'ai' && !aiData && !aiLoading) {
+      loadAiInsights(homeStoreId);
+    }
   }, [activeModule]);
 
   useEffect(() => {
@@ -6938,6 +6963,327 @@ function AdminDashboard() {
                 </tbody>
               </table>
             </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeModule === 'ai' ? (
+        <section className="panel admin-section">
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div>
+              <h3>🤖 Recomendaciones por IA</h3>
+              <p style={{ color: '#718096', maxWidth: 600 }}>
+                Análisis inteligente basado en {aiData?.analysisDays || 30} días de operación:
+                velocidad de productos, categorías, alumnos, horarios y oportunidades de margen.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                value={homeStoreId}
+                onChange={(e) => { setHomeStoreId(e.target.value); setAiData(null); loadAiInsights(e.target.value); }}
+                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #cbd5e0', fontSize: '0.875rem' }}
+              >
+                <option value="">Todas las tiendas</option>
+                {stores.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
+              </select>
+              <button className="btn btn-primary" onClick={() => loadAiInsights(homeStoreId)} disabled={aiLoading}>
+                {aiLoading ? 'Analizando...' : '🔄 Actualizar análisis'}
+              </button>
+            </div>
+          </div>
+
+          {aiError ? <p style={{ color: '#e53e3e' }}>{aiError}</p> : null}
+          {aiLoading ? <p style={{ color: '#718096' }}>Analizando datos de la tienda, un momento...</p> : null}
+
+          {aiData && !aiLoading ? (
+            <>
+              {/* Summary badges */}
+              <div className="cards">
+                <div className="card admin-kpi-card" style={{ borderLeft: '4px solid #e53e3e' }}>
+                  <h4>🚨 Alertas críticas</h4>
+                  <p style={{ fontSize: '2rem', fontWeight: 700, color: '#e53e3e', margin: '4px 0' }}>{aiData.summary.criticalAlerts}</p>
+                  <small>Productos que se agotan hoy o mañana</small>
+                </div>
+                <div className="card admin-kpi-card" style={{ borderLeft: '4px solid #d69e2e' }}>
+                  <h4>⚠️ Advertencias</h4>
+                  <p style={{ fontSize: '2rem', fontWeight: 700, color: '#d69e2e', margin: '4px 0' }}>{aiData.summary.warnings}</p>
+                  <small>Stock bajo y productos sin rotación</small>
+                </div>
+                <div className="card admin-kpi-card" style={{ borderLeft: '4px solid #38a169' }}>
+                  <h4>💡 Oportunidades</h4>
+                  <p style={{ fontSize: '2rem', fontWeight: 700, color: '#38a169', margin: '4px 0' }}>{aiData.summary.opportunities}</p>
+                  <small>Precio o promociones sugeridas</small>
+                </div>
+                <div className="card admin-kpi-card" style={{ borderLeft: '4px solid #667eea' }}>
+                  <h4>📊 Recomendaciones totales</h4>
+                  <p style={{ fontSize: '2rem', fontWeight: 700, color: '#553c9a', margin: '4px 0' }}>{aiData.summary.totalRecommendations}</p>
+                  <small>Análisis de {aiData.analysisDays} días</small>
+                </div>
+              </div>
+
+              {/* VELOCITY ALERTS */}
+              <div className="card" style={{ marginTop: 20 }}>
+                <h4>⚡ Alertas de velocidad — productos por agotarse</h4>
+                <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 12 }}>
+                  Basado en ventas promedio de los últimos 7 y 14 días vs stock actual. El pedido sugerido cubre 2 semanas de demanda.
+                </p>
+                {(aiData.velocityAlerts || []).length === 0 ? (
+                  <div style={{ background: '#f0fff4', border: '1px solid #c6f6d5', borderRadius: 8, padding: '12px 16px', color: '#276749' }}>
+                    ✅ Todos los productos tienen stock suficiente para los próximos 10 días.
+                  </div>
+                ) : (
+                  <div className="admin-low-balance-table-wrap">
+                    <table className="admin-low-balance-table">
+                      <thead>
+                        <tr>
+                          <th>Urgencia</th>
+                          <th>Producto</th>
+                          <th>Categoría</th>
+                          <th>Stock actual</th>
+                          <th>Venta diaria prom.</th>
+                          <th>Días restantes</th>
+                          <th>Pedido sugerido (2 sem.)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(aiData.velocityAlerts || []).map((alert) => {
+                          const urgencyColor = alert.urgency === 'critical' ? '#e53e3e' : alert.urgency === 'high' ? '#d69e2e' : '#805ad5';
+                          const urgencyLabel = alert.urgency === 'critical' ? '🔴 Crítico' : alert.urgency === 'high' ? '🟡 Alto' : '🟣 Medio';
+                          const rowBg = alert.urgency === 'critical' ? '#fff5f5' : alert.urgency === 'high' ? '#fffbeb' : undefined;
+                          return (
+                            <tr key={alert.productId} style={{ backgroundColor: rowBg }}>
+                              <td><strong style={{ color: urgencyColor }}>{urgencyLabel}</strong></td>
+                              <td><strong>{alert.productName}</strong></td>
+                              <td>{alert.categoryName}</td>
+                              <td><strong style={{ color: urgencyColor }}>{alert.currentStock} unds</strong></td>
+                              <td>{alert.avgDailySales7d} unds/día</td>
+                              <td><strong style={{ color: urgencyColor }}>{alert.daysUntilStockout} días</strong></td>
+                              <td>
+                                <span style={{ background: '#ebf8ff', color: '#2b6cb0', padding: '2px 10px', borderRadius: 12, fontWeight: 600, fontSize: '0.85rem' }}>
+                                  Pedir {alert.recommendedOrderQty} unds
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* DEAD STOCK */}
+              {(aiData.deadStock || []).length > 0 ? (
+                <div className="card" style={{ marginTop: 16 }}>
+                  <h4>📦 Inventario sin rotación</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 12 }}>
+                    Productos con stock alto pero sin ventas significativas en los últimos {aiData.analysisDays} días.
+                  </p>
+                  <div className="admin-low-balance-table-wrap">
+                    <table className="admin-low-balance-table">
+                      <thead>
+                        <tr>
+                          <th>Producto</th>
+                          <th>Categoría</th>
+                          <th>Stock actual</th>
+                          <th>Días sin ventas</th>
+                          <th>Sugerencia</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(aiData.deadStock || []).map((item) => (
+                          <tr key={item.productId}>
+                            <td><strong>{item.productName}</strong></td>
+                            <td>{item.categoryName}</td>
+                            <td>{item.currentStock} unds</td>
+                            <td><span style={{ color: '#c05621', fontWeight: 600 }}>{item.daysSinceLastSale} días</span></td>
+                            <td>Reduce pedido o crea una promoción</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* CATEGORIES + STUDENTS + GRADES */}
+              <div className="cards admin-list-cards" style={{ marginTop: 16 }}>
+                <div className="card">
+                  <h4>🏷️ Análisis por categorías</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 8 }}>Rendimiento de cada categoría en los últimos {aiData.analysisDays} días.</p>
+                  {(aiData.categoryInsights || []).length === 0 ? <p>Sin datos de categorías.</p> : null}
+                  {(aiData.categoryInsights || []).map((cat) => (
+                    <div key={cat.categoryId} style={{ borderBottom: '1px solid #e2e8f0', padding: '10px 0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong>{cat.categoryName}</strong>
+                        <span style={{ fontWeight: 700, color: '#2b6cb0' }}>{formatCurrency(cat.totalRevenuePeriod)}</span>
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#718096', marginTop: 2 }}>
+                        {cat.totalUnitsPeriod} unds · {cat.productCount} productos
+                        {cat.lowStockCount > 0 ? <span style={{ color: '#e53e3e', marginLeft: 6 }}>· {cat.lowStockCount} con stock bajo</span> : null}
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: '#4a5568', marginTop: 4 }}>{cat.insight}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#2d3748', background: '#f7fafc', padding: '4px 8px', borderRadius: 6, marginTop: 4 }}>💡 {cat.action}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="card">
+                  <h4>🎓 Top alumnos — consumo</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 8 }}>Alumnos con mayor gasto en los últimos {aiData.analysisDays} días.</p>
+                  {(aiData.studentInsights || []).length === 0 ? <p>Sin datos de alumnos.</p> : null}
+                  {(aiData.studentInsights || []).map((student, i) => (
+                    <div key={String(student.studentId)} style={{ borderBottom: '1px solid #e2e8f0', padding: '10px 0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <strong>#{i + 1} {student.studentName || 'Alumno'}</strong>
+                          {student.grade ? <span style={{ marginLeft: 6, color: '#718096', fontSize: '0.8rem' }}>({student.grade})</span> : null}
+                        </div>
+                        <span style={{ fontWeight: 700, color: '#553c9a' }}>{formatCurrency(student.totalSpent)}</span>
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#718096', marginTop: 2 }}>{student.orderCount} pedidos · {student.daysWithOrders} días activos</div>
+                      <div style={{ fontSize: '0.82rem', color: '#4a5568', marginTop: 3 }}>{student.insight}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="card">
+                  <h4>📚 Consumo por grado</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 8 }}>Ingresos totales agrupados por grado escolar.</p>
+                  {(aiData.gradeInsights || []).length === 0 ? <p>Sin datos por grado.</p> : null}
+                  {(aiData.gradeInsights || []).map((g) => (
+                    <div key={g.grade} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #e2e8f0' }}>
+                      <div>
+                        <strong>{g.grade}</strong>
+                        <span style={{ marginLeft: 8, fontSize: '0.8rem', color: '#718096' }}>{g.studentCount} alumnos</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 700, color: '#2b6cb0' }}>{formatCurrency(g.totalRevenue)}</div>
+                        <div style={{ fontSize: '0.78rem', color: '#718096' }}>Prom: {formatCurrency(g.avgSpentPerStudent)}/alumno</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* TIME INSIGHTS */}
+              {aiData.timeInsights ? (
+                <div className="card" style={{ marginTop: 16 }}>
+                  <h4>⏰ Patrones de tiempo</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 12 }}>Análisis horario y por día de semana de los últimos {aiData.analysisDays} días.</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+                    {aiData.timeInsights.peakHour !== null ? (
+                      <div style={{ background: '#ebf8ff', border: '1px solid #bee3f8', borderRadius: 8, padding: '12px 18px', flex: '1 1 140px' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#2b6cb0', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Hora pico</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 700, lineHeight: 1.2 }}>{String(aiData.timeInsights.peakHour).padStart(2, '0')}:00</div>
+                        <div style={{ fontSize: '0.8rem', color: '#4a5568' }}>{aiData.timeInsights.peakHourOrders} pedidos promedio</div>
+                      </div>
+                    ) : null}
+                    {aiData.timeInsights.valleyHour !== null ? (
+                      <div style={{ background: '#fffff0', border: '1px solid #fefcbf', borderRadius: 8, padding: '12px 18px', flex: '1 1 140px' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#d69e2e', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Hora valle</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 700, lineHeight: 1.2 }}>{String(aiData.timeInsights.valleyHour).padStart(2, '0')}:00</div>
+                        <div style={{ fontSize: '0.8rem', color: '#4a5568' }}>{aiData.timeInsights.valleyHourOrders} pedidos</div>
+                      </div>
+                    ) : null}
+                    {aiData.timeInsights.peakDay ? (
+                      <div style={{ background: '#f0fff4', border: '1px solid #c6f6d5', borderRadius: 8, padding: '12px 18px', flex: '1 1 140px' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#38a169', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Día más activo</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 700, lineHeight: 1.2 }}>{aiData.timeInsights.peakDay}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#4a5568' }}>{aiData.timeInsights.peakDayOrders} pedidos</div>
+                      </div>
+                    ) : null}
+                    {aiData.timeInsights.slowDay ? (
+                      <div style={{ background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: 8, padding: '12px 18px', flex: '1 1 140px' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#e53e3e', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Día más lento</div>
+                        <div style={{ fontSize: '1.8rem', fontWeight: 700, lineHeight: 1.2 }}>{aiData.timeInsights.slowDay}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#4a5568' }}>{aiData.timeInsights.slowDayOrders} pedidos</div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 8 }}>Distribución horaria:</div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, flexWrap: 'wrap' }}>
+                      {(() => {
+                        const maxOrders = Math.max(...(aiData.timeInsights.hourlyBreakdown || []).map((h) => h.orders), 1);
+                        return (aiData.timeInsights.hourlyBreakdown || []).filter((h) => h.orders > 0).map((h) => {
+                          const barH = Math.max(Math.round((h.orders / maxOrders) * 80), 4);
+                          const isPeak = h.hour === aiData.timeInsights.peakHour;
+                          return (
+                            <div key={h.hour} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 40 }}>
+                              <span style={{ fontSize: '0.65rem', color: '#a0aec0' }}>{h.orders}</span>
+                              <div style={{ width: 28, height: barH, background: isPeak ? '#3182ce' : '#bee3f8', borderRadius: '4px 4px 0 0' }} />
+                              <span style={{ fontSize: '0.72rem', color: isPeak ? '#2b6cb0' : '#718096', fontWeight: isPeak ? 700 : 400 }}>
+                                {String(h.hour).padStart(2, '0')}h
+                              </span>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* PRODUCT TRENDS + MARGIN OPPORTUNITIES */}
+              <div className="cards admin-list-cards" style={{ marginTop: 16 }}>
+                <div className="card">
+                  <h4>📈 Tendencias (7 días vs semana anterior)</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 8 }}>Crecimiento o caída en unidades vendidas por producto.</p>
+                  {(aiData.productTrend || []).length === 0 ? <p>Sin datos de tendencia disponibles.</p> : null}
+                  {(aiData.productTrend || []).map((item) => {
+                    const isGrowing = item.trend === 'growing';
+                    const isDeclining = item.trend === 'declining';
+                    const arrow = isGrowing ? '↑' : isDeclining ? '↓' : '→';
+                    const trendColor = isGrowing ? '#38a169' : isDeclining ? '#e53e3e' : '#718096';
+                    return (
+                      <div key={item.productId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #e2e8f0' }}>
+                        <div>
+                          <strong style={{ fontSize: '0.9rem' }}>{item.productName}</strong>
+                          <span style={{ marginLeft: 6, fontSize: '0.78rem', color: '#718096' }}>{item.categoryName}</span>
+                        </div>
+                        <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: 700, color: trendColor, fontSize: '1rem' }}>{arrow} {item.growthPercent > 0 ? '+' : ''}{item.growthPercent}%</span>
+                          <div style={{ fontSize: '0.75rem', color: '#a0aec0' }}>{item.currentQty} vs {item.previousQty} unds</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="card">
+                  <h4>💰 Oportunidades de margen</h4>
+                  <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 8 }}>Productos candidatos a ajuste de precio o promoción.</p>
+                  {(aiData.marginOpportunities || []).length === 0 ? (
+                    <p>Sin oportunidades detectadas en el período analizado.</p>
+                  ) : null}
+                  {(aiData.marginOpportunities || []).map((item) => (
+                    <div key={item.productId} style={{ borderBottom: '1px solid #e2e8f0', padding: '10px 0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong style={{ fontSize: '0.9rem' }}>{item.productName}</strong>
+                        <span style={{
+                          padding: '2px 10px', borderRadius: 12, fontSize: '0.78rem', fontWeight: 600,
+                          background: item.type === 'price_increase' ? '#fed7d7' : '#c6f6d5',
+                          color: item.type === 'price_increase' ? '#c53030' : '#276749',
+                        }}>
+                          {item.type === 'price_increase' ? '↑ Sube precio' : '🎁 Promocionar'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#718096', marginTop: 3 }}>
+                        Precio {formatCurrency(item.price)} · Costo {formatCurrency(item.cost)} · Margen {item.marginPercent}%
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#4a5568', marginTop: 4 }}>{item.insight}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {aiData.generatedAt ? (
+                <p style={{ fontSize: '0.75rem', color: '#a0aec0', marginTop: 16, textAlign: 'right' }}>
+                  Análisis generado: {new Date(aiData.generatedAt).toLocaleString('es-CO')} · {aiData.analysisDays} días de datos
+                </p>
+              ) : null}
+            </>
           ) : null}
         </section>
       ) : null}

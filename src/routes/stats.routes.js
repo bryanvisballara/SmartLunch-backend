@@ -9,6 +9,7 @@ const Wallet = require('../models/wallet.model');
 const FixedCost = require('../models/fixedCost.model');
 const Student = require('../models/student.model');
 const WalletTransaction = require('../models/walletTransaction.model');
+const Category = require('../models/category.model');
 
 const router = express.Router();
 
@@ -957,6 +958,418 @@ router.get('/admin-home', async (req, res) => {
       totalSubscribedStudents,
       totalAutoDebitActiveStudents,
       generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/ai-insights', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const storeFilter = resolveStoreFilter(req.query.storeId);
+    if (storeFilter === 'invalid') return res.status(400).json({ message: 'Invalid storeId' });
+
+    const rawDays = Number(req.query.days || 30);
+    const days = Number.isFinite(rawDays) && rawDays >= 7 && rawDays <= 90 ? rawDays : 30;
+    const now = new Date();
+    const analysisStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const dayStart = startOfDay(now);
+
+    const last7Start = new Date(dayStart);
+    last7Start.setUTCDate(last7Start.getUTCDate() - 6);
+
+    const last14Start = new Date(last7Start);
+    last14Start.setUTCDate(last14Start.getUTCDate() - 7);
+
+    const prev7Start = new Date(last7Start);
+    prev7Start.setUTCDate(prev7Start.getUTCDate() - 7);
+
+    const orderMatch = { schoolId, status: 'completed' };
+    if (storeFilter) orderMatch.storeId = storeFilter;
+
+    const productFilter = { schoolId, status: 'active', deletedAt: null };
+    if (storeFilter) productFilter.storeId = storeFilter;
+
+    const [
+      recentOrdersRaw,
+      allProducts,
+      allCategories,
+      studentOrdersRaw,
+      hourlySalesRaw,
+      weekdaySalesRaw,
+    ] = await Promise.all([
+      Order.find({ ...orderMatch, createdAt: { $gte: analysisStart } })
+        .select('items total studentId createdAt')
+        .lean(),
+
+      Product.find(productFilter)
+        .select('_id name categoryId price cost stock inventoryAlertStock')
+        .populate('categoryId', 'name')
+        .lean(),
+
+      Category.find({ schoolId, status: 'active', deletedAt: null })
+        .select('_id name')
+        .lean(),
+
+      Order.aggregate([
+        { $match: { ...orderMatch, studentId: { $ne: null }, createdAt: { $gte: analysisStart } } },
+        { $group: { _id: { studentId: '$studentId', day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } }, dailySpent: { $sum: '$total' }, dailyOrders: { $sum: 1 } } },
+        { $group: { _id: '$_id.studentId', totalSpent: { $sum: '$dailySpent' }, daysWithOrders: { $sum: 1 }, orderCount: { $sum: '$dailyOrders' } } },
+        { $sort: { totalSpent: -1 } },
+        { $limit: 15 },
+        { $lookup: { from: 'students', localField: '_id', foreignField: '_id', as: 'student' } },
+        { $unwind: { path: '$student', preserveNullAndEmptyArrays: true } },
+        { $project: { _id: 0, studentId: '$_id', studentName: '$student.name', schoolCode: '$student.schoolCode', grade: '$student.grade', totalSpent: 1, daysWithOrders: 1, orderCount: 1, avgDailySpent: { $cond: [{ $gt: ['$daysWithOrders', 0] }, { $divide: ['$totalSpent', '$daysWithOrders'] }, 0] } } },
+      ]).allowDiskUse(true),
+
+      Order.aggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: analysisStart } } },
+        { $group: { _id: { $hour: { date: '$createdAt', timezone: 'America/Bogota' } }, orders: { $sum: 1 }, revenue: { $sum: '$total' } } },
+        { $project: { _id: 0, hour: '$_id', orders: 1, revenue: 1 } },
+        { $sort: { hour: 1 } },
+      ]).allowDiskUse(true),
+
+      Order.aggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: analysisStart } } },
+        { $group: { _id: { $dayOfWeek: { date: '$createdAt', timezone: 'America/Bogota' } }, orders: { $sum: 1 }, revenue: { $sum: '$total' } } },
+        { $project: { _id: 0, dayOfWeek: '$_id', orders: 1, revenue: 1 } },
+        { $sort: { dayOfWeek: 1 } },
+      ]).allowDiskUse(true),
+    ]);
+
+    // Product lookup map O(1)
+    const productMap = new Map();
+    for (const product of allProducts) {
+      productMap.set(String(product._id), product);
+    }
+
+    const productCatMap = new Map();
+    for (const product of allProducts) {
+      const catId = String(product.categoryId?._id || product.categoryId || '');
+      productCatMap.set(String(product._id), { catId, productName: product.name });
+    }
+
+    // --- VELOCITY & DEAD STOCK ---
+    const productSalesMap = new Map();
+    const productLastSaleMap = new Map();
+
+    for (const order of recentOrdersRaw) {
+      const orderDate = new Date(order.createdAt);
+      for (const item of (order.items || [])) {
+        const pid = String(item.productId || '');
+        if (!pid) continue;
+        if (!productSalesMap.has(pid)) {
+          productSalesMap.set(pid, { qty7d: 0, qty14d: 0, qtyAnalysis: 0 });
+        }
+        const entry = productSalesMap.get(pid);
+        const qty = Number(item.quantity || 0);
+        if (orderDate >= last7Start) entry.qty7d += qty;
+        if (orderDate >= last14Start) entry.qty14d += qty;
+        entry.qtyAnalysis += qty;
+        const current = productLastSaleMap.get(pid);
+        if (!current || orderDate > current) {
+          productLastSaleMap.set(pid, orderDate);
+        }
+      }
+    }
+
+    const velocityAlerts = [];
+    const deadStock = [];
+
+    for (const product of allProducts) {
+      const pid = String(product._id);
+      const sales = productSalesMap.get(pid) || { qty7d: 0, qty14d: 0, qtyAnalysis: 0 };
+      const stock = Number(product.stock || 0);
+      const categoryName = product.categoryId?.name || 'Sin categoria';
+
+      const avgDailySales7d = sales.qty7d / 7;
+      const avgDailySales14d = sales.qty14d / 14;
+      const avgDailySales = Math.max(avgDailySales7d, avgDailySales14d);
+
+      if (avgDailySales > 0) {
+        const daysUntilStockout = stock / avgDailySales;
+        let urgency = null;
+        if (daysUntilStockout < 2) urgency = 'critical';
+        else if (daysUntilStockout < 5) urgency = 'high';
+        else if (daysUntilStockout < 10) urgency = 'medium';
+
+        if (urgency) {
+          velocityAlerts.push({
+            productId: pid,
+            productName: product.name,
+            categoryName,
+            currentStock: stock,
+            avgDailySales7d: Math.round(avgDailySales7d * 10) / 10,
+            avgDailySales14d: Math.round(avgDailySales14d * 10) / 10,
+            daysUntilStockout: Math.round(daysUntilStockout * 10) / 10,
+            recommendedOrderQty: Math.ceil(avgDailySales * 14),
+            urgency,
+          });
+        }
+      } else if (stock > Math.max(Number(product.inventoryAlertStock || 0) * 2, 20)) {
+        const lastSale = productLastSaleMap.get(pid);
+        const daysSinceLastSale = lastSale
+          ? Math.floor((now - lastSale) / (1000 * 60 * 60 * 24))
+          : days;
+        if (daysSinceLastSale >= 14) {
+          deadStock.push({
+            productId: pid,
+            productName: product.name,
+            categoryName,
+            currentStock: stock,
+            daysSinceLastSale,
+            lastSaleDate: lastSale ? lastSale.toISOString() : null,
+          });
+        }
+      }
+    }
+
+    velocityAlerts.sort((a, b) => a.daysUntilStockout - b.daysUntilStockout);
+    deadStock.sort((a, b) => b.currentStock - a.currentStock);
+
+    // --- CATEGORY INSIGHTS ---
+    const categorySalesMap = new Map();
+    for (const cat of allCategories) {
+      categorySalesMap.set(String(cat._id), {
+        categoryId: String(cat._id),
+        categoryName: cat.name,
+        totalRevenuePeriod: 0,
+        totalUnitsPeriod: 0,
+        productRevMap: new Map(),
+      });
+    }
+
+    for (const order of recentOrdersRaw) {
+      for (const item of (order.items || [])) {
+        const pid = String(item.productId || '');
+        const productInfo = productCatMap.get(pid);
+        if (!productInfo) continue;
+        const catEntry = categorySalesMap.get(productInfo.catId);
+        if (!catEntry) continue;
+        catEntry.totalRevenuePeriod += Number(item.subtotal || 0);
+        catEntry.totalUnitsPeriod += Number(item.quantity || 0);
+        const pName = productInfo.productName || item.nameSnapshot || 'Producto';
+        catEntry.productRevMap.set(pName, (catEntry.productRevMap.get(pName) || 0) + Number(item.subtotal || 0));
+      }
+    }
+
+    const catLowStockMap = new Map();
+    const catProductCountMap = new Map();
+    for (const product of allProducts) {
+      const catId = String(product.categoryId?._id || product.categoryId || '');
+      catProductCountMap.set(catId, (catProductCountMap.get(catId) || 0) + 1);
+      if (Number(product.stock || 0) <= Number(product.inventoryAlertStock || 10)) {
+        catLowStockMap.set(catId, (catLowStockMap.get(catId) || 0) + 1);
+      }
+    }
+
+    function fmtCOP(value) {
+      return `$${Math.round(Number(value || 0)).toLocaleString('es-CO')}`;
+    }
+
+    const categoryInsights = Array.from(categorySalesMap.values())
+      .map((entry) => {
+        let topProduct = '';
+        let topProductRevenue = 0;
+        for (const [pName, pRev] of entry.productRevMap) {
+          if (pRev > topProductRevenue) { topProductRevenue = pRev; topProduct = pName; }
+        }
+        const catId = entry.categoryId;
+        const lowStockCount = catLowStockMap.get(catId) || 0;
+        const productCount = catProductCountMap.get(catId) || 0;
+        let insight;
+        let action;
+        if (entry.totalRevenuePeriod === 0) {
+          insight = 'Sin ventas en el periodo de analisis.';
+          action = 'Verifica que los productos de esta categoria esten activos y visibles.';
+        } else if (lowStockCount > 0 && productCount > 0 && lowStockCount >= productCount * 0.5) {
+          insight = `Mas del 50% de los productos tienen stock bajo.`;
+          action = topProduct
+            ? `Refuerza inventario urgentemente. "${topProduct}" genera la mayor parte de ingresos.`
+            : 'Refuerza el inventario de esta categoria.';
+        } else if (topProduct) {
+          insight = `"${topProduct}" es el producto estrella con ${fmtCOP(topProductRevenue)} en ingresos.`;
+          action = 'Garantiza disponibilidad constante de este producto.';
+        } else {
+          insight = 'Categoria activa con ventas regulares.';
+          action = 'Mantén el inventario y monitorea tendencias.';
+        }
+        return { categoryId: catId, categoryName: entry.categoryName, totalRevenuePeriod: Math.round(entry.totalRevenuePeriod), totalUnitsPeriod: entry.totalUnitsPeriod, topProduct: topProduct || null, productCount, lowStockCount, insight, action };
+      })
+      .filter((c) => c.productCount > 0)
+      .sort((a, b) => b.totalRevenuePeriod - a.totalRevenuePeriod);
+
+    // --- GRADE INSIGHTS ---
+    const gradeMap = new Map();
+    for (const student of studentOrdersRaw) {
+      const grade = String(student.grade || 'Sin grado');
+      if (!gradeMap.has(grade)) gradeMap.set(grade, { grade, totalRevenue: 0, studentCount: 0 });
+      const entry = gradeMap.get(grade);
+      entry.totalRevenue += Number(student.totalSpent || 0);
+      entry.studentCount += 1;
+    }
+
+    const gradeInsights = Array.from(gradeMap.values())
+      .map((entry) => ({ ...entry, avgSpentPerStudent: entry.studentCount > 0 ? Math.round(entry.totalRevenue / entry.studentCount) : 0 }))
+      .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    // --- TIME INSIGHTS ---
+    const DAY_NAMES_AI = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+    const hourlyBreakdown = hourlySalesRaw.map((h) => ({ hour: h.hour, orders: h.orders, revenue: h.revenue }));
+    const activeHours = hourlyBreakdown.filter((h) => h.orders > 0);
+    const peakHourData = activeHours.length > 0 ? [...activeHours].sort((a, b) => b.orders - a.orders)[0] : null;
+    const valleyHourData = activeHours.length > 1 ? [...activeHours].sort((a, b) => a.orders - b.orders)[0] : null;
+
+    const weekdayBreakdown = weekdaySalesRaw.map((d) => ({
+      dayOfWeek: d.dayOfWeek,
+      dayName: DAY_NAMES_AI[(d.dayOfWeek - 1) % 7],
+      orders: d.orders,
+      revenue: d.revenue,
+    }));
+    const activeDays = weekdayBreakdown.filter((d) => d.orders > 0);
+    const peakDayData = activeDays.length > 0 ? [...activeDays].sort((a, b) => b.orders - a.orders)[0] : null;
+    const slowDayData = activeDays.length > 1 ? [...activeDays].sort((a, b) => a.orders - b.orders)[0] : null;
+
+    const timeInsights = {
+      peakHour: peakHourData?.hour ?? null,
+      peakHourOrders: peakHourData?.orders ?? 0,
+      valleyHour: valleyHourData?.hour ?? null,
+      valleyHourOrders: valleyHourData?.orders ?? 0,
+      peakDay: peakDayData?.dayName ?? null,
+      peakDayOrders: peakDayData?.orders ?? 0,
+      slowDay: slowDayData?.dayName ?? null,
+      slowDayOrders: slowDayData?.orders ?? 0,
+      hourlyBreakdown,
+      weekdayBreakdown,
+    };
+
+    // --- PRODUCT TRENDS (last 7d vs prior 7d) ---
+    const trendProductMap = new Map();
+    for (const order of recentOrdersRaw) {
+      const orderDate = new Date(order.createdAt);
+      const isCurrent = orderDate >= last7Start;
+      const isPrevious = orderDate >= prev7Start && orderDate < last7Start;
+      if (!isCurrent && !isPrevious) continue;
+      for (const item of (order.items || [])) {
+        const pid = String(item.productId || '');
+        if (!pid) continue;
+        if (!trendProductMap.has(pid)) {
+          const product = productMap.get(pid);
+          trendProductMap.set(pid, {
+            productId: pid,
+            productName: product?.name || item.nameSnapshot || 'Producto',
+            categoryName: product?.categoryId?.name || 'Sin categoria',
+            currentQty: 0,
+            previousQty: 0,
+          });
+        }
+        const entry = trendProductMap.get(pid);
+        const qty = Number(item.quantity || 0);
+        if (isCurrent) entry.currentQty += qty;
+        else entry.previousQty += qty;
+      }
+    }
+
+    const productTrend = Array.from(trendProductMap.values())
+      .map((item) => {
+        const growthPercent = Number(item.previousQty || 0) > 0
+          ? ((Number(item.currentQty) - Number(item.previousQty)) / Number(item.previousQty)) * 100
+          : 0;
+        const trend = growthPercent >= 20 ? 'growing' : growthPercent <= -20 ? 'declining' : 'stable';
+        return { ...item, growthPercent: Math.round(growthPercent * 10) / 10, trend };
+      })
+      .filter((item) => item.currentQty + item.previousQty > 0)
+      .sort((a, b) => b.growthPercent - a.growthPercent);
+
+    // --- MARGIN OPPORTUNITIES ---
+    const productSalesRevMap = new Map();
+    for (const order of recentOrdersRaw) {
+      for (const item of (order.items || [])) {
+        const pid = String(item.productId || '');
+        if (!pid) continue;
+        if (!productSalesRevMap.has(pid)) productSalesRevMap.set(pid, { unitsSold: 0, revenue: 0 });
+        const entry = productSalesRevMap.get(pid);
+        entry.unitsSold += Number(item.quantity || 0);
+        entry.revenue += Number(item.subtotal || 0);
+      }
+    }
+
+    const marginOpportunities = [];
+    for (const product of allProducts) {
+      const pid = String(product._id);
+      const price = Number(product.price || 0);
+      const cost = Number(product.cost || 0);
+      if (price === 0) continue;
+      const marginValue = price - cost;
+      const marginPercent = (marginValue / price) * 100;
+      const salesData = productSalesRevMap.get(pid) || { unitsSold: 0, revenue: 0 };
+      const isLowMargin = marginPercent < 30;
+      const isHighMargin = marginPercent >= 60;
+      const sellsWell = salesData.unitsSold >= 20;
+      const sellsPoorly = salesData.unitsSold < 5;
+      if ((isLowMargin && sellsWell) || (isHighMargin && sellsPoorly && Number(product.stock || 0) > 0)) {
+        let insight;
+        let type;
+        if (isLowMargin && sellsWell) {
+          insight = `Margen bajo (${marginPercent.toFixed(0)}%) pero alta rotacion (${salesData.unitsSold} unds). Considera ajustar el precio de venta.`;
+          type = 'price_increase';
+        } else {
+          insight = `Margen alto (${marginPercent.toFixed(0)}%) pero baja rotacion (${salesData.unitsSold} unds). Considera una promocion.`;
+          type = 'promotion';
+        }
+        marginOpportunities.push({
+          productId: pid,
+          productName: product.name,
+          categoryName: product.categoryId?.name || 'Sin categoria',
+          price,
+          cost,
+          marginPercent: Math.round(marginPercent * 10) / 10,
+          unitsSold: salesData.unitsSold,
+          revenue: salesData.revenue,
+          type,
+          insight,
+        });
+      }
+    }
+    marginOpportunities.sort((a, b) => b.unitsSold - a.unitsSold);
+
+    // --- STUDENT INSIGHTS ---
+    const studentInsights = studentOrdersRaw.slice(0, 10).map((student) => {
+      const avgDaily = Number(student.avgDailySpent || 0);
+      const orderCount = Number(student.orderCount || 0);
+      const totalSpent = Number(student.totalSpent || 0);
+      let insightType;
+      let insight;
+      if (avgDaily > 15000) {
+        insightType = 'top_spender';
+        insight = `Gasto promedio diario de ${fmtCOP(avgDaily)} — alumno de alto consumo.`;
+      } else if (orderCount >= 20) {
+        insightType = 'high_frequency';
+        insight = `Realizo ${orderCount} pedidos en el periodo — alta frecuencia de visita.`;
+      } else {
+        insightType = 'regular';
+        insight = `Total gastado: ${fmtCOP(totalSpent)} en ${student.daysWithOrders} dias con compras.`;
+      }
+      return { ...student, insightType, insight };
+    });
+
+    const criticalAlerts = velocityAlerts.filter((a) => a.urgency === 'critical').length;
+    const warnings = velocityAlerts.filter((a) => a.urgency !== 'critical').length + deadStock.length;
+    const opportunities = marginOpportunities.length + categoryInsights.filter((c) => c.totalRevenuePeriod === 0).length;
+
+    return res.status(200).json({
+      generatedAt: new Date().toISOString(),
+      analysisDays: days,
+      summary: { criticalAlerts, warnings, opportunities, totalRecommendations: velocityAlerts.length + deadStock.length + marginOpportunities.length },
+      velocityAlerts,
+      deadStock: deadStock.slice(0, 10),
+      categoryInsights,
+      studentInsights,
+      gradeInsights,
+      timeInsights,
+      productTrend: productTrend.slice(0, 20),
+      marginOpportunities: marginOpportunities.slice(0, 10),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

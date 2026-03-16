@@ -1,6 +1,7 @@
 import api from '../lib/api';
 
 export const getAdminHomepage = (params = {}) => api.get('/stats/admin-home', { params });
+export const getAiInsights = (params = {}) => api.get('/stats/ai-insights', { params });
 export const getAdminFixedCosts = (params = {}) => api.get('/admin/fixed-costs', { params });
 export const createAdminFixedCost = (data) => api.post('/admin/fixed-costs', data);
 export const deleteAdminFixedCost = (id) => api.delete(`/admin/fixed-costs/${id}`);
