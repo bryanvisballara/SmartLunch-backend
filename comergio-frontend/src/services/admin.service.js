@@ -2,9 +2,14 @@ import api from '../lib/api';
 
 export const getAdminHomepage = (params = {}) => api.get('/stats/admin-home', { params });
 export const getAiInsights = (params = {}) => api.get('/stats/ai-insights', { params });
+export const askAiInsights = (data) => api.post('/stats/ai-insights/ask', data);
 export const getAdminFixedCosts = (params = {}) => api.get('/admin/fixed-costs', { params });
 export const createAdminFixedCost = (data) => api.post('/admin/fixed-costs', data);
 export const deleteAdminFixedCost = (id) => api.delete(`/admin/fixed-costs/${id}`);
+export const getAdminSuppliers = () => api.get('/admin/suppliers');
+export const createAdminSupplier = (data) => api.post('/admin/suppliers', data);
+export const updateAdminSupplier = (id, data) => api.patch(`/admin/suppliers/${id}`, data);
+export const deleteAdminSupplier = (id) => api.delete(`/admin/suppliers/${id}`);
 
 export const getAdminCategories = () => api.get('/admin/categories');
 export const createAdminCategory = (data) => api.post('/admin/categories', data);

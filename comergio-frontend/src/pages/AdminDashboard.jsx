@@ -20,8 +20,13 @@ import {
   getAdminProducts,
   getAdminHomepage,
   getAiInsights,
+  askAiInsights,
   getAdminStores,
   getAdminUsers,
+  getAdminSuppliers,
+  createAdminSupplier,
+  updateAdminSupplier,
+  deleteAdminSupplier,
   getParentStudentLinks,
   getMeriendaSubscriptions,
   getMeriendaFailedPayments,
@@ -272,6 +277,7 @@ const modules = [
   { id: 'home', label: 'Homepage KPI' },
   { id: 'accounting', label: 'Contabilidad' },
   { id: 'ai', label: '🤖 IA — Recomendaciones' },
+  { id: 'suppliers', label: 'Proveedores' },
   { id: 'sales', label: 'Historial de ventas & recargas' },
   { id: 'school_billing', label: 'Cuentas de cobro colegio' },
   { id: 'notifications', label: 'Auditoria push' },
@@ -306,6 +312,9 @@ function AdminDashboard() {
   const [aiData, setAiData] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiQuestionLoading, setAiQuestionLoading] = useState(false);
+  const [aiQuestionAnswer, setAiQuestionAnswer] = useState(null);
   const [orders, setOrders] = useState([]);
   const [students, setStudents] = useState([]);
   const [products, setProducts] = useState([]);
@@ -313,6 +322,7 @@ function AdminDashboard() {
   const [categories, setCategories] = useState([]);
   const [users, setUsers] = useState([]);
   const [links, setLinks] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   const [pendingInventory, setPendingInventory] = useState([]);
   const [pendingCancellations, setPendingCancellations] = useState([]);
@@ -362,11 +372,22 @@ function AdminDashboard() {
   const [savingTopupStudentId, setSavingTopupStudentId] = useState('');
   const [fixedCostForm, setFixedCostForm] = useState({
     name: '',
+    supplierId: '',
+    supplierOtherName: '',
     amount: '',
     storeId: '',
     type: 'fixed',
     weekStart: currentWeekStartIso(),
   });
+  const [supplierForm, setSupplierForm] = useState({
+    name: '',
+    contactName: '',
+    phone: '',
+    email: '',
+    notes: '',
+    productIds: [],
+  });
+  const [editingSupplierId, setEditingSupplierId] = useState('');
 
   const [categoryForm, setCategoryForm] = useState({ name: '', imageUrl: '' });
   const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false);
@@ -1634,17 +1655,46 @@ function AdminDashboard() {
     }
   };
 
+  const loadSuppliers = async () => {
+    const response = await getAdminSuppliers();
+    setSuppliers(response.data || []);
+  };
+
+  const onAskAiQuestion = async (event) => {
+    event.preventDefault();
+    const trimmed = String(aiQuestion || '').trim();
+    if (!trimmed) {
+      setError('Escribe una pregunta para IA.');
+      return;
+    }
+
+    setAiQuestionLoading(true);
+    clearMessages();
+    try {
+      const response = await askAiInsights({
+        question: trimmed,
+        storeId: homeStoreId || undefined,
+      });
+      setAiQuestionAnswer(response.data || null);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo resolver la pregunta a IA.');
+    } finally {
+      setAiQuestionLoading(false);
+    }
+  };
+
   const loadBaseData = async () => {
     setLoading(true);
     clearMessages();
     try {
-      const [studentsRes, productsRes, storesRes, categoriesRes, usersRes, linksRes] = await Promise.all([
+      const [studentsRes, productsRes, storesRes, categoriesRes, usersRes, linksRes, suppliersRes] = await Promise.all([
         getStudents(),
         getAdminProducts({ includeInactive: true }),
         getAdminStores(),
         getAdminCategories(),
         getAdminUsers(),
         getParentStudentLinks(),
+        getAdminSuppliers(),
       ]);
 
       setStudents(studentsRes.data || []);
@@ -1653,6 +1703,7 @@ function AdminDashboard() {
       setCategories(categoriesRes.data || []);
       setUsers(usersRes.data || []);
       setLinks(linksRes.data || []);
+      setSuppliers(suppliersRes.data || []);
 
       const firstStoreId = storesRes.data?.[0]?._id || '';
       setClosureFilters((prev) => ({ ...prev, storeId: prev.storeId || firstStoreId }));
@@ -1839,6 +1890,22 @@ function AdminDashboard() {
     if (activeModule === 'ai' && !aiData && !aiLoading) {
       loadAiInsights(homeStoreId);
     }
+  }, [activeModule]);
+
+  useEffect(() => {
+    if (activeModule !== 'suppliers' || suppliers.length > 0) {
+      return;
+    }
+
+    setLoading(true);
+    clearMessages();
+    loadSuppliers()
+      .catch((requestError) => {
+        setError(requestError?.response?.data?.message || 'No se pudieron cargar los proveedores.');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [activeModule]);
 
   useEffect(() => {
@@ -2589,10 +2656,34 @@ function AdminDashboard() {
 
   const onCreateFixedCost = (event) => {
     event.preventDefault();
+
+    const isVariable = fixedCostForm.type === 'variable';
+    if (isVariable && !fixedCostForm.supplierId) {
+      setError('Selecciona un proveedor o "Otro" para costos variables.');
+      return;
+    }
+
+    if (isVariable && fixedCostForm.supplierId === 'other' && !String(fixedCostForm.supplierOtherName || '').trim()) {
+      setError('Escribe el concepto cuando seleccionas "Otro".');
+      return;
+    }
+
+    const selectedSupplier = suppliers.find((item) => String(item._id) === String(fixedCostForm.supplierId));
+
     runAction(
       () =>
         createAdminFixedCost({
-          name: fixedCostForm.name,
+          name: isVariable
+            ? (fixedCostForm.supplierId === 'other'
+              ? fixedCostForm.supplierOtherName
+              : (selectedSupplier?.name || fixedCostForm.name))
+            : fixedCostForm.name,
+          supplierId: isVariable && fixedCostForm.supplierId && fixedCostForm.supplierId !== 'other'
+            ? fixedCostForm.supplierId
+            : null,
+          supplierOtherName: isVariable && fixedCostForm.supplierId === 'other'
+            ? fixedCostForm.supplierOtherName
+            : '',
           amount: Number(fixedCostForm.amount || 0),
           storeId: fixedCostForm.storeId || null,
           type: fixedCostForm.type || 'fixed',
@@ -2603,11 +2694,99 @@ function AdminDashboard() {
         setFixedCostForm((prev) => ({
           ...prev,
           name: '',
+          supplierId: '',
+          supplierOtherName: '',
           amount: '',
         }));
         await loadHomepage(homeStoreId);
       }
     );
+  };
+
+  const onSubmitSupplier = (event) => {
+    event.preventDefault();
+
+    const payload = {
+      name: supplierForm.name,
+      contactName: supplierForm.contactName,
+      phone: supplierForm.phone,
+      email: supplierForm.email,
+      notes: supplierForm.notes,
+      productIds: supplierForm.productIds,
+    };
+
+    const action = editingSupplierId
+      ? () => updateAdminSupplier(editingSupplierId, payload)
+      : () => createAdminSupplier(payload);
+
+    runAction(
+      action,
+      editingSupplierId ? 'Proveedor actualizado.' : 'Proveedor creado.',
+      async () => {
+        setSupplierForm({
+          name: '',
+          contactName: '',
+          phone: '',
+          email: '',
+          notes: '',
+          productIds: [],
+        });
+        setEditingSupplierId('');
+        await loadSuppliers();
+      }
+    );
+  };
+
+  const onEditSupplier = (supplier) => {
+    setEditingSupplierId(String(supplier?._id || ''));
+    setSupplierForm({
+      name: supplier?.name || '',
+      contactName: supplier?.contactName || '',
+      phone: supplier?.phone || '',
+      email: supplier?.email || '',
+      notes: supplier?.notes || '',
+      productIds: Array.isArray(supplier?.productIds)
+        ? supplier.productIds.map((product) => String(product?._id || product)).filter(Boolean)
+        : [],
+    });
+    setActiveModule('suppliers');
+  };
+
+  const onDeleteSupplier = (supplierId) => {
+    runAction(
+      () => deleteAdminSupplier(supplierId),
+      'Proveedor eliminado.',
+      async () => {
+        if (String(editingSupplierId) === String(supplierId)) {
+          setEditingSupplierId('');
+          setSupplierForm({
+            name: '',
+            contactName: '',
+            phone: '',
+            email: '',
+            notes: '',
+            productIds: [],
+          });
+        }
+        await loadSuppliers();
+      }
+    );
+  };
+
+  const onToggleSupplierProduct = (productId) => {
+    const normalized = String(productId || '').trim();
+    if (!normalized) {
+      return;
+    }
+
+    setSupplierForm((prev) => {
+      const current = Array.isArray(prev.productIds) ? prev.productIds.map((item) => String(item)) : [];
+      const exists = current.includes(normalized);
+      return {
+        ...prev,
+        productIds: exists ? current.filter((item) => item !== normalized) : [...current, normalized],
+      };
+    });
   };
 
   const onDeleteFixedCost = (id) => {
@@ -4131,21 +4310,59 @@ function AdminDashboard() {
                 Tipo
                 <select
                   value={fixedCostForm.type}
-                  onChange={(event) => setFixedCostForm((prev) => ({ ...prev, type: event.target.value }))}
+                  onChange={(event) => {
+                    const nextType = event.target.value;
+                    setFixedCostForm((prev) => ({
+                      ...prev,
+                      type: nextType,
+                      supplierId: nextType === 'variable' ? prev.supplierId : '',
+                      supplierOtherName: nextType === 'variable' ? prev.supplierOtherName : '',
+                    }));
+                  }}
                 >
                   <option value="fixed">Fijo</option>
                   <option value="variable">Variable</option>
                 </select>
               </label>
-              <label>
-                Concepto
-                <input
-                  value={fixedCostForm.name}
-                  onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Ej: Nomina semana 2"
-                  required
-                />
-              </label>
+              {fixedCostForm.type === 'variable' ? (
+                <label>
+                  Concepto / Proveedor
+                  <select
+                    value={fixedCostForm.supplierId}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, supplierId: event.target.value }))}
+                    required
+                  >
+                    <option value="">Selecciona proveedor</option>
+                    {suppliers.map((supplier) => (
+                      <option key={supplier._id} value={supplier._id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                    <option value="other">Otro</option>
+                  </select>
+                </label>
+              ) : (
+                <label>
+                  Concepto
+                  <input
+                    value={fixedCostForm.name}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Ej: Nomina semana 2"
+                    required
+                  />
+                </label>
+              )}
+              {fixedCostForm.type === 'variable' && fixedCostForm.supplierId === 'other' ? (
+                <label>
+                  Concepto (otro)
+                  <input
+                    value={fixedCostForm.supplierOtherName}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, supplierOtherName: event.target.value }))}
+                    placeholder="Ej: Transporte de insumos"
+                    required
+                  />
+                </label>
+              ) : null}
               <label>
                 Valor
                 <input
@@ -6995,6 +7212,59 @@ function AdminDashboard() {
           {aiError ? <p style={{ color: '#e53e3e' }}>{aiError}</p> : null}
           {aiLoading ? <p style={{ color: '#718096' }}>Analizando datos de la tienda, un momento...</p> : null}
 
+          <div className="card" style={{ marginBottom: 16 }}>
+            <h4>💬 Pregúntale a la IA</h4>
+            <p style={{ color: '#718096', fontSize: '0.875rem', marginBottom: 8 }}>
+              Ejemplo: "Recomiéndame el pedido del proveedor Panadería El Sol para mañana".
+            </p>
+            <form onSubmit={onAskAiQuestion} style={{ display: 'grid', gap: 8 }}>
+              <textarea
+                value={aiQuestion}
+                onChange={(event) => setAiQuestion(event.target.value)}
+                rows={3}
+                placeholder="Escribe tu pregunta de negocio para la IA"
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+              <div>
+                <button className="btn btn-primary" type="submit" disabled={aiQuestionLoading}>
+                  {aiQuestionLoading ? 'Consultando...' : 'Preguntar a la IA'}
+                </button>
+              </div>
+            </form>
+
+            {aiQuestionAnswer ? (
+              <div style={{ marginTop: 12, padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f7fafc' }}>
+                <p style={{ marginBottom: 8 }}><strong>Respuesta:</strong> {aiQuestionAnswer.answer}</p>
+                {(aiQuestionAnswer.recommendations || []).length > 0 ? (
+                  <div className="admin-low-balance-table-wrap">
+                    <table className="admin-low-balance-table">
+                      <thead>
+                        <tr>
+                          <th>Producto</th>
+                          <th>Venta 7 días</th>
+                          <th>Promedio diario</th>
+                          <th>Stock actual</th>
+                          <th>Pedido sugerido mañana</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(aiQuestionAnswer.recommendations || []).map((row) => (
+                          <tr key={row.productId}>
+                            <td>{row.productName}</td>
+                            <td>{row.qty7d}</td>
+                            <td>{row.avgDaily}</td>
+                            <td>{row.currentStock}</td>
+                            <td><strong>{row.suggestedTomorrow}</strong></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
           {aiData && !aiLoading ? (
             <>
               {/* Summary badges */}
@@ -7285,6 +7555,148 @@ function AdminDashboard() {
               ) : null}
             </>
           ) : null}
+        </section>
+      ) : null}
+
+      {activeModule === 'suppliers' ? (
+        <section className="panel admin-section">
+          <h3>Proveedores</h3>
+          <p>Registra proveedores y los productos que te venden para mejorar contabilidad y recomendaciones de pedido.</p>
+
+          <div className="cards admin-list-cards">
+            <div className="card">
+              <h4>{editingSupplierId ? 'Editar proveedor' : 'Crear proveedor'}</h4>
+              <form className="admin-form-grid" onSubmit={onSubmitSupplier}>
+                <label>
+                  Nombre del proveedor
+                  <input
+                    value={supplierForm.name}
+                    onChange={(event) => setSupplierForm((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Ej: Panadería El Sol"
+                    required
+                  />
+                </label>
+                <label>
+                  Contacto
+                  <input
+                    value={supplierForm.contactName}
+                    onChange={(event) => setSupplierForm((prev) => ({ ...prev, contactName: event.target.value }))}
+                    placeholder="Nombre del contacto"
+                  />
+                </label>
+                <label>
+                  Teléfono
+                  <input
+                    value={supplierForm.phone}
+                    onChange={(event) => setSupplierForm((prev) => ({ ...prev, phone: event.target.value }))}
+                    placeholder="3001234567"
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    value={supplierForm.email}
+                    onChange={(event) => setSupplierForm((prev) => ({ ...prev, email: event.target.value }))}
+                    placeholder="contacto@proveedor.com"
+                  />
+                </label>
+                <label>
+                  Notas
+                  <input
+                    value={supplierForm.notes}
+                    onChange={(event) => setSupplierForm((prev) => ({ ...prev, notes: event.target.value }))}
+                    placeholder="Días de entrega, condiciones, etc."
+                  />
+                </label>
+
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <p style={{ marginBottom: 6, fontWeight: 600 }}>Productos que vende este proveedor</p>
+                  <div className="admin-card-scroll" style={{ maxHeight: 220, border: '1px solid #e2e8f0', borderRadius: 8, padding: 8 }}>
+                    {products.filter((product) => String(product.status || 'active') === 'active').length === 0 ? (
+                      <p>No hay productos activos para asociar.</p>
+                    ) : (
+                      products
+                        .filter((product) => String(product.status || 'active') === 'active')
+                        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
+                        .map((product) => {
+                          const checked = supplierForm.productIds.includes(String(product._id));
+                          return (
+                            <label key={product._id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => onToggleSupplierProduct(product._id)}
+                              />
+                              <span>{product.name}</span>
+                              <small style={{ color: '#718096' }}>{product.storeName ? `(${product.storeName})` : ''}</small>
+                            </label>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn btn-primary" type="submit">
+                    {editingSupplierId ? 'Guardar cambios' : 'Crear proveedor'}
+                  </button>
+                  {editingSupplierId ? (
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => {
+                        setEditingSupplierId('');
+                        setSupplierForm({ name: '', contactName: '', phone: '', email: '', notes: '', productIds: [] });
+                      }}
+                    >
+                      Cancelar edición
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            </div>
+
+            <div className="card">
+              <h4>Proveedores registrados</h4>
+              {suppliers.length === 0 ? <p>No hay proveedores creados aún.</p> : null}
+              {suppliers.length > 0 ? (
+                <div className="admin-low-balance-table-wrap admin-card-scroll">
+                  <table className="admin-low-balance-table">
+                    <thead>
+                      <tr>
+                        <th>Proveedor</th>
+                        <th>Contacto</th>
+                        <th>Productos asociados</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {suppliers.map((supplier) => (
+                        <tr key={supplier._id}>
+                          <td>
+                            <strong>{supplier.name}</strong>
+                            {supplier.notes ? <div style={{ fontSize: '0.78rem', color: '#718096' }}>{supplier.notes}</div> : null}
+                          </td>
+                          <td>
+                            <div>{supplier.contactName || 'N/A'}</div>
+                            <div style={{ fontSize: '0.78rem', color: '#718096' }}>{supplier.phone || supplier.email || ''}</div>
+                          </td>
+                          <td>{Array.isArray(supplier.productIds) ? supplier.productIds.length : 0}</td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <button className="btn" type="button" onClick={() => onEditSupplier(supplier)}>Editar</button>
+                              <button className="btn" type="button" onClick={() => onDeleteSupplier(supplier._id)}>Eliminar</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </section>
       ) : null}
 

@@ -5,6 +5,8 @@ const fixedCostSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', default: null },
     name: { type: String, required: true, trim: true },
+    supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
+    supplierName: { type: String, default: '', trim: true },
     amount: { type: Number, required: true, min: 0 },
     type: { type: String, enum: ['fixed', 'variable'], default: 'fixed' },
     weekStart: { type: Date, required: true },

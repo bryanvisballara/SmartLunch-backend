@@ -13,6 +13,7 @@ require('./dailyClosure.model');
 require('./deviceToken.model');
 require('./notification.model');
 require('./fixedCost.model');
+require('./supplier.model');
 require('./meriendaSubscription.model');
 require('./meriendaFailedPayment.model');
 require('./meriendaSnack.model');

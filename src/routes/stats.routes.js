@@ -10,6 +10,7 @@ const FixedCost = require('../models/fixedCost.model');
 const Student = require('../models/student.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const Category = require('../models/category.model');
+const Supplier = require('../models/supplier.model');
 
 const router = express.Router();
 
@@ -1370,6 +1371,179 @@ router.get('/ai-insights', async (req, res) => {
       timeInsights,
       productTrend: productTrend.slice(0, 20),
       marginOpportunities: marginOpportunities.slice(0, 10),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/ai-insights/ask', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const storeFilter = resolveStoreFilter(req.body?.storeId);
+    if (storeFilter === 'invalid') {
+      return res.status(400).json({ message: 'Invalid storeId' });
+    }
+
+    const question = String(req.body?.question || '').trim();
+    if (!question) {
+      return res.status(400).json({ message: 'question is required' });
+    }
+
+    const normalizeText = (value) => String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    const normalizedQuestion = normalizeText(question);
+
+    const now = new Date();
+    const dayStart = startOfDay(now);
+    const last7Start = new Date(dayStart);
+    last7Start.setUTCDate(last7Start.getUTCDate() - 6);
+    const last14Start = new Date(dayStart);
+    last14Start.setUTCDate(last14Start.getUTCDate() - 13);
+
+    const orderMatch = {
+      schoolId,
+      status: 'completed',
+      createdAt: { $gte: last14Start },
+    };
+    if (storeFilter) {
+      orderMatch.storeId = storeFilter;
+    }
+
+    const [suppliers, orders] = await Promise.all([
+      Supplier.find({ schoolId, deletedAt: null, status: 'active' })
+        .select('_id name productIds')
+        .lean(),
+      Order.find(orderMatch)
+        .select('createdAt items')
+        .lean(),
+    ]);
+
+    if (suppliers.length === 0) {
+      return res.status(200).json({
+        answer: 'No hay proveedores registrados. Crea proveedores y asocia productos para obtener recomendaciones de pedido.',
+        supplier: null,
+        recommendations: [],
+      });
+    }
+
+    const supplierDemand = suppliers.map((supplier) => ({
+      supplierId: String(supplier._id),
+      supplierName: supplier.name || 'Proveedor',
+      productIds: new Set((supplier.productIds || []).map((id) => String(id))),
+      qty7d: 0,
+      qty14d: 0,
+      productQty7d: new Map(),
+    }));
+
+    for (const order of orders) {
+      const orderDate = new Date(order.createdAt);
+      const is7d = orderDate >= last7Start;
+      const is14d = orderDate >= last14Start;
+      if (!is14d) {
+        continue;
+      }
+
+      for (const item of order.items || []) {
+        const pid = String(item.productId || '');
+        const qty = Number(item.quantity || 0);
+        if (!pid || qty <= 0) {
+          continue;
+        }
+
+        for (const supplier of supplierDemand) {
+          if (!supplier.productIds.has(pid)) {
+            continue;
+          }
+
+          supplier.qty14d += qty;
+          if (is7d) {
+            supplier.qty7d += qty;
+            supplier.productQty7d.set(pid, (supplier.productQty7d.get(pid) || 0) + qty);
+          }
+        }
+      }
+    }
+
+    const products = await Product.find({
+      schoolId,
+      status: 'active',
+      deletedAt: null,
+      _id: {
+        $in: Array.from(
+          new Set(
+            supplierDemand.flatMap((supplier) => Array.from(supplier.productIds))
+          )
+        ),
+      },
+    })
+      .select('_id name stock')
+      .lean();
+
+    const productNameMap = new Map(products.map((product) => [String(product._id), product.name || 'Producto']));
+    const productStockMap = new Map(products.map((product) => [String(product._id), Number(product.stock || 0)]));
+
+    const rankedSuppliers = supplierDemand
+      .map((supplier) => {
+        const avgDaily = Math.max(supplier.qty7d / 7, supplier.qty14d / 14);
+        return {
+          ...supplier,
+          avgDaily,
+        };
+      })
+      .sort((a, b) => b.avgDaily - a.avgDaily);
+
+    const mentionedSupplier = rankedSuppliers.find((supplier) =>
+      normalizedQuestion.includes(normalizeText(supplier.supplierName))
+    );
+
+    const targetSupplier = mentionedSupplier || rankedSuppliers[0];
+    const topProductRows = Array.from(targetSupplier.productQty7d.entries())
+      .map(([productId, qty7d]) => {
+        const avgDaily = qty7d / 7;
+        const suggestedTomorrow = Math.max(1, Math.ceil(avgDaily * 1.15));
+        const currentStock = productStockMap.get(productId) || 0;
+        return {
+          productId,
+          productName: productNameMap.get(productId) || 'Producto',
+          qty7d,
+          avgDaily: Math.round(avgDaily * 10) / 10,
+          currentStock,
+          suggestedTomorrow,
+        };
+      })
+      .sort((a, b) => b.avgDaily - a.avgDaily)
+      .slice(0, 8);
+
+    const totalSuggestedTomorrow = topProductRows.reduce((sum, row) => sum + row.suggestedTomorrow, 0);
+
+    const asksForTomorrowOrder =
+      normalizedQuestion.includes('pedido') ||
+      normalizedQuestion.includes('comprar') ||
+      normalizedQuestion.includes('manana') ||
+      normalizedQuestion.includes('mañana');
+
+    let answer;
+    if (asksForTomorrowOrder) {
+      answer = `Para ${targetSupplier.supplierName}, te recomiendo pedir aproximadamente ${totalSuggestedTomorrow} unidades para mañana, priorizando los productos de mayor rotación en los últimos 7 días.`;
+    } else {
+      answer = `Según tus datos recientes, ${targetSupplier.supplierName} es el proveedor con mayor demanda estimada (${targetSupplier.avgDaily.toFixed(1)} und/día). Puedes pedirme un pedido sugerido para mañana.`;
+    }
+
+    return res.status(200).json({
+      answer,
+      supplier: {
+        supplierId: targetSupplier.supplierId,
+        supplierName: targetSupplier.supplierName,
+        avgDailyUnits: Math.round(targetSupplier.avgDaily * 10) / 10,
+        qty7d: targetSupplier.qty7d,
+        qty14d: targetSupplier.qty14d,
+      },
+      recommendations: topProductRows,
+      generatedAt: new Date().toISOString(),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

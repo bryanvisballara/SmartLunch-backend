@@ -13,6 +13,7 @@ const User = require('../models/user.model');
 const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const FixedCost = require('../models/fixedCost.model');
+const Supplier = require('../models/supplier.model');
 const {
   uploadImageMiddleware,
   processAndStoreUploadedImage,
@@ -45,6 +46,26 @@ function monthKeyFromDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
+}
+
+function normalizeObjectIdList(values = []) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  const dedup = new Set();
+  const ids = [];
+  for (const value of values) {
+    const normalized = String(value || '').trim();
+    if (!mongoose.Types.ObjectId.isValid(normalized) || dedup.has(normalized)) {
+      continue;
+    }
+
+    dedup.add(normalized);
+    ids.push(new mongoose.Types.ObjectId(normalized));
+  }
+
+  return ids;
 }
 
 function normalizeImageUrl(value, includeImageData) {
@@ -252,6 +273,151 @@ router.delete('/categories/:id', async (req, res) => {
   }
 });
 
+router.get('/suppliers', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const suppliers = await Supplier.find({ schoolId, deletedAt: null })
+      .populate('productIds', '_id name status')
+      .sort({ name: 1 })
+      .lean();
+
+    return res.status(200).json(
+      suppliers.map((supplier) => ({
+        ...supplier,
+        productIds: Array.isArray(supplier.productIds)
+          ? supplier.productIds
+            .filter((product) => product && product._id)
+            .map((product) => ({
+              _id: String(product._id),
+              name: product.name || 'Producto',
+              status: product.status || 'active',
+            }))
+          : [],
+      }))
+    );
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/suppliers', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const {
+      name,
+      contactName = '',
+      phone = '',
+      email = '',
+      notes = '',
+      productIds = [],
+    } = req.body;
+
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ message: 'name is required' });
+    }
+
+    const normalizedProductIds = normalizeObjectIdList(productIds);
+
+    const supplier = await Supplier.create({
+      schoolId,
+      name: String(name).trim(),
+      contactName: String(contactName || '').trim(),
+      phone: String(phone || '').trim(),
+      email: String(email || '').trim().toLowerCase(),
+      notes: String(notes || '').trim(),
+      productIds: normalizedProductIds,
+      status: 'active',
+    });
+
+    const populated = await Supplier.findById(supplier._id)
+      .populate('productIds', '_id name status')
+      .lean();
+
+    return res.status(201).json(populated);
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: 'Supplier already exists' });
+    }
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/suppliers/:id', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const supplier = await Supplier.findOne({ _id: req.params.id, schoolId, deletedAt: null });
+    if (!supplier) {
+      return res.status(404).json({ message: 'Supplier not found' });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+      const name = String(req.body.name || '').trim();
+      if (!name) {
+        return res.status(400).json({ message: 'name is required' });
+      }
+      supplier.name = name;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'contactName')) {
+      supplier.contactName = String(req.body.contactName || '').trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'phone')) {
+      supplier.phone = String(req.body.phone || '').trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'email')) {
+      supplier.email = String(req.body.email || '').trim().toLowerCase();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'notes')) {
+      supplier.notes = String(req.body.notes || '').trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
+      const status = String(req.body.status || '').trim();
+      if (!['active', 'inactive'].includes(status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+      }
+      supplier.status = status;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'productIds')) {
+      supplier.productIds = normalizeObjectIdList(req.body.productIds || []);
+    }
+
+    await supplier.save();
+    const populated = await Supplier.findById(supplier._id)
+      .populate('productIds', '_id name status')
+      .lean();
+
+    return res.status(200).json(populated);
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: 'Supplier already exists' });
+    }
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/suppliers/:id', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const supplier = await Supplier.findOne({ _id: req.params.id, schoolId, deletedAt: null });
+    if (!supplier) {
+      return res.status(404).json({ message: 'Supplier not found' });
+    }
+
+    supplier.deletedAt = new Date();
+    supplier.status = 'inactive';
+    await supplier.save();
+
+    return res.status(200).json({ message: 'Supplier deleted' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/fixed-costs', async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -283,6 +449,7 @@ router.get('/fixed-costs', async (req, res) => {
 
     const fixedCosts = await FixedCost.find(filter)
       .populate('storeId', 'name')
+      .populate('supplierId', 'name')
       .sort({ weekStart: -1, createdAt: -1 })
       .lean();
 
@@ -295,11 +462,15 @@ router.get('/fixed-costs', async (req, res) => {
 router.post('/fixed-costs', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { name, amount, storeId = null, type = 'fixed', weekStart } = req.body;
-
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ message: 'name is required' });
-    }
+    const {
+      name,
+      amount,
+      storeId = null,
+      type = 'fixed',
+      weekStart,
+      supplierId = null,
+      supplierOtherName = '',
+    } = req.body;
 
     if (Number(amount) < 0) {
       return res.status(400).json({ message: 'amount must be >= 0' });
@@ -310,6 +481,46 @@ router.post('/fixed-costs', async (req, res) => {
       return res.status(400).json({ message: 'Invalid type. Use fixed or variable' });
     }
 
+    let normalizedName = String(name || '').trim();
+    let normalizedSupplierId = null;
+    let normalizedSupplierName = '';
+
+    if (normalizedType === 'variable') {
+      const supplierIdText = String(supplierId || '').trim();
+      const supplierOtherText = String(supplierOtherName || '').trim();
+
+      if (supplierIdText && supplierIdText !== 'other') {
+        if (!mongoose.Types.ObjectId.isValid(supplierIdText)) {
+          return res.status(400).json({ message: 'Invalid supplierId' });
+        }
+
+        const foundSupplier = await Supplier.findOne({
+          _id: supplierIdText,
+          schoolId,
+          deletedAt: null,
+        }).select('_id name').lean();
+
+        if (!foundSupplier) {
+          return res.status(404).json({ message: 'Supplier not found' });
+        }
+
+        normalizedSupplierId = foundSupplier._id;
+        normalizedSupplierName = String(foundSupplier.name || '').trim();
+        normalizedName = normalizedSupplierName || normalizedName;
+      } else if (supplierIdText === 'other') {
+        if (!supplierOtherText) {
+          return res.status(400).json({ message: 'supplierOtherName is required when supplier is other' });
+        }
+
+        normalizedSupplierName = supplierOtherText;
+        normalizedName = supplierOtherText;
+      }
+    }
+
+    if (!normalizedName) {
+      return res.status(400).json({ message: 'name is required' });
+    }
+
     const normalizedWeekStart = normalizeWeekStartDate(weekStart);
     if (!normalizedWeekStart) {
       return res.status(400).json({ message: 'Invalid weekStart date' });
@@ -318,7 +529,9 @@ router.post('/fixed-costs', async (req, res) => {
     const fixedCost = await FixedCost.create({
       schoolId,
       storeId: storeId || null,
-      name: String(name).trim(),
+      name: normalizedName,
+      supplierId: normalizedSupplierId,
+      supplierName: normalizedSupplierName,
       amount: Number(amount || 0),
       type: normalizedType,
       weekStart: normalizedWeekStart,
@@ -326,7 +539,10 @@ router.post('/fixed-costs', async (req, res) => {
       status: 'active',
     });
 
-    const populated = await FixedCost.findById(fixedCost._id).populate('storeId', 'name').lean();
+    const populated = await FixedCost.findById(fixedCost._id)
+      .populate('storeId', 'name')
+      .populate('supplierId', 'name')
+      .lean();
     return res.status(201).json(populated);
   } catch (error) {
     return res.status(500).json({ message: error.message });
