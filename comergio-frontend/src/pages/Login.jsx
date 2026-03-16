@@ -14,7 +14,7 @@ import {
 } from '../services/auth.service';
 import useAuthStore from '../store/auth.store';
 import loginLogo from '../assets/loginlogo.png';
-import smartLogo from '../assets/smartlogo.png';
+import smartLogo from '../assets/comergio.png';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensureParentPushNotifications } from '../lib/pushNotifications';
 import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
@@ -420,8 +420,8 @@ function Login() {
     <div className="page-center login-page login-page-auth">
       <section className="login-auth-hero" aria-label="Encabezado de login">
         <div className="login-auth-logo-wrap" aria-hidden="true">
-          <img className="login-auth-logo-image" src={loginLogo} alt="SmartLunch" />
-          <img className="login-auth-sublogo-image" src={smartLogo} alt="SmartLunch" />
+          <img className="login-auth-logo-image" src={loginLogo} alt="Comergio" />
+          <img className="login-auth-sublogo-image" src={smartLogo} alt="Comergio" />
         </div>
       </section>
 

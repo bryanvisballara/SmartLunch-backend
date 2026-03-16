@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const { connectDB } = require('../config/db');
 
 const TARGET_SCHOOL_ID = 'International Berckley School';
-const LEGACY_SCHOOL_IDS = ['smartlunch-demo', 'Insternational Berckley School', 'International Berckley School'];
+const LEGACY_SCHOOL_IDS = ['comergio-demo', 'Insternational Berckley School', 'International Berckley School'];
 
 async function dedupeMeriendaOperations(db) {
   const collection = db.collection('meriendaoperations');

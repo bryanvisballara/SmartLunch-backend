@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const { connectDB } = require('../config/db');
 const User = require('../models/user.model');
 
-const OLD_SCHOOL_ID = 'smartlunch-demo';
+const OLD_SCHOOL_ID = 'comergio-demo';
 const NEW_SCHOOL_ID = 'International Berckley School';
 
 async function run() {

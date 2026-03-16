@@ -70,7 +70,7 @@ function Navbar() {
 
   return (
     <nav className="nav">
-      {!isVendor ? <div className="nav-brand">SmartLunch</div> : null}
+      {!isVendor ? <div className="nav-brand">Comergio</div> : null}
       {isAdmin ? (
         <div className="nav-admin-right">
           <span className="nav-meta">Administrador: {user?.name || user?.username || 'N/A'}</span>
@@ -100,7 +100,7 @@ function Navbar() {
             <div className="nav-vendor-spacer" aria-hidden="true" />
 
             <div className="nav-vendor-center">
-              <div className="nav-brand nav-vendor-brand">SmartLunch</div>
+              <div className="nav-brand nav-vendor-brand">Comergio</div>
               <div className="nav-vendor-meta-row">
                 <span className="nav-meta">Tienda: {currentStore?.name || 'Sin tienda'}</span>
                 <span className="nav-meta">Vendedor: {user?.name || 'N/A'}</span>

@@ -16,21 +16,179 @@ router.use(roleMiddleware('admin'));
 
 const orderAggregate = (pipeline) => Order.aggregate(pipeline).allowDiskUse(true);
 
+const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
+
+function getBogotaShiftedDate(date = new Date()) {
+  return new Date(date.getTime() + BOGOTA_UTC_OFFSET_MS);
+}
+
+function bogotaLocalToUtcDate(year, monthIndex, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
+  return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond) - BOGOTA_UTC_OFFSET_MS);
+}
+
 function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const shifted = getBogotaShiftedDate(date);
+  return bogotaLocalToUtcDate(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
 }
 
 function startOfWeek(date) {
-  const day = date.getDay();
+  const shifted = getBogotaShiftedDate(date);
+  const day = shifted.getUTCDay();
   const diff = (day === 0 ? -6 : 1) - day;
-  const d = new Date(date);
-  d.setDate(date.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
+
+  return bogotaLocalToUtcDate(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() + diff
+  );
 }
 
 function startOfMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  const shifted = getBogotaShiftedDate(date);
+  return bogotaLocalToUtcDate(shifted.getUTCFullYear(), shifted.getUTCMonth(), 1);
+}
+
+function endOfMonth(date) {
+  const shifted = getBogotaShiftedDate(date);
+  return bogotaLocalToUtcDate(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, 1);
+}
+
+function monthKeyFromDate(date) {
+  const shifted = getBogotaShiftedDate(date);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function parseMonthKey(value) {
+  const normalized = String(value || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(normalized)) {
+    return null;
+  }
+
+  const [yearText, monthText] = normalized.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  return {
+    monthKey: normalized,
+    start: bogotaLocalToUtcDate(year, month - 1, 1),
+    end: bogotaLocalToUtcDate(year, month, 1),
+  };
+}
+
+function buildAiRecommendations({
+  topStudents,
+  lowStockProducts,
+  topProducts,
+  hourlySales,
+  productTrend,
+}) {
+  const recommendations = [];
+
+  const safeTopStudents = Array.isArray(topStudents) ? topStudents : [];
+  const safeLowStock = Array.isArray(lowStockProducts) ? lowStockProducts : [];
+  const safeTopProducts = Array.isArray(topProducts) ? topProducts : [];
+  const safeHourly = Array.isArray(hourlySales) ? hourlySales : [];
+  const safeTrend = Array.isArray(productTrend) ? productTrend : [];
+
+  if (safeHourly.length > 0) {
+    const sortedByRevenue = [...safeHourly].sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0));
+    const bestHour = sortedByRevenue[0];
+    const lowestHour = sortedByRevenue[sortedByRevenue.length - 1];
+
+    recommendations.push({
+      type: 'hour_peak',
+      priority: 'high',
+      title: 'Refuerza inventario en hora pico',
+      detail: `Mayor demanda en franja ${String(bestHour.hour).padStart(2, '0')}:00 con ${Number(bestHour.orders || 0)} pedidos.`,
+      action: 'Aumenta alistamiento y stock de productos mas vendidos antes de esa hora.',
+    });
+
+    if (lowestHour && Number(lowestHour.orders || 0) > 0 && Number(bestHour.orders || 0) >= Number(lowestHour.orders || 0) * 1.5) {
+      recommendations.push({
+        type: 'hour_valley',
+        priority: 'medium',
+        title: 'Activa promociones en horas valle',
+        detail: `Menor movimiento en ${String(lowestHour.hour).padStart(2, '0')}:00 (${Number(lowestHour.orders || 0)} pedidos).`,
+        action: 'Lanza combos o promociones puntuales para mover inventario en esa franja.',
+      });
+    }
+  }
+
+  if (safeTopStudents.length > 0) {
+    const topStudent = safeTopStudents[0];
+    recommendations.push({
+      type: 'student_behavior',
+      priority: 'medium',
+      title: 'Monitorea alumnos de alto consumo',
+      detail: `${topStudent.studentName || 'Alumno'} presenta gasto promedio diario de ${Math.round(Number(topStudent.averageDailySpent || 0)).toLocaleString('es-CO')} COP.`,
+      action: 'Revisa topes diarios y comunica opciones de compra balanceadas con acudientes.',
+    });
+  }
+
+  if (safeLowStock.length > 0) {
+    const critical = safeLowStock
+      .filter((item) => Number(item.stock || 0) <= Number(item.inventoryAlertStock || 0))
+      .slice(0, 3)
+      .map((item) => item.name)
+      .filter(Boolean);
+
+    recommendations.push({
+      type: 'stock_risk',
+      priority: 'high',
+      title: 'Riesgo de quiebre en productos clave',
+      detail: critical.length > 0
+        ? `Productos criticos: ${critical.join(', ')}.`
+        : `Hay ${safeLowStock.length} productos en alerta de stock.`,
+      action: 'Incrementa pedido semanal de referencias criticas para evitar ruptura en hora pico.',
+    });
+  }
+
+  const growthCandidates = safeTrend
+    .filter((item) => Number(item.previousQty || 0) > 0 && Number(item.growthPercent || 0) >= 25)
+    .sort((a, b) => Number(b.growthPercent || 0) - Number(a.growthPercent || 0));
+
+  if (growthCandidates.length > 0) {
+    const target = growthCandidates[0];
+    recommendations.push({
+      type: 'product_growth',
+      priority: 'high',
+      title: 'Aumenta pedido de producto en crecimiento',
+      detail: `${target.productName || 'Producto'} crecio ${Number(target.growthPercent || 0).toFixed(1)}% vs semana anterior.`,
+      action: 'Sube pedido de ese producto para la proxima semana y valida capacidad de produccion/compra.',
+    });
+  }
+
+  const dropCandidates = safeTrend
+    .filter((item) => Number(item.previousQty || 0) > 0 && Number(item.growthPercent || 0) <= -25)
+    .sort((a, b) => Number(a.growthPercent || 0) - Number(b.growthPercent || 0));
+
+  if (dropCandidates.length > 0) {
+    const target = dropCandidates[0];
+    recommendations.push({
+      type: 'product_drop',
+      priority: 'medium',
+      title: 'Reduce pedido de baja rotacion',
+      detail: `${target.productName || 'Producto'} cayo ${Math.abs(Number(target.growthPercent || 0)).toFixed(1)}% vs semana anterior.`,
+      action: 'Reduce volumen del pedido y evalua reemplazo por productos con mayor rotacion.',
+    });
+  }
+
+  if (recommendations.length === 0 && safeTopProducts.length > 0) {
+    recommendations.push({
+      type: 'general',
+      priority: 'low',
+      title: 'Mantener estrategia actual',
+      detail: 'No se detectaron variaciones fuertes en el patron de venta reciente.',
+      action: 'Mantener pedidos actuales y monitorear cambios durante la semana.',
+    });
+  }
+
+  return recommendations.slice(0, 6);
 }
 
 async function getKpi(req, res) {
@@ -38,6 +196,8 @@ async function getKpi(req, res) {
     const { schoolId } = req.user;
     const lowStockThreshold = Number(req.query.lowStockThreshold || 10);
     const now = new Date();
+    const monthStart = startOfMonth(now);
+    const monthEnd = endOfMonth(now);
 
     const [salesToday, salesWeek, salesMonth] = await Promise.all([
       orderAggregate([
@@ -49,7 +209,7 @@ async function getKpi(req, res) {
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       orderAggregate([
-        { $match: { schoolId, status: 'completed', createdAt: { $gte: startOfMonth(now) } } },
+        { $match: { schoolId, status: 'completed', createdAt: { $gte: monthStart, $lt: monthEnd } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
     ]);
@@ -83,9 +243,13 @@ function resolveStoreFilter(storeIdRaw) {
   return new mongoose.Types.ObjectId(normalized);
 }
 
-async function getUtilityForPeriod(baseMatch, periodStart) {
+async function getUtilityForPeriod(baseMatch, periodStart, periodEnd = null) {
+  const createdAtMatch = periodEnd
+    ? { $gte: periodStart, $lt: periodEnd }
+    : { $gte: periodStart };
+
   const data = await orderAggregate([
-    { $match: { ...baseMatch, createdAt: { $gte: periodStart } } },
+    { $match: { ...baseMatch, createdAt: createdAtMatch } },
     { $unwind: '$items' },
     {
       $lookup: {
@@ -131,8 +295,16 @@ router.get('/admin-home', async (req, res) => {
     const lowStockThreshold = Number(req.query.lowStockThreshold || 10);
     const lowBalanceThreshold = Number(req.query.lowBalanceThreshold || 20000);
     const now = new Date();
+    const requestedMonth = parseMonthKey(req.query.month);
+    const monthStart = requestedMonth?.start || startOfMonth(now);
+    const monthEnd = requestedMonth?.end || endOfMonth(now);
+    const currentMonthKey = requestedMonth?.monthKey || monthKeyFromDate(now);
     const thirtyDaysAgo = new Date(now);
     thirtyDaysAgo.setDate(now.getDate() - 30);
+    const last7Start = new Date(startOfDay(now));
+    last7Start.setUTCDate(last7Start.getUTCDate() - 6);
+    const prev7Start = new Date(last7Start);
+    prev7Start.setUTCDate(prev7Start.getUTCDate() - 7);
 
     const orderMatch = {
       schoolId,
@@ -157,10 +329,17 @@ router.get('/admin-home', async (req, res) => {
       schoolId,
       status: 'active',
       deletedAt: null,
+      $or: [
+        { monthKey: currentMonthKey },
+        {
+          monthKey: { $exists: false },
+          createdAt: { $gte: monthStart, $lt: monthEnd },
+        },
+      ],
     };
 
     if (storeFilter) {
-      fixedCostFilter.$or = [{ storeId: null }, { storeId: storeFilter }];
+      fixedCostFilter.$and = [{ $or: [{ storeId: null }, { storeId: storeFilter }] }];
     }
 
     const [
@@ -179,6 +358,8 @@ router.get('/admin-home', async (req, res) => {
       activeProductsRaw,
       totalSubscribedStudents,
       totalAutoDebitActiveStudents,
+      hourlySalesRaw,
+      productWeeklyTrendRaw,
     ] = await Promise.all([
       orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
@@ -189,12 +370,12 @@ router.get('/admin-home', async (req, res) => {
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       orderAggregate([
-        { $match: { ...orderMatch, createdAt: { $gte: startOfMonth(now) } } },
+        { $match: { ...orderMatch, createdAt: { $gte: monthStart, $lt: monthEnd } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       getUtilityForPeriod(orderMatch, startOfDay(now)),
       getUtilityForPeriod(orderMatch, startOfWeek(now)),
-      getUtilityForPeriod(orderMatch, startOfMonth(now)),
+      getUtilityForPeriod(orderMatch, monthStart, monthEnd),
       orderAggregate([
         {
           $match: {
@@ -367,6 +548,69 @@ router.get('/admin-home', async (req, res) => {
         .lean(),
       Student.countDocuments({ schoolId, status: 'active', deletedAt: null }),
       Wallet.countDocuments({ schoolId, status: 'active', autoDebitEnabled: true }),
+      orderAggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: thirtyDaysAgo } } },
+        {
+          $group: {
+            _id: {
+              hour: {
+                $hour: {
+                  date: '$createdAt',
+                  timezone: 'America/Bogota',
+                },
+              },
+            },
+            orders: { $sum: 1 },
+            revenue: { $sum: '$total' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            hour: '$_id.hour',
+            orders: 1,
+            revenue: 1,
+          },
+        },
+        { $sort: { hour: 1 } },
+      ]),
+      orderAggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: prev7Start } } },
+        { $unwind: '$items' },
+        {
+          $project: {
+            productId: '$items.productId',
+            quantity: '$items.quantity',
+            period: {
+              $cond: [{ $gte: ['$createdAt', last7Start] }, 'current', 'previous'],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: { productId: '$productId', period: '$period' },
+            qty: { $sum: '$quantity' },
+          },
+        },
+        {
+          $lookup: {
+            from: 'products',
+            localField: '_id.productId',
+            foreignField: '_id',
+            as: 'product',
+          },
+        },
+        { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 0,
+            productId: '$_id.productId',
+            period: '$_id.period',
+            qty: 1,
+            productName: '$product.name',
+          },
+        },
+      ]),
     ]);
 
     const normalizedBalances = lowBalanceStudents
@@ -506,6 +750,40 @@ router.get('/admin-home', async (req, res) => {
     const catalogProfitabilitySource = mergeCatalogProfitabilityByName(activeProductsRaw || []);
     const topProducts = mergeTopProductsByName(topProductsRaw || []);
 
+    const productTrendMap = new Map();
+    for (const row of productWeeklyTrendRaw || []) {
+      const key = String(row.productId || row.productName || '');
+      if (!key) {
+        continue;
+      }
+
+      if (!productTrendMap.has(key)) {
+        productTrendMap.set(key, {
+          productId: row.productId,
+          productName: row.productName || 'Producto',
+          currentQty: 0,
+          previousQty: 0,
+          growthPercent: 0,
+        });
+      }
+
+      const item = productTrendMap.get(key);
+      if (row.period === 'current') {
+        item.currentQty += Number(row.qty || 0);
+      } else {
+        item.previousQty += Number(row.qty || 0);
+      }
+    }
+
+    const productWeeklyTrend = Array.from(productTrendMap.values())
+      .map((item) => ({
+        ...item,
+        growthPercent: Number(item.previousQty || 0) > 0
+          ? ((Number(item.currentQty || 0) - Number(item.previousQty || 0)) / Number(item.previousQty || 0)) * 100
+          : 0,
+      }))
+      .sort((a, b) => Number(b.growthPercent || 0) - Number(a.growthPercent || 0));
+
     const topProductsByPercent = [...catalogProfitabilitySource]
       .sort((a, b) => (b.utilityPercent || 0) - (a.utilityPercent || 0) || (b.utilityValue || 0) - (a.utilityValue || 0))
       .slice(0, 10);
@@ -526,6 +804,13 @@ router.get('/admin-home', async (req, res) => {
     const salesMonthTotal = Number(salesMonth[0]?.total || 0);
     const utilityTheoreticalMonth = Number(utilityMonth || 0) - totalFixedCosts - totalVariableCosts;
     const utilityNetMonth = salesMonthTotal - totalFixedCosts - totalVariableCosts;
+    const aiRecommendations = buildAiRecommendations({
+      topStudents: topStudentsRaw,
+      lowStockProducts,
+      topProducts,
+      hourlySales: hourlySalesRaw,
+      productTrend: productWeeklyTrend,
+    });
 
     return res.status(200).json({
       salesToday: salesToday[0]?.total || 0,
@@ -549,6 +834,7 @@ router.get('/admin-home', async (req, res) => {
       totalFixedCosts,
       totalVariableCosts,
       utilityNetMonth,
+      aiRecommendations,
       totalSubscribedStudents,
       totalAutoDebitActiveStudents,
       generatedAt: new Date().toISOString(),

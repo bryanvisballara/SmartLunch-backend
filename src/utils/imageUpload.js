@@ -11,7 +11,7 @@ const WEBP_QUALITY = Number(process.env.UPLOADS_WEBP_QUALITY || 78);
 const THUMB_MAX_WIDTH = Number(process.env.UPLOADS_THUMB_MAX_WIDTH_PX || 250);
 const THUMB_WEBP_QUALITY = Number(process.env.UPLOADS_THUMB_WEBP_QUALITY || 70);
 const DEFAULT_FOLDER = '';
-const CLOUDINARY_FOLDER = String(process.env.CLOUDINARY_UPLOAD_FOLDER || 'smartlunch').trim();
+const CLOUDINARY_FOLDER = String(process.env.CLOUDINARY_UPLOAD_FOLDER || 'comergio').trim();
 
 const storage = multer.memoryStorage();
 

@@ -1,7 +1,7 @@
 {
-  "name": "smartlunch-backend",
+  "name": "comergio-backend",
   "version": "1.0.0",
-  "description": "SmartLunch backend API",
+  "description": "Comergio backend API",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
@@ -14,6 +14,8 @@
     "backfill:products-all-stores": "node src/scripts/backfillZeroStockProductsToAllStores.js",
     "migrate:meriendas-indexes": "node src/scripts/migrateMeriendasIndexes.js",
     "migrate:legacy-students": "node src/scripts/migrateLegacyStudents.js",
+    "migrate:image-domain:dry": "node src/scripts/migrateImageUrlDomain.js",
+    "migrate:image-domain:apply": "node src/scripts/migrateImageUrlDomain.js --apply=true",
     "seed": "node src/scripts/seed.js"
   },
   "dependencies": {

@@ -26,7 +26,7 @@ import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
 import pseLogo from '../assets/PSE.png';
 import warningLogo from '../assets/warning.png';
-import smartLogo from '../assets/smartlogo.png';
+import smartLogo from '../assets/comergio.png';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -859,7 +859,7 @@ function ParentPortal() {
         amount: daviAmountNumber,
         documentType: daviDocType,
         documentNumber: String(daviDocument || '').trim(),
-        description: `Recarga SmartLunch - ${selectedStudent?.name || 'Alumno'}`,
+        description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
       });
 
       const transactionId = String(response.data?.transactionId || '').trim();
@@ -1337,7 +1337,7 @@ function ParentPortal() {
         </button>
 
         <div className="parent-title-wrap">
-          <img className="parent-brand-logo" src={smartLogo} alt="SmartLunch" />
+          <img className="parent-brand-logo" src={smartLogo} alt="Comergio" />
           <h1>Hola, {headerName}!</h1>
         </div>
 
@@ -2090,7 +2090,7 @@ function ParentPortal() {
                 {showMeriendasCancelModal ? (
                   <div className="parent-meriendas-cancel-modal-overlay" role="dialog" aria-modal="true" aria-label="Cancelar suscripción de meriendas">
                     <div className="parent-meriendas-cancel-modal">
-                      <p className="kicker">SmartLunch Meriendas</p>
+                      <p className="kicker">Comergio Meriendas</p>
                       <h4>¿Cancelar suscripción?</h4>
                       <p>
                         Esta acción desactivará el servicio de meriendas para <strong>{selectedStudentFirstName}</strong> y podrás volver a suscribirlo cuando quieras.

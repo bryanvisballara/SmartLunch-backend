@@ -27,6 +27,26 @@ const router = express.Router();
 router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
 
+function normalizeWeekStartDate(value) {
+  const base = value ? new Date(value) : new Date();
+  if (Number.isNaN(base.getTime())) {
+    return null;
+  }
+
+  const day = base.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  const normalized = new Date(base);
+  normalized.setDate(base.getDate() + diff);
+  normalized.setHours(0, 0, 0, 0);
+  return normalized;
+}
+
+function monthKeyFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
 function normalizeImageUrl(value, includeImageData) {
   if (includeImageData) {
     return normalizeStoredImageUrl(value);
@@ -235,7 +255,7 @@ router.delete('/categories/:id', async (req, res) => {
 router.get('/fixed-costs', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { storeId = '', type = '' } = req.query;
+    const { storeId = '', type = '', month = '' } = req.query;
 
     const filter = {
       schoolId,
@@ -256,9 +276,14 @@ router.get('/fixed-costs', async (req, res) => {
       filter.type = normalizedType;
     }
 
+    const normalizedMonth = String(month || '').trim();
+    filter.monthKey = /^\d{4}-\d{2}$/.test(normalizedMonth)
+      ? normalizedMonth
+      : monthKeyFromDate(new Date());
+
     const fixedCosts = await FixedCost.find(filter)
       .populate('storeId', 'name')
-      .sort({ createdAt: -1 })
+      .sort({ weekStart: -1, createdAt: -1 })
       .lean();
 
     return res.status(200).json(fixedCosts);
@@ -270,7 +295,7 @@ router.get('/fixed-costs', async (req, res) => {
 router.post('/fixed-costs', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { name, amount, storeId = null, type = 'fixed' } = req.body;
+    const { name, amount, storeId = null, type = 'fixed', weekStart } = req.body;
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ message: 'name is required' });
@@ -285,12 +310,19 @@ router.post('/fixed-costs', async (req, res) => {
       return res.status(400).json({ message: 'Invalid type. Use fixed or variable' });
     }
 
+    const normalizedWeekStart = normalizeWeekStartDate(weekStart);
+    if (!normalizedWeekStart) {
+      return res.status(400).json({ message: 'Invalid weekStart date' });
+    }
+
     const fixedCost = await FixedCost.create({
       schoolId,
       storeId: storeId || null,
       name: String(name).trim(),
       amount: Number(amount || 0),
       type: normalizedType,
+      weekStart: normalizedWeekStart,
+      monthKey: monthKeyFromDate(normalizedWeekStart),
       status: 'active',
     });
 
@@ -550,7 +582,7 @@ router.post('/users/import-legacy-parents', async (req, res) => {
     const { schoolId } = req.user;
     const {
       rows = [],
-      defaultPassword = 'SmartLunch2026*',
+      defaultPassword = 'Comergio2026*',
     } = req.body || {};
 
     if (!Array.isArray(rows) || rows.length === 0) {

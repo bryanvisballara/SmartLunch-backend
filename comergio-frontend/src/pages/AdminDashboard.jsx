@@ -233,6 +233,16 @@ const currentMonthIso = () => {
 
 const currentDateIso = () => new Date().toISOString().slice(0, 10);
 
+const currentWeekStartIso = () => {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  const start = new Date(now);
+  start.setDate(now.getDate() + diff);
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString().slice(0, 10);
+};
+
 const daysInIsoMonth = (monthIso) => {
   const [year, month] = String(monthIso || '').split('-').map((part) => Number(part));
   if (!year || !month) {
@@ -259,6 +269,7 @@ const meriendasFailedStatusValid = (value) => {
 
 const modules = [
   { id: 'home', label: 'Homepage KPI' },
+  { id: 'accounting', label: 'Contabilidad' },
   { id: 'sales', label: 'Historial de ventas & recargas' },
   { id: 'school_billing', label: 'Cuentas de cobro colegio' },
   { id: 'notifications', label: 'Auditoria push' },
@@ -318,6 +329,7 @@ function AdminDashboard() {
   const [topupHistory, setTopupHistory] = useState([]);
   const [closureFilters, setClosureFilters] = useState({ storeId: '', date: '' });
   const [homeStoreId, setHomeStoreId] = useState('');
+  const [accountingMonthFilter, setAccountingMonthFilter] = useState(currentMonthIso());
   const [notificationAuditFilters, setNotificationAuditFilters] = useState({
     studentId: '',
     type: '',
@@ -343,7 +355,13 @@ function AdminDashboard() {
   const [topupBalanceSearchQuery, setTopupBalanceSearchQuery] = useState('');
   const [topupBalancePage, setTopupBalancePage] = useState(1);
   const [savingTopupStudentId, setSavingTopupStudentId] = useState('');
-  const [fixedCostForm, setFixedCostForm] = useState({ name: '', amount: '', storeId: '', type: 'fixed' });
+  const [fixedCostForm, setFixedCostForm] = useState({
+    name: '',
+    amount: '',
+    storeId: '',
+    type: 'fixed',
+    weekStart: currentWeekStartIso(),
+  });
 
   const [categoryForm, setCategoryForm] = useState({ name: '', imageUrl: '' });
   const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false);
@@ -779,6 +797,38 @@ function AdminDashboard() {
     () => (schoolBillingOrders || []).filter((order) => String(order.schoolBillingStatus || 'pending') === 'collected'),
     [schoolBillingOrders]
   );
+
+  const accountingWeeklyRows = useMemo(() => {
+    const fixedCosts = Array.isArray(homeData?.fixedCosts) ? homeData.fixedCosts : [];
+    const variableCosts = Array.isArray(homeData?.variableCosts) ? homeData.variableCosts : [];
+    const grouped = new Map();
+
+    const addCost = (item, field) => {
+      const baseDate = item?.weekStart || item?.createdAt;
+      const parsedDate = baseDate ? new Date(baseDate) : null;
+      if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+        return;
+      }
+
+      const weekKey = parsedDate.toISOString().slice(0, 10);
+      if (!grouped.has(weekKey)) {
+        grouped.set(weekKey, { weekKey, fixedTotal: 0, variableTotal: 0 });
+      }
+
+      const row = grouped.get(weekKey);
+      row[field] += Number(item?.amount || 0);
+    };
+
+    fixedCosts.forEach((item) => addCost(item, 'fixedTotal'));
+    variableCosts.forEach((item) => addCost(item, 'variableTotal'));
+
+    return Array.from(grouped.values())
+      .map((row) => ({
+        ...row,
+        total: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
+      }))
+      .sort((a, b) => String(b.weekKey).localeCompare(String(a.weekKey)));
+  }, [homeData?.fixedCosts, homeData?.variableCosts]);
 
   const filteredSalesStudents = useMemo(() => {
     const query = String(salesStudentQuery || '').trim().toLowerCase();
@@ -1532,8 +1582,11 @@ function AdminDashboard() {
     });
   };
 
-  const loadHomepage = async (storeId = homeStoreId) => {
-    const params = storeId ? { storeId } : {};
+  const loadHomepage = async (storeId = homeStoreId, month = accountingMonthFilter) => {
+    const params = {
+      ...(storeId ? { storeId } : {}),
+      ...(month ? { month } : {}),
+    };
     const homeRes = await getAdminHomepage(params);
     setHomeData(homeRes.data || null);
   };
@@ -2494,10 +2547,15 @@ function AdminDashboard() {
           amount: Number(fixedCostForm.amount || 0),
           storeId: fixedCostForm.storeId || null,
           type: fixedCostForm.type || 'fixed',
+          weekStart: fixedCostForm.weekStart,
         }),
-      'Costo fijo agregado.',
+      'Costo semanal guardado.',
       async () => {
-        setFixedCostForm({ name: '', amount: '', storeId: '', type: fixedCostForm.type || 'fixed' });
+        setFixedCostForm((prev) => ({
+          ...prev,
+          name: '',
+          amount: '',
+        }));
         await loadHomepage(homeStoreId);
       }
     );
@@ -3685,9 +3743,22 @@ function AdminDashboard() {
     setLoading(true);
     clearMessages();
     try {
-      await loadHomepage(storeId);
+      await loadHomepage(storeId, accountingMonthFilter);
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo cargar el homepage KPI.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onChangeAccountingMonth = async (month) => {
+    setAccountingMonthFilter(month);
+    setLoading(true);
+    clearMessages();
+    try {
+      await loadHomepage(homeStoreId, month);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo cargar el módulo de contabilidad.');
     } finally {
       setLoading(false);
     }
@@ -3697,7 +3768,7 @@ function AdminDashboard() {
     <div className="admin-portal">
       <section className="admin-hero">
         <div className="admin-hero-main">
-          <p className="admin-kicker">SmartLunch Admin</p>
+          <p className="admin-kicker">Comergio Admin</p>
           <h2>Portal administrativo operativo</h2>
           <p>Gestiona KPI, ventas, recargas, creaciones, inventario, autorizaciones y cierres por tienda.</p>
         </div>
@@ -3798,7 +3869,7 @@ function AdminDashboard() {
               ))}
             </div>
             <div className="card admin-compact-value-card">
-              <h4>Suscripción SmartLunch</h4>
+              <h4>Suscripción Comergio</h4>
               <p>{Number(homeData?.totalSubscribedStudents || 0)} alumnos suscritos</p>
               <small>{Number(homeData?.totalAutoDebitActiveStudents || 0)} con débito automático activo</small>
             </div>
@@ -3907,6 +3978,17 @@ function AdminDashboard() {
               ))}
             </div>
             <div className="card">
+              <h4>Recomendaciones por IA</h4>
+              {(homeData?.aiRecommendations || []).length === 0 ? <p>Sin recomendaciones disponibles.</p> : null}
+              {(homeData?.aiRecommendations || []).map((item, index) => (
+                <div key={`${item.type || 'rec'}-${index}`}>
+                  <p><strong>{item.title || 'Recomendación'}</strong></p>
+                  <p>{item.detail || ''}</p>
+                  <p><em>Acción sugerida:</em> {item.action || 'N/A'}</p>
+                </div>
+              ))}
+            </div>
+            <div className="card">
               <h4>Alertas de inventario</h4>
               {(homeData?.lowStockProducts || []).length === 0 ? <p>Sin alertas de inventario.</p> : null}
               {(homeData?.lowStockProducts || []).length > 0 ? (
@@ -3932,6 +4014,50 @@ function AdminDashboard() {
                 </div>
               ) : null}
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeModule === 'accounting' ? (
+        <section className="panel admin-section">
+          <h3>Contabilidad</h3>
+          <p>Registra costos por semana y consolida automáticamente los acumulados del mes.</p>
+
+          <form className="admin-form-grid" onSubmit={(event) => event.preventDefault()}>
+            <label>
+              Tienda para contabilidad
+              <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
+                <option value="">Todas las tiendas</option>
+                {stores.map((store) => (
+                  <option key={store._id} value={store._id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Mes contable
+              <input
+                type="month"
+                value={accountingMonthFilter}
+                onChange={(event) => onChangeAccountingMonth(event.target.value)}
+              />
+            </label>
+          </form>
+
+          <div className="cards">
+            <div className="card admin-kpi-card">
+              <h4>Utilidades del día</h4>
+              <p>{formatCurrency(homeData?.utilityToday)}</p>
+            </div>
+            <div className="card admin-kpi-card">
+              <h4>Utilidades de la semana</h4>
+              <p>{formatCurrency(homeData?.utilityWeek)}</p>
+            </div>
+            <div className="card admin-kpi-card">
+              <h4>Utilidades del mes</h4>
+              <p>{formatCurrency(homeData?.utilityMonth)}</p>
+            </div>
             <div className="card admin-compact-value-card">
               <h4>Utilidad teorica del mes</h4>
               <p>{formatCurrency(homeData?.utilityTheoreticalMonth ?? homeData?.utilityMonth)}</p>
@@ -3941,11 +4067,11 @@ function AdminDashboard() {
               <h4>Costos fijos</h4>
               <p>{formatCurrency(homeData?.totalFixedCosts)}</p>
             </div>
-            <div className="card">
+            <div className="card admin-compact-value-card">
               <h4>Costos variables</h4>
               <p>{formatCurrency(homeData?.totalVariableCosts)}</p>
             </div>
-            <div className="card">
+            <div className="card admin-compact-value-card">
               <h4>Ingresos - egresos</h4>
               <p>{formatCurrency(homeData?.utilityNetMonth)}</p>
               <small>Ventas del mes - costos fijos - costos variables</small>
@@ -3953,8 +4079,17 @@ function AdminDashboard() {
           </div>
 
           <div className="card">
-            <h4>Costos operativos</h4>
+            <h4>Costos operativos (semanales)</h4>
             <form className="admin-form-grid" onSubmit={onCreateFixedCost}>
+              <label>
+                Semana
+                <input
+                  type="date"
+                  value={fixedCostForm.weekStart}
+                  onChange={(event) => setFixedCostForm((prev) => ({ ...prev, weekStart: event.target.value }))}
+                  required
+                />
+              </label>
               <label>
                 Tipo
                 <select
@@ -3970,7 +4105,7 @@ function AdminDashboard() {
                 <input
                   value={fixedCostForm.name}
                   onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Ej: Arriendo, nomina, internet"
+                  placeholder="Ej: Nomina semana 2"
                   required
                 />
               </label>
@@ -4000,7 +4135,7 @@ function AdminDashboard() {
                 </select>
               </label>
               <button className="btn btn-primary" type="submit">
-                Agregar costo
+                Guardar costo semanal
               </button>
             </form>
 
@@ -4009,12 +4144,48 @@ function AdminDashboard() {
               <p>Total costos variables del mes: <strong>{formatCurrency(homeData?.totalVariableCosts)}</strong></p>
             </div>
 
-            <h5 className="admin-cost-list-title">Costos fijos</h5>
+            <h5 className="admin-cost-list-title">Consolidado semanal del mes</h5>
+            {accountingWeeklyRows.length === 0 ? <p>No hay costos semanales registrados para este mes.</p> : null}
+            {accountingWeeklyRows.length > 0 ? (
+              <div className="approval-history-scroll approval-history-table-scroll">
+                <table className="simple-table">
+                  <thead>
+                    <tr>
+                      <th>Semana</th>
+                      <th>Costos fijos</th>
+                      <th>Costos variables</th>
+                      <th>Total semana</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountingWeeklyRows.map((row) => {
+                      const startDate = new Date(`${row.weekKey}T00:00:00`);
+                      const endDate = new Date(startDate);
+                      endDate.setDate(startDate.getDate() + 6);
+
+                      return (
+                        <tr key={row.weekKey}>
+                          <td>
+                            {startDate.toLocaleDateString('es-CO')} - {endDate.toLocaleDateString('es-CO')}
+                          </td>
+                          <td>{formatCurrency(row.fixedTotal)}</td>
+                          <td>{formatCurrency(row.variableTotal)}</td>
+                          <td>{formatCurrency(row.total)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <h5 className="admin-cost-list-title">Detalle costos fijos del mes</h5>
             {(homeData?.fixedCosts || []).length === 0 ? <p>No hay costos fijos registrados.</p> : null}
             {(homeData?.fixedCosts || []).map((item) => (
               <div className="admin-row-actions" key={item._id}>
                 <p>
                   {item.name} - {formatCurrency(item.amount)} ({item.storeId?.name || 'Global'})
+                  {' | '}Semana: {item.weekStart ? new Date(item.weekStart).toLocaleDateString('es-CO') : 'N/A'}
                 </p>
                 <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
                   Eliminar
@@ -4022,12 +4193,13 @@ function AdminDashboard() {
               </div>
             ))}
 
-            <h5 className="admin-cost-list-title">Costos variables</h5>
+            <h5 className="admin-cost-list-title">Detalle costos variables del mes</h5>
             {(homeData?.variableCosts || []).length === 0 ? <p>No hay costos variables registrados.</p> : null}
             {(homeData?.variableCosts || []).map((item) => (
               <div className="admin-row-actions" key={item._id}>
                 <p>
                   {item.name} - {formatCurrency(item.amount)} ({item.storeId?.name || 'Global'})
+                  {' | '}Semana: {item.weekStart ? new Date(item.weekStart).toLocaleDateString('es-CO') : 'N/A'}
                 </p>
                 <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
                   Eliminar
@@ -6387,6 +6559,7 @@ function AdminDashboard() {
             <div className="card" key={group.key}>
               <p>Tienda: {group.store?.name || 'N/A'} {group.targetStore?.name ? `-> ${group.targetStore.name}` : ''}</p>
               <p>Solicitado por: {group.requestedBy?.name || 'N/A'}</p>
+              <p>Observaciones: {group.notes || 'Sin observaciones'}</p>
               <table className="simple-table">
                 <thead>
                   <tr>
@@ -6416,6 +6589,7 @@ function AdminDashboard() {
                   <p>Alumno: {request.studentId?.name || 'N/A'}</p>
                   <p>Monto: {formatCurrency(request.amount)}</p>
                   <p>Método: {request.method}</p>
+                  <p>Observaciones: {request.notes || 'Sin observaciones'}</p>
                   <div className="row gap">
                     <button className="btn btn-primary" onClick={() => onApproveTopup(request._id)} type="button">Aprobar</button>
                     <button className="btn" onClick={() => onRejectTopup(request._id)} type="button">Rechazar</button>
@@ -6430,6 +6604,7 @@ function AdminDashboard() {
                   <p>Orden: {request.orderId?._id || request.orderId}</p>
                   <p>Alumno: {request.orderId?.studentId?.name || 'Venta externa'}</p>
                   <p>Total: {formatCurrency(request.orderId?.total || 0)}</p>
+                  <p>Motivo: {request.reason || 'Sin motivo'}</p>
                   <div className="row gap">
                     <button className="btn btn-primary" onClick={() => onApproveCancellation(request._id)} type="button">Aprobar</button>
                     <button className="btn" onClick={() => onRejectCancellation(request._id)} type="button">Rechazar</button>
@@ -6698,25 +6873,54 @@ function AdminDashboard() {
             <button className="btn btn-primary" type="submit">Ver cierres</button>
           </form>
 
-          <div className="admin-closures-grid">
-            {closures.map((closure) => (
-              <div className="card" key={closure._id}>
-                <p>Fecha: {closure.date}</p>
-                <p>Vendedor: {closure.vendorId?.name || 'N/A'}</p>
-                <p>Ingresos efectivo: {formatCurrency(closure.systemCash)}</p>
-                <p>Ingresos datáfono: {formatCurrency(closure.systemDataphone)}</p>
-                <p>Ingresos transferencia: {formatCurrency(closure.systemTransfer)}</p>
-                <p>Ingresos sistema: {formatCurrency(closure.systemWallet)}</p>
-                <p>Total ingresos: {formatCurrency(closure.totalSales)}</p>
-                <p>Total efectivo sistema: {formatCurrency(closure.cashAccordingSystem)}</p>
-                <p>Total efectivo real: {formatCurrency(closure.countedCash)}</p>
-                <p>Base inicial: {formatCurrency(closure.baseInitial)}</p>
-                <p>Base final: {formatCurrency(closure.baseFinal)}</p>
-                <p>Total efectivo guardado: {formatCurrency(closure.totalCashSaved)}</p>
-                <p>Deficit: {formatCurrency(closure.cashDifference)}</p>
-              </div>
-            ))}
-          </div>
+          {closures.length === 0 ? <p>No hay cierres para los filtros seleccionados.</p> : null}
+
+          {closures.length > 0 ? (
+            <div className="approval-history-scroll approval-history-table-scroll">
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Vendedor</th>
+                    <th>Ingresos efectivo</th>
+                    <th>Ingresos datáfono</th>
+                    <th>Ingresos transferencia (QR)</th>
+                    <th>Ingresos sistema</th>
+                    <th>Total ingresos</th>
+                    <th>Total efectivo sistema</th>
+                    <th>Total efectivo real</th>
+                    <th>Base inicial</th>
+                    <th>Base final</th>
+                    <th>Total efectivo guardado</th>
+                    <th>Déficit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closures.map((closure) => {
+                    const transferenciaQr = Number(closure.systemTransfer || 0) + Number(closure.systemQr || 0);
+
+                    return (
+                      <tr key={closure._id}>
+                        <td>{closure.date}</td>
+                        <td>{closure.vendorId?.name || 'N/A'}</td>
+                        <td>{formatCurrency(closure.systemCash)}</td>
+                        <td>{formatCurrency(closure.systemDataphone)}</td>
+                        <td>{formatCurrency(transferenciaQr)}</td>
+                        <td>{formatCurrency(closure.systemWallet)}</td>
+                        <td>{formatCurrency(closure.totalSales)}</td>
+                        <td>{formatCurrency(closure.cashAccordingSystem)}</td>
+                        <td>{formatCurrency(closure.countedCash)}</td>
+                        <td>{formatCurrency(closure.baseInitial)}</td>
+                        <td>{formatCurrency(closure.baseFinal)}</td>
+                        <td>{formatCurrency(closure.totalCashSaved)}</td>
+                        <td>{formatCurrency(closure.cashDifference)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

@@ -189,7 +189,7 @@ function MeriendasOperator() {
     <div className="admin-portal">
       <section className="admin-hero">
         <div className="admin-hero-main">
-          <p className="admin-kicker">SmartLunch Meriendas</p>
+          <p className="admin-kicker">Comergio Meriendas</p>
           <h2>Portal Tutor de alimentación</h2>
           <p>Registra si el alumno comió, observaciones del comportamiento y revisa recomendaciones/restricciones alimentarias.</p>
         </div>

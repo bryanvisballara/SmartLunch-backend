@@ -9,7 +9,7 @@ function Privacy() {
         <section className="panel legal-panel">
           <h2>Privacy Policy</h2>
           <p>
-            En SmartLunch protegemos los datos personales de estudiantes, padres y operadores. Usamos
+            En Comergio protegemos los datos personales de estudiantes, padres y operadores. Usamos
             la información exclusivamente para la operación de la plataforma, seguridad de cuentas,
             trazabilidad de pagos y mejoras del servicio.
           </p>

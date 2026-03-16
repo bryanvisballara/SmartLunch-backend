@@ -77,7 +77,7 @@ async function createDaviplataPaymentOrder({ amount, documentType, documentNumbe
     amount: Number(amount),
     documentType: String(documentType || '').trim().toUpperCase(),
     documentNumber: String(documentNumber || '').trim(),
-    description: String(description || 'Recarga SmartLunch').trim(),
+    description: String(description || 'Recarga Comergio').trim(),
     reference: String(reference || '').trim(),
     callbackUrl: String(callbackUrl || '').trim(),
   };

@@ -12,7 +12,7 @@ function ensureWebPushConfig() {
 
   const publicKey = String(process.env.WEB_PUSH_PUBLIC_KEY || '').trim();
   const privateKey = String(process.env.WEB_PUSH_PRIVATE_KEY || '').trim();
-  const subject = String(process.env.WEB_PUSH_SUBJECT || 'mailto:soporte@smartlunch.local').trim();
+  const subject = String(process.env.WEB_PUSH_SUBJECT || 'mailto:soporte@comergio.local').trim();
 
   if (!publicKey || !privateKey) {
     return false;

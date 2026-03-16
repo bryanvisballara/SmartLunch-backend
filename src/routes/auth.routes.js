@@ -19,7 +19,7 @@ const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = requir
 const { signAccessToken } = require('../utils/token');
 
 const router = express.Router();
-const rpName = process.env.WEBAUTHN_RP_NAME || 'SmartLunch';
+const rpName = process.env.WEBAUTHN_RP_NAME || 'Comergio';
 const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
 const expectedOrigins = (process.env.WEBAUTHN_ORIGIN
   ? process.env.WEBAUTHN_ORIGIN.split(',')

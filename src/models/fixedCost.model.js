@@ -7,6 +7,8 @@ const fixedCostSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     amount: { type: Number, required: true, min: 0 },
     type: { type: String, enum: ['fixed', 'variable'], default: 'fixed' },
+    weekStart: { type: Date, required: true },
+    monthKey: { type: String, required: true, trim: true, index: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     deletedAt: { type: Date, default: null },
   },
@@ -14,5 +16,6 @@ const fixedCostSchema = new mongoose.Schema(
 );
 
 fixedCostSchema.index({ schoolId: 1, status: 1, deletedAt: 1, storeId: 1, type: 1 });
+fixedCostSchema.index({ schoolId: 1, monthKey: 1, weekStart: 1, type: 1, storeId: 1 });
 
 module.exports = mongoose.model('FixedCost', fixedCostSchema);

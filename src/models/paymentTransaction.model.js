@@ -20,7 +20,7 @@ const paymentTransactionSchema = new mongoose.Schema(
       index: true,
     },
     walletTransactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'WalletTransaction', default: null },
-    description: { type: String, trim: true, default: 'Recarga SmartLunch' },
+    description: { type: String, trim: true, default: 'Recarga Comergio' },
     callbackPayload: { type: mongoose.Schema.Types.Mixed, default: null },
     providerResponse: { type: mongoose.Schema.Types.Mixed, default: null },
     failureReason: { type: String, trim: true, default: null },

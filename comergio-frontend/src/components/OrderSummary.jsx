@@ -1,5 +1,5 @@
 const PAYMENT_OPTIONS = [
-  { value: 'system', label: 'Saldo SmartLunch' },
+  { value: 'system', label: 'Saldo Comergio' },
   { value: 'cash', label: 'Efectivo' },
   { value: 'qr', label: 'QR' },
   { value: 'dataphone', label: 'Datáfono' },

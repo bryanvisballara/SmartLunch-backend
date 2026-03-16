@@ -88,7 +88,7 @@ async function createBancolombiaPaymentOrder({ amount, reference, description, c
   const payload = {
     amount: Number(amount),
     reference: String(reference || '').trim(),
-    description: String(description || 'Recarga SmartLunch').trim(),
+    description: String(description || 'Recarga Comergio').trim(),
     callbackUrl: String(callbackUrl || '').trim(),
     redirectUrl: String(redirectUrl || '').trim(),
   };

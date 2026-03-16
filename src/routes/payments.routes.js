@@ -614,7 +614,7 @@ router.use(roleMiddleware('parent', 'admin'));
 router.post('/daviplata', async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
-    const { studentId, amount, documentType, documentNumber, description = 'Recarga SmartLunch' } = req.body;
+    const { studentId, amount, documentType, documentNumber, description = 'Recarga Comergio' } = req.body;
 
     const studentObjectId = toObjectId(studentId);
     if (!studentObjectId) {
@@ -666,7 +666,7 @@ router.post('/daviplata', async (req, res) => {
       reference,
       status: 'pending',
       providerStatus: 'PENDING',
-      description: String(description || 'Recarga SmartLunch').trim(),
+      description: String(description || 'Recarga Comergio').trim(),
     });
 
     try {
@@ -713,7 +713,7 @@ router.post('/daviplata', async (req, res) => {
 router.post('/bancolombia', async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
-    const { studentId, amount, description = 'Recarga SmartLunch' } = req.body;
+    const { studentId, amount, description = 'Recarga Comergio' } = req.body;
 
     const studentObjectId = toObjectId(studentId);
     if (!studentObjectId) {
@@ -755,7 +755,7 @@ router.post('/bancolombia', async (req, res) => {
       reference,
       status: 'pending',
       providerStatus: 'PENDING',
-      description: String(description || 'Recarga SmartLunch').trim(),
+      description: String(description || 'Recarga Comergio').trim(),
     });
 
     try {

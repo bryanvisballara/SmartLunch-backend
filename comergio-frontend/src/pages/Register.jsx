@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { sendRegisterEmailCode, verifyRegisterEmailCode } from '../services/auth.service';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
-import smartLogo from '../assets/smartlogo.png';
+import smartLogo from '../assets/comergio.png';
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
@@ -139,7 +139,7 @@ function Register() {
   return (
     <div className="page-center login-page login-page-auth">
       <form className="panel login-panel" onSubmit={onSendCode}>
-        <img className="register-smartlogo" src={smartLogo} alt="SmartLunch" />
+        <img className="register-smartlogo" src={smartLogo} alt="Comergio" />
         <h2>Crea tu cuenta</h2>
         <label>
           Colegio

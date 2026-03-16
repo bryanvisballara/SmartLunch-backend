@@ -128,7 +128,7 @@ app.use(
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
-    service: 'smartlunch-api',
+    service: 'comergio-api',
     time: new Date(),
   });
 });

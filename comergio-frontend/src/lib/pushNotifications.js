@@ -1,6 +1,6 @@
 import { registerDeviceToken } from '../services/notifications.service';
 
-const PUSH_TOKEN_STORAGE_KEY = 'smartlunchPushToken';
+const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);

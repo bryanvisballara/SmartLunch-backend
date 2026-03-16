@@ -1,7 +1,7 @@
 async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
   const apiKey = String(process.env.BREVO_API_KEY || '').trim();
-  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'smartlunch@comergio.com').trim();
-  const senderName = String(process.env.BREVO_SENDER_NAME || 'SmartLunch').trim();
+  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'comergio@comergio.com').trim();
+  const senderName = String(process.env.BREVO_SENDER_NAME || 'Comergio').trim();
 
   if (!apiKey) {
     // Development fallback so flow can be tested before Brevo credentials are configured.
@@ -27,7 +27,7 @@ async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
           name: toName || toEmail,
         },
       ],
-      subject: 'Bienvenido a SmartLunch - Verifica tu correo',
+      subject: 'Bienvenido a Comergio - Verifica tu correo',
       htmlContent: `
         <div style="margin:0;padding:0;background:#eaf1fb;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eaf1fb;padding:24px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -36,7 +36,7 @@ async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 14px 40px rgba(15,23,42,0.18);">
                   <tr>
                     <td bgcolor="#0f2749" style="background:#0f2749;background-image:linear-gradient(120deg,#0f172a 0%,#1d3557 45%,#334155 100%);padding:30px 28px 34px 28px;color:#ffffff;">
-                      <p style="margin:0 0 10px 0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;opacity:0.9;">SmartLunch</p>
+                      <p style="margin:0 0 10px 0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;opacity:0.9;">Comergio</p>
                       <h1 style="margin:0;font-size:28px;line-height:1.2;font-weight:800;">Verifica tu correo</h1>
                       <p style="margin:12px 0 0 0;font-size:15px;line-height:1.5;opacity:0.95;">Estas a un paso de terminar tu registro.</p>
                     </td>
@@ -70,7 +70,7 @@ async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
           </table>
         </div>
       `,
-      textContent: `Bienvenido a SmartLunch. Estas a un paso de terminar tu registro. Ingresa el codigo de verificacion: ${code}. Importante: este codigo expira en 15 minutos desde la recepcion de este correo.`,
+      textContent: `Bienvenido a Comergio. Estas a un paso de terminar tu registro. Ingresa el codigo de verificacion: ${code}. Importante: este codigo expira en 15 minutos desde la recepcion de este correo.`,
     }),
   });
 
@@ -93,8 +93,8 @@ async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
 
 async function sendPasswordResetCodeEmail({ toEmail, toName, code }) {
   const apiKey = String(process.env.BREVO_API_KEY || '').trim();
-  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'smartlunch@comergio.com').trim();
-  const senderName = String(process.env.BREVO_SENDER_NAME || 'SmartLunch').trim();
+  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'comergio@comergio.com').trim();
+  const senderName = String(process.env.BREVO_SENDER_NAME || 'Comergio').trim();
 
   if (!apiKey) {
     console.log(`[BREVO_DEV_FALLBACK] password reset code for ${toEmail}: ${code}`);
@@ -119,7 +119,7 @@ async function sendPasswordResetCodeEmail({ toEmail, toName, code }) {
           name: toName || toEmail,
         },
       ],
-      subject: 'SmartLunch - Recuperacion de contrasena',
+      subject: 'Comergio - Recuperacion de contrasena',
       htmlContent: `
         <div style="margin:0;padding:0;background:#eaf1fb;">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eaf1fb;padding:24px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -128,7 +128,7 @@ async function sendPasswordResetCodeEmail({ toEmail, toName, code }) {
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 14px 40px rgba(15,23,42,0.18);">
                   <tr>
                     <td bgcolor="#0f2749" style="background:#0f2749;background-image:linear-gradient(120deg,#0f172a 0%,#1d3557 45%,#334155 100%);padding:30px 28px 34px 28px;color:#ffffff;">
-                      <p style="margin:0 0 10px 0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;opacity:0.9;">SmartLunch</p>
+                      <p style="margin:0 0 10px 0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;opacity:0.9;">Comergio</p>
                       <h1 style="margin:0;font-size:28px;line-height:1.2;font-weight:800;">Recupera tu contrasena</h1>
                       <p style="margin:12px 0 0 0;font-size:15px;line-height:1.5;opacity:0.95;">Recibimos una solicitud para cambiar tu contrasena.</p>
                     </td>
@@ -162,7 +162,7 @@ async function sendPasswordResetCodeEmail({ toEmail, toName, code }) {
           </table>
         </div>
       `,
-      textContent: `Recibimos una solicitud para cambiar tu contrasena en SmartLunch. Ingresa este codigo de verificacion: ${code}. Importante: este codigo expira en 15 minutos.`,
+      textContent: `Recibimos una solicitud para cambiar tu contrasena en Comergio. Ingresa este codigo de verificacion: ${code}. Importante: este codigo expira en 15 minutos.`,
     }),
   });
 

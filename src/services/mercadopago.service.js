@@ -131,7 +131,7 @@ async function createPayment({ amount, paymentMethodId, customerId, cardId, exte
       payment_method_id: String(paymentMethodId || '').trim(),
       card_id: String(cardId || '').trim(),
       installments: 1,
-      description: String(description || 'Recarga automatica SmartLunch').trim(),
+      description: String(description || 'Recarga automatica Comergio').trim(),
       payer: {
         type: 'customer',
         id: String(customerId || '').trim(),

@@ -250,7 +250,7 @@ async function runAutoDebitCycle() {
         reference,
         status: 'pending',
         providerStatus: 'pending',
-        description: `Recarga automatica SmartLunch - alumno ${String(studentId)}`,
+        description: `Recarga automatica Comergio - alumno ${String(studentId)}`,
       });
 
       try {
@@ -260,7 +260,7 @@ async function runAutoDebitCycle() {
           customerId: card.providerCustomerId,
           cardId: card.providerCardId,
           externalReference: String(studentId),
-          description: 'Recarga automatica SmartLunch',
+          description: 'Recarga automatica Comergio',
           idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
           deviceId: card.providerDeviceId,
         });

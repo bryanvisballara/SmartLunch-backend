@@ -905,7 +905,7 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
 
     let paymentMethod;
     if (mercadopagoConfigured) {
-      const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@smartlunch.local`;
+      const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@comergio.local`;
       const customer = await findOrCreateCustomer({
         email: parentEmail,
         firstName,

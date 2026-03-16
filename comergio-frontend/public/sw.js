@@ -15,7 +15,7 @@ self.addEventListener('push', (event) => {
     payload = { body: event.data ? event.data.text() : '' };
   }
 
-  const title = payload.title || 'SmartLunch';
+  const title = payload.title || 'Comergio';
   const body = payload.body || 'Tienes una nueva notificacion.';
   const data = payload.data || {};
 
@@ -23,9 +23,9 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(title, {
       body,
       data,
-      icon: '/iconosmartlunch.jpg',
-      badge: '/iconosmartlunch.jpg',
-      tag: data.type || 'smartlunch-notification',
+      icon: '/iconocomergio.jpg',
+      badge: '/iconocomergio.jpg',
+      tag: data.type || 'comergio-notification',
       renotify: false,
     })
   );

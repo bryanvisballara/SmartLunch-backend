@@ -10,7 +10,7 @@ import { getProducts } from '../services/products.service';
 import { getStores } from '../services/stores.service';
 import useAuthStore from '../store/auth.store';
 
-const OFFLINE_POS_ORDERS_KEY = 'smartlunch_pos_offline_orders_v1';
+const OFFLINE_POS_ORDERS_KEY = 'comergio_pos_offline_orders_v1';
 
 const getOfflinePosOrders = () => {
   try {

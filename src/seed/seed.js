@@ -23,7 +23,7 @@ async function seed() {
     const connection = await connectDB();
     console.log(`MongoDB connected (${connection.name})`);
 
-    const schoolId = 'smartlunch-demo';
+    const schoolId = 'comergio-demo';
 
     await Promise.all([
       User.deleteMany({ schoolId }),
@@ -46,21 +46,21 @@ async function seed() {
     const [admin, vendor, parent, meriendaOperator] = await User.create([
       {
         schoolId,
-        name: 'Admin SmartLunch',
+        name: 'Admin Comergio',
         username: 'admin',
         passwordHash,
         role: 'admin',
       },
       {
         schoolId,
-        name: 'Vendor SmartLunch',
+        name: 'Vendor Comergio',
         username: 'vendor',
         passwordHash,
         role: 'vendor',
       },
       {
         schoolId,
-        name: 'Parent SmartLunch',
+        name: 'Parent Comergio',
         username: 'parent',
         passwordHash,
         role: 'parent',
