@@ -799,6 +799,22 @@ function AdminDashboard() {
   );
 
   const accountingWeeklyRows = useMemo(() => {
+    const apiRows = Array.isArray(homeData?.weeklyAccountingSummary) ? homeData.weeklyAccountingSummary : [];
+    if (apiRows.length > 0) {
+      return apiRows
+        .map((row) => ({
+          weekKey: String(row?.weekKey || ''),
+          fixedTotal: Number(row?.fixedTotal || 0),
+          variableTotal: Number(row?.variableTotal || 0),
+          salesTotal: Number(row?.salesTotal || 0),
+          utilityTotal: Number(row?.utilityTotal || 0),
+          topupsTotal: Number(row?.topupsTotal || 0),
+          total: Number(row?.fixedTotal || 0) + Number(row?.variableTotal || 0),
+        }))
+        .filter((row) => row.weekKey)
+        .sort((a, b) => String(b.weekKey).localeCompare(String(a.weekKey)));
+    }
+
     const fixedCosts = Array.isArray(homeData?.fixedCosts) ? homeData.fixedCosts : [];
     const variableCosts = Array.isArray(homeData?.variableCosts) ? homeData.variableCosts : [];
     const grouped = new Map();
@@ -812,11 +828,19 @@ function AdminDashboard() {
 
       const weekKey = parsedDate.toISOString().slice(0, 10);
       if (!grouped.has(weekKey)) {
-        grouped.set(weekKey, { weekKey, fixedTotal: 0, variableTotal: 0 });
+        grouped.set(weekKey, {
+          weekKey,
+          fixedTotal: 0,
+          variableTotal: 0,
+          salesTotal: 0,
+          utilityTotal: 0,
+          topupsTotal: 0,
+        });
       }
 
       const row = grouped.get(weekKey);
       row[field] += Number(item?.amount || 0);
+      row.utilityTotal = Number(row.salesTotal || 0) - Number(row.fixedTotal || 0) - Number(row.variableTotal || 0);
     };
 
     fixedCosts.forEach((item) => addCost(item, 'fixedTotal'));
@@ -828,7 +852,7 @@ function AdminDashboard() {
         total: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
       }))
       .sort((a, b) => String(b.weekKey).localeCompare(String(a.weekKey)));
-  }, [homeData?.fixedCosts, homeData?.variableCosts]);
+  }, [homeData?.weeklyAccountingSummary, homeData?.fixedCosts, homeData?.variableCosts]);
 
   const filteredSalesStudents = useMemo(() => {
     const query = String(salesStudentQuery || '').trim().toLowerCase();
@@ -4143,6 +4167,9 @@ function AdminDashboard() {
                       <th>Costos fijos</th>
                       <th>Costos variables</th>
                       <th>Total semana</th>
+                      <th>Ventas semana</th>
+                      <th>Utilidades semana</th>
+                      <th>Recargas</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4159,6 +4186,9 @@ function AdminDashboard() {
                           <td>{formatCurrency(row.fixedTotal)}</td>
                           <td>{formatCurrency(row.variableTotal)}</td>
                           <td>{formatCurrency(row.total)}</td>
+                          <td>{formatCurrency(row.salesTotal)}</td>
+                          <td>{formatCurrency(row.utilityTotal)}</td>
+                          <td>{formatCurrency(row.topupsTotal)}</td>
                         </tr>
                       );
                     })}

@@ -8,6 +8,7 @@ const Product = require('../models/product.model');
 const Wallet = require('../models/wallet.model');
 const FixedCost = require('../models/fixedCost.model');
 const Student = require('../models/student.model');
+const WalletTransaction = require('../models/walletTransaction.model');
 
 const router = express.Router();
 
@@ -78,6 +79,22 @@ function parseMonthKey(value) {
     start: bogotaLocalToUtcDate(year, month - 1, 1),
     end: bogotaLocalToUtcDate(year, month, 1),
   };
+}
+
+function getBogotaWeekKey(date) {
+  const shifted = getBogotaShiftedDate(date);
+  const day = shifted.getUTCDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  const weekStartShifted = new Date(Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() + diff
+  ));
+
+  const year = weekStartShifted.getUTCFullYear();
+  const month = String(weekStartShifted.getUTCMonth() + 1).padStart(2, '0');
+  const dayOfMonth = String(weekStartShifted.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${dayOfMonth}`;
 }
 
 function buildAiRecommendations({
@@ -360,6 +377,8 @@ router.get('/admin-home', async (req, res) => {
       totalAutoDebitActiveStudents,
       hourlySalesRaw,
       productWeeklyTrendRaw,
+      accountingSalesRaw,
+      topupsRaw,
     ] = await Promise.all([
       orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
@@ -611,6 +630,39 @@ router.get('/admin-home', async (req, res) => {
           },
         },
       ]),
+      orderAggregate([
+        {
+          $match: {
+            ...orderMatch,
+            paymentMethod: { $in: ['cash', 'transfer', 'qr'] },
+            createdAt: { $gte: monthStart, $lt: monthEnd },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            createdAt: 1,
+            total: 1,
+          },
+        },
+      ]),
+      WalletTransaction.aggregate([
+        {
+          $match: {
+            schoolId,
+            type: 'recharge',
+            cancelledAt: null,
+            createdAt: { $gte: monthStart, $lt: monthEnd },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            createdAt: 1,
+            amount: 1,
+          },
+        },
+      ]).allowDiskUse(true),
     ]);
 
     const normalizedBalances = lowBalanceStudents
@@ -799,6 +851,72 @@ router.get('/admin-home', async (req, res) => {
     const fixedCostsOnly = fixedCosts.filter((item) => String(item.type || 'fixed') !== 'variable');
     const variableCostsOnly = fixedCosts.filter((item) => String(item.type || 'fixed') === 'variable');
 
+    const weeklyAccountingMap = new Map();
+
+    const ensureWeeklyRow = (weekKey) => {
+      if (!weeklyAccountingMap.has(weekKey)) {
+        weeklyAccountingMap.set(weekKey, {
+          weekKey,
+          fixedTotal: 0,
+          variableTotal: 0,
+          salesTotal: 0,
+          topupsTotal: 0,
+          utilityTotal: 0,
+        });
+      }
+
+      return weeklyAccountingMap.get(weekKey);
+    };
+
+    const addWeeklyCost = (item, field) => {
+      const baseDate = item?.weekStart || item?.createdAt;
+      const parsedDate = baseDate ? new Date(baseDate) : null;
+      if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+        return;
+      }
+
+      const weekKey = getBogotaWeekKey(parsedDate);
+      const row = ensureWeeklyRow(weekKey);
+      row[field] += Number(item?.amount || 0);
+    };
+
+    for (const item of fixedCostsOnly) {
+      addWeeklyCost(item, 'fixedTotal');
+    }
+
+    for (const item of variableCostsOnly) {
+      addWeeklyCost(item, 'variableTotal');
+    }
+
+    for (const sale of accountingSalesRaw || []) {
+      const parsedDate = sale?.createdAt ? new Date(sale.createdAt) : null;
+      if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+        continue;
+      }
+
+      const weekKey = getBogotaWeekKey(parsedDate);
+      const row = ensureWeeklyRow(weekKey);
+      row.salesTotal += Number(sale?.total || 0);
+    }
+
+    for (const topup of topupsRaw || []) {
+      const parsedDate = topup?.createdAt ? new Date(topup.createdAt) : null;
+      if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+        continue;
+      }
+
+      const weekKey = getBogotaWeekKey(parsedDate);
+      const row = ensureWeeklyRow(weekKey);
+      row.topupsTotal += Number(topup?.amount || 0);
+    }
+
+    const weeklyAccountingSummary = Array.from(weeklyAccountingMap.values())
+      .map((row) => ({
+        ...row,
+        utilityTotal: Number(row.salesTotal || 0) - Number(row.fixedTotal || 0) - Number(row.variableTotal || 0),
+      }))
+      .sort((a, b) => String(b.weekKey || '').localeCompare(String(a.weekKey || '')));
+
     const totalFixedCosts = fixedCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const totalVariableCosts = variableCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const salesMonthTotal = Number(salesMonth[0]?.total || 0);
@@ -834,6 +952,7 @@ router.get('/admin-home', async (req, res) => {
       totalFixedCosts,
       totalVariableCosts,
       utilityNetMonth,
+      weeklyAccountingSummary,
       aiRecommendations,
       totalSubscribedStudents,
       totalAutoDebitActiveStudents,
