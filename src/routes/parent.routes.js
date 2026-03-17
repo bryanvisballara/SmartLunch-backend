@@ -23,6 +23,9 @@ const {
   createCardToken,
   createCustomerCard,
   deleteCustomerCard,
+  createPreapproval,
+  getPreapproval,
+  cancelPreapproval,
 } = require('../services/mercadopago.service');
 const { DEFAULT_TTL_SECONDS, getMenuCache, setMenuCache } = require('../services/menuCache.service');
 const { deriveThumbUrlFromImageUrl, normalizeStoredImageUrl } = require('../utils/imageUpload');
@@ -112,6 +115,10 @@ function getCardVerificationExpirationDate() {
   const expiresAt = new Date();
   expiresAt.setHours(expiresAt.getHours() + CARD_VERIFICATION_WINDOW_HOURS);
   return expiresAt;
+}
+
+function getFrontendBaseUrl() {
+  return String(process.env.FRONTEND_URL || 'https://comergio.com').trim().replace(/\/$/, '');
 }
 
 function serializeCard(card) {
@@ -271,6 +278,8 @@ router.get('/portal/overview', async (req, res) => {
           autoDebitLimit: Number(wallet?.autoDebitLimit || 0),
           autoDebitAmount: Number(wallet?.autoDebitAmount || 0),
           autoDebitPaymentMethodId: wallet?.autoDebitPaymentMethodId || null,
+          autoDebitAgreementId: String(wallet?.autoDebitAgreementId || ''),
+          autoDebitAgreementStatus: String(wallet?.autoDebitAgreementStatus || ''),
           autoDebitInProgress: Boolean(wallet?.autoDebitInProgress),
           autoDebitLockAt: wallet?.autoDebitLockAt || null,
           autoDebitLastAttempt: wallet?.autoDebitLastAttempt || null,
@@ -1308,10 +1317,22 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
 
     const enabled = Boolean(req.body?.enabled);
     if (!enabled) {
+      const agreementId = String(wallet.autoDebitAgreementId || '').trim();
+      if (agreementId && isMercadoPagoConfigured()) {
+        try {
+          await cancelPreapproval(agreementId);
+        } catch (cancelError) {
+          // Ignore provider cancellation failures and still disable locally.
+        }
+      }
+
       wallet.autoDebitEnabled = false;
       wallet.autoDebitLimit = 0;
       wallet.autoDebitAmount = 0;
       wallet.autoDebitPaymentMethodId = null;
+      wallet.autoDebitAgreementId = '';
+      wallet.autoDebitAgreementStatus = '';
+      wallet.autoDebitAgreementLastSyncAt = null;
       wallet.autoDebitInProgress = false;
       wallet.autoDebitLockAt = null;
       wallet.autoDebitLastAttempt = null;
@@ -1330,6 +1351,8 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
             autoDebitLimit: 0,
             autoDebitAmount: 0,
             autoDebitPaymentMethodId: null,
+            autoDebitAgreementId: '',
+            autoDebitAgreementStatus: '',
             autoDebitInProgress: false,
             autoDebitLockAt: null,
             autoDebitLastAttempt: null,
@@ -1344,14 +1367,24 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       });
     }
 
-    const autoDebitLimit = Number(req.body?.autoDebitLimit);
-    const autoDebitAmount = Number(req.body?.autoDebitAmount);
+    const confirmAuthorization = Boolean(req.body?.confirmAuthorization);
+    const requestedAutoDebitLimit = Number(req.body?.autoDebitLimit);
+    const requestedAutoDebitAmount = Number(req.body?.autoDebitAmount);
     const requestedMonthlyLimit = Number(req.body?.autoDebitMonthlyLimit);
+    const fallbackMonthlyLimit = Number(wallet.autoDebitMonthlyLimit || 0);
     const defaultMonthlyLimit = Number(process.env.AUTO_DEBIT_DEFAULT_MONTHLY_LIMIT || 1000000);
+    const autoDebitLimit = Number.isFinite(requestedAutoDebitLimit) && requestedAutoDebitLimit > 0
+      ? requestedAutoDebitLimit
+      : Number(wallet.autoDebitLimit || 0);
+    const autoDebitAmount = Number.isFinite(requestedAutoDebitAmount) && requestedAutoDebitAmount > 0
+      ? requestedAutoDebitAmount
+      : Number(wallet.autoDebitAmount || 0);
     const autoDebitMonthlyLimit = Number.isFinite(requestedMonthlyLimit) && requestedMonthlyLimit > 0
       ? requestedMonthlyLimit
-      : (Number.isFinite(defaultMonthlyLimit) && defaultMonthlyLimit > 0 ? defaultMonthlyLimit : 1000000);
-    const paymentMethodId = toObjectId(req.body?.paymentMethodId);
+      : (fallbackMonthlyLimit > 0
+        ? fallbackMonthlyLimit
+        : (Number.isFinite(defaultMonthlyLimit) && defaultMonthlyLimit > 0 ? defaultMonthlyLimit : 1000000));
+    const paymentMethodId = toObjectId(req.body?.paymentMethodId || wallet.autoDebitPaymentMethodId);
 
     if (!Number.isFinite(autoDebitLimit) || autoDebitLimit < 20000) {
       return res.status(400).json({ message: 'autoDebitLimit must be at least 20000' });
@@ -1363,6 +1396,14 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
 
     if (!paymentMethodId) {
       return res.status(400).json({ message: 'paymentMethodId is required' });
+    }
+
+    const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: 'parent', deletedAt: null })
+      .select('_id email name')
+      .lean();
+
+    if (!parentUser) {
+      return res.status(404).json({ message: 'Parent user not found' });
     }
 
     const paymentMethod = await ParentPaymentMethod.findOne({
@@ -1383,26 +1424,115 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       return res.status(404).json({ message: 'Tarjeta verificada no encontrada.' });
     }
 
-    wallet.autoDebitEnabled = true;
+    if (!isMercadoPagoConfigured()) {
+      return res.status(503).json({ message: 'Mercado Pago no está configurado en este momento.' });
+    }
+
+    if (confirmAuthorization) {
+      const candidateAgreementId = String(req.body?.preapprovalId || wallet.autoDebitAgreementId || '').trim();
+      if (!candidateAgreementId) {
+        return res.status(400).json({ message: 'preapprovalId is required to confirm authorization' });
+      }
+
+      const agreement = await getPreapproval(candidateAgreementId);
+      const agreementStatus = String(agreement?.status || '').trim().toLowerCase();
+      if (agreementStatus !== 'authorized') {
+        return res.status(409).json({
+          message: 'La autorización recurrente aún no está activa en Mercado Pago.',
+          requiresAuthorization: true,
+          preapprovalStatus: agreementStatus || 'pending',
+          preapprovalId: candidateAgreementId,
+        });
+      }
+
+      wallet.autoDebitEnabled = true;
+      wallet.autoDebitLimit = autoDebitLimit;
+      wallet.autoDebitAmount = autoDebitAmount;
+      wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
+      wallet.autoDebitPaymentMethodId = paymentMethodId;
+      wallet.autoDebitAgreementId = candidateAgreementId;
+      wallet.autoDebitAgreementStatus = agreementStatus;
+      wallet.autoDebitAgreementLastSyncAt = new Date();
+      wallet.autoDebitInProgress = false;
+      wallet.autoDebitLockAt = null;
+      wallet.autoDebitRetryAt = null;
+      wallet.autoDebitRetryCount = 0;
+      await wallet.save();
+
+      return res.status(200).json({
+        requiresAuthorization: false,
+        preapprovalId: candidateAgreementId,
+        preapprovalStatus: agreementStatus,
+        student: {
+          _id: studentId,
+          wallet: {
+            autoDebitEnabled: true,
+            autoDebitLimit,
+            autoDebitAmount,
+            autoDebitMonthlyLimit,
+            autoDebitPaymentMethodId: paymentMethodId,
+            autoDebitAgreementId: candidateAgreementId,
+            autoDebitAgreementStatus: agreementStatus,
+            autoDebitInProgress: false,
+            autoDebitLockAt: null,
+            autoDebitRetryAt: null,
+            autoDebitRetryCount: 0,
+            autoDebitMonthlyUsed: Number(wallet.autoDebitMonthlyUsed || 0),
+            autoDebitMonthlyPeriod: String(wallet.autoDebitMonthlyPeriod || ''),
+          },
+        },
+      });
+    }
+
+    const frontendBaseUrl = getFrontendBaseUrl();
+    const preapproval = await createPreapproval({
+      reason: `Recarga automática Comergio - ${String(studentId)}`,
+      externalReference: `${schoolId}:${String(studentId)}:${String(parentUserId)}:${Date.now()}`,
+      payerEmail: String(parentUser.email || '').trim().toLowerCase(),
+      backUrl: `${frontendBaseUrl}/parent/recargas/automatica`,
+      currencyId: 'COP',
+      transactionAmount: autoDebitAmount,
+      frequency: 1,
+      frequencyType: 'months',
+    });
+
+    const preapprovalId = String(preapproval?.id || '').trim();
+    const preapprovalStatus = String(preapproval?.status || 'pending').trim().toLowerCase();
+    const authorizationUrl = String(preapproval?.init_point || '').trim();
+
+    if (!preapprovalId || !authorizationUrl) {
+      return res.status(502).json({ message: 'No fue posible iniciar la autorización recurrente en Mercado Pago.' });
+    }
+
+    wallet.autoDebitEnabled = false;
     wallet.autoDebitLimit = autoDebitLimit;
     wallet.autoDebitAmount = autoDebitAmount;
     wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
     wallet.autoDebitPaymentMethodId = paymentMethodId;
+    wallet.autoDebitAgreementId = preapprovalId;
+    wallet.autoDebitAgreementStatus = preapprovalStatus;
+    wallet.autoDebitAgreementLastSyncAt = new Date();
     wallet.autoDebitInProgress = false;
     wallet.autoDebitLockAt = null;
     wallet.autoDebitRetryAt = null;
     wallet.autoDebitRetryCount = 0;
     await wallet.save();
 
-    return res.status(200).json({
+    return res.status(202).json({
+      requiresAuthorization: true,
+      authorizationUrl,
+      preapprovalId,
+      preapprovalStatus,
       student: {
         _id: studentId,
         wallet: {
-          autoDebitEnabled: true,
+          autoDebitEnabled: false,
           autoDebitLimit,
           autoDebitAmount,
           autoDebitMonthlyLimit,
           autoDebitPaymentMethodId: paymentMethodId,
+          autoDebitAgreementId: preapprovalId,
+          autoDebitAgreementStatus: preapprovalStatus,
           autoDebitInProgress: false,
           autoDebitLockAt: null,
           autoDebitRetryAt: null,

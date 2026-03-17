@@ -195,9 +195,11 @@ function ParentPortal() {
   const [autoTopupSubmitLoading, setAutoTopupSubmitLoading] = useState(false);
   const [autoTopupSubmitError, setAutoTopupSubmitError] = useState('');
   const [autoTopupSubmitSuccess, setAutoTopupSubmitSuccess] = useState('');
+  const [autoTopupAuthorizationLoading, setAutoTopupAuthorizationLoading] = useState(false);
   const [autoDebitMenuOpen, setAutoDebitMenuOpen] = useState(false);
   const [autoDebitCancelLoading, setAutoDebitCancelLoading] = useState(false);
   const autoDebitMenuRef = useRef(null);
+  const autoTopupAuthProcessedRef = useRef('');
   const [showAutoTopupCongratsModal, setShowAutoTopupCongratsModal] = useState(false);
   const [autoTopupCongratsStudentName, setAutoTopupCongratsStudentName] = useState('');
   const [savedCards, setSavedCards] = useState([]);
@@ -678,6 +680,72 @@ function ParentPortal() {
       setAutoTopupSelectedCardId(String(verifiedSavedCards[0]._id));
     }
   }, [verifiedSavedCards, autoTopupSelectedCardId]);
+
+  useEffect(() => {
+    if (!isAutoTopupPage || !selectedStudent?._id || loading || error) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search || '');
+    const preapprovalId = String(params.get('preapproval_id') || params.get('preapprovalId') || '').trim();
+    if (!preapprovalId) {
+      return;
+    }
+
+    if (autoTopupAuthProcessedRef.current === preapprovalId) {
+      return;
+    }
+
+    autoTopupAuthProcessedRef.current = preapprovalId;
+    setAutoTopupAuthorizationLoading(true);
+    setAutoTopupSubmitError('');
+    setAutoTopupSubmitSuccess('');
+
+    const confirmAuthorization = async () => {
+      try {
+        const response = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
+          enabled: true,
+          autoDebitLimit: autoTopupMinBalanceNumber,
+          autoDebitAmount: autoTopupRechargeAmount,
+          paymentMethodId: autoTopupSelectedCardId,
+          confirmAuthorization: true,
+          preapprovalId,
+        });
+
+        mergeStudentData(response.data?.student || {
+          _id: selectedStudent._id,
+          wallet: {
+            autoDebitEnabled: true,
+            autoDebitLimit: autoTopupMinBalanceNumber,
+            autoDebitAmount: autoTopupRechargeAmount,
+            autoDebitPaymentMethodId: autoTopupSelectedCardId,
+          },
+        });
+
+        setAutoTopupSubmitSuccess('Autorización confirmada. La recarga automática quedó activa.');
+        setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
+        setShowAutoTopupCongratsModal(true);
+        navigate('/parent/recargas/automatica', { replace: true });
+      } catch (requestError) {
+        setAutoTopupSubmitError(
+          requestError?.response?.data?.message || requestError?.message || 'No se pudo confirmar la autorización de Mercado Pago.'
+        );
+      } finally {
+        setAutoTopupAuthorizationLoading(false);
+      }
+    };
+
+    confirmAuthorization();
+  }, [
+    isAutoTopupPage,
+    selectedStudent?._id,
+    loading,
+    error,
+    location.search,
+    autoTopupMinBalanceNumber,
+    autoTopupRechargeAmount,
+    autoTopupSelectedCardId,
+  ]);
 
   const onLogout = () => {
     logout();
@@ -1184,6 +1252,15 @@ function ParentPortal() {
         autoDebitAmount: autoTopupRechargeAmount,
         paymentMethodId: autoTopupSelectedCardId,
       });
+
+      const requiresAuthorization = Boolean(response?.data?.requiresAuthorization);
+      const authorizationUrl = String(response?.data?.authorizationUrl || '').trim();
+
+      if (requiresAuthorization && authorizationUrl) {
+        setAutoTopupSubmitSuccess('Te estamos redirigiendo a Mercado Pago para autorizar el débito automático.');
+        window.location.assign(authorizationUrl);
+        return;
+      }
 
       mergeStudentData(response.data?.student || {
         _id: selectedStudent?._id || selectedStudentId,
@@ -1983,11 +2060,15 @@ function ParentPortal() {
 
             <button
               className="parent-auto-topup-activate-btn"
-              disabled={!canActivateAutoTopup || autoTopupSubmitLoading}
+              disabled={!canActivateAutoTopup || autoTopupSubmitLoading || autoTopupAuthorizationLoading}
               onClick={onSubmitAutoTopup}
               type="button"
             >
-              {autoTopupSubmitLoading ? 'Activando...' : 'Activar recarga'}
+              {autoTopupAuthorizationLoading
+                ? 'Confirmando autorización...'
+                : autoTopupSubmitLoading
+                  ? 'Activando...'
+                  : 'Activar recarga'}
             </button>
 
             {autoTopupSubmitError ? <p className="parent-error">{autoTopupSubmitError}</p> : null}

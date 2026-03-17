@@ -110,6 +110,47 @@ async function getCustomerCard({ customerId, cardId }) {
   return mercadopagoRequest(`/v1/customers/${encodeURIComponent(String(customerId))}/cards/${encodeURIComponent(String(cardId))}`);
 }
 
+async function createPreapproval({
+  reason,
+  externalReference,
+  payerEmail,
+  backUrl,
+  currencyId = 'COP',
+  transactionAmount,
+  frequency = 1,
+  frequencyType = 'months',
+}) {
+  return mercadopagoRequest('/preapproval', {
+    method: 'POST',
+    body: {
+      reason: String(reason || 'Recarga automatica Comergio').trim(),
+      external_reference: String(externalReference || '').trim(),
+      payer_email: String(payerEmail || '').trim().toLowerCase(),
+      back_url: String(backUrl || '').trim(),
+      auto_recurring: {
+        frequency: Math.max(1, Number(frequency || 1)),
+        frequency_type: String(frequencyType || 'months').trim().toLowerCase(),
+        transaction_amount: Number(transactionAmount || 0),
+        currency_id: String(currencyId || 'COP').trim().toUpperCase(),
+      },
+      status: 'pending',
+    },
+  });
+}
+
+async function getPreapproval(preapprovalId) {
+  return mercadopagoRequest(`/preapproval/${encodeURIComponent(String(preapprovalId || '').trim())}`);
+}
+
+async function cancelPreapproval(preapprovalId) {
+  return mercadopagoRequest(`/preapproval/${encodeURIComponent(String(preapprovalId || '').trim())}`, {
+    method: 'PUT',
+    body: {
+      status: 'cancelled',
+    },
+  });
+}
+
 function toInternalStatus(providerStatus) {
   const normalized = String(providerStatus || '').toLowerCase();
   if (normalized === 'approved') return 'approved';
@@ -118,7 +159,7 @@ function toInternalStatus(providerStatus) {
   return 'pending';
 }
 
-async function createPayment({ amount, paymentMethodId, cardId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
+async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
   const headers = {};
   if (idempotencyKey) {
     headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
@@ -134,7 +175,10 @@ async function createPayment({ amount, paymentMethodId, cardId, customerId, issu
       transaction_amount: Number(amount),
       payment_method_id: String(paymentMethodId || '').trim(),
       issuer_id: issuerId ? String(issuerId).trim() : undefined,
-      card_id: String(cardId || '').trim(),
+      payment_method_reference_id: Number.isFinite(Number(paymentMethodReferenceId))
+        ? Number(paymentMethodReferenceId)
+        : undefined,
+      preapproval_id: String(preapprovalId || '').trim() || undefined,
       installments: 1,
       description: String(description || 'Recarga automatica Comergio').trim(),
       payer: {
@@ -157,6 +201,9 @@ module.exports = {
   createCustomerCard,
   deleteCustomerCard,
   getCustomerCard,
+  createPreapproval,
+  getPreapproval,
+  cancelPreapproval,
   toInternalStatus,
   createPayment,
   getPaymentById,

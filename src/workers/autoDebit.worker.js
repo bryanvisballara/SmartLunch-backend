@@ -146,7 +146,7 @@ async function runAutoDebitCycle() {
           new: true,
         }
       )
-        .select('_id schoolId studentId autoDebitAmount autoDebitPaymentMethodId autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
+        .select('_id schoolId studentId autoDebitAmount autoDebitPaymentMethodId autoDebitAgreementId autoDebitAgreementStatus autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
         .lean();
 
       if (!lockedWallet) {
@@ -219,7 +219,14 @@ async function runAutoDebitCycle() {
 
       const provider = String(card.provider || '').trim().toLowerCase();
       const isBoldCard = provider === 'bold' && Boolean(String(card.providerCardId || '').trim());
-      const isMercadoPagoCard = provider === 'mercadopago' && Boolean(String(card.providerCardId || '').trim()) && Boolean(String(card.providerCustomerId || '').trim()) && Boolean(String(card.providerPaymentMethodId || '').trim());
+      const autoDebitAgreementId = String(lockedWallet.autoDebitAgreementId || '').trim();
+      const autoDebitAgreementStatus = String(lockedWallet.autoDebitAgreementStatus || '').trim().toLowerCase();
+      const isMercadoPagoCard = provider === 'mercadopago' &&
+        Boolean(String(card.providerCardId || '').trim()) &&
+        Boolean(String(card.providerCustomerId || '').trim()) &&
+        Boolean(String(card.providerPaymentMethodId || '').trim()) &&
+        Boolean(autoDebitAgreementId) &&
+        autoDebitAgreementStatus === 'authorized';
 
       if ((!isBoldCard && !isMercadoPagoCard) || (isBoldCard && !boldConfigured) || (isMercadoPagoCard && !mercadopagoConfigured)) {
         await Wallet.updateOne(
@@ -282,9 +289,10 @@ async function runAutoDebitCycle() {
             debugRequest: {
               amount,
               paymentMethodId,
-              cardId: card.providerCardId,
+              paymentMethodReferenceId: card.providerCardId,
               issuerId,
               customerId: card.providerCustomerId,
+              preapprovalId: autoDebitAgreementId,
               deviceId: card.providerDeviceId,
             },
             debugCard: providerCard,
@@ -294,7 +302,8 @@ async function runAutoDebitCycle() {
           providerPayment = await createMercadoPagoPayment({
             amount,
             paymentMethodId,
-            cardId: card.providerCardId,
+            paymentMethodReferenceId: card.providerCardId,
+            preapprovalId: autoDebitAgreementId,
             customerId: card.providerCustomerId,
             issuerId,
             deviceId: card.providerDeviceId,
