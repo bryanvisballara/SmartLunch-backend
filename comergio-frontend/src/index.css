@@ -3704,6 +3704,41 @@ label {
   line-height: 1.35;
 }
 
+.parent-auto-topup-warning-box {
+  border: 2px solid #f97316;
+  border-radius: 16px;
+  background: #fff7ed;
+  padding: 0.72rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.parent-auto-topup-warning-box svg {
+  width: 28px;
+  height: 28px;
+  color: #ea580c;
+  flex-shrink: 0;
+}
+
+.parent-auto-topup-warning-title {
+  margin: 0 0 0.4rem 0;
+  color: #ea580c;
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.parent-auto-topup-warning-text {
+  margin: 0;
+  color: #9a3412;
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
 .parent-auto-topup-activate-btn {
   width: 100%;
   min-height: 56px;
