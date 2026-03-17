@@ -1504,7 +1504,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       schoolId,
       parentUserId,
       type: 'card',
-      provider: 'bold',
+      provider: { $in: ['bold', 'mercadopago'] },
       providerCardId: { $ne: '' },
       status: 'active',
       deletedAt: null,
