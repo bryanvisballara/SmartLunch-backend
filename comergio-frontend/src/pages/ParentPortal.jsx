@@ -338,7 +338,8 @@ function ParentPortal() {
   const verifiedSavedCards = useMemo(
     () => savedCards.filter((card) => {
       const status = String(card?.verificationStatus || 'verified').toLowerCase();
-      return status === 'verified';
+      const provider = String(card?.provider || '').toLowerCase();
+      return status === 'verified' && provider === 'mercadopago';
     }),
     [savedCards]
   );
@@ -1114,7 +1115,7 @@ function ParentPortal() {
       const expYear = String(2000 + Number(expYearShort || 0));
 
       const payload = {
-        provider: 'bold',
+        provider: 'mercadopago',
         firstName,
         lastName,
         documentType,
