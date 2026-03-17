@@ -22,6 +22,7 @@ const ROUTE_FALLBACKS = [
   'parent/recargas',
   'parent/recargas/metodos',
   'parent/recargas/metodos/daviplata',
+  'parent/bold-resultado',
   'parent/recargas/metodos/pse',
   'parent/recargas/metodos/bancolombia',
   'parent/recargas/metodos/breb',
