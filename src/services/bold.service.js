@@ -3,7 +3,16 @@ function normalizeUrl(value) {
 }
 
 function getApiBaseUrl() {
-  return normalizeUrl(process.env.BOLD_API_URL) || 'https://integrations.api.bold.co';
+  const configured = normalizeUrl(process.env.BOLD_API_URL);
+  if (!configured) {
+    return 'https://integrations.api.bold.co';
+  }
+
+  if (configured === 'https://api.bold.co' || configured === 'http://api.bold.co') {
+    return 'https://integrations.api.bold.co';
+  }
+
+  return configured;
 }
 
 function getSecretKey() {
