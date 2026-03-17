@@ -1,3 +1,5 @@
+const crypto = require('crypto');
+
 function normalizeUrl(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }
@@ -19,30 +21,87 @@ function getSecretKey() {
   return String(process.env.BOLD_SECRET_KEY || process.env.BOLD_API_KEY || '').trim();
 }
 
-function getApiKey() {
-  // Bold API integrations use x-api-key with the identity key.
-  return String(process.env.BOLD_IDENTITY_KEY || '').trim() || getSecretKey();
+function getAccessKey() {
+  // Bold uses BOLD_IDENTITY_KEY as the AWS SigV4 access key for API calls.
+  return String(process.env.BOLD_IDENTITY_KEY || '').trim();
 }
 
 function isBoldConfigured() {
   return Boolean(getSecretKey());
 }
 
+/**
+ * Signs a request to Bold's API using AWS Signature Version 4.
+ * Bold's integrations API (integrations.api.bold.co) is hosted on AWS API Gateway
+ * and requires SigV4 signing, with BOLD_IDENTITY_KEY as the access key and
+ * BOLD_SECRET_KEY as the signing secret.
+ */
+function buildSigV4Headers(method, hostname, path, bodyString) {
+  const accessKey = getAccessKey();
+  const secretKey = getSecretKey();
+  const region = String(process.env.BOLD_API_REGION || 'us-east-1').trim();
+  const service = 'execute-api';
+
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const dateStamp = amzDate.slice(0, 8);
+
+  const payloadHash = crypto.createHash('sha256').update(bodyString).digest('hex');
+
+  const canonicalHeaders = `content-type:application/json\nhost:${hostname}\nx-amz-date:${amzDate}\n`;
+  const signedHeadersList = 'content-type;host;x-amz-date';
+
+  const canonicalRequest = [
+    method.toUpperCase(),
+    path,
+    '',
+    canonicalHeaders,
+    signedHeadersList,
+    payloadHash,
+  ].join('\n');
+
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n');
+
+  const hmac = (key, data) => crypto.createHmac('sha256', key).update(data).digest();
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secretKey}`, dateStamp), region), service), 'aws4_request');
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+  const authorizationHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeadersList}, Signature=${signature}`;
+
+  return {
+    Authorization: authorizationHeader,
+    'Content-Type': 'application/json',
+    'x-amz-date': amzDate,
+  };
+}
+
 async function boldRequest(path, { method = 'GET', body = null, extraHeaders = {} } = {}) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('BOLD_IDENTITY_KEY is not configured');
+  const accessKey = getAccessKey();
+  const secretKey = getSecretKey();
+  if (!accessKey || !secretKey) {
+    throw new Error('BOLD_IDENTITY_KEY and BOLD_SECRET_KEY must both be configured');
   }
 
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+  const baseUrl = getApiBaseUrl();
+  const url = new URL(path, baseUrl);
+  const bodyString = body ? JSON.stringify(body) : '';
+
+  const sigHeaders = buildSigV4Headers(method, url.hostname, url.pathname, bodyString);
+
+  const response = await fetch(url.toString(), {
     method,
     headers: {
-      'x-api-key': apiKey,
-      'Content-Type': 'application/json',
+      ...sigHeaders,
       Accept: 'application/json',
       ...extraHeaders,
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: bodyString || undefined,
   });
 
   let data = {};
