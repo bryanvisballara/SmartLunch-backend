@@ -19,20 +19,25 @@ function getSecretKey() {
   return String(process.env.BOLD_SECRET_KEY || process.env.BOLD_API_KEY || '').trim();
 }
 
+function getApiKey() {
+  // Bold API integrations use x-api-key with the identity key.
+  return String(process.env.BOLD_IDENTITY_KEY || '').trim() || getSecretKey();
+}
+
 function isBoldConfigured() {
   return Boolean(getSecretKey());
 }
 
 async function boldRequest(path, { method = 'GET', body = null, extraHeaders = {} } = {}) {
-  const secretKey = getSecretKey();
-  if (!secretKey) {
-    throw new Error('BOLD_SECRET_KEY is not configured');
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('BOLD_IDENTITY_KEY is not configured');
   }
 
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${secretKey}`,
+      'x-api-key': apiKey,
       'Content-Type': 'application/json',
       Accept: 'application/json',
       ...extraHeaders,
