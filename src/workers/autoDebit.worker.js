@@ -7,6 +7,11 @@ const {
   createCardPayment,
   toInternalStatus,
 } = require('../services/bold.service');
+const {
+  isMercadoPagoConfigured,
+  createPayment: createMercadoPagoPayment,
+  toInternalStatus: toMercadoPagoInternalStatus,
+} = require('../services/mercadopago.service');
 
 const POLL_INTERVAL_MS = Number(process.env.AUTO_DEBIT_POLL_MS || 60_000);
 const AUTO_DEBIT_COOLDOWN_MS = Number(process.env.AUTO_DEBIT_COOLDOWN_MS || 5 * 60_000);
@@ -55,7 +60,9 @@ async function runAutoDebitCycle() {
     return;
   }
 
-  if (!isBoldConfigured()) {
+  const boldConfigured = isBoldConfigured();
+  const mercadopagoConfigured = isMercadoPagoConfigured();
+  if (!boldConfigured && !mercadopagoConfigured) {
     return;
   }
 
@@ -175,21 +182,6 @@ async function runAutoDebitCycle() {
         continue;
       }
 
-      const hasPending = await PaymentTransaction.exists({
-        schoolId,
-        studentId,
-        method: 'bold_auto_debit',
-        status: 'pending',
-      });
-
-      if (hasPending) {
-        await Wallet.updateOne(
-          { _id: lockedWallet._id },
-          { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
-        );
-        continue;
-      }
-
       const link = await ParentStudentLink.findOne({
         schoolId,
         studentId,
@@ -224,10 +216,27 @@ async function runAutoDebitCycle() {
         continue;
       }
 
-      if (
-        card.provider !== 'bold' ||
-        !String(card.providerCardId || '').trim()
-      ) {
+      const provider = String(card.provider || '').trim().toLowerCase();
+      const isBoldCard = provider === 'bold' && Boolean(String(card.providerCardId || '').trim());
+      const isMercadoPagoCard = provider === 'mercadopago' && Boolean(String(card.providerCardId || '').trim()) && Boolean(String(card.providerCustomerId || '').trim()) && Boolean(String(card.providerPaymentMethodId || '').trim());
+
+      if ((!isBoldCard && !isMercadoPagoCard) || (isBoldCard && !boldConfigured) || (isMercadoPagoCard && !mercadopagoConfigured)) {
+        await Wallet.updateOne(
+          { _id: lockedWallet._id },
+          { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
+        );
+        continue;
+      }
+
+      const paymentMethod = isMercadoPagoCard ? 'mercadopago_auto_debit' : 'bold_auto_debit';
+      const hasPending = await PaymentTransaction.exists({
+        schoolId,
+        studentId,
+        method: paymentMethod,
+        status: 'pending',
+      });
+
+      if (hasPending) {
         await Wallet.updateOne(
           { _id: lockedWallet._id },
           { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
@@ -242,7 +251,7 @@ async function runAutoDebitCycle() {
         parentId,
         paymentMethodId: card._id,
         amount,
-        method: 'bold_auto_debit',
+        method: paymentMethod,
         documentType: '',
         documentNumber: '',
         reference,
@@ -252,18 +261,34 @@ async function runAutoDebitCycle() {
       });
 
       try {
-        const providerPayment = await createCardPayment({
-          amount,
-          paymentMethodToken: card.providerCardId,
-          customerId: card.providerCustomerId,
-          externalReference: String(studentId),
-          description: 'Recarga automatica Comergio',
-          idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
-        });
+        let providerPayment;
+        if (isMercadoPagoCard) {
+          providerPayment = await createMercadoPagoPayment({
+            amount,
+            paymentMethodId: card.providerPaymentMethodId,
+            customerId: card.providerCustomerId,
+            cardId: card.providerCardId,
+            deviceId: card.providerDeviceId,
+            externalReference: String(studentId),
+            description: 'Recarga automatica Comergio',
+            idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
+          });
+        } else {
+          providerPayment = await createCardPayment({
+            amount,
+            paymentMethodToken: card.providerCardId,
+            customerId: card.providerCustomerId,
+            externalReference: String(studentId),
+            description: 'Recarga automatica Comergio',
+            idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
+          });
+        }
 
         paymentRecord.providerTransactionId = String(providerPayment?.id || providerPayment?.transaction_id || '').trim();
         paymentRecord.providerStatus = String(providerPayment?.status || providerPayment?.state || 'pending').trim();
-        paymentRecord.status = toInternalStatus(paymentRecord.providerStatus);
+        paymentRecord.status = isMercadoPagoCard
+          ? toMercadoPagoInternalStatus(paymentRecord.providerStatus)
+          : toInternalStatus(paymentRecord.providerStatus);
         paymentRecord.providerResponse = providerPayment;
         paymentRecord.failureReason = paymentRecord.status === 'failed' || paymentRecord.status === 'rejected'
           ? String(providerPayment?.status_detail || paymentRecord.providerStatus || 'Provider error')
@@ -279,7 +304,9 @@ async function runAutoDebitCycle() {
       } catch (providerError) {
         paymentRecord.status = 'failed';
         paymentRecord.providerStatus = 'error';
-        paymentRecord.failureReason = providerError?.message || 'No fue posible crear el pago en Bold';
+        paymentRecord.failureReason = providerError?.message || (isMercadoPagoCard
+          ? 'No fue posible crear el pago en Mercado Pago'
+          : 'No fue posible crear el pago en Bold');
         paymentRecord.providerResponse = providerError?.providerPayload || null;
         await paymentRecord.save();
 
