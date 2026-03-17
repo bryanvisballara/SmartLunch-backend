@@ -1384,7 +1384,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       : (fallbackMonthlyLimit > 0
         ? fallbackMonthlyLimit
         : (Number.isFinite(defaultMonthlyLimit) && defaultMonthlyLimit > 0 ? defaultMonthlyLimit : 1000000));
-    const paymentMethodId = toObjectId(req.body?.paymentMethodId || wallet.autoDebitPaymentMethodId);
+    const requestedPaymentMethodId = toObjectId(req.body?.paymentMethodId || wallet.autoDebitPaymentMethodId);
 
     if (!Number.isFinite(autoDebitLimit) || autoDebitLimit < 20000) {
       return res.status(400).json({ message: 'autoDebitLimit must be at least 20000' });
@@ -1392,10 +1392,6 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
 
     if (!Number.isFinite(autoDebitAmount) || autoDebitAmount < 30000) {
       return res.status(400).json({ message: 'autoDebitAmount must be at least 30000' });
-    }
-
-    if (!paymentMethodId) {
-      return res.status(400).json({ message: 'paymentMethodId is required' });
     }
 
     const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: 'parent', deletedAt: null })
@@ -1406,8 +1402,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       return res.status(404).json({ message: 'Parent user not found' });
     }
 
-    const paymentMethod = await ParentPaymentMethod.findOne({
-      _id: paymentMethodId,
+    const cardFilter = {
       schoolId,
       parentUserId,
       type: 'card',
@@ -1416,13 +1411,30 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       status: 'active',
       deletedAt: null,
       verificationStatus: 'verified',
-    })
-      .select('_id')
-      .lean();
+    };
+
+    let paymentMethod = null;
+    if (requestedPaymentMethodId) {
+      paymentMethod = await ParentPaymentMethod.findOne({
+        ...cardFilter,
+        _id: requestedPaymentMethodId,
+      })
+        .select('_id')
+        .lean();
+    }
+
+    if (!paymentMethod) {
+      paymentMethod = await ParentPaymentMethod.findOne(cardFilter)
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .select('_id')
+        .lean();
+    }
 
     if (!paymentMethod) {
       return res.status(404).json({ message: 'Tarjeta verificada no encontrada.' });
     }
+
+    const paymentMethodId = paymentMethod._id;
 
     if (!isMercadoPagoConfigured()) {
       return res.status(503).json({ message: 'Mercado Pago no está configurado en este momento.' });

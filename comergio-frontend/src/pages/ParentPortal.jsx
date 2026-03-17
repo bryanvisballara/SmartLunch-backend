@@ -349,7 +349,6 @@ function ParentPortal() {
   );
   const autoTopupSelectedCard = verifiedSavedCards.find((card) => String(card._id) === String(autoTopupSelectedCardId)) || null;
   const canActivateAutoTopup = Boolean(
-    autoTopupSelectedCardId &&
     Number.isFinite(autoTopupMinBalanceNumber) &&
     autoTopupMinBalanceNumber >= 20000 &&
     Number.isFinite(autoTopupRechargeAmount) &&
@@ -709,7 +708,6 @@ function ParentPortal() {
           enabled: true,
           autoDebitLimit: autoTopupMinBalanceNumber,
           autoDebitAmount: autoTopupRechargeAmount,
-          paymentMethodId: autoTopupSelectedCardId,
           confirmAuthorization: true,
           preapprovalId,
         });
@@ -1252,7 +1250,6 @@ function ParentPortal() {
         enabled: true,
         autoDebitLimit: autoTopupMinBalanceNumber,
         autoDebitAmount: autoTopupRechargeAmount,
-        paymentMethodId: autoTopupSelectedCardId,
       });
 
       const requiresAuthorization = Boolean(response?.data?.requiresAuthorization);
@@ -1342,12 +1339,10 @@ function ParentPortal() {
 
     const fallbackLimit = Number(selectedStudent?.wallet?.autoDebitLimit || 0);
     const fallbackAmount = Number(selectedStudent?.wallet?.autoDebitAmount || 0);
-    const fallbackPaymentMethodId = String(selectedStudent?.wallet?.autoDebitPaymentMethodId || '').trim();
     const payloadLimit = autoTopupMinBalanceNumber > 0 ? autoTopupMinBalanceNumber : fallbackLimit;
     const payloadAmount = autoTopupRechargeAmount > 0 ? autoTopupRechargeAmount : fallbackAmount;
-    const payloadPaymentMethodId = String(autoTopupSelectedCardId || fallbackPaymentMethodId).trim();
 
-    if (!payloadLimit || !payloadAmount || !payloadPaymentMethodId) {
+    if (!payloadLimit || !payloadAmount) {
       setAutoTopupSubmitError('Completa o verifica los datos de recarga automática antes de continuar.');
       return;
     }
@@ -1361,7 +1356,6 @@ function ParentPortal() {
         enabled: true,
         autoDebitLimit: payloadLimit,
         autoDebitAmount: payloadAmount,
-        paymentMethodId: payloadPaymentMethodId,
       });
 
       const requiresAuthorization = Boolean(response?.data?.requiresAuthorization);
@@ -2063,60 +2057,9 @@ function ParentPortal() {
             </label>
 
             <div className="parent-auto-topup-card-picker">
-              <p>Usa una tarjeta verificada para realizar las recargas automáticas.</p>
-              <button
-                className="parent-auto-topup-card-btn"
-                onClick={() => setAutoTopupCardPickerOpen((prev) => !prev)}
-                type="button"
-              >
-                <span>
-                  {autoTopupSelectedCard
-                    ? `${getCardBrandLabel(autoTopupSelectedCard.brand)} **** ${autoTopupSelectedCard.last4}`
-                    : 'Seleccionar tarjeta'}
-                </span>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              {autoTopupCardPickerOpen ? (
-                <div className="parent-auto-topup-card-dropdown">
-                  {savedCardsLoading ? <p className="parent-auto-topup-card-empty">Cargando tarjetas...</p> : null}
-                  {!savedCardsLoading && savedCardsError ? <p className="parent-error">{savedCardsError}</p> : null}
-
-                  {!savedCardsLoading && !savedCardsError
-                    ? verifiedSavedCards.map((card) => (
-                        <button
-                          className={String(card._id) === String(autoTopupSelectedCardId) ? 'is-selected' : ''}
-                          key={card._id}
-                          onClick={() => {
-                            setAutoTopupSelectedCardId(String(card._id));
-                            setAutoTopupCardPickerOpen(false);
-                          }}
-                          type="button"
-                        >
-                          <span>{getCardBrandLabel(card.brand)} **** {card.last4}</span>
-                          <small>Vence {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}</small>
-                        </button>
-                      ))
-                    : null}
-
-                  <button
-                    className="parent-auto-topup-add-card-option"
-                    onClick={() => {
-                      setAutoTopupCardPickerOpen(false);
-                      navigate('/parent/recargas/agregar-tarjeta');
-                    }}
-                    type="button"
-                  >
-                    + Agregar tarjeta
-                  </button>
-
-                  {!savedCardsLoading && !savedCardsError && verifiedSavedCards.length === 0 ? (
-                    <p className="parent-auto-topup-card-empty">No tienes tarjetas verificadas todavía.</p>
-                  ) : null}
-                </div>
-              ) : null}
+              <p>
+                La selección y autorización de tarjeta ahora se realiza directamente en Mercado Pago.
+              </p>
             </div>
 
             <p className="parent-auto-topup-hint">
