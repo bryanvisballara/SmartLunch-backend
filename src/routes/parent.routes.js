@@ -24,6 +24,7 @@ const {
   createCustomerCard,
   deleteCustomerCard,
 } = require('../services/mercadopago.service');
+const { isBoldConfigured, createCardToken: createBoldCardToken } = require('../services/bold.service');
 const { DEFAULT_TTL_SECONDS, getMenuCache, setMenuCache } = require('../services/menuCache.service');
 const { deriveThumbUrlFromImageUrl, normalizeStoredImageUrl } = require('../utils/imageUpload');
 
@@ -862,6 +863,12 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     }
 
     const incomingCardToken = String(req.body?.cardToken || '').trim();
+    const requestedProvider = String(req.body?.provider || '').trim().toLowerCase();
+    const incomingBoldCustomerId = String(req.body?.boldCustomerId || req.body?.providerCustomerId || '').trim();
+    const incomingCardLast4 = String(req.body?.cardLast4 || '').trim();
+    const incomingCardBrand = String(req.body?.cardBrand || '').trim().toLowerCase();
+    const incomingCardExpMonth = Number(req.body?.cardExpMonth);
+    const incomingCardExpYear = Number(req.body?.cardExpYear);
     const incomingDeviceId = String(req.body?.deviceId || '').trim();
     const cardNumber = String(req.body?.cardNumber || '').replace(/\D/g, '');
     const expiry = parseExpiry(req.body?.cardExpiry);
@@ -896,15 +903,154 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     const fallbackBrand = cardNumber ? detectCardBrand(cardNumber) : 'unknown';
     const fallbackLast4 = cardNumber ? cardNumber.slice(-4) : '0000';
 
+    const boldConfigured = isBoldConfigured();
     const mercadopagoConfigured = isMercadoPagoConfigured();
-    if (incomingCardToken && !mercadopagoConfigured) {
+    if (requestedProvider === 'bold' && !boldConfigured) {
       return res.status(503).json({
-        message: 'Mercado Pago no está configurado en el backend. No se puede registrar la tarjeta con tokenización.',
+        message: 'Bold no esta configurado en el backend. No se puede registrar la tarjeta con tokenizacion Bold.',
+      });
+    }
+
+    if (incomingCardToken && requestedProvider !== 'bold' && !mercadopagoConfigured) {
+      return res.status(503).json({
+        message: 'Mercado Pago no esta configurado en el backend. No se puede registrar la tarjeta con tokenizacion.',
       });
     }
 
     let paymentMethod;
-    if (mercadopagoConfigured) {
+    if (requestedProvider === 'bold' && boldConfigured) {
+      const tokenizedBoldCard = incomingCardToken
+        ? null
+        : await createBoldCardToken({
+          cardNumber,
+          expirationMonth: expiry.month,
+          expirationYear: expiry.year,
+          securityCode: cvv,
+          cardholder: {
+            name: `${firstName} ${lastName}`.trim(),
+            identification: {
+              type: docType,
+              number: document,
+            },
+          },
+        });
+
+      const providerCardId = String(
+        incomingCardToken ||
+        tokenizedBoldCard?.id ||
+        tokenizedBoldCard?.token ||
+        tokenizedBoldCard?.cardToken ||
+        tokenizedBoldCard?.card_token ||
+        tokenizedBoldCard?.data?.id ||
+        tokenizedBoldCard?.data?.token ||
+        ''
+      ).trim();
+
+      if (!providerCardId) {
+        return res.status(502).json({ message: 'No fue posible tokenizar la tarjeta en Bold.' });
+      }
+
+      const resolvedLast4 = String(
+        incomingCardLast4 ||
+        tokenizedBoldCard?.last4 ||
+        tokenizedBoldCard?.last_four ||
+        tokenizedBoldCard?.last_four_digits ||
+        tokenizedBoldCard?.data?.last4 ||
+        tokenizedBoldCard?.data?.last_four ||
+        tokenizedBoldCard?.data?.last_four_digits ||
+        fallbackLast4
+      ).trim();
+
+      const resolvedBrand = String(
+        incomingCardBrand ||
+        tokenizedBoldCard?.brand ||
+        tokenizedBoldCard?.scheme ||
+        tokenizedBoldCard?.data?.brand ||
+        tokenizedBoldCard?.data?.scheme ||
+        fallbackBrand ||
+        'unknown'
+      )
+        .trim()
+        .toLowerCase();
+
+      const resolvedExpMonth = Number(
+        incomingCardExpMonth ||
+        tokenizedBoldCard?.expMonth ||
+        tokenizedBoldCard?.expiration_month ||
+        tokenizedBoldCard?.data?.expMonth ||
+        tokenizedBoldCard?.data?.expiration_month ||
+        expiry?.month
+      );
+
+      const resolvedExpYear = Number(
+        incomingCardExpYear ||
+        tokenizedBoldCard?.expYear ||
+        tokenizedBoldCard?.expiration_year ||
+        tokenizedBoldCard?.data?.expYear ||
+        tokenizedBoldCard?.data?.expiration_year ||
+        expiry?.year
+      );
+
+      const resolvedCustomerId = String(
+        incomingBoldCustomerId ||
+        tokenizedBoldCard?.customerId ||
+        tokenizedBoldCard?.customer_id ||
+        tokenizedBoldCard?.data?.customerId ||
+        tokenizedBoldCard?.data?.customer_id ||
+        ''
+      ).trim();
+
+      const existingProviderCard = await ParentPaymentMethod.findOne({
+        schoolId,
+        parentUserId,
+        provider: 'bold',
+        providerCardId,
+        deletedAt: null,
+      })
+        .select('_id')
+        .lean();
+
+      if (existingProviderCard) {
+        return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
+      }
+
+      const cardFingerprint = `${providerCardId}|${incomingCardLast4 || fallbackLast4}`;
+      const fingerprint = crypto
+        .createHash('sha256')
+        .update(`${schoolId}|${String(parentUserId)}|bold|${cardFingerprint}`)
+        .digest('hex');
+
+      paymentMethod = await ParentPaymentMethod.create({
+        schoolId,
+        parentUserId,
+        type: 'card',
+        provider: 'bold',
+        token: `bold_${providerCardId}`,
+        providerCustomerId: resolvedCustomerId,
+        providerCardId,
+        providerPaymentMethodId: '',
+        providerDeviceId: incomingDeviceId,
+        fingerprint,
+        brand: resolvedBrand || 'unknown',
+        last4: resolvedLast4,
+        expMonth: Number.isFinite(resolvedExpMonth) && resolvedExpMonth >= 1 && resolvedExpMonth <= 12
+          ? resolvedExpMonth
+          : Number(expiry?.month || 1),
+        expYear: Number.isFinite(resolvedExpYear) && resolvedExpYear >= 2000
+          ? resolvedExpYear
+          : Number(expiry?.year || 2099),
+        holderFirstName: firstName,
+        holderLastName: lastName,
+        holderDocType: docType,
+        holderDocument: document,
+        verificationStatus: 'verified',
+        verificationAmount: null,
+        verificationAttemptCount: 0,
+        verificationLastRequestedAt: null,
+        verificationExpiresAt: null,
+        verifiedAt: new Date(),
+      });
+    } else if (mercadopagoConfigured) {
       const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@comergio.local`;
       const customer = await findOrCreateCustomer({
         email: parentEmail,
@@ -1358,7 +1504,8 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       schoolId,
       parentUserId,
       type: 'card',
-      provider: 'mercadopago',
+      provider: 'bold',
+      providerCardId: { $ne: '' },
       status: 'active',
       deletedAt: null,
       verificationStatus: 'verified',

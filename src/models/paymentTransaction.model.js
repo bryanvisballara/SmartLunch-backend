@@ -7,7 +7,7 @@ const paymentTransactionSchema = new mongoose.Schema(
     parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     paymentMethodId: { type: mongoose.Schema.Types.ObjectId, ref: 'ParentPaymentMethod', default: null },
     amount: { type: Number, required: true, min: 1 },
-    method: { type: String, enum: ['daviplata', 'bancolombia', 'mercadopago_auto_debit'], default: 'daviplata' },
+    method: { type: String, enum: ['daviplata', 'bancolombia', 'bold', 'mercadopago_auto_debit', 'bold_auto_debit'], default: 'daviplata' },
     documentType: { type: String, enum: ['CC', 'TI', 'CE', 'PP', 'NIT', ''], default: '' },
     documentNumber: { type: String, default: '', trim: true },
     reference: { type: String, required: true, trim: true, unique: true },

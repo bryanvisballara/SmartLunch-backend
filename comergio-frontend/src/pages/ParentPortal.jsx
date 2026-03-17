@@ -18,10 +18,8 @@ import {
   updateParentPortalStudentDailyLimit,
   updateParentPortalStudentAutoDebit,
 } from '../services/parent.service';
-import { createDaviPlataPayment } from '../services/payments.service';
+import { createBoldRechargePayment } from '../services/payments.service';
 import { getProducts } from '../services/products.service';
-import { createMercadoPagoCardToken } from '../lib/mercadopago';
-import daviplataLogo from '../assets/daviplata.png';
 import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
 import pseLogo from '../assets/PSE.png';
@@ -125,8 +123,6 @@ function ParentPortal() {
   const [dailyLimitDraft, setDailyLimitDraft] = useState('0');
   const [dailyLimitSaving, setDailyLimitSaving] = useState(false);
   const [dailyLimitError, setDailyLimitError] = useState('');
-  const [daviDocType, setDaviDocType] = useState('');
-  const [daviDocument, setDaviDocument] = useState('');
   const [daviAmount, setDaviAmount] = useState('');
   const [daviSubmitLoading, setDaviSubmitLoading] = useState(false);
   const [daviSubmitError, setDaviSubmitError] = useState('');
@@ -260,11 +256,8 @@ function ParentPortal() {
     ? brebAmountNumber + brebFeeAmount
     : 0;
   const canContinueDaviRecharge = Boolean(
-    daviDocType &&
-    String(daviDocument || '').trim().length >= 5 &&
     Number.isFinite(daviAmountNumber) &&
-    daviAmountNumber >= 50000 &&
-    daviAmountNumber <= 150000
+    daviAmountNumber >= 1000
   );
   const canContinuePseRecharge = Boolean(
     Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
@@ -290,7 +283,6 @@ function ParentPortal() {
     cardDocumentDigits.length >= 5
   );
   const autoTopupPresetOptions = [30000, 50000, 100000];
-  const mercadopagoPublicKey = String(import.meta.env.VITE_MERCADOPAGO_PUBLIC_KEY || '').trim();
   const autoTopupMinBalanceNumber = Number(autoTopupMinBalance || 0);
   const autoTopupCustomAmountNumber = Number(autoTopupCustomAmount || 0);
   const autoTopupRechargeAmount = autoTopupPresetAmount === 0 ? autoTopupCustomAmountNumber : autoTopupPresetAmount;
@@ -587,12 +579,12 @@ function ParentPortal() {
   };
 
   useEffect(() => {
-    if ((!isTopupsPage && !isAutoTopupPage) || loading || error) {
+    if ((!isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isAutoTopupPage) || loading || error) {
       return;
     }
 
     loadSavedCards();
-  }, [isTopupsPage, isAutoTopupPage, loading, error]);
+  }, [isTopupsPage, isTopupMethodsPage, isTopupDaviPlataPage, isAutoTopupPage, loading, error]);
 
   useEffect(() => {
     if ((!isMeriendasPage && !isMeriendasDayPage) || loading || error || !selectedStudentId) {
@@ -854,24 +846,27 @@ function ParentPortal() {
     setDaviSubmitSuccess('');
 
     try {
-      const response = await createDaviPlataPayment({
+      const response = await createBoldRechargePayment({
         studentId: selectedStudent._id,
         amount: daviAmountNumber,
-        documentType: daviDocType,
-        documentNumber: String(daviDocument || '').trim(),
         description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
       });
 
+      const checkoutUrl = String(response.data?.checkoutUrl || '').trim();
       const transactionId = String(response.data?.transactionId || '').trim();
       const providerStatus = String(response.data?.status || 'PENDING').trim();
 
-      setDaviSubmitSuccess(
-        transactionId
-          ? `Solicitud enviada (${providerStatus}). Revisa tu app DaviPlata para aprobar la recarga. Transacción: ${transactionId}`
-          : `Solicitud enviada (${providerStatus}). Revisa tu app DaviPlata para aprobar la recarga.`
-      );
+      if (checkoutUrl) {
+        setDaviSubmitSuccess('Redirigiendo a Bold para completar el pago...');
+        window.location.assign(checkoutUrl);
+        return;
+      }
+
+      setDaviSubmitSuccess(transactionId
+        ? `Recarga creada (${providerStatus}). Transaccion: ${transactionId}.`
+        : `Recarga creada (${providerStatus}).`);
     } catch (requestError) {
-      setDaviSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo crear la orden de pago.');
+      setDaviSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo procesar la recarga con Bold.');
     } finally {
       setDaviSubmitLoading(false);
     }
@@ -933,6 +928,10 @@ function ParentPortal() {
     } finally {
       setBrebSubmitLoading(false);
     }
+  };
+
+  const onGoToBoldCheckout = () => {
+    navigate('/parent/recargas/metodos/daviplata');
   };
 
   const openCardVerificationModal = (card) => {
@@ -1040,34 +1039,19 @@ function ParentPortal() {
       const expYearShort = cardExpiryDigits.slice(2, 4);
       const expYear = String(2000 + Number(expYearShort || 0));
 
-      let payload = {
+      const payload = {
+        provider: 'bold',
         firstName,
         lastName,
         documentType,
         documentNumber,
-      };
-
-      if (!mercadopagoPublicKey) {
-        setAddCardError('Falta configurar VITE_MERCADOPAGO_PUBLIC_KEY. No se puede tokenizar la tarjeta.');
-        setAddCardLoading(false);
-        return;
-      }
-
-      const tokenizedCard = await createMercadoPagoCardToken({
-        publicKey: mercadopagoPublicKey,
         cardNumber: cardDigits,
-        cardholderName: `${firstName} ${lastName}`.trim(),
-        expirationMonth: expMonth,
-        expirationYear: expYear,
-        securityCode: cardCvvDigits,
-        identificationType: documentType,
-        identificationNumber: documentNumber,
-      });
-
-      payload = {
-        ...payload,
-        cardToken: String(tokenizedCard?.id || '').trim(),
-        deviceId: String(tokenizedCard?.deviceId || '').trim(),
+        cardExpiry: `${expMonth}/${expYearShort}`,
+        cardCvv: cardCvvDigits,
+        cardExpMonth: Number(expMonth),
+        cardExpYear: Number(expYear),
+        cardLast4: cardDigits.slice(-4),
+        cardBrand: 'unknown',
       };
 
       const response = await createParentCardPaymentMethod(payload);
@@ -2222,40 +2206,9 @@ function ParentPortal() {
                 </button>
               ) : null}
 
-              <button onClick={() => navigate('/parent/recargas/metodos/daviplata')} type="button">
+              <button onClick={onGoToBoldCheckout} type="button">
                 <div className="left">
-                  <img alt="DaviPlata" className="logo" src={daviplataLogo} />
-                  <span>DaviPlata</span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/metodos/bancolombia')} type="button">
-                <div className="left">
-                  <img alt="Bancolombia" className="logo" src={bancolombiaLogo} />
-                  <span>Bancolombia</span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/metodos/breb')} type="button">
-                <div className="left">
-                  <img alt="Bre-B" className="logo" src={brebLogo} />
-                  <span>Bre-B</span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/metodos/pse')} type="button">
-                <div className="left">
-                  <img alt="PSE" className="logo" src={pseLogo} />
-                  <span>PSE</span>
+                  <span>Recarga con Bold</span>
                 </div>
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
@@ -2275,39 +2228,17 @@ function ParentPortal() {
             </button>
 
             <div className="parent-topup-davi-head">
-              <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con DaviPlata</h2>
-              <img alt="DaviPlata" src={daviplataLogo} />
+              <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con Bold</h2>
             </div>
 
-            <div className="parent-topup-davi-grid">
-              <label>
-                Tipo de documento
-                <select value={daviDocType} onChange={(event) => setDaviDocType(event.target.value)}>
-                  <option value="">Tipo doc</option>
-                  <option value="CC">Cedula de ciudadania</option>
-                  <option value="TI">Tarjeta de identidad</option>
-                  <option value="CE">Cedula de extranjeria</option>
-                  <option value="PP">Pasaporte</option>
-                </select>
-                {!daviDocType ? <small>Selecciona el tipo de documento</small> : null}
-              </label>
-
-              <label>
-                Documento
-                <input
-                  placeholder="Ingrese un valor"
-                  value={daviDocument}
-                  onChange={(event) => setDaviDocument(event.target.value.replace(/\D/g, ''))}
-                  inputMode="numeric"
-                />
-              </label>
-            </div>
+            <p className="parent-topup-fee-note">
+              Te redirigiremos al checkout seguro de Bold para completar el pago.
+            </p>
 
             <label className="parent-topup-davi-amount">
               ¿Cuánto vas a recargar?
               <input
-                min="50000"
-                max="150000"
+                min="1000"
                 step="1000"
                 type="number"
                 placeholder="Ingrese un valor"
@@ -2336,7 +2267,7 @@ function ParentPortal() {
               onClick={onSubmitDaviTopup}
               type="button"
             >
-              {daviSubmitLoading ? 'Enviando...' : 'Continuar'}
+              {daviSubmitLoading ? 'Procesando...' : 'Pagar con Bold'}
             </button>
 
             {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}

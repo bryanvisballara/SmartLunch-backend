@@ -15,6 +15,11 @@ const {
   mapProviderStatus: mapBancolombiaProviderStatus,
 } = require('../services/bancolombia.service');
 const { getPaymentById, toInternalStatus: toMercadoPagoInternalStatus, isMercadoPagoConfigured } = require('../services/mercadopago.service');
+const {
+  createCheckoutPayment: createBoldCheckoutPayment,
+  isBoldConfigured,
+  toInternalStatus: toBoldInternalStatus,
+} = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
 const router = express.Router();
@@ -140,6 +145,60 @@ function getLowBalanceLevelForBalance(balance) {
   if (value < 10000) return 'lt10';
   if (value < 20000) return 'lt20';
   return 'none';
+}
+
+function getBoldPaymentStatus(payload) {
+  return String(payload?.status || payload?.state || payload?.data?.status || 'pending').trim();
+}
+
+function getBoldPaymentId(payload) {
+  return String(payload?.id || payload?.transactionId || payload?.data?.id || '').trim();
+}
+
+function getBoldCheckoutUrl(payload) {
+  return String(
+    payload?.checkoutUrl ||
+      payload?.checkout_url ||
+      payload?.paymentUrl ||
+      payload?.payment_url ||
+      payload?.redirectUrl ||
+      payload?.redirect_url ||
+      payload?.url ||
+      payload?.data?.checkoutUrl ||
+      payload?.data?.checkout_url ||
+      payload?.data?.paymentUrl ||
+      payload?.data?.payment_url ||
+      payload?.data?.redirectUrl ||
+      payload?.data?.redirect_url ||
+      payload?.data?.url ||
+      ''
+  ).trim();
+}
+
+function getBoldPaidAmount(payload) {
+  const candidates = [
+    payload?.amount?.total,
+    payload?.amount?.value,
+    payload?.total,
+    payload?.paidAmount,
+    payload?.paid_amount,
+    payload?.value,
+    payload?.data?.amount?.total,
+    payload?.data?.amount?.value,
+    payload?.data?.total,
+    payload?.data?.paidAmount,
+    payload?.data?.paid_amount,
+    payload?.data?.value,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.round(parsed);
+    }
+  }
+
+  return null;
 }
 
 async function canAccessStudent(user, studentId) {
@@ -608,8 +667,340 @@ router.post('/mercadopago', async (req, res) => {
   }
 });
 
+router.post('/bold', async (req, res) => {
+  let session;
+
+  try {
+    const boldIdentityKey = String(process.env.BOLD_IDENTITY_KEY || '').trim();
+    if (boldIdentityKey) {
+      const incomingSignature = String(req.headers['x-bold-signature'] || '').trim();
+      const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
+      const expectedSignature = require('crypto')
+        .createHmac('sha256', boldIdentityKey)
+        .update(rawBody)
+        .digest('base64');
+      if (incomingSignature !== expectedSignature) {
+        return res.status(401).json({ message: 'Invalid Bold webhook signature' });
+      }
+    }
+
+    const providerTransactionId = String(
+      req.body?.id || req.body?.transactionId || req.body?.data?.id || req.body?.payload?.id || ''
+    ).trim();
+    const reference = String(
+      req.body?.reference ||
+      req.body?.externalReference ||
+      req.body?.external_reference ||
+      req.body?.metadata?.external_reference ||
+      req.body?.data?.reference ||
+      ''
+    ).trim();
+    const providerStatus = String(
+      req.body?.status || req.body?.state || req.body?.data?.status || req.body?.event?.status || 'pending'
+    ).trim();
+
+    if (!providerTransactionId && !reference) {
+      return res.status(200).json({ received: true, ignored: true, reason: 'missing identifiers' });
+    }
+
+    const searchConditions = [];
+    if (providerTransactionId) {
+      searchConditions.push({ providerTransactionId });
+    }
+    if (reference) {
+      searchConditions.push({ reference });
+    }
+
+    const paymentRecord = await PaymentTransaction.findOne({
+      method: { $in: ['bold_auto_debit', 'bold'] },
+      $or: searchConditions,
+    });
+
+    if (!paymentRecord) {
+      return res.status(200).json({ received: true, ignored: true, reason: 'Payment record not found' });
+    }
+
+    const internalStatus = toBoldInternalStatus(providerStatus);
+    const paidAmount = getBoldPaidAmount(req.body);
+
+    if (internalStatus !== 'approved') {
+      paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
+      paymentRecord.providerStatus = providerStatus;
+      paymentRecord.status = internalStatus;
+      paymentRecord.callbackPayload = req.body;
+      paymentRecord.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
+      await paymentRecord.save();
+
+      if (internalStatus !== 'pending' && paymentRecord.method === 'bold_auto_debit') {
+        await releaseWalletAutoDebitWithRetry({
+          schoolId: paymentRecord.schoolId,
+          studentId: paymentRecord.studentId,
+        });
+      }
+
+      return res.status(200).json({
+        received: true,
+        credited: false,
+        status: internalStatus,
+        rechargeAmount: Number(paymentRecord.amount || 0),
+        paidAmount: paidAmount || undefined,
+      });
+    }
+
+    if (paymentRecord.walletTransactionId) {
+      return res.status(200).json({ received: true, credited: true, alreadyProcessed: true });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const lockedPayment = await PaymentTransaction.findById(paymentRecord._id).session(session);
+    if (!lockedPayment) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    if (lockedPayment.walletTransactionId) {
+      await session.commitTransaction();
+      return res.status(200).json({ received: true, credited: true, alreadyProcessed: true });
+    }
+
+    const wallet = await Wallet.findOne({
+      schoolId: lockedPayment.schoolId,
+      studentId: lockedPayment.studentId,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    const approvedAmount = Number(lockedPayment.amount || 0);
+    const isAutoDebitPayment = lockedPayment.method === 'bold_auto_debit';
+
+    if (isAutoDebitPayment) {
+      const period = currentYearMonth();
+      if (String(wallet.autoDebitMonthlyPeriod || '') !== period) {
+        wallet.autoDebitMonthlyPeriod = period;
+        wallet.autoDebitMonthlyUsed = 0;
+      }
+
+      wallet.autoDebitMonthlyUsed = Number(wallet.autoDebitMonthlyUsed || 0) + approvedAmount;
+      wallet.autoDebitInProgress = false;
+      wallet.autoDebitLockAt = null;
+      wallet.autoDebitLastChargeAt = new Date();
+      wallet.autoDebitRetryAt = null;
+      wallet.autoDebitRetryCount = 0;
+    }
+
+    wallet.balance += approvedAmount;
+    wallet.lowBalanceAlertLevel = getLowBalanceLevelForBalance(wallet.balance);
+    await wallet.save({ session });
+
+    const [walletTopup] = await WalletTransaction.create(
+      [
+        {
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          walletId: wallet._id,
+          type: 'recharge',
+          amount: approvedAmount,
+          method: 'bold',
+          createdBy: lockedPayment.parentId,
+          notes: isAutoDebitPayment
+            ? `Recarga automatica aprobada por Bold (${providerTransactionId || lockedPayment.reference})`
+            : `Recarga aprobada por Bold (${providerTransactionId || lockedPayment.reference})`,
+        },
+      ],
+      { session }
+    );
+
+    lockedPayment.providerTransactionId = providerTransactionId || lockedPayment.providerTransactionId;
+    lockedPayment.providerStatus = providerStatus;
+    lockedPayment.status = 'approved';
+    lockedPayment.callbackPayload = req.body;
+    lockedPayment.providerResponse = {
+      ...(lockedPayment.providerResponse || {}),
+      webhook: req.body,
+      paidAmount: paidAmount || undefined,
+    };
+    lockedPayment.walletTransactionId = walletTopup._id;
+    lockedPayment.approvedAt = new Date();
+    lockedPayment.failureReason = null;
+    await lockedPayment.save({ session });
+
+    await session.commitTransaction();
+
+    if (isAutoDebitPayment && wallet.autoDebitEnabled) {
+      setImmediate(async () => {
+        try {
+          await queueAutoDebitRechargeNotification({
+            schoolId: lockedPayment.schoolId,
+            studentId: lockedPayment.studentId,
+            amount: approvedAmount,
+            newBalance: Number(wallet.balance || 0),
+            method: 'bold',
+          });
+        } catch (notificationError) {
+          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=bold_webhook paymentId=${lockedPayment._id} error=${notificationError.message}`);
+        }
+      });
+    }
+
+    return res.status(200).json({
+      received: true,
+      credited: true,
+      status: 'approved',
+      rechargeAmount: approvedAmount,
+      paidAmount: paidAmount || undefined,
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
+
+router.post('/bold/recharge', async (req, res) => {
+  try {
+    if (!isBoldConfigured()) {
+      return res.status(503).json({ message: 'Bold no esta configurado en el backend.' });
+    }
+
+    const { schoolId, userId } = req.user;
+    const { studentId, amount, description = 'Recarga Comergio' } = req.body;
+
+    const studentObjectId = toObjectId(studentId);
+    if (!studentObjectId) {
+      return res.status(400).json({ message: 'studentId is required' });
+    }
+
+    const numericAmount = Math.round(Number(amount));
+    if (!Number.isFinite(numericAmount) || numericAmount < 1000) {
+      return res.status(400).json({ message: 'Amount must be at least 1000 COP' });
+    }
+
+    const allowed = await canAccessStudent(req.user, studentObjectId);
+    if (!allowed) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const student = await Student.findOne({ _id: studentObjectId, schoolId, deletedAt: null, status: 'active' }).select('_id');
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: studentObjectId });
+    if (!wallet) {
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    const feeAmount = Math.round(numericAmount * 0.015);
+    const totalToPay = numericAmount + feeAmount;
+
+    const reference = buildReference();
+    const payment = await PaymentTransaction.create({
+      schoolId,
+      studentId: studentObjectId,
+      parentId: userId,
+      amount: numericAmount,
+      method: 'bold',
+      documentType: '',
+      documentNumber: '',
+      reference,
+      status: 'pending',
+      providerStatus: 'PENDING',
+      description: String(description || 'Recarga Comergio').trim(),
+    });
+
+    try {
+      const providerPayment = await createBoldCheckoutPayment({
+        totalAmount: totalToPay,
+        externalReference: reference,
+        description: payment.description,
+        metadata: {
+          recharge_amount: numericAmount,
+          fee_amount: feeAmount,
+          charge_amount: totalToPay,
+          school_id: schoolId,
+          student_id: String(studentObjectId),
+        },
+        idempotencyKey: String(payment._id),
+      });
+
+      const providerStatus = getBoldPaymentStatus(providerPayment);
+      const internalStatus = toBoldInternalStatus(providerStatus);
+      const providerTransactionId = getBoldPaymentId(providerPayment);
+      const checkoutUrl = getBoldCheckoutUrl(providerPayment);
+      const paidAmount = getBoldPaidAmount(providerPayment);
+
+      payment.providerTransactionId = providerTransactionId || undefined;
+      payment.providerStatus = providerStatus;
+      payment.providerResponse = {
+        raw: providerPayment,
+        checkoutUrl: checkoutUrl || undefined,
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        paidAmount: paidAmount || undefined,
+      };
+      payment.status = internalStatus;
+
+      if (!checkoutUrl && internalStatus !== 'approved') {
+        payment.status = 'failed';
+        payment.providerStatus = providerStatus || 'ERROR';
+        payment.failureReason = 'Bold no devolvio URL de checkout para completar el pago.';
+        await payment.save();
+
+        return res.status(502).json({
+          message: 'Bold no devolvio URL de checkout. Revisa la configuracion del endpoint manual.',
+          paymentId: payment._id,
+          reference,
+        });
+      }
+
+      payment.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
+      await payment.save();
+
+      return res.status(201).json({
+        paymentId: payment._id,
+        reference,
+        transactionId: payment.providerTransactionId,
+        status: payment.providerStatus,
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        checkoutUrl,
+        message: checkoutUrl
+          ? 'Redirige al usuario a Bold para completar el pago.'
+          : 'Pago Bold creado. Esperando confirmacion del proveedor.',
+      });
+    } catch (providerError) {
+      payment.status = 'failed';
+      payment.providerStatus = 'ERROR';
+      payment.failureReason = providerError.message;
+      payment.providerResponse = providerError.providerPayload || null;
+      await payment.save();
+
+      return res.status(502).json({
+        message: providerError.message || 'No fue posible procesar la recarga con Bold',
+        paymentId: payment._id,
+        reference,
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 router.post('/daviplata', async (req, res) => {
   try {
