@@ -282,7 +282,7 @@ async function runAutoDebitCycle() {
             debugRequest: {
               amount,
               paymentMethodId,
-              paymentMethodReferenceId: card.providerCardId,
+              cardId: card.providerCardId,
               issuerId,
               customerId: card.providerCustomerId,
               deviceId: card.providerDeviceId,
@@ -294,7 +294,7 @@ async function runAutoDebitCycle() {
           providerPayment = await createMercadoPagoPayment({
             amount,
             paymentMethodId,
-            paymentMethodReferenceId: card.providerCardId,
+            cardId: card.providerCardId,
             customerId: card.providerCustomerId,
             issuerId,
             deviceId: card.providerDeviceId,
