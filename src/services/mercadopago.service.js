@@ -118,7 +118,7 @@ function toInternalStatus(providerStatus) {
   return 'pending';
 }
 
-async function createPayment({ amount, paymentMethodId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
+async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
   const headers = {};
   if (idempotencyKey) {
     headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
@@ -134,6 +134,7 @@ async function createPayment({ amount, paymentMethodId, customerId, issuerId, ex
       transaction_amount: Number(amount),
       payment_method_id: String(paymentMethodId || '').trim(),
       issuer_id: issuerId ? String(issuerId).trim() : undefined,
+      payment_method_reference_id: Number(paymentMethodReferenceId),
       installments: 1,
       description: String(description || 'Recarga automatica Comergio').trim(),
       payer: {
