@@ -112,7 +112,18 @@ async function boldRequest(path, { method = 'GET', body = null, extraHeaders = {
   }
 
   if (!response.ok) {
-    const message = data?.message || data?.error || `Bold request failed (${response.status})`;
+    const providerMsg = data?.message || data?.error || '';
+    // Help diagnose SigV4 credential issues
+    const isAuthError = response.status === 403 || response.status === 401;
+    const isCredentialError = isAuthError && (
+      providerMsg.includes('security token') ||
+      providerMsg.includes('Missing Authentication') ||
+      providerMsg.includes('key=value') ||
+      providerMsg.includes('Credential')
+    );
+    const message = isCredentialError
+      ? 'Error de autenticacion con Bold API. Verifica que BOLD_IDENTITY_KEY y BOLD_SECRET_KEY sean las credenciales de cobro recurrente (no las del boton de pagos). Contacta a Bold para obtener las credenciales de API de cobros recurrentes.'
+      : providerMsg || `Bold request failed (${response.status})`;
     const requestError = new Error(message);
     requestError.status = response.status;
     requestError.providerPayload = data;
