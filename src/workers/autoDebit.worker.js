@@ -278,6 +278,19 @@ async function runAutoDebitCycle() {
             throw new Error('No fue posible identificar emisor o medio de pago de la tarjeta guardada en Mercado Pago');
           }
 
+          paymentRecord.providerResponse = {
+            debugRequest: {
+              amount,
+              paymentMethodId,
+              paymentMethodReferenceId: card.providerCardId,
+              issuerId,
+              customerId: card.providerCustomerId,
+              deviceId: card.providerDeviceId,
+            },
+            debugCard: providerCard,
+          };
+          await paymentRecord.save();
+
           providerPayment = await createMercadoPagoPayment({
             amount,
             paymentMethodId,
