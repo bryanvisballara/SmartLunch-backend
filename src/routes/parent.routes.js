@@ -1468,7 +1468,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       payerEmail: String(parentUser.email || '').trim().toLowerCase(),
       backUrl: `${frontendBaseUrl}/parent/recargas/automatica`,
       currencyId: 'COP',
-      transactionAmount: autoDebitAmount,
+      transactionAmount: 0,
       frequency: 1,
       frequencyType: 'months',
     });
