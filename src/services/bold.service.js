@@ -122,39 +122,28 @@ async function createCardPayment({ amount, paymentMethodToken, customerId, exter
   });
 }
 
-async function createCheckoutPayment({ totalAmount, externalReference, description, metadata = {}, idempotencyKey }) {
-  const endpoint = String(process.env.BOLD_MANUAL_RECHARGE_PATH || '/online/link/v1').trim();
-
-  const payload = {
-    amount: {
-      currency: 'COP',
-      total: Math.round(Number(totalAmount || 0)),
-    },
-    reference: String(externalReference || '').trim(),
-    description: String(description || 'Recarga Comergio').trim(),
-    metadata: {
-      external_reference: String(externalReference || '').trim(),
-      source: 'comergio_manual_recharge',
-      ...metadata,
-    },
-  };
-
-  const headers = {};
-  if (idempotencyKey) {
-    headers['Idempotency-Key'] = String(idempotencyKey).trim();
+/**
+ * Generates the Bold integrity hash for the "Botón de pagos" frontend button.
+ * Formula: SHA256(orderId + amount + currency + secretKey) → hex
+ */
+function generateIntegrityHash(orderId, amount, currency) {
+  const secretKey = getSecretKey();
+  if (!secretKey) {
+    throw new Error('BOLD_SECRET_KEY is not configured');
   }
+  const raw = `${orderId}${amount}${currency}${secretKey}`;
+  return require('crypto').createHash('sha256').update(raw).digest('hex');
+}
 
-  return boldRequest(endpoint, {
-    method: 'POST',
-    body: payload,
-    extraHeaders: headers,
-  });
+function getIdentityKey() {
+  return String(process.env.BOLD_IDENTITY_KEY || '').trim();
 }
 
 module.exports = {
   isBoldConfigured,
+  getIdentityKey,
   toInternalStatus,
   createCardToken,
   createCardPayment,
-  createCheckoutPayment,
+  generateIntegrityHash,
 };

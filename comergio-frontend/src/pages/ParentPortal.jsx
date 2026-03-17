@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import {
@@ -51,6 +51,39 @@ function formatSignedCurrency(value) {
   const absAmount = Math.abs(amount);
   const prefix = amount < 0 ? '-' : '+';
   return `${prefix} ${formatCurrency(absAmount)}`;
+}
+
+function BoldResultContent() {
+  const params = new URLSearchParams(window.location.search);
+  const txStatus = String(params.get('bold-tx-status') || '').toLowerCase();
+  const orderId = String(params.get('bold-order-id') || '');
+
+  if (txStatus === 'approved') {
+    return (
+      <div className="parent-topup-davi-fee-box">
+        <p style={{ fontWeight: 'bold', color: '#22c55e' }}>¡Pago exitoso!</p>
+        <p>Tu recarga está siendo procesada. El saldo se acreditará en unos instantes.</p>
+        {orderId ? <p style={{ fontSize: '0.8rem', color: '#888' }}>Referencia: {orderId}</p> : null}
+      </div>
+    );
+  }
+
+  if (txStatus === 'rejected' || txStatus === 'failed' || txStatus === 'denied') {
+    return (
+      <div className="parent-topup-davi-fee-box">
+        <p style={{ fontWeight: 'bold', color: '#ef4444' }}>Pago rechazado</p>
+        <p>No fue posible procesar tu pago. Por favor intenta de nuevo.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="parent-topup-davi-fee-box">
+      <p style={{ fontWeight: 'bold' }}>Pago en proceso</p>
+      <p>Tu pago está siendo verificado. Recibirás una confirmación pronto.</p>
+      {orderId ? <p style={{ fontSize: '0.8rem', color: '#888' }}>Referencia: {orderId}</p> : null}
+    </div>
+  );
 }
 
 function currentYearMonth() {
@@ -127,6 +160,8 @@ function ParentPortal() {
   const [daviSubmitLoading, setDaviSubmitLoading] = useState(false);
   const [daviSubmitError, setDaviSubmitError] = useState('');
   const [daviSubmitSuccess, setDaviSubmitSuccess] = useState('');
+  const [boldPaymentData, setBoldPaymentData] = useState(null);
+  const boldContainerRef = useRef(null);
   const [pseAmount, setPseAmount] = useState('');
   const [pseSubmitLoading, setPseSubmitLoading] = useState(false);
   const [pseSubmitError, setPseSubmitError] = useState('');
@@ -190,6 +225,7 @@ function ParentPortal() {
   const isTopupsPage = location.pathname === '/parent/recargas';
   const isTopupMethodsPage = location.pathname === '/parent/recargas/metodos';
   const isTopupDaviPlataPage = location.pathname === '/parent/recargas/metodos/daviplata';
+  const isBoldResultPage = location.pathname === '/parent/bold-resultado';
   const isTopupPsePage = location.pathname === '/parent/recargas/metodos/pse';
   const isTopupBancolombiaPage = location.pathname === '/parent/recargas/metodos/bancolombia';
   const isTopupBrebPage = location.pathname === '/parent/recargas/metodos/breb';
@@ -844,6 +880,7 @@ function ParentPortal() {
     setDaviSubmitLoading(true);
     setDaviSubmitError('');
     setDaviSubmitSuccess('');
+    setBoldPaymentData(null);
 
     try {
       const response = await createBoldRechargePayment({
@@ -852,25 +889,38 @@ function ParentPortal() {
         description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
       });
 
-      const checkoutUrl = String(response.data?.checkoutUrl || '').trim();
-      const transactionId = String(response.data?.transactionId || '').trim();
-      const providerStatus = String(response.data?.status || 'PENDING').trim();
-
-      if (checkoutUrl) {
-        setDaviSubmitSuccess('Redirigiendo a Bold para completar el pago...');
-        window.location.assign(checkoutUrl);
-        return;
-      }
-
-      setDaviSubmitSuccess(transactionId
-        ? `Recarga creada (${providerStatus}). Transaccion: ${transactionId}.`
-        : `Recarga creada (${providerStatus}).`);
+      setBoldPaymentData(response.data);
     } catch (requestError) {
       setDaviSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo procesar la recarga con Bold.');
     } finally {
       setDaviSubmitLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!boldPaymentData || !boldContainerRef.current) return;
+
+    boldContainerRef.current.innerHTML = '';
+
+    const script = document.createElement('script');
+    script.setAttribute('data-bold-button', '');
+    script.setAttribute('data-api-key', boldPaymentData.apiKey);
+    script.setAttribute('data-amount', String(boldPaymentData.amount));
+    script.setAttribute('data-currency', boldPaymentData.currency || 'COP');
+    script.setAttribute('data-order-id', boldPaymentData.reference);
+    script.setAttribute('data-integrity-signature', boldPaymentData.integritySignature);
+    script.setAttribute('data-redirection-url', boldPaymentData.redirectionUrl);
+    if (boldPaymentData.description) {
+      script.setAttribute('data-description', boldPaymentData.description);
+    }
+    script.setAttribute('data-render-mode', 'embedded');
+
+    boldContainerRef.current.appendChild(script);
+
+    if (window.BoldButton?.render) {
+      window.BoldButton.render();
+    }
+  }, [boldPaymentData]);
 
   const onSubmitPseTopup = async () => {
     if (!canContinuePseRecharge) {
@@ -2220,7 +2270,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupDaviPlataPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => { setBoldPaymentData(null); navigate('/parent/recargas/metodos'); }} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -2231,47 +2281,86 @@ function ParentPortal() {
               <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con Bold</h2>
             </div>
 
-            <p className="parent-topup-fee-note">
-              Te redirigiremos al checkout seguro de Bold para completar el pago.
-            </p>
-
-            <label className="parent-topup-davi-amount">
-              ¿Cuánto vas a recargar?
-              <input
-                min="1000"
-                step="1000"
-                type="number"
-                placeholder="Ingrese un valor"
-                value={daviAmount}
-                onChange={(event) => setDaviAmount(event.target.value)}
-              />
-            </label>
-
-            {daviAmountNumber > 0 ? (
-              <div className="parent-topup-davi-fee-box">
-                <p>
-                  Valor a recargar: <strong>{formatCurrency(daviAmountNumber)}</strong>
+            {boldPaymentData ? (
+              <>
+                <div className="parent-topup-davi-fee-box">
+                  <p>
+                    Valor a recargar: <strong>{formatCurrency(boldPaymentData.rechargeAmount)}</strong>
+                  </p>
+                  <p>
+                    Costo de transacción (1.5%): <strong>{formatCurrency(boldPaymentData.feeAmount)}</strong>
+                  </p>
+                  <p className="total">
+                    Total a pagar: <strong>{formatCurrency(boldPaymentData.amount)}</strong>
+                  </p>
+                </div>
+                <div ref={boldContainerRef} className="bold-button-container" />
+                <button
+                  className="parent-topup-back-btn"
+                  onClick={() => setBoldPaymentData(null)}
+                  style={{ marginTop: '12px' }}
+                  type="button"
+                >
+                  <span>Cancelar y volver</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="parent-topup-fee-note">
+                  Haz clic en el botón para pagar con Bold de forma segura.
                 </p>
-                <p>
-                  Costo de transacción (1.5%): <strong>{formatCurrency(daviFeeAmount)}</strong>
-                </p>
-                <p className="total">
-                  Total a pagar: <strong>{formatCurrency(daviTotalCharge)}</strong>
-                </p>
-              </div>
-            ) : null}
 
-            <button
-              className="parent-topup-davi-continue"
-              disabled={!canContinueDaviRecharge || daviSubmitLoading}
-              onClick={onSubmitDaviTopup}
-              type="button"
-            >
-              {daviSubmitLoading ? 'Procesando...' : 'Pagar con Bold'}
+                <label className="parent-topup-davi-amount">
+                  ¿Cuánto vas a recargar?
+                  <input
+                    min="1000"
+                    step="1000"
+                    type="number"
+                    placeholder="Ingrese un valor"
+                    value={daviAmount}
+                    onChange={(event) => setDaviAmount(event.target.value)}
+                  />
+                </label>
+
+                {daviAmountNumber > 0 ? (
+                  <div className="parent-topup-davi-fee-box">
+                    <p>
+                      Valor a recargar: <strong>{formatCurrency(daviAmountNumber)}</strong>
+                    </p>
+                    <p>
+                      Costo de transacción (1.5%): <strong>{formatCurrency(daviFeeAmount)}</strong>
+                    </p>
+                    <p className="total">
+                      Total a pagar: <strong>{formatCurrency(daviTotalCharge)}</strong>
+                    </p>
+                  </div>
+                ) : null}
+
+                <button
+                  className="parent-topup-davi-continue"
+                  disabled={!canContinueDaviRecharge || daviSubmitLoading}
+                  onClick={onSubmitDaviTopup}
+                  type="button"
+                >
+                  {daviSubmitLoading ? 'Procesando...' : 'Continuar con Bold'}
+                </button>
+
+                {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
+                {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
+              </>
+            )}
+          </section>
+        ) : null}
+
+        {isBoldResultPage ? (
+          <section className="parent-topup-davi-page">
+            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
+              </svg>
+              <span>Ir a recargas</span>
             </button>
-
-            {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
-            {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
+            <BoldResultContent />
           </section>
         ) : null}
 

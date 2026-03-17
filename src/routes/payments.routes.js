@@ -16,9 +16,10 @@ const {
 } = require('../services/bancolombia.service');
 const { getPaymentById, toInternalStatus: toMercadoPagoInternalStatus, isMercadoPagoConfigured } = require('../services/mercadopago.service');
 const {
-  createCheckoutPayment: createBoldCheckoutPayment,
   isBoldConfigured,
+  getIdentityKey: getBoldIdentityKey,
   toInternalStatus: toBoldInternalStatus,
+  generateIntegrityHash,
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
@@ -922,81 +923,39 @@ router.post('/bold/recharge', async (req, res) => {
       description: String(description || 'Recarga Comergio').trim(),
     });
 
-    try {
-      const providerPayment = await createBoldCheckoutPayment({
-        totalAmount: totalToPay,
-        externalReference: reference,
-        description: payment.description,
-        metadata: {
-          recharge_amount: numericAmount,
-          fee_amount: feeAmount,
-          charge_amount: totalToPay,
-          school_id: schoolId,
-          student_id: String(studentObjectId),
-        },
-        idempotencyKey: String(payment._id),
-      });
+    const integritySignature = generateIntegrityHash(reference, totalToPay, 'COP');
+    const apiKey = getBoldIdentityKey();
 
-      const providerStatus = getBoldPaymentStatus(providerPayment);
-      const internalStatus = toBoldInternalStatus(providerStatus);
-      const providerTransactionId = getBoldPaymentId(providerPayment);
-      const checkoutUrl = getBoldCheckoutUrl(providerPayment);
-      const paidAmount = getBoldPaidAmount(providerPayment);
-
-      payment.providerTransactionId = providerTransactionId || undefined;
-      payment.providerStatus = providerStatus;
-      payment.providerResponse = {
-        raw: providerPayment,
-        checkoutUrl: checkoutUrl || undefined,
-        rechargeAmount: numericAmount,
-        feeAmount,
-        totalToPay,
-        paidAmount: paidAmount || undefined,
-      };
-      payment.status = internalStatus;
-
-      if (!checkoutUrl && internalStatus !== 'approved') {
-        payment.status = 'failed';
-        payment.providerStatus = providerStatus || 'ERROR';
-        payment.failureReason = 'Bold no devolvio URL de checkout para completar el pago.';
-        await payment.save();
-
-        return res.status(502).json({
-          message: 'Bold no devolvio URL de checkout. Revisa la configuracion del endpoint manual.',
-          paymentId: payment._id,
-          reference,
-        });
-      }
-
-      payment.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
-      await payment.save();
-
-      return res.status(201).json({
-        paymentId: payment._id,
-        reference,
-        transactionId: payment.providerTransactionId,
-        status: payment.providerStatus,
-        rechargeAmount: numericAmount,
-        feeAmount,
-        totalToPay,
-        checkoutUrl,
-        message: checkoutUrl
-          ? 'Redirige al usuario a Bold para completar el pago.'
-          : 'Pago Bold creado. Esperando confirmacion del proveedor.',
-      });
-    } catch (providerError) {
+    if (!apiKey) {
       payment.status = 'failed';
       payment.providerStatus = 'ERROR';
-      payment.failureReason = providerError.message;
-      payment.providerResponse = providerError.providerPayload || null;
+      payment.failureReason = 'BOLD_IDENTITY_KEY no esta configurado.';
       await payment.save();
-
-      return res.status(502).json({
-        message: providerError.message || 'No fue posible procesar la recarga con Bold',
-        paymentId: payment._id,
-        reference,
-      });
+      return res.status(503).json({ message: 'Bold no esta completamente configurado en el backend.' });
     }
+
+    payment.providerResponse = {
+      rechargeAmount: numericAmount,
+      feeAmount,
+      totalToPay,
+      integritySignature,
+    };
+    await payment.save();
+
+    const redirectionUrl = `${String(process.env.FRONTEND_URL || 'https://comergio.com').replace(/\/$/, '')}/parent/bold-resultado`;
+
+    return res.status(200).json({
+      paymentId: payment._id,
+      reference,
+      apiKey,
+      amount: totalToPay,
+      rechargeAmount: numericAmount,
+      feeAmount,
+      currency: 'COP',
+      integritySignature,
+      redirectionUrl,
+      description: payment.description,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
