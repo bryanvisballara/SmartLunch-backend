@@ -988,7 +988,7 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         parentUserId,
         type: 'card',
         provider: 'mercadopago',
-        token: `mp_${customerId}_${providerCardId}`,
+        token: `mp_${crypto.randomBytes(12).toString('hex')}`,
         providerCustomerId: customerId,
         providerCardId,
         providerPaymentMethodId: String(customerCard?.payment_method?.id || '').trim(),
