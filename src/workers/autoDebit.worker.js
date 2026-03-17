@@ -9,6 +9,7 @@ const {
 } = require('../services/bold.service');
 const {
   isMercadoPagoConfigured,
+  getCustomerCard,
   createPayment: createMercadoPagoPayment,
   toInternalStatus: toMercadoPagoInternalStatus,
 } = require('../services/mercadopago.service');
@@ -263,11 +264,25 @@ async function runAutoDebitCycle() {
       try {
         let providerPayment;
         if (isMercadoPagoCard) {
-          providerPayment = await createMercadoPagoPayment({
-            amount,
-            paymentMethodId: card.providerPaymentMethodId,
+          const providerCard = await getCustomerCard({
             customerId: card.providerCustomerId,
             cardId: card.providerCardId,
+          });
+
+          const paymentMethodId = String(
+            providerCard?.payment_method?.id || card.providerPaymentMethodId || ''
+          ).trim();
+          const issuerId = String(providerCard?.issuer?.id || '').trim();
+
+          if (!paymentMethodId || !issuerId) {
+            throw new Error('No fue posible identificar emisor o medio de pago de la tarjeta guardada en Mercado Pago');
+          }
+
+          providerPayment = await createMercadoPagoPayment({
+            amount,
+            paymentMethodId,
+            customerId: card.providerCustomerId,
+            issuerId,
             deviceId: card.providerDeviceId,
             externalReference: String(studentId),
             description: 'Recarga automatica Comergio',

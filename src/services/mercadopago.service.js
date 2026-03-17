@@ -106,6 +106,10 @@ async function deleteCustomerCard({ customerId, cardId }) {
   });
 }
 
+async function getCustomerCard({ customerId, cardId }) {
+  return mercadopagoRequest(`/v1/customers/${encodeURIComponent(String(customerId))}/cards/${encodeURIComponent(String(cardId))}`);
+}
+
 function toInternalStatus(providerStatus) {
   const normalized = String(providerStatus || '').toLowerCase();
   if (normalized === 'approved') return 'approved';
@@ -114,7 +118,7 @@ function toInternalStatus(providerStatus) {
   return 'pending';
 }
 
-async function createPayment({ amount, paymentMethodId, customerId, cardId, externalReference, description, idempotencyKey, deviceId }) {
+async function createPayment({ amount, paymentMethodId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
   const headers = {};
   if (idempotencyKey) {
     headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
@@ -128,8 +132,8 @@ async function createPayment({ amount, paymentMethodId, customerId, cardId, exte
     extraHeaders: headers,
     body: {
       transaction_amount: Number(amount),
-      token: String(cardId || '').trim(),
       payment_method_id: String(paymentMethodId || '').trim(),
+      issuer_id: issuerId ? String(issuerId).trim() : undefined,
       installments: 1,
       description: String(description || 'Recarga automatica Comergio').trim(),
       payer: {
@@ -151,6 +155,7 @@ module.exports = {
   createCardToken,
   createCustomerCard,
   deleteCustomerCard,
+  getCustomerCard,
   toInternalStatus,
   createPayment,
   getPaymentById,
