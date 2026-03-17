@@ -128,6 +128,7 @@ async function createPayment({ amount, paymentMethodId, customerId, cardId, exte
     extraHeaders: headers,
     body: {
       transaction_amount: Number(amount),
+      token: String(cardId || '').trim(),
       payment_method_id: String(paymentMethodId || '').trim(),
       installments: 1,
       description: String(description || 'Recarga automatica Comergio').trim(),
