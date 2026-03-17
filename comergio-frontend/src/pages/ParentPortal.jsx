@@ -1328,15 +1328,6 @@ function ParentPortal() {
       return;
     }
 
-    if (autoTopupPendingAuthorizationUrl) {
-      try {
-        window.open(autoTopupPendingAuthorizationUrl, '_blank');
-      } catch (_) {
-        window.location.assign(autoTopupPendingAuthorizationUrl);
-      }
-      return;
-    }
-
     const fallbackLimit = Number(selectedStudent?.wallet?.autoDebitLimit || 0);
     const fallbackAmount = Number(selectedStudent?.wallet?.autoDebitAmount || 0);
     const payloadLimit = autoTopupMinBalanceNumber > 0 ? autoTopupMinBalanceNumber : fallbackLimit;
