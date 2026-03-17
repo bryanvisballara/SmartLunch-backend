@@ -1328,6 +1328,39 @@ function ParentPortal() {
       return;
     }
 
+    const existingPreapprovalId = String(
+      autoTopupPendingPreapprovalId || selectedStudent?.wallet?.autoDebitAgreementId || ''
+    ).trim();
+
+    if (existingPreapprovalId) {
+      setAutoTopupAuthorizationLoading(true);
+      setAutoTopupSubmitError('');
+      setAutoTopupSubmitSuccess('');
+      try {
+        const confirmResponse = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
+          enabled: true,
+          confirmAuthorization: true,
+          preapprovalId: existingPreapprovalId,
+        });
+
+        mergeStudentData(confirmResponse.data?.student || { _id: selectedStudent._id, wallet: { autoDebitEnabled: true } });
+        setAutoTopupPendingAuthorizationUrl('');
+        setAutoTopupPendingPreapprovalId('');
+        setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
+        setShowAutoTopupCongratsModal(true);
+        return;
+      } catch (err) {
+        if (Number(err?.response?.status || 0) !== 409) {
+          setAutoTopupSubmitError(
+            err?.response?.data?.message || err?.message || 'No se pudo validar la autorización en Mercado Pago.'
+          );
+          return;
+        }
+      } finally {
+        setAutoTopupAuthorizationLoading(false);
+      }
+    }
+
     const fallbackLimit = Number(selectedStudent?.wallet?.autoDebitLimit || 0);
     const fallbackAmount = Number(selectedStudent?.wallet?.autoDebitAmount || 0);
     const payloadLimit = autoTopupMinBalanceNumber > 0 ? autoTopupMinBalanceNumber : fallbackLimit;
@@ -1376,36 +1409,6 @@ function ParentPortal() {
       );
     } finally {
       setAutoTopupSubmitLoading(false);
-    }
-  };
-
-  const onConfirmMPAuthorization = async () => {
-    const preapprovalId = autoTopupPendingPreapprovalId || String(selectedStudent?.wallet?.autoDebitAgreementId || '').trim();
-    if (!preapprovalId || autoTopupAuthorizationLoading) return;
-    setAutoTopupAuthorizationLoading(true);
-    setAutoTopupSubmitError('');
-    setAutoTopupSubmitSuccess('');
-    try {
-      const response = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
-        enabled: true,
-        confirmAuthorization: true,
-        preapprovalId,
-      });
-      mergeStudentData(response.data?.student || { _id: selectedStudent._id, wallet: { autoDebitEnabled: true } });
-      setAutoTopupPendingAuthorizationUrl('');
-      setAutoTopupPendingPreapprovalId('');
-      setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
-      setShowAutoTopupCongratsModal(true);
-    } catch (err) {
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.message || err?.message || 'No se pudo confirmar la autorización.';
-      setAutoTopupSubmitError(
-        status === 409
-          ? 'Aún no detectamos tu autorización en Mercado Pago. Asegúrate de aceptar en la página de MP e intenta de nuevo.'
-          : msg
-      );
-    } finally {
-      setAutoTopupAuthorizationLoading(false);
     }
   };
 
@@ -1923,14 +1926,6 @@ function ParentPortal() {
                 <span>Recarga automática</span>
               </button>
 
-              <button onClick={() => navigate('/parent/recargas/agregar-tarjeta')} type="button">
-                <span className="parent-topups-action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2h-2V7a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2h2v2a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7Zm12 1h6v2h-2v2h-2v-2h-2V8Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>Agregar tarjeta</span>
-              </button>
             </div>
 
             <div className="parent-topups-method-list">
@@ -1993,9 +1988,6 @@ function ParentPortal() {
                   ))
                 : null}
 
-              {!savedCardsLoading && !savedCardsError && savedCards.length === 0 ? (
-                <p className="parent-topups-empty-method">No tienes tarjetas guardadas todavia.</p>
-              ) : null}
             </div>
 
             <section className="parent-section">
@@ -2109,16 +2101,7 @@ function ParentPortal() {
                   onClick={onOpenMPAuthorization}
                   type="button"
                 >
-                  {autoTopupSubmitLoading ? 'Abriendo...' : 'Ir a Mercado Pago'}
-                </button>
-                <button
-                  className="parent-auto-topup-activate-btn"
-                  style={{ marginTop: '8px', background: 'var(--color-primary, #009ee3)' }}
-                  disabled={autoTopupAuthorizationLoading}
-                  onClick={onConfirmMPAuthorization}
-                  type="button"
-                >
-                  {autoTopupAuthorizationLoading ? 'Verificando...' : 'Ya autoricé en Mercado Pago'}
+                  {autoTopupAuthorizationLoading ? 'Verificando...' : (autoTopupSubmitLoading ? 'Abriendo...' : 'Ir a Mercado Pago')}
                 </button>
               </div>
             ) : (

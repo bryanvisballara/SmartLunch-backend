@@ -1384,7 +1384,6 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       : (fallbackMonthlyLimit > 0
         ? fallbackMonthlyLimit
         : (Number.isFinite(defaultMonthlyLimit) && defaultMonthlyLimit > 0 ? defaultMonthlyLimit : 1000000));
-    const requestedPaymentMethodId = toObjectId(req.body?.paymentMethodId || wallet.autoDebitPaymentMethodId);
 
     if (!Number.isFinite(autoDebitLimit) || autoDebitLimit < 20000) {
       return res.status(400).json({ message: 'autoDebitLimit must be at least 20000' });
@@ -1401,40 +1400,6 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
     if (!parentUser) {
       return res.status(404).json({ message: 'Parent user not found' });
     }
-
-    const cardFilter = {
-      schoolId,
-      parentUserId,
-      type: 'card',
-      provider: 'mercadopago',
-      providerCardId: { $ne: '' },
-      status: 'active',
-      deletedAt: null,
-      verificationStatus: 'verified',
-    };
-
-    let paymentMethod = null;
-    if (requestedPaymentMethodId) {
-      paymentMethod = await ParentPaymentMethod.findOne({
-        ...cardFilter,
-        _id: requestedPaymentMethodId,
-      })
-        .select('_id')
-        .lean();
-    }
-
-    if (!paymentMethod) {
-      paymentMethod = await ParentPaymentMethod.findOne(cardFilter)
-        .sort({ updatedAt: -1, createdAt: -1 })
-        .select('_id')
-        .lean();
-    }
-
-    if (!paymentMethod) {
-      return res.status(404).json({ message: 'Tarjeta verificada no encontrada.' });
-    }
-
-    const paymentMethodId = paymentMethod._id;
 
     if (!isMercadoPagoConfigured()) {
       return res.status(503).json({ message: 'Mercado Pago no está configurado en este momento.' });
@@ -1461,7 +1426,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       wallet.autoDebitLimit = autoDebitLimit;
       wallet.autoDebitAmount = autoDebitAmount;
       wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
-      wallet.autoDebitPaymentMethodId = paymentMethodId;
+      wallet.autoDebitPaymentMethodId = null;
       wallet.autoDebitAgreementId = candidateAgreementId;
       wallet.autoDebitAgreementStatus = agreementStatus;
       wallet.autoDebitAgreementLastSyncAt = new Date();
@@ -1482,7 +1447,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
             autoDebitLimit,
             autoDebitAmount,
             autoDebitMonthlyLimit,
-            autoDebitPaymentMethodId: paymentMethodId,
+            autoDebitPaymentMethodId: null,
             autoDebitAgreementId: candidateAgreementId,
             autoDebitAgreementStatus: agreementStatus,
             autoDebitInProgress: false,
@@ -1520,7 +1485,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
     wallet.autoDebitLimit = autoDebitLimit;
     wallet.autoDebitAmount = autoDebitAmount;
     wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
-    wallet.autoDebitPaymentMethodId = paymentMethodId;
+    wallet.autoDebitPaymentMethodId = null;
     wallet.autoDebitAgreementId = preapprovalId;
     wallet.autoDebitAgreementStatus = preapprovalStatus;
     wallet.autoDebitAgreementLastSyncAt = new Date();
@@ -1542,7 +1507,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
           autoDebitLimit,
           autoDebitAmount,
           autoDebitMonthlyLimit,
-          autoDebitPaymentMethodId: paymentMethodId,
+          autoDebitPaymentMethodId: null,
           autoDebitAgreementId: preapprovalId,
           autoDebitAgreementStatus: preapprovalStatus,
           autoDebitInProgress: false,

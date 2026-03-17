@@ -153,10 +153,28 @@ async function cancelPreapproval(preapprovalId) {
 
 function toInternalStatus(providerStatus) {
   const normalized = String(providerStatus || '').toLowerCase();
-  if (normalized === 'approved') return 'approved';
+  if (normalized === 'approved' || normalized === 'authorized') return 'approved';
   if (normalized === 'rejected' || normalized === 'cancelled') return 'rejected';
   if (normalized === 'failed') return 'failed';
   return 'pending';
+}
+
+async function createAuthorizedPayment({ preapprovalId, amount, externalReference, description, idempotencyKey }) {
+  const headers = {};
+  if (idempotencyKey) {
+    headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
+  }
+
+  return mercadopagoRequest('/authorized_payments', {
+    method: 'POST',
+    extraHeaders: headers,
+    body: {
+      preapproval_id: String(preapprovalId || '').trim(),
+      reason: String(description || 'Recarga automatica Comergio').trim(),
+      external_reference: String(externalReference || '').trim(),
+      transaction_amount: Number(amount),
+    },
+  });
 }
 
 async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
@@ -206,5 +224,6 @@ module.exports = {
   cancelPreapproval,
   toInternalStatus,
   createPayment,
+  createAuthorizedPayment,
   getPaymentById,
 };

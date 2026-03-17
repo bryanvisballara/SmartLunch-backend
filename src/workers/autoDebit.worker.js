@@ -1,16 +1,9 @@
 const ParentStudentLink = require('../models/parentStudentLink.model');
-const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const Wallet = require('../models/wallet.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
 const {
-  isBoldConfigured,
-  createCardPayment,
-  toInternalStatus,
-} = require('../services/bold.service');
-const {
   isMercadoPagoConfigured,
-  getCustomerCard,
-  createPayment: createMercadoPagoPayment,
+  createAuthorizedPayment: createMercadoPagoAuthorizedPayment,
   toInternalStatus: toMercadoPagoInternalStatus,
 } = require('../services/mercadopago.service');
 
@@ -61,9 +54,8 @@ async function runAutoDebitCycle() {
     return;
   }
 
-  const boldConfigured = isBoldConfigured();
   const mercadopagoConfigured = isMercadoPagoConfigured();
-  if (!boldConfigured && !mercadopagoConfigured) {
+  if (!mercadopagoConfigured) {
     return;
   }
 
@@ -75,9 +67,10 @@ async function runAutoDebitCycle() {
       status: 'active',
       autoDebitAmount: { $gt: 0 },
       autoDebitLimit: { $gt: 0 },
-      autoDebitPaymentMethodId: { $ne: null },
+      autoDebitAgreementId: { $ne: '' },
+      autoDebitAgreementStatus: 'authorized',
     })
-      .select('_id schoolId studentId balance autoDebitLimit autoDebitAmount autoDebitPaymentMethodId autoDebitLastChargeAt autoDebitRetryAt autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
+      .select('_id schoolId studentId balance autoDebitLimit autoDebitAmount autoDebitPaymentMethodId autoDebitAgreementId autoDebitAgreementStatus autoDebitLastChargeAt autoDebitRetryAt autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
       .lean();
 
     for (const wallet of wallets) {
@@ -103,7 +96,8 @@ async function runAutoDebitCycle() {
         status: 'active',
         autoDebitAmount: { $gt: 0 },
         autoDebitLimit: { $gt: 0 },
-        autoDebitPaymentMethodId: { $ne: null },
+        autoDebitAgreementId: { $ne: '' },
+        autoDebitAgreementStatus: 'authorized',
       };
 
       // Enforce balance-threshold and cooldown atomically to prevent parallel charges.
@@ -197,38 +191,11 @@ async function runAutoDebitCycle() {
 
       const parentId = link.parentId;
 
-      const card = await ParentPaymentMethod.findOne({
-        _id: lockedWallet.autoDebitPaymentMethodId,
-        schoolId,
-        parentUserId: parentId,
-        type: 'card',
-        status: 'active',
-        deletedAt: null,
-        verificationStatus: 'verified',
-      })
-        .select('_id provider providerCustomerId providerCardId providerPaymentMethodId providerDeviceId')
-        .lean();
-
-      if (!card) {
-        await Wallet.updateOne(
-          { _id: lockedWallet._id },
-          { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
-        );
-        continue;
-      }
-
-      const provider = String(card.provider || '').trim().toLowerCase();
-      const isBoldCard = provider === 'bold' && Boolean(String(card.providerCardId || '').trim());
       const autoDebitAgreementId = String(lockedWallet.autoDebitAgreementId || '').trim();
       const autoDebitAgreementStatus = String(lockedWallet.autoDebitAgreementStatus || '').trim().toLowerCase();
-      const isMercadoPagoCard = provider === 'mercadopago' &&
-        Boolean(String(card.providerCardId || '').trim()) &&
-        Boolean(String(card.providerCustomerId || '').trim()) &&
-        Boolean(String(card.providerPaymentMethodId || '').trim()) &&
-        Boolean(autoDebitAgreementId) &&
-        autoDebitAgreementStatus === 'authorized';
+      const isMercadoPagoAgreement = Boolean(autoDebitAgreementId) && autoDebitAgreementStatus === 'authorized';
 
-      if ((!isBoldCard && !isMercadoPagoCard) || (isBoldCard && !boldConfigured) || (isMercadoPagoCard && !mercadopagoConfigured)) {
+      if (!isMercadoPagoAgreement || !mercadopagoConfigured) {
         await Wallet.updateOne(
           { _id: lockedWallet._id },
           { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
@@ -236,7 +203,7 @@ async function runAutoDebitCycle() {
         continue;
       }
 
-      const paymentMethod = isMercadoPagoCard ? 'mercadopago_auto_debit' : 'bold_auto_debit';
+      const paymentMethod = 'mercadopago_auto_debit';
       const hasPending = await PaymentTransaction.exists({
         schoolId,
         studentId,
@@ -257,7 +224,7 @@ async function runAutoDebitCycle() {
         schoolId,
         studentId,
         parentId,
-        paymentMethodId: card._id,
+        paymentMethodId: null,
         amount,
         method: paymentMethod,
         documentType: '',
@@ -269,64 +236,17 @@ async function runAutoDebitCycle() {
       });
 
       try {
-        let providerPayment;
-        if (isMercadoPagoCard) {
-          const providerCard = await getCustomerCard({
-            customerId: card.providerCustomerId,
-            cardId: card.providerCardId,
-          });
-
-          const paymentMethodId = String(
-            providerCard?.payment_method?.id || card.providerPaymentMethodId || ''
-          ).trim();
-          const issuerId = String(providerCard?.issuer?.id || '').trim();
-
-          if (!paymentMethodId || !issuerId) {
-            throw new Error('No fue posible identificar emisor o medio de pago de la tarjeta guardada en Mercado Pago');
-          }
-
-          paymentRecord.providerResponse = {
-            debugRequest: {
-              amount,
-              paymentMethodId,
-              paymentMethodReferenceId: card.providerCardId,
-              issuerId,
-              customerId: card.providerCustomerId,
-              preapprovalId: autoDebitAgreementId,
-              deviceId: card.providerDeviceId,
-            },
-            debugCard: providerCard,
-          };
-          await paymentRecord.save();
-
-          providerPayment = await createMercadoPagoPayment({
-            amount,
-            paymentMethodId,
-            paymentMethodReferenceId: card.providerCardId,
-            preapprovalId: autoDebitAgreementId,
-            customerId: card.providerCustomerId,
-            issuerId,
-            deviceId: card.providerDeviceId,
-            externalReference: String(studentId),
-            description: 'Recarga automatica Comergio',
-            idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
-          });
-        } else {
-          providerPayment = await createCardPayment({
-            amount,
-            paymentMethodToken: card.providerCardId,
-            customerId: card.providerCustomerId,
-            externalReference: String(studentId),
-            description: 'Recarga automatica Comergio',
-            idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
-          });
-        }
+        const providerPayment = await createMercadoPagoAuthorizedPayment({
+          preapprovalId: autoDebitAgreementId,
+          amount,
+          externalReference: String(studentId),
+          description: 'Recarga automatica Comergio',
+          idempotencyKey: `autodebit-${String(lockedWallet._id)}-${reference}`,
+        });
 
         paymentRecord.providerTransactionId = String(providerPayment?.id || providerPayment?.transaction_id || '').trim();
         paymentRecord.providerStatus = String(providerPayment?.status || providerPayment?.state || 'pending').trim();
-        paymentRecord.status = isMercadoPagoCard
-          ? toMercadoPagoInternalStatus(paymentRecord.providerStatus)
-          : toInternalStatus(paymentRecord.providerStatus);
+        paymentRecord.status = toMercadoPagoInternalStatus(paymentRecord.providerStatus);
         paymentRecord.providerResponse = providerPayment;
         paymentRecord.failureReason = paymentRecord.status === 'failed' || paymentRecord.status === 'rejected'
           ? String(providerPayment?.status_detail || paymentRecord.providerStatus || 'Provider error')
@@ -342,9 +262,7 @@ async function runAutoDebitCycle() {
       } catch (providerError) {
         paymentRecord.status = 'failed';
         paymentRecord.providerStatus = 'error';
-        paymentRecord.failureReason = providerError?.message || (isMercadoPagoCard
-          ? 'No fue posible crear el pago en Mercado Pago'
-          : 'No fue posible crear el pago en Bold');
+        paymentRecord.failureReason = providerError?.message || 'No fue posible crear el pago en Mercado Pago';
         paymentRecord.providerResponse = providerError?.providerPayload || null;
         await paymentRecord.save();
 
