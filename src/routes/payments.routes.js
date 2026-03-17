@@ -886,8 +886,8 @@ router.post('/bold/recharge', async (req, res) => {
     }
 
     const numericAmount = Math.round(Number(amount));
-    if (!Number.isFinite(numericAmount) || numericAmount < 1000) {
-      return res.status(400).json({ message: 'Amount must be at least 1000 COP' });
+    if (!Number.isFinite(numericAmount) || numericAmount < 20000) {
+      return res.status(400).json({ message: 'Amount must be at least 20000 COP' });
     }
 
     const allowed = await canAccessStudent(req.user, studentObjectId);

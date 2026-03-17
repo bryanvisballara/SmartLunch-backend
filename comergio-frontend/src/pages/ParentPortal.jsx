@@ -262,6 +262,7 @@ function ParentPortal() {
   }, [overview?.parent?.name, user?.name, user?.username]);
 
   const parentInitial = String(overview?.parent?.name || user?.name || user?.username || 'P').charAt(0).toUpperCase();
+  const minimumBoldRecharge = 20000;
   const rechargeFeeRate = 0.015;
   const daviAmountNumber = Number(daviAmount || 0);
   const daviFeeAmount = Number.isFinite(daviAmountNumber) && daviAmountNumber > 0
@@ -293,7 +294,7 @@ function ParentPortal() {
     : 0;
   const canContinueDaviRecharge = Boolean(
     Number.isFinite(daviAmountNumber) &&
-    daviAmountNumber >= 1000
+    daviAmountNumber >= minimumBoldRecharge
   );
   const canContinuePseRecharge = Boolean(
     Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
@@ -873,7 +874,7 @@ function ParentPortal() {
     }
 
     if (!canContinueDaviRecharge) {
-      setDaviSubmitError('Completa todos los campos con un valor válido.');
+      setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
       return;
     }
 
@@ -903,6 +904,8 @@ function ParentPortal() {
     boldContainerRef.current.innerHTML = '';
 
     const script = document.createElement('script');
+    script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
+    script.async = true;
     script.setAttribute('data-bold-button', '');
     script.setAttribute('data-api-key', boldPaymentData.apiKey);
     script.setAttribute('data-amount', String(boldPaymentData.amount));
@@ -916,10 +919,6 @@ function ParentPortal() {
     script.setAttribute('data-render-mode', 'embedded');
 
     boldContainerRef.current.appendChild(script);
-
-    if (window.BoldButton?.render) {
-      window.BoldButton.render();
-    }
   }, [boldPaymentData]);
 
   const onSubmitPseTopup = async () => {
@@ -2313,7 +2312,7 @@ function ParentPortal() {
                 <label className="parent-topup-davi-amount">
                   ¿Cuánto vas a recargar?
                   <input
-                    min="1000"
+                    min={minimumBoldRecharge}
                     step="1000"
                     type="number"
                     placeholder="Ingrese un valor"
@@ -2321,6 +2320,10 @@ function ParentPortal() {
                     onChange={(event) => setDaviAmount(event.target.value)}
                   />
                 </label>
+
+                <p className="parent-topup-fee-note">
+                  Monto minimo para recargar con Bold: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+                </p>
 
                 {daviAmountNumber > 0 ? (
                   <div className="parent-topup-davi-fee-box">
