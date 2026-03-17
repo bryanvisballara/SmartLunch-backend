@@ -196,6 +196,8 @@ function ParentPortal() {
   const [autoTopupSubmitError, setAutoTopupSubmitError] = useState('');
   const [autoTopupSubmitSuccess, setAutoTopupSubmitSuccess] = useState('');
   const [autoTopupAuthorizationLoading, setAutoTopupAuthorizationLoading] = useState(false);
+  const [autoTopupPendingAuthorizationUrl, setAutoTopupPendingAuthorizationUrl] = useState('');
+  const [autoTopupPendingPreapprovalId, setAutoTopupPendingPreapprovalId] = useState('');
   const [autoDebitMenuOpen, setAutoDebitMenuOpen] = useState(false);
   const [autoDebitCancelLoading, setAutoDebitCancelLoading] = useState(false);
   const autoDebitMenuRef = useRef(null);
@@ -1257,8 +1259,14 @@ function ParentPortal() {
       const authorizationUrl = String(response?.data?.authorizationUrl || '').trim();
 
       if (requiresAuthorization && authorizationUrl) {
-        setAutoTopupSubmitSuccess('Te estamos redirigiendo a Mercado Pago para autorizar el débito automático.');
-        window.location.assign(authorizationUrl);
+        const pendingPreapprovalId = String(response?.data?.preapprovalId || '').trim();
+        setAutoTopupPendingAuthorizationUrl(authorizationUrl);
+        setAutoTopupPendingPreapprovalId(pendingPreapprovalId);
+        mergeStudentData(response.data?.student || {
+          _id: selectedStudent?._id || selectedStudentId,
+          wallet: { autoDebitAgreementId: pendingPreapprovalId, autoDebitAgreementStatus: 'pending', autoDebitEnabled: false },
+        });
+        try { window.open(authorizationUrl, '_blank'); } catch (_) { /* ignore */ }
         return;
       }
 
@@ -1316,6 +1324,36 @@ function ParentPortal() {
 
   const closeAutoTopupCongratsModal = () => {
     setShowAutoTopupCongratsModal(false);
+  };
+
+  const onConfirmMPAuthorization = async () => {
+    const preapprovalId = autoTopupPendingPreapprovalId || String(selectedStudent?.wallet?.autoDebitAgreementId || '').trim();
+    if (!preapprovalId || autoTopupAuthorizationLoading) return;
+    setAutoTopupAuthorizationLoading(true);
+    setAutoTopupSubmitError('');
+    setAutoTopupSubmitSuccess('');
+    try {
+      const response = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
+        enabled: true,
+        confirmAuthorization: true,
+        preapprovalId,
+      });
+      mergeStudentData(response.data?.student || { _id: selectedStudent._id, wallet: { autoDebitEnabled: true } });
+      setAutoTopupPendingAuthorizationUrl('');
+      setAutoTopupPendingPreapprovalId('');
+      setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
+      setShowAutoTopupCongratsModal(true);
+    } catch (err) {
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || err?.message || 'No se pudo confirmar la autorización.';
+      setAutoTopupSubmitError(
+        status === 409
+          ? 'Aún no detectamos tu autorización en Mercado Pago. Asegúrate de aceptar en la página de MP e intenta de nuevo.'
+          : msg
+      );
+    } finally {
+      setAutoTopupAuthorizationLoading(false);
+    }
   };
 
   const onSubmitMeriendas = async () => {
@@ -2058,18 +2096,40 @@ function ParentPortal() {
               </p>
             </div>
 
-            <button
-              className="parent-auto-topup-activate-btn"
-              disabled={!canActivateAutoTopup || autoTopupSubmitLoading || autoTopupAuthorizationLoading}
-              onClick={onSubmitAutoTopup}
-              type="button"
-            >
-              {autoTopupAuthorizationLoading
-                ? 'Confirmando autorización...'
-                : autoTopupSubmitLoading
-                  ? 'Activando...'
-                  : 'Activar recarga'}
-            </button>
+            {(autoTopupPendingPreapprovalId || (String(selectedStudent?.wallet?.autoDebitAgreementId || '') && String(selectedStudent?.wallet?.autoDebitAgreementStatus || '') === 'pending' && !selectedStudent?.wallet?.autoDebitEnabled)) ? (
+              <div className="parent-auto-topup-pending-auth">
+                <p className="parent-auto-topup-pending-auth-msg">
+                  <strong>Falta autorizar en Mercado Pago.</strong> Abre la página de Mercado Pago, acepta el débito automático y regresa aquí para confirmar.
+                </p>
+                {(autoTopupPendingAuthorizationUrl) ? (
+                  <button
+                    className="parent-auto-topup-activate-btn"
+                    onClick={() => { try { window.open(autoTopupPendingAuthorizationUrl, '_blank'); } catch (_) { window.location.assign(autoTopupPendingAuthorizationUrl); } }}
+                    type="button"
+                  >
+                    Ir a Mercado Pago
+                  </button>
+                ) : null}
+                <button
+                  className="parent-auto-topup-activate-btn"
+                  style={{ marginTop: '8px', background: 'var(--color-primary, #009ee3)' }}
+                  disabled={autoTopupAuthorizationLoading}
+                  onClick={onConfirmMPAuthorization}
+                  type="button"
+                >
+                  {autoTopupAuthorizationLoading ? 'Verificando...' : 'Ya autoricé en Mercado Pago'}
+                </button>
+              </div>
+            ) : (
+              <button
+                className="parent-auto-topup-activate-btn"
+                disabled={!canActivateAutoTopup || autoTopupSubmitLoading || autoTopupAuthorizationLoading}
+                onClick={onSubmitAutoTopup}
+                type="button"
+              >
+                {autoTopupSubmitLoading ? 'Activando...' : 'Activar recarga'}
+              </button>
+            )}
 
             {autoTopupSubmitError ? <p className="parent-error">{autoTopupSubmitError}</p> : null}
             {autoTopupSubmitSuccess ? <p className="parent-success">{autoTopupSubmitSuccess}</p> : null}
