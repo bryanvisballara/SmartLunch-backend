@@ -3,7 +3,7 @@ function normalizeUrl(value) {
 }
 
 function getApiBaseUrl() {
-  return normalizeUrl(process.env.BOLD_API_URL) || 'https://api.bold.co';
+  return normalizeUrl(process.env.BOLD_API_URL) || 'https://integrations.api.bold.co';
 }
 
 function getSecretKey() {
