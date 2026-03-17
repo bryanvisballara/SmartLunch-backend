@@ -688,7 +688,18 @@ function ParentPortal() {
     }
 
     const params = new URLSearchParams(location.search || '');
-    const preapprovalId = String(params.get('preapproval_id') || params.get('preapprovalId') || '').trim();
+    const preapprovalFromQuery = String(params.get('preapproval_id') || params.get('preapprovalId') || '').trim();
+    const pendingAgreementId = String(selectedStudent?.wallet?.autoDebitAgreementId || '').trim();
+    const pendingAgreementStatus = String(selectedStudent?.wallet?.autoDebitAgreementStatus || '').trim().toLowerCase();
+
+    const preapprovalId = preapprovalFromQuery || (
+      !selectedStudent?.wallet?.autoDebitEnabled &&
+      pendingAgreementId &&
+      pendingAgreementStatus === 'pending'
+        ? pendingAgreementId
+        : ''
+    );
+
     if (!preapprovalId) {
       return;
     }
@@ -718,7 +729,7 @@ function ParentPortal() {
             autoDebitEnabled: true,
             autoDebitLimit: autoTopupMinBalanceNumber,
             autoDebitAmount: autoTopupRechargeAmount,
-            autoDebitPaymentMethodId: autoTopupSelectedCardId,
+            autoDebitPaymentMethodId: null,
           },
         });
 
@@ -739,12 +750,14 @@ function ParentPortal() {
   }, [
     isAutoTopupPage,
     selectedStudent?._id,
+    selectedStudent?.wallet?.autoDebitAgreementId,
+    selectedStudent?.wallet?.autoDebitAgreementStatus,
+    selectedStudent?.wallet?.autoDebitEnabled,
     loading,
     error,
     location.search,
     autoTopupMinBalanceNumber,
     autoTopupRechargeAmount,
-    autoTopupSelectedCardId,
   ]);
 
   const onLogout = () => {
