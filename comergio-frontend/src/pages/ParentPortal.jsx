@@ -195,6 +195,9 @@ function ParentPortal() {
   const [autoTopupSubmitLoading, setAutoTopupSubmitLoading] = useState(false);
   const [autoTopupSubmitError, setAutoTopupSubmitError] = useState('');
   const [autoTopupSubmitSuccess, setAutoTopupSubmitSuccess] = useState('');
+  const [autoDebitMenuOpen, setAutoDebitMenuOpen] = useState(false);
+  const [autoDebitCancelLoading, setAutoDebitCancelLoading] = useState(false);
+  const autoDebitMenuRef = useRef(null);
   const [showAutoTopupCongratsModal, setShowAutoTopupCongratsModal] = useState(false);
   const [autoTopupCongratsStudentName, setAutoTopupCongratsStudentName] = useState('');
   const [savedCards, setSavedCards] = useState([]);
@@ -347,6 +350,28 @@ function ParentPortal() {
     Number.isFinite(autoTopupRechargeAmount) &&
     autoTopupRechargeAmount >= 30000
   );
+
+  useEffect(() => {
+    if (!autoDebitMenuOpen) {
+      return undefined;
+    }
+
+    const onDocumentMouseDown = (event) => {
+      if (autoDebitMenuRef.current && !autoDebitMenuRef.current.contains(event.target)) {
+        setAutoDebitMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onDocumentMouseDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentMouseDown);
+    };
+  }, [autoDebitMenuOpen]);
+
+  useEffect(() => {
+    setAutoDebitMenuOpen(false);
+  }, [location.pathname, selectedStudent?._id]);
+
   const meriendaSubscription = meriendasData?.subscription || null;
   const isMeriendasSubscribed = Boolean(meriendaSubscription?.active);
   const meriendaScheduleDays = useMemo(
@@ -1178,6 +1203,39 @@ function ParentPortal() {
     }
   };
 
+  const onDisableAutoTopup = async () => {
+    if (!selectedStudent?._id || autoDebitCancelLoading) {
+      return;
+    }
+
+    setAutoDebitCancelLoading(true);
+    setAutoTopupSubmitError('');
+    setAutoTopupSubmitSuccess('');
+
+    try {
+      const response = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
+        enabled: false,
+      });
+
+      mergeStudentData(response.data?.student || {
+        _id: selectedStudent._id,
+        wallet: {
+          autoDebitEnabled: false,
+          autoDebitLimit: 0,
+          autoDebitAmount: 0,
+          autoDebitPaymentMethodId: null,
+        },
+      });
+
+      setAutoDebitMenuOpen(false);
+      setAutoTopupSubmitSuccess('Debito automatico cancelado correctamente.');
+    } catch (requestError) {
+      setAutoTopupSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo cancelar el debito automatico.');
+    } finally {
+      setAutoDebitCancelLoading(false);
+    }
+  };
+
   const closeAutoTopupCongratsModal = () => {
     setShowAutoTopupCongratsModal(false);
   };
@@ -1638,15 +1696,37 @@ function ParentPortal() {
               <p className="parent-topups-kicker">Saldo disponible</p>
               <h3>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h3>
               {showAutoDebitEstablishedNotice ? (
-                <div className="parent-autodebit-established" role="status" aria-live="polite">
-                  <span className="parent-autodebit-established-check" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
-                    </svg>
-                  </span>
-                  <span>
-                    Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
-                  </span>
+                <div className="parent-autodebit-established-row">
+                  <div className="parent-autodebit-established" role="status" aria-live="polite">
+                    <span className="parent-autodebit-established-check" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
+                      </svg>
+                    </span>
+                    <span>
+                      Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
+                    </span>
+                  </div>
+                  <div className="parent-autodebit-menu-wrap" ref={autoDebitMenuRef}>
+                    <button
+                      aria-expanded={autoDebitMenuOpen}
+                      aria-label="Opciones de recarga automatica"
+                      className="parent-autodebit-menu-btn"
+                      onClick={() => setAutoDebitMenuOpen((prev) => !prev)}
+                      type="button"
+                    >
+                      <span />
+                      <span />
+                      <span />
+                    </button>
+                    {autoDebitMenuOpen ? (
+                      <div className="parent-autodebit-menu">
+                        <button disabled={autoDebitCancelLoading} onClick={onDisableAutoTopup} type="button">
+                          {autoDebitCancelLoading ? 'Cancelando...' : 'Cancelar debito automatico'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               <div className="parent-topups-pill">
@@ -2773,15 +2853,37 @@ function ParentPortal() {
               <p className="meta">Saldo actual</p>
               <h2>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h2>
               {showAutoDebitEstablishedNotice ? (
-                <div className="parent-autodebit-established" role="status" aria-live="polite">
-                  <span className="parent-autodebit-established-check" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
-                    </svg>
-                  </span>
-                  <span>
-                    Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
-                  </span>
+                <div className="parent-autodebit-established-row">
+                  <div className="parent-autodebit-established" role="status" aria-live="polite">
+                    <span className="parent-autodebit-established-check" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
+                      </svg>
+                    </span>
+                    <span>
+                      Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
+                    </span>
+                  </div>
+                  <div className="parent-autodebit-menu-wrap" ref={autoDebitMenuRef}>
+                    <button
+                      aria-expanded={autoDebitMenuOpen}
+                      aria-label="Opciones de recarga automatica"
+                      className="parent-autodebit-menu-btn"
+                      onClick={() => setAutoDebitMenuOpen((prev) => !prev)}
+                      type="button"
+                    >
+                      <span />
+                      <span />
+                      <span />
+                    </button>
+                    {autoDebitMenuOpen ? (
+                      <div className="parent-autodebit-menu">
+                        <button disabled={autoDebitCancelLoading} onClick={onDisableAutoTopup} type="button">
+                          {autoDebitCancelLoading ? 'Cancelando...' : 'Cancelar debito automatico'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               <p>
