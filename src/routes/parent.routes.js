@@ -118,6 +118,7 @@ function serializeCard(card) {
   return {
     _id: card._id,
     token: card.token,
+    provider: card.provider || 'mercadopago',
     brand: card.brand || 'unknown',
     last4: card.last4,
     expMonth: card.expMonth,
