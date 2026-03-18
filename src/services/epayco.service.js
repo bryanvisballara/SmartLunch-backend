@@ -36,6 +36,16 @@ function getEntityClientId() {
   return String(process.env.EPAYCO_ENTITY_CLIENT_ID || '').trim();
 }
 
+function getCustomerCreatePath() {
+  const raw = String(process.env.EPAYCO_CUSTOMER_CREATE_PATH || '').trim();
+  if (!raw) return '';
+  return raw.startsWith('/') ? raw : `/${raw}`;
+}
+
+function getExistingCustomerIdOverride() {
+  return normalizeCustomerId(process.env.EPAYCO_EXISTING_CUSTOMER_ID || '');
+}
+
 function isTestMode() {
   return String(process.env.EPAYCO_TEST || 'false').toLowerCase() === 'true';
 }
@@ -620,7 +630,9 @@ async function createOrUpdateCustomer({
   };
 
   const tryCreateCustomer = async () => {
+    const configuredCreatePath = getCustomerCreatePath();
     const customerCreateEndpoints = [
+      configuredCreatePath,
       '/subscriptions/customer/create',
       '/subscriptions/customer/save',
       '/subscriptions/customer/new',
@@ -634,7 +646,7 @@ async function createOrUpdateCustomer({
       '/customer/save',
       '/customers/create',
       '/customers/save',
-    ];
+    ].filter(Boolean);
 
     let lastError = null;
     for (const endpoint of customerCreateEndpoints) {
@@ -670,7 +682,7 @@ async function createOrUpdateCustomer({
   };
 
   let lastSubscriptionError = null;
-  const resolvedExistingCustomerId = normalizeCustomerId(existingCustomerId);
+  const resolvedExistingCustomerId = normalizeCustomerId(existingCustomerId) || getExistingCustomerIdOverride();
 
   if (resolvedExistingCustomerId) {
     try {
