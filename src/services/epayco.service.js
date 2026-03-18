@@ -315,29 +315,11 @@ async function createCardToken({ cardNumber, expirationMonth, expirationYear, se
     cardCvc: cleanCvv,
   };
 
-  try {
-    const result = await epaycoRequest('/token/card', {
-      method: 'POST',
-      body: primaryBody,
-    });
-    return result.data || result;
-  } catch (error) {
-    // Backward compatibility for legacy integrations that still expose /payment/process/base64
-    const cardData = {
-      'card[number]': cleanCardNumber,
-      'card[exp_year]': cleanExpYear,
-      'card[exp_month]': cleanExpMonth,
-      'card[cvc]': cleanCvv,
-      hasCvv: true,
-    };
-
-    const encodedData = Buffer.from(JSON.stringify(cardData)).toString('base64');
-    const legacyResult = await epaycoRequest('/payment/process/base64', {
-      method: 'POST',
-      body: { data: encodedData },
-    });
-    return legacyResult.data || legacyResult;
-  }
+  const result = await epaycoRequest('/token/card', {
+    method: 'POST',
+    body: primaryBody,
+  });
+  return result.data || result;
 }
 
 // ---------------------------------------------------------------------------
