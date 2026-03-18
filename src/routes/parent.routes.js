@@ -1389,8 +1389,8 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       return res.status(400).json({ message: 'autoDebitLimit must be at least 20000' });
     }
 
-    if (!Number.isFinite(autoDebitAmount) || autoDebitAmount < 25000) {
-      return res.status(400).json({ message: 'autoDebitAmount must be at least 25000' });
+    if (!Number.isFinite(autoDebitAmount) || autoDebitAmount < 20000) {
+      return res.status(400).json({ message: 'autoDebitAmount must be at least 20000' });
     }
 
     const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: 'parent', deletedAt: null })

@@ -2081,7 +2081,7 @@ function ParentPortal() {
             <label className="parent-auto-topup-custom-row">
               <span>Otro valor</span>
               <input
-                min="25000"
+                min="20000"
                 step="1000"
                 type="number"
                 placeholder="Ingrese un valor"
