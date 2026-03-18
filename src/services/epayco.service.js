@@ -15,6 +15,15 @@ function getApiBaseUrls() {
   return Array.from(new Set(urls.filter(Boolean)));
 }
 
+function getApiBaseUrlsWithPreferred(preferredBaseUrl) {
+  const preferred = normalizeBaseUrl(preferredBaseUrl || '');
+  const urls = getApiBaseUrls();
+  if (!preferred) {
+    return urls;
+  }
+  return [preferred, ...urls.filter((url) => url !== preferred)];
+}
+
 function getPublicKey() {
   return String(process.env.EPAYCO_PUBLIC_KEY || '').trim();
 }
@@ -85,7 +94,7 @@ function extractEpaycoErrorMessage(data, responseStatus, path) {
   return `ePayco request failed (${responseStatus}) on ${path}`;
 }
 
-async function epaycoLogin() {
+async function epaycoLogin(preferredBaseUrl = null) {
   const publicKey = getPublicKey();
   const privateKey = getPrivateKey();
   const entityClientId = getEntityClientId();
@@ -135,7 +144,7 @@ async function epaycoLogin() {
   let lastPayload = null;
   let lastMessage = 'ePayco login failed';
 
-  for (const baseUrl of getApiBaseUrls()) {
+  for (const baseUrl of getApiBaseUrlsWithPreferred(preferredBaseUrl)) {
     for (const attempt of attempts) {
       const credentialsToTry = attempt.useCredentialVariants ? credentialVariants : [null];
 
@@ -177,15 +186,21 @@ async function epaycoLogin() {
   throw err;
 }
 
-async function getBearer() {
-  if (_bearerToken && Date.now() < _bearerExpiresAt && _bearerBaseUrl) {
+async function getBearer(preferredBaseUrl = null) {
+  const preferred = normalizeBaseUrl(preferredBaseUrl || '');
+  if (
+    _bearerToken
+    && Date.now() < _bearerExpiresAt
+    && _bearerBaseUrl
+    && (!preferred || preferred === _bearerBaseUrl)
+  ) {
     return {
       token: _bearerToken,
       baseUrl: _bearerBaseUrl,
     };
   }
 
-  const loginResult = await epaycoLogin();
+  const loginResult = await epaycoLogin(preferred || null);
   _bearerToken = String(loginResult.__accessToken || loginResult.bearer || loginResult.token || '').trim();
   _bearerBaseUrl = String(loginResult.__baseUrl || getApiBaseUrls()[0] || '').trim();
 
@@ -211,33 +226,34 @@ function invalidateBearerCache() {
 // ---------------------------------------------------------------------------
 
 async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders = {} } = {}) {
-  const bearerSession = await getBearer();
-  const url = `${String(bearerSession.baseUrl || '').trim()}${path}`;
+  const attemptRequest = async (preferredBaseUrl = null) => {
+    const bearerSession = await getBearer(preferredBaseUrl);
+    const url = `${String(bearerSession.baseUrl || '').trim()}${path}`;
 
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${bearerSession.token}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...extraHeaders,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${bearerSession.token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...extraHeaders,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
 
-  let data = {};
-  try {
-    data = await response.json();
-  } catch { /* empty */ }
+    let data = {};
+    try {
+      data = await response.json();
+    } catch { /* empty */ }
 
-  // ePayco responds with HTTP 200 even for logical errors; check data.status
-  const ok = response.ok && (data.status === true || data.status === 'true');
+    const ok = response.ok && (data.status === true || data.status === 'true');
+    if (ok) {
+      return data;
+    }
 
-  if (!ok) {
     const rawMsg = extractEpaycoErrorMessage(data, response.status, path);
     const msg = normalizeEpaycoProviderErrorMessage(rawMsg);
 
-    // If the error is auth-related, flush the cached token so next call re-logs
     if (response.status === 401 || response.status === 403) {
       invalidateBearerCache();
     }
@@ -246,13 +262,38 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
     err.status = response.status;
     err.providerPath = path;
     err.providerPayload = data;
+    err.providerBaseUrl = String(bearerSession.baseUrl || '').trim();
     if (String(rawMsg || '').toLowerCase().includes('invalid client') || String(rawMsg || '').toLowerCase().includes('invalid_client')) {
       err.code = 'EPAYCO_INVALID_CLIENT';
     }
     throw err;
-  }
+  };
 
-  return data;
+  try {
+    return await attemptRequest();
+  } catch (error) {
+    const status = Number(error?.status);
+    if (status !== 404) {
+      throw error;
+    }
+
+    const originalBase = String(error?.providerBaseUrl || '').trim();
+    const alternateBases = getApiBaseUrls().filter((url) => url && url !== originalBase);
+    let lastError = error;
+
+    for (const altBase of alternateBases) {
+      try {
+        return await attemptRequest(altBase);
+      } catch (retryError) {
+        lastError = retryError;
+        if (Number(retryError?.status) !== 404) {
+          throw retryError;
+        }
+      }
+    }
+
+    throw lastError;
+  }
 }
 
 // ---------------------------------------------------------------------------
