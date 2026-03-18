@@ -246,7 +246,38 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
       data = await response.json();
     } catch { /* empty */ }
 
-    const ok = response.ok && (data.status === true || data.status === 'true');
+    const hasStatusField = Object.prototype.hasOwnProperty.call(data || {}, 'status');
+    const hasSuccessField = Object.prototype.hasOwnProperty.call(data || {}, 'success');
+    const hasErrorField = Object.prototype.hasOwnProperty.call(data || {}, 'error');
+
+    const normalizedStatus = String(data?.status ?? '').toLowerCase().trim();
+    const normalizedError = String(data?.error ?? '').toLowerCase().trim();
+
+    const explicitFailure =
+      (hasStatusField && [false, 0, '0'].includes(data?.status))
+      || (hasStatusField && ['false', 'error', 'failed', 'fail', 'rejected'].includes(normalizedStatus))
+      || (hasSuccessField && data?.success === false)
+      || (hasErrorField && data?.error === true)
+      || (hasErrorField && Boolean(normalizedError) && normalizedError !== 'false');
+
+    const explicitSuccess =
+      (hasStatusField && (data?.status === true || data?.status === 1 || data?.status === '1'))
+      || (hasStatusField && ['true', 'ok', 'success', 'accepted', 'approved'].includes(normalizedStatus))
+      || (hasSuccessField && data?.success === true);
+
+    const hasTokenLikePayload = Boolean(
+      data?.cardToken
+      || data?.token
+      || data?.token_card
+      || data?.id
+      || data?.data?.cardToken
+      || data?.data?.token
+      || data?.data?.token_card
+      || data?.data?.id
+    );
+
+    const implicitOk = !hasStatusField && !hasSuccessField && !hasErrorField;
+    const ok = response.ok && !explicitFailure && (explicitSuccess || hasTokenLikePayload || implicitOk);
     if (ok) {
       return data;
     }
