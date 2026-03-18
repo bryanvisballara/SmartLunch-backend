@@ -10,6 +10,10 @@ function getApiBaseUrl() {
   return normalizeUrl(process.env.MERCADOPAGO_API_URL) || 'https://api.mercadopago.com';
 }
 
+function getDefaultApiBaseUrl() {
+  return 'https://api.mercadopago.com';
+}
+
 function isMercadoPagoConfigured() {
   return Boolean(getAccessToken());
 }
@@ -20,33 +24,62 @@ async function mercadopagoRequest(path, { method = 'GET', body = null, extraHead
     throw new Error('MERCADOPAGO_ACCESS_TOKEN is not configured');
   }
 
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...extraHeaders,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  async function doRequest(baseUrl) {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...extraHeaders,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
 
-  let data = {};
-  try {
-    data = await response.json();
-  } catch (error) {
-    data = {};
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (error) {
+      data = {};
+    }
+
+    return { response, data };
   }
 
-  if (!response.ok) {
-    const message = data?.message || data?.error || `Mercado Pago request failed (${response.status})`;
-    const requestError = new Error(message);
-    requestError.status = response.status;
-    requestError.providerPayload = data;
-    throw requestError;
+  const primaryBaseUrl = getApiBaseUrl();
+  const primaryResult = await doRequest(primaryBaseUrl);
+
+  if (primaryResult.response.ok) {
+    return primaryResult.data;
   }
 
-  return data;
+  const isResourceNotFound = Number(primaryResult.response.status || 0) === 404
+    || String(primaryResult.data?.error || '').toLowerCase() === 'resource not found';
+  const defaultBaseUrl = getDefaultApiBaseUrl();
+  const shouldRetryAgainstDefaultBase = isResourceNotFound && primaryBaseUrl !== defaultBaseUrl;
+
+  if (shouldRetryAgainstDefaultBase) {
+    const fallbackResult = await doRequest(defaultBaseUrl);
+    if (fallbackResult.response.ok) {
+      return fallbackResult.data;
+    }
+
+    const fallbackMessage = fallbackResult.data?.message
+      || fallbackResult.data?.error
+      || `Mercado Pago request failed (${fallbackResult.response.status})`;
+    const fallbackError = new Error(fallbackMessage);
+    fallbackError.status = fallbackResult.response.status;
+    fallbackError.providerPayload = fallbackResult.data;
+    throw fallbackError;
+  }
+
+  const message = primaryResult.data?.message
+    || primaryResult.data?.error
+    || `Mercado Pago request failed (${primaryResult.response.status})`;
+  const requestError = new Error(message);
+  requestError.status = primaryResult.response.status;
+  requestError.providerPayload = primaryResult.data;
+  throw requestError;
 }
 
 async function findOrCreateCustomer({ email, firstName, lastName, externalReference }) {
@@ -198,7 +231,7 @@ async function createAuthorizedPayment({ preapprovalId, amount, externalReferenc
   }
 }
 
-async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
+async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, payerEmail, issuerId, externalReference, description, idempotencyKey, deviceId }) {
   const headers = {};
   if (idempotencyKey) {
     headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
@@ -220,11 +253,21 @@ async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId
       preapproval_id: String(preapprovalId || '').trim() || undefined,
       installments: 1,
       description: String(description || 'Recarga automatica Comergio').trim(),
-      payer: {
-        type: 'customer',
-        id: String(customerId || '').trim(),
-      },
-      external_reference: String(externalReference || '').trim(),
+      ...(String(customerId || '').trim()
+        ? {
+          payer: {
+            type: 'customer',
+            id: String(customerId || '').trim(),
+          },
+        }
+        : (String(payerEmail || '').trim()
+          ? {
+            payer: {
+              email: String(payerEmail || '').trim().toLowerCase(),
+            },
+          }
+          : {})),
+      external_reference: String(externalReference || '').trim() || undefined,
     },
   });
 }
