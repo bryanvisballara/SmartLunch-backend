@@ -247,7 +247,7 @@ async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId
       transaction_amount: Number(amount),
       payment_method_id: String(paymentMethodId || '').trim() || undefined,
       issuer_id: issuerId ? String(issuerId).trim() : undefined,
-      payment_method_reference_id: Number.isFinite(Number(paymentMethodReferenceId))
+      card_id: Number.isFinite(Number(paymentMethodReferenceId))
         ? Number(paymentMethodReferenceId)
         : undefined,
       preapproval_id: String(preapprovalId || '').trim() || undefined,
