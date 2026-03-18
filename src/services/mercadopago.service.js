@@ -169,16 +169,33 @@ async function createAuthorizedPayment({ preapprovalId, amount, externalReferenc
     headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
   }
 
-  return mercadopagoRequest('/authorized_payments', {
-    method: 'POST',
-    extraHeaders: headers,
-    body: {
-      preapproval_id: String(preapprovalId || '').trim(),
-      reason: String(description || 'Recarga automatica Comergio').trim(),
-      external_reference: String(externalReference || '').trim(),
-      transaction_amount: Number(amount),
-    },
-  });
+  const requestBody = {
+    preapproval_id: String(preapprovalId || '').trim(),
+    reason: String(description || 'Recarga automatica Comergio').trim(),
+    external_reference: String(externalReference || '').trim(),
+    transaction_amount: Number(amount),
+  };
+
+  try {
+    return await mercadopagoRequest('/authorized_payments', {
+      method: 'POST',
+      extraHeaders: headers,
+      body: requestBody,
+    });
+  } catch (error) {
+    const isNotFound = Number(error?.status || 0) === 404
+      || String(error?.providerPayload?.error || '').toLowerCase() === 'resource not found';
+
+    if (!isNotFound) {
+      throw error;
+    }
+
+    return mercadopagoRequest('/v1/authorized_payments', {
+      method: 'POST',
+      extraHeaders: headers,
+      body: requestBody,
+    });
+  }
 }
 
 async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, issuerId, externalReference, description, idempotencyKey, deviceId }) {
