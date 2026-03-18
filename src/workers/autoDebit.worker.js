@@ -7,6 +7,7 @@ const {
   isMercadoPagoConfigured,
   createAuthorizedPayment: createMercadoPagoAuthorizedPayment,
   createPayment: createMercadoPagoPayment,
+  createCardTokenFromCustomerCard: createMercadoPagoCardTokenFromCustomerCard,
   getPreapproval: getMercadoPagoPreapproval,
   toInternalStatus: toMercadoPagoInternalStatus,
 } = require('../services/mercadopago.service');
@@ -281,10 +282,20 @@ async function runAutoDebitCycle() {
             throw new Error('Tarjeta tokenizada inválida para cobro automático');
           }
 
+          const generatedCardToken = await createMercadoPagoCardTokenFromCustomerCard({
+            customerId: providerCustomerId,
+            cardId: cardRefId,
+          });
+          const oneClickToken = String(generatedCardToken?.id || '').trim();
+          if (!oneClickToken) {
+            throw new Error('No fue posible generar token para la tarjeta guardada');
+          }
+
           providerPayment = await createMercadoPagoPayment({
             amount,
+            token: oneClickToken,
             paymentMethodId: paymentMethodProviderId || undefined,
-            paymentMethodReferenceId: cardRefId,
+            paymentMethodReferenceId: undefined,
             customerId: providerCustomerId,
             payerEmail: parentEmail || undefined,
             externalReference: String(studentId),

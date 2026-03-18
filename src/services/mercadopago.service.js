@@ -124,6 +124,16 @@ async function createCardToken({ cardNumber, expirationMonth, expirationYear, se
   });
 }
 
+async function createCardTokenFromCustomerCard({ customerId, cardId }) {
+  return mercadopagoRequest('/v1/card_tokens', {
+    method: 'POST',
+    body: {
+      customer_id: String(customerId || '').trim(),
+      card_id: String(cardId || '').trim(),
+    },
+  });
+}
+
 async function createCustomerCard({ customerId, cardToken }) {
   return mercadopagoRequest(`/v1/customers/${encodeURIComponent(String(customerId))}/cards`, {
     method: 'POST',
@@ -231,7 +241,7 @@ async function createAuthorizedPayment({ preapprovalId, amount, externalReferenc
   }
 }
 
-async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, payerEmail, issuerId, externalReference, description, idempotencyKey, deviceId }) {
+async function createPayment({ amount, token, paymentMethodId, paymentMethodReferenceId, preapprovalId, customerId, payerEmail, issuerId, externalReference, description, idempotencyKey, deviceId }) {
   const headers = {};
   if (idempotencyKey) {
     headers['X-Idempotency-Key'] = String(idempotencyKey).trim();
@@ -245,6 +255,7 @@ async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId
     extraHeaders: headers,
     body: {
       transaction_amount: Number(amount),
+      token: String(token || '').trim() || undefined,
       payment_method_id: String(paymentMethodId || '').trim() || undefined,
       issuer_id: issuerId ? String(issuerId).trim() : undefined,
       card_id: Number.isFinite(Number(paymentMethodReferenceId))
@@ -280,6 +291,7 @@ module.exports = {
   isMercadoPagoConfigured,
   findOrCreateCustomer,
   createCardToken,
+  createCardTokenFromCustomerCard,
   createCustomerCard,
   deleteCustomerCard,
   getCustomerCard,
