@@ -102,6 +102,42 @@ function isFalsyErrorValue(value) {
   return !normalized || ['false', 'null', 'undefined', 'none', 'ok', 'success'].includes(normalized);
 }
 
+function extractCustomerIdFromPayload(payload) {
+  return String(
+    payload?.customerId
+    || payload?.customer_id
+    || payload?.idCustomer
+    || payload?.id_customer
+    || payload?.customer?.id
+    || payload?.customer?.customerId
+    || payload?.customer?.customer_id
+    || payload?.data?.customerId
+    || payload?.data?.customer_id
+    || payload?.data?.idCustomer
+    || payload?.data?.id_customer
+    || payload?.data?.customer?.id
+    || payload?.data?.customer?.customerId
+    || payload?.data?.customer?.customer_id
+    || ''
+  ).trim();
+}
+
+function extractCardTokenFromPayload(payload) {
+  return String(
+    payload?.token
+    || payload?.token_card
+    || payload?.cardToken
+    || payload?.card_token
+    || payload?.id
+    || payload?.data?.token
+    || payload?.data?.token_card
+    || payload?.data?.cardToken
+    || payload?.data?.card_token
+    || payload?.data?.id
+    || ''
+  ).trim();
+}
+
 async function epaycoLogin(preferredBaseUrl = null) {
   const publicKey = getPublicKey();
   const privateKey = getPrivateKey();
@@ -393,8 +429,9 @@ async function createOrUpdateCustomer({
   franchise,
   mask,
 }) {
+  const normalizedTokenCard = String(tokenCard || '').trim();
   const body = {
-    token_card: String(tokenCard || '').trim(),
+    token_card: normalizedTokenCard,
     name: String(firstName || '').trim(),
     last_name: String(lastName || '').trim(),
     email: String(email || '').trim().toLowerCase(),
@@ -415,8 +452,8 @@ async function createOrUpdateCustomer({
   const subscriptionBody = {
     customerId: String(existingCustomerId || '').trim() || undefined,
     customer_id: String(existingCustomerId || '').trim() || undefined,
-    cardToken: String(tokenCard || '').trim(),
-    token_card: String(tokenCard || '').trim(),
+    cardToken: normalizedTokenCard,
+    token_card: normalizedTokenCard,
     franchise: String(franchise || '').trim() || undefined,
     mask: String(mask || '').trim() || undefined,
     email: body.email,
@@ -432,48 +469,147 @@ async function createOrUpdateCustomer({
     address: body.address,
   };
 
-  const hasExistingCustomerId = Boolean(String(existingCustomerId || '').trim());
-  const subscriptionEndpoints = hasExistingCustomerId
-    ? ['/subscriptions/customer/add/new/token/default', '/subscriptions/customer/add/new/token']
-    : ['/subscriptions/customer/add/new/token'];
+  const createCustomerBody = {
+    name: body.name,
+    last_name: body.last_name,
+    email: body.email,
+    phone: body.phone,
+    cell_phone: body.cell_phone,
+    doc_type: body.doc_type,
+    doc_number: body.doc_number,
+    city: body.city,
+    address: body.address,
+    default: true,
+  };
+
+  const tryAddTokenWithCustomer = async (customerId) => {
+    const resolvedCustomerId = String(customerId || '').trim();
+    if (!resolvedCustomerId) {
+      throw new Error('Missing ePayco customer id for token association');
+    }
+
+    const payload = {
+      ...subscriptionBody,
+      customerId: resolvedCustomerId,
+      customer_id: resolvedCustomerId,
+    };
+
+    const endpoints = [
+      '/subscriptions/customer/add/new/token/default',
+      '/subscriptions/customer/add/new/token',
+    ];
+
+    let lastError = null;
+    for (const endpoint of endpoints) {
+      try {
+        const result = await epaycoRequest(endpoint, {
+          method: 'POST',
+          body: payload,
+        });
+
+        const normalized = result?.data || result;
+        return {
+          ...normalized,
+          customerId: extractCustomerIdFromPayload(normalized) || resolvedCustomerId,
+          token: extractCardTokenFromPayload(normalized) || normalizedTokenCard,
+        };
+      } catch (error) {
+        lastError = error;
+        if (error?.code === 'EPAYCO_INVALID_CLIENT') {
+          throw error;
+        }
+
+        const status = Number(error?.status);
+        if (status === 401 || status === 403) {
+          throw error;
+        }
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    throw new Error('No fue posible asociar la tarjeta al customer en ePayco.');
+  };
+
+  const tryCreateCustomer = async () => {
+    const customerCreateEndpoints = [
+      '/subscriptions/customer/create',
+      '/subscriptions/customer/save',
+      '/subscription/customer/create',
+      '/subscription/customer/save',
+    ];
+
+    let lastError = null;
+    for (const endpoint of customerCreateEndpoints) {
+      try {
+        const result = await epaycoRequest(endpoint, {
+          method: 'POST',
+          body: createCustomerBody,
+        });
+        const normalized = result?.data || result;
+        const customerId = extractCustomerIdFromPayload(normalized);
+        if (customerId) {
+          return customerId;
+        }
+      } catch (error) {
+        lastError = error;
+        const status = Number(error?.status);
+        if (status !== 404 && status !== 400 && status !== 422) {
+          throw error;
+        }
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    return '';
+  };
 
   let lastSubscriptionError = null;
-  for (const endpoint of subscriptionEndpoints) {
+  const resolvedExistingCustomerId = String(existingCustomerId || '').trim();
+
+  if (resolvedExistingCustomerId) {
     try {
-      const result = await epaycoRequest(endpoint, {
-        method: 'POST',
-        body: subscriptionBody,
-      });
-      return result.data || result;
+      return await tryAddTokenWithCustomer(resolvedExistingCustomerId);
     } catch (error) {
       lastSubscriptionError = error;
-
       if (error?.code === 'EPAYCO_INVALID_CLIENT') {
         throw error;
       }
-
       const status = Number(error?.status);
       if (status === 401 || status === 403) {
         throw error;
       }
-
-      // Continue trying alternatives and legacy flow on validation failures (HTTP 200 with success=false).
-      continue;
     }
   }
 
-  try {
-    const legacyResult = await epaycoRequest('/payment/customer/save', {
-      method: 'POST',
-      body,
-    });
+  const createdCustomerId = await tryCreateCustomer();
+  if (createdCustomerId) {
+    return tryAddTokenWithCustomer(createdCustomerId);
+  }
 
-    return legacyResult.data || legacyResult;
-  } catch (legacyError) {
+  // As a last fallback, try direct token association without customerId.
+  try {
+    const result = await epaycoRequest('/subscriptions/customer/add/new/token', {
+      method: 'POST',
+      body: subscriptionBody,
+    });
+    const normalized = result?.data || result;
+    const customerId = extractCustomerIdFromPayload(normalized);
+    return {
+      ...normalized,
+      customerId: customerId || '',
+      token: extractCardTokenFromPayload(normalized) || normalizedTokenCard,
+    };
+  } catch (error) {
     if (lastSubscriptionError) {
-      throw legacyError;
+      throw lastSubscriptionError;
     }
-    throw legacyError;
+    throw error;
   }
 }
 
