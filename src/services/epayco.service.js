@@ -94,6 +94,14 @@ function extractEpaycoErrorMessage(data, responseStatus, path) {
   return `ePayco request failed (${responseStatus}) on ${path}`;
 }
 
+function isFalsyErrorValue(value) {
+  if (value === false || value === 0 || value === '0' || value == null) {
+    return true;
+  }
+  const normalized = String(value).toLowerCase().trim();
+  return !normalized || ['false', 'null', 'undefined', 'none', 'ok', 'success'].includes(normalized);
+}
+
 async function epaycoLogin(preferredBaseUrl = null) {
   const publicKey = getPublicKey();
   const privateKey = getPrivateKey();
@@ -258,7 +266,7 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
       || (hasStatusField && ['false', 'error', 'failed', 'fail', 'rejected'].includes(normalizedStatus))
       || (hasSuccessField && data?.success === false)
       || (hasErrorField && data?.error === true)
-      || (hasErrorField && Boolean(normalizedError) && normalizedError !== 'false');
+      || (hasErrorField && !isFalsyErrorValue(data?.error));
 
     const explicitSuccess =
       (hasStatusField && (data?.status === true || data?.status === 1 || data?.status === '1'))
@@ -276,8 +284,19 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
       || data?.data?.id
     );
 
+    const hasCustomerLikePayload = Boolean(
+      data?.customerId
+      || data?.customer_id
+      || data?.customer
+      || data?.subscription
+      || data?.data?.customerId
+      || data?.data?.customer_id
+      || data?.data?.customer
+      || data?.data?.subscription
+    );
+
     const implicitOk = !hasStatusField && !hasSuccessField && !hasErrorField;
-    const ok = response.ok && !explicitFailure && (explicitSuccess || hasTokenLikePayload || implicitOk);
+    const ok = response.ok && !explicitFailure && (explicitSuccess || hasTokenLikePayload || hasCustomerLikePayload || implicitOk);
     if (ok) {
       return data;
     }
