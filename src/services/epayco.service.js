@@ -38,7 +38,7 @@ function getEntityClientId() {
 
 function getCustomerCreatePath() {
   const raw = String(process.env.EPAYCO_CUSTOMER_CREATE_PATH || '').trim();
-  if (!raw) return '';
+  if (!raw) return '/token/customer';
   return raw.startsWith('/') ? raw : `/${raw}`;
 }
 
@@ -578,6 +578,17 @@ async function createOrUpdateCustomer({
     mask: String(mask || '').trim() || undefined,
   };
 
+  const createCustomerBodyTokenCustomer = {
+    docType: body.doc_type,
+    docNumber: body.doc_number,
+    name: body.name,
+    lastName: body.last_name,
+    email: body.email,
+    cellPhone: body.cell_phone,
+    phone: body.phone,
+    requireCardToken: false,
+  };
+
   const tryAddTokenWithCustomer = async (customerId) => {
     const resolvedCustomerId = String(customerId || '').trim();
     if (!resolvedCustomerId) {
@@ -633,6 +644,7 @@ async function createOrUpdateCustomer({
     const configuredCreatePath = getCustomerCreatePath();
     const customerCreateEndpoints = [
       configuredCreatePath,
+      '/token/customer',
       '/subscriptions/customer/create',
       '/subscriptions/customer/save',
       '/subscriptions/customer/new',
@@ -651,9 +663,13 @@ async function createOrUpdateCustomer({
     let lastError = null;
     for (const endpoint of customerCreateEndpoints) {
       try {
+        const requestBody = endpoint === '/token/customer'
+          ? createCustomerBodyTokenCustomer
+          : createCustomerBody;
+
         const result = await epaycoRequest(endpoint, {
           method: 'POST',
-          body: createCustomerBody,
+          body: requestBody,
         });
         const normalized = result?.data || result;
         const customerId = extractCustomerIdFromPayload(normalized);
