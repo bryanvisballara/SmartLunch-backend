@@ -714,14 +714,13 @@ function ParentPortal() {
     setAutoTopupSubmitError('');
     setAutoTopupSubmitSuccess('');
 
-    const confirmAuthorization = async () => {
+    const activateAutoTopupDirectly = async () => {
       try {
         const response = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
           enabled: true,
           autoDebitLimit: autoTopupMinBalanceNumber,
           autoDebitAmount: autoTopupRechargeAmount,
-          confirmAuthorization: true,
-          preapprovalId,
+          autoDebitPaymentMethodId: autoTopupSelectedCardId,
         });
 
         mergeStudentData(response.data?.student || {
@@ -734,20 +733,20 @@ function ParentPortal() {
           },
         });
 
-        setAutoTopupSubmitSuccess('Autorización confirmada. La recarga automática quedó activa.');
+        setAutoTopupSubmitSuccess('Recarga automática activada correctamente.');
         setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
         setShowAutoTopupCongratsModal(true);
         navigate('/parent/recargas/automatica', { replace: true });
       } catch (requestError) {
         setAutoTopupSubmitError(
-          requestError?.response?.data?.message || requestError?.message || 'No se pudo confirmar la autorización de ePayco.'
+          requestError?.response?.data?.message || requestError?.message || 'No se pudo activar la recarga automática de ePayco.'
         );
       } finally {
         setAutoTopupAuthorizationLoading(false);
       }
     };
 
-    confirmAuthorization();
+    activateAutoTopupDirectly();
   }, [
     isAutoTopupPage,
     selectedStudent?._id,
@@ -1359,8 +1358,9 @@ function ParentPortal() {
       try {
         const confirmResponse = await updateParentPortalStudentAutoDebit(selectedStudent._id, {
           enabled: true,
-          confirmAuthorization: true,
-          preapprovalId: existingPreapprovalId,
+          autoDebitLimit: autoTopupMinBalanceNumber,
+          autoDebitAmount: autoTopupRechargeAmount,
+          autoDebitPaymentMethodId: autoTopupSelectedCardId,
         });
 
         mergeStudentData(confirmResponse.data?.student || { _id: selectedStudent._id, wallet: { autoDebitEnabled: true } });
@@ -1371,9 +1371,7 @@ function ParentPortal() {
         return;
       } catch (err) {
         if (Number(err?.response?.status || 0) !== 409) {
-          setAutoTopupSubmitError(
-            err?.response?.data?.message || err?.message || 'No se pudo validar la autorización en ePayco.'
-          );
+          setAutoTopupSubmitError(err?.response?.data?.message || err?.message || 'No se pudo activar la recarga automática de ePayco.');
           return;
         }
       } finally {
@@ -1402,30 +1400,25 @@ function ParentPortal() {
         autoDebitAmount: payloadAmount,
       });
 
-      const requiresAuthorization = Boolean(response?.data?.requiresAuthorization);
-      const authorizationUrl = String(response?.data?.authorizationUrl || '').trim();
-      const preapprovalId = String(response?.data?.preapprovalId || '').trim();
-
-      if (!requiresAuthorization || !authorizationUrl) {
-        setAutoTopupSubmitError('No pudimos obtener el enlace de autorización de ePayco. Intenta de nuevo.');
-        return;
-      }
-
-      setAutoTopupPendingAuthorizationUrl(authorizationUrl);
-      setAutoTopupPendingPreapprovalId(preapprovalId);
       mergeStudentData(response.data?.student || {
         _id: selectedStudent._id,
-        wallet: { autoDebitAgreementId: preapprovalId, autoDebitAgreementStatus: 'pending', autoDebitEnabled: false },
+        wallet: {
+          autoDebitEnabled: true,
+          autoDebitLimit: payloadLimit,
+          autoDebitAmount: payloadAmount,
+          autoDebitPaymentMethodId: autoTopupSelectedCardId,
+          autoDebitAgreementId: '',
+          autoDebitAgreementStatus: '',
+        },
       });
-
-      try {
-        window.open(authorizationUrl, '_blank');
-      } catch (_) {
-        window.location.assign(authorizationUrl);
-      }
+      setAutoTopupPendingAuthorizationUrl('');
+      setAutoTopupPendingPreapprovalId('');
+      setAutoTopupSubmitSuccess('Recarga automática activada correctamente.');
+      setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
+      setShowAutoTopupCongratsModal(true);
     } catch (requestError) {
       setAutoTopupSubmitError(
-        requestError?.response?.data?.message || requestError?.message || 'No se pudo abrir la autorización de ePayco.'
+        requestError?.response?.data?.message || requestError?.message || 'No se pudo activar la recarga automática de ePayco.'
       );
     } finally {
       setAutoTopupSubmitLoading(false);
