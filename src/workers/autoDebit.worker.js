@@ -1,6 +1,7 @@
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Wallet = require('../models/wallet.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
+const User = require('../models/user.model');
 const {
   isMercadoPagoConfigured,
   createAuthorizedPayment: createMercadoPagoAuthorizedPayment,
@@ -192,6 +193,8 @@ async function runAutoDebitCycle() {
       }
 
       const parentId = link.parentId;
+      const parentUser = await User.findById(parentId).select('email').lean();
+      const parentEmail = String(parentUser?.email || '').trim().toLowerCase();
 
       const autoDebitAgreementId = String(lockedWallet.autoDebitAgreementId || '').trim();
       const autoDebitAgreementStatus = String(lockedWallet.autoDebitAgreementStatus || '').trim().toLowerCase();
@@ -260,7 +263,7 @@ async function runAutoDebitCycle() {
           // Compatibility fallback: some MP accounts do not expose /authorized_payments.
           const agreement = await getMercadoPagoPreapproval(autoDebitAgreementId);
           const payerId = String(agreement?.payer_id || agreement?.payer?.id || '').trim();
-          const payerEmail = String(agreement?.payer_email || agreement?.payer?.email || '').trim().toLowerCase();
+          const payerEmail = String(agreement?.payer_email || agreement?.payer?.email || parentEmail || '').trim().toLowerCase();
           const cardId = Number(agreement?.card_id || agreement?.card?.id || 0);
           const paymentMethodId = String(
             agreement?.payment_method_id
