@@ -390,6 +390,8 @@ async function createOrUpdateCustomer({
   city,
   address,
   existingCustomerId,
+  franchise,
+  mask,
 }) {
   const body = {
     token_card: String(tokenCard || '').trim(),
@@ -415,6 +417,8 @@ async function createOrUpdateCustomer({
     customer_id: String(existingCustomerId || '').trim() || undefined,
     cardToken: String(tokenCard || '').trim(),
     token_card: String(tokenCard || '').trim(),
+    franchise: String(franchise || '').trim() || undefined,
+    mask: String(mask || '').trim() || undefined,
     email: body.email,
     docType: body.doc_type,
     doc_type: body.doc_type,
@@ -428,11 +432,12 @@ async function createOrUpdateCustomer({
     address: body.address,
   };
 
-  const subscriptionEndpoints = [
-    '/subscriptions/customer/add/new/token/default',
-    '/subscriptions/customer/add/new/token',
-  ];
+  const hasExistingCustomerId = Boolean(String(existingCustomerId || '').trim());
+  const subscriptionEndpoints = hasExistingCustomerId
+    ? ['/subscriptions/customer/add/new/token/default', '/subscriptions/customer/add/new/token']
+    : ['/subscriptions/customer/add/new/token'];
 
+  let lastSubscriptionError = null;
   for (const endpoint of subscriptionEndpoints) {
     try {
       const result = await epaycoRequest(endpoint, {
@@ -441,18 +446,35 @@ async function createOrUpdateCustomer({
       });
       return result.data || result;
     } catch (error) {
-      if (Number(error?.status) !== 404) {
+      lastSubscriptionError = error;
+
+      if (error?.code === 'EPAYCO_INVALID_CLIENT') {
         throw error;
       }
+
+      const status = Number(error?.status);
+      if (status === 401 || status === 403) {
+        throw error;
+      }
+
+      // Continue trying alternatives and legacy flow on validation failures (HTTP 200 with success=false).
+      continue;
     }
   }
 
-  const legacyResult = await epaycoRequest('/payment/customer/save', {
-    method: 'POST',
-    body,
-  });
+  try {
+    const legacyResult = await epaycoRequest('/payment/customer/save', {
+      method: 'POST',
+      body,
+    });
 
-  return legacyResult.data || legacyResult;
+    return legacyResult.data || legacyResult;
+  } catch (legacyError) {
+    if (lastSubscriptionError) {
+      throw legacyError;
+    }
+    throw legacyError;
+  }
 }
 
 // ---------------------------------------------------------------------------

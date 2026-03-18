@@ -78,6 +78,16 @@ function detectCardBrand(cardDigits) {
   return 'unknown';
 }
 
+function toEpaycoFranchise(brandValue) {
+  const normalized = String(brandValue || '').trim().toLowerCase();
+  if (normalized === 'visa') return 'VISA';
+  if (normalized === 'mastercard') return 'MASTERCARD';
+  if (normalized === 'amex' || normalized === 'american_express' || normalized === 'american express') return 'AMEX';
+  if (normalized === 'diners' || normalized === 'diners_club') return 'DINERS';
+  if (normalized === 'discover') return 'DISCOVER';
+  return '';
+}
+
 function parseExpiry(expiryInput) {
   const value = String(expiryInput || '').trim();
   const matched = value.match(/^(\d{2})\s*\/\s*(\d{2}|\d{4})$/);
@@ -923,6 +933,7 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     if (true) {
       // 1. Tokenize the card (with CVV) to get a one-time token
       const rawCardToken = incomingCardToken || null;
+      let tokenResultData = null;
       let oneTimeToken;
       if (rawCardToken) {
         oneTimeToken = rawCardToken;
@@ -933,6 +944,7 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
           expirationYear: expiry.year,
           securityCode: cvv,
         });
+        tokenResultData = tokenResult || null;
         oneTimeToken = String(
           tokenResult?.id
           || tokenResult?.token
@@ -947,6 +959,45 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         return res.status(400).json({ message: 'No se pudo tokenizar la tarjeta en ePayco.' });
       }
 
+      const existingEpaycoCard = await ParentPaymentMethod.findOne({
+        schoolId,
+        parentUserId,
+        provider: 'epayco',
+        deletedAt: null,
+        providerCustomerId: { $exists: true, $nin: ['', null] },
+      })
+        .select('providerCustomerId')
+        .lean();
+
+      const existingEpaycoCustomerId = String(existingEpaycoCard?.providerCustomerId || '').trim() || null;
+
+      const resolvedBrand = String(
+        incomingCardBrand
+        || tokenResultData?.franchise
+        || tokenResultData?.brand
+        || fallbackBrand
+        || 'unknown'
+      ).trim();
+
+      const resolvedLast4 = String(
+        incomingCardLast4
+        || tokenResultData?.last4
+        || tokenResultData?.lastFour
+        || tokenResultData?.last_digits
+        || fallbackLast4
+      ).trim();
+
+      const inferredMask = cardNumber
+        ? `${cardNumber.slice(0, 6)}******${cardNumber.slice(-4)}`
+        : (resolvedLast4 ? `******${resolvedLast4}` : '');
+
+      const resolvedMask = String(tokenResultData?.mask || tokenResultData?.cardMask || inferredMask).trim();
+      const resolvedFranchise = String(
+        tokenResultData?.franchise
+        || tokenResultData?.cardFranchise
+        || toEpaycoFranchise(resolvedBrand)
+      ).trim();
+
       // 2. Save customer / save card → get permanent customerId + saved card token
       const customerResult = await createEpaycoCustomer({
         tokenCard: oneTimeToken,
@@ -955,6 +1006,9 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         lastName,
         docType,
         docNumber: document,
+        existingCustomerId: existingEpaycoCustomerId,
+        franchise: resolvedFranchise,
+        mask: resolvedMask,
       });
 
       const epaycoCustomerId = String(customerResult?.customerId || customerResult?.customer_id || customerResult?.id || '').trim();
