@@ -121,6 +121,16 @@ function getFrontendBaseUrl() {
   return String(process.env.FRONTEND_URL || 'https://comergio.com').trim().replace(/\/$/, '');
 }
 
+function getMercadoPagoErrorMessage(error) {
+  const directMessage = String(error?.message || '').trim();
+  const providerPayload = error?.providerPayload || null;
+  const cause = Array.isArray(providerPayload?.cause) ? providerPayload.cause[0] : null;
+  const causeDescription = String(cause?.description || '').trim();
+  const payloadMessage = String(providerPayload?.message || providerPayload?.error || '').trim();
+
+  return causeDescription || payloadMessage || directMessage || 'No fue posible autorizar el método de pago en Mercado Pago.';
+}
+
 function serializeCard(card) {
   return {
     _id: card._id,
@@ -1462,6 +1472,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
     }
 
     const frontendBaseUrl = getFrontendBaseUrl();
+    const preapprovalStartDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const preapproval = await createPreapproval({
       reason: `Recarga automática Comergio - ${String(studentId)}`,
       externalReference: `${schoolId}:${String(studentId)}:${String(parentUserId)}:${Date.now()}`,
@@ -1471,6 +1482,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       transactionAmount: autoDebitAmount,
       frequency: 1,
       frequencyType: 'months',
+      startDate: preapprovalStartDate,
     });
 
     const preapprovalId = String(preapproval?.id || '').trim();
@@ -1520,7 +1532,10 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    const status = Number(error?.status || 500);
+    const normalizedStatus = Number.isFinite(status) ? status : 500;
+    const message = getMercadoPagoErrorMessage(error);
+    return res.status(normalizedStatus >= 400 && normalizedStatus < 600 ? normalizedStatus : 500).json({ message });
   }
 });
 

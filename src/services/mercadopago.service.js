@@ -119,6 +119,8 @@ async function createPreapproval({
   transactionAmount,
   frequency = 1,
   frequencyType = 'months',
+  startDate,
+  endDate,
 }) {
   return mercadopagoRequest('/preapproval', {
     method: 'POST',
@@ -132,6 +134,8 @@ async function createPreapproval({
         frequency_type: String(frequencyType || 'months').trim().toLowerCase(),
         transaction_amount: Number(transactionAmount || 0),
         currency_id: String(currencyId || 'COP').trim().toUpperCase(),
+        ...(startDate ? { start_date: String(startDate).trim() } : {}),
+        ...(endDate ? { end_date: String(endDate).trim() } : {}),
       },
       status: 'pending',
     },
