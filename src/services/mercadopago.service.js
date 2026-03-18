@@ -212,7 +212,7 @@ async function createPayment({ amount, paymentMethodId, paymentMethodReferenceId
     extraHeaders: headers,
     body: {
       transaction_amount: Number(amount),
-      payment_method_id: String(paymentMethodId || '').trim(),
+      payment_method_id: String(paymentMethodId || '').trim() || undefined,
       issuer_id: issuerId ? String(issuerId).trim() : undefined,
       payment_method_reference_id: Number.isFinite(Number(paymentMethodReferenceId))
         ? Number(paymentMethodReferenceId)
