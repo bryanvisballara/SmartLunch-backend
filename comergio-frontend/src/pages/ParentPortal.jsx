@@ -2081,7 +2081,7 @@ function ParentPortal() {
             <label className="parent-auto-topup-custom-row">
               <span>Otro valor</span>
               <input
-                min="30000"
+                min="25000"
                 step="1000"
                 type="number"
                 placeholder="Ingrese un valor"
@@ -2099,7 +2099,7 @@ function ParentPortal() {
                 <path d="M11 8h2v7h-2V8Zm0 8h2v2h-2v-2Zm1-14A10 10 0 1 0 22 12A10 10 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8a8 8 0 0 1-8 8Z" fill="currentColor"/>
               </svg>
               <p>
-                Recuerda que cada recarga tiene un costo adicional de <strong>{formatCurrency(autoTopupFeeAmount)}</strong> por el valor del servicio de recarga.
+                Cada recarga tiene un costo por transacción del <strong>1.5%</strong> sobre el valor a recargar{autoTopupRechargeAmount > 0 && ` (${formatCurrency(autoTopupFeeAmount)})`}.
               </p>
             </div>
 
@@ -2112,12 +2112,7 @@ function ParentPortal() {
                   <strong>⚠️ Se te cobrará apenas autorices en Mercado Pago</strong>
                 </p>
                 <p className="parent-auto-topup-warning-text">
-                  Cuando autorices el débito automático en Mercado Pago, se aplicará una recarga de <strong>{formatCurrency(autoTopupRechargeAmount)}</strong> a la cuenta de {selectedStudentFirstName}. 
-                  {autoTopupFeeAmount > 0 && (
-                    <>
-                      {' '}Se incluye un costo adicional de <strong>{formatCurrency(autoTopupFeeAmount)}</strong> por el servicio de recarga.
-                    </>
-                  )}
+                  Cuando autorices el débito automático en Mercado Pago, se aplicará una recarga de <strong>{formatCurrency(autoTopupRechargeAmount)}</strong> a la cuenta de {selectedStudentFirstName} con un costo por transacción del <strong>1.5%</strong> ({formatCurrency(autoTopupFeeAmount)}).
                 </p>
               </div>
             </div>
