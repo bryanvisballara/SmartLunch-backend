@@ -1930,6 +1930,15 @@ function ParentPortal() {
                 <span>Recargar saldo</span>
               </button>
 
+              <button onClick={() => navigate('/parent/recargas/agregar-tarjeta')} type="button">
+                <span className="parent-topups-action-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2H4V5Zm16 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9h16Zm-8 2a1 1 0 0 0-1 1v1h-1a1 1 0 1 0 0 2h1v1a1 1 0 1 0 2 0v-1h1a1 1 0 1 0 0-2h-1v-1a1 1 0 0 0-1-1Z" fill="currentColor"/>
+                  </svg>
+                </span>
+                <span>Agregar tarjeta</span>
+              </button>
+
               <button onClick={() => navigate('/parent/recargas/automatica')} type="button">
                 <span className="parent-topups-action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
