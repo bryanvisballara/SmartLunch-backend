@@ -781,13 +781,6 @@ async function chargeCustomer({
     dues: '1',
     cardTokenId: String(customerToken || '').trim(),
     customerId: String(customerId || '').trim(),
-    address: String(address || 'Colombia').trim(),
-    city: String(city || 'Bogota').trim(),
-    description: String(description || 'Recarga automatica Comergio').trim(),
-    currency: 'COP',
-    tax: 0,
-    taxBase: 0,
-    test: isTest ? 'true' : 'false',
   };
 
   const extraHeaders = {};
