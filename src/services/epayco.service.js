@@ -770,24 +770,24 @@ async function chargeCustomer({
   const isTest = isTestMode();
 
   const body = {
-    token_card: String(customerToken || '').trim(),
-    customer_id: String(customerId || '').trim(),
-    doc_type: normalizeEpaycoDocType(docType),
-    doc_number: String(docNumber || '').replace(/\D/g, ''),
-    name: String(firstName || '').trim(),
-    last_name: String(lastName || '').trim(),
-    email: String(email || '').trim().toLowerCase(),
-    city: String(city || 'Bogota').trim(),
-    address: String(address || 'Colombia').trim(),
-    phone: String(phone || '3000000000').replace(/\D/g, ''),
-    cell_phone: String(cellPhone || phone || '3000000000').replace(/\D/g, ''),
-    description: String(description || 'Recarga automatica Comergio').trim(),
     value: String(Math.round(Number(amount || 0))),
-    tax: '0',
-    tax_base: '0',
-    currency: 'COP',
+    docType: normalizeEpaycoDocType(docType),
+    docNumber: String(docNumber || '').replace(/\D/g, ''),
+    name: String(firstName || '').trim(),
+    lastName: String(lastName || '').trim(),
+    email: String(email || '').trim().toLowerCase(),
+    cellPhone: String(cellPhone || phone || '3000000000').replace(/\D/g, ''),
+    phone: String(phone || '3000000000').replace(/\D/g, ''),
     dues: '1',
-    test_request: isTest ? 'TRUE' : 'FALSE',
+    cardTokenId: String(customerToken || '').trim(),
+    customerId: String(customerId || '').trim(),
+    address: String(address || 'Colombia').trim(),
+    city: String(city || 'Bogota').trim(),
+    description: String(description || 'Recarga automatica Comergio').trim(),
+    currency: 'COP',
+    tax: '0',
+    taxBase: '0',
+    test: isTest ? 'true' : 'false',
   };
 
   const extraHeaders = {};
@@ -795,7 +795,7 @@ async function chargeCustomer({
     extraHeaders['X-Idempotency-Key'] = String(idempotencyKey).trim();
   }
 
-  const result = await epaycoRequest('/payment/process/charge', {
+  const result = await epaycoRequest('/payment/process', {
     method: 'POST',
     body,
     extraHeaders,
