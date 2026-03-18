@@ -2175,20 +2175,6 @@ function ParentPortal() {
               </p>
             </div>
 
-            <div className="parent-auto-topup-warning-box">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor"/>
-              </svg>
-              <div>
-                <p className="parent-auto-topup-warning-title">
-                  <strong>⚠️ Se te cobrará apenas autorices en Mercado Pago</strong>
-                </p>
-                <p className="parent-auto-topup-warning-text">
-                  Cuando autorices el débito automático en Mercado Pago, se aplicará una recarga de <strong>{formatCurrency(autoTopupRechargeAmount)}</strong> a la cuenta de {selectedStudentFirstName} con un costo por transacción del <strong>1.5%</strong> ({formatCurrency(autoTopupFeeAmount)}).
-                </p>
-              </div>
-            </div>
-
             {(autoTopupPendingPreapprovalId || (String(selectedStudent?.wallet?.autoDebitAgreementId || '') && String(selectedStudent?.wallet?.autoDebitAgreementStatus || '') === 'pending' && !selectedStudent?.wallet?.autoDebitEnabled)) ? (
               <div className="parent-auto-topup-pending-auth">
                 <p className="parent-auto-topup-pending-auth-msg">
