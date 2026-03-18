@@ -269,17 +269,38 @@ async function runAutoDebitCycle() {
             || ''
           ).trim();
 
-          providerPayment = await createMercadoPagoPayment({
-            amount,
-            paymentMethodId: paymentMethodId || undefined,
-            paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
-            preapprovalId: autoDebitAgreementId,
-            customerId: payerId || undefined,
-            payerEmail: payerEmail || undefined,
-            externalReference: String(studentId),
-            description: 'Recarga automatica Comergio',
-            idempotencyKey,
-          });
+          try {
+            providerPayment = await createMercadoPagoPayment({
+              amount,
+              paymentMethodId: paymentMethodId || undefined,
+              paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+              preapprovalId: autoDebitAgreementId,
+              customerId: payerId || undefined,
+              payerEmail: payerEmail || undefined,
+              externalReference: String(studentId),
+              description: 'Recarga automatica Comergio',
+              idempotencyKey,
+            });
+          } catch (paymentError) {
+            const customerNotFound = String(paymentError?.message || '').toLowerCase().includes('customer not found')
+              || Number(paymentError?.providerPayload?.cause?.[0]?.code || 0) === 2002;
+
+            if (!customerNotFound || !payerEmail) {
+              throw paymentError;
+            }
+
+            providerPayment = await createMercadoPagoPayment({
+              amount,
+              paymentMethodId: paymentMethodId || undefined,
+              paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+              preapprovalId: autoDebitAgreementId,
+              customerId: undefined,
+              payerEmail,
+              externalReference: String(studentId),
+              description: 'Recarga automatica Comergio',
+              idempotencyKey,
+            });
+          }
         }
 
         paymentRecord.providerTransactionId = String(providerPayment?.id || providerPayment?.transaction_id || '').trim();
