@@ -343,7 +343,7 @@ function ParentPortal() {
     () => savedCards.filter((card) => {
       const status = String(card?.verificationStatus || 'verified').toLowerCase();
       const provider = String(card?.provider || '').toLowerCase();
-      return status === 'verified' && provider === 'mercadopago';
+      return status === 'verified' && provider === 'epayco';
     }),
     [savedCards]
   );
@@ -740,7 +740,7 @@ function ParentPortal() {
         navigate('/parent/recargas/automatica', { replace: true });
       } catch (requestError) {
         setAutoTopupSubmitError(
-          requestError?.response?.data?.message || requestError?.message || 'No se pudo confirmar la autorización de Mercado Pago.'
+          requestError?.response?.data?.message || requestError?.message || 'No se pudo confirmar la autorización de ePayco.'
         );
       } finally {
         setAutoTopupAuthorizationLoading(false);
@@ -1372,7 +1372,7 @@ function ParentPortal() {
       } catch (err) {
         if (Number(err?.response?.status || 0) !== 409) {
           setAutoTopupSubmitError(
-            err?.response?.data?.message || err?.message || 'No se pudo validar la autorización en Mercado Pago.'
+            err?.response?.data?.message || err?.message || 'No se pudo validar la autorización en ePayco.'
           );
           return;
         }
@@ -1407,7 +1407,7 @@ function ParentPortal() {
       const preapprovalId = String(response?.data?.preapprovalId || '').trim();
 
       if (!requiresAuthorization || !authorizationUrl) {
-        setAutoTopupSubmitError('No pudimos obtener el enlace de autorización de Mercado Pago. Intenta de nuevo.');
+        setAutoTopupSubmitError('No pudimos obtener el enlace de autorización de ePayco. Intenta de nuevo.');
         return;
       }
 
@@ -1425,7 +1425,7 @@ function ParentPortal() {
       }
     } catch (requestError) {
       setAutoTopupSubmitError(
-        requestError?.response?.data?.message || requestError?.message || 'No se pudo abrir la autorización de Mercado Pago.'
+        requestError?.response?.data?.message || requestError?.message || 'No se pudo abrir la autorización de ePayco.'
       );
     } finally {
       setAutoTopupSubmitLoading(false);
@@ -2112,7 +2112,7 @@ function ParentPortal() {
                     type="button"
                   >
                     <span>+ Agregar tarjeta</span>
-                    <small>Registrar una nueva tarjeta en Mercado Pago</small>
+                    <small>Registrar una nueva tarjeta en ePayco</small>
                   </button>
                 </div>
               ) : null}
@@ -2178,7 +2178,7 @@ function ParentPortal() {
             {(autoTopupPendingPreapprovalId || (String(selectedStudent?.wallet?.autoDebitAgreementId || '') && String(selectedStudent?.wallet?.autoDebitAgreementStatus || '') === 'pending' && !selectedStudent?.wallet?.autoDebitEnabled)) ? (
               <div className="parent-auto-topup-pending-auth">
                 <p className="parent-auto-topup-pending-auth-msg">
-                  <strong>Falta autorizar en Mercado Pago.</strong> Abre la página de Mercado Pago, acepta el débito automático y regresa aquí para confirmar.
+                  <strong>Falta autorizar en ePayco.</strong> Abre la página de ePayco, acepta el débito automático y regresa aquí para confirmar.
                 </p>
                 <button
                   className="parent-auto-topup-activate-btn"
@@ -2186,7 +2186,7 @@ function ParentPortal() {
                   onClick={onOpenMPAuthorization}
                   type="button"
                 >
-                  {autoTopupAuthorizationLoading ? 'Verificando...' : (autoTopupSubmitLoading ? 'Abriendo...' : 'Ir a Mercado Pago')}
+                  {autoTopupAuthorizationLoading ? 'Verificando...' : (autoTopupSubmitLoading ? 'Abriendo...' : 'Ir a ePayco')}
                 </button>
               </div>
             ) : (

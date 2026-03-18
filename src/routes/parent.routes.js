@@ -1064,6 +1064,13 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
       verificationWindowHours: CARD_VERIFICATION_WINDOW_HOURS,
     });
   } catch (error) {
+    if (error?.code === 'EPAYCO_INVALID_CLIENT') {
+      return res.status(502).json({
+        message: error.message,
+        code: 'EPAYCO_INVALID_CLIENT',
+      });
+    }
+
     if (error?.code === 11000) {
       return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
     }

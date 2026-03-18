@@ -4,8 +4,15 @@ const crypto = require('crypto');
 // Configuration helpers
 // ---------------------------------------------------------------------------
 
-function getApiBaseUrl() {
-  return String(process.env.EPAYCO_API_URL || 'https://apify.epayco.co').trim().replace(/\/$/, '');
+function normalizeBaseUrl(url) {
+  return String(url || '').trim().replace(/\/$/, '');
+}
+
+function getApiBaseUrls() {
+  const configured = normalizeBaseUrl(process.env.EPAYCO_API_URL || '');
+  const defaults = ['https://api.epayco.co', 'https://apify.epayco.co'];
+  const urls = configured ? [configured, ...defaults] : defaults;
+  return Array.from(new Set(urls.filter(Boolean)));
 }
 
 function getPublicKey() {
@@ -14,6 +21,10 @@ function getPublicKey() {
 
 function getPrivateKey() {
   return String(process.env.EPAYCO_PRIVATE_KEY || '').trim();
+}
+
+function getEntityClientId() {
+  return String(process.env.EPAYCO_ENTITY_CLIENT_ID || '').trim();
 }
 
 function isTestMode() {
@@ -30,62 +41,146 @@ function isEpaycoConfigured() {
 
 let _bearerToken = null;
 let _bearerExpiresAt = 0;
+let _bearerBaseUrl = null;
+
+function normalizeEpaycoDocType(value) {
+  const normalized = String(value || 'CC').trim().toUpperCase();
+  if (['CC', 'CE', 'TI', 'NIT', 'PP', 'DNI'].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === 'PASSPORT') {
+    return 'PP';
+  }
+  return 'CC';
+}
+
+function normalizeEpaycoProviderErrorMessage(rawMsg) {
+  const normalized = String(rawMsg || '').toLowerCase();
+  if (normalized.includes('invalid client') || normalized.includes('invalid_client')) {
+    return 'ePayco rechazó las credenciales del comercio (invalid_client). Verifica EPAYCO_PUBLIC_KEY y EPAYCO_PRIVATE_KEY de API en Render y confirma que la cuenta tenga API habilitada.';
+  }
+  return rawMsg;
+}
 
 async function epaycoLogin() {
   const publicKey = getPublicKey();
   const privateKey = getPrivateKey();
+  const entityClientId = getEntityClientId();
   if (!publicKey || !privateKey) {
     throw new Error('EPAYCO_PUBLIC_KEY y EPAYCO_PRIVATE_KEY deben estar configurados');
   }
 
-  // ePayco expects the private key hashed with SHA-256 as part of Basic auth
-  const privateKeyHash = crypto.createHash('sha256').update(privateKey).digest('hex');
-  const credentials = Buffer.from(`${publicKey}:${privateKeyHash}`).toString('base64');
+  // Official Postman collection uses Basic Auth with PUBLIC_KEY / PRIVATE_KEY.
+  // Postman base64-encodes "PUBLIC_KEY:PRIVATE_KEY" automatically.
+  const credentialVariants = [
+    Buffer.from(`${publicKey}:${privateKey}`).toString('base64'),
+    Buffer.from(`${publicKey}:${crypto.createHash('sha256').update(privateKey).digest('hex')}`).toString('base64'),
+  ];
 
-  const response = await fetch(`${getApiBaseUrl()}/login`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ authenticate: true }),
-  });
+  // If EntityClientId is configured, try both with and without it.
+  // Some accounts are not registrador and fail when this header is sent.
+  const entityClientIdHeaderVariants = entityClientId
+    ? [Buffer.from(entityClientId).toString('base64'), null]
+    : [null];
 
-  let data = {};
-  try {
-    data = await response.json();
-  } catch { /* empty */ }
-
-  if (!response.ok || !data.bearer) {
-    const msg = data?.message || data?.error || `ePayco login failed (${response.status})`;
-    const err = new Error(msg);
-    err.status = response.status;
-    err.providerPayload = data;
-    throw err;
+  const attempts = [];
+  for (const encodedEntityClientId of entityClientIdHeaderVariants) {
+    attempts.push({
+      headers: (credentials) => ({
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/json',
+        ...(encodedEntityClientId ? { EntityClientId: encodedEntityClientId } : {}),
+      }),
+      body: { authenticate: true },
+      useCredentialVariants: true,
+    });
   }
 
-  return data;
+  attempts.push({
+    headers: () => ({
+      'Content-Type': 'application/json',
+    }),
+    body: {
+      public_key: publicKey,
+      private_key: privateKey,
+      authenticate: true,
+    },
+    useCredentialVariants: false,
+  });
+
+  let lastStatus = 500;
+  let lastPayload = null;
+  let lastMessage = 'ePayco login failed';
+
+  for (const baseUrl of getApiBaseUrls()) {
+    for (const attempt of attempts) {
+      const credentialsToTry = attempt.useCredentialVariants ? credentialVariants : [null];
+
+      for (const credentials of credentialsToTry) {
+        const response = await fetch(`${baseUrl}/login`, {
+          method: 'POST',
+          headers: attempt.headers(credentials),
+          body: JSON.stringify(attempt.body),
+        });
+
+        let data = {};
+        try {
+          data = await response.json();
+        } catch {
+          data = {};
+        }
+
+        const accessToken = String(data?.bearer || data?.token || '').trim();
+        if (response.ok && accessToken) {
+          return {
+            ...data,
+            __accessToken: accessToken,
+            __baseUrl: baseUrl,
+          };
+        }
+
+        lastStatus = response.status;
+        lastPayload = data;
+        lastMessage = data?.message || data?.error || `ePayco login failed (${response.status})`;
+      }
+    }
+  }
+
+  const msg = normalizeEpaycoProviderErrorMessage(lastMessage);
+
+  const err = new Error(msg);
+  err.status = lastStatus;
+  err.providerPayload = lastPayload;
+  throw err;
 }
 
 async function getBearer() {
-  if (_bearerToken && Date.now() < _bearerExpiresAt) {
-    return _bearerToken;
+  if (_bearerToken && Date.now() < _bearerExpiresAt && _bearerBaseUrl) {
+    return {
+      token: _bearerToken,
+      baseUrl: _bearerBaseUrl,
+    };
   }
 
   const loginResult = await epaycoLogin();
-  _bearerToken = String(loginResult.bearer || '').trim();
+  _bearerToken = String(loginResult.__accessToken || loginResult.bearer || loginResult.token || '').trim();
+  _bearerBaseUrl = String(loginResult.__baseUrl || getApiBaseUrls()[0] || '').trim();
 
   // Cache with a 23-hour window (safer than full 24h)
   const ttlMs = 23 * 60 * 60 * 1000;
   _bearerExpiresAt = Date.now() + ttlMs;
 
-  return _bearerToken;
+  return {
+    token: _bearerToken,
+    baseUrl: _bearerBaseUrl,
+  };
 }
 
 // Invalidate cached token so next call re-authenticates
 function invalidateBearerCache() {
   _bearerToken = null;
   _bearerExpiresAt = 0;
+  _bearerBaseUrl = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,13 +188,13 @@ function invalidateBearerCache() {
 // ---------------------------------------------------------------------------
 
 async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders = {} } = {}) {
-  const bearer = await getBearer();
-  const url = `${getApiBaseUrl()}${path}`;
+  const bearerSession = await getBearer();
+  const url = `${String(bearerSession.baseUrl || '').trim()}${path}`;
 
   const response = await fetch(url, {
     method,
     headers: {
-      Authorization: `Bearer ${bearer}`,
+      Authorization: `Bearer ${bearerSession.token}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
       ...extraHeaders,
@@ -116,7 +211,8 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
   const ok = response.ok && (data.status === true || data.status === 'true');
 
   if (!ok) {
-    const msg = data?.message || data?.error || `ePayco request failed (${response.status})`;
+    const rawMsg = data?.message || data?.error || `ePayco request failed (${response.status})`;
+    const msg = normalizeEpaycoProviderErrorMessage(rawMsg);
 
     // If the error is auth-related, flush the cached token so next call re-logs
     if (response.status === 401 || response.status === 403) {
@@ -126,6 +222,9 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
     const err = new Error(msg);
     err.status = response.status;
     err.providerPayload = data;
+    if (String(rawMsg || '').toLowerCase().includes('invalid client') || String(rawMsg || '').toLowerCase().includes('invalid_client')) {
+      err.code = 'EPAYCO_INVALID_CLIENT';
+    }
     throw err;
   }
 
@@ -183,7 +282,7 @@ async function createOrUpdateCustomer({
     email: String(email || '').trim().toLowerCase(),
     phone: String(phone || '3000000000').replace(/\D/g, ''),
     cell_phone: String(cellPhone || phone || '3000000000').replace(/\D/g, ''),
-    doc_type: String(docType || 'CC').trim().toUpperCase(),
+    doc_type: normalizeEpaycoDocType(docType),
     doc_number: String(docNumber || '').replace(/\D/g, ''),
     city: String(city || 'Bogota').trim(),
     address: String(address || 'Colombia').trim(),
@@ -240,7 +339,7 @@ async function chargeCustomer({
   const body = {
     token_card: String(customerToken || '').trim(),
     customer_id: String(customerId || '').trim(),
-    doc_type: String(docType || 'CC').trim().toUpperCase(),
+    doc_type: normalizeEpaycoDocType(docType),
     doc_number: String(docNumber || '').replace(/\D/g, ''),
     name: String(firstName || '').trim(),
     last_name: String(lastName || '').trim(),
