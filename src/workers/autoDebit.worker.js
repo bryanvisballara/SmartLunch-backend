@@ -291,16 +291,36 @@ async function runAutoDebitCycle() {
 
           // ePayco response fields
           paymentRecord.providerTransactionId = String(
-            providerPayment?.x_ref_payco || providerPayment?.ref_payco || providerPayment?.x_transaction_id || ''
+            providerPayment?.x_ref_payco
+            || providerPayment?.ref_payco
+            || providerPayment?.x_transaction_id
+            || providerPayment?.transaction?.data?.ref_payco
+            || providerPayment?.transaction?.data?.recibo
+            || ''
           ).trim();
+
           const epaycoState = String(
-            providerPayment?.x_transaction_state || providerPayment?.x_response || ''
+            providerPayment?.x_transaction_state
+            || providerPayment?.x_response
+            || providerPayment?.transaction?.data?.estado
+            || providerPayment?.transaction?.data?.respuesta
+            || ''
           ).trim();
+
+          const epaycoReason = String(
+            providerPayment?.x_response_reason_text
+            || providerPayment?.transaction?.data?.respuesta
+            || providerPayment?.transaction?.data?.cc_network_response?.message
+            || providerPayment?.transaction?.data?.cod_error
+            || epaycoState
+            || 'ePayco error'
+          ).trim();
+
           paymentRecord.providerStatus = epaycoState;
           chargeStatus = toEpaycoInternalStatus(epaycoState);
           paymentRecord.status = chargeStatus;
           paymentRecord.failureReason = (chargeStatus === 'failed' || chargeStatus === 'rejected')
-            ? String(providerPayment?.x_response_reason_text || epaycoState || 'ePayco error')
+            ? epaycoReason
             : null;
           paymentRecord.providerResponse = providerPayment;
           await paymentRecord.save();
