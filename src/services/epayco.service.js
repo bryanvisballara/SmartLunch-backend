@@ -302,23 +302,42 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
 // ---------------------------------------------------------------------------
 
 async function createCardToken({ cardNumber, expirationMonth, expirationYear, securityCode }) {
-  const cardData = {
-    'card[number]': String(cardNumber || '').replace(/\D/g, ''),
-    'card[exp_year]': String(Number(expirationYear)),
-    'card[exp_month]': String(Number(expirationMonth)).padStart(2, '0'),
-    'card[cvc]': String(securityCode || '').replace(/\D/g, ''),
-    hasCvv: true,
+  const cleanCardNumber = String(cardNumber || '').replace(/\D/g, '');
+  const cleanExpYear = String(Number(expirationYear || 0));
+  const cleanExpMonth = String(Number(expirationMonth || 0)).padStart(2, '0');
+  const cleanCvv = String(securityCode || '').replace(/\D/g, '');
+
+  // Official APIFY endpoint from ePayco collection
+  const primaryBody = {
+    cardNumber: cleanCardNumber,
+    cardExpYear: cleanExpYear,
+    cardExpMonth: cleanExpMonth,
+    cardCvc: cleanCvv,
   };
 
-  const encodedData = Buffer.from(JSON.stringify(cardData)).toString('base64');
+  try {
+    const result = await epaycoRequest('/token/card', {
+      method: 'POST',
+      body: primaryBody,
+    });
+    return result.data || result;
+  } catch (error) {
+    // Backward compatibility for legacy integrations that still expose /payment/process/base64
+    const cardData = {
+      'card[number]': cleanCardNumber,
+      'card[exp_year]': cleanExpYear,
+      'card[exp_month]': cleanExpMonth,
+      'card[cvc]': cleanCvv,
+      hasCvv: true,
+    };
 
-  const result = await epaycoRequest('/payment/process/base64', {
-    method: 'POST',
-    body: { data: encodedData },
-  });
-
-  // Response: { status: true, data: { id: "tok_xxx", ... } }
-  return result.data || result;
+    const encodedData = Buffer.from(JSON.stringify(cardData)).toString('base64');
+    const legacyResult = await epaycoRequest('/payment/process/base64', {
+      method: 'POST',
+      body: { data: encodedData },
+    });
+    return legacyResult.data || legacyResult;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -359,13 +378,49 @@ async function createOrUpdateCustomer({
     body.customer_id = String(existingCustomerId).trim();
   }
 
-  const result = await epaycoRequest('/payment/customer/save', {
+  const subscriptionBody = {
+    customerId: String(existingCustomerId || '').trim() || undefined,
+    customer_id: String(existingCustomerId || '').trim() || undefined,
+    cardToken: String(tokenCard || '').trim(),
+    token_card: String(tokenCard || '').trim(),
+    email: body.email,
+    docType: body.doc_type,
+    doc_type: body.doc_type,
+    docNumber: body.doc_number,
+    doc_number: body.doc_number,
+    name: body.name,
+    last_name: body.last_name,
+    phone: body.phone,
+    cell_phone: body.cell_phone,
+    city: body.city,
+    address: body.address,
+  };
+
+  const subscriptionEndpoints = [
+    '/subscriptions/customer/add/new/token/default',
+    '/subscriptions/customer/add/new/token',
+  ];
+
+  for (const endpoint of subscriptionEndpoints) {
+    try {
+      const result = await epaycoRequest(endpoint, {
+        method: 'POST',
+        body: subscriptionBody,
+      });
+      return result.data || result;
+    } catch (error) {
+      if (Number(error?.status) !== 404) {
+        throw error;
+      }
+    }
+  }
+
+  const legacyResult = await epaycoRequest('/payment/customer/save', {
     method: 'POST',
     body,
   });
 
-  // Response: { status: true, message: "...", data: { customerId, token, ... } }
-  return result.data || result;
+  return legacyResult.data || legacyResult;
 }
 
 // ---------------------------------------------------------------------------

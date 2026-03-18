@@ -933,7 +933,14 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
           expirationYear: expiry.year,
           securityCode: cvv,
         });
-        oneTimeToken = String(tokenResult?.id || tokenResult?.token || '').trim();
+        oneTimeToken = String(
+          tokenResult?.id
+          || tokenResult?.token
+          || tokenResult?.cardToken
+          || tokenResult?.token_card
+          || tokenResult?.card_token
+          || ''
+        ).trim();
       }
 
       if (!oneTimeToken) {
@@ -952,7 +959,13 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
 
       const epaycoCustomerId = String(customerResult?.customerId || customerResult?.customer_id || customerResult?.id || '').trim();
       // The permanent card token returned by ePayco after saving the customer
-      const epaycoCardToken = String(customerResult?.token || customerResult?.token_card || oneTimeToken).trim();
+      const epaycoCardToken = String(
+        customerResult?.token
+        || customerResult?.token_card
+        || customerResult?.cardToken
+        || customerResult?.card_token
+        || oneTimeToken
+      ).trim();
 
       if (!epaycoCustomerId) {
         return res.status(502).json({ message: 'No fue posible guardar la tarjeta en ePayco.' });
