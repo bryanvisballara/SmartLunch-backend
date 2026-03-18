@@ -72,11 +72,32 @@ function normalizeEpaycoProviderErrorMessage(rawMsg) {
 }
 
 function extractEpaycoErrorMessage(data, responseStatus, path) {
+  const nestedErrors = data?.data?.errors;
+  if (Array.isArray(nestedErrors) && nestedErrors.length > 0) {
+    const first = nestedErrors[0] || {};
+    const code = String(first?.codError || '').trim();
+    const text = String(first?.errorMessage || '').trim();
+    if (code || text) {
+      return [code, text].filter(Boolean).join(': ');
+    }
+  }
+
+  if (nestedErrors && typeof nestedErrors === 'object' && !Array.isArray(nestedErrors)) {
+    const code = String(nestedErrors?.codError || '').trim();
+    const text = String(nestedErrors?.errorMessage || '').trim();
+    if (code || text) {
+      return [code, text].filter(Boolean).join(': ');
+    }
+  }
+
   const candidates = [
     data?.message,
     data?.error,
     data?.detail,
     data?.msg,
+    data?.textResponse,
+    data?.titleResponse,
+    data?.lastAction,
     data?.data?.message,
     data?.data?.error,
     data?.data?.detail,
@@ -390,22 +411,62 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
 async function createCardToken({ cardNumber, expirationMonth, expirationYear, securityCode }) {
   const cleanCardNumber = String(cardNumber || '').replace(/\D/g, '');
   const cleanExpYear = String(Number(expirationYear || 0));
+  const cleanExpYearTwoDigits = cleanExpYear.length === 4 ? cleanExpYear.slice(-2) : cleanExpYear;
   const cleanExpMonth = String(Number(expirationMonth || 0)).padStart(2, '0');
   const cleanCvv = String(securityCode || '').replace(/\D/g, '');
 
-  // Official APIFY endpoint from ePayco collection
-  const primaryBody = {
-    cardNumber: cleanCardNumber,
-    cardExpYear: cleanExpYear,
-    cardExpMonth: cleanExpMonth,
-    cardCvc: cleanCvv,
-  };
+  const payloadVariants = [
+    // Official APIFY format from Postman collection
+    {
+      cardNumber: cleanCardNumber,
+      cardExpYear: cleanExpYear,
+      cardExpMonth: cleanExpMonth,
+      cardCvc: cleanCvv,
+    },
+    // Some accounts expect YY instead of YYYY
+    {
+      cardNumber: cleanCardNumber,
+      cardExpYear: cleanExpYearTwoDigits,
+      cardExpMonth: cleanExpMonth,
+      cardCvc: cleanCvv,
+    },
+    // Compatibility with alternate key naming
+    {
+      card_number: cleanCardNumber,
+      exp_year: cleanExpYear,
+      exp_month: cleanExpMonth,
+      cvc: cleanCvv,
+    },
+    {
+      card_number: cleanCardNumber,
+      exp_year: cleanExpYearTwoDigits,
+      exp_month: cleanExpMonth,
+      cvc: cleanCvv,
+    },
+  ];
 
-  const result = await epaycoRequest('/token/card', {
-    method: 'POST',
-    body: primaryBody,
-  });
-  return result.data || result;
+  let lastError = null;
+  for (const payload of payloadVariants) {
+    try {
+      const result = await epaycoRequest('/token/card', {
+        method: 'POST',
+        body: payload,
+      });
+      return result.data || result;
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status);
+      if (status !== 400 && status !== 422) {
+        throw error;
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  throw new Error('No se pudo tokenizar la tarjeta en ePayco.');
 }
 
 // ---------------------------------------------------------------------------
