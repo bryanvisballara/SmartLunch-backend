@@ -623,8 +623,13 @@ async function createOrUpdateCustomer({
       }
     }
 
+    // If customer-creation endpoints are unavailable or reject validation,
+    // continue with the alternative token-association flow.
     if (lastError) {
-      throw lastError;
+      const status = Number(lastError?.status);
+      if (status !== 404 && status !== 400 && status !== 422) {
+        throw lastError;
+      }
     }
 
     return '';
