@@ -1138,6 +1138,16 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
       });
     }
 
+    if (error?.code === 'EPAYCO_CUSTOMER_ID_REQUIRED') {
+      return res.status(502).json({
+        message: error.message,
+        code: 'EPAYCO_CUSTOMER_ID_REQUIRED',
+        providerPath: error.providerPath || null,
+        providerStatus: Number.isFinite(error?.status) ? error.status : null,
+        providerPayload: error.providerPayload || null,
+      });
+    }
+
     if (error?.providerPayload || error?.providerPath) {
       return res.status(502).json({
         message: error.message || 'Error de ePayco al registrar la tarjeta.',

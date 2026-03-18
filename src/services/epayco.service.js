@@ -541,6 +541,10 @@ async function createOrUpdateCustomer({
     city: body.city,
     address: body.address,
     default: true,
+    token_card: normalizedTokenCard,
+    cardToken: normalizedTokenCard,
+    franchise: String(franchise || '').trim() || undefined,
+    mask: String(mask || '').trim() || undefined,
   };
 
   const tryAddTokenWithCustomer = async (customerId) => {
@@ -598,8 +602,17 @@ async function createOrUpdateCustomer({
     const customerCreateEndpoints = [
       '/subscriptions/customer/create',
       '/subscriptions/customer/save',
+      '/subscriptions/customer/new',
+      '/subscriptions/customer/add',
+      '/subscriptions/customer/add/new',
       '/subscription/customer/create',
       '/subscription/customer/save',
+      '/subscription/customer/new',
+      '/subscription/customer/add',
+      '/customer/create',
+      '/customer/save',
+      '/customers/create',
+      '/customers/save',
     ];
 
     let lastError = null;
@@ -658,25 +671,14 @@ async function createOrUpdateCustomer({
     return tryAddTokenWithCustomer(createdCustomerId);
   }
 
-  // As a last fallback, try direct token association without customerId.
-  try {
-    const result = await epaycoRequest('/subscriptions/customer/add/new/token', {
-      method: 'POST',
-      body: subscriptionBody,
-    });
-    const normalized = result?.data || result;
-    const customerId = extractCustomerIdFromPayload(normalized);
-    return {
-      ...normalized,
-      customerId: customerId || '',
-      token: extractCardTokenFromPayload(normalized) || normalizedTokenCard,
-    };
-  } catch (error) {
-    if (lastSubscriptionError) {
-      throw lastSubscriptionError;
-    }
-    throw error;
-  }
+  const noCustomerErr = new Error(
+    'No fue posible obtener o crear customerId en ePayco para asociar la tarjeta. Verifica en la colección de APIFY el endpoint de creacion de customer habilitado para esta cuenta.'
+  );
+  noCustomerErr.status = 502;
+  noCustomerErr.code = 'EPAYCO_CUSTOMER_ID_REQUIRED';
+  noCustomerErr.providerPath = '/subscriptions/customer/add/new/token';
+  noCustomerErr.providerPayload = lastSubscriptionError?.providerPayload || null;
+  throw noCustomerErr;
 }
 
 // ---------------------------------------------------------------------------
