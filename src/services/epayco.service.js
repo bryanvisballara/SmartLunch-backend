@@ -779,7 +779,7 @@ async function chargeCustomer({
     cellPhone: String(cellPhone || phone || '3000000000').replace(/\D/g, ''),
     phone: String(phone || '3000000000').replace(/\D/g, ''),
     dues: '1',
-    cardTokenId: String(customerToken || '').trim(),
+    _cardTokenId: String(customerToken || '').trim(),
     customerId: String(customerId || '').trim(),
   };
 
