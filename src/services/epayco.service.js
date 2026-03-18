@@ -785,8 +785,8 @@ async function chargeCustomer({
     city: String(city || 'Bogota').trim(),
     description: String(description || 'Recarga automatica Comergio').trim(),
     currency: 'COP',
-    tax: '0',
-    taxBase: '0',
+    tax: 0,
+    taxBase: 0,
     test: isTest ? 'true' : 'false',
   };
 
