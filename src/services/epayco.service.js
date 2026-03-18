@@ -159,6 +159,27 @@ function extractCardTokenFromPayload(payload) {
   ).trim();
 }
 
+function normalizeCustomerId(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  const lower = normalized.toLowerCase();
+  if (['undefined', 'null', 'nan', 'none', 'false'].includes(lower)) {
+    return '';
+  }
+  return normalized;
+}
+
+function isCustomerIdRequiredProviderError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (message.includes('field customerid required')) {
+    return true;
+  }
+
+  const providerErrors = error?.providerPayload?.data?.errors;
+  const list = Array.isArray(providerErrors) ? providerErrors : (providerErrors ? [providerErrors] : []);
+  return list.some((entry) => String(entry?.errorMessage || '').toLowerCase().includes('field customerid required'));
+}
+
 async function epaycoLogin(preferredBaseUrl = null) {
   const publicKey = getPublicKey();
   const privateKey = getPrivateKey();
@@ -507,12 +528,12 @@ async function createOrUpdateCustomer({
 
   // Include customer_id for updates; omit it for new customers
   if (existingCustomerId) {
-    body.customer_id = String(existingCustomerId).trim();
+    body.customer_id = normalizeCustomerId(existingCustomerId);
   }
 
   const subscriptionBody = {
-    customerId: String(existingCustomerId || '').trim() || undefined,
-    customer_id: String(existingCustomerId || '').trim() || undefined,
+    customerId: normalizeCustomerId(existingCustomerId) || undefined,
+    customer_id: normalizeCustomerId(existingCustomerId) || undefined,
     cardToken: normalizedTokenCard,
     token_card: normalizedTokenCard,
     franchise: String(franchise || '').trim() || undefined,
@@ -649,7 +670,7 @@ async function createOrUpdateCustomer({
   };
 
   let lastSubscriptionError = null;
-  const resolvedExistingCustomerId = String(existingCustomerId || '').trim();
+  const resolvedExistingCustomerId = normalizeCustomerId(existingCustomerId);
 
   if (resolvedExistingCustomerId) {
     try {
@@ -662,6 +683,12 @@ async function createOrUpdateCustomer({
       const status = Number(error?.status);
       if (status === 401 || status === 403) {
         throw error;
+      }
+
+      // Stored customer id is invalid/stale for this merchant account.
+      // Continue with customer creation flow.
+      if (isCustomerIdRequiredProviderError(error)) {
+        lastSubscriptionError = null;
       }
     }
   }
