@@ -1415,6 +1415,67 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       return res.status(503).json({ message: 'Mercado Pago no está configurado en este momento.' });
     }
 
+    if (!confirmAuthorization) {
+      const verifiedCard = await ParentPaymentMethod.findOne({
+        schoolId,
+        parentUserId,
+        type: 'card',
+        provider: 'mercadopago',
+        status: 'active',
+        deletedAt: null,
+        verificationStatus: 'verified',
+        providerCustomerId: { $ne: '' },
+        providerCardId: { $ne: '' },
+      })
+        .sort({ verifiedAt: -1, createdAt: -1 })
+        .select('_id')
+        .lean();
+
+      if (!verifiedCard?._id) {
+        return res.status(409).json({
+          message: 'Debes registrar y verificar una tarjeta en Mercado Pago para activar la recarga automática por umbral.',
+          requiresVerifiedCard: true,
+        });
+      }
+
+      wallet.autoDebitEnabled = true;
+      wallet.autoDebitLimit = autoDebitLimit;
+      wallet.autoDebitAmount = autoDebitAmount;
+      wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
+      wallet.autoDebitPaymentMethodId = verifiedCard._id;
+      wallet.autoDebitAgreementId = '';
+      wallet.autoDebitAgreementStatus = '';
+      wallet.autoDebitAgreementLastSyncAt = null;
+      wallet.autoDebitInProgress = false;
+      wallet.autoDebitLockAt = null;
+      wallet.autoDebitRetryAt = null;
+      wallet.autoDebitRetryCount = 0;
+      await wallet.save();
+
+      return res.status(200).json({
+        requiresAuthorization: false,
+        mode: 'card_tokenized_threshold',
+        student: {
+          _id: studentId,
+          wallet: {
+            autoDebitEnabled: true,
+            autoDebitLimit,
+            autoDebitAmount,
+            autoDebitMonthlyLimit,
+            autoDebitPaymentMethodId: verifiedCard._id,
+            autoDebitAgreementId: '',
+            autoDebitAgreementStatus: '',
+            autoDebitInProgress: false,
+            autoDebitLockAt: null,
+            autoDebitRetryAt: null,
+            autoDebitRetryCount: 0,
+            autoDebitMonthlyUsed: Number(wallet.autoDebitMonthlyUsed || 0),
+            autoDebitMonthlyPeriod: String(wallet.autoDebitMonthlyPeriod || ''),
+          },
+        },
+      });
+    }
+
     if (confirmAuthorization) {
       const candidateAgreementId = String(req.body?.preapprovalId || wallet.autoDebitAgreementId || '').trim();
       if (!candidateAgreementId) {

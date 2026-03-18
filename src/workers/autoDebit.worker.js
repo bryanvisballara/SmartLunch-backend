@@ -1,4 +1,5 @@
 const ParentStudentLink = require('../models/parentStudentLink.model');
+const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const Wallet = require('../models/wallet.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
 const User = require('../models/user.model');
@@ -70,8 +71,10 @@ async function runAutoDebitCycle() {
       status: 'active',
       autoDebitAmount: { $gt: 0 },
       autoDebitLimit: { $gt: 0 },
-      autoDebitAgreementId: { $ne: '' },
-      autoDebitAgreementStatus: 'authorized',
+      $or: [
+        { autoDebitPaymentMethodId: { $ne: null } },
+        { autoDebitAgreementId: { $ne: '' }, autoDebitAgreementStatus: 'authorized' },
+      ],
     })
       .select('_id schoolId studentId balance autoDebitLimit autoDebitAmount autoDebitPaymentMethodId autoDebitAgreementId autoDebitAgreementStatus autoDebitLastChargeAt autoDebitRetryAt autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
       .lean();
@@ -99,8 +102,10 @@ async function runAutoDebitCycle() {
         status: 'active',
         autoDebitAmount: { $gt: 0 },
         autoDebitLimit: { $gt: 0 },
-        autoDebitAgreementId: { $ne: '' },
-        autoDebitAgreementStatus: 'authorized',
+        $or: [
+          { autoDebitPaymentMethodId: { $ne: null } },
+          { autoDebitAgreementId: { $ne: '' }, autoDebitAgreementStatus: 'authorized' },
+        ],
       };
 
       // Enforce balance-threshold and cooldown atomically to prevent parallel charges.
@@ -195,12 +200,35 @@ async function runAutoDebitCycle() {
       const parentId = link.parentId;
       const parentUser = await User.findById(parentId).select('email').lean();
       const parentEmail = String(parentUser?.email || '').trim().toLowerCase();
+      const paymentMethodIdFromWallet = lockedWallet?.autoDebitPaymentMethodId || null;
 
       const autoDebitAgreementId = String(lockedWallet.autoDebitAgreementId || '').trim();
       const autoDebitAgreementStatus = String(lockedWallet.autoDebitAgreementStatus || '').trim().toLowerCase();
       const isMercadoPagoAgreement = Boolean(autoDebitAgreementId) && autoDebitAgreementStatus === 'authorized';
 
-      if (!isMercadoPagoAgreement || !mercadopagoConfigured) {
+      let verifiedCard = null;
+      if (paymentMethodIdFromWallet) {
+        verifiedCard = await ParentPaymentMethod.findOne({
+          _id: paymentMethodIdFromWallet,
+          schoolId,
+          parentUserId: parentId,
+          provider: 'mercadopago',
+          type: 'card',
+          status: 'active',
+          deletedAt: null,
+          verificationStatus: 'verified',
+        })
+          .select('_id providerCustomerId providerCardId providerPaymentMethodId providerDeviceId')
+          .lean();
+      }
+
+      const hasTokenizedCard = Boolean(
+        verifiedCard?._id
+        && String(verifiedCard?.providerCustomerId || '').trim()
+        && String(verifiedCard?.providerCardId || '').trim()
+      );
+
+      if ((!hasTokenizedCard && !isMercadoPagoAgreement) || !mercadopagoConfigured) {
         await Wallet.updateOne(
           { _id: lockedWallet._id },
           { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
@@ -229,7 +257,7 @@ async function runAutoDebitCycle() {
         schoolId,
         studentId,
         parentId,
-        paymentMethodId: null,
+        paymentMethodId: hasTokenizedCard ? verifiedCard._id : null,
         amount,
         method: paymentMethod,
         documentType: '',
@@ -244,65 +272,87 @@ async function runAutoDebitCycle() {
         const idempotencyKey = `autodebit-${String(lockedWallet._id)}-${reference}`;
         let providerPayment;
 
-        try {
-          providerPayment = await createMercadoPagoAuthorizedPayment({
-            preapprovalId: autoDebitAgreementId,
+        if (hasTokenizedCard) {
+          const cardRefId = Number(String(verifiedCard.providerCardId || '').trim());
+          const paymentMethodProviderId = String(verifiedCard.providerPaymentMethodId || '').trim();
+          const providerCustomerId = String(verifiedCard.providerCustomerId || '').trim();
+
+          if (!Number.isFinite(cardRefId) || cardRefId <= 0 || !providerCustomerId) {
+            throw new Error('Tarjeta tokenizada inválida para cobro automático');
+          }
+
+          providerPayment = await createMercadoPagoPayment({
             amount,
+            paymentMethodId: paymentMethodProviderId || undefined,
+            paymentMethodReferenceId: cardRefId,
+            customerId: providerCustomerId,
+            payerEmail: parentEmail || undefined,
             externalReference: String(studentId),
             description: 'Recarga automatica Comergio',
             idempotencyKey,
+            deviceId: String(verifiedCard.providerDeviceId || '').trim() || undefined,
           });
-        } catch (providerError) {
-          const isResourceNotFound = Number(providerError?.status || 0) === 404
-            || String(providerError?.providerPayload?.error || '').toLowerCase() === 'resource not found';
-
-          if (!isResourceNotFound) {
-            throw providerError;
-          }
-
-          // Compatibility fallback: some MP accounts do not expose /authorized_payments.
-          const agreement = await getMercadoPagoPreapproval(autoDebitAgreementId);
-          const payerId = String(agreement?.payer_id || agreement?.payer?.id || '').trim();
-          const payerEmail = String(agreement?.payer_email || agreement?.payer?.email || parentEmail || '').trim().toLowerCase();
-          const cardId = Number(agreement?.card_id || agreement?.card?.id || 0);
-          const paymentMethodId = String(
-            agreement?.payment_method_id
-            || agreement?.auto_recurring?.payment_method_id
-            || agreement?.card?.payment_method_id
-            || ''
-          ).trim();
-
+        } else {
           try {
-            providerPayment = await createMercadoPagoPayment({
-              amount,
-              paymentMethodId: paymentMethodId || undefined,
-              paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+            providerPayment = await createMercadoPagoAuthorizedPayment({
               preapprovalId: autoDebitAgreementId,
-              customerId: payerId || undefined,
-              payerEmail: payerEmail || undefined,
+              amount,
               externalReference: String(studentId),
               description: 'Recarga automatica Comergio',
               idempotencyKey,
             });
-          } catch (paymentError) {
-            const customerNotFound = String(paymentError?.message || '').toLowerCase().includes('customer not found')
-              || Number(paymentError?.providerPayload?.cause?.[0]?.code || 0) === 2002;
+          } catch (providerError) {
+            const isResourceNotFound = Number(providerError?.status || 0) === 404
+              || String(providerError?.providerPayload?.error || '').toLowerCase() === 'resource not found';
 
-            if (!customerNotFound || !payerEmail) {
-              throw paymentError;
+            if (!isResourceNotFound) {
+              throw providerError;
             }
 
-            providerPayment = await createMercadoPagoPayment({
-              amount,
-              paymentMethodId: paymentMethodId || undefined,
-              paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
-              preapprovalId: autoDebitAgreementId,
-              customerId: undefined,
-              payerEmail,
-              externalReference: String(studentId),
-              description: 'Recarga automatica Comergio',
-              idempotencyKey,
-            });
+            // Compatibility fallback: some MP accounts do not expose /authorized_payments.
+            const agreement = await getMercadoPagoPreapproval(autoDebitAgreementId);
+            const payerId = String(agreement?.payer_id || agreement?.payer?.id || '').trim();
+            const payerEmail = String(agreement?.payer_email || agreement?.payer?.email || parentEmail || '').trim().toLowerCase();
+            const cardId = Number(agreement?.card_id || agreement?.card?.id || 0);
+            const paymentMethodId = String(
+              agreement?.payment_method_id
+              || agreement?.auto_recurring?.payment_method_id
+              || agreement?.card?.payment_method_id
+              || ''
+            ).trim();
+
+            try {
+              providerPayment = await createMercadoPagoPayment({
+                amount,
+                paymentMethodId: paymentMethodId || undefined,
+                paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+                preapprovalId: autoDebitAgreementId,
+                customerId: payerId || undefined,
+                payerEmail: payerEmail || undefined,
+                externalReference: String(studentId),
+                description: 'Recarga automatica Comergio',
+                idempotencyKey,
+              });
+            } catch (paymentError) {
+              const customerNotFound = String(paymentError?.message || '').toLowerCase().includes('customer not found')
+                || Number(paymentError?.providerPayload?.cause?.[0]?.code || 0) === 2002;
+
+              if (!customerNotFound || !payerEmail) {
+                throw paymentError;
+              }
+
+              providerPayment = await createMercadoPagoPayment({
+                amount,
+                paymentMethodId: paymentMethodId || undefined,
+                paymentMethodReferenceId: Number.isFinite(cardId) && cardId > 0 ? cardId : undefined,
+                preapprovalId: autoDebitAgreementId,
+                customerId: undefined,
+                payerEmail,
+                externalReference: String(studentId),
+                description: 'Recarga automatica Comergio',
+                idempotencyKey,
+              });
+            }
           }
         }
 
