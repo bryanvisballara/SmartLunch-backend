@@ -1197,7 +1197,7 @@ function ParentPortal() {
       const expYear = String(2000 + Number(expYearShort || 0));
 
       const payload = {
-        provider: 'mercadopago',
+        provider: 'epayco',
         firstName,
         lastName,
         documentType,

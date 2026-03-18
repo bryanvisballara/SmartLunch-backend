@@ -18,15 +18,11 @@ const Category = require('../models/category.model');
 const Product = require('../models/product.model');
 const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const {
-  isMercadoPagoConfigured,
-  findOrCreateCustomer,
-  createCardToken,
-  createCustomerCard,
-  deleteCustomerCard,
-  createPreapproval,
-  getPreapproval,
-  cancelPreapproval,
-} = require('../services/mercadopago.service');
+  isEpaycoConfigured,
+  createCardToken: createEpaycoCardToken,
+  createOrUpdateCustomer: createEpaycoCustomer,
+  toInternalStatus: toEpaycoInternalStatus,
+} = require('../services/epayco.service');
 const { DEFAULT_TTL_SECONDS, getMenuCache, setMenuCache } = require('../services/menuCache.service');
 const { deriveThumbUrlFromImageUrl, normalizeStoredImageUrl } = require('../utils/imageUpload');
 
@@ -117,25 +113,11 @@ function getCardVerificationExpirationDate() {
   return expiresAt;
 }
 
-function getFrontendBaseUrl() {
-  return String(process.env.FRONTEND_URL || 'https://comergio.com').trim().replace(/\/$/, '');
-}
-
-function getMercadoPagoErrorMessage(error) {
-  const directMessage = String(error?.message || '').trim();
-  const providerPayload = error?.providerPayload || null;
-  const cause = Array.isArray(providerPayload?.cause) ? providerPayload.cause[0] : null;
-  const causeDescription = String(cause?.description || '').trim();
-  const payloadMessage = String(providerPayload?.message || providerPayload?.error || '').trim();
-
-  return causeDescription || payloadMessage || directMessage || 'No fue posible autorizar el método de pago en Mercado Pago.';
-}
-
 function serializeCard(card) {
   return {
     _id: card._id,
     token: card.token,
-    provider: card.provider || 'mercadopago',
+    provider: card.provider || 'epayco',
     brand: card.brand || 'unknown',
     last4: card.last4,
     expMonth: card.expMonth,
@@ -921,73 +903,66 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
     const fallbackBrand = cardNumber ? detectCardBrand(cardNumber) : 'unknown';
     const fallbackLast4 = cardNumber ? cardNumber.slice(-4) : '0000';
 
-    const mercadopagoConfigured = isMercadoPagoConfigured();
     if (requestedProvider === 'bold') {
       return res.status(400).json({
-        message: 'Bold solo esta habilitado para recargas manuales. Para tarjetas y debito automatico usa Mercado Pago.',
+        message: 'Bold solo esta habilitado para recargas manuales. Para tarjetas y debito automatico usa ePayco.',
       });
     }
 
-    if (!mercadopagoConfigured) {
+    if (!isEpaycoConfigured()) {
       return res.status(503).json({
-        message: 'Mercado Pago no esta configurado en el backend. No se puede registrar la tarjeta con tokenizacion.',
+        message: 'ePayco no está configurado en el backend. Configura EPAYCO_PUBLIC_KEY y EPAYCO_PRIVATE_KEY para registrar tarjetas.',
       });
     }
+
+    const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@comergio.local`;
 
     let paymentMethod;
-    if (mercadopagoConfigured) {
-      const parentEmail = String(parentUser?.email || '').trim().toLowerCase() || `${String(parentUserId)}@comergio.local`;
-      const customer = await findOrCreateCustomer({
+
+    // ── ePayco ─────────────────────────────────────────────────────────────
+    if (true) {
+      // 1. Tokenize the card (with CVV) to get a one-time token
+      const rawCardToken = incomingCardToken || null;
+      let oneTimeToken;
+      if (rawCardToken) {
+        oneTimeToken = rawCardToken;
+      } else {
+        const tokenResult = await createEpaycoCardToken({
+          cardNumber,
+          expirationMonth: expiry.month,
+          expirationYear: expiry.year,
+          securityCode: cvv,
+        });
+        oneTimeToken = String(tokenResult?.id || tokenResult?.token || '').trim();
+      }
+
+      if (!oneTimeToken) {
+        return res.status(400).json({ message: 'No se pudo tokenizar la tarjeta en ePayco.' });
+      }
+
+      // 2. Save customer / save card → get permanent customerId + saved card token
+      const customerResult = await createEpaycoCustomer({
+        tokenCard: oneTimeToken,
         email: parentEmail,
         firstName,
         lastName,
-        externalReference: `${schoolId}:${String(parentUserId)}`,
+        docType,
+        docNumber: document,
       });
 
-      const customerId = String(customer?.id || customer?._id || '').trim();
-      if (!customerId) {
-        return res.status(502).json({ message: 'No fue posible crear el cliente en Mercado Pago.' });
-      }
+      const epaycoCustomerId = String(customerResult?.customerId || customerResult?.customer_id || customerResult?.id || '').trim();
+      // The permanent card token returned by ePayco after saving the customer
+      const epaycoCardToken = String(customerResult?.token || customerResult?.token_card || oneTimeToken).trim();
 
-      const cardTokenId = incomingCardToken
-        ? incomingCardToken
-        : String(
-          (
-            await createCardToken({
-              cardNumber,
-              expirationMonth: expiry.month,
-              expirationYear: expiry.year,
-              securityCode: cvv,
-              cardholder: {
-                name: `${firstName} ${lastName}`.trim(),
-                identification: {
-                  type: docType,
-                  number: document,
-                },
-              },
-            })
-          )?.id || ''
-        ).trim();
-
-      if (!cardTokenId) {
-        return res.status(400).json({ message: 'No se pudo tokenizar la tarjeta.' });
-      }
-
-      const customerCard = await createCustomerCard({
-        customerId,
-        cardToken: cardTokenId,
-      });
-
-      const providerCardId = String(customerCard?.id || '').trim();
-      if (!providerCardId) {
-        return res.status(502).json({ message: 'No fue posible guardar la tarjeta en Mercado Pago.' });
+      if (!epaycoCustomerId) {
+        return res.status(502).json({ message: 'No fue posible guardar la tarjeta en ePayco.' });
       }
 
       const existingProviderCard = await ParentPaymentMethod.findOne({
         schoolId,
         parentUserId,
-        provider: 'mercadopago',
-        providerCardId,
+        provider: 'epayco',
+        providerCustomerId: epaycoCustomerId,
         deletedAt: null,
       })
         .select('_id')
@@ -997,27 +972,26 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
       }
 
-      const cardFingerprint = String(customerCard?.fingerprint || customerCard?.first_six_digits || providerCardId);
       const fingerprint = crypto
         .createHash('sha256')
-        .update(`${schoolId}|${String(parentUserId)}|mp|${cardFingerprint}`)
+        .update(`${schoolId}|${String(parentUserId)}|epayco|${epaycoCustomerId}`)
         .digest('hex');
 
       paymentMethod = await ParentPaymentMethod.create({
         schoolId,
         parentUserId,
         type: 'card',
-        provider: 'mercadopago',
-        token: `mp_${crypto.randomBytes(12).toString('hex')}`,
-        providerCustomerId: customerId,
-        providerCardId,
-        providerPaymentMethodId: String(customerCard?.payment_method?.id || '').trim(),
+        provider: 'epayco',
+        token: `ep_${crypto.randomBytes(12).toString('hex')}`,
+        providerCustomerId: epaycoCustomerId,
+        providerCardId: epaycoCardToken,          // permanent token for future charges
+        providerPaymentMethodId: '',
         providerDeviceId: incomingDeviceId,
         fingerprint,
-        brand: String(customerCard?.payment_method?.name || fallbackBrand || 'unknown').toLowerCase(),
-        last4: String(customerCard?.last_four_digits || fallbackLast4),
-        expMonth: Number(customerCard?.expiration_month || expiry?.month || 1),
-        expYear: Number(customerCard?.expiration_year || expiry?.year || 2099),
+        brand: incomingCardBrand || fallbackBrand || 'unknown',
+        last4: incomingCardLast4 || fallbackLast4,
+        expMonth: incomingCardExpMonth || expiry?.month || 1,
+        expYear: incomingCardExpYear || expiry?.year || 2099,
         holderFirstName: firstName,
         holderLastName: lastName,
         holderDocType: docType,
@@ -1029,15 +1003,16 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
         verificationExpiresAt: null,
         verifiedAt: new Date(),
       });
+
+    // ── Internal fallback (controlled environments only) ───────────────────
     } else {
       const allowInternalFallback = String(process.env.ALLOW_INTERNAL_CARD_FALLBACK || '').toLowerCase() === 'true';
       if (!allowInternalFallback) {
         return res.status(503).json({
-          message: 'Registro manual de tarjetas deshabilitado. Configura Mercado Pago para continuar.',
+          message: 'Registro manual de tarjetas deshabilitado. Configura ePayco para continuar.',
         });
       }
 
-      // Fallback path for controlled environments only.
       const fingerprint = crypto
         .createHash('sha256')
         .update(`${schoolId}|${String(parentUserId)}|${cardNumber}|${expiry.month}|${expiry.year}|${docType}|${document}`)
@@ -1266,24 +1241,6 @@ router.delete('/portal/payment-methods/cards/:cardId', async (req, res) => {
       return res.status(404).json({ message: 'Tarjeta no encontrada.' });
     }
 
-    if (
-      card.provider === 'mercadopago' &&
-      card.providerCustomerId &&
-      card.providerCardId &&
-      isMercadoPagoConfigured()
-    ) {
-      try {
-        await deleteCustomerCard({
-          customerId: card.providerCustomerId,
-          cardId: card.providerCardId,
-        });
-      } catch (providerError) {
-        return res.status(502).json({
-          message: providerError?.message || 'No fue posible eliminar la tarjeta en Mercado Pago.',
-        });
-      }
-    }
-
     card.status = 'inactive';
     card.deletedAt = new Date();
     await card.save();
@@ -1327,15 +1284,6 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
 
     const enabled = Boolean(req.body?.enabled);
     if (!enabled) {
-      const agreementId = String(wallet.autoDebitAgreementId || '').trim();
-      if (agreementId && isMercadoPagoConfigured()) {
-        try {
-          await cancelPreapproval(agreementId);
-        } catch (cancelError) {
-          // Ignore provider cancellation failures and still disable locally.
-        }
-      }
-
       wallet.autoDebitEnabled = false;
       wallet.autoDebitLimit = 0;
       wallet.autoDebitAmount = 0;
@@ -1412,8 +1360,8 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       return res.status(404).json({ message: 'Parent user not found' });
     }
 
-    if (!isMercadoPagoConfigured()) {
-      return res.status(503).json({ message: 'Mercado Pago no está configurado en este momento.' });
+    if (!isEpaycoConfigured()) {
+      return res.status(503).json({ message: 'ePayco no está configurado en este momento.' });
     }
 
     if (!confirmAuthorization) {
@@ -1421,7 +1369,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
         schoolId,
         parentUserId,
         type: 'card',
-        provider: 'mercadopago',
+        provider: 'epayco',
         status: 'active',
         deletedAt: null,
         verificationStatus: 'verified',
@@ -1440,10 +1388,10 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
 
       if (!verifiedCard?._id) {
         return res.status(409).json({
+          requiresVerifiedCard: true,
           message: requestedAutoDebitPaymentMethodId
             ? 'La tarjeta seleccionada no está verificada o no está disponible para recarga automática.'
-            : 'Debes registrar y verificar una tarjeta en Mercado Pago para activar la recarga automática por umbral.',
-          requiresVerifiedCard: true,
+            : 'Debes registrar y verificar una tarjeta en ePayco para activar la recarga automática por umbral.',
         });
       }
 
@@ -1485,127 +1433,9 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
       });
     }
 
-    if (confirmAuthorization) {
-      const candidateAgreementId = String(req.body?.preapprovalId || wallet.autoDebitAgreementId || '').trim();
-      if (!candidateAgreementId) {
-        return res.status(400).json({ message: 'preapprovalId is required to confirm authorization' });
-      }
-
-      const agreement = await getPreapproval(candidateAgreementId);
-      const agreementStatus = String(agreement?.status || '').trim().toLowerCase();
-      if (agreementStatus !== 'authorized') {
-        return res.status(409).json({
-          message: 'La autorización recurrente aún no está activa en Mercado Pago.',
-          requiresAuthorization: true,
-          preapprovalStatus: agreementStatus || 'pending',
-          preapprovalId: candidateAgreementId,
-        });
-      }
-
-      wallet.autoDebitEnabled = true;
-      wallet.autoDebitLimit = autoDebitLimit;
-      wallet.autoDebitAmount = autoDebitAmount;
-      wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
-      wallet.autoDebitPaymentMethodId = null;
-      wallet.autoDebitAgreementId = candidateAgreementId;
-      wallet.autoDebitAgreementStatus = agreementStatus;
-      wallet.autoDebitAgreementLastSyncAt = new Date();
-      wallet.autoDebitInProgress = false;
-      wallet.autoDebitLockAt = null;
-      wallet.autoDebitRetryAt = null;
-      wallet.autoDebitRetryCount = 0;
-      await wallet.save();
-
-      return res.status(200).json({
-        requiresAuthorization: false,
-        preapprovalId: candidateAgreementId,
-        preapprovalStatus: agreementStatus,
-        student: {
-          _id: studentId,
-          wallet: {
-            autoDebitEnabled: true,
-            autoDebitLimit,
-            autoDebitAmount,
-            autoDebitMonthlyLimit,
-            autoDebitPaymentMethodId: null,
-            autoDebitAgreementId: candidateAgreementId,
-            autoDebitAgreementStatus: agreementStatus,
-            autoDebitInProgress: false,
-            autoDebitLockAt: null,
-            autoDebitRetryAt: null,
-            autoDebitRetryCount: 0,
-            autoDebitMonthlyUsed: Number(wallet.autoDebitMonthlyUsed || 0),
-            autoDebitMonthlyPeriod: String(wallet.autoDebitMonthlyPeriod || ''),
-          },
-        },
-      });
-    }
-
-    const frontendBaseUrl = getFrontendBaseUrl();
-    const preapprovalStartDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const preapproval = await createPreapproval({
-      reason: `Recarga automática Comergio - ${String(studentId)}`,
-      externalReference: `${schoolId}:${String(studentId)}:${String(parentUserId)}:${Date.now()}`,
-      payerEmail: String(parentUser.email || '').trim().toLowerCase(),
-      backUrl: `${frontendBaseUrl}/parent/recargas/automatica`,
-      currencyId: 'COP',
-      transactionAmount: autoDebitAmount,
-      frequency: 1,
-      frequencyType: 'months',
-      startDate: preapprovalStartDate,
-    });
-
-    const preapprovalId = String(preapproval?.id || '').trim();
-    const preapprovalStatus = String(preapproval?.status || 'pending').trim().toLowerCase();
-    const authorizationUrl = String(preapproval?.init_point || '').trim();
-
-    if (!preapprovalId || !authorizationUrl) {
-      return res.status(502).json({ message: 'No fue posible iniciar la autorización recurrente en Mercado Pago.' });
-    }
-
-    wallet.autoDebitEnabled = false;
-    wallet.autoDebitLimit = autoDebitLimit;
-    wallet.autoDebitAmount = autoDebitAmount;
-    wallet.autoDebitMonthlyLimit = autoDebitMonthlyLimit;
-    wallet.autoDebitPaymentMethodId = null;
-    wallet.autoDebitAgreementId = preapprovalId;
-    wallet.autoDebitAgreementStatus = preapprovalStatus;
-    wallet.autoDebitAgreementLastSyncAt = new Date();
-    wallet.autoDebitInProgress = false;
-    wallet.autoDebitLockAt = null;
-    wallet.autoDebitRetryAt = null;
-    wallet.autoDebitRetryCount = 0;
-    await wallet.save();
-
-    return res.status(202).json({
-      requiresAuthorization: true,
-      authorizationUrl,
-      preapprovalId,
-      preapprovalStatus,
-      student: {
-        _id: studentId,
-        wallet: {
-          autoDebitEnabled: false,
-          autoDebitLimit,
-          autoDebitAmount,
-          autoDebitMonthlyLimit,
-          autoDebitPaymentMethodId: null,
-          autoDebitAgreementId: preapprovalId,
-          autoDebitAgreementStatus: preapprovalStatus,
-          autoDebitInProgress: false,
-          autoDebitLockAt: null,
-          autoDebitRetryAt: null,
-          autoDebitRetryCount: 0,
-          autoDebitMonthlyUsed: Number(wallet.autoDebitMonthlyUsed || 0),
-          autoDebitMonthlyPeriod: String(wallet.autoDebitMonthlyPeriod || ''),
-        },
-      },
-    });
+    return res.status(400).json({ message: 'confirmAuthorization is not supported. Use the ePayco card tokenized threshold flow.' });
   } catch (error) {
-    const status = Number(error?.status || 500);
-    const normalizedStatus = Number.isFinite(status) ? status : 500;
-    const message = getMercadoPagoErrorMessage(error);
-    return res.status(normalizedStatus >= 400 && normalizedStatus < 600 ? normalizedStatus : 500).json({ message });
+    return res.status(500).json({ message: error?.message || 'Error activando recarga automatica.' });
   }
 });
 

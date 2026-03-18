@@ -5,7 +5,7 @@ const parentPaymentMethodSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     parentUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type: { type: String, enum: ['card'], default: 'card', required: true },
-    provider: { type: String, enum: ['internal', 'mercadopago', 'bold'], default: 'internal', required: true },
+    provider: { type: String, enum: ['internal', 'bold', 'epayco'], default: 'internal', required: true },
     token: { type: String, required: true, trim: true, unique: true },
     providerCustomerId: { type: String, trim: true, default: '' },
     providerCardId: { type: String, trim: true, default: '' },
