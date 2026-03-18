@@ -349,10 +349,11 @@ function ParentPortal() {
   );
   const autoTopupSelectedCard = verifiedSavedCards.find((card) => String(card._id) === String(autoTopupSelectedCardId)) || null;
   const canActivateAutoTopup = Boolean(
+    autoTopupSelectedCardId &&
     Number.isFinite(autoTopupMinBalanceNumber) &&
     autoTopupMinBalanceNumber >= 20000 &&
     Number.isFinite(autoTopupRechargeAmount) &&
-    autoTopupRechargeAmount >= 30000
+    autoTopupRechargeAmount >= 20000
   );
 
   useEffect(() => {
@@ -1249,6 +1250,11 @@ function ParentPortal() {
       return;
     }
 
+    if (!verifiedSavedCards.length) {
+      setAutoTopupSubmitError('Debes agregar y verificar una tarjeta para activar la recarga automática.');
+      return;
+    }
+
     if (!canActivateAutoTopup) {
       setAutoTopupSubmitError('Completa los datos para activar la recarga automática.');
       return;
@@ -1263,6 +1269,7 @@ function ParentPortal() {
         enabled: true,
         autoDebitLimit: autoTopupMinBalanceNumber,
         autoDebitAmount: autoTopupRechargeAmount,
+        autoDebitPaymentMethodId: autoTopupSelectedCardId,
       });
 
       const requiresAuthorization = Boolean(response?.data?.requiresAuthorization);
@@ -2062,9 +2069,65 @@ function ParentPortal() {
             </label>
 
             <div className="parent-auto-topup-card-picker">
-              <p>
-                La selección y autorización de tarjeta ahora se realiza directamente en Mercado Pago.
-              </p>
+              <p>Selecciona la tarjeta verificada que se usará para la recarga automática por umbral.</p>
+
+              <button
+                className="parent-auto-topup-card-btn"
+                onClick={() => setAutoTopupCardPickerOpen((prev) => !prev)}
+                type="button"
+              >
+                <span>
+                  {autoTopupSelectedCard
+                    ? `${getCardBrandLabel(autoTopupSelectedCard.brand)} **** ${autoTopupSelectedCard.last4}`
+                    : 'Selecciona una tarjeta'}
+                </span>
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="m7 10 5 5 5-5z" fill="currentColor" />
+                </svg>
+              </button>
+
+              {autoTopupCardPickerOpen ? (
+                <div className="parent-auto-topup-card-dropdown">
+                  {verifiedSavedCards.map((card) => (
+                    <button
+                      className={String(card._id) === String(autoTopupSelectedCardId) ? 'is-selected' : ''}
+                      key={card._id}
+                      onClick={() => {
+                        setAutoTopupSelectedCardId(String(card._id));
+                        setAutoTopupCardPickerOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <span>{getCardBrandLabel(card.brand)} **** {card.last4}</span>
+                      <small>Vence {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}</small>
+                    </button>
+                  ))}
+
+                  <button
+                    className="parent-auto-topup-add-card-option"
+                    onClick={() => {
+                      setAutoTopupCardPickerOpen(false);
+                      navigate('/parent/recargas/agregar-tarjeta');
+                    }}
+                    type="button"
+                  >
+                    <span>+ Agregar tarjeta</span>
+                    <small>Registrar una nueva tarjeta en Mercado Pago</small>
+                  </button>
+                </div>
+              ) : null}
+
+              {!verifiedSavedCards.length ? (
+                <p className="parent-auto-topup-card-empty">
+                  No tienes tarjetas verificadas. Agrega y verifica una para habilitar la recarga automática.
+                </p>
+              ) : null}
+
+              {autoTopupSelectedCard ? (
+                <p className="parent-auto-topup-card-cycle">
+                  Se usará {getCardBrandLabel(autoTopupSelectedCard.brand)} **** {autoTopupSelectedCard.last4} para los cobros automáticos.
+                </p>
+              ) : null}
             </div>
 
             <p className="parent-auto-topup-hint">

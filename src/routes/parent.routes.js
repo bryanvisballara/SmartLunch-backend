@@ -1378,6 +1378,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
     }
 
     const confirmAuthorization = Boolean(req.body?.confirmAuthorization);
+    const requestedAutoDebitPaymentMethodId = toObjectId(req.body?.autoDebitPaymentMethodId);
     const requestedAutoDebitLimit = Number(req.body?.autoDebitLimit);
     const requestedAutoDebitAmount = Number(req.body?.autoDebitAmount);
     const requestedMonthlyLimit = Number(req.body?.autoDebitMonthlyLimit);
@@ -1416,7 +1417,7 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
     }
 
     if (!confirmAuthorization) {
-      const verifiedCard = await ParentPaymentMethod.findOne({
+      const verifiedCardFilter = {
         schoolId,
         parentUserId,
         type: 'card',
@@ -1426,14 +1427,22 @@ router.patch('/portal/students/:studentId/auto-debit', async (req, res) => {
         verificationStatus: 'verified',
         providerCustomerId: { $ne: '' },
         providerCardId: { $ne: '' },
-      })
+      };
+
+      if (requestedAutoDebitPaymentMethodId) {
+        verifiedCardFilter._id = requestedAutoDebitPaymentMethodId;
+      }
+
+      const verifiedCard = await ParentPaymentMethod.findOne(verifiedCardFilter)
         .sort({ verifiedAt: -1, createdAt: -1 })
         .select('_id')
         .lean();
 
       if (!verifiedCard?._id) {
         return res.status(409).json({
-          message: 'Debes registrar y verificar una tarjeta en Mercado Pago para activar la recarga automática por umbral.',
+          message: requestedAutoDebitPaymentMethodId
+            ? 'La tarjeta seleccionada no está verificada o no está disponible para recarga automática.'
+            : 'Debes registrar y verificar una tarjeta en Mercado Pago para activar la recarga automática por umbral.',
           requiresVerifiedCard: true,
         });
       }
