@@ -62,6 +62,29 @@ function normalizeEpaycoProviderErrorMessage(rawMsg) {
   return rawMsg;
 }
 
+function extractEpaycoErrorMessage(data, responseStatus, path) {
+  const candidates = [
+    data?.message,
+    data?.error,
+    data?.detail,
+    data?.msg,
+    data?.data?.message,
+    data?.data?.error,
+    data?.data?.detail,
+    data?.data?.response,
+    data?.data?.description,
+  ];
+
+  for (const value of candidates) {
+    const text = String(value || '').trim();
+    if (text) {
+      return text;
+    }
+  }
+
+  return `ePayco request failed (${responseStatus}) on ${path}`;
+}
+
 async function epaycoLogin() {
   const publicKey = getPublicKey();
   const privateKey = getPrivateKey();
@@ -211,7 +234,7 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
   const ok = response.ok && (data.status === true || data.status === 'true');
 
   if (!ok) {
-    const rawMsg = data?.message || data?.error || `ePayco request failed (${response.status})`;
+    const rawMsg = extractEpaycoErrorMessage(data, response.status, path);
     const msg = normalizeEpaycoProviderErrorMessage(rawMsg);
 
     // If the error is auth-related, flush the cached token so next call re-logs
@@ -221,6 +244,7 @@ async function epaycoRequest(path, { method = 'GET', body = null, extraHeaders =
 
     const err = new Error(msg);
     err.status = response.status;
+    err.providerPath = path;
     err.providerPayload = data;
     if (String(rawMsg || '').toLowerCase().includes('invalid client') || String(rawMsg || '').toLowerCase().includes('invalid_client')) {
       err.code = 'EPAYCO_INVALID_CLIENT';

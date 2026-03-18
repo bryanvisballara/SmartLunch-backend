@@ -1071,6 +1071,16 @@ router.post('/portal/payment-methods/cards', async (req, res) => {
       });
     }
 
+    if (error?.providerPayload || error?.providerPath) {
+      return res.status(502).json({
+        message: error.message || 'Error de ePayco al registrar la tarjeta.',
+        code: 'EPAYCO_REQUEST_FAILED',
+        providerPath: error.providerPath || null,
+        providerStatus: Number.isFinite(error?.status) ? error.status : null,
+        providerPayload: error.providerPayload || null,
+      });
+    }
+
     if (error?.code === 11000) {
       return res.status(409).json({ message: 'Esta tarjeta ya se encuentra registrada.' });
     }
