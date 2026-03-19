@@ -664,7 +664,8 @@ async function createOrUpdateCustomer({
     let lastError = null;
     for (const endpoint of customerCreateEndpoints) {
       try {
-        const requestBody = endpoint === '/token/customer'
+        const usesTokenCustomerEndpoint = endpoint === '/token/customer';
+        const requestBody = usesTokenCustomerEndpoint
           ? createCustomerBodyTokenCustomer
           : createCustomerBody;
 
@@ -675,7 +676,9 @@ async function createOrUpdateCustomer({
         const normalized = result?.data || result;
         const customerId = extractCustomerIdFromPayload(normalized);
         if (customerId) {
-          return customerId;
+          // When /token/customer is used with requireCardToken:true the token
+          // is already linked to the new customer — skip tryAddTokenWithCustomer.
+          return { customerId, tokenLinked: usesTokenCustomerEndpoint && createCustomerBodyTokenCustomer.requireCardToken === true };
         }
       } catch (error) {
         lastError = error;
@@ -695,7 +698,7 @@ async function createOrUpdateCustomer({
       }
     }
 
-    return '';
+    return null;
   };
 
   let lastSubscriptionError = null;
@@ -719,11 +722,24 @@ async function createOrUpdateCustomer({
       if (isCustomerIdRequiredProviderError(error)) {
         lastSubscriptionError = null;
       }
+
+      // Token already linked to another customer — skip add-token step and
+      // proceed to create a fresh customer with this token.
+      const alreadyLinked = String(error?.message || '').toLowerCase().includes('ya se encuentra asociado a otro customer')
+        || String(error?.message || '').toLowerCase().includes('token que desea asociar ya se encuentra');
+      if (alreadyLinked) {
+        lastSubscriptionError = null;
+      }
     }
   }
 
-  const createdCustomerId = await tryCreateCustomer();
-  if (createdCustomerId) {
+  const createResult = await tryCreateCustomer();
+  if (createResult) {
+    const { customerId: createdCustomerId, tokenLinked } = createResult;
+    if (tokenLinked) {
+      // Token already linked during customer creation — return directly
+      return { customerId: createdCustomerId, token: normalizedTokenCard };
+    }
     return tryAddTokenWithCustomer(createdCustomerId);
   }
 
