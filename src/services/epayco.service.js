@@ -586,7 +586,8 @@ async function createOrUpdateCustomer({
     email: body.email,
     cellPhone: body.cell_phone,
     phone: body.phone,
-    requireCardToken: false,
+    requireCardToken: true,
+    cardTokenId: normalizedTokenCard,
   };
 
   const tryAddTokenWithCustomer = async (customerId) => {
@@ -779,6 +780,7 @@ async function chargeCustomer({
     cellPhone: String(cellPhone || phone || '3000000000').replace(/\D/g, ''),
     phone: String(phone || '3000000000').replace(/\D/g, ''),
     dues: '1',
+    cardTokenId: String(customerToken || '').trim(),
     customerId: String(customerId || '').trim(),
   };
 
