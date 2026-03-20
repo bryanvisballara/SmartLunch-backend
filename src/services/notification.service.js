@@ -121,61 +121,70 @@ async function queueNotificationsForParents({
     status: 'active',
   });
 
-  let queueResult = { queued: false, reason: 'enqueue_not_attempted', count: 0 };
-  try {
-    queueResult = await withTimeout(
-      enqueueNotificationJobs(
-        insertedNotifications.map((notification) => ({
-          notificationId: String(notification._id),
-          schoolId,
-          parentId: String(notification.parentId),
-        }))
-      ),
-      process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
-      'Notification queue timeout'
-    );
-  } catch (queueError) {
-    queueResult = {
-      queued: false,
-      reason: queueError.message || 'enqueue_failed',
-      count: 0,
-    };
-  }
+  const directDelivery = { attempted: insertedNotifications.length > 0, delivered: 0, failed: 0 };
+  const retryJobs = [];
 
-  let directDelivery = { attempted: false, delivered: 0, failed: 0 };
-  if (!queueResult.queued && insertedNotifications.length) {
-    directDelivery.attempted = true;
+  for (const notification of insertedNotifications) {
+    try {
+      const delivery = await sendPushToParent({
+        schoolId,
+        parentId: notification.parentId,
+        title: notification.title,
+        body: notification.body,
+        payload: notification.payload,
+      });
 
-    for (const notification of insertedNotifications) {
-      try {
-        const delivery = await sendPushToParent({
-          schoolId,
-          parentId: notification.parentId,
-          title: notification.title,
-          body: notification.body,
-          payload: notification.payload,
-        });
-
-        if (delivery.delivered) {
-          directDelivery.delivered += 1;
-          await Notification.updateOne(
-            { _id: notification._id },
-            { status: 'sent', sentAt: new Date(), lastError: null }
-          );
-        } else {
-          directDelivery.failed += 1;
-          await Notification.updateOne(
-            { _id: notification._id },
-            { status: 'failed', lastError: delivery.reason || 'Push delivery failed' }
-          );
-        }
-      } catch (directError) {
-        directDelivery.failed += 1;
+      if (delivery.delivered) {
+        directDelivery.delivered += 1;
         await Notification.updateOne(
           { _id: notification._id },
-          { status: 'failed', lastError: directError.message || 'Direct push delivery failed' }
+          { status: 'sent', sentAt: new Date(), lastError: null }
         );
+        continue;
       }
+
+      directDelivery.failed += 1;
+      const reason = delivery.reason || 'Push delivery failed';
+      await Notification.updateOne(
+        { _id: notification._id },
+        { status: 'failed', lastError: reason }
+      );
+
+      retryJobs.push({
+        notificationId: String(notification._id),
+        schoolId,
+        parentId: String(notification.parentId),
+      });
+    } catch (directError) {
+      directDelivery.failed += 1;
+      const reason = directError.message || 'Direct push delivery failed';
+      await Notification.updateOne(
+        { _id: notification._id },
+        { status: 'failed', lastError: reason }
+      );
+
+      retryJobs.push({
+        notificationId: String(notification._id),
+        schoolId,
+        parentId: String(notification.parentId),
+      });
+    }
+  }
+
+  let queueResult = { queued: true, reason: 'all_delivered_direct', count: 0 };
+  if (retryJobs.length) {
+    try {
+      queueResult = await withTimeout(
+        enqueueNotificationJobs(retryJobs),
+        process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
+        'Notification queue timeout'
+      );
+    } catch (queueError) {
+      queueResult = {
+        queued: false,
+        reason: queueError.message || 'enqueue_failed',
+        count: 0,
+      };
     }
   }
 
