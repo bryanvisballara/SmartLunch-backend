@@ -291,21 +291,19 @@ router.post('/daviplata/callback', async (req, res) => {
 
     await session.commitTransaction();
 
-    if (wallet.autoDebitEnabled) {
-      setImmediate(async () => {
-        try {
-          await queueAutoDebitRechargeNotification({
-            schoolId: lockedPayment.schoolId,
-            studentId: lockedPayment.studentId,
-            amount: Number(lockedPayment.amount || 0),
-            newBalance: Number(wallet.balance || 0),
-            method: 'daviplata',
-          });
-        } catch (notificationError) {
-          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=daviplata_callback paymentId=${lockedPayment._id} error=${notificationError.message}`);
-        }
-      });
-    }
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          amount: Number(lockedPayment.amount || 0),
+          newBalance: Number(wallet.balance || 0),
+          method: 'daviplata',
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=daviplata_callback paymentId=${lockedPayment._id} error=${notificationError.message}`);
+      }
+    });
 
     return res.status(200).json({ received: true, credited: true, status: 'approved' });
   } catch (error) {
@@ -435,21 +433,19 @@ router.post('/bancolombia/callback', async (req, res) => {
 
     await session.commitTransaction();
 
-    if (wallet.autoDebitEnabled) {
-      setImmediate(async () => {
-        try {
-          await queueAutoDebitRechargeNotification({
-            schoolId: lockedPayment.schoolId,
-            studentId: lockedPayment.studentId,
-            amount: Number(lockedPayment.amount || 0),
-            newBalance: Number(wallet.balance || 0),
-            method: 'bancolombia',
-          });
-        } catch (notificationError) {
-          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=bancolombia_callback paymentId=${lockedPayment._id} error=${notificationError.message}`);
-        }
-      });
-    }
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          amount: Number(lockedPayment.amount || 0),
+          newBalance: Number(wallet.balance || 0),
+          method: 'bancolombia',
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=bancolombia_callback paymentId=${lockedPayment._id} error=${notificationError.message}`);
+      }
+    });
 
     return res.status(200).json({ received: true, credited: true, status: 'approved' });
   } catch (error) {
@@ -629,21 +625,19 @@ router.post('/bold', async (req, res) => {
 
     await session.commitTransaction();
 
-    if (isAutoDebitPayment && wallet.autoDebitEnabled) {
-      setImmediate(async () => {
-        try {
-          await queueAutoDebitRechargeNotification({
-            schoolId: lockedPayment.schoolId,
-            studentId: lockedPayment.studentId,
-            amount: approvedAmount,
-            newBalance: Number(wallet.balance || 0),
-            method: 'bold',
-          });
-        } catch (notificationError) {
-          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=bold_webhook paymentId=${lockedPayment._id} error=${notificationError.message}`);
-        }
-      });
-    }
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          amount: approvedAmount,
+          newBalance: Number(wallet.balance || 0),
+          method: 'bold',
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=bold_webhook paymentId=${lockedPayment._id} error=${notificationError.message}`);
+      }
+    });
 
     return res.status(200).json({
       received: true,

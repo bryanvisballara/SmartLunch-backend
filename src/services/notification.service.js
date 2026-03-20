@@ -5,6 +5,7 @@ const DeviceToken = require('../models/deviceToken.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { enqueueNotificationJobs } = require('../config/queue');
+const { sendPushToParent } = require('./push.service');
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
   const parsedTimeout = Number(timeoutMs || 0);
@@ -33,11 +34,11 @@ function formatCurrency(value) {
   return Number(value || 0).toLocaleString('es-CO');
 }
 
-function buildPurchaseBody({ studentName, items, total, remainingBalance }) {
+function buildPurchaseBody({ items, total, remainingBalance }) {
   const lines = items.map((item) => `- ${item.nameSnapshot} $${formatCurrency(item.subtotal)}`).join('\n');
 
   return [
-    `${studentName} compro:`,
+    'Detalle de la compra:',
     lines,
     '',
     `Total compra: $${formatCurrency(total)}`,
@@ -59,9 +60,9 @@ async function queueOrderCreatedNotifications({ schoolId, student, order }) {
   const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).select('balance');
   const remainingBalance = wallet?.balance || 0;
 
-  const title = 'Compra realizada';
+  const childName = firstName(student.name);
+  const title = `${childName} ha realizado una compra`;
   const body = buildPurchaseBody({
-    studentName: student.name,
     items: order.items,
     total: order.total,
     remainingBalance,
@@ -141,12 +142,52 @@ async function queueNotificationsForParents({
     };
   }
 
+  let directDelivery = { attempted: false, delivered: 0, failed: 0 };
+  if (!queueResult.queued && insertedNotifications.length) {
+    directDelivery.attempted = true;
+
+    for (const notification of insertedNotifications) {
+      try {
+        const delivery = await sendPushToParent({
+          schoolId,
+          parentId: notification.parentId,
+          title: notification.title,
+          body: notification.body,
+          payload: notification.payload,
+        });
+
+        if (delivery.delivered) {
+          directDelivery.delivered += 1;
+          await Notification.updateOne(
+            { _id: notification._id },
+            { status: 'sent', sentAt: new Date(), lastError: null }
+          );
+        } else {
+          directDelivery.failed += 1;
+          await Notification.updateOne(
+            { _id: notification._id },
+            { status: 'failed', lastError: delivery.reason || 'Push delivery failed' }
+          );
+        }
+      } catch (directError) {
+        directDelivery.failed += 1;
+        await Notification.updateOne(
+          { _id: notification._id },
+          { status: 'failed', lastError: directError.message || 'Direct push delivery failed' }
+        );
+      }
+    }
+  }
+
   return {
     notificationsCreated: notifications.length,
     tokensFound,
     queued: queueResult.queued,
     queuedCount: queueResult.count || 0,
     queueReason: queueResult.reason || null,
+    directAttempted: directDelivery.attempted,
+    directDelivered: directDelivery.delivered,
+    directFailed: directDelivery.failed,
   };
 }
 
@@ -175,11 +216,11 @@ async function queueLowBalanceAlertNotification({ schoolId, student, balance, th
 
   const messageByThreshold = {
     lt20: {
-      title: 'Saldo bajo',
+      title: `A ${childName} le quedan menos de $20,000`,
       body: `${childName} tiene bajo saldo y se puede quedar sin merendar. Recarga cuanto antes.`,
     },
     lt10: {
-      title: 'Ultimo aviso de saldo',
+      title: `Ultimo aviso de saldo para ${childName}`,
       body: `Ultimo aviso! ${childName} esta a punto de quedarse sin saldo. Recarga AHORA!`,
     },
   };
@@ -223,17 +264,18 @@ async function queueAutoDebitRechargeNotification({ schoolId, studentId, amount,
 
   const parentIds = parentLinks.map((link) => link.parentId);
   const childName = firstName(student.name);
+  const rechargeAmount = Number(amount || 0);
 
   return queueNotificationsForParents({
     schoolId,
     parentIds,
     studentId,
-    title: 'Recarga automatica realizada',
-    body: `Se realizo una recarga para ${childName}. Nuevo saldo disponible: $${formatCurrency(newBalance)}.`,
+    title: 'Recarga exitosa!',
+    body: `se han acreditado $${formatCurrency(rechargeAmount)} a ${childName}.`,
     payload: {
-      type: 'wallet.auto_recharge',
+      type: 'wallet.recharge',
       studentId,
-      amount,
+      amount: rechargeAmount,
       balance: newBalance,
       method,
     },

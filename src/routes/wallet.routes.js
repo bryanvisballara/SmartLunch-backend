@@ -376,21 +376,19 @@ router.post('/topup-requests/:id/approve', roleMiddleware('admin'), async (req, 
 
     await session.commitTransaction();
 
-    if (wallet.autoDebitEnabled) {
-      setImmediate(async () => {
-        try {
-          await queueAutoDebitRechargeNotification({
-            schoolId,
-            studentId: topupRequest.studentId,
-            amount: Number(topupRequest.amount || 0),
-            newBalance: Number(wallet.balance || 0),
-            method: topupRequest.method || 'cash',
-          });
-        } catch (notificationError) {
-          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=topup_request_approve requestId=${topupRequest._id} error=${notificationError.message}`);
-        }
-      });
-    }
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId,
+          studentId: topupRequest.studentId,
+          amount: Number(topupRequest.amount || 0),
+          newBalance: Number(wallet.balance || 0),
+          method: topupRequest.method || 'cash',
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=topup_request_approve requestId=${topupRequest._id} error=${notificationError.message}`);
+      }
+    });
 
     return res.status(200).json(topupRequest);
   } catch (error) {
@@ -459,21 +457,19 @@ router.post('/topup', roleMiddleware('admin', 'parent'), async (req, res) => {
       notes,
     });
 
-    if (wallet.autoDebitEnabled) {
-      setImmediate(async () => {
-        try {
-          await queueAutoDebitRechargeNotification({
-            schoolId,
-            studentId,
-            amount: Number(amount || 0),
-            newBalance: Number(wallet.balance || 0),
-            method,
-          });
-        } catch (notificationError) {
-          console.error(`[AUTO_RECHARGE_NOTIFICATION_FAILED] source=wallet_topup studentId=${studentId} error=${notificationError.message}`);
-        }
-      });
-    }
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId,
+          studentId,
+          amount: Number(amount || 0),
+          newBalance: Number(wallet.balance || 0),
+          method,
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=wallet_topup studentId=${studentId} error=${notificationError.message}`);
+      }
+    });
 
     return res.status(200).json(wallet);
   } catch (error) {
@@ -576,6 +572,20 @@ router.post('/recharge', roleMiddleware('admin', 'parent'), async (req, res) => 
       method,
       createdBy: userId,
       notes,
+    });
+
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId,
+          studentId,
+          amount: Number(amount || 0),
+          newBalance: Number(wallet.balance || 0),
+          method,
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=wallet_recharge studentId=${studentId} error=${notificationError.message}`);
+      }
     });
 
     return res.status(200).json(wallet);
