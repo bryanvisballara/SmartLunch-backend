@@ -158,6 +158,7 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
   }
 
   if (!ensureFirebaseConfig()) {
+    console.error('[PUSH_NATIVE] Firebase credentials are not configured');
     return { delivered: 0, total: nativeTokens.length, reason: 'Firebase credentials are not configured' };
   }
 
@@ -194,10 +195,12 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
   for (let index = 0; index < response.responses.length; index += 1) {
     const delivery = response.responses[index];
     if (delivery.success) {
+      console.info(`[PUSH_NATIVE_OK] token=${String(validDocs[index]?.token || '').slice(0, 20)}...`);
       continue;
     }
 
     const code = String(delivery.error?.code || '');
+    console.warn(`[PUSH_NATIVE_ERR] token=${String(validDocs[index]?.token || '').slice(0, 20)}... code=${code} message=${delivery.error?.message || ''}`);
     if (
       code === 'messaging/registration-token-not-registered' ||
       code === 'messaging/invalid-registration-token'
@@ -222,6 +225,8 @@ async function sendPushToParent({ schoolId, parentId, title, body, payload }) {
     userId: parentId,
     status: 'active',
   }).select('platform token');
+
+  console.info(`[PUSH_TO_PARENT] parentId=${parentId} tokensFound=${tokens.length}`);
 
   if (!tokens.length) {
     return { delivered: false, tokens: 0, reason: 'No active device tokens' };

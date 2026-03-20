@@ -136,6 +136,7 @@ async function queueNotificationsForParents({
 
       if (delivery.delivered) {
         directDelivery.delivered += 1;
+        console.info(`[PUSH_SENT] notificationId=${notification._id} parentId=${notification.parentId}`);
         await Notification.updateOne(
           { _id: notification._id },
           { status: 'sent', sentAt: new Date(), lastError: null }
@@ -145,6 +146,7 @@ async function queueNotificationsForParents({
 
       directDelivery.failed += 1;
       const reason = delivery.reason || 'Push delivery failed';
+      console.warn(`[PUSH_FAILED] notificationId=${notification._id} parentId=${notification.parentId} reason=${reason}`);
       await Notification.updateOne(
         { _id: notification._id },
         { status: 'failed', lastError: reason }
