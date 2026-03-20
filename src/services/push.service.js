@@ -71,15 +71,20 @@ function ensureFirebaseConfig() {
   }
 
   const serviceAccountRaw = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+  console.info(`[FIREBASE_INIT] FIREBASE_SERVICE_ACCOUNT_JSON length=${serviceAccountRaw.length}`);
+
   if (serviceAccountRaw) {
     try {
       const serviceAccount = JSON.parse(serviceAccountRaw);
+      console.info(`[FIREBASE_INIT] parsed OK project_id=${serviceAccount.project_id} client_email=${serviceAccount.client_email}`);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
+      console.info('[FIREBASE_INIT] initializeApp OK via JSON');
       firebaseConfigured = true;
       return true;
     } catch (error) {
+      console.error(`[FIREBASE_INIT] JSON parse/init FAILED: ${error.message}`);
       return false;
     }
   }
@@ -88,7 +93,10 @@ function ensureFirebaseConfig() {
   const clientEmail = String(process.env.FIREBASE_CLIENT_EMAIL || '').trim();
   const privateKey = String(process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n').trim();
 
+  console.info(`[FIREBASE_INIT] fallback vars: projectId=${projectId} clientEmail=${clientEmail} privateKeyLen=${privateKey.length}`);
+
   if (!projectId || !clientEmail || !privateKey) {
+    console.error('[FIREBASE_INIT] Missing individual Firebase env vars');
     return false;
   }
 
@@ -100,9 +108,11 @@ function ensureFirebaseConfig() {
         privateKey,
       }),
     });
+    console.info('[FIREBASE_INIT] initializeApp OK via individual vars');
     firebaseConfigured = true;
     return true;
   } catch (error) {
+    console.error(`[FIREBASE_INIT] individual vars init FAILED: ${error.message}`);
     return false;
   }
 }
