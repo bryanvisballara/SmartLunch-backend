@@ -34,15 +34,21 @@ app.set('etag', false);
 
 const defaultOrigins = [
   'http://localhost:5173',
+  'http://localhost',
+  'capacitor://localhost',
+  'ionic://localhost',
   'https://comergio.com',
   'https://www.comergio.com',
 ];
 
 const defaultOriginRegexes = [/^https:\/\/[a-z0-9-]+\.hostingersite\.com$/i];
 
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
-  : defaultOrigins;
+const envOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
 const allowedOriginRegexes = (process.env.CORS_ORIGIN_REGEX || '')
   .split(',')
