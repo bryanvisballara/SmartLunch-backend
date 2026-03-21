@@ -31,6 +31,7 @@ const ROUTE_FALLBACKS = [
   'parent/historial-ordenes',
   'parent/limitar-consumo',
   'parent/meriendas',
+  'parent/gio-ia',
   'login',
   'register',
   'register/next-step',

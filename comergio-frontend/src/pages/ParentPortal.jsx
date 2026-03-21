@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import {
   addToMeriendasWaitlist,
+  askParentGioIaChat,
   cancelParentMeriendasSubscription,
   confirmParentCardVerification,
   createParentCardPaymentMethod,
@@ -162,6 +163,7 @@ function ParentPortal() {
   const [daviSubmitError, setDaviSubmitError] = useState('');
   const [daviSubmitSuccess, setDaviSubmitSuccess] = useState('');
   const [boldPaymentData, setBoldPaymentData] = useState(null);
+  const [boldButtonLoadError, setBoldButtonLoadError] = useState('');
   const boldContainerRef = useRef(null);
   const [pseAmount, setPseAmount] = useState('');
   const [pseSubmitLoading, setPseSubmitLoading] = useState(false);
@@ -230,6 +232,17 @@ function ParentPortal() {
   const [showMeriendasCancelModal, setShowMeriendasCancelModal] = useState(false);
   const [showWaitlistSuccessModal, setShowWaitlistSuccessModal] = useState(false);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [gioMessages, setGioMessages] = useState([
+    {
+      role: 'assistant',
+      content: 'Hola, soy GIO - IA. Pregúntame sobre el consumo de tu hijo: por fecha, promedio o tendencias.',
+    },
+  ]);
+  const [gioInput, setGioInput] = useState('');
+  const [gioSending, setGioSending] = useState(false);
+  const [gioError, setGioError] = useState('');
+  const [gioContext, setGioContext] = useState(null);
+  const gioThreadEndRef = useRef(null);
 
   const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
   const isTopupsPage = location.pathname === '/parent/recargas';
@@ -245,6 +258,7 @@ function ParentPortal() {
   const isMeriendasPage = location.pathname === '/parent/meriendas';
   const isHistoryPage = location.pathname === '/parent/historial-ordenes';
   const isLimitPage = location.pathname === '/parent/limitar-consumo';
+  const isGioIaPage = location.pathname === '/parent/gio-ia';
   const menuCategoryId = useMemo(() => {
     const prefix = '/parent/menu/';
     if (!location.pathname.startsWith(prefix)) {
@@ -673,6 +687,38 @@ function ParentPortal() {
   }, [isMeriendasPage]);
 
   useEffect(() => {
+    if (!isGioIaPage) {
+      return;
+    }
+
+    setGioMessages([
+      {
+        role: 'assistant',
+        content: `Hola, soy GIO - IA. Estoy listo para ayudarte con el consumo de ${selectedStudentFirstName}.`,
+      },
+    ]);
+    setGioInput('');
+    setGioError('');
+    setGioContext(null);
+  }, [isGioIaPage, selectedStudent?._id, selectedStudentFirstName]);
+
+  useEffect(() => {
+    if (!isGioIaPage) {
+      return;
+    }
+
+    gioThreadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [gioMessages, gioSending, isGioIaPage]);
+
+  useEffect(() => {
+    if (!isAutoTopupPage) {
+      return;
+    }
+
+    navigate('/parent/recargas', { replace: true });
+  }, [isAutoTopupPage, navigate]);
+
+  useEffect(() => {
     if (!verifiedSavedCards.length) {
       if (autoTopupSelectedCardId) {
         setAutoTopupSelectedCardId('');
@@ -774,6 +820,51 @@ function ParentPortal() {
     loadOverview(String(studentId));
   };
 
+  const onSendGioMessage = async () => {
+    const message = String(gioInput || '').trim();
+    if (!message || gioSending) {
+      return;
+    }
+
+    if (!selectedStudentId) {
+      setGioError('Selecciona un alumno para continuar.');
+      return;
+    }
+
+    const userMessage = { role: 'user', content: message };
+    const nextMessages = [...gioMessages, userMessage];
+    setGioMessages(nextMessages);
+    setGioInput('');
+    setGioError('');
+    setGioSending(true);
+
+    try {
+      const historyPayload = nextMessages.slice(-20).map((item) => ({
+        role: item.role,
+        content: String(item.content || ''),
+      }));
+      const response = await askParentGioIaChat({
+        studentId: selectedStudentId,
+        message,
+        history: historyPayload,
+        context: gioContext,
+      });
+
+      const answer = String(response.data?.answer || 'No tengo una respuesta para esa consulta todavía.').trim();
+      setGioMessages((prev) => [...prev, { role: 'assistant', content: answer }]);
+      setGioContext(response.data?.context || null);
+    } catch (requestError) {
+      const messageError = requestError?.response?.data?.message || requestError?.message || 'No se pudo procesar tu pregunta.';
+      setGioError(messageError);
+      setGioMessages((prev) => [
+        ...prev,
+        { role: 'assistant', content: 'No pude responder en este momento. Intenta de nuevo en unos segundos.' },
+      ]);
+    } finally {
+      setGioSending(false);
+    }
+  };
+
   const selectedMenuCategory = categories.find((category) => String(category._id) === String(menuCategoryId));
 
   const onRunMenuAction = (label) => {
@@ -807,6 +898,11 @@ function ParentPortal() {
 
     if (label === 'Meriendas') {
       navigate('/parent/meriendas');
+      return;
+    }
+
+    if (label === 'GIO - IA') {
+      navigate('/parent/gio-ia');
     }
   };
 
@@ -821,22 +917,6 @@ function ParentPortal() {
     setSelectedOrderDetail(null);
   };
 
-  const goToAutoTopupPage = () => {
-    const targetPath = '/parent/recargas/automatica';
-    if (location.pathname === targetPath) {
-      return;
-    }
-
-    navigate(targetPath);
-
-    // Fallback in case a stale router state prevents SPA navigation.
-    setTimeout(() => {
-      if (window.location.pathname !== targetPath) {
-        window.location.assign(targetPath);
-      }
-    }, 80);
-  };
-
   const menuItems = [
     { key: 'Inicio', label: 'Inicio', icon: 'home' },
     { key: 'Menu - bloquear products', label: 'Menú - bloquear productos', icon: 'food-menu' },
@@ -844,6 +924,7 @@ function ParentPortal() {
     { key: 'Historial de órdenes', label: 'Historial de órdenes', icon: 'ticket' },
     { key: 'Limitar consumo', label: 'Limitar consumo', icon: 'limit' },
     { key: 'Meriendas', label: 'Meriendas', icon: 'star' },
+    { key: 'GIO - IA', label: 'GIO - IA', icon: 'sparkles' },
   ];
 
   const mergeStudentData = (updatedStudent) => {
@@ -991,6 +1072,7 @@ function ParentPortal() {
     setDaviSubmitLoading(true);
     setDaviSubmitError('');
     setDaviSubmitSuccess('');
+    setBoldButtonLoadError('');
     setBoldPaymentData(null);
 
     try {
@@ -1012,6 +1094,8 @@ function ParentPortal() {
     if (!boldPaymentData || !boldContainerRef.current) return;
 
     boldContainerRef.current.innerHTML = '';
+    setBoldButtonLoadError('');
+    setDaviSubmitSuccess('Redirigiendo a Bold...');
 
     const script = document.createElement('script');
     script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
@@ -1027,8 +1111,49 @@ function ParentPortal() {
       script.setAttribute('data-description', boldPaymentData.description);
     }
     script.setAttribute('data-render-mode', 'embedded');
+    script.onerror = () => {
+      setBoldButtonLoadError('No pudimos cargar el botón de Bold. Intenta nuevamente.');
+      setDaviSubmitSuccess('');
+    };
 
     boldContainerRef.current.appendChild(script);
+
+    let attempts = 0;
+    const maxAttempts = 25;
+    const autoOpenInterval = setInterval(() => {
+      if (!boldContainerRef.current) {
+        clearInterval(autoOpenInterval);
+        return;
+      }
+
+      const clickable = boldContainerRef.current.querySelector('button, a, [role="button"]');
+      if (clickable) {
+        clearInterval(autoOpenInterval);
+        try {
+          clickable.click();
+        } catch (_) {
+          setBoldButtonLoadError('No pudimos abrir Bold automáticamente. Presiona el botón de Bold para continuar.');
+        }
+        return;
+      }
+
+      attempts += 1;
+      if (attempts >= maxAttempts) {
+        clearInterval(autoOpenInterval);
+      }
+    }, 200);
+
+    const renderCheck = setTimeout(() => {
+      if (!boldContainerRef.current || boldContainerRef.current.childElementCount === 0) {
+        setBoldButtonLoadError('No pudimos cargar el botón de Bold. Intenta nuevamente.');
+        setDaviSubmitSuccess('');
+      }
+    }, 2500);
+
+    return () => {
+      clearInterval(autoOpenInterval);
+      clearTimeout(renderCheck);
+    };
   }, [boldPaymentData]);
 
   const onSubmitPseTopup = async () => {
@@ -1608,6 +1733,13 @@ function ParentPortal() {
         </svg>
       );
     }
+    if (icon === 'sparkles') {
+      return (
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2.5a1 1 0 0 1 .96.73l1.12 4.04l4.03 1.12a1 1 0 0 1 0 1.93l-4.03 1.12l-1.12 4.04a1 1 0 0 1-1.92 0l-1.12-4.04l-4.03-1.12a1 1 0 0 1 0-1.93l4.03-1.12l1.12-4.04A1 1 0 0 1 12 2.5Zm6.5 11.5a.75.75 0 0 1 .72.54l.5 1.76l1.76.5a.75.75 0 0 1 0 1.44l-1.76.5l-.5 1.76a.75.75 0 0 1-1.44 0l-.5-1.76l-1.76-.5a.75.75 0 0 1 0-1.44l1.76-.5l.5-1.76a.75.75 0 0 1 .72-.54Z" fill="currentColor"/>
+        </svg>
+      );
+    }
 
     return (
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -1853,7 +1985,7 @@ function ParentPortal() {
             {!historyOrdersLoading && historyOrdersError ? <p className="parent-error">{historyOrdersError}</p> : null}
 
             {!historyOrdersLoading && !historyOrdersError ? (
-              <div className="parent-history-list">
+              <div className="parent-history-list parent-history-list-scroll">
                 {historyOrders.map((order) => (
                   <article
                     key={order._id}
@@ -1895,48 +2027,14 @@ function ParentPortal() {
             <div className="parent-topups-balance-card">
               <p className="parent-topups-kicker">Saldo disponible</p>
               <h3>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h3>
-              {showAutoDebitEstablishedNotice ? (
-                <div className="parent-autodebit-established-row">
-                  <div className="parent-autodebit-established" role="status" aria-live="polite">
-                    <span className="parent-autodebit-established-check" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
-                      </svg>
-                    </span>
-                    <span>
-                      Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
-                    </span>
-                  </div>
-                  <div className="parent-autodebit-menu-wrap" ref={autoDebitMenuRef}>
-                    <button
-                      aria-expanded={autoDebitMenuOpen}
-                      aria-label="Opciones de recarga automatica"
-                      className="parent-autodebit-menu-btn"
-                      onClick={() => setAutoDebitMenuOpen((prev) => !prev)}
-                      type="button"
-                    >
-                      <span />
-                      <span />
-                      <span />
-                    </button>
-                    {autoDebitMenuOpen ? (
-                      <div className="parent-autodebit-menu">
-                        <button disabled={autoDebitCancelLoading} onClick={onDisableAutoTopup} type="button">
-                          {autoDebitCancelLoading ? 'Cancelando...' : 'Cancelar debito automatico'}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               <div className="parent-topups-pill">
                 <span className="dot" aria-hidden="true" />
-                <span>Saldo minimo sugerido {formatCurrency(selectedStudent?.wallet?.autoDebitLimit || 20000)}</span>
+                <span>Recarga mínima sugerida {formatCurrency(minimumBoldRecharge)}</span>
               </div>
             </div>
 
-            <div className="parent-topups-actions">
-              <button onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <div className="parent-topups-actions parent-topups-actions-single">
+              <button onClick={() => navigate('/parent/recargas/metodos/daviplata')} type="button">
                 <span className="parent-topups-action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z" fill="currentColor"/>
@@ -1944,92 +2042,11 @@ function ParentPortal() {
                 </span>
                 <span>Recargar saldo</span>
               </button>
-
-              <button onClick={() => navigate('/parent/recargas/agregar-tarjeta')} type="button">
-                <span className="parent-topups-action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2H4V5Zm16 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9h16Zm-8 2a1 1 0 0 0-1 1v1h-1a1 1 0 1 0 0 2h1v1a1 1 0 1 0 2 0v-1h1a1 1 0 1 0 0-2h-1v-1a1 1 0 0 0-1-1Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>Agregar tarjeta</span>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/automatica')} type="button">
-                <span className="parent-topups-action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M13 2L4 14h6l-1 8l9-12h-6l1-8Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>Recarga automática</span>
-              </button>
-
-            </div>
-
-            <div className="parent-topups-method-list">
-              {savedCardsLoading ? <p className="parent-loading">Cargando tarjetas...</p> : null}
-              {!savedCardsLoading && savedCardsError ? <p className="parent-error">{savedCardsError}</p> : null}
-
-              {!savedCardsLoading && !savedCardsError
-                ? savedCards.map((card) => (
-                    <div className="parent-topups-method-card" key={card._id}>
-                      <div className="parent-topups-method-left">
-                        <span className={`parent-topups-brand-dot brand-${String(card.brand || 'unknown').toLowerCase()}`} aria-hidden="true" />
-                        <div>
-                          <p className="title">{getCardBrandLabel(card.brand)} **** {card.last4}</p>
-                          <p className="meta">Vence {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}</p>
-                        </div>
-                      </div>
-                      <div className="parent-topups-method-actions">
-                        <span
-                          className={`parent-topups-badge ${String(card?.verificationStatus || 'verified') === 'verified' ? '' : 'pending'}`}
-                        >
-                          {String(card?.verificationStatus || 'verified') === 'verified' ? 'Verificada' : 'Pendiente'}
-                        </span>
-                        <button
-                          aria-expanded={cardMenuOpenId === String(card._id)}
-                          aria-label="Opciones de tarjeta"
-                          className="parent-topups-menu-btn"
-                          onClick={() => setCardMenuOpenId((prev) => (prev === String(card._id) ? '' : String(card._id)))}
-                          type="button"
-                        >
-                          <span />
-                          <span />
-                          <span />
-                        </button>
-
-                        {cardMenuOpenId === String(card._id) ? (
-                          <div className="parent-topups-card-menu">
-                            {String(card?.verificationStatus || 'verified') !== 'verified' ? (
-                              <button
-                                disabled={deletingCardId === String(card._id)}
-                                onClick={() => {
-                                  setCardMenuOpenId('');
-                                  openCardVerificationModal(card);
-                                }}
-                                type="button"
-                              >
-                                Verificar tarjeta
-                              </button>
-                            ) : null}
-                            <button
-                              disabled={deletingCardId === String(card._id)}
-                              onClick={() => onDeleteSavedCard(card._id)}
-                              type="button"
-                            >
-                              {deletingCardId === String(card._id) ? 'Eliminando...' : 'Eliminar tarjeta'}
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))
-                : null}
-
             </div>
 
             <section className="parent-section">
               <h3>Ultimas recargas</h3>
-              <div className="parent-list">
+              <div className="parent-list parent-list-scroll">
                 {(overview?.recentTopups || []).map((topup) => (
                   <article key={topup._id}>
                     <div>
@@ -2048,168 +2065,6 @@ function ParentPortal() {
                 {(overview?.recentTopups || []).length === 0 ? <p className="empty">No hay recargas registradas para los alumnos vinculados.</p> : null}
               </div>
             </section>
-          </section>
-        ) : null}
-
-        {!loading && !error && isAutoTopupPage ? (
-          <section className="parent-auto-topup-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
-              </svg>
-              <span>Volver</span>
-            </button>
-
-            <h2>Recarga automática</h2>
-            <p className="parent-auto-topup-hint">
-              Define el saldo mínimo para activar la recarga automática. (Saldo mínimo {formatCurrency(20000)})
-            </p>
-
-            <label className="parent-auto-topup-input-wrap">
-              <input
-                min="20000"
-                step="1000"
-                type="number"
-                placeholder="Ingrese un valor"
-                value={autoTopupMinBalance}
-                onChange={(event) => setAutoTopupMinBalance(event.target.value)}
-              />
-            </label>
-
-            <div className="parent-auto-topup-card-picker">
-              <p>Selecciona la tarjeta verificada que se usará para la recarga automática por umbral.</p>
-
-              <button
-                className="parent-auto-topup-card-btn"
-                onClick={() => setAutoTopupCardPickerOpen((prev) => !prev)}
-                type="button"
-              >
-                <span>
-                  {autoTopupSelectedCard
-                    ? `${getCardBrandLabel(autoTopupSelectedCard.brand)} **** ${autoTopupSelectedCard.last4}`
-                    : 'Selecciona una tarjeta'}
-                </span>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="m7 10 5 5 5-5z" fill="currentColor" />
-                </svg>
-              </button>
-
-              {autoTopupCardPickerOpen ? (
-                <div className="parent-auto-topup-card-dropdown">
-                  {verifiedSavedCards.map((card) => (
-                    <button
-                      className={String(card._id) === String(autoTopupSelectedCardId) ? 'is-selected' : ''}
-                      key={card._id}
-                      onClick={() => {
-                        setAutoTopupSelectedCardId(String(card._id));
-                        setAutoTopupCardPickerOpen(false);
-                      }}
-                      type="button"
-                    >
-                      <span>{getCardBrandLabel(card.brand)} **** {card.last4}</span>
-                      <small>Vence {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}</small>
-                    </button>
-                  ))}
-
-                  <button
-                    className="parent-auto-topup-add-card-option"
-                    onClick={() => {
-                      setAutoTopupCardPickerOpen(false);
-                      navigate('/parent/recargas/agregar-tarjeta');
-                    }}
-                    type="button"
-                  >
-                    <span>+ Agregar tarjeta</span>
-                    <small>Registrar una nueva tarjeta en ePayco</small>
-                  </button>
-                </div>
-              ) : null}
-
-              {!verifiedSavedCards.length ? (
-                <p className="parent-auto-topup-card-empty">
-                  No tienes tarjetas verificadas. Agrega y verifica una para habilitar la recarga automática.
-                </p>
-              ) : null}
-
-              {autoTopupSelectedCard ? (
-                <p className="parent-auto-topup-card-cycle">
-                  Se usará {getCardBrandLabel(autoTopupSelectedCard.brand)} **** {autoTopupSelectedCard.last4} para los cobros automáticos.
-                </p>
-              ) : null}
-            </div>
-
-            <p className="parent-auto-topup-hint">
-              Indica el valor que deseas que sea recargado a tu cuenta cuando llegue al saldo mínimo.
-            </p>
-
-            <div className="parent-auto-topup-amount-grid">
-              {autoTopupPresetOptions.map((amount) => (
-                <button
-                  className={autoTopupPresetAmount === amount ? 'is-active' : ''}
-                  key={amount}
-                  onClick={() => {
-                    setAutoTopupPresetAmount(amount);
-                    setAutoTopupCustomAmount('');
-                  }}
-                  type="button"
-                >
-                  {formatCurrency(amount)}
-                </button>
-              ))}
-            </div>
-
-            <label className="parent-auto-topup-custom-row">
-              <span>Otro valor</span>
-              <input
-                min="20000"
-                step="1000"
-                type="number"
-                placeholder="Ingrese un valor"
-                value={autoTopupCustomAmount}
-                onFocus={() => setAutoTopupPresetAmount(0)}
-                onChange={(event) => {
-                  setAutoTopupPresetAmount(0);
-                  setAutoTopupCustomAmount(event.target.value);
-                }}
-              />
-            </label>
-
-            <div className="parent-auto-topup-fee-note">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M11 8h2v7h-2V8Zm0 8h2v2h-2v-2Zm1-14A10 10 0 1 0 22 12A10 10 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8a8 8 0 0 1-8 8Z" fill="currentColor"/>
-              </svg>
-              <p>
-                Cada recarga tiene un costo por transacción del <strong>1.5%</strong> sobre el valor a recargar{autoTopupRechargeAmount > 0 && ` (${formatCurrency(autoTopupFeeAmount)})`}.
-              </p>
-            </div>
-
-            {(autoTopupPendingPreapprovalId || (String(selectedStudent?.wallet?.autoDebitAgreementId || '') && String(selectedStudent?.wallet?.autoDebitAgreementStatus || '') === 'pending' && !selectedStudent?.wallet?.autoDebitEnabled)) ? (
-              <div className="parent-auto-topup-pending-auth">
-                <p className="parent-auto-topup-pending-auth-msg">
-                  <strong>Falta autorizar en ePayco.</strong> Abre la página de ePayco, acepta el débito automático y regresa aquí para confirmar.
-                </p>
-                <button
-                  className="parent-auto-topup-activate-btn"
-                  disabled={autoTopupSubmitLoading || autoTopupAuthorizationLoading}
-                  onClick={onOpenMPAuthorization}
-                  type="button"
-                >
-                  {autoTopupAuthorizationLoading ? 'Verificando...' : (autoTopupSubmitLoading ? 'Abriendo...' : 'Ir a ePayco')}
-                </button>
-              </div>
-            ) : (
-              <button
-                className="parent-auto-topup-activate-btn"
-                disabled={!canActivateAutoTopup || autoTopupSubmitLoading || autoTopupAuthorizationLoading}
-                onClick={onSubmitAutoTopup}
-                type="button"
-              >
-                {autoTopupSubmitLoading ? 'Activando...' : 'Activar recarga'}
-              </button>
-            )}
-
-            {autoTopupSubmitError ? <p className="parent-error">{autoTopupSubmitError}</p> : null}
-            {autoTopupSubmitSuccess ? <p className="parent-success">{autoTopupSubmitSuccess}</p> : null}
           </section>
         ) : null}
 
@@ -2558,22 +2413,6 @@ function ParentPortal() {
             </p>
 
             <div className="parent-topup-methods-list">
-              {!selectedStudent?.wallet?.autoDebitEnabled ? (
-                <button
-                  className="parent-topup-method-highlight"
-                  onClick={goToAutoTopupPage}
-                  type="button"
-                >
-                  <div className="left">
-                    <img alt="Advertencia" className="logo" src={warningLogo} />
-                    <span>Activa recargas automáticas</span>
-                  </div>
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                  </svg>
-                </button>
-              ) : null}
-
               <button onClick={onGoToBoldCheckout} type="button">
                 <div className="left">
                   <span>Recarga con Bold</span>
@@ -2588,7 +2427,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupDaviPlataPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => { setBoldPaymentData(null); navigate('/parent/recargas/metodos'); }} type="button">
+            <button className="parent-topup-back-btn" onClick={() => { setBoldPaymentData(null); navigate('/parent/recargas'); }} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -2613,6 +2452,7 @@ function ParentPortal() {
                   </p>
                 </div>
                 <div ref={boldContainerRef} className="bold-button-container" />
+                {boldButtonLoadError ? <p className="parent-error">{boldButtonLoadError}</p> : null}
                 <button
                   className="parent-topup-back-btn"
                   onClick={() => setBoldPaymentData(null)}
@@ -2664,7 +2504,7 @@ function ParentPortal() {
                   onClick={onSubmitDaviTopup}
                   type="button"
                 >
-                  {daviSubmitLoading ? 'Procesando...' : 'Continuar con Bold'}
+                  {daviSubmitLoading ? 'Procesando...' : 'Pagar con Bold'}
                 </button>
 
                 {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
@@ -3086,63 +2926,62 @@ function ParentPortal() {
           </section>
         ) : null}
 
-        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage ? (
+        {!loading && !error && isGioIaPage ? (
+          <section className="parent-gio-page">
+            <h2>GIO - IA</h2>
+            <p className="parent-gio-subtitle">
+              Conversa con GIO sobre el consumo de <strong>{selectedStudent?.name || 'tu hijo'}</strong>.
+            </p>
+
+            <div className="parent-gio-thread" role="log" aria-live="polite">
+              {gioMessages.map((item, index) => (
+                <article
+                  key={`${item.role}-${index}`}
+                  className={`parent-gio-bubble ${item.role === 'user' ? 'is-user' : 'is-assistant'}`}
+                >
+                  <p>{item.content}</p>
+                </article>
+              ))}
+
+              {gioSending ? (
+                <article className="parent-gio-bubble is-assistant">
+                  <p>Analizando consumo...</p>
+                </article>
+              ) : null}
+
+              <div ref={gioThreadEndRef} />
+            </div>
+
+            <div className="parent-gio-input-wrap">
+              <textarea
+                placeholder="Ej: ¿Qué consumió Oliver el 10 de marzo?"
+                value={gioInput}
+                onChange={(event) => setGioInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    onSendGioMessage();
+                  }
+                }}
+              />
+              <button type="button" onClick={onSendGioMessage} disabled={gioSending || !String(gioInput || '').trim()}>
+                {gioSending ? 'Enviando...' : 'Enviar'}
+              </button>
+            </div>
+
+            {gioError ? <p className="parent-error">{gioError}</p> : null}
+          </section>
+        ) : null}
+
+        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
           <>
             <section className="parent-balance-hero" id="parent-balance-section">
               <p className="meta">Saldo actual</p>
               <h2>{formatCurrency(selectedStudent?.wallet?.balance || 0)}</h2>
-              {showAutoDebitEstablishedNotice ? (
-                <div className="parent-autodebit-established-row">
-                  <div className="parent-autodebit-established" role="status" aria-live="polite">
-                    <span className="parent-autodebit-established-check" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M9.2 16.3 5.7 12.8l1.4-1.4 2.1 2.1 6-6 1.4 1.4-7.4 7.4Z" fill="currentColor" />
-                      </svg>
-                    </span>
-                    <span>
-                      Recarga automatica establecida, saldo minimo permitido: {formatCurrency(autoDebitLimitConfigured)}.
-                    </span>
-                  </div>
-                  <div className="parent-autodebit-menu-wrap" ref={autoDebitMenuRef}>
-                    <button
-                      aria-expanded={autoDebitMenuOpen}
-                      aria-label="Opciones de recarga automatica"
-                      className="parent-autodebit-menu-btn"
-                      onClick={() => setAutoDebitMenuOpen((prev) => !prev)}
-                      type="button"
-                    >
-                      <span />
-                      <span />
-                      <span />
-                    </button>
-                    {autoDebitMenuOpen ? (
-                      <div className="parent-autodebit-menu">
-                        <button disabled={autoDebitCancelLoading} onClick={onDisableAutoTopup} type="button">
-                          {autoDebitCancelLoading ? 'Cancelando...' : 'Cancelar debito automatico'}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               <p>
                 Alumno: <strong>{selectedStudent?.name || 'N/A'}</strong>
               </p>
             </section>
-
-            {!selectedStudent?.wallet?.autoDebitEnabled ? (
-              <button className="parent-autodebit-banner" onClick={goToAutoTopupPage} type="button">
-                <span className="parent-autodebit-banner-title">
-                  Activa las recargas automáticas
-                  <span aria-hidden="true" className="parent-warning-inline">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M12 2 1 21h22L12 2Zm0 6.5a1.25 1.25 0 0 1 1.25 1.25v5.5a1.25 1.25 0 1 1-2.5 0v-5.5A1.25 1.25 0 0 1 12 8.5Zm0 10.25a1.5 1.5 0 1 1 0-3a1.5 1.5 0 0 1 0 3Z" fill="currentColor"/>
-                    </svg>
-                  </span>
-                </span>
-                <span className="parent-autodebit-banner-text">Protege el saldo de {selectedStudentFirstName} y evita que se quede sin fondos.</span>
-              </button>
-            ) : null}
 
             <section className="parent-spending-cards">
               <article className="parent-mini-card">
@@ -3193,7 +3032,7 @@ function ParentPortal() {
             <section className="parent-section" id="parent-topups-section">
               <h3>Últimas recargas</h3>
               <div className="parent-list">
-                {(overview?.recentTopups || []).map((topup) => (
+                {(overview?.recentTopups || []).slice(0, 5).map((topup) => (
                   <article key={topup._id}>
                     <div>
                       <strong className={Number(topup.amount || 0) < 0 ? 'amount-negative' : 'amount-positive'}>
@@ -3215,10 +3054,6 @@ function ParentPortal() {
             <section className="parent-section" id="student-control">
               <h3>Información del alumno</h3>
               <div className="parent-info-grid">
-                <p>
-                  <span>Débito automático</span>
-                  <strong>{selectedStudent?.wallet?.autoDebitEnabled ? 'Activo' : 'Inactivo'}</strong>
-                </p>
                 <p>
                   <span>Curso</span>
                   <strong>{selectedStudent?.grade || 'N/A'}</strong>
@@ -3284,36 +3119,6 @@ function ParentPortal() {
                 <p className="empty">No hay detalle de productos disponible para esta orden.</p>
               ) : null}
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showAutoTopupCongratsModal ? (
-        <div
-          className="parent-autotopup-congrats-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Recarga automática configurada"
-        >
-          <div className="parent-autotopup-congrats-modal">
-            <div className="parent-autotopup-congrats-burst" aria-hidden="true">
-              <span className="dot dot-a" />
-              <span className="dot dot-b" />
-              <span className="dot dot-c" />
-            </div>
-            <div className="parent-autotopup-congrats-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2 3 8v8l9 6 9-6V8l-9-6Zm4.4 8.8-5 5a1 1 0 0 1-1.4 0l-2.4-2.4 1.4-1.4 1.7 1.7 4.3-4.3 1.4 1.4Z" fill="currentColor"/>
-              </svg>
-            </div>
-            <h3>Felicidades!</h3>
-            <p>
-              Tus recargas automaticas ya se encuentran configuradas, ahora despreocupate por el saldo de{' '}
-              <strong>{autoTopupCongratsStudentName || selectedStudentFirstName}</strong>.
-            </p>
-            <button className="parent-autotopup-congrats-cta" onClick={closeAutoTopupCongratsModal} type="button">
-              Entendido
-            </button>
           </div>
         </div>
       ) : null}

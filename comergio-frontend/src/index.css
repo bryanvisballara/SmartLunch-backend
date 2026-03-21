@@ -3098,6 +3098,12 @@ label {
   gap: 0.5rem;
 }
 
+.parent-history-list-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
 .parent-history-list article {
   border: 1px solid #edf2f7;
   border-radius: 11px;
@@ -3146,6 +3152,90 @@ label {
   font-size: clamp(1.95rem, 8vw, 2.5rem);
   color: #0b1b3a;
   line-height: 1.05;
+}
+
+.parent-gio-page {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.parent-gio-page h2 {
+  margin: 1.35rem 0 0;
+  font-size: clamp(1.95rem, 8vw, 2.5rem);
+  color: #0b1b3a;
+  line-height: 1.05;
+}
+
+.parent-gio-subtitle {
+  margin: 0;
+  color: #475569;
+  font-size: 0.95rem;
+}
+
+.parent-gio-thread {
+  border: 1px solid #dbe2ea;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 0.75rem;
+  max-height: 420px;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.parent-gio-bubble {
+  max-width: 88%;
+  border-radius: 14px;
+  padding: 0.6rem 0.7rem;
+}
+
+.parent-gio-bubble p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.parent-gio-bubble.is-assistant {
+  justify-self: start;
+  background: #eaf4ff;
+  border: 1px solid #bfdbfe;
+  color: #0f172a;
+}
+
+.parent-gio-bubble.is-user {
+  justify-self: end;
+  background: #0f766e;
+  border: 1px solid #0f766e;
+  color: #ffffff;
+}
+
+.parent-gio-input-wrap {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.parent-gio-input-wrap textarea {
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.65rem;
+  font-size: 0.93rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.parent-gio-input-wrap button {
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: #0f766e;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.parent-gio-input-wrap button:disabled {
+  opacity: 0.55;
 }
 
 .parent-topups-subtitle {
@@ -3312,6 +3402,12 @@ label {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
+}
+
+.parent-topups-actions.parent-topups-actions-single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 180px;
+  margin: 0 auto;
 }
 
 .parent-topups-actions button {
@@ -5115,6 +5211,12 @@ label {
 .parent-list {
   display: grid;
   gap: 0.5rem;
+}
+
+.parent-list-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .parent-list article {

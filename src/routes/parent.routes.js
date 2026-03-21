@@ -62,6 +62,128 @@ function currentYearMonth() {
   return `${year}-${month}`;
 }
 
+function normalizeAiText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function startOfDayLocal(dateValue) {
+  const date = new Date(dateValue);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function endOfDayLocal(dateValue) {
+  const date = new Date(dateValue);
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function formatDateLabelEs(dateValue) {
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(dateValue);
+}
+
+function parseDateFromQuestion(rawQuestion, context = {}) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return null;
+  }
+
+  const now = new Date();
+
+  if (/\bhoy\b/.test(question)) {
+    return startOfDayLocal(now);
+  }
+
+  if (/\bayer\b/.test(question)) {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return startOfDayLocal(yesterday);
+  }
+
+  const isoLike = rawQuestion.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (isoLike) {
+    const parsed = new Date(Number(isoLike[1]), Number(isoLike[2]) - 1, Number(isoLike[3]));
+    if (!Number.isNaN(parsed.getTime())) {
+      return startOfDayLocal(parsed);
+    }
+  }
+
+  const slashLike = rawQuestion.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (slashLike) {
+    const day = Number(slashLike[1]);
+    const month = Number(slashLike[2]);
+    const year = slashLike[3]
+      ? (slashLike[3].length === 2 ? 2000 + Number(slashLike[3]) : Number(slashLike[3]))
+      : now.getFullYear();
+    const parsed = new Date(year, month - 1, day);
+    if (!Number.isNaN(parsed.getTime())) {
+      return startOfDayLocal(parsed);
+    }
+  }
+
+  const monthMap = {
+    enero: 0,
+    febrero: 1,
+    marzo: 2,
+    abril: 3,
+    mayo: 4,
+    junio: 5,
+    julio: 6,
+    agosto: 7,
+    septiembre: 8,
+    setiembre: 8,
+    octubre: 9,
+    noviembre: 10,
+    diciembre: 11,
+  };
+  const spanishLike = question.match(/\b(\d{1,2})\s+de\s+([a-z]+)(?:\s+de\s+(\d{4}))?\b/);
+  if (spanishLike) {
+    const day = Number(spanishLike[1]);
+    const monthIndex = monthMap[spanishLike[2]];
+    const year = spanishLike[3] ? Number(spanishLike[3]) : now.getFullYear();
+    if (Number.isInteger(day) && Number.isInteger(monthIndex) && Number.isInteger(year)) {
+      const parsed = new Date(year, monthIndex, day);
+      if (!Number.isNaN(parsed.getTime())) {
+        return startOfDayLocal(parsed);
+      }
+    }
+  }
+
+  if (/\bese dia\b|\baquel dia\b|\bestado de ese dia\b/.test(question) && context?.lastDate) {
+    const parsed = new Date(String(context.lastDate));
+    if (!Number.isNaN(parsed.getTime())) {
+      return startOfDayLocal(parsed);
+    }
+  }
+
+  return null;
+}
+
+function inferGioIntent(rawQuestion, parsedDate) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return 'summary';
+  }
+  if (parsedDate) {
+    return 'date';
+  }
+  if (/\b(promedio|media|promedi|diario promedio)\b/.test(question)) {
+    return 'average';
+  }
+  if (/\b(que consumio|que compro|consumo|comio|compro|pedido|orden)\b/.test(question)) {
+    return 'date';
+  }
+  return 'summary';
+}
+
 function normalizeFoodRestrictionReason(value) {
   const normalized = String(value || '').trim();
   if (normalized === 'Religion') {
@@ -1690,6 +1812,190 @@ router.patch('/portal/students/:studentId/daily-limit', async (req, res) => {
       student: {
         _id: student._id,
         dailyLimit: Number(student.dailyLimit || 0),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/gio-ia/chat', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin'
+      ? req.body.parentUserId || req.query.parentUserId || userId
+      : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+    const studentId = toObjectId(req.body.studentId || req.query.studentId);
+    const message = String(req.body?.message || '').trim();
+    const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+
+    if (!parentUserId) {
+      return res.status(400).json({ message: 'Invalid parent user id' });
+    }
+
+    if (!studentId) {
+      return res.status(400).json({ message: 'studentId is required' });
+    }
+
+    if (message.length < 2) {
+      return res.status(400).json({ message: 'message is required' });
+    }
+
+    const link = await ParentStudentLink.findOne({
+      schoolId,
+      parentId: parentUserId,
+      studentId,
+      status: 'active',
+    }).lean();
+
+    if (!link) {
+      return res.status(403).json({ message: 'Forbidden studentId' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null })
+      .select('name')
+      .lean();
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const parsedDate = parseDateFromQuestion(message, context);
+    const intent = inferGioIntent(message, parsedDate);
+    const studentName = String(student.name || 'el alumno');
+    let answer = '';
+    let nextContext = {
+      studentId: String(studentId),
+      studentName,
+      lastIntent: intent,
+      lastDate: context?.lastDate || null,
+    };
+
+    if (intent === 'date' && parsedDate) {
+      const fromDate = startOfDayLocal(parsedDate);
+      const toDate = endOfDayLocal(parsedDate);
+      const dateOrders = await Order.find({
+        schoolId,
+        studentId,
+        status: 'completed',
+        createdAt: { $gte: fromDate, $lte: toDate },
+      })
+        .select('createdAt total items')
+        .lean();
+
+      const total = dateOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+      const itemsMap = new Map();
+
+      for (const order of dateOrders) {
+        for (const item of Array.isArray(order.items) ? order.items : []) {
+          const name = String(item?.nameSnapshot || 'Producto');
+          const quantity = Number(item?.quantity || 0);
+          const subtotal = Number(item?.subtotal || 0);
+          const previous = itemsMap.get(name) || { quantity: 0, subtotal: 0 };
+          itemsMap.set(name, {
+            quantity: previous.quantity + quantity,
+            subtotal: previous.subtotal + subtotal,
+          });
+        }
+      }
+
+      const topItems = Array.from(itemsMap.entries())
+        .map(([name, data]) => ({ name, quantity: data.quantity, subtotal: data.subtotal }))
+        .sort((a, b) => b.subtotal - a.subtotal)
+        .slice(0, 5);
+
+      if (!dateOrders.length) {
+        answer = `${studentName} no tiene consumos registrados el ${formatDateLabelEs(fromDate)}.`;
+      } else {
+        const detailsText = topItems.length
+          ? ` Productos principales: ${topItems.map((item) => `${item.name} x${item.quantity}`).join(', ')}.`
+          : '';
+        answer = `${studentName} consumio ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(total)} el ${formatDateLabelEs(fromDate)} en ${dateOrders.length} orden(es).${detailsText}`;
+      }
+
+      nextContext = {
+        ...nextContext,
+        lastIntent: 'date',
+        lastDate: fromDate.toISOString().slice(0, 10),
+      };
+
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const recentOrders = await Order.find({
+      schoolId,
+      studentId,
+      status: 'completed',
+      createdAt: { $gte: startOfDayLocal(thirtyDaysAgo) },
+    })
+      .select('createdAt total items')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const totalRecent = recentOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+    const daysMap = new Map();
+    const productsMap = new Map();
+
+    for (const order of recentOrders) {
+      const dayKey = startOfDayLocal(order.createdAt).toISOString().slice(0, 10);
+      daysMap.set(dayKey, Number(daysMap.get(dayKey) || 0) + Number(order.total || 0));
+
+      for (const item of Array.isArray(order.items) ? order.items : []) {
+        const name = String(item?.nameSnapshot || 'Producto');
+        const quantity = Number(item?.quantity || 0);
+        const subtotal = Number(item?.subtotal || 0);
+        const previous = productsMap.get(name) || { quantity: 0, subtotal: 0 };
+        productsMap.set(name, {
+          quantity: previous.quantity + quantity,
+          subtotal: previous.subtotal + subtotal,
+        });
+      }
+    }
+
+    const activeDays = daysMap.size;
+    const averageByActiveDay = activeDays > 0 ? totalRecent / activeDays : 0;
+    const averageByMonthWindow = totalRecent / 30;
+    const topProducts = Array.from(productsMap.entries())
+      .map(([name, data]) => ({ name, quantity: data.quantity, subtotal: data.subtotal }))
+      .sort((a, b) => b.subtotal - a.subtotal)
+      .slice(0, 3);
+
+    const currencyFormat = new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0,
+    });
+
+    if (!recentOrders.length) {
+      answer = `No encontré consumos recientes de ${studentName} en los últimos 30 días.`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'average') {
+      answer = `En los últimos 30 días, ${studentName} lleva ${currencyFormat.format(totalRecent)} en ${recentOrders.length} orden(es). Promedio por día con consumo: ${currencyFormat.format(averageByActiveDay)}. Promedio diario sobre 30 días: ${currencyFormat.format(averageByMonthWindow)}.`;
+      return res.status(200).json({
+        answer,
+        context: {
+          ...nextContext,
+          lastIntent: 'average',
+        },
+      });
+    }
+
+    const topProductsText = topProducts.length
+      ? ` Productos más frecuentes: ${topProducts.map((item) => `${item.name} x${item.quantity}`).join(', ')}.`
+      : '';
+    answer = `${studentName} lleva ${currencyFormat.format(totalRecent)} en los últimos 30 días, con ${recentOrders.length} orden(es) en ${activeDays} día(s) de consumo.${topProductsText} Si quieres, te detallo un día específico.`;
+
+    return res.status(200).json({
+      answer,
+      context: {
+        ...nextContext,
+        lastIntent: 'summary',
       },
     });
   } catch (error) {

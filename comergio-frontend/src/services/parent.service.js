@@ -11,6 +11,7 @@ export const updateParentMeriendasSubscription = (subscriptionId, data) =>
 export const cancelParentMeriendasSubscription = (subscriptionId, params = {}) =>
 	api.delete(`/parent/portal/meriendas/subscription/${subscriptionId}`, { params });
 export const addToMeriendasWaitlist = () => api.post('/parent/portal/meriendas/waitlist');
+export const askParentGioIaChat = (data) => api.post('/parent/portal/gio-ia/chat', data);
 export const updateParentPortalStudentBlock = (studentId, data) => api.patch(`/parent/portal/students/${studentId}/blocks`, data);
 export const updateParentPortalStudentDailyLimit = (studentId, data) =>
 	api.patch(`/parent/portal/students/${studentId}/daily-limit`, data);
