@@ -4050,6 +4050,29 @@ label {
   color: #6b7280;
 }
 
+.parent-bold-inline-wrap {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.parent-bold-inline-button {
+  min-height: 76px;
+}
+
+.parent-bold-inline-button:empty::before {
+  content: 'Cargando botón de Bold...';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 58px;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px dashed #cbd5e1;
+  color: #475569;
+  background: #f8fafc;
+  font-weight: 700;
+}
+
 .parent-add-card-page {
   display: grid;
   gap: 0.9rem;

@@ -131,55 +131,6 @@ function dedupeParentMenuProducts(products) {
   return Array.from(map.values());
 }
 
-function mountBoldCheckoutInDocument(targetDocument, paymentData) {
-  const doc = targetDocument;
-  doc.open();
-  doc.write(`<!doctype html><html><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Checkout Bold</title><style>body{font-family:Segoe UI,Tahoma,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:18px} .box{max-width:460px;margin:0 auto;padding:14px;border:1px solid #dbe2ea;border-radius:14px;background:#fff} p{margin:0 0 10px}</style></head><body><div class="box"><p>Abriendo checkout de Bold...</p><div id="bold-checkout"></div></div></body></html>`);
-  doc.close();
-
-  const mountNode = doc.getElementById('bold-checkout');
-  if (!mountNode) {
-    return;
-  }
-
-  const script = doc.createElement('script');
-  script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
-  script.async = true;
-  script.setAttribute('data-bold-button', '');
-  script.setAttribute('data-api-key', paymentData.apiKey);
-  script.setAttribute('data-amount', String(paymentData.amount));
-  script.setAttribute('data-currency', paymentData.currency || 'COP');
-  script.setAttribute('data-order-id', paymentData.reference);
-  script.setAttribute('data-integrity-signature', paymentData.integritySignature);
-  script.setAttribute('data-redirection-url', paymentData.redirectionUrl);
-  if (paymentData.description) {
-    script.setAttribute('data-description', paymentData.description);
-  }
-  script.setAttribute('data-render-mode', 'embedded');
-
-  mountNode.appendChild(script);
-
-  let attempts = 0;
-  const maxAttempts = 40;
-  const autoOpenInterval = setInterval(() => {
-    const clickable = doc.querySelector('button, a, [role="button"]');
-    if (clickable) {
-      clearInterval(autoOpenInterval);
-      try {
-        clickable.click();
-      } catch (_) {
-        // If the auto click fails, user can still click the rendered Bold button manually.
-      }
-      return;
-    }
-
-    attempts += 1;
-    if (attempts >= maxAttempts) {
-      clearInterval(autoOpenInterval);
-    }
-  }, 120);
-}
-
 function ParentPortal() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -286,6 +237,7 @@ function ParentPortal() {
   const [showMeriendasCancelModal, setShowMeriendasCancelModal] = useState(false);
   const [showWaitlistSuccessModal, setShowWaitlistSuccessModal] = useState(false);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
+  const [waitlistSuccessMessage, setWaitlistSuccessMessage] = useState('');
   const [gioMessages, setGioMessages] = useState([
     {
       role: 'assistant',
@@ -1151,62 +1103,88 @@ function ParentPortal() {
     }
   };
 
-  const onSubmitDaviTopup = async () => {
+  useEffect(() => {
+    if (!isTopupDaviPlataPage) {
+      setBoldPaymentData(null);
+      setBoldButtonLoadError('');
+      setDaviSubmitError('');
+      setDaviSubmitSuccess('');
+      return;
+    }
+
     if (!selectedStudent?._id) {
+      setBoldPaymentData(null);
       setDaviSubmitError('Selecciona un alumno antes de continuar.');
       return;
     }
 
     if (!canContinueDaviRecharge) {
-      setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
+      setBoldPaymentData(null);
+      setBoldButtonLoadError('');
+      setDaviSubmitSuccess('');
+      if (daviAmountNumber > 0) {
+        setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
+      } else {
+        setDaviSubmitError('');
+      }
       return;
     }
 
-    setDaviSubmitLoading(true);
-    setDaviSubmitError('');
-    setDaviSubmitSuccess('');
-    setBoldButtonLoadError('');
-    setBoldPaymentData(null);
-    const checkoutPopup = window.open('', 'bold-checkout-window');
-    if (checkoutPopup && !checkoutPopup.closed) {
-      checkoutPopup.document.open();
-      checkoutPopup.document.write('<!doctype html><html><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Checkout Bold</title></head><body style="font-family:Segoe UI,Tahoma,sans-serif;padding:18px">Preparando checkout de Bold...</body></html>');
-      checkoutPopup.document.close();
-    }
+    let isCancelled = false;
+    const prepareTimer = setTimeout(async () => {
+      setDaviSubmitLoading(true);
+      setDaviSubmitError('');
+      setDaviSubmitSuccess('');
+      setBoldButtonLoadError('');
+      setBoldPaymentData(null);
 
-    try {
-      const response = await createBoldRechargePayment({
-        studentId: selectedStudent._id,
-        amount: daviAmountNumber,
-        description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
-      });
-      const paymentData = response.data;
+      try {
+        const response = await createBoldRechargePayment({
+          studentId: selectedStudent._id,
+          amount: daviAmountNumber,
+          description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
+        });
 
-      if (checkoutPopup && !checkoutPopup.closed) {
-        mountBoldCheckoutInDocument(checkoutPopup.document, paymentData);
-        setDaviSubmitSuccess('Checkout de Bold abierto.');
-        return;
+        if (isCancelled) {
+          return;
+        }
+
+        setBoldPaymentData(response.data);
+        setDaviSubmitSuccess('Botón de Bold listo para continuar con el pago.');
+      } catch (requestError) {
+        if (isCancelled) {
+          return;
+        }
+
+        setBoldPaymentData(null);
+        setDaviSubmitError(
+          requestError?.response?.data?.message || requestError?.message || 'No se pudo preparar el pago con Bold.'
+        );
+      } finally {
+        if (!isCancelled) {
+          setDaviSubmitLoading(false);
+        }
       }
+    }, 350);
 
-      // Fallback path if popup is blocked by browser settings.
-      setBoldPaymentData(paymentData);
-      setDaviSubmitSuccess('Continua con el botón de Bold para abrir el checkout.');
-    } catch (requestError) {
-      if (checkoutPopup && !checkoutPopup.closed) {
-        checkoutPopup.close();
-      }
-      setDaviSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo procesar la recarga con Bold.');
-    } finally {
-      setDaviSubmitLoading(false);
-    }
-  };
+    return () => {
+      isCancelled = true;
+      clearTimeout(prepareTimer);
+    };
+  }, [
+    isTopupDaviPlataPage,
+    selectedStudent?._id,
+    selectedStudent?.name,
+    daviAmountNumber,
+    canContinueDaviRecharge,
+    minimumBoldRecharge,
+  ]);
 
   useEffect(() => {
     if (!boldPaymentData || !boldContainerRef.current) return;
 
     boldContainerRef.current.innerHTML = '';
     setBoldButtonLoadError('');
-    setDaviSubmitSuccess('Redirigiendo a Bold...');
 
     const script = document.createElement('script');
     script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
@@ -1229,31 +1207,6 @@ function ParentPortal() {
 
     boldContainerRef.current.appendChild(script);
 
-    let attempts = 0;
-    const maxAttempts = 25;
-    const autoOpenInterval = setInterval(() => {
-      if (!boldContainerRef.current) {
-        clearInterval(autoOpenInterval);
-        return;
-      }
-
-      const clickable = boldContainerRef.current.querySelector('button, a, [role="button"]');
-      if (clickable) {
-        clearInterval(autoOpenInterval);
-        try {
-          clickable.click();
-        } catch (_) {
-          setBoldButtonLoadError('No pudimos abrir Bold automáticamente. Presiona el botón de Bold para continuar.');
-        }
-        return;
-      }
-
-      attempts += 1;
-      if (attempts >= maxAttempts) {
-        clearInterval(autoOpenInterval);
-      }
-    }, 200);
-
     const renderCheck = setTimeout(() => {
       if (!boldContainerRef.current || boldContainerRef.current.childElementCount === 0) {
         setBoldButtonLoadError('No pudimos cargar el botón de Bold. Intenta nuevamente.');
@@ -1262,7 +1215,6 @@ function ParentPortal() {
     }, 2500);
 
     return () => {
-      clearInterval(autoOpenInterval);
       clearTimeout(renderCheck);
     };
   }, [boldPaymentData]);
@@ -1729,11 +1681,17 @@ function ParentPortal() {
 
   const onJoinMeriendasWaitlist = async () => {
     setWaitlistLoading(true);
+    setMeriendasSubmitError('');
     try {
-      await addToMeriendasWaitlist();
+      const response = await addToMeriendasWaitlist();
+      setWaitlistSuccessMessage(
+        response?.data?.message || 'Cuando el servicio esté disponible en tu colegio, te avisaremos por aquí.'
+      );
       setShowWaitlistSuccessModal(true);
-    } catch {
-      // silently ignore
+    } catch (requestError) {
+      setMeriendasSubmitError(
+        requestError?.response?.data?.message || requestError?.message || 'No se pudo agregar a la lista de espera.'
+      );
     } finally {
       setWaitlistLoading(false);
     }
@@ -2549,79 +2507,53 @@ function ParentPortal() {
               <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con Bold</h2>
             </div>
 
-            {boldPaymentData ? (
-              <>
-                <div className="parent-topup-davi-fee-box">
-                  <p>
-                    Valor a recargar: <strong>{formatCurrency(boldPaymentData.rechargeAmount)}</strong>
-                  </p>
-                  <p>
-                    Costo de transacción (1.5%): <strong>{formatCurrency(boldPaymentData.feeAmount)}</strong>
-                  </p>
-                  <p className="total">
-                    Total a pagar: <strong>{formatCurrency(boldPaymentData.amount)}</strong>
-                  </p>
-                </div>
-                <div ref={boldContainerRef} className="bold-button-container" />
-                {boldButtonLoadError ? <p className="parent-error">{boldButtonLoadError}</p> : null}
-                <button
-                  className="parent-topup-back-btn"
-                  onClick={() => setBoldPaymentData(null)}
-                  style={{ marginTop: '12px' }}
-                  type="button"
-                >
-                  <span>Cancelar y volver</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <p className="parent-topup-fee-note">
-                  Haz clic en el botón para pagar con Bold de forma segura.
+            <p className="parent-topup-fee-note">
+              Usa el botón oficial de Bold. Cuando el monto sea válido, lo cargaremos automáticamente aquí mismo.
+            </p>
+
+            <label className="parent-topup-davi-amount">
+              ¿Cuánto vas a recargar?
+              <input
+                min={minimumBoldRecharge}
+                step="1000"
+                type="number"
+                placeholder="Ingrese un valor"
+                value={daviAmount}
+                onChange={(event) => setDaviAmount(event.target.value)}
+              />
+            </label>
+
+            <p className="parent-topup-fee-note">
+              Monto minimo para recargar con Bold: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+            </p>
+
+            {daviAmountNumber > 0 ? (
+              <div className="parent-topup-davi-fee-box">
+                <p>
+                  Valor a recargar: <strong>{formatCurrency(daviAmountNumber)}</strong>
                 </p>
-
-                <label className="parent-topup-davi-amount">
-                  ¿Cuánto vas a recargar?
-                  <input
-                    min={minimumBoldRecharge}
-                    step="1000"
-                    type="number"
-                    placeholder="Ingrese un valor"
-                    value={daviAmount}
-                    onChange={(event) => setDaviAmount(event.target.value)}
-                  />
-                </label>
-
-                <p className="parent-topup-fee-note">
-                  Monto minimo para recargar con Bold: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+                <p>
+                  Costo de transacción (1.5%): <strong>{formatCurrency(daviFeeAmount)}</strong>
                 </p>
+                <p className="total">
+                  Total a pagar: <strong>{formatCurrency(daviTotalCharge)}</strong>
+                </p>
+              </div>
+            ) : null}
 
-                {daviAmountNumber > 0 ? (
-                  <div className="parent-topup-davi-fee-box">
-                    <p>
-                      Valor a recargar: <strong>{formatCurrency(daviAmountNumber)}</strong>
-                    </p>
-                    <p>
-                      Costo de transacción (1.5%): <strong>{formatCurrency(daviFeeAmount)}</strong>
-                    </p>
-                    <p className="total">
-                      Total a pagar: <strong>{formatCurrency(daviTotalCharge)}</strong>
-                    </p>
-                  </div>
-                ) : null}
+            {canContinueDaviRecharge && daviSubmitLoading ? (
+              <p className="parent-topup-fee-note">Preparando botón de Bold...</p>
+            ) : null}
 
-                <button
-                  className="parent-topup-davi-continue"
-                  disabled={!canContinueDaviRecharge || daviSubmitLoading}
-                  onClick={onSubmitDaviTopup}
-                  type="button"
-                >
-                  {daviSubmitLoading ? 'Procesando...' : 'Pagar con Bold'}
-                </button>
+            {canContinueDaviRecharge && boldPaymentData ? (
+              <div className="parent-bold-inline-wrap">
+                <div ref={boldContainerRef} className="bold-button-container parent-bold-inline-button" />
+              </div>
+            ) : null}
 
-                {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
-                {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
-              </>
-            )}
+            {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
+            {boldButtonLoadError ? <p className="parent-error">{boldButtonLoadError}</p> : null}
+            {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
           </section>
         ) : null}
 
@@ -3256,6 +3188,25 @@ function ParentPortal() {
 
             <p className="parent-order-detail-meta">
               Hora: <strong>{formatDateTime(selectedOrderDetail.createdAt)}</strong>
+
+              {showWaitlistSuccessModal ? (
+                <div className="parent-meriendas-cancel-modal-overlay" role="dialog" aria-modal="true" aria-label="Lista de espera meriendas">
+                  <div className="parent-meriendas-cancel-modal">
+                    <p className="kicker">Comergio Meriendas</p>
+                    <h4>¡Te agregamos a la lista!</h4>
+                    <p>{waitlistSuccessMessage || 'Cuando el servicio esté disponible en tu colegio, te avisaremos por aquí.'}</p>
+                    <div className="parent-meriendas-cancel-modal-actions">
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        onClick={() => setShowWaitlistSuccessModal(false)}
+                      >
+                        Entendido
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </p>
             <p className="parent-order-detail-meta">
               Tienda: <strong>{selectedOrderDetail.storeName || 'Tienda'}</strong>
