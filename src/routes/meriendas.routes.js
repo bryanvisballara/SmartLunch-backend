@@ -9,6 +9,7 @@ const MeriendaSnack = require('../models/meriendaSnack.model');
 const MeriendaSchedule = require('../models/meriendaSchedule.model');
 const MeriendaOperation = require('../models/meriendaOperation.model');
 const MeriendaIntakeRecord = require('../models/meriendaIntakeRecord.model');
+const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const { queueTutorCommentNotification } = require('../services/notification.service');
 const { normalizeStoredImageUrl, validateIncomingImageUrl } = require('../utils/imageUpload');
 
@@ -982,6 +983,17 @@ router.put('/schedule/:month', roleMiddleware('admin'), async (req, res) => {
       .populate('days.secondSnackId', 'title type imageUrl');
 
     return res.status(200).json(sanitizeScheduleDoc(schedule.toObject()));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin: get meriendas waitlist
+router.get('/waitlist', roleMiddleware(['admin']), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const entries = await MeriendaWaitlist.find({ schoolId }).sort({ createdAt: -1 }).lean();
+    return res.status(200).json(entries);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

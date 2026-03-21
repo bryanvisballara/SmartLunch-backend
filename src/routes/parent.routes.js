@@ -13,6 +13,7 @@ const MeriendaSubscription = require('../models/meriendaSubscription.model');
 const MeriendaSchedule = require('../models/meriendaSchedule.model');
 const MeriendaOperation = require('../models/meriendaOperation.model');
 const MeriendaIntakeRecord = require('../models/meriendaIntakeRecord.model');
+const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const User = require('../models/user.model');
 const Category = require('../models/category.model');
 const Product = require('../models/product.model');
@@ -1691,6 +1692,46 @@ router.patch('/portal/students/:studentId/daily-limit', async (req, res) => {
         dailyLimit: Number(student.dailyLimit || 0),
       },
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+// Waitlist for meriendas (service not yet open)
+router.post('/portal/meriendas/waitlist', roleMiddleware(['parent']), async (req, res) => {
+  try {
+    const { schoolId, userId, name, username } = req.user;
+
+    const links = await ParentStudentLink.find({ schoolId, parentId: userId, status: 'active' })
+      .select('studentId')
+      .lean();
+
+    const studentIds = links.map((l) => String(l.studentId));
+    let childName = '';
+    let childGrade = '';
+
+    if (studentIds.length > 0) {
+      const student = await Student.findOne({ schoolId, _id: { $in: studentIds }, deletedAt: null })
+        .select('name grade')
+        .lean();
+      childName = student?.name || '';
+      childGrade = student?.grade || '';
+    }
+
+    await MeriendaWaitlist.findOneAndUpdate(
+      { schoolId, parentUserId: userId },
+      {
+        schoolId,
+        parentUserId: userId,
+        parentName: name || '',
+        parentUsername: username || '',
+        childName,
+        childGrade,
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.status(200).json({ message: 'Agregado a la lista de espera correctamente.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

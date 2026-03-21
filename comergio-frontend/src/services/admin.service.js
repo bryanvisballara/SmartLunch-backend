@@ -54,6 +54,7 @@ export const getParentStudentLinks = () => api.get('/admin/links');
 export const createParentStudentLink = (data) => api.post('/admin/links', data);
 
 export const getMeriendaSubscriptions = () => api.get('/meriendas/subscriptions');
+export const getMeriendaWaitlist = () => api.get('/meriendas/waitlist');
 
 export const getMeriendaFailedPayments = () => api.get('/meriendas/failed-payments');
 export const updateMeriendaFailedPayment = (id, data) => api.patch(`/meriendas/failed-payments/${id}`, data);

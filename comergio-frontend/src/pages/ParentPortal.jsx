@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import {
+  addToMeriendasWaitlist,
   cancelParentMeriendasSubscription,
   confirmParentCardVerification,
   createParentCardPaymentMethod,
@@ -227,6 +228,8 @@ function ParentPortal() {
   const [meriendasSubmitSuccess, setMeriendasSubmitSuccess] = useState('');
   const [meriendasStatusMenuOpen, setMeriendasStatusMenuOpen] = useState(false);
   const [showMeriendasCancelModal, setShowMeriendasCancelModal] = useState(false);
+  const [showWaitlistSuccessModal, setShowWaitlistSuccessModal] = useState(false);
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
 
   const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
   const isTopupsPage = location.pathname === '/parent/recargas';
@@ -1488,6 +1491,18 @@ function ParentPortal() {
     setShowMeriendasCancelModal(true);
   };
 
+  const onJoinMeriendasWaitlist = async () => {
+    setWaitlistLoading(true);
+    try {
+      await addToMeriendasWaitlist();
+      setShowWaitlistSuccessModal(true);
+    } catch {
+      // silently ignore
+    } finally {
+      setWaitlistLoading(false);
+    }
+  };
+
   const onCancelMeriendasSubscription = async () => {
     if (!meriendaSubscription?._id) {
       setMeriendasSubmitError('No se encontró una suscripción activa para cancelar.');
@@ -2208,6 +2223,7 @@ function ParentPortal() {
             </button>
 
             <h2>Meriendas</h2>
+            <p className="parent-meriendas-coming-soon">(Próximamente)</p>
             <p className="parent-meriendas-subtitle">
               Fomentemos en <strong>{selectedStudentFirstName}</strong> una alimentacion saludable desde temprana edad con meriendas equilibradas que apoyan su desarrollo y energia durante el dia.
             </p>
@@ -2393,12 +2409,31 @@ function ParentPortal() {
                 {!isMeriendasSubscribed ? (
                   <button
                     className="parent-meriendas-submit-btn"
-                    disabled={!canSubmitMeriendas || meriendasSubmitLoading}
-                    onClick={onSubmitMeriendas}
+                    disabled={waitlistLoading}
+                    onClick={onJoinMeriendasWaitlist}
                     type="button"
                   >
-                    {meriendasSubmitLoading ? 'Guardando...' : 'Suscribirse'}
+                    {waitlistLoading ? 'Guardando...' : 'Agregarse a la lista de espera'}
                   </button>
+                ) : null}
+
+                {showWaitlistSuccessModal ? (
+                  <div className="parent-meriendas-cancel-modal-overlay" role="dialog" aria-modal="true" aria-label="Lista de espera meriendas">
+                    <div className="parent-meriendas-cancel-modal">
+                      <p className="kicker">Comergio Meriendas</p>
+                      <h4>¡Te agregamos a la lista!</h4>
+                      <p>Cuando el servicio esté disponible en tu colegio, te avisaremos por aquí.</p>
+                      <div className="parent-meriendas-cancel-modal-actions">
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={() => setShowWaitlistSuccessModal(false)}
+                        >
+                          Entendido
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 ) : null}
 
                 {meriendasSubmitError ? <p className="parent-error">{meriendasSubmitError}</p> : null}

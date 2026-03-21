@@ -29,6 +29,7 @@ import {
   deleteAdminSupplier,
   getParentStudentLinks,
   getMeriendaSubscriptions,
+  getMeriendaWaitlist,
   getMeriendaFailedPayments,
   updateMeriendaFailedPayment,
   getMeriendaSnacks,
@@ -448,6 +449,7 @@ function AdminDashboard() {
 
   const [meriendaStudentQuery, setMeriendaStudentQuery] = useState('');
   const [meriendaSubscriptions, setMeriendaSubscriptions] = useState([]);
+  const [meriendaWaitlist, setMeriendaWaitlist] = useState([]);
   const [meriendaFailedPayments, setMeriendaFailedPayments] = useState([]);
   const [firstSnackDraft, setFirstSnackDraft] = useState({ title: '', description: '', imageUrl: '' });
   const [secondSnackDraft, setSecondSnackDraft] = useState({ title: '', description: '', imageUrl: '' });
@@ -1116,15 +1118,17 @@ function AdminDashboard() {
   }, [meriendaOperationsHistory, selectedMeriendaHistoryMonth]);
 
   const loadMeriendasData = async () => {
-    const [subscriptionsRes, failedRes, snacksRes] = await Promise.all([
+    const [subscriptionsRes, failedRes, snacksRes, waitlistRes] = await Promise.all([
       getMeriendaSubscriptions(),
       getMeriendaFailedPayments(),
       getMeriendaSnacks(),
+      getMeriendaWaitlist(),
     ]);
 
     setMeriendaSubscriptions(subscriptionsRes.data || []);
     setMeriendaFailedPayments(failedRes.data || []);
     setMeriendasSnacks(snacksRes.data || []);
+    setMeriendaWaitlist(waitlistRes.data || []);
   };
 
   const loadMeriendaControlHistory = async (filters = meriendaControlFilters) => {
@@ -6457,6 +6461,22 @@ function AdminDashboard() {
               ))}
             </div>
             {filteredMeriendaSubscriptions.length === 0 ? <p>No hay alumnos suscritos en meriendas.</p> : null}
+          </div>
+
+          <div className="card">
+            <h4>Lista de espera — Meriendas</h4>
+            <p>{meriendaWaitlist.length} {meriendaWaitlist.length === 1 ? 'padre interesado' : 'padres interesados'}</p>
+            <div className="admin-links-grid">
+              {meriendaWaitlist.map((entry) => (
+                <div className="card admin-link-card" key={entry._id}>
+                  <p>Acudiente: {entry.parentName || 'N/A'}</p>
+                  <p>Usuario: {entry.parentUsername || 'N/A'}</p>
+                  <p>Alumno: {entry.childName || 'N/A'}</p>
+                  <p>Grado: {entry.childGrade || 'N/A'}</p>
+                </div>
+              ))}
+            </div>
+            {meriendaWaitlist.length === 0 ? <p>No hay padres en la lista de espera.</p> : null}
           </div>
 
           <div className="card">
