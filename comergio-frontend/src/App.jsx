@@ -11,6 +11,7 @@ import DailyClosure from './pages/DailyClosure';
 import InventoryRequestPage from './pages/InventoryRequestPage';
 import CancelSale from './pages/CancelSale';
 import Topups from './pages/Topups';
+import BoldReturnBridge from './pages/BoldReturnBridge';
 import MeriendasOperator from './pages/MeriendasOperator';
 import ParentPortal from './pages/ParentPortal';
 import Privacy from './pages/Privacy';
@@ -76,12 +77,14 @@ function App() {
     location.pathname !== '/login' &&
     location.pathname !== '/register' &&
     location.pathname !== '/register/next-step' &&
+    location.pathname !== '/bold-resultado' &&
     !location.pathname.startsWith('/parent') &&
     !['/privacy', '/contact'].includes(location.pathname);
   const hideFooter =
     location.pathname === '/login' ||
     location.pathname === '/register' ||
-    location.pathname === '/register/next-step';
+    location.pathname === '/register/next-step' ||
+    location.pathname === '/bold-resultado';
 
   return (
     <div>
@@ -99,6 +102,7 @@ function App() {
           />
           <Route element={<Register />} path="/register" />
           <Route element={<RegisterVerifiedNext />} path="/register/next-step" />
+          <Route element={<BoldReturnBridge />} path="/bold-resultado" />
           <Route
             element={(
               <RequireRole

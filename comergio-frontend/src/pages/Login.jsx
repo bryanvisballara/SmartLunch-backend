@@ -17,6 +17,7 @@ import loginLogo from '../assets/loginlogo.png';
 import smartLogo from '../assets/comergio.png';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
+import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
 import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
 
 function normalizeUsername(value) {
@@ -126,6 +127,12 @@ function Login() {
   }, [forgotResendCountdown]);
 
   const navigateByRole = useCallback((role) => {
+    const pendingPath = consumePostLoginRedirect();
+    if (pendingPath && (role === 'parent' || role === 'admin')) {
+      navigate(pendingPath, { replace: true });
+      return;
+    }
+
     if (role === 'vendor') {
       navigate('/daily-closure');
       return;

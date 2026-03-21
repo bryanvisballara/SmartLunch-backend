@@ -465,15 +465,25 @@ router.post('/bold', async (req, res) => {
   let session;
 
   try {
-    const boldIdentityKey = String(process.env.BOLD_IDENTITY_KEY || '').trim();
-    if (boldIdentityKey) {
+    const webhookSecrets = [
+      String(process.env.BOLD_WEBHOOK_SECRET || '').trim(),
+      String(process.env.BOLD_SECRET_KEY || '').trim(),
+    ].filter(Boolean);
+
+    if (webhookSecrets.length > 0) {
       const incomingSignature = String(req.headers['x-bold-signature'] || '').trim();
       const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
-      const expectedSignature = require('crypto')
-        .createHmac('sha256', boldIdentityKey)
+      const expectedSignatures = webhookSecrets.map((secret) => require('crypto')
+        .createHmac('sha256', secret)
         .update(rawBody)
-        .digest('base64');
-      if (incomingSignature !== expectedSignature) {
+        .digest('base64'));
+
+      if (!incomingSignature || !expectedSignatures.includes(incomingSignature)) {
+        console.warn('[BOLD_WEBHOOK_SIGNATURE_MISMATCH]', {
+          hasIncomingSignature: Boolean(incomingSignature),
+          candidateSecrets: webhookSecrets.length,
+          bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 12) : [],
+        });
         return res.status(401).json({ message: 'Invalid Bold webhook signature' });
       }
     }
@@ -662,6 +672,56 @@ router.post('/bold', async (req, res) => {
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
 
+router.get('/bold/recharge-status', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const reference = String(req.query?.reference || '').trim();
+
+    if (!reference) {
+      return res.status(400).json({ message: 'reference is required' });
+    }
+
+    const paymentQuery = {
+      schoolId,
+      method: 'bold',
+      reference,
+    };
+
+    if (role !== 'admin') {
+      paymentQuery.parentId = userId;
+    }
+
+    const payment = await PaymentTransaction.findOne(paymentQuery)
+      .select('reference status providerStatus amount approvedAt studentId walletTransactionId failureReason')
+      .lean();
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    const wallet = await Wallet.findOne({
+      schoolId,
+      studentId: payment.studentId,
+    })
+      .select('balance')
+      .lean();
+
+    return res.status(200).json({
+      reference: payment.reference,
+      status: payment.status,
+      providerStatus: payment.providerStatus,
+      rechargeAmount: Number(payment.amount || 0),
+      studentId: String(payment.studentId || ''),
+      approvedAt: payment.approvedAt || null,
+      walletBalance: Number(wallet?.balance || 0),
+      walletTransactionId: payment.walletTransactionId ? String(payment.walletTransactionId) : '',
+      failureReason: payment.failureReason || '',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/bold/recharge', async (req, res) => {
   try {
     if (!isBoldConfigured()) {
@@ -733,7 +793,8 @@ router.post('/bold/recharge', async (req, res) => {
     };
     await payment.save();
 
-    const redirectionUrl = `${String(process.env.FRONTEND_URL || 'https://comergio.com').replace(/\/$/, '')}/parent/bold-resultado`;
+    const frontendBaseUrl = String(process.env.FRONTEND_URL || 'https://comergio.com').replace(/\/$/, '');
+    const redirectionUrl = `${frontendBaseUrl}/bold-resultado?studentId=${encodeURIComponent(String(studentObjectId))}&paymentReference=${encodeURIComponent(reference)}`;
 
     return res.status(200).json({
       paymentId: payment._id,

@@ -21,7 +21,7 @@ import {
   updateParentPortalStudentGrade,
   updateParentPortalStudentAutoDebit,
 } from '../services/parent.service';
-import { createBoldRechargePayment } from '../services/payments.service';
+import { createBoldRechargePayment, getBoldRechargeStatus } from '../services/payments.service';
 import { getProducts } from '../services/products.service';
 import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
@@ -238,6 +238,7 @@ function ParentPortal() {
   const [showWaitlistSuccessModal, setShowWaitlistSuccessModal] = useState(false);
   const [waitlistLoading, setWaitlistLoading] = useState(false);
   const [waitlistSuccessMessage, setWaitlistSuccessMessage] = useState('');
+  const [walletReturnNotice, setWalletReturnNotice] = useState(null);
   const [gioMessages, setGioMessages] = useState([
     {
       role: 'assistant',
@@ -249,6 +250,7 @@ function ParentPortal() {
   const [gioError, setGioError] = useState('');
   const [gioContext, setGioContext] = useState(null);
   const gioThreadEndRef = useRef(null);
+  const processedBoldReturnKeyRef = useRef('');
 
   const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
   const isTopupsPage = location.pathname === '/parent/recargas';
@@ -517,6 +519,144 @@ function ParentPortal() {
   useEffect(() => {
     loadOverview('');
   }, []);
+
+  useEffect(() => {
+    if (location.pathname !== '/parent' || loading || error) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search || '');
+    const queryStudentId = String(params.get('studentId') || '').trim();
+
+    if (!queryStudentId) {
+      return;
+    }
+
+    const currentStudentId = String(selectedStudent?._id || selectedStudentId || '').trim();
+    if (currentStudentId === queryStudentId) {
+      return;
+    }
+
+    setSelectedStudentId(queryStudentId);
+    loadOverview(queryStudentId);
+  }, [location.pathname, location.search, loading, error, selectedStudent?._id, selectedStudentId]);
+
+  useEffect(() => {
+    if (location.pathname !== '/parent' || loading || error) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search || '');
+    const paymentSource = String(params.get('paymentSource') || '').trim().toLowerCase();
+    const paymentReference = String(params.get('paymentReference') || '').trim();
+    const paymentStatus = String(params.get('paymentStatus') || '').trim().toLowerCase();
+    const queryStudentId = String(params.get('studentId') || '').trim();
+
+    if (paymentSource !== 'bold' || !paymentReference) {
+      return;
+    }
+
+    const processKey = `${queryStudentId}|${paymentReference}|${paymentStatus}`;
+    if (processedBoldReturnKeyRef.current === processKey) {
+      return;
+    }
+
+    processedBoldReturnKeyRef.current = processKey;
+
+    let cancelled = false;
+
+    const buildParentUrl = () => {
+      const nextParams = new URLSearchParams();
+      if (queryStudentId) {
+        nextParams.set('studentId', queryStudentId);
+      }
+      const query = nextParams.toString();
+      return query ? `/parent?${query}` : '/parent';
+    };
+
+    const finishReturn = (notice) => {
+      if (cancelled) {
+        return;
+      }
+
+      setWalletReturnNotice(notice);
+      navigate(buildParentUrl(), { replace: true });
+    };
+
+    const syncBoldReturn = async () => {
+      if (queryStudentId) {
+        setSelectedStudentId(queryStudentId);
+        await loadOverview(queryStudentId);
+      }
+
+      if (paymentStatus === 'rejected' || paymentStatus === 'failed' || paymentStatus === 'denied') {
+        finishReturn({
+          type: 'error',
+          message: 'El pago con Bold no fue aprobado. La billetera no recibió saldo nuevo.',
+        });
+        return;
+      }
+
+      setWalletReturnNotice({
+        type: 'info',
+        message: 'Estamos confirmando tu recarga con Bold y actualizando el saldo de la billetera.',
+      });
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          const response = await getBoldRechargeStatus(paymentReference);
+          const status = String(response.data?.status || '').trim().toLowerCase();
+          const responseStudentId = String(response.data?.studentId || queryStudentId).trim();
+
+          if (status === 'approved') {
+            if (responseStudentId) {
+              setSelectedStudentId(responseStudentId);
+              await loadOverview(responseStudentId);
+            }
+
+            finishReturn({
+              type: 'success',
+              message: 'La recarga fue acreditada correctamente. Ya actualizamos el saldo de la billetera.',
+            });
+            return;
+          }
+
+          if (status === 'rejected' || status === 'failed') {
+            finishReturn({
+              type: 'error',
+              message: 'El pago con Bold no fue aprobado. Revisa el estado e intenta de nuevo si es necesario.',
+            });
+            return;
+          }
+        } catch (requestError) {
+          if (attempt === 7) {
+            finishReturn({
+              type: 'info',
+              message: requestError?.response?.data?.message || 'No pudimos confirmar la recarga todavía. Vuelve a revisar la billetera en unos segundos.',
+            });
+            return;
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+      }
+
+      finishReturn({
+        type: 'info',
+        message: 'Seguimos verificando la recarga. Si el saldo aún no cambia, vuelve a entrar en unos segundos.',
+      });
+    };
+
+    syncBoldReturn();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, location.search, loading, error, navigate]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1890,6 +2030,11 @@ function ParentPortal() {
       <main className="parent-mobile-content">
         {loading ? <div className="parent-loading">Cargando portal...</div> : null}
         {!loading && error ? <div className="parent-error">{error}</div> : null}
+        {!loading && !error && walletReturnNotice?.message ? (
+          <div className={walletReturnNotice?.type === 'error' ? 'parent-error' : walletReturnNotice?.type === 'success' ? 'parent-success' : 'parent-topup-fee-note'}>
+            {walletReturnNotice.message}
+          </div>
+        ) : null}
 
         {!loading && !error && isMenuPage ? (
           <section className="parent-menu-page" id="parent-menu-page">
