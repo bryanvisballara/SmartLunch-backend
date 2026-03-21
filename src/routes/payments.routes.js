@@ -165,6 +165,99 @@ function getBoldPaidAmount(payload) {
   return null;
 }
 
+function extractBoldReference(payload) {
+  const candidates = [
+    payload?.reference,
+    payload?.externalReference,
+    payload?.external_reference,
+    payload?.orderId,
+    payload?.order_id,
+    payload?.merchantReference,
+    payload?.merchant_reference,
+    payload?.metadata?.external_reference,
+    payload?.metadata?.orderId,
+    payload?.metadata?.order_id,
+    payload?.data?.reference,
+    payload?.data?.externalReference,
+    payload?.data?.external_reference,
+    payload?.data?.orderId,
+    payload?.data?.order_id,
+    payload?.payload?.reference,
+    payload?.payload?.orderId,
+    payload?.payload?.order_id,
+    payload?.event?.data?.reference,
+    payload?.event?.data?.external_reference,
+    payload?.event?.data?.order_id,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  // Fallback for payloads that only embed the merchant order id as text.
+  const payloadText = JSON.stringify(payload || {});
+  const match = payloadText.match(/SL-\d{13,}-\d{6}/);
+  if (match && match[0]) {
+    return String(match[0]).trim();
+  }
+
+  return '';
+}
+
+function extractBoldProviderTransactionId(payload) {
+  const candidates = [
+    payload?.id,
+    payload?.transactionId,
+    payload?.transaction_id,
+    payload?.boldTransactionId,
+    payload?.bold_transaction_id,
+    payload?.data?.id,
+    payload?.data?.transactionId,
+    payload?.data?.transaction_id,
+    payload?.payload?.id,
+    payload?.payload?.transaction_id,
+    payload?.event?.id,
+    payload?.event?.data?.id,
+    payload?.payment?.id,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function extractBoldProviderStatus(payload) {
+  const candidates = [
+    payload?.status,
+    payload?.state,
+    payload?.transactionStatus,
+    payload?.transaction_status,
+    payload?.data?.status,
+    payload?.data?.state,
+    payload?.payload?.status,
+    payload?.event?.status,
+    payload?.event?.data?.status,
+    payload?.payment?.status,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return 'pending';
+}
+
 async function canAccessStudent(user, studentId) {
   if (user.role === 'admin') {
     return true;
@@ -465,6 +558,13 @@ async function handleBoldWebhook(req, res) {
   let session;
 
   try {
+    console.info('[BOLD_WEBHOOK_RECEIVED]', {
+      path: req.originalUrl,
+      method: req.method,
+      signatureHeaders: Object.keys(req.headers || {}).filter((key) => key.toLowerCase().includes('signature')),
+      bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 20) : [],
+    });
+
     const webhookSecrets = Array.from(new Set([
       String(process.env.BOLD_WEBHOOK_SECRET || '').trim(),
       String(process.env.BOLD_SECRET_KEY || '').trim(),
@@ -520,22 +620,19 @@ async function handleBoldWebhook(req, res) {
       }
     }
 
-    const providerTransactionId = String(
-      req.body?.id || req.body?.transactionId || req.body?.data?.id || req.body?.payload?.id || ''
-    ).trim();
-    const reference = String(
-      req.body?.reference ||
-      req.body?.externalReference ||
-      req.body?.external_reference ||
-      req.body?.metadata?.external_reference ||
-      req.body?.data?.reference ||
-      ''
-    ).trim();
-    const providerStatus = String(
-      req.body?.status || req.body?.state || req.body?.data?.status || req.body?.event?.status || 'pending'
-    ).trim();
+    const providerTransactionId = extractBoldProviderTransactionId(req.body);
+    const reference = extractBoldReference(req.body);
+    const providerStatus = extractBoldProviderStatus(req.body);
+
+    console.info('[BOLD_WEBHOOK_PARSED_IDENTIFIERS]', {
+      providerTransactionId,
+      reference,
+      providerStatus,
+      paidAmount: getBoldPaidAmount(req.body),
+    });
 
     if (!providerTransactionId && !reference) {
+      console.warn('[BOLD_WEBHOOK_IGNORED_MISSING_IDENTIFIERS]');
       return res.status(200).json({ received: true, ignored: true, reason: 'missing identifiers' });
     }
 
@@ -553,6 +650,10 @@ async function handleBoldWebhook(req, res) {
     });
 
     if (!paymentRecord) {
+      console.warn('[BOLD_WEBHOOK_PAYMENT_NOT_FOUND]', {
+        providerTransactionId,
+        reference,
+      });
       return res.status(200).json({ received: true, ignored: true, reason: 'Payment record not found' });
     }
 
