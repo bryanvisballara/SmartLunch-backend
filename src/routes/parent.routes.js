@@ -1819,6 +1819,70 @@ router.patch('/portal/students/:studentId/daily-limit', async (req, res) => {
   }
 });
 
+router.patch('/portal/students/:studentId/grade', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.body.parentUserId || req.query.parentUserId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+    const studentId = toObjectId(req.params.studentId);
+    const gradeValue = String(req.body?.grade || '').trim();
+
+    if (!parentUserId) {
+      return res.status(400).json({ message: 'Invalid parent user id' });
+    }
+
+    if (!studentId) {
+      return res.status(400).json({ message: 'Invalid student id' });
+    }
+
+    if (!gradeValue) {
+      return res.status(400).json({ message: 'El curso es obligatorio.' });
+    }
+
+    if (gradeValue.length > 40) {
+      return res.status(400).json({ message: 'El curso no puede superar 40 caracteres.' });
+    }
+
+    const link = await ParentStudentLink.findOne({
+      schoolId,
+      parentId: parentUserId,
+      studentId,
+      status: 'active',
+    }).lean();
+
+    if (!link) {
+      return res.status(403).json({ message: 'Forbidden studentId' });
+    }
+
+    const student = await Student.findOneAndUpdate(
+      {
+        _id: studentId,
+        schoolId,
+        deletedAt: null,
+      },
+      {
+        grade: gradeValue,
+      },
+      {
+        new: true,
+      }
+    ).lean();
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    return res.status(200).json({
+      student: {
+        _id: student._id,
+        grade: student.grade || '',
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/portal/gio-ia/chat', async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;

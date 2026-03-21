@@ -18,6 +18,7 @@ import {
   updateParentMeriendasSubscription,
   updateParentPortalStudentBlock,
   updateParentPortalStudentDailyLimit,
+  updateParentPortalStudentGrade,
   updateParentPortalStudentAutoDebit,
 } from '../services/parent.service';
 import { createBoldRechargePayment } from '../services/payments.service';
@@ -130,6 +131,55 @@ function dedupeParentMenuProducts(products) {
   return Array.from(map.values());
 }
 
+function mountBoldCheckoutInDocument(targetDocument, paymentData) {
+  const doc = targetDocument;
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Checkout Bold</title><style>body{font-family:Segoe UI,Tahoma,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:18px} .box{max-width:460px;margin:0 auto;padding:14px;border:1px solid #dbe2ea;border-radius:14px;background:#fff} p{margin:0 0 10px}</style></head><body><div class="box"><p>Abriendo checkout de Bold...</p><div id="bold-checkout"></div></div></body></html>`);
+  doc.close();
+
+  const mountNode = doc.getElementById('bold-checkout');
+  if (!mountNode) {
+    return;
+  }
+
+  const script = doc.createElement('script');
+  script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
+  script.async = true;
+  script.setAttribute('data-bold-button', '');
+  script.setAttribute('data-api-key', paymentData.apiKey);
+  script.setAttribute('data-amount', String(paymentData.amount));
+  script.setAttribute('data-currency', paymentData.currency || 'COP');
+  script.setAttribute('data-order-id', paymentData.reference);
+  script.setAttribute('data-integrity-signature', paymentData.integritySignature);
+  script.setAttribute('data-redirection-url', paymentData.redirectionUrl);
+  if (paymentData.description) {
+    script.setAttribute('data-description', paymentData.description);
+  }
+  script.setAttribute('data-render-mode', 'embedded');
+
+  mountNode.appendChild(script);
+
+  let attempts = 0;
+  const maxAttempts = 40;
+  const autoOpenInterval = setInterval(() => {
+    const clickable = doc.querySelector('button, a, [role="button"]');
+    if (clickable) {
+      clearInterval(autoOpenInterval);
+      try {
+        clickable.click();
+      } catch (_) {
+        // If the auto click fails, user can still click the rendered Bold button manually.
+      }
+      return;
+    }
+
+    attempts += 1;
+    if (attempts >= maxAttempts) {
+      clearInterval(autoOpenInterval);
+    }
+  }, 120);
+}
+
 function ParentPortal() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -158,6 +208,10 @@ function ParentPortal() {
   const [dailyLimitDraft, setDailyLimitDraft] = useState('0');
   const [dailyLimitSaving, setDailyLimitSaving] = useState(false);
   const [dailyLimitError, setDailyLimitError] = useState('');
+  const [gradeDraft, setGradeDraft] = useState('');
+  const [gradeSaving, setGradeSaving] = useState(false);
+  const [gradeError, setGradeError] = useState('');
+  const [gradeEditOpen, setGradeEditOpen] = useState(false);
   const [daviAmount, setDaviAmount] = useState('');
   const [daviSubmitLoading, setDaviSubmitLoading] = useState(false);
   const [daviSubmitError, setDaviSubmitError] = useState('');
@@ -484,7 +538,10 @@ function ParentPortal() {
   useEffect(() => {
     setDailyLimitDraft(String(Number(selectedStudent?.dailyLimit || 0)));
     setDailyLimitError('');
-  }, [selectedStudent?._id, selectedStudent?.dailyLimit]);
+    setGradeDraft(String(selectedStudent?.grade || ''));
+    setGradeError('');
+    setGradeEditOpen(false);
+  }, [selectedStudent?._id, selectedStudent?.dailyLimit, selectedStudent?.grade]);
 
   const loadOverview = async (studentId = '') => {
     setLoading(true);
@@ -937,6 +994,8 @@ function ParentPortal() {
       const blockedCategories = Array.isArray(updatedStudent.blockedCategories) ? updatedStudent.blockedCategories : [];
       const hasDailyLimit = Object.prototype.hasOwnProperty.call(updatedStudent, 'dailyLimit');
       const nextDailyLimit = hasDailyLimit ? Number(updatedStudent.dailyLimit || 0) : null;
+      const hasGrade = Object.prototype.hasOwnProperty.call(updatedStudent, 'grade');
+      const nextGrade = hasGrade ? String(updatedStudent.grade || '').trim() : '';
       const hasAutoDebitEnabled = Boolean(
         Object.prototype.hasOwnProperty.call(updatedStudent, 'autoDebitEnabled') ||
         Object.prototype.hasOwnProperty.call(updatedStudent?.wallet || {}, 'autoDebitEnabled')
@@ -964,6 +1023,10 @@ function ParentPortal() {
 
         if (hasDailyLimit) {
           nextStudent.dailyLimit = nextDailyLimit;
+        }
+
+        if (hasGrade) {
+          nextStudent.grade = nextGrade;
         }
 
         if (Array.isArray(updatedStudent.blockedProducts)) {
@@ -1058,6 +1121,36 @@ function ParentPortal() {
     }
   };
 
+  const onSaveStudentGrade = async () => {
+    if (!selectedStudentId) {
+      setGradeError('Selecciona un alumno para actualizar el curso.');
+      return;
+    }
+
+    const normalizedGrade = String(gradeDraft || '').trim();
+    if (!normalizedGrade) {
+      setGradeError('Ingresa el curso del alumno.');
+      return;
+    }
+
+    setGradeSaving(true);
+    setGradeError('');
+
+    try {
+      const response = await updateParentPortalStudentGrade(selectedStudentId, {
+        grade: normalizedGrade,
+      });
+      const updatedStudent = response.data?.student || null;
+      mergeStudentData(updatedStudent);
+      setGradeDraft(String(updatedStudent?.grade || normalizedGrade));
+      setGradeEditOpen(false);
+    } catch (requestError) {
+      setGradeError(requestError?.response?.data?.message || requestError?.message || 'No se pudo guardar el curso.');
+    } finally {
+      setGradeSaving(false);
+    }
+  };
+
   const onSubmitDaviTopup = async () => {
     if (!selectedStudent?._id) {
       setDaviSubmitError('Selecciona un alumno antes de continuar.');
@@ -1074,6 +1167,12 @@ function ParentPortal() {
     setDaviSubmitSuccess('');
     setBoldButtonLoadError('');
     setBoldPaymentData(null);
+    const checkoutPopup = window.open('', 'bold-checkout-window');
+    if (checkoutPopup && !checkoutPopup.closed) {
+      checkoutPopup.document.open();
+      checkoutPopup.document.write('<!doctype html><html><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>Checkout Bold</title></head><body style="font-family:Segoe UI,Tahoma,sans-serif;padding:18px">Preparando checkout de Bold...</body></html>');
+      checkoutPopup.document.close();
+    }
 
     try {
       const response = await createBoldRechargePayment({
@@ -1081,9 +1180,21 @@ function ParentPortal() {
         amount: daviAmountNumber,
         description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
       });
+      const paymentData = response.data;
 
-      setBoldPaymentData(response.data);
+      if (checkoutPopup && !checkoutPopup.closed) {
+        mountBoldCheckoutInDocument(checkoutPopup.document, paymentData);
+        setDaviSubmitSuccess('Checkout de Bold abierto.');
+        return;
+      }
+
+      // Fallback path if popup is blocked by browser settings.
+      setBoldPaymentData(paymentData);
+      setDaviSubmitSuccess('Continua con el botón de Bold para abrir el checkout.');
     } catch (requestError) {
+      if (checkoutPopup && !checkoutPopup.closed) {
+        checkoutPopup.close();
+      }
       setDaviSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo procesar la recarga con Bold.');
     } finally {
       setDaviSubmitLoading(false);
@@ -3054,9 +3165,50 @@ function ParentPortal() {
             <section className="parent-section" id="student-control">
               <h3>Información del alumno</h3>
               <div className="parent-info-grid">
-                <p>
+                <p className="parent-info-editable-card">
                   <span>Curso</span>
-                  <strong>{selectedStudent?.grade || 'N/A'}</strong>
+                  {!gradeEditOpen ? (
+                    <>
+                      <strong>{selectedStudent?.grade || 'N/A'}</strong>
+                      <button
+                        type="button"
+                        className="parent-info-inline-button"
+                        onClick={() => {
+                          setGradeDraft(String(selectedStudent?.grade || ''));
+                          setGradeError('');
+                          setGradeEditOpen(true);
+                        }}
+                      >
+                        Editar curso
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={gradeDraft}
+                        onChange={(event) => setGradeDraft(event.target.value)}
+                        maxLength={40}
+                        placeholder="Ej: 5A"
+                      />
+                      <div className="parent-info-inline-actions">
+                        <button type="button" onClick={onSaveStudentGrade} disabled={gradeSaving}>
+                          {gradeSaving ? 'Guardando...' : 'Guardar'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGradeDraft(String(selectedStudent?.grade || ''));
+                            setGradeError('');
+                            setGradeEditOpen(false);
+                          }}
+                          disabled={gradeSaving}
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </p>
                 <p>
                   <span>Límite diario</span>
@@ -3066,7 +3218,12 @@ function ParentPortal() {
                   <span>Productos bloqueados</span>
                   <strong>{selectedStudent?.blockedProductsCount || 0}</strong>
                 </p>
+                <p>
+                  <span>Categorías bloqueadas</span>
+                  <strong>{selectedStudent?.blockedCategoriesCount || 0}</strong>
+                </p>
               </div>
+              {gradeError ? <p className="parent-error">{gradeError}</p> : null}
               <div className="parent-tags-wrap">
                 {(selectedStudent?.blockedProducts || []).slice(0, 6).map((item) => (
                   <span key={item._id} className="parent-tag">
