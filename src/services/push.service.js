@@ -64,6 +64,19 @@ function normalizeDataPayload(payload = {}) {
   }, {});
 }
 
+function resolveTargetUrl(payload = {}, fallback = '/parent') {
+  const candidate = String(payload?.url || '').trim();
+  if (!candidate) {
+    return fallback;
+  }
+
+  if (candidate.startsWith('/')) {
+    return candidate;
+  }
+
+  return fallback;
+}
+
 function ensureFirebaseConfig() {
   if (firebaseConfigured || admin.apps.length > 0) {
     firebaseConfigured = true;
@@ -126,12 +139,13 @@ async function sendWebPushTokens({ webTokens, title, body, payload }) {
     return { delivered: 0, total: webTokens.length, reason: 'WEB_PUSH_PUBLIC_KEY/WEB_PUSH_PRIVATE_KEY are not configured' };
   }
 
+  const targetUrl = resolveTargetUrl(payload, '/parent');
   const notificationPayload = JSON.stringify({
     title,
     body,
     data: {
       ...(payload || {}),
-      url: '/parent',
+      url: targetUrl,
     },
   });
 
@@ -177,6 +191,7 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
     return { delivered: 0, total: nativeTokens.length, reason: 'No valid native device tokens' };
   }
 
+  const targetUrl = resolveTargetUrl(payload, '/parent');
   const response = await admin.messaging().sendEachForMulticast({
     tokens: validDocs.map((item) => String(item.token).trim()),
     notification: {
@@ -185,7 +200,7 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
     },
     data: {
       ...normalizeDataPayload(payload),
-      url: '/parent',
+      url: targetUrl,
     },
     android: {
       priority: 'high',

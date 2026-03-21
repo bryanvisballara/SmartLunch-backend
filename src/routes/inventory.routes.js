@@ -174,7 +174,7 @@ async function approveInventoryRequest({ schoolId, userId, requestId }) {
 
 router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const { storeId, targetStoreId = null, productId, type, quantity, notes, items } = req.body;
 
     if (!storeId || !type) {
@@ -213,30 +213,33 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
     const requests = await InventoryRequest.insertMany(documents);
 
-    try {
-      const requestCount = Number(requests.length || 0);
-      const typeLabelMap = {
-        in: 'ingreso',
-        out: 'egreso',
-        transfer: 'traslado',
-      };
-      const typeLabel = typeLabelMap[type] || 'inventario';
+    if (role === 'vendor') {
+      try {
+        const requestCount = Number(requests.length || 0);
+        const typeLabelMap = {
+          in: 'ingreso',
+          out: 'egreso',
+          transfer: 'traslado',
+        };
+        const typeLabel = typeLabelMap[type] || 'inventario';
 
-      await queueApprovalPendingNotificationForAdmins({
-        schoolId,
-        title: 'Nueva autorizacion pendiente',
-        body: `Hay ${requestCount} solicitud(es) de ${typeLabel} pendiente(s) de aprobacion.`,
-        payload: {
-          type: 'approval.inventory.pending',
-          batchId,
-          requestType: String(type || ''),
-          requestsCount: requestCount,
-          storeId: String(storeId || ''),
-          targetStoreId: String(targetStoreId || ''),
-        },
-      });
-    } catch (notificationError) {
-      console.warn(`[APPROVAL_PUSH_WARNING] inventory batch=${batchId} error=${notificationError.message}`);
+        await queueApprovalPendingNotificationForAdmins({
+          schoolId,
+          title: 'Nueva autorizacion pendiente',
+          body: `Vendedor solicito ${requestCount} movimiento(s) de ${typeLabel}.`,
+          payload: {
+            type: 'approval.inventory.pending',
+            batchId,
+            requestType: String(type || ''),
+            requestsCount: requestCount,
+            storeId: String(storeId || ''),
+            targetStoreId: String(targetStoreId || ''),
+            requestedBy: String(userId || ''),
+          },
+        });
+      } catch (notificationError) {
+        console.warn(`[APPROVAL_PUSH_WARNING] inventory batch=${batchId} error=${notificationError.message}`);
+      }
     }
 
     return res.status(201).json({

@@ -464,21 +464,24 @@ router.post('/cancel-request', roleMiddleware('vendor', 'admin'), async (req, re
       status: 'pending',
     });
 
-    try {
-      const total = Number(order.total || 0).toLocaleString('es-CO');
-      await queueApprovalPendingNotificationForAdmins({
-        schoolId,
-        title: 'Nueva autorizacion pendiente',
-        body: `Hay una solicitud de anulacion pendiente por $${total}.`,
-        payload: {
-          type: 'approval.cancellation.pending',
-          requestId: String(request._id),
-          orderId: String(order._id),
-          storeId: String(order.storeId || ''),
-        },
-      });
-    } catch (notificationError) {
-      console.warn(`[APPROVAL_PUSH_WARNING] cancellation request=${request._id} error=${notificationError.message}`);
+    if (role === 'vendor') {
+      try {
+        const total = Number(order.total || 0).toLocaleString('es-CO');
+        await queueApprovalPendingNotificationForAdmins({
+          schoolId,
+          title: 'Nueva autorizacion pendiente',
+          body: `Vendedor solicito una anulacion por $${total}.`,
+          payload: {
+            type: 'approval.cancellation.pending',
+            requestId: String(request._id),
+            orderId: String(order._id),
+            storeId: String(order.storeId || ''),
+            requestedBy: String(userId || ''),
+          },
+        });
+      } catch (notificationError) {
+        console.warn(`[APPROVAL_PUSH_WARNING] cancellation request=${request._id} error=${notificationError.message}`);
+      }
     }
 
     return res.status(201).json(request);

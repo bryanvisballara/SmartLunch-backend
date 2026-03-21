@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import {
@@ -16,7 +16,7 @@ import useAuthStore from '../store/auth.store';
 import loginLogo from '../assets/loginlogo.png';
 import smartLogo from '../assets/comergio.png';
 import DismissibleNotice from '../components/DismissibleNotice';
-import { ensureParentPushNotifications } from '../lib/pushNotifications';
+import { ensurePortalPushNotifications } from '../lib/pushNotifications';
 import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
 
 function normalizeUsername(value) {
@@ -52,10 +52,17 @@ function InputAdornment({ kind }) {
 }
 
 function Login() {
-    const setupParentPushIfPossible = async () => {
+    const setupPushIfPossible = async () => {
       try {
-        await ensureParentPushNotifications();
-      } catch {
+        const result = await ensurePortalPushNotifications();
+        if (!result?.enabled) {
+          console.warn('[PUSH_SETUP_DISABLED]', result?.reason || 'unknown');
+          return;
+        }
+
+        console.info('[PUSH_SETUP_OK]', result?.tokenSource || 'unknown');
+      } catch (error) {
+        console.error('[PUSH_SETUP_ERROR]', error?.message || 'unknown');
         // Push setup failures should not block login flow.
       }
     };
@@ -63,8 +70,8 @@ function Login() {
   const navigate = useNavigate();
   const { token, user, setAuth, setUser } = useAuthStore();
   const [selectedSchoolId, setSelectedSchoolId] = useState(() => localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID);
-  const [username, setUsername] = useState(() => localStorage.getItem('lastParentUsername') || 'admin');
-  const [password, setPassword] = useState('123456');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
@@ -80,6 +87,32 @@ function Login() {
   const [forgotError, setForgotError] = useState('');
   const [forgotInfo, setForgotInfo] = useState('');
   const [forgotResendCountdown, setForgotResendCountdown] = useState(0);
+  const hasUserTypedRef = useRef(false);
+
+  useEffect(() => {
+    const clearIfUntouched = () => {
+      if (hasUserTypedRef.current) {
+        return;
+      }
+
+      setUsername('');
+      setPassword('');
+    };
+
+    clearIfUntouched();
+    const immediateClearTimer = setTimeout(clearIfUntouched, 120);
+    const delayedClearTimer = setTimeout(clearIfUntouched, 900);
+
+    return () => {
+      clearTimeout(immediateClearTimer);
+      clearTimeout(delayedClearTimer);
+    };
+  }, []);
+
+  const markUserInteraction = () => {
+    hasUserTypedRef.current = true;
+  };
+
   useEffect(() => {
     if (forgotResendCountdown <= 0) {
       return;
@@ -160,8 +193,8 @@ function Login() {
     }
 
     if (user?.role) {
-      if (user.role === 'parent') {
-        setupParentPushIfPossible();
+      if (user.role === 'parent' || user.role === 'admin') {
+        setupPushIfPossible();
       }
       navigateByRole(user.role);
       return;
@@ -188,8 +221,8 @@ function Login() {
         };
 
         setUser(hydratedUser);
-        if (hydratedUser.role === 'parent') {
-          setupParentPushIfPossible();
+        if (hydratedUser.role === 'parent' || hydratedUser.role === 'admin') {
+          setupPushIfPossible();
         }
         navigateByRole(hydratedUser.role);
       } catch {
@@ -225,7 +258,11 @@ function Login() {
       if (authResponse?.user?.role === 'parent') {
         localStorage.setItem('lastParentUsername', normalizedUsername);
         await maybePromptEnableBiometric(authResponse, normalizedUsername);
-        setupParentPushIfPossible();
+        setupPushIfPossible();
+      }
+
+      if (authResponse?.user?.role === 'admin') {
+        setupPushIfPossible();
       }
 
       navigateByRole(authResponse?.user?.role);
@@ -273,7 +310,11 @@ function Login() {
       localStorage.setItem('lastParentUsername', normalizedUsername);
       localStorage.setItem('selectedSchoolId', selectedSchoolId);
       if (verifyResponse.data?.user?.role === 'parent') {
-        setupParentPushIfPossible();
+        setupPushIfPossible();
+      }
+
+      if (verifyResponse.data?.user?.role === 'admin') {
+        setupPushIfPossible();
       }
       navigateByRole(verifyResponse.data?.user?.role);
     } catch (requestError) {
@@ -425,7 +466,7 @@ function Login() {
         </div>
       </section>
 
-      <form className="login-panel login-auth-card" onSubmit={onSubmit}>
+      <form className="login-panel login-auth-card" autoComplete="off" onSubmit={onSubmit}>
         <div className="login-auth-card-head">
           <h2>Bienvenido,</h2>
           <p>Administra el consumo escolar de forma simple y segura.</p>
@@ -450,7 +491,17 @@ function Login() {
           <span>Usuario</span>
           <div className="login-input-shell">
             <span className="login-input-icon"><InputAdornment kind="username" /></span>
-            <input placeholder="Tu usuario" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <input
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              name="comergio_username"
+              placeholder="Tu usuario"
+              spellCheck={false}
+              value={username}
+              onFocus={markUserInteraction}
+              onChange={(e) => setUsername(e.target.value)}
+            />
           </div>
         </label>
 
@@ -459,9 +510,14 @@ function Login() {
           <div className="password-field login-input-shell">
             <span className="login-input-icon"><InputAdornment kind="password" /></span>
             <input
+              autoCapitalize="none"
+              autoComplete="new-password"
+              autoCorrect="off"
+              name="comergio_password"
               type={showPassword ? 'text' : 'password'}
               placeholder="Tu contraseña"
               value={password}
+              onFocus={markUserInteraction}
               onChange={(e) => setPassword(e.target.value)}
             />
             <button

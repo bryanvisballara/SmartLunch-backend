@@ -248,7 +248,7 @@ router.post('/recharges/:id/cancel', roleMiddleware('admin'), async (req, res) =
 
 router.post('/topup-requests', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const { studentId, amount, method = 'cash', storeId = null, requestDate, notes } = req.body;
     const allowedMethods = ['cash', 'qr', 'dataphone'];
 
@@ -277,21 +277,24 @@ router.post('/topup-requests', roleMiddleware('vendor', 'admin'), async (req, re
       status: 'pending',
     });
 
-    try {
-      const amountText = Number(request.amount || 0).toLocaleString('es-CO');
-      await queueApprovalPendingNotificationForAdmins({
-        schoolId,
-        title: 'Nueva autorizacion pendiente',
-        body: `Hay una solicitud de recarga pendiente por $${amountText}.`,
-        payload: {
-          type: 'approval.topup.pending',
-          requestId: String(request._id),
-          studentId: String(student._id),
-          storeId: String(storeId || ''),
-        },
-      });
-    } catch (notificationError) {
-      console.warn(`[APPROVAL_PUSH_WARNING] topup request=${request._id} error=${notificationError.message}`);
+    if (role === 'vendor') {
+      try {
+        const amountText = Number(request.amount || 0).toLocaleString('es-CO');
+        await queueApprovalPendingNotificationForAdmins({
+          schoolId,
+          title: 'Nueva autorizacion pendiente',
+          body: `Vendedor solicito una recarga de $${amountText}.`,
+          payload: {
+            type: 'approval.topup.pending',
+            requestId: String(request._id),
+            studentId: String(student._id),
+            storeId: String(storeId || ''),
+            requestedBy: String(userId || ''),
+          },
+        });
+      } catch (notificationError) {
+        console.warn(`[APPROVAL_PUSH_WARNING] topup request=${request._id} error=${notificationError.message}`);
+      }
     }
 
     return res.status(201).json(request);
@@ -479,7 +482,7 @@ router.post('/topup', roleMiddleware('admin', 'parent'), async (req, res) => {
 
 router.post('/pay', roleMiddleware('admin', 'vendor'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const { studentId, amount, method = 'system', notes } = req.body;
 
     if (!studentId || !amount || amount <= 0) {
@@ -508,6 +511,27 @@ router.post('/pay', roleMiddleware('admin', 'vendor'), async (req, res) => {
       createdBy: userId,
       notes,
     });
+
+    if (role === 'vendor') {
+      try {
+        const amountText = Number(amount || 0).toLocaleString('es-CO');
+        await queueApprovalPendingNotificationForAdmins({
+          schoolId,
+          title: 'Egreso registrado en POS',
+          body: `Vendedor registro un egreso por $${amountText}.`,
+          payload: {
+            type: 'pos.wallet.egress',
+            studentId: String(studentId || ''),
+            amount: Number(amount || 0),
+            method: String(method || ''),
+            source: 'wallet.pay',
+            requestedBy: String(userId || ''),
+          },
+        });
+      } catch (notificationError) {
+        console.warn(`[POS_PUSH_WARNING] source=wallet_pay studentId=${studentId} error=${notificationError.message}`);
+      }
+    }
 
     return res.status(200).json(wallet);
   } catch (error) {
@@ -596,7 +620,7 @@ router.post('/recharge', roleMiddleware('admin', 'parent'), async (req, res) => 
 
 router.post('/debit', roleMiddleware('admin', 'vendor'), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const { studentId, amount, method = 'system', notes } = req.body;
 
     if (!studentId || !amount || amount <= 0) {
@@ -625,6 +649,27 @@ router.post('/debit', roleMiddleware('admin', 'vendor'), async (req, res) => {
       createdBy: userId,
       notes,
     });
+
+    if (role === 'vendor') {
+      try {
+        const amountText = Number(amount || 0).toLocaleString('es-CO');
+        await queueApprovalPendingNotificationForAdmins({
+          schoolId,
+          title: 'Egreso registrado en POS',
+          body: `Vendedor registro un egreso por $${amountText}.`,
+          payload: {
+            type: 'pos.wallet.egress',
+            studentId: String(studentId || ''),
+            amount: Number(amount || 0),
+            method: String(method || ''),
+            source: 'wallet.debit',
+            requestedBy: String(userId || ''),
+          },
+        });
+      } catch (notificationError) {
+        console.warn(`[POS_PUSH_WARNING] source=wallet_debit studentId=${studentId} error=${notificationError.message}`);
+      }
+    }
 
     return res.status(200).json(wallet);
   } catch (error) {
