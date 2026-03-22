@@ -989,7 +989,7 @@ router.put('/schedule/:month', roleMiddleware('admin'), async (req, res) => {
 });
 
 // Admin: get meriendas waitlist
-router.get('/waitlist', roleMiddleware(['admin']), async (req, res) => {
+router.get('/waitlist', roleMiddleware('admin'), async (req, res) => {
   try {
     const { schoolId } = req.user;
     const entries = await MeriendaWaitlist.find({ schoolId }).sort({ createdAt: -1 }).lean();

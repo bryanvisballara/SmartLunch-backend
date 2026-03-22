@@ -273,6 +273,92 @@ const parseWeekKeyDateSafe = (weekKey) => {
   return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
 };
 
+const ACCOUNTING_WEEK_DAYS = [
+  { offset: 0, label: 'Lunes' },
+  { offset: 1, label: 'Martes' },
+  { offset: 2, label: 'Miercoles' },
+  { offset: 3, label: 'Jueves' },
+  { offset: 4, label: 'Viernes' },
+  { offset: 5, label: 'Sabado' },
+];
+
+const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
+  const startDate = parseWeekKeyDateSafe(weekKey);
+  if (!startDate) {
+    return [];
+  }
+
+  const normalizeDayKey = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+      return '';
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      return normalized;
+    }
+
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      return '';
+    }
+
+    return parsed.toISOString().slice(0, 10);
+  };
+
+  const dayRowsSource = Array.isArray(dailyBreakdown)
+    ? dailyBreakdown
+    : Object.values(dailyBreakdown || {});
+
+  const byDayKey = new Map(
+    dayRowsSource.map((item) => [
+      normalizeDayKey(item?.dayKey),
+      {
+        salesCashTotal: Number(item?.salesCashTotal || 0),
+        salesQrTotal: Number(item?.salesQrTotal || 0),
+        salesDataphoneTotal: Number(item?.salesDataphoneTotal || 0),
+        topupsTotal: Number(item?.topupsTotal || 0),
+        fixedTotal: Number(item?.fixedTotal || 0),
+        variableTotal: Number(item?.variableTotal || 0),
+      },
+    ])
+  );
+
+  return ACCOUNTING_WEEK_DAYS.map((dayItem) => {
+    const dayDate = new Date(startDate.getTime());
+    dayDate.setUTCDate(dayDate.getUTCDate() + dayItem.offset);
+    const dayKey = dayDate.toISOString().slice(0, 10);
+    const dayValues = byDayKey.get(dayKey) || {
+      salesCashTotal: 0,
+      salesQrTotal: 0,
+      salesDataphoneTotal: 0,
+      topupsTotal: 0,
+      fixedTotal: 0,
+      variableTotal: 0,
+    };
+
+    const totalIncomeTotal =
+      Number(dayValues.salesCashTotal || 0)
+      + Number(dayValues.salesQrTotal || 0)
+      + Number(dayValues.salesDataphoneTotal || 0)
+      + Number(dayValues.topupsTotal || 0);
+    const totalCostsTotal = Number(dayValues.fixedTotal || 0) + Number(dayValues.variableTotal || 0);
+    const dayDateLabel = dayDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
+
+    return {
+      dayLabel: `${dayItem.label} (${dayDateLabel})`,
+      salesCashTotal: Number(dayValues.salesCashTotal || 0),
+      salesQrTotal: Number(dayValues.salesQrTotal || 0),
+      salesDataphoneTotal: Number(dayValues.salesDataphoneTotal || 0),
+      topupsTotal: Number(dayValues.topupsTotal || 0),
+      totalIncomeTotal,
+      fixedTotal: Number(dayValues.fixedTotal || 0),
+      variableTotal: Number(dayValues.variableTotal || 0),
+      totalCostsTotal,
+    };
+  });
+};
+
 const daysInIsoMonth = (monthIso) => {
   const [year, month] = String(monthIso || '').split('-').map((part) => Number(part));
   if (!year || !month) {
@@ -375,6 +461,7 @@ function AdminDashboard() {
   const [closureFilters, setClosureFilters] = useState({ storeId: '', date: '' });
   const [homeStoreId, setHomeStoreId] = useState('');
   const [accountingMonthFilter, setAccountingMonthFilter] = useState(currentMonthIso());
+  const [expandedAccountingWeekKeys, setExpandedAccountingWeekKeys] = useState([]);
   const [notificationAuditFilters, setNotificationAuditFilters] = useState({
     studentId: '',
     type: '',
@@ -891,6 +978,21 @@ function AdminDashboard() {
           const totalIncomeTotal = salesTotal + topupsTotal;
           const totalCostsTotal = fixedTotal + variableTotal;
           const utilityTotal = totalIncomeTotal - totalCostsTotal;
+          const rawDailyBreakdown = Array.isArray(row?.dailyBreakdown)
+            ? row.dailyBreakdown
+            : Object.values(row?.dailyBreakdown || {});
+          const dailyBreakdown = rawDailyBreakdown
+            .map((dayRow) => ({
+              dayKey: String(dayRow?.dayKey || ''),
+              salesCashTotal: Number(dayRow?.salesCashTotal || 0),
+              salesQrTotal: Number(dayRow?.salesQrTotal || 0),
+              salesDataphoneTotal: Number(dayRow?.salesDataphoneTotal || 0),
+              topupsTotal: Number(dayRow?.topupsTotal || 0),
+              fixedTotal: Number(dayRow?.fixedTotal || 0),
+              variableTotal: Number(dayRow?.variableTotal || 0),
+            }))
+            .filter((dayRow) => dayRow.dayKey)
+            .sort((a, b) => String(a.dayKey).localeCompare(String(b.dayKey)));
 
           return {
             weekKey: String(row?.weekKey || ''),
@@ -903,6 +1005,7 @@ function AdminDashboard() {
             variableTotal,
             totalCostsTotal,
             utilityTotal,
+            dailyBreakdown,
           };
         })
         .filter((row) => row.weekKey)
@@ -933,6 +1036,7 @@ function AdminDashboard() {
           totalCostsTotal: 0,
           utilityTotal: 0,
           topupsTotal: 0,
+          dailyBreakdown: [],
         });
       }
 
@@ -1118,17 +1222,17 @@ function AdminDashboard() {
   }, [meriendaOperationsHistory, selectedMeriendaHistoryMonth]);
 
   const loadMeriendasData = async () => {
-    const [subscriptionsRes, failedRes, snacksRes, waitlistRes] = await Promise.all([
+    const [subscriptionsRes, failedRes, snacksRes, waitlistRes] = await Promise.allSettled([
       getMeriendaSubscriptions(),
       getMeriendaFailedPayments(),
       getMeriendaSnacks(),
       getMeriendaWaitlist(),
     ]);
 
-    setMeriendaSubscriptions(subscriptionsRes.data || []);
-    setMeriendaFailedPayments(failedRes.data || []);
-    setMeriendasSnacks(snacksRes.data || []);
-    setMeriendaWaitlist(waitlistRes.data || []);
+    setMeriendaSubscriptions(subscriptionsRes.status === 'fulfilled' ? subscriptionsRes.value.data || [] : []);
+    setMeriendaFailedPayments(failedRes.status === 'fulfilled' ? failedRes.value.data || [] : []);
+    setMeriendasSnacks(snacksRes.status === 'fulfilled' ? snacksRes.value.data || [] : []);
+    setMeriendaWaitlist(waitlistRes.status === 'fulfilled' ? waitlistRes.value.data || [] : []);
   };
 
   const loadMeriendaControlHistory = async (filters = meriendaControlFilters) => {
@@ -1780,7 +1884,7 @@ function AdminDashboard() {
       setClosureFilters((prev) => ({ ...prev, storeId: prev.storeId || firstStoreId }));
       setInventoryForm((prev) => ({ ...prev, storeId: prev.storeId || firstStoreId }));
 
-      await Promise.all([
+      const secondaryLoads = await Promise.allSettled([
         loadApprovals(),
         loadOrders(),
         loadClosures({ storeId: firstStoreId }),
@@ -1789,6 +1893,12 @@ function AdminDashboard() {
         loadMeriendasOperationsMonth(meriendasMonth),
         loadMeriendasOperationsHistory(),
       ]);
+
+      // Accounting must not stay empty due to unrelated module failures.
+      const homepageLoad = secondaryLoads[3];
+      if (homepageLoad?.status === 'rejected') {
+        throw homepageLoad.reason;
+      }
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo cargar el portal administrativo.');
     } finally {
@@ -4517,24 +4627,81 @@ function AdminDashboard() {
 
                       const endDate = new Date(startDate.getTime());
                       endDate.setUTCDate(endDate.getUTCDate() + 6);
+                      const isExpanded = expandedAccountingWeekKeys.includes(row.weekKey);
+                      const dailyRows = buildAccountingWeekDayRows(row.weekKey, row.dailyBreakdown);
 
                       return (
-                        <tr key={row.weekKey}>
-                          <td>
-                            {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
-                            {' - '}
-                            {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
-                          </td>
-                          <td>{formatCurrency(row.salesCashTotal)}</td>
-                          <td>{formatCurrency(row.salesQrTotal)}</td>
-                          <td>{formatCurrency(row.salesDataphoneTotal)}</td>
-                          <td>{formatCurrency(row.topupsTotal)}</td>
-                          <td>{formatCurrency(row.totalIncomeTotal)}</td>
-                          <td>{formatCurrency(row.fixedTotal)}</td>
-                          <td>{formatCurrency(row.variableTotal)}</td>
-                          <td>{formatCurrency(row.totalCostsTotal)}</td>
-                          <td>{formatCurrency(row.utilityTotal)}</td>
-                        </tr>
+                        [
+                          <tr key={`${row.weekKey}-summary`}>
+                            <td>
+                              <button
+                                className="admin-accounting-week-toggle"
+                                onClick={() => {
+                                  setExpandedAccountingWeekKeys((prev) => (
+                                    prev.includes(row.weekKey)
+                                      ? prev.filter((weekKey) => weekKey !== row.weekKey)
+                                      : [...prev, row.weekKey]
+                                  ));
+                                }}
+                                type="button"
+                              >
+                                <span>
+                                  {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                                  {' - '}
+                                  {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                                </span>
+                                <span>{isExpanded ? 'Ocultar dias' : 'Ver dias'}</span>
+                              </button>
+                            </td>
+                            <td>{formatCurrency(row.salesCashTotal)}</td>
+                            <td>{formatCurrency(row.salesQrTotal)}</td>
+                            <td>{formatCurrency(row.salesDataphoneTotal)}</td>
+                            <td>{formatCurrency(row.topupsTotal)}</td>
+                            <td>{formatCurrency(row.totalIncomeTotal)}</td>
+                            <td>{formatCurrency(row.fixedTotal)}</td>
+                            <td>{formatCurrency(row.variableTotal)}</td>
+                            <td>{formatCurrency(row.totalCostsTotal)}</td>
+                            <td>{formatCurrency(row.utilityTotal)}</td>
+                          </tr>,
+                          isExpanded ? (
+                            <tr className="admin-accounting-week-detail-row" key={`${row.weekKey}-detail`}>
+                              <td colSpan={10}>
+                                <div className="approval-history-scroll approval-history-table-scroll admin-accounting-week-detail-wrap">
+                                  <table className="simple-table">
+                                    <thead>
+                                      <tr>
+                                        <th>Dia</th>
+                                        <th>Ventas efectivo</th>
+                                        <th>Ventas QR</th>
+                                        <th>Ventas datáfono</th>
+                                        <th>Recargas del dia</th>
+                                        <th>Total ingresos del dia</th>
+                                        <th>Costos fijos</th>
+                                        <th>Costos variables</th>
+                                        <th>Total costos dia</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {dailyRows.map((dayRow) => (
+                                        <tr key={`${row.weekKey}-${dayRow.dayLabel}`}>
+                                          <td>{dayRow.dayLabel}</td>
+                                          <td>{formatCurrency(dayRow.salesCashTotal)}</td>
+                                          <td>{formatCurrency(dayRow.salesQrTotal)}</td>
+                                          <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
+                                          <td>{formatCurrency(dayRow.topupsTotal)}</td>
+                                          <td>{formatCurrency(dayRow.totalIncomeTotal)}</td>
+                                          <td>{formatCurrency(dayRow.fixedTotal)}</td>
+                                          <td>{formatCurrency(dayRow.variableTotal)}</td>
+                                          <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null,
+                        ]
                       );
                     })}
                   </tbody>

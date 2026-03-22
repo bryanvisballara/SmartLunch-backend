@@ -2068,7 +2068,7 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
 });
 
 // Waitlist for meriendas (service not yet open)
-router.post('/portal/meriendas/waitlist', roleMiddleware(['parent']), async (req, res) => {
+router.post('/portal/meriendas/waitlist', roleMiddleware('parent'), async (req, res) => {
   try {
     const { schoolId, userId, name, username } = req.user;
 

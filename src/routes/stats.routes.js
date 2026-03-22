@@ -99,6 +99,14 @@ function getBogotaWeekKey(date) {
   return `${year}-${month}-${dayOfMonth}`;
 }
 
+function getBogotaDayKey(date) {
+  const shifted = getBogotaShiftedDate(date);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const dayOfMonth = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${dayOfMonth}`;
+}
+
 function buildAiRecommendations({
   topStudents,
   lowStockProducts,
@@ -869,10 +877,31 @@ router.get('/admin-home', async (req, res) => {
           totalIncomeTotal: 0,
           totalCostsTotal: 0,
           utilityTotal: 0,
+          dailyBreakdown: {},
         });
       }
 
       return weeklyAccountingMap.get(weekKey);
+    };
+
+    const ensureDailyRow = (weeklyRow, dayKey) => {
+      if (!weeklyRow.dailyBreakdown[dayKey]) {
+        weeklyRow.dailyBreakdown[dayKey] = {
+          dayKey,
+          salesCashTotal: 0,
+          salesQrTotal: 0,
+          salesDataphoneTotal: 0,
+          fixedTotal: 0,
+          variableTotal: 0,
+          topupsTotal: 0,
+          salesTotal: 0,
+          totalIncomeTotal: 0,
+          totalCostsTotal: 0,
+          utilityTotal: 0,
+        };
+      }
+
+      return weeklyRow.dailyBreakdown[dayKey];
     };
 
     const addWeeklyCost = (item, field) => {
@@ -885,7 +914,12 @@ router.get('/admin-home', async (req, res) => {
 
       const weekKey = getBogotaWeekKey(parsedDate);
       const row = ensureWeeklyRow(weekKey);
-      row[field] += Number(item?.amount || 0);
+      const dayKey = getBogotaDayKey(parsedDate);
+      const amount = Number(item?.amount || 0);
+
+      row[field] += amount;
+      const dailyRow = ensureDailyRow(row, dayKey);
+      dailyRow[field] += amount;
     };
 
     for (const item of fixedCostsOnly) {
@@ -904,14 +938,19 @@ router.get('/admin-home', async (req, res) => {
 
       const weekKey = getBogotaWeekKey(parsedDate);
       const row = ensureWeeklyRow(weekKey);
+      const dayKey = getBogotaDayKey(parsedDate);
+      const dailyRow = ensureDailyRow(row, dayKey);
       const paymentMethod = String(sale?.paymentMethod || '').toLowerCase();
       const amount = Number(sale?.total || 0);
       if (paymentMethod === 'cash') {
         row.salesCashTotal += amount;
+        dailyRow.salesCashTotal += amount;
       } else if (paymentMethod === 'qr') {
         row.salesQrTotal += amount;
+        dailyRow.salesQrTotal += amount;
       } else if (paymentMethod === 'dataphone') {
         row.salesDataphoneTotal += amount;
+        dailyRow.salesDataphoneTotal += amount;
       }
     }
 
@@ -923,30 +962,57 @@ router.get('/admin-home', async (req, res) => {
 
       const weekKey = getBogotaWeekKey(parsedDate);
       const row = ensureWeeklyRow(weekKey);
-      row.topupsTotal += Number(topup?.amount || 0);
+      const dayKey = getBogotaDayKey(parsedDate);
+      const dailyRow = ensureDailyRow(row, dayKey);
+      const amount = Number(topup?.amount || 0);
+
+      row.topupsTotal += amount;
+      dailyRow.topupsTotal += amount;
     }
 
     const weeklyAccountingSummary = Array.from(weeklyAccountingMap.values())
-      .map((row) => ({
-        ...row,
-        salesTotal:
-          Number(row.salesCashTotal || 0)
-          + Number(row.salesQrTotal || 0)
-          + Number(row.salesDataphoneTotal || 0),
-        totalIncomeTotal:
-          Number(row.salesCashTotal || 0)
-          + Number(row.salesQrTotal || 0)
-          + Number(row.salesDataphoneTotal || 0)
-          + Number(row.topupsTotal || 0),
-        totalCostsTotal: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
-        utilityTotal:
-          (
+      .map((row) => {
+        const dailyBreakdown = Object.values(row.dailyBreakdown || {})
+          .map((dayRow) => {
+            const salesTotal =
+              Number(dayRow.salesCashTotal || 0)
+              + Number(dayRow.salesQrTotal || 0)
+              + Number(dayRow.salesDataphoneTotal || 0);
+            const totalIncomeTotal = salesTotal + Number(dayRow.topupsTotal || 0);
+            const totalCostsTotal = Number(dayRow.fixedTotal || 0) + Number(dayRow.variableTotal || 0);
+
+            return {
+              ...dayRow,
+              salesTotal,
+              totalIncomeTotal,
+              totalCostsTotal,
+              utilityTotal: totalIncomeTotal - totalCostsTotal,
+            };
+          })
+          .sort((a, b) => String(a.dayKey || '').localeCompare(String(b.dayKey || '')));
+
+        return {
+          ...row,
+          dailyBreakdown,
+          salesTotal:
+            Number(row.salesCashTotal || 0)
+            + Number(row.salesQrTotal || 0)
+            + Number(row.salesDataphoneTotal || 0),
+          totalIncomeTotal:
             Number(row.salesCashTotal || 0)
             + Number(row.salesQrTotal || 0)
             + Number(row.salesDataphoneTotal || 0)
-            + Number(row.topupsTotal || 0)
-          ) - (Number(row.fixedTotal || 0) + Number(row.variableTotal || 0)),
-      }))
+            + Number(row.topupsTotal || 0),
+          totalCostsTotal: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
+          utilityTotal:
+            (
+              Number(row.salesCashTotal || 0)
+              + Number(row.salesQrTotal || 0)
+              + Number(row.salesDataphoneTotal || 0)
+              + Number(row.topupsTotal || 0)
+            ) - (Number(row.fixedTotal || 0) + Number(row.variableTotal || 0)),
+        };
+      })
       .sort((a, b) => String(b.weekKey || '').localeCompare(String(a.weekKey || '')));
 
     const totalFixedCosts = fixedCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
