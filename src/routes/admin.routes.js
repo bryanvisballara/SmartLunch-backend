@@ -14,6 +14,7 @@ const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const FixedCost = require('../models/fixedCost.model');
 const Supplier = require('../models/supplier.model');
+const AccountingFeeSetting = require('../models/accountingFeeSetting.model');
 const {
   uploadImageMiddleware,
   processAndStoreUploadedImage,
@@ -27,6 +28,26 @@ const router = express.Router();
 
 router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
+
+const DEFAULT_ACCOUNTING_FEE_SETTINGS = {
+  dataphonePercent: 0,
+  dataphoneFixedFee: 0,
+  dataphoneRetentionPercent: 0,
+  qrPercent: 0,
+};
+
+function normalizeNonNegativeNumber(value, { max = null } = {}) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  if (max !== null && parsed > max) {
+    return null;
+  }
+
+  return parsed;
+}
 
 const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
 
@@ -453,6 +474,56 @@ router.delete('/suppliers/:id', async (req, res) => {
     await supplier.save();
 
     return res.status(200).json({ message: 'Supplier deleted' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/accounting-fees', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const setting = await AccountingFeeSetting.findOne({ schoolId }).lean();
+    return res.status(200).json({
+      ...DEFAULT_ACCOUNTING_FEE_SETTINGS,
+      ...(setting || {}),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.put('/accounting-fees', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const dataphonePercent = normalizeNonNegativeNumber(req.body?.dataphonePercent, { max: 100 });
+    const dataphoneFixedFee = normalizeNonNegativeNumber(req.body?.dataphoneFixedFee);
+    const dataphoneRetentionPercent = normalizeNonNegativeNumber(req.body?.dataphoneRetentionPercent, { max: 100 });
+    const qrPercent = normalizeNonNegativeNumber(req.body?.qrPercent, { max: 100 });
+
+    if (
+      dataphonePercent === null
+      || dataphoneFixedFee === null
+      || dataphoneRetentionPercent === null
+      || qrPercent === null
+    ) {
+      return res.status(400).json({ message: 'Invalid fee values. Use non-negative numbers and percent values up to 100.' });
+    }
+
+    const saved = await AccountingFeeSetting.findOneAndUpdate(
+      { schoolId },
+      {
+        $set: {
+          schoolId,
+          dataphonePercent,
+          dataphoneFixedFee,
+          dataphoneRetentionPercent,
+          qrPercent,
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return res.status(200).json(saved);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

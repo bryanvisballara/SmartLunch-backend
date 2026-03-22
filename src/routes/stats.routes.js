@@ -11,11 +11,36 @@ const Student = require('../models/student.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const Category = require('../models/category.model');
 const Supplier = require('../models/supplier.model');
+const AccountingFeeSetting = require('../models/accountingFeeSetting.model');
 
 const router = express.Router();
 
 router.use(authMiddleware);
 router.use(roleMiddleware('admin'));
+
+const DEFAULT_ACCOUNTING_FEE_SETTINGS = {
+  dataphonePercent: 0,
+  dataphoneFixedFee: 0,
+  dataphoneRetentionPercent: 0,
+  qrPercent: 0,
+};
+
+function normalizeFeeSettings(raw) {
+  const toNonNegative = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return 0;
+    }
+    return parsed;
+  };
+
+  return {
+    dataphonePercent: toNonNegative(raw?.dataphonePercent),
+    dataphoneFixedFee: toNonNegative(raw?.dataphoneFixedFee),
+    dataphoneRetentionPercent: toNonNegative(raw?.dataphoneRetentionPercent),
+    qrPercent: toNonNegative(raw?.qrPercent),
+  };
+}
 
 const orderAggregate = (pipeline) => Order.aggregate(pipeline).allowDiskUse(true);
 
@@ -389,6 +414,7 @@ router.get('/admin-home', async (req, res) => {
       productWeeklyTrendRaw,
       accountingSalesRaw,
       topupsRaw,
+      accountingFeeSettingsRaw,
     ] = await Promise.all([
       orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
@@ -673,7 +699,20 @@ router.get('/admin-home', async (req, res) => {
           },
         },
       ]).allowDiskUse(true),
+      AccountingFeeSetting.findOne({ schoolId }).lean(),
     ]);
+
+    const accountingFeeSettings = {
+      ...DEFAULT_ACCOUNTING_FEE_SETTINGS,
+      ...normalizeFeeSettings(accountingFeeSettingsRaw),
+    };
+
+    const calculateQrFee = (amount) => (Number(amount || 0) * accountingFeeSettings.qrPercent) / 100;
+    const calculateDataphoneFee = (amount) => (
+      ((Number(amount || 0) * accountingFeeSettings.dataphonePercent) / 100)
+      + accountingFeeSettings.dataphoneFixedFee
+      + ((Number(amount || 0) * accountingFeeSettings.dataphoneRetentionPercent) / 100)
+    );
 
     const normalizedBalances = lowBalanceStudents
       .filter((item) => item.studentId)
@@ -870,11 +909,15 @@ router.get('/admin-home', async (req, res) => {
           salesCashTotal: 0,
           salesQrTotal: 0,
           salesDataphoneTotal: 0,
+          qrFeesTotal: 0,
+          dataphoneFeesTotal: 0,
+          paymentFeesTotal: 0,
           fixedTotal: 0,
           variableTotal: 0,
           salesTotal: 0,
           topupsTotal: 0,
           totalIncomeTotal: 0,
+          totalIncomeNetTotal: 0,
           totalCostsTotal: 0,
           utilityTotal: 0,
           dailyBreakdown: {},
@@ -891,11 +934,15 @@ router.get('/admin-home', async (req, res) => {
           salesCashTotal: 0,
           salesQrTotal: 0,
           salesDataphoneTotal: 0,
+          qrFeesTotal: 0,
+          dataphoneFeesTotal: 0,
+          paymentFeesTotal: 0,
           fixedTotal: 0,
           variableTotal: 0,
           topupsTotal: 0,
           salesTotal: 0,
           totalIncomeTotal: 0,
+          totalIncomeNetTotal: 0,
           totalCostsTotal: 0,
           utilityTotal: 0,
         };
@@ -942,16 +989,27 @@ router.get('/admin-home', async (req, res) => {
       const dailyRow = ensureDailyRow(row, dayKey);
       const paymentMethod = String(sale?.paymentMethod || '').toLowerCase();
       const amount = Number(sale?.total || 0);
+      let paymentFee = 0;
+
       if (paymentMethod === 'cash') {
         row.salesCashTotal += amount;
         dailyRow.salesCashTotal += amount;
       } else if (paymentMethod === 'qr') {
         row.salesQrTotal += amount;
         dailyRow.salesQrTotal += amount;
+        paymentFee = calculateQrFee(amount);
+        row.qrFeesTotal += paymentFee;
+        dailyRow.qrFeesTotal += paymentFee;
       } else if (paymentMethod === 'dataphone') {
         row.salesDataphoneTotal += amount;
         dailyRow.salesDataphoneTotal += amount;
+        paymentFee = calculateDataphoneFee(amount);
+        row.dataphoneFeesTotal += paymentFee;
+        dailyRow.dataphoneFeesTotal += paymentFee;
       }
+
+      row.paymentFeesTotal += paymentFee;
+      dailyRow.paymentFeesTotal += paymentFee;
     }
 
     for (const topup of topupsRaw || []) {
@@ -979,38 +1037,37 @@ router.get('/admin-home', async (req, res) => {
               + Number(dayRow.salesQrTotal || 0)
               + Number(dayRow.salesDataphoneTotal || 0);
             const totalIncomeTotal = salesTotal + Number(dayRow.topupsTotal || 0);
+            const paymentFeesTotal = Number(dayRow.paymentFeesTotal || 0);
+            const totalIncomeNetTotal = totalIncomeTotal - paymentFeesTotal;
             const totalCostsTotal = Number(dayRow.fixedTotal || 0) + Number(dayRow.variableTotal || 0);
 
             return {
               ...dayRow,
               salesTotal,
               totalIncomeTotal,
+              totalIncomeNetTotal,
               totalCostsTotal,
-              utilityTotal: totalIncomeTotal - totalCostsTotal,
+              utilityTotal: totalIncomeNetTotal - totalCostsTotal,
             };
           })
           .sort((a, b) => String(a.dayKey || '').localeCompare(String(b.dayKey || '')));
 
+        const salesTotal =
+          Number(row.salesCashTotal || 0)
+          + Number(row.salesQrTotal || 0)
+          + Number(row.salesDataphoneTotal || 0);
+        const totalIncomeTotal = salesTotal + Number(row.topupsTotal || 0);
+        const paymentFeesTotal = Number(row.paymentFeesTotal || 0);
+        const totalIncomeNetTotal = totalIncomeTotal - paymentFeesTotal;
+
         return {
           ...row,
           dailyBreakdown,
-          salesTotal:
-            Number(row.salesCashTotal || 0)
-            + Number(row.salesQrTotal || 0)
-            + Number(row.salesDataphoneTotal || 0),
-          totalIncomeTotal:
-            Number(row.salesCashTotal || 0)
-            + Number(row.salesQrTotal || 0)
-            + Number(row.salesDataphoneTotal || 0)
-            + Number(row.topupsTotal || 0),
+          salesTotal,
+          totalIncomeTotal,
+          totalIncomeNetTotal,
           totalCostsTotal: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
-          utilityTotal:
-            (
-              Number(row.salesCashTotal || 0)
-              + Number(row.salesQrTotal || 0)
-              + Number(row.salesDataphoneTotal || 0)
-              + Number(row.topupsTotal || 0)
-            ) - (Number(row.fixedTotal || 0) + Number(row.variableTotal || 0)),
+          utilityTotal: totalIncomeNetTotal - (Number(row.fixedTotal || 0) + Number(row.variableTotal || 0)),
         };
       })
       .sort((a, b) => String(b.weekKey || '').localeCompare(String(a.weekKey || '')));
@@ -1018,8 +1075,20 @@ router.get('/admin-home', async (req, res) => {
     const totalFixedCosts = fixedCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const totalVariableCosts = variableCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const salesMonthTotal = Number(salesMonth[0]?.total || 0);
+    const paymentFeesMonthTotal = (accountingSalesRaw || []).reduce((sum, sale) => {
+      const paymentMethod = String(sale?.paymentMethod || '').toLowerCase();
+      const amount = Number(sale?.total || 0);
+      if (paymentMethod === 'qr') {
+        return sum + calculateQrFee(amount);
+      }
+      if (paymentMethod === 'dataphone') {
+        return sum + calculateDataphoneFee(amount);
+      }
+      return sum;
+    }, 0);
+    const salesMonthNetTotal = salesMonthTotal - paymentFeesMonthTotal;
     const utilityTheoreticalMonth = Number(utilityMonth || 0) - totalFixedCosts - totalVariableCosts;
-    const utilityNetMonth = salesMonthTotal - totalFixedCosts - totalVariableCosts;
+    const utilityNetMonth = salesMonthNetTotal - totalFixedCosts - totalVariableCosts;
     const aiRecommendations = buildAiRecommendations({
       topStudents: topStudentsRaw,
       lowStockProducts,
@@ -1032,6 +1101,8 @@ router.get('/admin-home', async (req, res) => {
       salesToday: salesToday[0]?.total || 0,
       salesWeek: salesWeek[0]?.total || 0,
       salesMonth: salesMonth[0]?.total || 0,
+      salesMonthNet: salesMonthNetTotal,
+      paymentFeesMonthTotal,
       utilityToday,
       utilityWeek,
       utilityMonth,
@@ -1050,6 +1121,7 @@ router.get('/admin-home', async (req, res) => {
       totalFixedCosts,
       totalVariableCosts,
       utilityNetMonth,
+      accountingFeeSettings,
       weeklyAccountingSummary,
       aiRecommendations,
       totalSubscribedStudents,

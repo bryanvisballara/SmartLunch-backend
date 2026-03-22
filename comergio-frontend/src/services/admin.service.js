@@ -6,6 +6,8 @@ export const askAiInsights = (data) => api.post('/stats/ai-insights/ask', data);
 export const getAdminFixedCosts = (params = {}) => api.get('/admin/fixed-costs', { params });
 export const createAdminFixedCost = (data) => api.post('/admin/fixed-costs', data);
 export const deleteAdminFixedCost = (id) => api.delete(`/admin/fixed-costs/${id}`);
+export const getAdminAccountingFees = () => api.get('/admin/accounting-fees');
+export const saveAdminAccountingFees = (data) => api.put('/admin/accounting-fees', data);
 export const getAdminSuppliers = () => api.get('/admin/suppliers');
 export const createAdminSupplier = (data) => api.post('/admin/suppliers', data);
 export const updateAdminSupplier = (id, data) => api.patch(`/admin/suppliers/${id}`, data);

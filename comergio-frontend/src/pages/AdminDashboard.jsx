@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   createAdminFixedCost,
+  getAdminAccountingFees,
   createAdminCategory,
   createAdminProduct,
   createAdminStore,
@@ -26,6 +27,7 @@ import {
   getAdminSuppliers,
   createAdminSupplier,
   updateAdminSupplier,
+  saveAdminAccountingFees,
   deleteAdminSupplier,
   getParentStudentLinks,
   getMeriendaSubscriptions,
@@ -315,6 +317,7 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
         salesCashTotal: Number(item?.salesCashTotal || 0),
         salesQrTotal: Number(item?.salesQrTotal || 0),
         salesDataphoneTotal: Number(item?.salesDataphoneTotal || 0),
+        paymentFeesTotal: Number(item?.paymentFeesTotal || 0),
         topupsTotal: Number(item?.topupsTotal || 0),
         fixedTotal: Number(item?.fixedTotal || 0),
         variableTotal: Number(item?.variableTotal || 0),
@@ -330,6 +333,7 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
       salesCashTotal: 0,
       salesQrTotal: 0,
       salesDataphoneTotal: 0,
+      paymentFeesTotal: 0,
       topupsTotal: 0,
       fixedTotal: 0,
       variableTotal: 0,
@@ -340,6 +344,8 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
       + Number(dayValues.salesQrTotal || 0)
       + Number(dayValues.salesDataphoneTotal || 0)
       + Number(dayValues.topupsTotal || 0);
+    const paymentFeesTotal = Number(dayValues.paymentFeesTotal || 0);
+    const totalIncomeNetTotal = totalIncomeTotal - paymentFeesTotal;
     const totalCostsTotal = Number(dayValues.fixedTotal || 0) + Number(dayValues.variableTotal || 0);
     const dayDateLabel = dayDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
 
@@ -350,7 +356,9 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
       salesQrTotal: Number(dayValues.salesQrTotal || 0),
       salesDataphoneTotal: Number(dayValues.salesDataphoneTotal || 0),
       topupsTotal: Number(dayValues.topupsTotal || 0),
+      paymentFeesTotal,
       totalIncomeTotal,
+      totalIncomeNetTotal,
       fixedTotal: Number(dayValues.fixedTotal || 0),
       variableTotal: Number(dayValues.variableTotal || 0),
       totalCostsTotal,
@@ -494,6 +502,12 @@ function AdminDashboard() {
     storeId: '',
     type: 'fixed',
     weekStart: currentDateIso(),
+  });
+  const [accountingFeeForm, setAccountingFeeForm] = useState({
+    dataphonePercent: '0',
+    dataphoneFixedFee: '0',
+    dataphoneRetentionPercent: '0',
+    qrPercent: '0',
   });
   const [supplierForm, setSupplierForm] = useState({
     name: '',
@@ -659,6 +673,20 @@ function AdminDashboard() {
       clearTimeout(closeTimer);
     };
   }, [inventoryApplyModal.open]);
+
+  useEffect(() => {
+    const settings = homeData?.accountingFeeSettings;
+    if (!settings) {
+      return;
+    }
+
+    setAccountingFeeForm({
+      dataphonePercent: String(Number(settings.dataphonePercent || 0)),
+      dataphoneFixedFee: String(Number(settings.dataphoneFixedFee || 0)),
+      dataphoneRetentionPercent: String(Number(settings.dataphoneRetentionPercent || 0)),
+      qrPercent: String(Number(settings.qrPercent || 0)),
+    });
+  }, [homeData?.accountingFeeSettings]);
   const [editCategoryForm, setEditCategoryForm] = useState({ name: '', imageUrl: '', status: 'active' });
   const [editStoreForm, setEditStoreForm] = useState({ name: '', location: '', status: 'active' });
   const [editProductForm, setEditProductForm] = useState({
@@ -981,8 +1009,10 @@ function AdminDashboard() {
           const salesTotalFallback = Number(row?.salesTotal || 0);
           const salesTotal = salesByMethod > 0 ? salesByMethod : salesTotalFallback;
           const totalIncomeTotal = salesTotal + topupsTotal;
+          const paymentFeesTotal = Number(row?.paymentFeesTotal || 0);
+          const totalIncomeNetTotal = Number(row?.totalIncomeNetTotal || (totalIncomeTotal - paymentFeesTotal));
           const totalCostsTotal = fixedTotal + variableTotal;
-          const utilityTotal = totalIncomeTotal - totalCostsTotal;
+          const utilityTotal = totalIncomeNetTotal - totalCostsTotal;
           const rawDailyBreakdown = Array.isArray(row?.dailyBreakdown)
             ? row.dailyBreakdown
             : Object.values(row?.dailyBreakdown || {});
@@ -992,6 +1022,7 @@ function AdminDashboard() {
               salesCashTotal: Number(dayRow?.salesCashTotal || 0),
               salesQrTotal: Number(dayRow?.salesQrTotal || 0),
               salesDataphoneTotal: Number(dayRow?.salesDataphoneTotal || 0),
+              paymentFeesTotal: Number(dayRow?.paymentFeesTotal || 0),
               topupsTotal: Number(dayRow?.topupsTotal || 0),
               fixedTotal: Number(dayRow?.fixedTotal || 0),
               variableTotal: Number(dayRow?.variableTotal || 0),
@@ -1006,6 +1037,8 @@ function AdminDashboard() {
             salesDataphoneTotal,
             topupsTotal,
             totalIncomeTotal,
+            totalIncomeNetTotal,
+            paymentFeesTotal,
             fixedTotal,
             variableTotal,
             totalCostsTotal,
@@ -1036,6 +1069,8 @@ function AdminDashboard() {
           salesQrTotal: 0,
           salesDataphoneTotal: 0,
           totalIncomeTotal: 0,
+          totalIncomeNetTotal: 0,
+          paymentFeesTotal: 0,
           fixedTotal: 0,
           variableTotal: 0,
           totalCostsTotal: 0,
@@ -1861,8 +1896,14 @@ function AdminDashboard() {
       ...(storeId ? { storeId } : {}),
       ...(month ? { month } : {}),
     };
-    const homeRes = await getAdminHomepage(params);
-    setHomeData(homeRes.data || null);
+    const [homeRes, feesRes] = await Promise.all([
+      getAdminHomepage(params),
+      getAdminAccountingFees(),
+    ]);
+    setHomeData({
+      ...(homeRes.data || {}),
+      accountingFeeSettings: feesRes?.data || homeRes?.data?.accountingFeeSettings || null,
+    });
   };
 
   const loadAiInsights = async (storeId = homeStoreId) => {
@@ -2949,6 +2990,25 @@ function AdminDashboard() {
           amount: '',
         }));
         await loadHomepage(homeStoreId);
+      }
+    );
+  };
+
+  const onSaveAccountingFees = (event) => {
+    event.preventDefault();
+
+    const payload = {
+      dataphonePercent: Number(accountingFeeForm.dataphonePercent || 0),
+      dataphoneFixedFee: Number(accountingFeeForm.dataphoneFixedFee || 0),
+      dataphoneRetentionPercent: Number(accountingFeeForm.dataphoneRetentionPercent || 0),
+      qrPercent: Number(accountingFeeForm.qrPercent || 0),
+    };
+
+    runAction(
+      () => saveAdminAccountingFees(payload),
+      'Configuracion de comisiones guardada.',
+      async () => {
+        await loadHomepage(homeStoreId, accountingMonthFilter);
       }
     );
   };
@@ -4538,10 +4598,78 @@ function AdminDashboard() {
               <p>{formatCurrency(homeData?.totalVariableCosts)}</p>
             </div>
             <div className="card admin-compact-value-card">
+              <h4>Comisiones QR + datáfono (mes)</h4>
+              <p>{formatCurrency(homeData?.paymentFeesMonthTotal)}</p>
+              <small>Se descuentan para calcular ingresos netos reales</small>
+            </div>
+            <div className="card admin-compact-value-card">
+              <h4>Ventas netas del mes</h4>
+              <p>{formatCurrency(homeData?.salesMonthNet ?? homeData?.salesMonth)}</p>
+              <small>Ventas del mes - comisiones QR/datáfono</small>
+            </div>
+            <div className="card admin-compact-value-card">
               <h4>Ingresos - egresos</h4>
               <p>{formatCurrency(homeData?.utilityNetMonth)}</p>
-              <small>Ventas del mes - costos fijos - costos variables</small>
+              <small>Ventas netas del mes - costos fijos - costos variables</small>
             </div>
+          </div>
+
+          <div className="card">
+            <h4>Comisiones de medios de pago</h4>
+            <form className="admin-form-grid" onSubmit={onSaveAccountingFees}>
+              <label>
+                Datáfono %
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={accountingFeeForm.dataphonePercent}
+                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphonePercent: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                Datáfono fijo por transacción
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={accountingFeeForm.dataphoneFixedFee}
+                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphoneFixedFee: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                Retenciones datáfono %
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={accountingFeeForm.dataphoneRetentionPercent}
+                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphoneRetentionPercent: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                QR %
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={accountingFeeForm.qrPercent}
+                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, qrPercent: event.target.value }))}
+                  required
+                />
+              </label>
+              <button className="btn btn-primary" type="submit">
+                Guardar comisiones
+              </button>
+            </form>
+
+            <p className="admin-accounting-fees-help">
+              Ejemplo datáfono: 2.99% + 300 + retenciones 1.92%. Estos valores se descuentan automáticamente
+              en "Total ingresos" y utilidades del consolidado.
+            </p>
           </div>
 
           <div className="card">
@@ -4660,7 +4788,7 @@ function AdminDashboard() {
                       <th>Ventas QR</th>
                       <th>Ventas datáfono</th>
                       <th>Recargas semana</th>
-                      <th>Total ingresos semana</th>
+                      <th>Total ingresos netos semana</th>
                       <th>Costos fijos</th>
                       <th>Costos variables</th>
                       <th>Total costos semana</th>
@@ -4706,7 +4834,7 @@ function AdminDashboard() {
                             <td>{formatCurrency(row.salesQrTotal)}</td>
                             <td>{formatCurrency(row.salesDataphoneTotal)}</td>
                             <td>{formatCurrency(row.topupsTotal)}</td>
-                            <td>{formatCurrency(row.totalIncomeTotal)}</td>
+                            <td>{formatCurrency(row.totalIncomeNetTotal)}</td>
                             <td>{formatCurrency(row.fixedTotal)}</td>
                             <td>{formatCurrency(row.variableTotal)}</td>
                             <td>{formatCurrency(row.totalCostsTotal)}</td>
@@ -4724,7 +4852,7 @@ function AdminDashboard() {
                                         <th>Ventas QR</th>
                                         <th>Ventas datáfono</th>
                                         <th>Recargas del dia</th>
-                                        <th>Total ingresos del dia</th>
+                                        <th>Total ingresos netos del dia</th>
                                         <th>Costos fijos</th>
                                         <th>Costos variables</th>
                                         <th>Total costos dia</th>
@@ -4738,7 +4866,7 @@ function AdminDashboard() {
                                           <td>{formatCurrency(dayRow.salesQrTotal)}</td>
                                           <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
                                           <td>{formatCurrency(dayRow.topupsTotal)}</td>
-                                          <td>{formatCurrency(dayRow.totalIncomeTotal)}</td>
+                                          <td>{formatCurrency(dayRow.totalIncomeNetTotal)}</td>
                                           <td>
                                             <button
                                               className="admin-accounting-cost-trigger"
