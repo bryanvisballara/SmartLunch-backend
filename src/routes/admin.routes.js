@@ -38,7 +38,7 @@ function bogotaLocalToUtcDate(year, monthIndex, day, hour = 0, minute = 0, secon
   return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond) - BOGOTA_UTC_OFFSET_MS);
 }
 
-function normalizeWeekStartDate(value) {
+function normalizeBogotaDate(value) {
   const normalizedText = String(value || '').trim();
   let base;
 
@@ -57,6 +57,20 @@ function normalizeWeekStartDate(value) {
   }
 
   const shifted = getBogotaShiftedDate(base);
+  return bogotaLocalToUtcDate(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  );
+}
+
+function toBogotaWeekStartDate(value) {
+  const normalizedDay = normalizeBogotaDate(value);
+  if (!normalizedDay) {
+    return null;
+  }
+
+  const shifted = getBogotaShiftedDate(normalizedDay);
   const day = shifted.getUTCDay();
   const diff = (day === 0 ? -6 : 1) - day;
 
@@ -547,7 +561,12 @@ router.post('/fixed-costs', async (req, res) => {
       return res.status(400).json({ message: 'name is required' });
     }
 
-    const normalizedWeekStart = normalizeWeekStartDate(weekStart);
+    const normalizedEffectiveDate = normalizeBogotaDate(weekStart);
+    if (!normalizedEffectiveDate) {
+      return res.status(400).json({ message: 'Invalid weekStart date' });
+    }
+
+    const normalizedWeekStart = toBogotaWeekStartDate(normalizedEffectiveDate);
     if (!normalizedWeekStart) {
       return res.status(400).json({ message: 'Invalid weekStart date' });
     }
@@ -560,8 +579,9 @@ router.post('/fixed-costs', async (req, res) => {
       supplierName: normalizedSupplierName,
       amount: Number(amount || 0),
       type: normalizedType,
+      effectiveDate: normalizedEffectiveDate,
       weekStart: normalizedWeekStart,
-      monthKey: monthKeyFromDate(normalizedWeekStart),
+      monthKey: monthKeyFromDate(normalizedEffectiveDate),
       status: 'active',
     });
 

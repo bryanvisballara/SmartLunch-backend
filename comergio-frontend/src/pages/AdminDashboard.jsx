@@ -242,16 +242,14 @@ const currentDateIso = () => new Date().toISOString().slice(0, 10);
 
 const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
 
-const currentWeekStartIso = () => {
-  const bogotaShifted = new Date(Date.now() + BOGOTA_UTC_OFFSET_MS);
-  const day = bogotaShifted.getUTCDay();
-  const diff = (day === 0 ? -6 : 1) - day;
-  const mondayUtc = new Date(Date.UTC(
-    bogotaShifted.getUTCFullYear(),
-    bogotaShifted.getUTCMonth(),
-    bogotaShifted.getUTCDate() + diff
-  ));
-  return mondayUtc.toISOString().slice(0, 10);
+const getBogotaDayKeyFromValue = (value) => {
+  const parsed = value ? new Date(value) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+
+  const shifted = new Date(parsed.getTime() + BOGOTA_UTC_OFFSET_MS);
+  return shifted.toISOString().slice(0, 10);
 };
 
 const parseWeekKeyDateSafe = (weekKey) => {
@@ -346,6 +344,7 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
     const dayDateLabel = dayDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
 
     return {
+      dayKey,
       dayLabel: `${dayItem.label} (${dayDateLabel})`,
       salesCashTotal: Number(dayValues.salesCashTotal || 0),
       salesQrTotal: Number(dayValues.salesQrTotal || 0),
@@ -494,7 +493,7 @@ function AdminDashboard() {
     amount: '',
     storeId: '',
     type: 'fixed',
-    weekStart: currentWeekStartIso(),
+    weekStart: currentDateIso(),
   });
   const [supplierForm, setSupplierForm] = useState({
     name: '',
@@ -593,6 +592,12 @@ function AdminDashboard() {
   const [legacyMigrationLoading, setLegacyMigrationLoading] = useState(false);
   const [legacyMigrationLoadingTitle, setLegacyMigrationLoadingTitle] = useState('Migrando base de datos');
   const [inventoryApplyModal, setInventoryApplyModal] = useState({ open: false, fading: false, title: '', message: '' });
+  const [accountingCostDetailModal, setAccountingCostDetailModal] = useState({
+    open: false,
+    dayLabel: '',
+    costType: 'fixed',
+    items: [],
+  });
 
   useEffect(() => {
     if (!snackSavePopup.open) {
@@ -1052,6 +1057,50 @@ function AdminDashboard() {
     return Array.from(grouped.values())
       .sort((a, b) => String(b.weekKey).localeCompare(String(a.weekKey)));
   }, [homeData?.weeklyAccountingSummary, homeData?.fixedCosts, homeData?.variableCosts]);
+
+  const accountingCostDetailsByDay = useMemo(() => {
+    const fixedCosts = Array.isArray(homeData?.fixedCosts) ? homeData.fixedCosts : [];
+    const variableCosts = Array.isArray(homeData?.variableCosts) ? homeData.variableCosts : [];
+    const byDay = new Map();
+
+    const addCost = (item, type) => {
+      const dayKey = getBogotaDayKeyFromValue(item?.effectiveDate || item?.createdAt || item?.weekStart);
+      if (!dayKey) {
+        return;
+      }
+
+      if (!byDay.has(dayKey)) {
+        byDay.set(dayKey, { fixed: [], variable: [] });
+      }
+
+      const entry = byDay.get(dayKey);
+      entry[type].push({
+        id: String(item?._id || ''),
+        name: String(item?.name || 'Sin nombre'),
+        amount: Number(item?.amount || 0),
+        supplierName: String(item?.supplierName || item?.supplierId?.name || ''),
+        storeName: String(item?.storeId?.name || 'Global'),
+        registeredAt: item?.createdAt || null,
+      });
+    };
+
+    fixedCosts.forEach((item) => addCost(item, 'fixed'));
+    variableCosts.forEach((item) => addCost(item, 'variable'));
+
+    return byDay;
+  }, [homeData?.fixedCosts, homeData?.variableCosts]);
+
+  const openAccountingCostDetailModal = (dayRow, costType) => {
+    const dayCosts = accountingCostDetailsByDay.get(dayRow?.dayKey) || { fixed: [], variable: [] };
+    const items = costType === 'variable' ? dayCosts.variable : dayCosts.fixed;
+
+    setAccountingCostDetailModal({
+      open: true,
+      dayLabel: String(dayRow?.dayLabel || ''),
+      costType: costType === 'variable' ? 'variable' : 'fixed',
+      items,
+    });
+  };
 
   const filteredSalesStudents = useMemo(() => {
     const query = String(salesStudentQuery || '').trim().toLowerCase();
@@ -2890,7 +2939,7 @@ function AdminDashboard() {
           type: fixedCostForm.type || 'fixed',
           weekStart: fixedCostForm.weekStart,
         }),
-      'Costo semanal guardado.',
+      'Costo diario guardado.',
       async () => {
         setFixedCostForm((prev) => ({
           ...prev,
@@ -4496,10 +4545,10 @@ function AdminDashboard() {
           </div>
 
           <div className="card">
-            <h4>Costos operativos (semanales)</h4>
+            <h4>Costos operativos (diarios)</h4>
             <form className="admin-form-grid" onSubmit={onCreateFixedCost}>
               <label>
-                Semana
+                Dia
                 <input
                   type="date"
                   value={fixedCostForm.weekStart}
@@ -4548,7 +4597,7 @@ function AdminDashboard() {
                   <input
                     value={fixedCostForm.name}
                     onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="Ej: Nomina semana 2"
+                    placeholder="Ej: Nomina dia sabado"
                     required
                   />
                 </label>
@@ -4590,7 +4639,7 @@ function AdminDashboard() {
                 </select>
               </label>
               <button className="btn btn-primary" type="submit">
-                Guardar costo semanal
+                Guardar costo diario
               </button>
             </form>
 
@@ -4690,8 +4739,24 @@ function AdminDashboard() {
                                           <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
                                           <td>{formatCurrency(dayRow.topupsTotal)}</td>
                                           <td>{formatCurrency(dayRow.totalIncomeTotal)}</td>
-                                          <td>{formatCurrency(dayRow.fixedTotal)}</td>
-                                          <td>{formatCurrency(dayRow.variableTotal)}</td>
+                                          <td>
+                                            <button
+                                              className="admin-accounting-cost-trigger"
+                                              onClick={() => openAccountingCostDetailModal(dayRow, 'fixed')}
+                                              type="button"
+                                            >
+                                              {formatCurrency(dayRow.fixedTotal)}
+                                            </button>
+                                          </td>
+                                          <td>
+                                            <button
+                                              className="admin-accounting-cost-trigger"
+                                              onClick={() => openAccountingCostDetailModal(dayRow, 'variable')}
+                                              type="button"
+                                            >
+                                              {formatCurrency(dayRow.variableTotal)}
+                                            </button>
+                                          </td>
                                           <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
                                         </tr>
                                       ))}
@@ -4715,7 +4780,7 @@ function AdminDashboard() {
               <div className="admin-row-actions" key={item._id}>
                 <p>
                   {item.name} - {formatCurrency(item.amount)} ({item.storeId?.name || 'Global'})
-                  {' | '}Semana: {item.weekStart ? new Date(item.weekStart).toLocaleDateString('es-CO') : 'N/A'}
+                  {' | '}Dia: {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
                 </p>
                 <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
                   Eliminar
@@ -4729,7 +4794,7 @@ function AdminDashboard() {
               <div className="admin-row-actions" key={item._id}>
                 <p>
                   {item.name} - {formatCurrency(item.amount)} ({item.storeId?.name || 'Global'})
-                  {' | '}Semana: {item.weekStart ? new Date(item.weekStart).toLocaleDateString('es-CO') : 'N/A'}
+                  {' | '}Dia: {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
                 </p>
                 <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
                   Eliminar
@@ -8050,6 +8115,55 @@ function AdminDashboard() {
             </div>
           </div>
         </section>
+      ) : null}
+
+      {accountingCostDetailModal.open ? (
+        <div className="brand-popup-overlay" role="dialog" aria-modal="true" aria-label="Detalle de costos diarios">
+          <div className="brand-popup brand-popup-warning">
+            <h3>
+              {accountingCostDetailModal.costType === 'variable' ? 'Costos variables del dia' : 'Costos fijos del dia'}
+            </h3>
+            <p className="admin-accounting-cost-modal-subtitle">{accountingCostDetailModal.dayLabel}</p>
+            <p className="admin-accounting-cost-modal-total">
+              Total: <strong>{formatCurrency((accountingCostDetailModal.items || []).reduce((sum, item) => sum + Number(item?.amount || 0), 0))}</strong>
+            </p>
+
+            {(accountingCostDetailModal.items || []).length === 0 ? (
+              <p>No hay costos registrados para este dia.</p>
+            ) : (
+              <div className="approval-history-scroll approval-history-table-scroll admin-accounting-cost-modal-table">
+                <table className="simple-table">
+                  <thead>
+                    <tr>
+                      <th>Concepto</th>
+                      <th>Proveedor</th>
+                      <th>Tienda</th>
+                      <th>Valor</th>
+                      <th>Registrado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(accountingCostDetailModal.items || []).map((item, index) => (
+                      <tr key={`${item.id || 'cost'}-${index}`}>
+                        <td>{item.name}</td>
+                        <td>{item.supplierName || 'N/A'}</td>
+                        <td>{item.storeName || 'Global'}</td>
+                        <td>{formatCurrency(item.amount)}</td>
+                        <td>{formatDateTime(item.registeredAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="brand-popup-actions">
+              <button className="btn btn-primary" type="button" onClick={() => setAccountingCostDetailModal({ open: false, dayLabel: '', costType: 'fixed', items: [] })}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {showDeleteConfirmModal ? (

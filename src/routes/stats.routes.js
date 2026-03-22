@@ -905,8 +905,8 @@ router.get('/admin-home', async (req, res) => {
     };
 
     const addWeeklyCost = (item, field) => {
-      // Prefer createdAt for weekly consolidation to avoid legacy weekStart timezone drift.
-      const baseDate = item?.createdAt || item?.weekStart;
+      // Prefer explicit effectiveDate (selected day) when available.
+      const baseDate = item?.effectiveDate || item?.createdAt || item?.weekStart;
       const parsedDate = baseDate ? new Date(baseDate) : null;
       if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
         return;

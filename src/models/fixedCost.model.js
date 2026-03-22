@@ -9,6 +9,7 @@ const fixedCostSchema = new mongoose.Schema(
     supplierName: { type: String, default: '', trim: true },
     amount: { type: Number, required: true, min: 0 },
     type: { type: String, enum: ['fixed', 'variable'], default: 'fixed' },
+    effectiveDate: { type: Date, default: null },
     weekStart: { type: Date, required: true },
     monthKey: { type: String, required: true, trim: true, index: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
