@@ -192,6 +192,7 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
   }
 
   const targetUrl = resolveTargetUrl(payload, '/parent');
+  const apnsTopic = String(process.env.IOS_BUNDLE_ID || 'com.comergio.app').trim();
   const response = await admin.messaging().sendEachForMulticast({
     tokens: validDocs.map((item) => String(item.token).trim()),
     notification: {
@@ -209,8 +210,17 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
       },
     },
     apns: {
+      headers: {
+        'apns-push-type': 'alert',
+        'apns-priority': '10',
+        'apns-topic': apnsTopic,
+      },
       payload: {
         aps: {
+          alert: {
+            title,
+            body,
+          },
           sound: 'default',
         },
       },

@@ -1,7 +1,10 @@
+import { useEffect, useRef } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import Navbar from './components/Navbar';
 import AppFooter from './components/AppFooter';
 import useAuthStore from './store/auth.store';
+import { ensurePortalPushNotifications } from './lib/pushNotifications';
 import Login from './pages/Login';
 import POS from './pages/POS';
 import Wallet from './pages/Wallet';
@@ -72,6 +75,7 @@ function App() {
   const { token, user } = useAuthStore();
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
+  const pushAttemptKeyRef = useRef('');
   const isAdminRoute = location.pathname.startsWith('/admin');
   const showNavbar =
     location.pathname !== '/login' &&
@@ -85,6 +89,29 @@ function App() {
     location.pathname === '/register' ||
     location.pathname === '/register/next-step' ||
     location.pathname === '/bold-resultado';
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !isAuthenticated) {
+      return;
+    }
+
+    const attemptKey = `${token}:${userRole}`;
+    if (pushAttemptKeyRef.current === attemptKey) {
+      return;
+    }
+
+    pushAttemptKeyRef.current = attemptKey;
+
+    ensurePortalPushNotifications()
+      .then((result) => {
+        if (!result?.enabled) {
+          console.warn('[PUSH_SETUP_DISABLED]', result?.reason || 'unknown');
+        }
+      })
+      .catch((error) => {
+        console.error('[PUSH_SETUP_ERROR]', error?.message || 'unknown');
+      });
+  }, [isAuthenticated, token, userRole]);
 
   return (
     <div>

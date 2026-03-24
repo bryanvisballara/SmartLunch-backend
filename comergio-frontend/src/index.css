@@ -1,16 +1,34 @@
 :root {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   color: #111827;
-  background: #f5f7fb;
+  background: #0f172a;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  background: #0f172a;
+}
+
 body {
   margin: 0;
   min-width: 320px;
+  touch-action: pan-y;
+  -webkit-text-size-adjust: 100%;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
 }
 
 a {
@@ -61,7 +79,8 @@ label {
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: calc(env(safe-area-inset-top, 0px) + 1rem) clamp(0.85rem, 3vw, 1rem) 1rem;
+  overflow-x: hidden;
 }
 
 .container.container-full {
@@ -105,7 +124,7 @@ label {
   background:
     linear-gradient(120deg, #0f172a 0%, #1d3557 45%, #334155 100%) top / 100% 190px no-repeat,
     #f5f7fb;
-  margin: -1rem;
+  margin: calc(-1 * (env(safe-area-inset-top, 0px) + 1rem)) -1rem -1rem;
   padding-bottom: 1.4rem;
 }
 
@@ -286,9 +305,8 @@ label {
 
 .login-page {
   min-height: 100vh;
-  width: auto;
-  margin: -1rem;
-  padding: 0 0 2rem;
+  margin: calc(-1 * (env(safe-area-inset-top, 0px) + 1rem)) -1rem -1rem;
+  padding: calc(env(safe-area-inset-top, 0px) + 1rem) 0 2rem;
   background: linear-gradient(120deg, #0f172a 0%, #1d3557 45%, #334155 100%);
   place-items: start center;
   align-content: start;
@@ -559,9 +577,8 @@ label {
   --login-accent: #7ed957;
   --login-text: #10273f;
   font-family: 'Poppins', 'Segoe UI', sans-serif;
-  margin: -1rem;
-  width: calc(100% + 2rem);
-  padding: 0 1rem 2.5rem;
+  margin: calc(-1 * (env(safe-area-inset-top, 0px) + 1rem)) -1rem -1rem;
+  padding: calc(env(safe-area-inset-top, 0px) + 1.2rem) 1rem 2.5rem;
   min-height: 100vh;
   background: linear-gradient(180deg, #12324b 0%, #102739 48%, #0b121b 100%);
   display: grid;
@@ -1834,7 +1851,7 @@ label {
 
 .table-wrap {
   width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .admin-hero {
@@ -2047,7 +2064,7 @@ label {
 
 .admin-low-balance-table-wrap {
   width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .admin-card-scroll {
@@ -2087,7 +2104,7 @@ label {
 
 .admin-balance-editor-wrap {
   width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .admin-balance-editor-toolbar {
@@ -2618,17 +2635,17 @@ label {
   color: var(--parent-text);
   font-family: 'Poppins', 'Segoe UI', Tahoma, sans-serif;
   position: relative;
-  margin: -1rem;
-  padding-top: calc(env(safe-area-inset-top, 0px) + 1.8rem);
+  margin: calc(-1 * (env(safe-area-inset-top, 0px) + 1rem)) -1rem -1rem;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.15rem);
   padding-bottom: 2rem;
 }
 
 .parent-topbar {
-  height: 154px;
+  height: 142px;
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
-  padding: 0.9rem 1rem 0.55rem;
+  padding: 0.2rem 1rem 0.55rem;
   color: #fff;
 }
 
@@ -2639,15 +2656,15 @@ label {
   justify-items: center;
   text-align: center;
   gap: 0.2rem;
-  transform: translateY(0.55rem);
+  transform: translateY(-0.15rem);
 }
 
 .parent-brand-logo {
   display: block;
   width: auto;
   height: clamp(30px, 8.55vw, 43.5px);
-  margin-bottom: -0.35rem;
-  transform: translateY(1.05rem);
+  margin-bottom: -0.25rem;
+  transform: translateY(0.2rem);
   position: relative;
   z-index: 0;
   object-fit: contain;
@@ -2655,7 +2672,7 @@ label {
 }
 
 .parent-topbar h1 {
-  margin: 1.35rem 0 0;
+  margin: 0.45rem 0 0;
   position: relative;
   z-index: 1;
   font-size: clamp(1.02rem, 3.2vw, 1.45rem);
@@ -2675,7 +2692,7 @@ label {
   justify-content: center;
   gap: 4px;
   padding: 0 11px;
-  margin-top: 1.75rem;
+  margin-top: 0.95rem;
   cursor: pointer;
 }
 
@@ -2710,7 +2727,7 @@ label {
   flex: 0 0 46px;
   display: flex;
   justify-content: flex-end;
-  margin-top: 1.75rem;
+  margin-top: 0.95rem;
 }
 
 .parent-profile-menu {
@@ -5548,7 +5565,7 @@ label {
   z-index: 30;
   transform: translateX(-104%);
   transition: transform 0.2s ease;
-  padding: 1rem 0.95rem;
+  padding: calc(env(safe-area-inset-top, 0px) + 0.85rem) 0.95rem calc(env(safe-area-inset-bottom, 0px) + 0.85rem);
   border-right: 1px solid rgba(255, 255, 255, 0.26);
   box-shadow: 20px 0 40px rgba(2, 6, 23, 0.34);
   display: flex;
