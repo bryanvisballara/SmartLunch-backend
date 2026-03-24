@@ -228,7 +228,8 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
     console.warn(`[PUSH_NATIVE_ERR] token=${String(validDocs[index]?.token || '').slice(0, 20)}... code=${code} message=${delivery.error?.message || ''}`);
     if (
       code === 'messaging/registration-token-not-registered' ||
-      code === 'messaging/invalid-registration-token'
+      code === 'messaging/invalid-registration-token' ||
+      code === 'messaging/mismatched-credential'
     ) {
       const tokenDoc = validDocs[index];
       if (tokenDoc?._id) {
