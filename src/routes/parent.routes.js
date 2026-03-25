@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
+const multer = require('multer');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -25,9 +26,15 @@ const {
   toInternalStatus: toEpaycoInternalStatus,
 } = require('../services/epayco.service');
 const { DEFAULT_TTL_SECONDS, getMenuCache, setMenuCache } = require('../services/menuCache.service');
-const { deriveThumbUrlFromImageUrl, normalizeStoredImageUrl } = require('../utils/imageUpload');
+const {
+  deriveThumbUrlFromImageUrl,
+  normalizeStoredImageUrl,
+  uploadImageMiddleware,
+  processAndStoreUploadedImage,
+} = require('../utils/imageUpload');
 
 const router = express.Router();
+const uploadParentStudentPhoto = uploadImageMiddleware.single('image');
 
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
@@ -185,6 +192,16 @@ function formatGioNameList(values) {
   return `${safeValues.slice(0, -1).join(', ')} y ${safeValues[safeValues.length - 1]}`;
 }
 
+function serializeStudentPhotoFields(student) {
+  const imageUrl = normalizeStoredImageUrl(student?.imageUrl);
+  const thumbUrl = normalizeStoredImageUrl(student?.thumbUrl) || deriveThumbUrlFromImageUrl(imageUrl);
+
+  return {
+    imageUrl,
+    thumbUrl,
+  };
+}
+
 function getGioStudentNameCandidates(student) {
   const fullName = normalizeAiText(student?.name || '');
   const firstName = fullName.split(/\s+/).filter(Boolean)[0] || '';
@@ -223,6 +240,7 @@ function buildGioChildProfiles({ students, wallets, meriendaSubscriptions }) {
       name: String(student.name || '').trim() || 'Alumno',
       schoolCode: String(student.schoolCode || '').trim(),
       grade: String(student.grade || '').trim(),
+      ...serializeStudentPhotoFields(student),
       dailyLimit: Number(student.dailyLimit || 0),
       blockedProducts: Array.isArray(student.blockedProducts)
         ? student.blockedProducts.map((item) => String(item?.name || '').trim()).filter(Boolean)
@@ -1001,6 +1019,7 @@ router.get('/portal/overview', async (req, res) => {
         name: student.name,
         schoolCode: student.schoolCode || '',
         grade: student.grade || '',
+        ...serializeStudentPhotoFields(student),
         dailyLimit: Number(student.dailyLimit || 0),
         blockedProductsCount: Array.isArray(student.blockedProducts) ? student.blockedProducts.length : 0,
         blockedCategoriesCount: Array.isArray(student.blockedCategories) ? student.blockedCategories.length : 0,
@@ -2494,6 +2513,82 @@ router.patch('/portal/students/:studentId/grade', async (req, res) => {
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
+});
+
+router.post('/portal/students/:studentId/photo', (req, res) => {
+  uploadParentStudentPhoto(req, res, async (error) => {
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        message: 'La imagen supera el limite permitido. Usa una imagen mas liviana.',
+      });
+    }
+
+    if (error) {
+      return res.status(400).json({ message: error.message || 'No se pudo cargar la foto del alumno.' });
+    }
+
+    try {
+      const { schoolId, role, userId } = req.user;
+      const requestedParentUserId = role === 'admin' ? req.body.parentUserId || req.query.parentUserId : userId;
+      const parentUserId = toObjectId(requestedParentUserId);
+      const studentId = toObjectId(req.params.studentId);
+
+      if (!parentUserId) {
+        return res.status(400).json({ message: 'Invalid parent user id' });
+      }
+
+      if (!studentId) {
+        return res.status(400).json({ message: 'Invalid student id' });
+      }
+
+      const link = await ParentStudentLink.findOne({
+        schoolId,
+        parentId: parentUserId,
+        studentId,
+        status: 'active',
+      }).lean();
+
+      if (!link) {
+        return res.status(403).json({ message: 'Forbidden studentId' });
+      }
+
+      const student = await Student.findOne({
+        _id: studentId,
+        schoolId,
+        deletedAt: null,
+      });
+
+      if (!student) {
+        return res.status(404).json({ message: 'Student not found' });
+      }
+
+      const saved = await processAndStoreUploadedImage({
+        file: req.file,
+        folder: 'students',
+        preferredName: req.body?.preferredName || student.name || req.file?.originalname,
+        requireCloudinary: true,
+      });
+
+      if (saved.storage !== 'cloudinary') {
+        return res.status(503).json({
+          message: 'La foto del alumno solo se puede guardar en Cloudinary.',
+        });
+      }
+
+      student.imageUrl = normalizeStoredImageUrl(saved.url);
+      student.thumbUrl = normalizeStoredImageUrl(saved.thumbUrl);
+      await student.save();
+
+      return res.status(200).json({
+        student: {
+          _id: student._id,
+          ...serializeStudentPhotoFields(student),
+        },
+      });
+    } catch (processingError) {
+      return res.status(400).json({ message: processingError.message || 'No se pudo guardar la foto del alumno.' });
+    }
+  });
 });
 
 router.post('/portal/gio-ia/chat', async (req, res) => {

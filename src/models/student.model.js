@@ -6,6 +6,8 @@ const studentSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     schoolCode: { type: String, trim: true },
     grade: { type: String, trim: true },
+    imageUrl: { type: String, trim: true, default: '' },
+    thumbUrl: { type: String, trim: true, default: '' },
     dailyLimit: { type: Number, default: 0 },
     blockedProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
     blockedCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],

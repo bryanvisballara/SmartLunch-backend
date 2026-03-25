@@ -170,9 +170,13 @@ function validateIncomingImageUrl(value) {
   return imageUrl;
 }
 
-async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, preferredName = '' }) {
+async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, preferredName = '', requireCloudinary = false }) {
   if (!file?.buffer) {
     throw new Error('No se recibio ningun archivo de imagen.');
+  }
+
+  if (requireCloudinary && !isCloudinaryEnabled()) {
+    throw new Error('Cloudinary no esta configurado para guardar esta imagen.');
   }
 
   const safeFolder = sanitizeFolder(folder);
