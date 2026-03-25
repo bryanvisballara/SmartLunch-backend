@@ -204,7 +204,13 @@ async function boldPaymentApiRequest(path, { method = 'GET', body = null, extraH
   if (!response.ok) {
     const errors = Array.isArray(data?.errors) ? data.errors : [];
     const providerMessage = errors
-      .map((item) => String(item?.message || item?.detail || item?.code || '').trim())
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item.trim();
+        }
+
+        return String(item?.message || item?.detail || item?.code || '').trim();
+      })
       .filter(Boolean)
       .join('. ');
     const fallbackMessage = String(data?.message || data?.error || '').trim();

@@ -382,6 +382,21 @@ function getBoldPseBankConfig(paymentMethod = {}) {
   };
 }
 
+function hasValidBoldPseBankConfig(bankConfig) {
+  const bankCode = String(bankConfig?.bankCode || '').trim();
+  const bankName = String(bankConfig?.bankName || '').trim();
+
+  if (!bankCode || !bankName) {
+    return false;
+  }
+
+  if (bankCode === '1234' && bankName.toUpperCase() === 'BOLD CF') {
+    return false;
+  }
+
+  return true;
+}
+
 function extractBoldProviderStatus(payload) {
   const candidates = [
     payload?.status,
@@ -1488,6 +1503,12 @@ router.post('/bold/recharge', async (req, res) => {
       (cardNumber.length < 13 || cardNumber.length > 19 || expirationMonth.length !== 2 || expirationYear.length !== 4 || cvc.length < 3)
     ) {
       return res.status(400).json({ message: 'Los datos de la tarjeta no son validos.' });
+    }
+
+    if (requestedPaymentMethodName === 'PSE' && !hasValidBoldPseBankConfig(pseBankConfig)) {
+      return res.status(400).json({
+        message: 'Debes configurar un banco PSE valido antes de continuar. Define BOLD_PSE_BANK_CODE y BOLD_PSE_BANK_NAME en el backend o envia un banco permitido por Bold desde el formulario.',
+      });
     }
 
     const reference = buildReference();
