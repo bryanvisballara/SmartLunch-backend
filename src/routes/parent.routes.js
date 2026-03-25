@@ -207,6 +207,32 @@ function shouldReuseGioScope(rawQuestion) {
     || /\b(y cuanto|y que|y cuales|cuanto fue|cuantas ordenes|cual fue el promedio|y el promedio)\b/.test(question);
 }
 
+function isGioPeakDayQuestion(rawQuestion) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return false;
+  }
+
+  return /\b(dia|fecha)\b.*\b(mas gasto|mayor gasto|gasto mas|mas plata|mas dinero)\b/.test(question)
+    || /\b(cuando|cual)\b.*\b(gasto mas|fue el mayor gasto)\b/.test(question)
+    || /\b(dia pico|pico de gasto)\b/.test(question);
+}
+
+function isGioSpecificDayFollowUp(rawQuestion, context = {}) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return false;
+  }
+
+  if (!context?.lastPeakDate && !context?.lastDate) {
+    return false;
+  }
+
+  return /\b(dame|di|quiero|cual|cual es|cual fue)\b.*\b(dia|fecha)\b.*\b(especific|exact|puntual)\b/.test(question)
+    || /\b(dame|di)\b.*\b(dia|fecha)\b/.test(question)
+    || /\b(cual fue el dia|que dia fue|que fecha fue|la fecha exacta)\b/.test(question);
+}
+
 function resolveGioTimeframe(rawQuestion, context = {}, history = []) {
   const parsedDate = parseDateFromQuestion(rawQuestion, context);
   if (parsedDate) {
@@ -289,6 +315,12 @@ function inferGioIntent(rawQuestion, parsedDate, context = {}) {
   if (!question) {
     return String(context?.lastIntent || 'summary');
   }
+  if (isGioSpecificDayFollowUp(rawQuestion, context)) {
+    return 'specific_day';
+  }
+  if (isGioPeakDayQuestion(rawQuestion)) {
+    return 'peak_day';
+  }
   if (/\b(promedio|media|promedi|diario promedio)\b/.test(question)) {
     return 'average';
   }
@@ -321,7 +353,11 @@ function buildGioMetrics(orders, fromDate, toDate) {
 
   for (const order of safeOrders) {
     const dayKey = startOfDayLocal(order.createdAt).toISOString().slice(0, 10);
-    daysMap.set(dayKey, Number(daysMap.get(dayKey) || 0) + Number(order.total || 0));
+    const previousDay = daysMap.get(dayKey) || { total: 0, ordersCount: 0 };
+    daysMap.set(dayKey, {
+      total: previousDay.total + Number(order.total || 0),
+      ordersCount: previousDay.ordersCount + 1,
+    });
 
     for (const item of Array.isArray(order.items) ? order.items : []) {
       const name = String(item?.nameSnapshot || 'Producto');
@@ -339,6 +375,19 @@ function buildGioMetrics(orders, fromDate, toDate) {
     .map(([name, data]) => ({ name, quantity: data.quantity, subtotal: data.subtotal }))
     .sort((a, b) => b.subtotal - a.subtotal);
 
+  const dailyTotals = Array.from(daysMap.entries())
+    .map(([date, data]) => ({
+      date,
+      total: Number(data.total || 0),
+      ordersCount: Number(data.ordersCount || 0),
+    }))
+    .sort((a, b) => {
+      if (b.total !== a.total) {
+        return b.total - a.total;
+      }
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
   const activeDays = daysMap.size;
   const calendarDays = Math.max(1, Math.round((endOfDayLocal(toDate) - startOfDayLocal(fromDate)) / 86400000) + 1);
   const averageByActiveDay = activeDays > 0 ? total / activeDays : 0;
@@ -352,6 +401,7 @@ function buildGioMetrics(orders, fromDate, toDate) {
     averageByActiveDay,
     averageByCalendarDay,
     topProducts,
+    peakDay: dailyTotals[0] || null,
   };
 }
 
@@ -2161,6 +2211,7 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       lastFromDate: fromDate.toISOString().slice(0, 10),
       lastToDate: toDate.toISOString().slice(0, 10),
       lastRangeDays: Number(timeframe.rangeDays || 1),
+      lastPeakDate: context?.lastPeakDate || null,
     };
 
     if (!matchingOrders.length) {
@@ -2181,6 +2232,37 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
         answer,
         context: nextContext,
       });
+    }
+
+    if (intent === 'peak_day') {
+      const peakDayDate = metrics.peakDay ? startOfDayLocal(metrics.peakDay.date) : null;
+      if (!peakDayDate || Number.isNaN(peakDayDate.getTime())) {
+        answer = timeframe.scope === 'date'
+          ? `${studentName} solo tiene consumos el ${formatDateLabelEs(fromDate)}.`
+          : `No pude determinar un día pico de gasto para ${studentName} en ${scopeLabel}.`;
+        return res.status(200).json({ answer, context: nextContext });
+      }
+
+      nextContext.lastIntent = 'peak_day';
+      nextContext.lastDate = peakDayDate.toISOString().slice(0, 10);
+      nextContext.lastPeakDate = peakDayDate.toISOString().slice(0, 10);
+      answer = `${studentName} tuvo su mayor gasto en ${scopeLabel} el ${formatDateLabelEs(peakDayDate)}: ${currencyFormat.format(metrics.peakDay.total)} en ${metrics.peakDay.ordersCount} orden(es).`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'specific_day') {
+      const referenceDateValue = context?.lastPeakDate || context?.lastDate || null;
+      const referenceDate = referenceDateValue ? startOfDayLocal(referenceDateValue) : null;
+      if (!referenceDate || Number.isNaN(referenceDate.getTime())) {
+        answer = `Necesito una fecha o un período previo para decirte el día específico de ${studentName}.`;
+        return res.status(200).json({ answer, context: nextContext });
+      }
+
+      nextContext.lastIntent = 'specific_day';
+      nextContext.lastDate = referenceDate.toISOString().slice(0, 10);
+      nextContext.lastPeakDate = context?.lastPeakDate || referenceDate.toISOString().slice(0, 10);
+      answer = `${studentName} tuvo ese consumo el ${formatDateLabelEs(referenceDate)}.`;
+      return res.status(200).json({ answer, context: nextContext });
     }
 
     if (intent === 'orders') {
