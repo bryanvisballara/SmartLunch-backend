@@ -324,6 +324,10 @@ function buildBoldWalletReturnUrl({ studentId, reference }) {
   return url.toString();
 }
 
+function isWebhookSource(source) {
+  return String(source || '').toLowerCase().includes('webhook');
+}
+
 function normalizePhoneNumber(value) {
   return String(value || '').replace(/\D/g, '').trim();
 }
@@ -376,7 +380,7 @@ async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { sour
         [source]: providerPayload,
         paidAmount: paidAmount || undefined,
       };
-      if (source === 'webhook') {
+      if (isWebhookSource(source)) {
         paymentRecord.callbackPayload = providerPayload;
       }
       await paymentRecord.save();
@@ -476,7 +480,7 @@ async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { sour
       [source]: providerPayload,
       paidAmount: paidAmount || undefined,
     };
-    if (source === 'webhook') {
+    if (isWebhookSource(source)) {
       lockedPayment.callbackPayload = providerPayload;
     }
     await lockedPayment.save({ session });
@@ -865,9 +869,76 @@ async function handleBoldWebhook(req, res) {
   }
 }
 
+function handleBoldAsyncWebhookAck(req, res, { label }) {
+  res.status(200).json({ received: true });
+
+  setImmediate(async () => {
+    try {
+      const incomingSignature = String(
+        req.headers['x-bold-signature'] ||
+        req.headers['x-signature'] ||
+        req.headers['x-signature-hmac-sha256'] ||
+        ''
+      ).trim();
+
+      if (
+        incomingSignature &&
+        !verifyBoldWebhookSignature(req.rawBody || Buffer.from(JSON.stringify(req.body || {})), incomingSignature)
+      ) {
+        console.warn(`[${label.toUpperCase()}_SIGNATURE_MISMATCH]`, {
+          hasIncomingSignature: true,
+          bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 12) : [],
+        });
+        return;
+      }
+
+      const providerTransactionId = extractBoldProviderTransactionId(req.body);
+      const reference = extractBoldReference(req.body);
+      const providerStatus = extractBoldProviderStatus(req.body);
+
+      if (!providerTransactionId && !reference) {
+        console.warn(`[${label.toUpperCase()}_IGNORED_MISSING_IDENTIFIERS]`);
+        return;
+      }
+
+      const searchConditions = [];
+      if (providerTransactionId) {
+        searchConditions.push({ providerTransactionId });
+      }
+      if (reference) {
+        searchConditions.push({ reference });
+      }
+
+      const paymentRecord = await PaymentTransaction.findOne({
+        method: { $in: ['bold_auto_debit', 'bold'] },
+        $or: searchConditions,
+      });
+
+      if (!paymentRecord) {
+        console.warn(`[${label.toUpperCase()}_PAYMENT_NOT_FOUND]`, {
+          providerTransactionId,
+          reference,
+          providerStatus,
+        });
+        return;
+      }
+
+      await reconcileBoldPaymentRecord(paymentRecord, req.body, { source: `${label}_webhook` });
+    } catch (error) {
+      console.error(`[${label.toUpperCase()}_PROCESSING_FAILED]`, {
+        message: error.message,
+      });
+    }
+  });
+}
+
 router.post('/bold', handleBoldWebhook);
 router.post('/bold/webhook', handleBoldWebhook);
 router.post('/bold/callback', handleBoldWebhook);
+router.post('/nequi', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_nequi' }));
+router.post('/nequi/webhook', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_nequi' }));
+router.post('/vnp/bancolombia', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_bancolombia' }));
+router.post('/vnp/bancolombia/webhook', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_bancolombia' }));
 
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
@@ -995,11 +1066,17 @@ router.post('/bold/recharge', async (req, res) => {
     const payerPhone = normalizePhoneNumber(payer?.phone || parentUser.phone || '');
     const payerDocumentType = mapBoldDocumentType(payer?.documentType);
     const payerDocumentNumber = String(payer?.documentNumber || '').replace(/\D/g, '').trim();
+    const requestedPaymentMethodName = String(paymentMethod?.name || 'CREDIT_CARD').trim().toUpperCase();
     const cardNumber = String(paymentMethod?.cardNumber || '').replace(/\D/g, '').trim();
     const expirationMonth = String(paymentMethod?.expirationMonth || '').replace(/\D/g, '').slice(0, 2);
     const expirationYear = String(paymentMethod?.expirationYear || '').replace(/\D/g, '').slice(-4);
     const installments = Math.max(1, Number(paymentMethod?.installments || 1));
     const cvc = String(paymentMethod?.cvc || '').replace(/\D/g, '').slice(0, 4);
+    const supportsCardDetails = requestedPaymentMethodName === 'CREDIT_CARD';
+
+    if (!['CREDIT_CARD', 'NEQUI', 'BOTON_BANCOLOMBIA'].includes(requestedPaymentMethodName)) {
+      return res.status(400).json({ message: 'Metodo de pago Bold no soportado.' });
+    }
 
     if (!payerName || !payerEmail || payerPhone.length < 7 || !payerDocumentNumber) {
       return res.status(400).json({
@@ -1007,7 +1084,10 @@ router.post('/bold/recharge', async (req, res) => {
       });
     }
 
-    if (cardNumber.length < 13 || cardNumber.length > 19 || expirationMonth.length !== 2 || expirationYear.length !== 4 || cvc.length < 3) {
+    if (
+      supportsCardDetails &&
+      (cardNumber.length < 13 || cardNumber.length > 19 || expirationMonth.length !== 2 || expirationYear.length !== 4 || cvc.length < 3)
+    ) {
       return res.status(400).json({ message: 'Los datos de la tarjeta no son validos.' });
     }
 
@@ -1076,17 +1156,26 @@ router.post('/bold/recharge', async (req, res) => {
           document_type: payerDocumentType,
           document_number: payerDocumentNumber,
         },
-        paymentMethod: {
-          name: 'CREDIT_CARD',
-          card_number: cardNumber,
-          cardholder_name: String(paymentMethod?.cardholderName || payerName).trim(),
-          expiration_month: expirationMonth,
-          expiration_year: expirationYear,
-          installments,
-          cvc,
-        },
+        paymentMethod: supportsCardDetails
+          ? {
+              name: 'CREDIT_CARD',
+              card_number: cardNumber,
+              cardholder_name: String(paymentMethod?.cardholderName || payerName).trim(),
+              expiration_month: expirationMonth,
+              expiration_year: expirationYear,
+              installments,
+              cvc,
+            }
+          : {
+              name: requestedPaymentMethodName,
+            },
         deviceFingerprint,
       });
+
+      const redirectUrl = getBoldCheckoutUrl(paymentAttempt) || String(paymentAttempt?.next_actions?.redirect_url || '').trim();
+      const redirectMethod = String(
+        paymentAttempt?.next_actions?.redirect_method || paymentAttempt?.redirect_method || ''
+      ).trim() || (redirectUrl ? 'GET' : '');
 
       payment.providerTransactionId = extractBoldProviderTransactionId(paymentAttempt) || payment.providerTransactionId;
       payment.providerStatus = extractBoldProviderStatus(paymentAttempt) || 'RUNNING';
@@ -1094,6 +1183,7 @@ router.post('/bold/recharge', async (req, res) => {
         rechargeAmount: numericAmount,
         feeAmount,
         totalToPay,
+        paymentMethod: requestedPaymentMethodName,
         paymentIntent,
         paymentAttempt,
       };
@@ -1105,10 +1195,11 @@ router.post('/bold/recharge', async (req, res) => {
         rechargeAmount: numericAmount,
         feeAmount,
         totalToPay,
+        paymentMethod: requestedPaymentMethodName,
         status: extractBoldProviderStatus(paymentAttempt) || 'RUNNING',
         transactionId: extractBoldProviderTransactionId(paymentAttempt),
-        redirectUrl: String(paymentAttempt?.next_actions?.redirect_url || '').trim(),
-        redirectMethod: String(paymentAttempt?.next_actions?.redirect_method || '').trim() || 'GET',
+        redirectUrl,
+        redirectMethod,
         callbackUrl,
       });
     } catch (providerError) {
