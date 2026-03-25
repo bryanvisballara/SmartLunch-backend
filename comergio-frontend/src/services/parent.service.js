@@ -17,6 +17,10 @@ export const updateParentPortalStudentDailyLimit = (studentId, data) =>
 	api.patch(`/parent/portal/students/${studentId}/daily-limit`, data);
 export const updateParentPortalStudentGrade = (studentId, data) =>
 	api.patch(`/parent/portal/students/${studentId}/grade`, data);
+export const uploadParentPortalStudentPhoto = (studentId, formData) =>
+	api.post(`/parent/portal/students/${studentId}/photo`, formData, {
+		headers: { 'Content-Type': 'multipart/form-data' },
+	});
 export const updateParentPortalStudentAutoDebit = (studentId, data) =>
 	api.patch(`/parent/portal/students/${studentId}/auto-debit`, data);
 export const createParentCardPaymentMethod = (data) => api.post('/parent/portal/payment-methods/cards', data);

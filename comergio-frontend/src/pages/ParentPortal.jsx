@@ -23,6 +23,7 @@ import {
   updateParentPortalStudentDailyLimit,
   updateParentPortalStudentGrade,
   updateParentPortalStudentAutoDebit,
+  uploadParentPortalStudentPhoto,
 } from '../services/parent.service';
 import {
   createBoldRechargePayment,
@@ -208,11 +209,26 @@ function dedupeParentMenuProducts(products) {
   return Array.from(map.values());
 }
 
+function getStudentInitials(name) {
+  const parts = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (!parts.length) {
+    return 'A';
+  }
+
+  return parts.map((part) => part.charAt(0).toUpperCase()).join('');
+}
+
 function ParentPortal() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const portalRootRef = useRef(null);
+  const studentPhotoInputRef = useRef(null);
   const pullStartYRef = useRef(0);
   const pullTrackingRef = useRef(false);
   const pullTriggeredRef = useRef(false);
@@ -244,6 +260,9 @@ function ParentPortal() {
   const [gradeSaving, setGradeSaving] = useState(false);
   const [gradeError, setGradeError] = useState('');
   const [gradeEditOpen, setGradeEditOpen] = useState(false);
+  const [studentPhotoUploading, setStudentPhotoUploading] = useState(false);
+  const [studentPhotoError, setStudentPhotoError] = useState('');
+  const [studentPhotoSuccess, setStudentPhotoSuccess] = useState('');
   const [daviAmount, setDaviAmount] = useState('');
   const [daviSubmitLoading, setDaviSubmitLoading] = useState(false);
   const [daviSubmitError, setDaviSubmitError] = useState('');
@@ -743,6 +762,8 @@ function ParentPortal() {
     setGradeDraft(String(selectedStudent?.grade || ''));
     setGradeError('');
     setGradeEditOpen(false);
+    setStudentPhotoError('');
+    setStudentPhotoSuccess('');
   }, [selectedStudent?._id, selectedStudent?.dailyLimit, selectedStudent?.grade]);
 
   const loadOverview = async (studentId = '') => {
@@ -1453,6 +1474,10 @@ function ParentPortal() {
       const nextDailyLimit = hasDailyLimit ? Number(updatedStudent.dailyLimit || 0) : null;
       const hasGrade = Object.prototype.hasOwnProperty.call(updatedStudent, 'grade');
       const nextGrade = hasGrade ? String(updatedStudent.grade || '').trim() : '';
+      const hasImageUrl = Object.prototype.hasOwnProperty.call(updatedStudent, 'imageUrl');
+      const hasThumbUrl = Object.prototype.hasOwnProperty.call(updatedStudent, 'thumbUrl');
+      const nextImageUrl = hasImageUrl ? String(updatedStudent.imageUrl || '').trim() : '';
+      const nextThumbUrl = hasThumbUrl ? String(updatedStudent.thumbUrl || '').trim() : '';
       const hasAutoDebitEnabled = Boolean(
         Object.prototype.hasOwnProperty.call(updatedStudent, 'autoDebitEnabled') ||
         Object.prototype.hasOwnProperty.call(updatedStudent?.wallet || {}, 'autoDebitEnabled')
@@ -1484,6 +1509,14 @@ function ParentPortal() {
 
         if (hasGrade) {
           nextStudent.grade = nextGrade;
+        }
+
+        if (hasImageUrl) {
+          nextStudent.imageUrl = nextImageUrl;
+        }
+
+        if (hasThumbUrl) {
+          nextStudent.thumbUrl = nextThumbUrl;
         }
 
         if (Array.isArray(updatedStudent.blockedProducts)) {
@@ -1523,6 +1556,60 @@ function ParentPortal() {
         selectedStudent: mapStudent(prev.selectedStudent),
       };
     });
+  };
+
+  const onOpenStudentPhotoPicker = () => {
+    if (!selectedStudentId || studentPhotoUploading) {
+      if (!selectedStudentId) {
+        setStudentPhotoError('Selecciona un alumno antes de subir la foto.');
+      }
+      return;
+    }
+
+    setStudentPhotoError('');
+    setStudentPhotoSuccess('');
+    studentPhotoInputRef.current?.click();
+  };
+
+  const onStudentPhotoSelected = async (event) => {
+    const input = event.target;
+    const file = input?.files?.[0] || null;
+
+    if (input) {
+      input.value = '';
+    }
+
+    if (!file) {
+      return;
+    }
+
+    if (!String(file.type || '').startsWith('image/')) {
+      setStudentPhotoError('Selecciona una imagen válida para el alumno.');
+      return;
+    }
+
+    if (!selectedStudentId) {
+      setStudentPhotoError('Selecciona un alumno antes de subir la foto.');
+      return;
+    }
+
+    setStudentPhotoUploading(true);
+    setStudentPhotoError('');
+    setStudentPhotoSuccess('');
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('preferredName', String(selectedStudent?.name || selectedStudentId));
+
+      const response = await uploadParentPortalStudentPhoto(selectedStudentId, formData);
+      mergeStudentData(response.data?.student || null);
+      setStudentPhotoSuccess('Foto del alumno actualizada correctamente.');
+    } catch (requestError) {
+      setStudentPhotoError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la foto del alumno.');
+    } finally {
+      setStudentPhotoUploading(false);
+    }
   };
 
   const onToggleBlock = async (type, targetId, blocked) => {
@@ -2500,6 +2587,20 @@ function ParentPortal() {
   };
 
   const drawerHeaderName = overview?.parent?.name || user?.name || user?.username || 'Padre';
+  const renderStudentAvatar = (student, extraClassName = '') => {
+    const avatarClassName = ['parent-student-avatar', extraClassName].filter(Boolean).join(' ');
+    const photoSrc = String(student?.thumbUrl || student?.imageUrl || '').trim();
+
+    if (photoSrc) {
+      return (
+        <span className={avatarClassName}>
+          <img alt={student?.name || 'Alumno'} decoding="async" loading="lazy" src={photoSrc} />
+        </span>
+      );
+    }
+
+    return <span className={avatarClassName}>{getStudentInitials(student?.name)}</span>;
+  };
 
   return (
     <div
@@ -2558,24 +2659,51 @@ function ParentPortal() {
       </header>
 
       <section className="parent-student-switcher">
-        <button className="parent-student-toggle" onClick={() => setChildrenOpen((prev) => !prev)} type="button">
-          <div>
-            <p className="meta">Alumno seleccionado</p>
-            <h3>{selectedStudent?.name || 'Sin alumno'}</h3>
-            <p>
-              {selectedStudent?.grade || 'Sin grado'}
-            </p>
-          </div>
-          <span className={`chevron ${childrenOpen ? 'open' : ''}`}>⌄</span>
-        </button>
+        <div className="parent-student-toggle-row">
+          <button className="parent-student-toggle" onClick={() => setChildrenOpen((prev) => !prev)} type="button">
+            {renderStudentAvatar(selectedStudent)}
+            <div className="parent-student-toggle-copy">
+              <p className="meta">Alumno seleccionado</p>
+              <h3>{selectedStudent?.name || 'Sin alumno'}</h3>
+              <p>
+                {selectedStudent?.grade || 'Sin grado'}
+              </p>
+            </div>
+            <span className={`chevron ${childrenOpen ? 'open' : ''}`}>⌄</span>
+          </button>
+
+          <button
+            aria-label={selectedStudent?.imageUrl ? `Cambiar foto de ${selectedStudent?.name || 'alumno'}` : `Subir foto de ${selectedStudent?.name || 'alumno'}`}
+            className="parent-student-photo-btn"
+            disabled={!selectedStudentId || studentPhotoUploading}
+            onClick={onOpenStudentPhotoPicker}
+            type="button"
+          >
+            {studentPhotoUploading ? '...' : '+'}
+          </button>
+        </div>
+
+        <input
+          accept="image/*"
+          hidden
+          onChange={onStudentPhotoSelected}
+          ref={studentPhotoInputRef}
+          type="file"
+        />
+
+        {studentPhotoError ? <p className="parent-student-upload-feedback is-error">{studentPhotoError}</p> : null}
+        {!studentPhotoError && studentPhotoSuccess ? <p className="parent-student-upload-feedback">{studentPhotoSuccess}</p> : null}
 
         {childrenOpen ? (
           <div className="parent-student-options">
             {(overview?.children || []).map((child) => (
               <button key={child._id} onClick={() => onSelectChild(child._id)} type="button">
-                <strong>{child.name}</strong>
-                <span>
-                  {child.grade || 'Sin grado'}
+                {renderStudentAvatar(child, 'is-small')}
+                <span className="parent-student-option-copy">
+                  <strong>{child.name}</strong>
+                  <span>
+                    {child.grade || 'Sin grado'}
+                  </span>
                 </span>
               </button>
             ))}
