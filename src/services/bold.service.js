@@ -17,6 +17,24 @@ function getApiBaseUrl() {
   return configured;
 }
 
+function getPaymentApiBaseUrl() {
+  const configured = normalizeUrl(process.env.BOLD_API_URL);
+  if (!configured) {
+    return 'https://api.online.payments.bold.co';
+  }
+
+  if (
+    configured === 'https://api.bold.co' ||
+    configured === 'http://api.bold.co' ||
+    configured === 'https://integrations.api.bold.co' ||
+    configured === 'http://integrations.api.bold.co'
+  ) {
+    return 'https://api.online.payments.bold.co';
+  }
+
+  return configured;
+}
+
 function getSecretKey() {
   return String(process.env.BOLD_SECRET_KEY || process.env.BOLD_API_KEY || '').trim();
 }
@@ -163,7 +181,7 @@ async function boldPaymentApiRequest(path, { method = 'GET', body = null, extraH
     throw new Error('BOLD_IDENTITY_KEY must be configured');
   }
 
-  const baseUrl = normalizeUrl(process.env.BOLD_API_URL) || 'https://api.online.payments.bold.co';
+  const baseUrl = getPaymentApiBaseUrl();
   const url = new URL(path, baseUrl);
   const response = await fetch(url.toString(), {
     method,
