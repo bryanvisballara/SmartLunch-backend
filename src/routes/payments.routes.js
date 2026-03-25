@@ -5,6 +5,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
+const User = require('../models/user.model');
 const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
@@ -14,10 +15,12 @@ const {
   mapProviderStatus: mapBancolombiaProviderStatus,
 } = require('../services/bancolombia.service');
 const {
-  isBoldConfigured,
-  getIdentityKey: getBoldIdentityKey,
+  isBoldPaymentApiConfigured,
+  getWebhookSecret: getBoldWebhookSecret,
   toInternalStatus: toBoldInternalStatus,
-  generateIntegrityHash,
+  createPaymentIntent,
+  createPaymentAttempt,
+  getPaymentAttemptStatus,
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
@@ -112,11 +115,29 @@ function getLowBalanceLevelForBalance(balance) {
 }
 
 function getBoldPaymentStatus(payload) {
-  return String(payload?.status || payload?.state || payload?.data?.status || 'pending').trim();
+  return String(
+    payload?.status ||
+      payload?.state ||
+      payload?.type ||
+      payload?.data?.status ||
+      payload?.data?.state ||
+      payload?.payload?.status ||
+      'pending'
+  ).trim();
 }
 
 function getBoldPaymentId(payload) {
-  return String(payload?.id || payload?.transactionId || payload?.data?.id || '').trim();
+  return String(
+    payload?.id ||
+      payload?.transactionId ||
+      payload?.transaction_id ||
+      payload?.subject ||
+      payload?.data?.id ||
+      payload?.data?.payment_id ||
+      payload?.data?.transaction_id ||
+      payload?.payload?.transaction_id ||
+      ''
+  ).trim();
 }
 
 function getBoldCheckoutUrl(payload) {
@@ -141,12 +162,15 @@ function getBoldCheckoutUrl(payload) {
 
 function getBoldPaidAmount(payload) {
   const candidates = [
+    payload?.amount?.total_amount,
     payload?.amount?.total,
     payload?.amount?.value,
     payload?.total,
     payload?.paidAmount,
     payload?.paid_amount,
     payload?.value,
+    payload?.data?.amount?.total,
+    payload?.data?.amount?.total_amount,
     payload?.data?.amount?.total,
     payload?.data?.amount?.value,
     payload?.data?.total,
@@ -168,21 +192,26 @@ function getBoldPaidAmount(payload) {
 function extractBoldReference(payload) {
   const candidates = [
     payload?.reference,
+    payload?.reference_id,
     payload?.externalReference,
     payload?.external_reference,
     payload?.orderId,
     payload?.order_id,
     payload?.merchantReference,
     payload?.merchant_reference,
+    payload?.metadata?.reference,
     payload?.metadata?.external_reference,
     payload?.metadata?.orderId,
     payload?.metadata?.order_id,
     payload?.data?.reference,
+    payload?.data?.reference_id,
     payload?.data?.externalReference,
     payload?.data?.external_reference,
     payload?.data?.orderId,
     payload?.data?.order_id,
+    payload?.data?.metadata?.reference,
     payload?.payload?.reference,
+    payload?.payload?.reference_id,
     payload?.payload?.orderId,
     payload?.payload?.order_id,
     payload?.event?.data?.reference,
@@ -212,12 +241,16 @@ function extractBoldProviderTransactionId(payload) {
     payload?.id,
     payload?.transactionId,
     payload?.transaction_id,
+    payload?.transaction_id,
+    payload?.subject,
     payload?.boldTransactionId,
     payload?.bold_transaction_id,
     payload?.data?.id,
+    payload?.data?.payment_id,
     payload?.data?.transactionId,
     payload?.data?.transaction_id,
     payload?.payload?.id,
+    payload?.payload?.transaction_id,
     payload?.payload?.transaction_id,
     payload?.event?.id,
     payload?.event?.data?.id,
@@ -238,10 +271,12 @@ function extractBoldProviderStatus(payload) {
   const candidates = [
     payload?.status,
     payload?.state,
+    payload?.type,
     payload?.transactionStatus,
     payload?.transaction_status,
     payload?.data?.status,
     payload?.data?.state,
+    payload?.data?.type,
     payload?.payload?.status,
     payload?.event?.status,
     payload?.event?.data?.status,
@@ -271,6 +306,214 @@ async function canAccessStudent(user, studentId) {
   });
 
   return Boolean(link);
+}
+
+function getFrontendBaseUrl() {
+  return String(process.env.FRONTEND_URL || 'https://comergio.com').replace(/\/$/, '');
+}
+
+function buildBoldWalletReturnUrl({ studentId, reference }) {
+  const url = new URL('/parent/recargas', `${getFrontendBaseUrl()}/`);
+  if (studentId) {
+    url.searchParams.set('studentId', String(studentId));
+  }
+  if (reference) {
+    url.searchParams.set('paymentSource', 'bold');
+    url.searchParams.set('paymentReference', String(reference));
+  }
+  return url.toString();
+}
+
+function normalizePhoneNumber(value) {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
+function mapBoldDocumentType(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'CC') return 'CEDULA';
+  if (normalized === 'TI') return 'TARJETA_DE_IDENTIDAD';
+  if (normalized === 'CE') return 'CEDULA_DE_EXTRANJERIA';
+  if (normalized === 'PP') return 'PASAPORTE';
+  if (normalized === 'NIT') return 'NIT';
+  return normalized || 'CEDULA';
+}
+
+function verifyBoldWebhookSignature(rawBodyBuffer, incomingSignature) {
+  const expectedSignature = String(incomingSignature || '').trim();
+  if (!expectedSignature) {
+    return false;
+  }
+
+  const secret = getBoldWebhookSecret();
+  const crypto = require('crypto');
+  const rawBodyText = Buffer.isBuffer(rawBodyBuffer)
+    ? rawBodyBuffer.toString('utf8')
+    : String(rawBodyBuffer || '');
+  const encodedBody = Buffer.from(rawBodyText, 'utf8').toString('base64');
+  const computedSignature = crypto.createHmac('sha256', secret).update(encodedBody).digest('hex');
+  if (computedSignature.length !== expectedSignature.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(computedSignature), Buffer.from(expectedSignature));
+}
+
+async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { source = 'status_sync' } = {}) {
+  let session;
+
+  try {
+    const providerTransactionId = extractBoldProviderTransactionId(providerPayload) || paymentRecord.providerTransactionId || '';
+    const providerStatus = extractBoldProviderStatus(providerPayload);
+    const internalStatus = toBoldInternalStatus(providerStatus);
+    const paidAmount = getBoldPaidAmount(providerPayload);
+
+    if (internalStatus !== 'approved') {
+      paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
+      paymentRecord.providerStatus = providerStatus;
+      paymentRecord.status = internalStatus;
+      paymentRecord.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
+      paymentRecord.providerResponse = {
+        ...(paymentRecord.providerResponse || {}),
+        [source]: providerPayload,
+        paidAmount: paidAmount || undefined,
+      };
+      if (source === 'webhook') {
+        paymentRecord.callbackPayload = providerPayload;
+      }
+      await paymentRecord.save();
+
+      if (internalStatus !== 'pending' && paymentRecord.method === 'bold_auto_debit') {
+        await releaseWalletAutoDebitWithRetry({
+          schoolId: paymentRecord.schoolId,
+          studentId: paymentRecord.studentId,
+        });
+      }
+
+      return {
+        received: true,
+        credited: false,
+        status: internalStatus,
+        rechargeAmount: Number(paymentRecord.amount || 0),
+        paidAmount: paidAmount || undefined,
+      };
+    }
+
+    if (paymentRecord.walletTransactionId) {
+      return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const lockedPayment = await PaymentTransaction.findById(paymentRecord._id).session(session);
+    if (!lockedPayment) {
+      await session.abortTransaction();
+      return { received: true, credited: false, status: 'failed', message: 'Payment transaction not found' };
+    }
+
+    if (lockedPayment.walletTransactionId) {
+      await session.commitTransaction();
+      return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+    }
+
+    const wallet = await Wallet.findOne({
+      schoolId: lockedPayment.schoolId,
+      studentId: lockedPayment.studentId,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+      return { received: true, credited: false, status: 'failed', message: 'Wallet not found' };
+    }
+
+    const approvedAmount = Number(lockedPayment.amount || 0);
+    const isAutoDebitPayment = lockedPayment.method === 'bold_auto_debit';
+
+    if (isAutoDebitPayment) {
+      const period = currentYearMonth();
+      if (String(wallet.autoDebitMonthlyPeriod || '') !== period) {
+        wallet.autoDebitMonthlyPeriod = period;
+        wallet.autoDebitMonthlyUsed = 0;
+      }
+
+      wallet.autoDebitMonthlyUsed = Number(wallet.autoDebitMonthlyUsed || 0) + approvedAmount;
+      wallet.autoDebitInProgress = false;
+      wallet.autoDebitLockAt = null;
+      wallet.autoDebitLastChargeAt = new Date();
+      wallet.autoDebitRetryAt = null;
+      wallet.autoDebitRetryCount = 0;
+    }
+
+    wallet.balance += approvedAmount;
+    wallet.lowBalanceAlertLevel = getLowBalanceLevelForBalance(wallet.balance);
+    await wallet.save({ session });
+
+    const [walletTopup] = await WalletTransaction.create(
+      [
+        {
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          walletId: wallet._id,
+          type: 'recharge',
+          amount: approvedAmount,
+          method: 'bold',
+          createdBy: lockedPayment.parentId,
+          notes: isAutoDebitPayment
+            ? `Recarga automatica aprobada por Bold (${providerTransactionId || lockedPayment.reference})`
+            : `Recarga aprobada por Bold (${providerTransactionId || lockedPayment.reference})`,
+        },
+      ],
+      { session }
+    );
+
+    lockedPayment.providerTransactionId = providerTransactionId || lockedPayment.providerTransactionId;
+    lockedPayment.providerStatus = providerStatus;
+    lockedPayment.status = 'approved';
+    lockedPayment.failureReason = null;
+    lockedPayment.walletTransactionId = walletTopup._id;
+    lockedPayment.approvedAt = new Date();
+    lockedPayment.providerResponse = {
+      ...(lockedPayment.providerResponse || {}),
+      [source]: providerPayload,
+      paidAmount: paidAmount || undefined,
+    };
+    if (source === 'webhook') {
+      lockedPayment.callbackPayload = providerPayload;
+    }
+    await lockedPayment.save({ session });
+
+    await session.commitTransaction();
+
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          amount: approvedAmount,
+          newBalance: Number(wallet.balance || 0),
+          method: 'bold',
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=${source} paymentId=${lockedPayment._id} error=${notificationError.message}`);
+      }
+    });
+
+    return {
+      received: true,
+      credited: true,
+      status: 'approved',
+      rechargeAmount: approvedAmount,
+      paidAmount: paidAmount || undefined,
+    };
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    throw error;
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
 }
 
 router.get('/daviplata/oauth/callback', async (req, res) => {
@@ -555,8 +798,6 @@ router.post('/bancolombia/callback', async (req, res) => {
 });
 
 async function handleBoldWebhook(req, res) {
-  let session;
-
   try {
     console.info('[BOLD_WEBHOOK_RECEIVED]', {
       path: req.originalUrl,
@@ -565,59 +806,20 @@ async function handleBoldWebhook(req, res) {
       bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 20) : [],
     });
 
-    const webhookSecrets = Array.from(new Set([
-      String(process.env.BOLD_WEBHOOK_SECRET || '').trim(),
-      String(process.env.BOLD_SECRET_KEY || '').trim(),
-      String(process.env.BOLD_IDENTITY_KEY || '').trim(),
-    ].filter(Boolean)));
+    const incomingSignature = String(
+      req.headers['x-bold-signature'] ||
+      req.headers['x-signature'] ||
+      req.headers['x-signature-hmac-sha256'] ||
+      ''
+    ).trim();
 
-    if (webhookSecrets.length > 0) {
-      const crypto = require('crypto');
-      const incomingSignature = String(
-        req.headers['x-bold-signature'] ||
-        req.headers['x-signature'] ||
-        req.headers['x-signature-hmac-sha256'] ||
-        ''
-      ).trim();
-      const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
-      const expectedSignatures = new Set();
-
-      webhookSecrets.forEach((secret) => {
-        const base64Signature = crypto
-          .createHmac('sha256', secret)
-          .update(rawBody)
-          .digest('base64');
-        const hexSignature = crypto
-          .createHmac('sha256', secret)
-          .update(rawBody)
-          .digest('hex');
-
-        expectedSignatures.add(base64Signature);
-        expectedSignatures.add(hexSignature);
-        expectedSignatures.add(`sha256=${base64Signature}`);
-        expectedSignatures.add(`sha256=${hexSignature}`);
-        expectedSignatures.add(`v1=${hexSignature}`);
+    if (!verifyBoldWebhookSignature(req.rawBody || Buffer.from(JSON.stringify(req.body || {})), incomingSignature)) {
+      console.warn('[BOLD_WEBHOOK_SIGNATURE_MISMATCH]', {
+        hasIncomingSignature: Boolean(incomingSignature),
+        signatureHeaders: Object.keys(req.headers || {}).filter((key) => key.toLowerCase().includes('signature')),
+        bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 12) : [],
       });
-
-      const normalizedIncoming = incomingSignature.toLowerCase();
-      const matched = incomingSignature
-        && Array.from(expectedSignatures).some((candidate) => {
-          if (candidate === incomingSignature) {
-            return true;
-          }
-
-          return candidate.toLowerCase() === normalizedIncoming;
-        });
-
-      if (!matched) {
-        console.warn('[BOLD_WEBHOOK_SIGNATURE_MISMATCH]', {
-          hasIncomingSignature: Boolean(incomingSignature),
-          candidateSecrets: webhookSecrets.length,
-          signatureHeaders: Object.keys(req.headers || {}).filter((key) => key.toLowerCase().includes('signature')),
-          bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 12) : [],
-        });
-        return res.status(401).json({ message: 'Invalid Bold webhook signature' });
-      }
+      return res.status(401).json({ message: 'Invalid Bold webhook signature' });
     }
 
     const providerTransactionId = extractBoldProviderTransactionId(req.body);
@@ -656,149 +858,10 @@ async function handleBoldWebhook(req, res) {
       });
       return res.status(200).json({ received: true, ignored: true, reason: 'Payment record not found' });
     }
-
-    const internalStatus = toBoldInternalStatus(providerStatus);
-    const paidAmount = getBoldPaidAmount(req.body);
-
-    if (internalStatus !== 'approved') {
-      paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
-      paymentRecord.providerStatus = providerStatus;
-      paymentRecord.status = internalStatus;
-      paymentRecord.callbackPayload = req.body;
-      paymentRecord.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
-      await paymentRecord.save();
-
-      if (internalStatus !== 'pending' && paymentRecord.method === 'bold_auto_debit') {
-        await releaseWalletAutoDebitWithRetry({
-          schoolId: paymentRecord.schoolId,
-          studentId: paymentRecord.studentId,
-        });
-      }
-
-      return res.status(200).json({
-        received: true,
-        credited: false,
-        status: internalStatus,
-        rechargeAmount: Number(paymentRecord.amount || 0),
-        paidAmount: paidAmount || undefined,
-      });
-    }
-
-    if (paymentRecord.walletTransactionId) {
-      return res.status(200).json({ received: true, credited: true, alreadyProcessed: true });
-    }
-
-    session = await mongoose.startSession();
-    session.startTransaction();
-
-    const lockedPayment = await PaymentTransaction.findById(paymentRecord._id).session(session);
-    if (!lockedPayment) {
-      await session.abortTransaction();
-      return res.status(404).json({ message: 'Payment transaction not found' });
-    }
-
-    if (lockedPayment.walletTransactionId) {
-      await session.commitTransaction();
-      return res.status(200).json({ received: true, credited: true, alreadyProcessed: true });
-    }
-
-    const wallet = await Wallet.findOne({
-      schoolId: lockedPayment.schoolId,
-      studentId: lockedPayment.studentId,
-    }).session(session);
-
-    if (!wallet) {
-      await session.abortTransaction();
-      return res.status(404).json({ message: 'Wallet not found' });
-    }
-
-    const approvedAmount = Number(lockedPayment.amount || 0);
-    const isAutoDebitPayment = lockedPayment.method === 'bold_auto_debit';
-
-    if (isAutoDebitPayment) {
-      const period = currentYearMonth();
-      if (String(wallet.autoDebitMonthlyPeriod || '') !== period) {
-        wallet.autoDebitMonthlyPeriod = period;
-        wallet.autoDebitMonthlyUsed = 0;
-      }
-
-      wallet.autoDebitMonthlyUsed = Number(wallet.autoDebitMonthlyUsed || 0) + approvedAmount;
-      wallet.autoDebitInProgress = false;
-      wallet.autoDebitLockAt = null;
-      wallet.autoDebitLastChargeAt = new Date();
-      wallet.autoDebitRetryAt = null;
-      wallet.autoDebitRetryCount = 0;
-    }
-
-    wallet.balance += approvedAmount;
-    wallet.lowBalanceAlertLevel = getLowBalanceLevelForBalance(wallet.balance);
-    await wallet.save({ session });
-
-    const [walletTopup] = await WalletTransaction.create(
-      [
-        {
-          schoolId: lockedPayment.schoolId,
-          studentId: lockedPayment.studentId,
-          walletId: wallet._id,
-          type: 'recharge',
-          amount: approvedAmount,
-          method: 'bold',
-          createdBy: lockedPayment.parentId,
-          notes: isAutoDebitPayment
-            ? `Recarga automatica aprobada por Bold (${providerTransactionId || lockedPayment.reference})`
-            : `Recarga aprobada por Bold (${providerTransactionId || lockedPayment.reference})`,
-        },
-      ],
-      { session }
-    );
-
-    lockedPayment.providerTransactionId = providerTransactionId || lockedPayment.providerTransactionId;
-    lockedPayment.providerStatus = providerStatus;
-    lockedPayment.status = 'approved';
-    lockedPayment.callbackPayload = req.body;
-    lockedPayment.providerResponse = {
-      ...(lockedPayment.providerResponse || {}),
-      webhook: req.body,
-      paidAmount: paidAmount || undefined,
-    };
-    lockedPayment.walletTransactionId = walletTopup._id;
-    lockedPayment.approvedAt = new Date();
-    lockedPayment.failureReason = null;
-    await lockedPayment.save({ session });
-
-    await session.commitTransaction();
-
-    setImmediate(async () => {
-      try {
-        await queueAutoDebitRechargeNotification({
-          schoolId: lockedPayment.schoolId,
-          studentId: lockedPayment.studentId,
-          amount: approvedAmount,
-          newBalance: Number(wallet.balance || 0),
-          method: 'bold',
-        });
-      } catch (notificationError) {
-        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=bold_webhook paymentId=${lockedPayment._id} error=${notificationError.message}`);
-      }
-    });
-
-    return res.status(200).json({
-      received: true,
-      credited: true,
-      status: 'approved',
-      rechargeAmount: approvedAmount,
-      paidAmount: paidAmount || undefined,
-    });
+    const result = await reconcileBoldPaymentRecord(paymentRecord, req.body, { source: 'webhook' });
+    return res.status(200).json(result);
   } catch (error) {
-    if (session && session.inTransaction()) {
-      await session.abortTransaction();
-    }
-
     return res.status(500).json({ message: error.message });
-  } finally {
-    if (session) {
-      session.endSession();
-    }
   }
 }
 
@@ -828,12 +891,25 @@ router.get('/bold/recharge-status', async (req, res) => {
       paymentQuery.parentId = userId;
     }
 
-    const payment = await PaymentTransaction.findOne(paymentQuery)
-      .select('reference status providerStatus amount approvedAt studentId walletTransactionId failureReason')
-      .lean();
+    let payment = await PaymentTransaction.findOne(paymentQuery);
 
     if (!payment) {
       return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    if (payment.method === 'bold' && payment.status === 'pending' && isBoldPaymentApiConfigured()) {
+      try {
+        const providerPayload = await getPaymentAttemptStatus(reference);
+        await reconcileBoldPaymentRecord(payment, providerPayload, { source: 'status_query' });
+        payment = await PaymentTransaction.findById(payment._id);
+      } catch (providerError) {
+        if (Number(providerError?.status) !== 404) {
+          console.warn('[BOLD_STATUS_SYNC_FAILED]', {
+            reference,
+            message: providerError.message,
+          });
+        }
+      }
     }
 
     const wallet = await Wallet.findOne({
@@ -861,12 +937,19 @@ router.get('/bold/recharge-status', async (req, res) => {
 
 router.post('/bold/recharge', async (req, res) => {
   try {
-    if (!isBoldConfigured()) {
+    if (!isBoldPaymentApiConfigured()) {
       return res.status(503).json({ message: 'Bold no esta configurado en el backend.' });
     }
 
     const { schoolId, userId } = req.user;
-    const { studentId, amount, description = 'Recarga Comergio' } = req.body;
+    const {
+      studentId,
+      amount,
+      description = 'Recarga Comergio',
+      payer = {},
+      paymentMethod = {},
+      deviceFingerprint = {},
+    } = req.body || {};
 
     const studentObjectId = toObjectId(studentId);
     if (!studentObjectId) {
@@ -893,8 +976,40 @@ router.post('/bold/recharge', async (req, res) => {
       return res.status(404).json({ message: 'Wallet not found' });
     }
 
+    const parentUser = await User.findOne({
+      _id: userId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('name email phone');
+
+    if (!parentUser) {
+      return res.status(404).json({ message: 'Parent user not found' });
+    }
+
     const feeAmount = Math.round(numericAmount * 0.015);
     const totalToPay = numericAmount + feeAmount;
+
+    const payerName = String(payer?.name || paymentMethod?.cardholderName || parentUser.name || '').trim();
+    const payerEmail = String(payer?.email || parentUser.email || '').trim().toLowerCase();
+    const payerPhone = normalizePhoneNumber(payer?.phone || parentUser.phone || '');
+    const payerDocumentType = mapBoldDocumentType(payer?.documentType);
+    const payerDocumentNumber = String(payer?.documentNumber || '').replace(/\D/g, '').trim();
+    const cardNumber = String(paymentMethod?.cardNumber || '').replace(/\D/g, '').trim();
+    const expirationMonth = String(paymentMethod?.expirationMonth || '').replace(/\D/g, '').slice(0, 2);
+    const expirationYear = String(paymentMethod?.expirationYear || '').replace(/\D/g, '').slice(-4);
+    const installments = Math.max(1, Number(paymentMethod?.installments || 1));
+    const cvc = String(paymentMethod?.cvc || '').replace(/\D/g, '').slice(0, 4);
+
+    if (!payerName || !payerEmail || payerPhone.length < 7 || !payerDocumentNumber) {
+      return res.status(400).json({
+        message: 'Faltan datos del titular para procesar el pago con Bold. Verifica nombre, correo, telefono y documento.',
+      });
+    }
+
+    if (cardNumber.length < 13 || cardNumber.length > 19 || expirationMonth.length !== 2 || expirationYear.length !== 4 || cvc.length < 3) {
+      return res.status(400).json({ message: 'Los datos de la tarjeta no son validos.' });
+    }
 
     const reference = buildReference();
     const payment = await PaymentTransaction.create({
@@ -911,40 +1026,97 @@ router.post('/bold/recharge', async (req, res) => {
       description: String(description || 'Recarga Comergio').trim(),
     });
 
-    const integritySignature = generateIntegrityHash(reference, totalToPay, 'COP');
-    const apiKey = getBoldIdentityKey();
+    try {
+      const callbackUrl = buildBoldWalletReturnUrl({
+        studentId: String(studentObjectId),
+        reference,
+      });
 
-    if (!apiKey) {
+      const metadata = {
+        reference,
+        student_id: String(studentObjectId),
+        parent_id: String(userId),
+        recharge_amount: numericAmount,
+        fee_amount: feeAmount,
+        source: 'comergio_wallet_topup',
+      };
+
+      const paymentIntent = await createPaymentIntent({
+        referenceId: reference,
+        amount: {
+          currency: 'COP',
+          total_amount: totalToPay,
+        },
+        description: payment.description,
+        callbackUrl,
+        metadata,
+        customer: {
+          name: payerName,
+          phone: payerPhone,
+          email: payerEmail,
+        },
+      });
+
+      const paymentAttempt = await createPaymentAttempt({
+        referenceId: reference,
+        metadata,
+        payer: {
+          person_type: 'NATURAL_PERSON',
+          name: payerName,
+          phone: payerPhone,
+          email: payerEmail,
+          document_type: payerDocumentType,
+          document_number: payerDocumentNumber,
+        },
+        paymentMethod: {
+          name: 'CREDIT_CARD',
+          card_number: cardNumber,
+          cardholder_name: String(paymentMethod?.cardholderName || payerName).trim(),
+          expiration_month: expirationMonth,
+          expiration_year: expirationYear,
+          installments,
+          cvc,
+        },
+        deviceFingerprint,
+      });
+
+      payment.providerTransactionId = extractBoldProviderTransactionId(paymentAttempt) || payment.providerTransactionId;
+      payment.providerStatus = extractBoldProviderStatus(paymentAttempt) || 'RUNNING';
+      payment.providerResponse = {
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        paymentIntent,
+        paymentAttempt,
+      };
+      await payment.save();
+
+      return res.status(200).json({
+        paymentId: payment._id,
+        reference,
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        status: extractBoldProviderStatus(paymentAttempt) || 'RUNNING',
+        transactionId: extractBoldProviderTransactionId(paymentAttempt),
+        redirectUrl: String(paymentAttempt?.next_actions?.redirect_url || '').trim(),
+        redirectMethod: String(paymentAttempt?.next_actions?.redirect_method || '').trim() || 'GET',
+        callbackUrl,
+      });
+    } catch (providerError) {
       payment.status = 'failed';
       payment.providerStatus = 'ERROR';
-      payment.failureReason = 'BOLD_IDENTITY_KEY no esta configurado.';
+      payment.failureReason = providerError.message;
+      payment.providerResponse = {
+        ...(payment.providerResponse || {}),
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        error: providerError.providerPayload || { message: providerError.message },
+      };
       await payment.save();
-      return res.status(503).json({ message: 'Bold no esta completamente configurado en el backend.' });
+      return res.status(Number(providerError?.status) || 500).json({ message: providerError.message });
     }
-
-    payment.providerResponse = {
-      rechargeAmount: numericAmount,
-      feeAmount,
-      totalToPay,
-      integritySignature,
-    };
-    await payment.save();
-
-    const frontendBaseUrl = String(process.env.FRONTEND_URL || 'https://www.comergio.com').replace(/\/$/, '');
-    const redirectionUrl = `${frontendBaseUrl}/parent/recargas`;
-
-    return res.status(200).json({
-      paymentId: payment._id,
-      reference,
-      apiKey,
-      amount: totalToPay,
-      rechargeAmount: numericAmount,
-      feeAmount,
-      currency: 'COP',
-      integritySignature,
-      redirectionUrl,
-      description: payment.description,
-    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

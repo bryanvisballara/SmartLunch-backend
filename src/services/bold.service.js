@@ -26,8 +26,32 @@ function getAccessKey() {
   return String(process.env.BOLD_IDENTITY_KEY || '').trim();
 }
 
+function normalizeResponsePayload(data) {
+  if (data && typeof data === 'object' && data.payload && typeof data.payload === 'object') {
+    return data.payload;
+  }
+
+  return data;
+}
+
+function getWebhookSecret() {
+  if (Object.prototype.hasOwnProperty.call(process.env, 'BOLD_WEBHOOK_SECRET')) {
+    return String(process.env.BOLD_WEBHOOK_SECRET || '').trim();
+  }
+
+  if (String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production') {
+    return getSecretKey();
+  }
+
+  return '';
+}
+
 function isBoldConfigured() {
   return Boolean(getSecretKey());
+}
+
+function isBoldPaymentApiConfigured() {
+  return Boolean(getAccessKey());
 }
 
 /**
@@ -133,11 +157,101 @@ async function boldRequest(path, { method = 'GET', body = null, extraHeaders = {
   return data;
 }
 
+async function boldPaymentApiRequest(path, { method = 'GET', body = null, extraHeaders = {} } = {}) {
+  const identityKey = getAccessKey();
+  if (!identityKey) {
+    throw new Error('BOLD_IDENTITY_KEY must be configured');
+  }
+
+  const baseUrl = normalizeUrl(process.env.BOLD_API_URL) || 'https://api.online.payments.bold.co';
+  const url = new URL(path, baseUrl);
+  const response = await fetch(url.toString(), {
+    method,
+    headers: {
+      Authorization: `x-api-key ${identityKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...extraHeaders,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch (error) {
+    data = {};
+  }
+
+  if (!response.ok) {
+    const errors = Array.isArray(data?.errors) ? data.errors : [];
+    const providerMessage = errors
+      .map((item) => String(item?.message || item?.detail || item?.code || '').trim())
+      .filter(Boolean)
+      .join('. ');
+    const fallbackMessage = String(data?.message || data?.error || '').trim();
+    const requestError = new Error(providerMessage || fallbackMessage || `Bold payment API request failed (${response.status})`);
+    requestError.status = response.status;
+    requestError.providerPayload = data;
+    throw requestError;
+  }
+
+  return normalizeResponsePayload(data);
+}
+
 function toInternalStatus(providerStatus) {
   const normalized = String(providerStatus || '').toLowerCase().trim();
-  if (['approved', 'succeeded', 'paid', 'successful', 'completed'].includes(normalized)) return 'approved';
-  if (['rejected', 'declined', 'failed', 'error', 'cancelled', 'canceled'].includes(normalized)) return 'rejected';
+  if ([
+    'approved',
+    'sale_approved',
+    'succeeded',
+    'paid',
+    'successful',
+    'completed',
+    'void_approved',
+  ].includes(normalized)) return 'approved';
+  if ([
+    'rejected',
+    'sale_rejected',
+    'declined',
+    'failed',
+    'error',
+    'cancelled',
+    'canceled',
+    'void_rejected',
+  ].includes(normalized)) return 'rejected';
   return 'pending';
+}
+
+async function createPaymentIntent({ referenceId, amount, description, callbackUrl, metadata = {}, customer = {} }) {
+  return boldPaymentApiRequest('/v1/payment-intent', {
+    method: 'POST',
+    body: {
+      reference_id: String(referenceId || '').trim(),
+      amount,
+      description: String(description || 'Recarga Comergio').trim(),
+      callback_url: String(callbackUrl || '').trim() || undefined,
+      metadata,
+      customer,
+    },
+  });
+}
+
+async function createPaymentAttempt({ referenceId, metadata = {}, payer, paymentMethod, deviceFingerprint = {} }) {
+  return boldPaymentApiRequest('/v1/payment', {
+    method: 'POST',
+    body: {
+      reference_id: String(referenceId || '').trim(),
+      metadata,
+      payer,
+      payment_method: paymentMethod,
+      device_fingerprint: deviceFingerprint,
+    },
+  });
+}
+
+async function getPaymentAttemptStatus(referenceId) {
+  return boldPaymentApiRequest(`/v1/payment/${encodeURIComponent(String(referenceId || '').trim())}`);
 }
 
 async function createCardToken({ cardNumber, expirationMonth, expirationYear, securityCode, cardholder }) {
@@ -216,9 +330,14 @@ function getIdentityKey() {
 
 module.exports = {
   isBoldConfigured,
+  isBoldPaymentApiConfigured,
   getIdentityKey,
+  getWebhookSecret,
   toInternalStatus,
   createCardToken,
   createCardPayment,
+  createPaymentIntent,
+  createPaymentAttempt,
+  getPaymentAttemptStatus,
   generateIntegrityHash,
 };
