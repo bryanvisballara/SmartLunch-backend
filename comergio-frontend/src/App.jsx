@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import Navbar from './components/Navbar';
 import AppFooter from './components/AppFooter';
 import useAuthStore from './store/auth.store';
+import { resolveComergioAppUrl } from './lib/deepLinks';
+import { savePostLoginRedirect } from './lib/postLoginRedirect';
 import { ensurePortalPushNotifications } from './lib/pushNotifications';
 import Login from './pages/Login';
 import POS from './pages/POS';
@@ -15,6 +18,7 @@ import InventoryRequestPage from './pages/InventoryRequestPage';
 import CancelSale from './pages/CancelSale';
 import Topups from './pages/Topups';
 import BoldReturnBridge from './pages/BoldReturnBridge';
+import EpaycoReturnBridge from './pages/EpaycoReturnBridge';
 import MeriendasOperator from './pages/MeriendasOperator';
 import ParentPortal from './pages/ParentPortal';
 import Privacy from './pages/Privacy';
@@ -113,6 +117,45 @@ function App() {
       });
   }, [isAuthenticated, token, userRole]);
 
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      return undefined;
+    }
+
+    let listenerHandle = null;
+
+    const openInternalPath = (rawUrl) => {
+      const internalPath = resolveComergioAppUrl(rawUrl);
+      if (!internalPath) {
+        return;
+      }
+
+      savePostLoginRedirect(internalPath);
+      window.history.replaceState({}, '', internalPath);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    };
+
+    CapacitorApp.getLaunchUrl()
+      .then((result) => {
+        if (result?.url) {
+          openInternalPath(result.url);
+        }
+      })
+      .catch(() => {});
+
+    CapacitorApp.addListener('appUrlOpen', ({ url }) => {
+      openInternalPath(url);
+    })
+      .then((handle) => {
+        listenerHandle = handle;
+      })
+      .catch(() => {});
+
+    return () => {
+      listenerHandle?.remove();
+    };
+  }, []);
+
   return (
     <div>
       {showNavbar ? <Navbar /> : null}
@@ -130,6 +173,7 @@ function App() {
           <Route element={<Register />} path="/register" />
           <Route element={<RegisterVerifiedNext />} path="/register/next-step" />
           <Route element={<BoldReturnBridge />} path="/bold-resultado" />
+          <Route element={<EpaycoReturnBridge />} path="/epayco-resultado" />
           <Route
             element={(
               <RequireRole
