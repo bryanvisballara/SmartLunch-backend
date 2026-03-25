@@ -418,6 +418,15 @@ function inferGioIntent(rawQuestion, parsedDate, context = {}) {
   if (/\b(cuantas ordenes|cuantos pedidos|cuantas compras|numero de ordenes|numero de pedidos)\b/.test(question)) {
     return 'orders';
   }
+  if (/\b(recarga|recargar|recargue|recargué|saldo|wallet|abono|recargo)\b/.test(question)) {
+    if (/\b(ultima|ultimo|reciente|mas reciente|cuando fue|cuand[oó])\b/.test(question)) {
+      return 'last_recharge';
+    }
+    if (/\b(cuanto|cuanto le he recargado|cuanto le hice|total)\b/.test(question)) {
+      return 'recharge_total';
+    }
+    return 'last_recharge';
+  }
   if (/\b(cuanto|cuanto gasto|cuanto gast[oó]|gasto|valor|total|plata)\b/.test(question)) {
     return 'total';
   }
@@ -436,7 +445,51 @@ function inferGioIntent(rawQuestion, parsedDate, context = {}) {
   if (shouldReuseGioScope(rawQuestion) && context?.lastIntent) {
     return String(context.lastIntent);
   }
-  return 'summary';
+  return 'unsupported';
+}
+
+function formatGioWalletMethod(methodValue) {
+  const normalized = String(methodValue || '').trim().toLowerCase();
+  if (!normalized) {
+    return 'un medio no especificado';
+  }
+
+  const labels = {
+    cash: 'efectivo',
+    qr: 'QR',
+    transfer: 'transferencia',
+    dataphone: 'datáfono',
+    daviplata: 'DaviPlata',
+    bancolombia: 'Bancolombia',
+    mercadopago: 'Mercado Pago',
+    bold: 'Bold',
+    epayco: 'ePayco',
+    system: 'sistema',
+  };
+
+  return labels[normalized] || methodValue;
+}
+
+async function findGioRechargeMetrics({ schoolId, studentId }) {
+  const transactions = await WalletTransaction.find({
+    schoolId,
+    studentId,
+    cancelledAt: null,
+    type: 'recharge',
+  })
+    .select('amount method createdAt notes')
+    .sort({ createdAt: -1 })
+    .limit(200)
+    .lean();
+
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
+  const totalAmount = safeTransactions.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  return {
+    totalAmount,
+    count: safeTransactions.length,
+    latest: safeTransactions[0] || null,
+  };
 }
 
 function buildGioMetrics(orders, fromDate, toDate) {
@@ -2278,24 +2331,11 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
     const fromDate = startOfDayLocal(timeframe.fromDate);
     const toDate = endOfDayLocal(timeframe.toDate);
     const scopeLabel = formatGioScopeLabel(timeframe.scope, fromDate, toDate, timeframe.rangeDays);
-    const matchingOrders = await Order.find({
-      schoolId,
-      studentId,
-      status: 'completed',
-      createdAt: { $gte: fromDate, $lte: toDate },
-    })
-      .select('createdAt total items')
-      .sort({ createdAt: -1 })
-      .lean();
-    const metrics = buildGioMetrics(matchingOrders, fromDate, toDate);
     const currencyFormat = new Intl.NumberFormat('es-CO', {
       style: 'currency',
       currency: 'COP',
       maximumFractionDigits: 0,
     });
-
-    const topProducts = metrics.topProducts.slice(0, 5);
-    let answer = '';
     const nextContext = {
       studentId: String(studentId),
       studentName,
@@ -2307,6 +2347,48 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       lastRangeDays: Number(timeframe.rangeDays || 1),
       lastPeakDate: context?.lastPeakDate || null,
     };
+
+    if (intent === 'last_recharge' || intent === 'recharge_total') {
+      const rechargeMetrics = await findGioRechargeMetrics({
+        schoolId,
+        studentId,
+      });
+
+      nextContext.lastIntent = intent;
+
+      if (!rechargeMetrics.latest) {
+        answer = `${studentName} no tiene recargas registradas todavía.`;
+        return res.status(200).json({ answer, context: nextContext });
+      }
+
+      if (intent === 'recharge_total') {
+        answer = `${studentName} registra ${rechargeMetrics.count} recarga(s) por un total acumulado de ${currencyFormat.format(rechargeMetrics.totalAmount)}.`;
+        return res.status(200).json({ answer, context: nextContext });
+      }
+
+      nextContext.lastDate = startOfDayLocal(rechargeMetrics.latest.createdAt).toISOString().slice(0, 10);
+      answer = `La última recarga de ${studentName} fue el ${formatDateLabelEs(rechargeMetrics.latest.createdAt)} por ${currencyFormat.format(rechargeMetrics.latest.amount)} vía ${formatGioWalletMethod(rechargeMetrics.latest.method)}.`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'unsupported') {
+      answer = `Puedo ayudarte con consumo, órdenes, promedios, días específicos y recargas de ${studentName}. Si quieres, pregúntame por ejemplo: "¿qué consumió?", "¿cuánto gastó?" o "¿cuándo fue la última recarga?".`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    const matchingOrders = await Order.find({
+      schoolId,
+      studentId,
+      status: 'completed',
+      createdAt: { $gte: fromDate, $lte: toDate },
+    })
+      .select('createdAt total items')
+      .sort({ createdAt: -1 })
+      .lean();
+    const metrics = buildGioMetrics(matchingOrders, fromDate, toDate);
+
+    const topProducts = metrics.topProducts.slice(0, 5);
+    let answer = '';
 
     if (!matchingOrders.length) {
       answer = timeframe.scope === 'date'
