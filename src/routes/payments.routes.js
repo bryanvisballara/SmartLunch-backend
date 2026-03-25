@@ -396,6 +396,20 @@ function mapBoldDocumentType(value) {
   return normalized || 'CEDULA';
 }
 
+function buildBoldBillingAddress(input = {}, phone = '') {
+  const raw = input && typeof input === 'object' ? input : {};
+
+  return {
+    street1: String(raw.street1 || 'Calle 1 # 1 - 01').trim(),
+    street2: String(raw.street2 || '').trim() || undefined,
+    city: String(raw.city || 'Bogota').trim(),
+    zip_code: String(raw.zipCode || raw.zip_code || '110111').trim(),
+    province: String(raw.province || 'Bogota DC').trim(),
+    country: String(raw.country || 'CO').trim().toUpperCase(),
+    phone: normalizePhoneNumber(raw.phone || phone),
+  };
+}
+
 function verifyBoldWebhookSignature(rawBodyBuffer, incomingSignature) {
   const expectedSignature = String(incomingSignature || '').trim();
   if (!expectedSignature) {
@@ -1206,6 +1220,11 @@ router.post('/bold/recharge', async (req, res) => {
           email: payerEmail,
           document_type: payerDocumentType,
           document_number: payerDocumentNumber,
+          ...(requestedPaymentMethodName === 'BOTON_BANCOLOMBIA'
+            ? {
+                billing_address: buildBoldBillingAddress(payer?.billingAddress || payer?.billing_address, payerPhone),
+              }
+            : {}),
         },
         paymentMethod: supportsCardDetails
           ? {
