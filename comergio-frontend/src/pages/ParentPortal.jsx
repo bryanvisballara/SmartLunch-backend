@@ -2661,7 +2661,6 @@ function ParentPortal() {
       <section className="parent-student-switcher">
         <div className="parent-student-toggle-card">
           <button className="parent-student-toggle" onClick={() => setChildrenOpen((prev) => !prev)} type="button">
-            {renderStudentAvatar(selectedStudent)}
             <div className="parent-student-toggle-copy">
               <p className="meta">Alumno seleccionado</p>
               <h3>{selectedStudent?.name || 'Sin alumno'}</h3>
@@ -2679,7 +2678,11 @@ function ParentPortal() {
             onClick={onOpenStudentPhotoPicker}
             type="button"
           >
-            {studentPhotoUploading ? '...' : '+'}
+            {selectedStudent?.imageUrl || selectedStudent?.thumbUrl ? (
+              renderStudentAvatar(selectedStudent)
+            ) : (
+              <span aria-hidden="true">+</span>
+            )}
           </button>
         </div>
 
