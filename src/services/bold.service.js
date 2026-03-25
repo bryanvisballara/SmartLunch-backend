@@ -276,6 +276,10 @@ async function createPaymentAttempt({ referenceId, metadata = {}, payer, payment
   });
 }
 
+async function getPseBanks() {
+  return boldPaymentApiRequest('/v1/payment/pse/banks');
+}
+
 async function getPaymentAttemptStatus(referenceId) {
   return boldPaymentApiRequest(`/v1/payment/${encodeURIComponent(String(referenceId || '').trim())}`);
 }
@@ -364,6 +368,7 @@ module.exports = {
   createCardPayment,
   createPaymentIntent,
   createPaymentAttempt,
+  getPseBanks,
   getPaymentAttemptStatus,
   generateIntegrityHash,
 };

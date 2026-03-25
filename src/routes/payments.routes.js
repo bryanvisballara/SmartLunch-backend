@@ -20,6 +20,7 @@ const {
   toInternalStatus: toBoldInternalStatus,
   createPaymentIntent,
   createPaymentAttempt,
+  getPseBanks,
   getPaymentAttemptStatus,
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
@@ -1416,6 +1417,30 @@ router.get('/bold/recharge-status', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/bold/pse-banks', async (req, res) => {
+  try {
+    if (!isBoldPaymentApiConfigured()) {
+      return res.status(503).json({ message: 'Bold no esta configurado en el backend.' });
+    }
+
+    const providerPayload = await getPseBanks();
+    const banks = Array.isArray(providerPayload?.banks)
+      ? providerPayload.banks
+          .map((bank) => ({
+            bankCode: String(bank?.bank_code || '').trim(),
+            bankName: String(bank?.bank_name || '').trim(),
+          }))
+          .filter((bank) => bank.bankCode && bank.bankName)
+      : [];
+
+    return res.status(200).json({ banks });
+  } catch (error) {
+    return res.status(Number(error?.status) || 500).json({
+      message: error.message || 'No se pudo consultar el listado de bancos PSE.',
+    });
   }
 });
 
