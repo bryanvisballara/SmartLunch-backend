@@ -141,7 +141,7 @@ function getBoldPaymentId(payload) {
 }
 
 function getBoldCheckoutUrl(payload) {
-  return String(
+  const directUrl = String(
     payload?.checkoutUrl ||
       payload?.checkout_url ||
       payload?.paymentUrl ||
@@ -158,6 +158,44 @@ function getBoldCheckoutUrl(payload) {
       payload?.data?.url ||
       ''
   ).trim();
+
+  if (directUrl) {
+    return directUrl;
+  }
+
+  const reference = String(
+    payload?.reference_id ||
+      payload?.reference ||
+      payload?.metadata?.reference ||
+      payload?.data?.reference_id ||
+      payload?.data?.reference ||
+      payload?.data?.metadata?.reference ||
+      ''
+  ).trim();
+  const transactionId = String(
+    payload?.transaction_id ||
+      payload?.transactionId ||
+      payload?.id ||
+      payload?.data?.transaction_id ||
+      payload?.data?.transactionId ||
+      payload?.data?.id ||
+      ''
+  ).trim();
+  const uuidToken = String(
+    payload?.uuid_token ||
+      payload?.uuidToken ||
+      payload?.token ||
+      payload?.data?.uuid_token ||
+      payload?.data?.uuidToken ||
+      payload?.data?.token ||
+      ''
+  ).trim();
+
+  if (reference && transactionId && uuidToken) {
+    return `https://checkout.bold.co/payment/${encodeURIComponent(reference)}/${encodeURIComponent(transactionId)}/${encodeURIComponent(uuidToken)}`;
+  }
+
+  return '';
 }
 
 function getBoldPaidAmount(payload) {
