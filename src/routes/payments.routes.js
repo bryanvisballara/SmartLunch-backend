@@ -269,23 +269,63 @@ function toEpaycoInternalStatus(providerStatus) {
   return 'pending';
 }
 
+function getMergedEpaycoPayload(req) {
+  const queryPayload = req.query && typeof req.query === 'object' ? req.query : {};
+  const bodyPayload = req.body && typeof req.body === 'object' ? req.body : {};
+  return {
+    ...queryPayload,
+    ...bodyPayload,
+  };
+}
+
+function buildEpaycoSignatureCandidates(payload) {
+  const merchantCandidates = new Set([
+    String(payload?.x_cust_id_cliente || '').trim(),
+    String(getEpaycoEntityClientId() || '').trim(),
+  ].filter(Boolean));
+  const keyCandidates = new Set([
+    String(process.env.EPAYCO_PRIVATE_KEY || '').trim(),
+    String(process.env.EPAYCO_PUBLIC_KEY || '').trim(),
+    String(getEpaycoCheckoutPublicKey() || '').trim(),
+  ].filter(Boolean));
+  const refPayco = String(payload?.x_ref_payco || payload?.ref_payco || '').trim();
+  const transactionId = String(payload?.x_transaction_id || payload?.transaction_id || '').trim();
+  const amount = String(payload?.x_amount || payload?.amount || '').trim();
+  const currency = String(payload?.x_currency_code || 'COP').trim().toUpperCase();
+  const raws = [];
+
+  for (const merchantId of merchantCandidates) {
+    for (const key of keyCandidates) {
+      raws.push(`${merchantId}^${key}^${refPayco}^${transactionId}^${amount}^${currency}`);
+    }
+  }
+
+  return raws;
+}
+
 function verifyEpaycoSignature(payload) {
   const incomingSignature = String(payload?.x_signature || payload?.signature || '').trim().toLowerCase();
-  const merchantId = getEpaycoEntityClientId();
-  const publicKey = getEpaycoCheckoutPublicKey();
   const refPayco = String(payload?.x_ref_payco || '').trim();
-  const transactionId = String(payload?.x_transaction_id || '').trim();
-  const amount = String(payload?.x_amount || '').trim();
-  const currency = String(payload?.x_currency_code || 'COP').trim().toUpperCase();
 
-  if (!incomingSignature || !merchantId || !publicKey || !refPayco || !transactionId || !amount) {
+  if (!incomingSignature || !refPayco) {
     return false;
   }
 
-  const rawSignature = `${merchantId}^${publicKey}^${refPayco}^${transactionId}^${amount}^${currency}`;
-  const expectedSignature = crypto.createHash('md5').update(rawSignature).digest('hex').toLowerCase();
+  const candidates = buildEpaycoSignatureCandidates(payload);
+  if (!candidates.length) {
+    return false;
+  }
 
-  return incomingSignature === expectedSignature;
+  for (const rawSignature of candidates) {
+    const md5Signature = crypto.createHash('md5').update(rawSignature).digest('hex').toLowerCase();
+    const sha256Signature = crypto.createHash('sha256').update(rawSignature).digest('hex').toLowerCase();
+
+    if (incomingSignature === md5Signature || incomingSignature === sha256Signature) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function getBoldPaymentStatus(payload) {
@@ -1717,7 +1757,7 @@ router.get('/epayco/response', async (req, res) => {
 
 router.post('/epayco/response', async (req, res) => {
   try {
-    const payload = req.body || {};
+    const payload = getMergedEpaycoPayload(req);
     const reference = extractEpaycoReference(payload);
     const providerStatus = extractEpaycoProviderStatus(payload);
     const internalStatus = toEpaycoInternalStatus(providerStatus);
@@ -1755,7 +1795,7 @@ router.post('/epayco/response', async (req, res) => {
 
 router.post('/epayco/confirmation', async (req, res) => {
   try {
-    const payload = req.body || {};
+    const payload = getMergedEpaycoPayload(req);
     const reference = extractEpaycoReference(payload);
     const providerTransactionId = extractEpaycoProviderTransactionId(payload);
     const providerStatus = extractEpaycoProviderStatus(payload);
@@ -1764,6 +1804,10 @@ router.post('/epayco/confirmation', async (req, res) => {
       reference,
       providerTransactionId,
       providerStatus,
+      payloadSource: {
+        queryKeys: req.query && typeof req.query === 'object' ? Object.keys(req.query).length : 0,
+        bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).length : 0,
+      },
       xRefPayco: String(payload?.x_ref_payco || '').trim(),
       xTransactionId: String(payload?.x_transaction_id || '').trim(),
     });
