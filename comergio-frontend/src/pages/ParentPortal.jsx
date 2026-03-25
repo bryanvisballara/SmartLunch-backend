@@ -2833,6 +2833,21 @@ function ParentPortal() {
                 </svg>
               </button>
 
+              <button onClick={() => navigate('/parent/recargas/metodos/pse')} type="button">
+                <div className="left">
+                  <span className="parent-topup-method-icon is-bancolombia" aria-hidden="true">
+                    <img alt="PSE" className="logo" src={pseLogo} />
+                  </span>
+                  <span className="parent-topup-method-copy">
+                    <strong>PSE</strong>
+                    <small>Transferencia bancaria por PSE con redirección Bold</small>
+                  </span>
+                </div>
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
+                </svg>
+              </button>
+
               <button onClick={() => navigate('/parent/recargas/metodos/bancolombia')} type="button">
                 <div className="left">
                   <span className="parent-topup-method-icon is-bancolombia" aria-hidden="true">
