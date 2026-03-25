@@ -25,6 +25,7 @@ const {
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
 const router = express.Router();
+const boldWebhookFallbackRetryTimers = new Map();
 
 function toObjectId(id) {
   if (!mongoose.Types.ObjectId.isValid(String(id || ''))) {
@@ -557,15 +558,109 @@ async function reconcileBoldWebhookByProviderLookup({ providerTransactionId, ref
     console.warn('[BOLD_WEBHOOK_FALLBACK_FAILED]', {
       reference,
       providerTransactionId,
+      status: Number(error?.status) || null,
       message: error.message,
     });
     return {
       received: true,
       ignored: true,
       verifiedViaStatusQuery: false,
+      retryRecommended: Number(error?.status) === 404,
       reason: error.message,
     };
   }
+}
+
+function getBoldWebhookRetryKey(reference, providerTransactionId) {
+  return `${String(reference || '').trim()}::${String(providerTransactionId || '').trim()}`;
+}
+
+function clearBoldWebhookFallbackRetry(reference, providerTransactionId) {
+  const retryKey = getBoldWebhookRetryKey(reference, providerTransactionId);
+  const existingTimer = boldWebhookFallbackRetryTimers.get(retryKey);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    boldWebhookFallbackRetryTimers.delete(retryKey);
+  }
+}
+
+function scheduleBoldWebhookFallbackRetry({ providerTransactionId, reference, payload, source, attempt = 1 }) {
+  const normalizedReference = String(reference || '').trim();
+  if (!normalizedReference || !isBoldPaymentApiConfigured()) {
+    return;
+  }
+
+  const maxAttempts = 4;
+  if (attempt > maxAttempts) {
+    console.warn('[BOLD_WEBHOOK_FALLBACK_RETRY_EXHAUSTED]', {
+      reference: normalizedReference,
+      providerTransactionId,
+    });
+    clearBoldWebhookFallbackRetry(normalizedReference, providerTransactionId);
+    return;
+  }
+
+  const delayMs = [5000, 15000, 30000, 120000][attempt - 1] || 120000;
+  const retryKey = getBoldWebhookRetryKey(normalizedReference, providerTransactionId);
+
+  clearBoldWebhookFallbackRetry(normalizedReference, providerTransactionId);
+
+  const timer = setTimeout(async () => {
+    try {
+      const result = await reconcileBoldWebhookByProviderLookup({
+        providerTransactionId,
+        reference: normalizedReference,
+        payload,
+        source: `${source}_retry_${attempt}`,
+      });
+
+      if (result?.verifiedViaStatusQuery) {
+        console.info('[BOLD_WEBHOOK_FALLBACK_RETRY_RECONCILED]', {
+          reference: normalizedReference,
+          providerTransactionId,
+          attempt,
+        });
+        clearBoldWebhookFallbackRetry(normalizedReference, providerTransactionId);
+        return;
+      }
+
+      if (result?.retryRecommended) {
+        scheduleBoldWebhookFallbackRetry({
+          providerTransactionId,
+          reference: normalizedReference,
+          payload,
+          source,
+          attempt: attempt + 1,
+        });
+        return;
+      }
+
+      clearBoldWebhookFallbackRetry(normalizedReference, providerTransactionId);
+    } catch (error) {
+      console.error('[BOLD_WEBHOOK_FALLBACK_RETRY_FAILED]', {
+        reference: normalizedReference,
+        providerTransactionId,
+        attempt,
+        message: error.message,
+      });
+      scheduleBoldWebhookFallbackRetry({
+        providerTransactionId,
+        reference: normalizedReference,
+        payload,
+        source,
+        attempt: attempt + 1,
+      });
+    }
+  }, delayMs);
+
+  boldWebhookFallbackRetryTimers.set(retryKey, timer);
+
+  console.info('[BOLD_WEBHOOK_FALLBACK_RETRY_SCHEDULED]', {
+    reference: normalizedReference,
+    providerTransactionId,
+    attempt,
+    delayMs,
+  });
 }
 
 async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { source = 'status_sync' } = {}) {
@@ -1048,6 +1143,15 @@ async function handleBoldWebhook(req, res) {
         source: 'webhook_status_fallback',
       });
 
+      if (fallbackResult?.retryRecommended) {
+        scheduleBoldWebhookFallbackRetry({
+          providerTransactionId,
+          reference,
+          payload: req.body,
+          source: 'webhook_status_fallback',
+        });
+      }
+
       return res.status(200).json(fallbackResult || { received: true, ignored: true, reason: 'invalid signature' });
     }
 
@@ -1118,12 +1222,22 @@ function handleBoldAsyncWebhookAck(req, res, { label }) {
           reference,
         });
 
-        await reconcileBoldWebhookByProviderLookup({
+        const fallbackResult = await reconcileBoldWebhookByProviderLookup({
           providerTransactionId,
           reference,
           payload: req.body,
           source: `${label}_status_fallback`,
         });
+
+        if (fallbackResult?.retryRecommended) {
+          scheduleBoldWebhookFallbackRetry({
+            providerTransactionId,
+            reference,
+            payload: req.body,
+            source: `${label}_status_fallback`,
+          });
+        }
+
         return;
       }
 
