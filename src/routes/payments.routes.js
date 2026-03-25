@@ -719,7 +719,7 @@ function buildBoldWalletReturnUrl({ studentId, reference }) {
 
 function buildEpaycoWalletReturnUrl({ studentId, reference, status = '', frontendBaseUrl = '' }) {
   const baseUrl = String(frontendBaseUrl || '').trim() || getFrontendBaseUrl();
-  const url = new URL('/parent/recargas', `${baseUrl}/`);
+  const url = new URL('/epayco-resultado', `${baseUrl}/`);
   if (studentId) {
     url.searchParams.set('studentId', String(studentId));
   }
