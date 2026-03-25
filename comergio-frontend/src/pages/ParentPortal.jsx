@@ -24,7 +24,13 @@ import {
   updateParentPortalStudentGrade,
   updateParentPortalStudentAutoDebit,
 } from '../services/parent.service';
-import { createBoldRechargePayment, getBoldPseBanks, getBoldRechargeStatus } from '../services/payments.service';
+import {
+  createBoldRechargePayment,
+  createEpaycoRechargePayment,
+  getBoldPseBanks,
+  getBoldRechargeStatus,
+  getEpaycoRechargeStatus,
+} from '../services/payments.service';
 import { getProducts } from '../services/products.service';
 import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
@@ -124,6 +130,42 @@ function buildBoldDeviceFingerprint() {
   };
 }
 
+let epaycoCheckoutScriptPromise = null;
+
+function loadEpaycoCheckoutScript() {
+  if (window.ePayco?.checkout?.configure) {
+    return Promise.resolve(window.ePayco);
+  }
+
+  if (!epaycoCheckoutScriptPromise) {
+    epaycoCheckoutScriptPromise = new Promise((resolve, reject) => {
+      const existingScript = document.querySelector('script[data-epayco-checkout="true"]');
+      if (existingScript) {
+        existingScript.addEventListener('load', () => resolve(window.ePayco));
+        existingScript.addEventListener('error', () => reject(new Error('No se pudo cargar checkout.js de ePayco.')));
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://checkout.epayco.co/checkout.js';
+      script.async = true;
+      script.dataset.epaycoCheckout = 'true';
+      script.onload = () => {
+        if (window.ePayco?.checkout?.configure) {
+          resolve(window.ePayco);
+          return;
+        }
+
+        reject(new Error('ePayco no quedó disponible después de cargar checkout.js.'));
+      };
+      script.onerror = () => reject(new Error('No se pudo cargar checkout.js de ePayco.'));
+      document.body.appendChild(script);
+    });
+  }
+
+  return epaycoCheckoutScriptPromise;
+}
+
 function currentYearMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -208,17 +250,15 @@ function ParentPortal() {
   const [boldTopupCardExpiry, setBoldTopupCardExpiry] = useState('');
   const [boldTopupCardCvv, setBoldTopupCardCvv] = useState('');
   const [boldTopupCardholderName, setBoldTopupCardholderName] = useState('');
-  const [boldTopupDocumentType, setBoldTopupDocumentType] = useState('CC');
-  const [boldTopupDocumentNumber, setBoldTopupDocumentNumber] = useState('');
+  const [epaycoAmount, setEpaycoAmount] = useState('');
+  const [epaycoSubmitLoading, setEpaycoSubmitLoading] = useState(false);
+  const [epaycoSubmitError, setEpaycoSubmitError] = useState('');
+  const [epaycoSubmitSuccess, setEpaycoSubmitSuccess] = useState('');
   const [nequiAmount, setNequiAmount] = useState('');
-  const [nequiDocumentType, setNequiDocumentType] = useState('CC');
-  const [nequiDocumentNumber, setNequiDocumentNumber] = useState('');
   const [nequiSubmitLoading, setNequiSubmitLoading] = useState(false);
   const [nequiSubmitError, setNequiSubmitError] = useState('');
   const [nequiSubmitSuccess, setNequiSubmitSuccess] = useState('');
   const [pseAmount, setPseAmount] = useState('');
-  const [pseDocumentType, setPseDocumentType] = useState('CC');
-  const [pseDocumentNumber, setPseDocumentNumber] = useState('');
   const [pseBanks, setPseBanks] = useState([]);
   const [pseBanksLoading, setPseBanksLoading] = useState(false);
   const [pseSelectedBankCode, setPseSelectedBankCode] = useState('');
@@ -226,8 +266,6 @@ function ParentPortal() {
   const [pseSubmitError, setPseSubmitError] = useState('');
   const [pseSubmitSuccess, setPseSubmitSuccess] = useState('');
   const [bancolombiaAmount, setBancolombiaAmount] = useState('');
-  const [bancolombiaDocumentType, setBancolombiaDocumentType] = useState('CC');
-  const [bancolombiaDocumentNumber, setBancolombiaDocumentNumber] = useState('');
   const [bancolombiaSubmitLoading, setBancolombiaSubmitLoading] = useState(false);
   const [bancolombiaSubmitError, setBancolombiaSubmitError] = useState('');
   const [bancolombiaSubmitSuccess, setBancolombiaSubmitSuccess] = useState('');
@@ -303,12 +341,13 @@ function ParentPortal() {
   const [gioError, setGioError] = useState('');
   const [gioContext, setGioContext] = useState(null);
   const gioThreadEndRef = useRef(null);
-  const processedBoldReturnKeyRef = useRef('');
+  const processedPaymentReturnKeyRef = useRef('');
 
   const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
   const isTopupsPage = location.pathname === '/parent/recargas';
   const isTopupMethodsPage = location.pathname === '/parent/recargas/metodos';
   const isTopupDaviPlataPage = location.pathname === '/parent/recargas/metodos/daviplata';
+  const isTopupEpaycoPage = location.pathname === '/parent/recargas/metodos/epayco';
   const isTopupNequiPage = location.pathname === '/parent/recargas/metodos/nequi';
   const isBoldResultPage = location.pathname === '/parent/bold-resultado';
   const isTopupPsePage = location.pathname === '/parent/recargas/metodos/pse';
@@ -357,6 +396,13 @@ function ParentPortal() {
   const daviTotalCharge = Number.isFinite(daviAmountNumber) && daviAmountNumber > 0
     ? daviAmountNumber + daviFeeAmount
     : 0;
+  const epaycoAmountNumber = Number(epaycoAmount || 0);
+  const epaycoFeeAmount = Number.isFinite(epaycoAmountNumber) && epaycoAmountNumber > 0
+    ? Math.round(epaycoAmountNumber * rechargeFeeRate)
+    : 0;
+  const epaycoTotalCharge = Number.isFinite(epaycoAmountNumber) && epaycoAmountNumber > 0
+    ? epaycoAmountNumber + epaycoFeeAmount
+    : 0;
   const nequiAmountNumber = Number(nequiAmount || 0);
   const nequiFeeAmount = Number.isFinite(nequiAmountNumber) && nequiAmountNumber > 0
     ? Math.round(nequiAmountNumber * rechargeFeeRate)
@@ -364,7 +410,6 @@ function ParentPortal() {
   const nequiTotalCharge = Number.isFinite(nequiAmountNumber) && nequiAmountNumber > 0
     ? nequiAmountNumber + nequiFeeAmount
     : 0;
-  const nequiDocumentDigits = String(nequiDocumentNumber || '').replace(/\D/g, '');
   const pseAmountNumber = Number(pseAmount || 0);
   const pseFeeAmount = Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
     ? Math.round(pseAmountNumber * rechargeFeeRate)
@@ -372,7 +417,6 @@ function ParentPortal() {
   const pseTotalCharge = Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
     ? pseAmountNumber + pseFeeAmount
     : 0;
-  const pseDocumentDigits = String(pseDocumentNumber || '').replace(/\D/g, '');
   const pseSelectedBank = pseBanks.find((bank) => String(bank.bankCode) === String(pseSelectedBankCode)) || null;
   const bancolombiaAmountNumber = Number(bancolombiaAmount || 0);
   const bancolombiaFeeAmount = Number.isFinite(bancolombiaAmountNumber) && bancolombiaAmountNumber > 0
@@ -381,7 +425,6 @@ function ParentPortal() {
   const bancolombiaTotalCharge = Number.isFinite(bancolombiaAmountNumber) && bancolombiaAmountNumber > 0
     ? bancolombiaAmountNumber + bancolombiaFeeAmount
     : 0;
-  const bancolombiaDocumentDigits = String(bancolombiaDocumentNumber || '').replace(/\D/g, '');
   const brebAmountNumber = Number(brebAmount || 0);
   const brebFeeAmount = Number.isFinite(brebAmountNumber) && brebAmountNumber > 0
     ? Math.round(brebAmountNumber * rechargeFeeRate)
@@ -393,6 +436,10 @@ function ParentPortal() {
     Number.isFinite(daviAmountNumber) &&
     daviAmountNumber >= minimumBoldRecharge
   );
+  const canContinueEpaycoRecharge = Boolean(
+    Number.isFinite(epaycoAmountNumber) &&
+    epaycoAmountNumber >= minimumBoldRecharge
+  );
   const canContinueNequiRecharge = Boolean(
     Number.isFinite(nequiAmountNumber) &&
     nequiAmountNumber >= minimumBoldRecharge &&
@@ -401,26 +448,22 @@ function ParentPortal() {
   const boldTopupCardDigits = String(boldTopupCardNumber || '').replace(/\D/g, '');
   const boldTopupExpiryDigits = String(boldTopupCardExpiry || '').replace(/\D/g, '');
   const boldTopupCvvDigits = String(boldTopupCardCvv || '').replace(/\D/g, '');
-  const boldTopupDocumentDigits = String(boldTopupDocumentNumber || '').replace(/\D/g, '');
   const canSubmitBoldCardDetails = Boolean(
     boldTopupCardDigits.length >= 13 &&
     boldTopupCardDigits.length <= 19 &&
     boldTopupExpiryDigits.length === 4 &&
     boldTopupCvvDigits.length >= 3 &&
     boldTopupCvvDigits.length <= 4 &&
-    String(boldTopupCardholderName || '').trim().length >= 5 &&
-    boldTopupDocumentDigits.length >= 5
+    String(boldTopupCardholderName || '').trim().length >= 5
   );
   const canContinuePseRecharge = Boolean(
     Number.isFinite(pseAmountNumber) &&
     pseAmountNumber >= minimumBoldRecharge &&
-    pseDocumentDigits.length >= 5 &&
     pseSelectedBank
   );
   const canContinueBancolombiaRecharge = Boolean(
     Number.isFinite(bancolombiaAmountNumber) &&
-    bancolombiaAmountNumber >= minimumBoldRecharge &&
-    bancolombiaDocumentDigits.length >= 5
+    bancolombiaAmountNumber >= minimumBoldRecharge
   );
   const canContinueBrebRecharge = Boolean(
     Number.isFinite(brebAmountNumber) && brebAmountNumber > 0
@@ -485,6 +528,14 @@ function ParentPortal() {
       document.removeEventListener('mousedown', onDocumentMouseDown);
     };
   }, [autoDebitMenuOpen]);
+
+      useEffect(() => {
+        if (!isTopupMethodsPage) {
+          return;
+        }
+
+        navigate('/parent/recargas/metodos/epayco', { replace: true });
+      }, [isTopupMethodsPage, navigate]);
 
   useEffect(() => {
     setAutoDebitMenuOpen(false);
@@ -644,12 +695,12 @@ function ParentPortal() {
       return;
     }
 
-    const processKey = `${queryStudentId}|${paymentReference}|${paymentStatus}`;
-    if (processedBoldReturnKeyRef.current === processKey) {
+    const processKey = `bold|${queryStudentId}|${paymentReference}|${paymentStatus}`;
+    if (processedPaymentReturnKeyRef.current === processKey) {
       return;
     }
 
-    processedBoldReturnKeyRef.current = processKey;
+    processedPaymentReturnKeyRef.current = processKey;
 
     let cancelled = false;
 
@@ -740,6 +791,123 @@ function ParentPortal() {
     };
 
     syncBoldReturn();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, location.search, loading, error, navigate]);
+
+  useEffect(() => {
+    if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
+      return;
+    }
+
+    const params = new URLSearchParams(location.search || '');
+    const paymentSource = String(params.get('paymentSource') || '').trim().toLowerCase();
+    const paymentReference = String(params.get('paymentReference') || '').trim();
+    const paymentStatus = String(params.get('paymentStatus') || '').trim().toLowerCase();
+    const queryStudentId = String(params.get('studentId') || '').trim();
+
+    if (paymentSource !== 'epayco' || !paymentReference) {
+      return;
+    }
+
+    const processKey = `epayco|${queryStudentId}|${paymentReference}|${paymentStatus}`;
+    if (processedPaymentReturnKeyRef.current === processKey) {
+      return;
+    }
+
+    processedPaymentReturnKeyRef.current = processKey;
+
+    let cancelled = false;
+
+    const buildParentUrl = () => {
+      const nextParams = new URLSearchParams();
+      if (queryStudentId) {
+        nextParams.set('studentId', queryStudentId);
+      }
+      const query = nextParams.toString();
+      return query ? `/parent/recargas?${query}` : '/parent/recargas';
+    };
+
+    const finishReturn = (notice) => {
+      if (cancelled) {
+        return;
+      }
+
+      setWalletReturnNotice(notice);
+      navigate(buildParentUrl(), { replace: true });
+    };
+
+    const syncEpaycoReturn = async () => {
+      if (['rejected', 'failed', 'denied', 'cancelled', 'canceled', 'abandoned'].includes(paymentStatus)) {
+        finishReturn({
+          type: 'error',
+          message: 'Cancelaste o rechazaste el pago con ePayco. La billetera no recibió saldo nuevo.',
+        });
+        return;
+      }
+
+      if (queryStudentId) {
+        setSelectedStudentId(queryStudentId);
+        await loadOverview(queryStudentId);
+      }
+
+      setWalletReturnNotice({
+        type: 'info',
+        message: 'Estamos confirmando tu recarga con ePayco y actualizando el saldo de la billetera.',
+      });
+
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          const response = await getEpaycoRechargeStatus(paymentReference);
+          const status = String(response.data?.status || '').trim().toLowerCase();
+          const responseStudentId = String(response.data?.studentId || queryStudentId).trim();
+
+          if (status === 'approved') {
+            if (responseStudentId) {
+              setSelectedStudentId(responseStudentId);
+              await loadOverview(responseStudentId);
+            }
+
+            finishReturn({
+              type: 'success',
+              message: 'La recarga fue acreditada correctamente. Ya actualizamos el saldo de la billetera.',
+            });
+            return;
+          }
+
+          if (status === 'rejected' || status === 'failed') {
+            finishReturn({
+              type: 'error',
+              message: 'El pago con ePayco no fue aprobado. Revisa el estado e intenta de nuevo si es necesario.',
+            });
+            return;
+          }
+        } catch (requestError) {
+          if (attempt === 7) {
+            finishReturn({
+              type: 'info',
+              message: requestError?.response?.data?.message || 'No pudimos confirmar la recarga todavía. Vuelve a revisar la billetera en unos segundos.',
+            });
+            return;
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+      }
+
+      finishReturn({
+        type: 'info',
+        message: 'Seguimos verificando la recarga. Si el saldo aún no cambia, vuelve a entrar en unos segundos.',
+      });
+    };
+
+    syncEpaycoReturn();
 
     return () => {
       cancelled = true;
@@ -1431,7 +1599,7 @@ function ParentPortal() {
 
   const onSubmitPseTopup = async () => {
     if (!canContinuePseRecharge) {
-      setPseSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)}, un documento válido y selecciona un banco PSE.`);
+      setPseSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y selecciona un banco PSE.`);
       return;
     }
 
@@ -1443,8 +1611,6 @@ function ParentPortal() {
       await startBoldRedirectTopup({
         amount: pseAmountNumber,
         paymentMethodName: 'PSE',
-        documentType: pseDocumentType,
-        documentNumber: pseDocumentDigits,
         bankCode: pseSelectedBank?.bankCode,
         bankName: pseSelectedBank?.bankName,
       });
@@ -1499,7 +1665,7 @@ function ParentPortal() {
     navigate(`/parent/recargas?${params.toString()}`);
   };
 
-  const startBoldRedirectTopup = async ({ amount, paymentMethodName, documentType, documentNumber, bankCode, bankName }) => {
+  const startBoldRedirectTopup = async ({ amount, paymentMethodName, bankCode, bankName }) => {
     if (!selectedStudent?._id) {
       throw new Error('Selecciona un alumno antes de continuar.');
     }
@@ -1508,10 +1674,6 @@ function ParentPortal() {
       studentId: selectedStudent._id,
       amount,
       description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
-      payer: {
-        documentType,
-        documentNumber,
-      },
       paymentMethod: {
         name: paymentMethodName,
         ...(bankCode || bankName
@@ -1527,9 +1689,56 @@ function ParentPortal() {
     await redirectAfterBoldTopupStart(response.data, selectedStudent._id);
   };
 
+  const onSubmitEpaycoTopup = async () => {
+    if (!canContinueEpaycoRecharge) {
+      setEpaycoSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)}.`);
+      return;
+    }
+
+    if (!selectedStudent?._id) {
+      setEpaycoSubmitError('Selecciona un alumno antes de continuar.');
+      return;
+    }
+
+    setEpaycoSubmitLoading(true);
+    setEpaycoSubmitError('');
+    setEpaycoSubmitSuccess('');
+
+    try {
+      const response = await createEpaycoRechargePayment({
+        studentId: selectedStudent._id,
+        amount: epaycoAmountNumber,
+        description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
+      });
+
+      const checkout = response?.data?.checkout || null;
+      const checkoutData = checkout?.data || null;
+      const publicKey = String(checkout?.publicKey || '').trim();
+
+      if (!publicKey || !checkoutData) {
+        throw new Error('No recibimos la configuración de checkout de ePayco.');
+      }
+
+      const epayco = await loadEpaycoCheckoutScript();
+      const handler = epayco.checkout.configure({
+        key: publicKey,
+        test: Boolean(checkout?.test),
+      });
+
+      handler.open(checkoutData);
+      setEpaycoSubmitSuccess('Abrimos ePayco para que completes la recarga.');
+    } catch (requestError) {
+      setEpaycoSubmitError(
+        requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar la recarga con ePayco.'
+      );
+    } finally {
+      setEpaycoSubmitLoading(false);
+    }
+  };
+
   const onSubmitNequiTopup = async () => {
     if (!canContinueNequiRecharge) {
-      setNequiSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y un documento válido.`);
+      setNequiSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)}.`);
       return;
     }
 
@@ -1541,8 +1750,6 @@ function ParentPortal() {
       await startBoldRedirectTopup({
         amount: nequiAmountNumber,
         paymentMethodName: 'NEQUI',
-        documentType: nequiDocumentType,
-        documentNumber: nequiDocumentDigits,
       });
       setNequiSubmitSuccess('Te estamos redirigiendo a Nequi para completar la recarga.');
     } catch (requestError) {
@@ -1554,7 +1761,7 @@ function ParentPortal() {
 
   const onSubmitBancolombiaTopup = async () => {
     if (!canContinueBancolombiaRecharge) {
-      setBancolombiaSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y un documento válido.`);
+      setBancolombiaSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)}.`);
       return;
     }
 
@@ -1566,8 +1773,6 @@ function ParentPortal() {
       await startBoldRedirectTopup({
         amount: bancolombiaAmountNumber,
         paymentMethodName: 'BOTON_BANCOLOMBIA',
-        documentType: bancolombiaDocumentType,
-        documentNumber: bancolombiaDocumentDigits,
       });
       setBancolombiaSubmitSuccess('Te estamos redirigiendo a Botón Bancolombia para completar la recarga.');
     } catch (requestError) {
@@ -1626,8 +1831,6 @@ function ParentPortal() {
         description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
         payer: {
           name: String(boldTopupCardholderName || '').trim(),
-          documentType: boldTopupDocumentType,
-          documentNumber: boldTopupDocumentDigits,
         },
         paymentMethod: {
           cardNumber: boldTopupCardDigits,
@@ -1649,10 +1852,6 @@ function ParentPortal() {
     } finally {
       setDaviSubmitLoading(false);
     }
-  };
-
-  const onGoToBoldCheckout = () => {
-    navigate('/parent/recargas/metodos/daviplata');
   };
 
   const openCardVerificationModal = (card) => {
@@ -2482,7 +2681,7 @@ function ParentPortal() {
             </div>
 
             <div className="parent-topups-actions parent-topups-actions-single">
-              <button onClick={() => navigate('/parent/recargas/metodos')} type="button">
+              <button onClick={() => navigate('/parent/recargas/metodos/epayco')} type="button">
                 <span className="parent-topups-action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z" fill="currentColor"/>
@@ -2845,88 +3044,9 @@ function ParentPortal() {
           </section>
         ) : null}
 
-        {!loading && !error && isTopupMethodsPage ? (
-          <section className="parent-topup-methods-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
-              </svg>
-              <span>Volver</span>
-            </button>
-
-            <h2>Recargar cuenta de {selectedStudent?.name || 'alumno seleccionado'}</h2>
-            <p className="parent-topup-methods-title">¿Cómo quieres recargar la cuenta?</p>
-            <p className="parent-topup-fee-note">
-              Todos los medios de pago aplican un costo de transacción del 1.5% sobre el valor que recargues.
-            </p>
-
-            <div className="parent-topup-methods-list">
-              <button onClick={onGoToBoldCheckout} type="button">
-                <div className="left">
-                  <span className="parent-topup-method-icon is-card" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
-                    </svg>
-                  </span>
-                  <span className="parent-topup-method-copy">
-                    <strong>Tarjeta de credito o debito</strong>
-                    <small>Visa, Mastercard y otras franquicias</small>
-                  </span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/metodos/nequi')} type="button">
-                <div className="left">
-                  <span className="parent-topup-method-icon is-nequi" aria-hidden="true">N</span>
-                  <span className="parent-topup-method-copy">
-                    <strong>Nequi</strong>
-                    <small>Redirección directa al flujo Bold de Nequi</small>
-                  </span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/metodos/pse')} type="button">
-                <div className="left">
-                  <span className="parent-topup-method-icon is-bancolombia" aria-hidden="true">
-                    <img alt="PSE" className="logo" src={pseLogo} />
-                  </span>
-                  <span className="parent-topup-method-copy">
-                    <strong>PSE</strong>
-                    <small>Transferencia bancaria por PSE con redirección Bold</small>
-                  </span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-
-              <button onClick={() => navigate('/parent/recargas/metodos/bancolombia')} type="button">
-                <div className="left">
-                  <span className="parent-topup-method-icon is-bancolombia" aria-hidden="true">
-                    <img alt="Bancolombia" className="logo" src={bancolombiaLogo} />
-                  </span>
-                  <span className="parent-topup-method-copy">
-                    <strong>Botón Bancolombia</strong>
-                    <small>Te llevamos al redirect que entregue Bold</small>
-                  </span>
-                </div>
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
-                </svg>
-              </button>
-            </div>
-          </section>
-        ) : null}
-
         {!loading && !error && isTopupDaviPlataPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3027,29 +3147,6 @@ function ParentPortal() {
                       />
                     </label>
 
-                    <div className="parent-topup-davi-grid">
-                      <label>
-                        Tipo de documento
-                        <select value={boldTopupDocumentType} onChange={(event) => setBoldTopupDocumentType(event.target.value)}>
-                          <option value="CC">Cedula</option>
-                          <option value="CE">Cedula de extranjeria</option>
-                          <option value="PP">Pasaporte</option>
-                          <option value="NIT">NIT</option>
-                        </select>
-                      </label>
-
-                      <label>
-                        Número de documento
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="1234567890"
-                          value={boldTopupDocumentNumber}
-                          onChange={(event) => setBoldTopupDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
-                        />
-                      </label>
-                    </div>
-
                     <label className="parent-topup-davi-amount">
                       Número de tarjeta
                       <input
@@ -3123,6 +3220,68 @@ function ParentPortal() {
           </section>
         ) : null}
 
+        {!loading && !error && isTopupEpaycoPage ? (
+          <section className="parent-topup-davi-page">
+            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
+              </svg>
+              <span>Volver</span>
+            </button>
+
+            <div className="parent-topup-davi-head">
+              <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con ePayco</h2>
+              <span className="parent-topup-brand-chip is-nequi">ePayco</span>
+            </div>
+
+            <p className="parent-topup-davi-caption">
+              Abriremos el checkout de ePayco para que completes la recarga y luego volverás a la billetera.
+            </p>
+
+            <label className="parent-topup-davi-amount">
+              ¿Cuánto vas a recargar?
+              <input
+                min={minimumBoldRecharge}
+                step="1000"
+                type="number"
+                placeholder="Ingrese un valor"
+                value={epaycoAmount}
+                onChange={(event) => setEpaycoAmount(event.target.value)}
+              />
+            </label>
+
+            <p className="parent-topup-fee-note">
+              Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+            </p>
+
+            {epaycoAmountNumber > 0 ? (
+              <div className="parent-topup-davi-fee-box">
+                <p>
+                  Valor a recargar: <strong>{formatCurrency(epaycoAmountNumber)}</strong>
+                </p>
+                <p>
+                  Costo de transacción (1.5%): <strong>{formatCurrency(epaycoFeeAmount)}</strong>
+                </p>
+                <p className="total">
+                  Total a pagar: <strong>{formatCurrency(epaycoTotalCharge)}</strong>
+                </p>
+              </div>
+            ) : null}
+
+            <button
+              className="parent-topup-davi-continue"
+              disabled={!canContinueEpaycoRecharge || epaycoSubmitLoading}
+              onClick={onSubmitEpaycoTopup}
+              type="button"
+            >
+              {epaycoSubmitLoading ? 'Abriendo checkout...' : 'Recarga ahora'}
+            </button>
+
+            {epaycoSubmitError ? <p className="parent-error">{epaycoSubmitError}</p> : null}
+            {epaycoSubmitSuccess ? <p className="parent-success">{epaycoSubmitSuccess}</p> : null}
+          </section>
+        ) : null}
+
         {!loading && !error && isTopupNequiPage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
@@ -3152,29 +3311,6 @@ function ParentPortal() {
                 onChange={(event) => setNequiAmount(event.target.value)}
               />
             </label>
-
-            <div className="parent-topup-davi-grid">
-              <label>
-                Tipo de documento
-                <select value={nequiDocumentType} onChange={(event) => setNequiDocumentType(event.target.value)}>
-                  <option value="CC">Cedula</option>
-                  <option value="CE">Cedula de extranjeria</option>
-                  <option value="PP">Pasaporte</option>
-                  <option value="NIT">NIT</option>
-                </select>
-              </label>
-
-              <label>
-                Número de documento
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="1234567890"
-                  value={nequiDocumentNumber}
-                  onChange={(event) => setNequiDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
-                />
-              </label>
-            </div>
 
             <p className="parent-topup-fee-note">
               Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
@@ -3233,29 +3369,6 @@ function ParentPortal() {
                 onChange={(event) => setPseAmount(event.target.value)}
               />
             </label>
-
-            <div className="parent-topup-davi-grid">
-              <label>
-                Tipo de documento
-                <select value={pseDocumentType} onChange={(event) => setPseDocumentType(event.target.value)}>
-                  <option value="CC">Cedula</option>
-                  <option value="CE">Cedula de extranjeria</option>
-                  <option value="PP">Pasaporte</option>
-                  <option value="NIT">NIT</option>
-                </select>
-              </label>
-
-              <label>
-                Número de documento
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="1234567890"
-                  value={pseDocumentNumber}
-                  onChange={(event) => setPseDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
-                />
-              </label>
-            </div>
 
             <label className="parent-topup-davi-amount">
               Banco PSE
@@ -3334,29 +3447,6 @@ function ParentPortal() {
                 onChange={(event) => setBancolombiaAmount(event.target.value)}
               />
             </label>
-
-            <div className="parent-topup-davi-grid">
-              <label>
-                Tipo de documento
-                <select value={bancolombiaDocumentType} onChange={(event) => setBancolombiaDocumentType(event.target.value)}>
-                  <option value="CC">Cedula</option>
-                  <option value="CE">Cedula de extranjeria</option>
-                  <option value="PP">Pasaporte</option>
-                  <option value="NIT">NIT</option>
-                </select>
-              </label>
-
-              <label>
-                Número de documento
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="1234567890"
-                  value={bancolombiaDocumentNumber}
-                  onChange={(event) => setBancolombiaDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
-                />
-              </label>
-            </div>
 
             <p className="parent-topup-fee-note">
               Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
@@ -3729,7 +3819,7 @@ function ParentPortal() {
           </section>
         ) : null}
 
-        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
+        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupEpaycoPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
           <>
             <section className="parent-balance-hero" id="parent-balance-section">
               <p className="meta">Saldo actual</p>

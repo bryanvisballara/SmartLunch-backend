@@ -3,15 +3,26 @@ import { getOrderCancellationRequests, getOrders, requestOrderCancellation } fro
 import { getStudents } from '../services/students.service';
 import { getDailyClosures } from '../services/dailyClosure.service';
 import DismissibleNotice from '../components/DismissibleNotice';
+import useAuthStore from '../store/auth.store';
 
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function CancelSale() {
+  const { user, currentStore } = useAuthStore();
   const [orders, setOrders] = useState([]);
+  const [filters, setFilters] = useState({
+    from: todayYmd(),
+    to: todayYmd(),
+    searchType: 'student',
+    studentId: '',
+    productKey: '',
+  });
   const [studentQuery, setStudentQuery] = useState('');
-  const [showStudentSuggestions, setShowStudentSuggestions] = useState(false);
+  const [showStudentOptions, setShowStudentOptions] = useState(false);
+  const [productQuery, setProductQuery] = useState('');
+  const [showProductOptions, setShowProductOptions] = useState(false);
   const [students, setStudents] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [historyRequests, setHistoryRequests] = useState([]);
@@ -20,6 +31,18 @@ function CancelSale() {
   const [onlyExternalSales, setOnlyExternalSales] = useState(false);
   const [successModal, setSuccessModal] = useState({ open: false, fading: false });
   const [submitting, setSubmitting] = useState(false);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  const isVendor = user?.role === 'vendor';
+
+  const normalizeDateForApi = (value, isEndOfDay = false) => {
+    if (!value) {
+      return null;
+    }
+
+    const suffix = isEndOfDay ? 'T23:59:59.999' : 'T00:00:00.000';
+    return new Date(`${value}${suffix}`).toISOString();
+  };
 
   const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
 
@@ -27,7 +50,9 @@ function CancelSale() {
     setOrders([]);
     setPendingRequests([]);
     setStudentQuery('');
-    setShowStudentSuggestions(false);
+    setShowStudentOptions(false);
+    setProductQuery('');
+    setShowProductOptions(false);
   };
 
   const loadDayStatus = async () => {
@@ -48,15 +73,26 @@ function CancelSale() {
     }
   };
 
-  const loadOrders = async () => {
+  const loadOrders = async (nextFilters = filters) => {
     try {
-      const now = new Date();
-      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-      const response = await getOrders({ from, to });
-      setOrders((response.data || []).filter((order) => order.status === 'completed').slice(0, 100));
+      setLoadingOrders(true);
+      const params = {};
+      if (nextFilters.searchType === 'student' && nextFilters.studentId) {
+        params.studentId = nextFilters.studentId;
+      }
+      if (nextFilters.from) {
+        params.from = normalizeDateForApi(nextFilters.from);
+      }
+      if (nextFilters.to) {
+        params.to = normalizeDateForApi(nextFilters.to, true);
+      }
+      const response = await getOrders(params);
+      setOrders((response.data || []).filter((order) => order.status === 'completed'));
     } catch (error) {
       setMessage(error?.response?.data?.message || 'No se pudieron cargar órdenes');
+      setOrders([]);
+    } finally {
+      setLoadingOrders(false);
     }
   };
 
@@ -181,73 +217,302 @@ function CancelSale() {
     return studentOptions.filter((student) => student.name.toLowerCase().includes(query));
   }, [studentOptions, studentQuery]);
 
-  const filteredOrders = orders.filter((order) => {
+  const visibleOrders = useMemo(() => {
+    if (!isVendor || !currentStore?._id) {
+      return orders;
+    }
+
+    return orders.filter((order) => String(order?.storeId?._id || '') === String(currentStore._id));
+  }, [orders, isVendor, currentStore?._id]);
+
+  const productOptions = useMemo(() => {
+    const map = new Map();
+
+    for (const order of visibleOrders) {
+      for (const item of order?.items || []) {
+        const key = String(item?.productId?._id || item?.productId || item?._id || '').trim();
+        const label = String(item?.nameSnapshot || item?.productId?.name || '').trim();
+
+        if (!label) {
+          continue;
+        }
+
+        const normalizedKey = key || `name:${label.toLowerCase()}`;
+        if (!map.has(normalizedKey)) {
+          map.set(normalizedKey, { key: normalizedKey, label });
+        }
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  }, [visibleOrders]);
+
+  const filteredProductOptions = useMemo(() => {
+    const query = String(productQuery || '').trim().toLowerCase();
+    if (!query) {
+      return productOptions;
+    }
+
+    return productOptions.filter((option) => option.label.toLowerCase().includes(query));
+  }, [productOptions, productQuery]);
+
+  const onChangeFilter = (key, value) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const onChangeSearchType = (value) => {
+    if (value === 'product') {
+      setFilters((prev) => ({
+        ...prev,
+        searchType: 'product',
+        studentId: '',
+      }));
+      setStudentQuery('');
+      setShowStudentOptions(false);
+      setProductQuery('');
+      setShowProductOptions(true);
+      return;
+    }
+
+    setFilters((prev) => ({
+      ...prev,
+      searchType: 'student',
+      productKey: '',
+    }));
+    setStudentQuery('');
+    setShowStudentOptions(false);
+    setProductQuery('');
+    setShowProductOptions(false);
+  };
+
+  const onSelectStudentOption = (student) => {
+    setFilters((prev) => ({
+      ...prev,
+      studentId: student.id,
+    }));
+    setStudentQuery(student.schoolCode ? `${student.name} (${student.schoolCode})` : student.name);
+    setShowStudentOptions(false);
+  };
+
+  const onSelectProductOption = (option) => {
+    setFilters((prev) => ({
+      ...prev,
+      productKey: option.key,
+    }));
+    setProductQuery(option.label);
+    setShowProductOptions(false);
+  };
+
+  const onSearch = async () => {
+    const closed = await loadDayStatus();
+    if (!closed) {
+      loadOrders(filters);
+    }
+  };
+
+  const onClear = async () => {
+    const emptyFilters = {
+      from: todayYmd(),
+      to: todayYmd(),
+      searchType: 'student',
+      studentId: '',
+      productKey: '',
+    };
+    setFilters(emptyFilters);
+    setStudentQuery('');
+    setShowStudentOptions(false);
+    setProductQuery('');
+    setShowProductOptions(false);
+    setOnlyExternalSales(false);
+    const closed = await loadDayStatus();
+    if (!closed) {
+      loadOrders(emptyFilters);
+    }
+  };
+
+  const filteredOrders = visibleOrders.filter((order) => {
     if (onlyExternalSales && !order.guestSale) {
       return false;
     }
 
-    const resolved = resolveStudent(order.studentId);
-    const name = String(resolved.name || '').toLowerCase();
-    const query = studentQuery.trim().toLowerCase();
-    if (!query) {
-      return true;
+    if (filters.searchType === 'product' && filters.productKey) {
+      return (order?.items || []).some((item) => {
+        const itemProductId = String(item?.productId?._id || item?.productId || item?._id || '').trim();
+        const itemName = String(item?.nameSnapshot || item?.productId?.name || '').trim().toLowerCase();
+
+        if (filters.productKey.startsWith('name:')) {
+          return `name:${itemName}` === filters.productKey;
+        }
+
+        return itemProductId === filters.productKey;
+      });
     }
 
-    return name.includes(query);
+    return true;
   });
 
   return (
     <div className="page-grid single">
       <section className="panel">
         <h2>CANCELAR VENTA</h2>
-        <label>
-          Buscar por alumno
-          <div className="product-picker">
+
+        <div className="admin-form-grid">
+          <label>
+            Buscar por
+            <select
+              value={filters.searchType}
+              onChange={(event) => onChangeSearchType(event.target.value)}
+            >
+              <option value="student">Alumno</option>
+              <option value="product">Producto</option>
+            </select>
+          </label>
+
+          <label>
+            Fecha desde
             <input
-              placeholder="Escribe el nombre del alumno"
-              value={studentQuery}
-              onFocus={() => setShowStudentSuggestions(true)}
-              onBlur={() => {
-                setTimeout(() => {
-                  setShowStudentSuggestions(false);
-                }, 120);
-              }}
-              onChange={(event) => setStudentQuery(event.target.value)}
+              type="date"
+              value={filters.from}
+              onChange={(event) => onChangeFilter('from', event.target.value)}
             />
-            {showStudentSuggestions ? (
-              <div className="product-picker-menu">
-                {filteredStudentOptions.map((student) => (
-                  <button
-                    className="product-picker-option"
-                    key={student.id}
-                    onMouseDown={() => {
-                      setStudentQuery(student.name);
-                      setShowStudentSuggestions(false);
-                    }}
-                    type="button"
-                  >
-                    {student.name} {student.schoolCode ? `(${student.schoolCode})` : ''}
-                  </button>
-                ))}
-                {filteredStudentOptions.length === 0 ? (
-                  <p className="product-picker-empty">Sin coincidencias</p>
+          </label>
+
+          <label>
+            Fecha hasta
+            <input
+              type="date"
+              value={filters.to}
+              onChange={(event) => onChangeFilter('to', event.target.value)}
+            />
+          </label>
+
+          {filters.searchType === 'student' ? (
+            <label>
+              Alumno
+              <div className="product-picker">
+                <input
+                  placeholder="Escribe para filtrar alumnos"
+                  value={studentQuery}
+                  onFocus={() => setShowStudentOptions(true)}
+                  onBlur={() => {
+                    setTimeout(() => {
+                      setShowStudentOptions(false);
+                    }, 120);
+                  }}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setStudentQuery(nextValue);
+                    setShowStudentOptions(true);
+                    setFilters((prev) => ({
+                      ...prev,
+                      studentId: '',
+                    }));
+                  }}
+                />
+                {showStudentOptions ? (
+                  <div className="product-picker-menu">
+                    <button
+                      className="product-picker-option"
+                      type="button"
+                      onMouseDown={() => {
+                        setFilters((prev) => ({
+                          ...prev,
+                          studentId: '',
+                        }));
+                        setStudentQuery('');
+                        setShowStudentOptions(false);
+                      }}
+                    >
+                      Todos
+                    </button>
+                    {filteredStudentOptions.map((student) => (
+                      <button
+                        className="product-picker-option"
+                        key={student.id}
+                        onMouseDown={() => onSelectStudentOption(student)}
+                        type="button"
+                      >
+                        {student.name} {student.schoolCode ? `(${student.schoolCode})` : ''}
+                      </button>
+                    ))}
+                    {filteredStudentOptions.length === 0 ? (
+                      <p className="product-picker-empty">Sin coincidencias</p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
-            ) : null}
+            </label>
+          ) : (
+            <label>
+              Producto
+              <div className="product-picker">
+                <input
+                  type="text"
+                  value={productQuery}
+                  placeholder="Escribe para filtrar productos"
+                  onFocus={() => setShowProductOptions(true)}
+                  onBlur={() => {
+                    setTimeout(() => {
+                      setShowProductOptions(false);
+                    }, 120);
+                  }}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setProductQuery(nextValue);
+                    setShowProductOptions(true);
+                    setFilters((prev) => ({
+                      ...prev,
+                      productKey: '',
+                    }));
+                  }}
+                />
+                {showProductOptions ? (
+                  <div className="product-picker-menu">
+                    {filteredProductOptions.length > 0 ? (
+                      filteredProductOptions.map((option) => (
+                        <button
+                          className="product-picker-option"
+                          key={option.key}
+                          onMouseDown={() => onSelectProductOption(option)}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="product-picker-empty">Sin coincidencias</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </label>
+          )}
+
+          <div className="admin-cost-summary-row">
+            <button className="btn btn-primary" type="button" onClick={onSearch} disabled={loadingOrders}>
+              {loadingOrders ? 'Buscando...' : 'Buscar'}
+            </button>
+            <button className="btn btn-outline" type="button" onClick={onClear} disabled={loadingOrders}>
+              Limpiar
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={async () => {
+                const closed = await loadDayStatus();
+                if (!closed) {
+                  loadOrders(filters);
+                }
+              }}
+              disabled={loadingOrders}
+            >
+              Recargar órdenes
+            </button>
           </div>
-        </label>
-        <button
-          className="btn"
-          type="button"
-          onClick={async () => {
-            const closed = await loadDayStatus();
-            if (!closed) {
-              loadOrders();
-            }
-          }}
-        >
-          Recargar órdenes
-        </button>
+        </div>
 
         {dayClosed ? <p>Día cerrado: órdenes y anulaciones reiniciadas en 0.</p> : null}
 
@@ -261,6 +526,8 @@ function CancelSale() {
         </label>
 
         <div className="panel soft page-scroll-list">
+          {filteredOrders.length === 0 ? <p>{loadingOrders ? 'Cargando órdenes...' : 'No hay órdenes para mostrar.'}</p> : null}
+
           {filteredOrders.map((order) => (
             <div className="card" key={order._id}>
               <p>Orden: {order._id}</p>
@@ -268,9 +535,11 @@ function CancelSale() {
                 Alumno: {resolveStudent(order.studentId).name}
                 {resolveStudent(order.studentId).schoolCode ? ` (${resolveStudent(order.studentId).schoolCode})` : ''}
               </p>
+              <p>Productos: {(order.items || []).map((item) => `${item.quantity}x ${item.nameSnapshot}`).join(', ') || 'N/A'}</p>
               {order.guestSale ? <p>Tipo: Venta externa</p> : null}
               <p>Método: {order.paymentMethod}</p>
               <p>Total: ${Number(order.total).toLocaleString('es-CO')}</p>
+              <p>Fecha: {formatDateTime(order.createdAt)}</p>
               {pendingOrderIds.has(String(order._id)) ? (
                 <p>Anulación pendiente</p>
               ) : (

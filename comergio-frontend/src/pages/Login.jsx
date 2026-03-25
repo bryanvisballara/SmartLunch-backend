@@ -13,8 +13,7 @@ import {
   verifyBiometricRegistration,
 } from '../services/auth.service';
 import useAuthStore from '../store/auth.store';
-import loginLogo from '../assets/loginlogo.png';
-import smartLogo from '../assets/comergio.png';
+import loginLogo from '../assets/logonuevo.png';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
 import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
@@ -468,8 +467,7 @@ function Login() {
     <div className="page-center login-page login-page-auth">
       <section className="login-auth-hero" aria-label="Encabezado de login">
         <div className="login-auth-logo-wrap" aria-hidden="true">
-          <img className="login-auth-logo-image" src={loginLogo} alt="Comergio" />
-          <img className="login-auth-sublogo-image" src={smartLogo} alt="Comergio" />
+          <img className="login-auth-sublogo-image" src={loginLogo} alt="Comergio" />
         </div>
       </section>
 

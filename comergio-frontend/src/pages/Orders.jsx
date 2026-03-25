@@ -14,6 +14,8 @@ function Orders() {
     studentId: '',
     productKey: '',
   });
+  const [studentQuery, setStudentQuery] = useState('');
+  const [showStudentOptions, setShowStudentOptions] = useState(false);
   const [productQuery, setProductQuery] = useState('');
   const [showProductOptions, setShowProductOptions] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -115,6 +117,27 @@ function Orders() {
     return productOptions.filter((option) => option.label.toLowerCase().includes(queryText));
   }, [productOptions, productQuery]);
 
+  const studentOptions = useMemo(() => {
+    return (students || []).map((student) => ({
+      id: String(student._id),
+      name: student.name || 'N/A',
+      schoolCode: student.schoolCode || '',
+    }));
+  }, [students]);
+
+  const filteredStudentOptions = useMemo(() => {
+    const queryText = String(studentQuery || '').trim().toLowerCase();
+    if (!queryText) {
+      return studentOptions;
+    }
+
+    return studentOptions.filter((student) => {
+      const name = String(student.name || '').toLowerCase();
+      const schoolCode = String(student.schoolCode || '').toLowerCase();
+      return name.includes(queryText) || schoolCode.includes(queryText);
+    });
+  }, [studentOptions, studentQuery]);
+
   const finalVisibleOrders = useMemo(() => {
     if (filters.searchType !== 'product' || !filters.productKey) {
       return visibleOrders;
@@ -148,6 +171,8 @@ function Orders() {
         searchType: 'product',
         studentId: '',
       }));
+      setStudentQuery('');
+      setShowStudentOptions(false);
       setProductQuery('');
       setShowProductOptions(true);
       return;
@@ -158,8 +183,19 @@ function Orders() {
       searchType: 'student',
       productKey: '',
     }));
+    setStudentQuery('');
+    setShowStudentOptions(false);
     setProductQuery('');
     setShowProductOptions(false);
+  };
+
+  const onSelectStudentOption = (student) => {
+    setFilters((prev) => ({
+      ...prev,
+      studentId: student.id,
+    }));
+    setStudentQuery(student.schoolCode ? `${student.name} (${student.schoolCode})` : student.name);
+    setShowStudentOptions(false);
   };
 
   const onSelectProductOption = (option) => {
@@ -178,6 +214,8 @@ function Orders() {
   const onClear = () => {
     const emptyFilters = { from: '', to: '', searchType: 'student', studentId: '', productKey: '' };
     setFilters(emptyFilters);
+    setStudentQuery('');
+    setShowStudentOptions(false);
     setProductQuery('');
     setShowProductOptions(false);
     loadOrders(emptyFilters);
@@ -263,17 +301,58 @@ function Orders() {
           {filters.searchType === 'student' ? (
             <label>
               Alumno
-              <select
-                value={filters.studentId}
-                onChange={(event) => onChangeFilter('studentId', event.target.value)}
-              >
-                <option value="">Todos</option>
-                {students.map((student) => (
-                  <option key={student._id} value={student._id}>
-                    {student.name}
-                  </option>
-                ))}
-              </select>
+              <div className="product-picker">
+                <input
+                  type="text"
+                  value={studentQuery}
+                  placeholder="Escribe para filtrar alumnos"
+                  onFocus={() => setShowStudentOptions(true)}
+                  onBlur={() => {
+                    setTimeout(() => setShowStudentOptions(false), 120);
+                  }}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setStudentQuery(nextValue);
+                    setShowStudentOptions(true);
+                    setFilters((prev) => ({
+                      ...prev,
+                      studentId: '',
+                    }));
+                  }}
+                />
+                {showStudentOptions ? (
+                  <div className="product-picker-menu">
+                    <button
+                      className="product-picker-option"
+                      type="button"
+                      onMouseDown={() => {
+                        setFilters((prev) => ({
+                          ...prev,
+                          studentId: '',
+                        }));
+                        setStudentQuery('');
+                        setShowStudentOptions(false);
+                      }}
+                    >
+                      Todos
+                    </button>
+                    {filteredStudentOptions.length > 0 ? (
+                      filteredStudentOptions.map((student) => (
+                        <button
+                          className="product-picker-option"
+                          key={student.id}
+                          type="button"
+                          onMouseDown={() => onSelectStudentOption(student)}
+                        >
+                          {student.name} {student.schoolCode ? `(${student.schoolCode})` : ''}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="product-picker-empty">Sin coincidencias</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
             </label>
           ) : (
             <label>

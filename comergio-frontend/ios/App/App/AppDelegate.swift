@@ -2,20 +2,23 @@ import UIKit
 import Capacitor
 import FirebaseCore
 import FirebaseMessaging
-import UserNotifications
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
+    override init() {
+        super.init()
+        NSLog("[Comergio][AppDelegate] init start")
+        configureFirebaseIfNeeded()
+        NSLog("[Comergio][AppDelegate] init end firebaseConfigured=\(FirebaseApp.app() != nil)")
+    }
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure()
-        }
-
-        UNUserNotificationCenter.current().delegate = self
-
+        NSLog("[Comergio][AppDelegate] didFinishLaunching start firebaseConfigured=\(FirebaseApp.app() != nil)")
+        configureFirebaseIfNeeded()
+        NSLog("[Comergio][AppDelegate] didFinishLaunching end firebaseConfigured=\(FirebaseApp.app() != nil)")
         return true
     }
 
@@ -67,24 +70,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return false
     }
 
-}
+    private func configureFirebaseIfNeeded() {
+        if FirebaseApp.app() != nil {
+            NSLog("[Comergio][Firebase] default app already configured")
+            return
+        }
 
-extension AppDelegate: UNUserNotificationCenterDelegate {
-    // Show notification banner even when the app is in the foreground
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .badge, .sound])
-    }
+        if let filePath = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+           let options = FirebaseOptions(contentsOfFile: filePath) {
+            NSLog("[Comergio][Firebase] configuring from plist path=\(filePath)")
+            FirebaseApp.configure(options: options)
+            NSLog("[Comergio][Firebase] configured from explicit plist")
+            return
+        }
 
-    // Handle notification tap while app is in background/closed
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        completionHandler()
+        NSLog("[Comergio][Firebase] plist not found in bundle, falling back to default configure")
+        FirebaseApp.configure()
+        NSLog("[Comergio][Firebase] configured from default lookup")
     }
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Comergio",
-  "short_name": "Comergio",
+  "name": "Comergio App",
+  "short_name": "Comergio App",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

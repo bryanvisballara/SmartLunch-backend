@@ -4,7 +4,24 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { registerDeviceToken } from '../services/notifications.service';
 
 const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
+const ANDROID_PUSH_CHANNEL_ID = 'comergio_alerts_v1';
 let nativePushSetupPromise = null;
+
+async function ensureAndroidPushChannel() {
+  try {
+    await PushNotifications.createChannel({
+      id: ANDROID_PUSH_CHANNEL_ID,
+      name: 'Notificaciones Comergio',
+      description: 'Alertas importantes de Comergio',
+      importance: 5,
+      visibility: 1,
+      sound: 'pushandroid',
+      vibration: true,
+    });
+  } catch (error) {
+    console.warn('[PUSH_CHANNEL_CREATE_FAILED]', error);
+  }
+}
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -37,85 +54,44 @@ async function ensureNativePushNotifications() {
   nativePushSetupPromise = (async () => {
     const platform = Capacitor.getPlatform(); // 'ios' | 'android'
 
-    let permission = await PushNotifications.checkPermissions();
+    if (platform === 'android') {
+      await ensureAndroidPushChannel();
+    }
+
+    let permission = await FirebaseMessaging.checkPermissions();
 
     if (permission.receive === 'prompt' || permission.receive === 'prompt-with-rationale') {
-      permission = await PushNotifications.requestPermissions();
+      permission = await FirebaseMessaging.requestPermissions();
     }
 
     if (permission.receive !== 'granted') {
       return { enabled: false, reason: 'Permiso de notificaciones nativas no concedido' };
     }
 
-    const nativeToken = await new Promise((resolve) => {
-      let settled = false;
-      let registrationHandle = null;
-      let registrationErrorHandle = null;
-
-      const finish = (value) => {
-        if (settled) return;
-        settled = true;
-
-        Promise.allSettled([
-          registrationHandle?.remove?.(),
-          registrationErrorHandle?.remove?.(),
-        ]).finally(() => {
-          resolve(value);
-        });
-      };
-
-      const finishWithTimeout = () => {
-        finish({ token: '', reason: 'Timeout registrando token nativo' });
-      };
-
-      const timeout = window.setTimeout(() => {
-        finishWithTimeout();
-      }, 15000);
-
-      const onRegistration = (event) => {
-        window.clearTimeout(timeout);
-        finish({ token: String(event?.value || '').trim(), reason: null });
-      };
-
-      const onError = (error) => {
-        window.clearTimeout(timeout);
-        finish({ token: '', reason: `Error de registro nativo: ${JSON.stringify(error)}` });
-      };
-
-      Promise.all([
-        PushNotifications.addListener('registration', onRegistration),
-        PushNotifications.addListener('registrationError', onError),
-      ])
-        .then(([regHandle, errHandle]) => {
-          registrationHandle = regHandle;
-          registrationErrorHandle = errHandle;
-          return PushNotifications.register();
-        })
-        .catch((error) => {
-          window.clearTimeout(timeout);
-          finish({ token: '', reason: `Error preparando listeners nativos: ${error?.message || 'unknown'}` });
-        });
-    });
-
-    let fcmToken = '';
-    let fcmReason = null;
+    let fcmResult = { token: '', reason: null };
 
     try {
       const tokenResult = await FirebaseMessaging.getToken();
-      fcmToken = String(tokenResult?.token || '').trim();
-      if (!fcmToken) {
-        fcmReason = 'Firebase no devolvió token FCM';
+      const token = String(tokenResult?.token || '').trim();
+
+      if (token) {
+        fcmResult = { token, reason: null };
+      } else {
+        fcmResult = { token: '', reason: 'Firebase no devolvió token FCM' };
       }
     } catch (error) {
-      fcmReason = `Error obteniendo token FCM: ${error?.message || 'unknown'}`;
+      fcmResult = {
+        token: '',
+        reason: `Error obteniendo token FCM: ${error?.message || 'unknown'}`,
+      };
     }
 
-    const tokenForBackend = fcmToken || nativeToken.token;
+    const tokenForBackend = fcmResult.token;
 
     if (!tokenForBackend) {
       return {
         enabled: false,
-        reason: fcmReason || nativeToken.reason || 'No se pudo obtener token de notificaciones',
+        reason: fcmResult.reason || 'No se pudo obtener token de notificaciones',
       };
     }
 
@@ -126,7 +102,7 @@ async function ensureNativePushNotifications() {
       return { enabled: false, reason: `Error registrando token: ${err.message}` };
     }
 
-    return { enabled: true, tokenSource: fcmToken ? 'fcm' : 'native' };
+    return { enabled: true, tokenSource: 'fcm' };
   })();
 
   try {
