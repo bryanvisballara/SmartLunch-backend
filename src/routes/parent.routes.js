@@ -90,7 +90,81 @@ function formatDateLabelEs(dateValue) {
   }).format(dateValue);
 }
 
-function parseDateFromQuestion(rawQuestion, context = {}) {
+function buildDateWithReference(referenceDateValue, day) {
+  const referenceDate = new Date(referenceDateValue);
+  if (!Number.isFinite(day) || day < 1 || day > 31 || Number.isNaN(referenceDate.getTime())) {
+    return null;
+  }
+
+  const candidate = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), day);
+  if (candidate.getMonth() !== referenceDate.getMonth() || candidate.getDate() !== day) {
+    return null;
+  }
+
+  return startOfDayLocal(candidate);
+}
+
+function resolveGioReferenceDate(context = {}, history = []) {
+  const candidates = [
+    context?.lastDate,
+    context?.lastPeakDate,
+    context?.lastFromDate,
+    context?.lastToDate,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const parsed = new Date(String(candidate));
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
+  const recentHistory = Array.isArray(history)
+    ? history.filter((item) => item && item.role === 'user').slice(-6).reverse()
+    : [];
+
+  for (const item of recentHistory) {
+    const rawContent = String(item.content || '').trim();
+    const explicitIso = rawContent.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+    if (explicitIso) {
+      const parsed = new Date(Number(explicitIso[1]), Number(explicitIso[2]) - 1, Number(explicitIso[3]));
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+
+    const explicitSpanish = normalizeAiText(rawContent).match(/\b(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+(\d{4}))?\b/);
+    if (explicitSpanish) {
+      const monthMap = {
+        enero: 0,
+        febrero: 1,
+        marzo: 2,
+        abril: 3,
+        mayo: 4,
+        junio: 5,
+        julio: 6,
+        agosto: 7,
+        septiembre: 8,
+        setiembre: 8,
+        octubre: 9,
+        noviembre: 10,
+        diciembre: 11,
+      };
+      const parsed = new Date(
+        explicitSpanish[3] ? Number(explicitSpanish[3]) : new Date().getFullYear(),
+        monthMap[explicitSpanish[2]],
+        Number(explicitSpanish[1])
+      );
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseDateFromQuestion(rawQuestion, context = {}, history = []) {
   const question = normalizeAiText(rawQuestion);
   if (!question) {
     return null;
@@ -154,6 +228,23 @@ function parseDateFromQuestion(rawQuestion, context = {}) {
       if (!Number.isNaN(parsed.getTime())) {
         return startOfDayLocal(parsed);
       }
+    }
+  }
+
+  const referenceDate = resolveGioReferenceDate(context, history);
+  const isPartialDateFollowUp = /^(y\s+)?(el\s+)?\d{1,2}[?.!]?$/i.test(question)
+    || /\b(y\s+el|el)\s+\d{1,2}\b/.test(question)
+    || /\b(que|qué)\s+consumio\s+el\s+\d{1,2}\b/.test(question)
+    || /\b(y\s+que|y\s+qué)\s+consumio\s+el\s+\d{1,2}\b/.test(question);
+  const hasRangeSignal = /\b(ultim|dias|dia|semana|mes|promedio|rango|periodo)\b/.test(question);
+  const bareDayMatch = !hasRangeSignal && referenceDate
+    ? question.match(/(?:^|\b)(?:y\s+)?(?:el\s+)?(\d{1,2})(?:\b|[?.!])/)
+    : null;
+
+  if (isPartialDateFollowUp && bareDayMatch) {
+    const inferredDate = buildDateWithReference(referenceDate, Number(bareDayMatch[1]));
+    if (inferredDate) {
+      return inferredDate;
     }
   }
 
@@ -234,7 +325,7 @@ function isGioSpecificDayFollowUp(rawQuestion, context = {}) {
 }
 
 function resolveGioTimeframe(rawQuestion, context = {}, history = []) {
-  const parsedDate = parseDateFromQuestion(rawQuestion, context);
+  const parsedDate = parseDateFromQuestion(rawQuestion, context, history);
   if (parsedDate) {
     return {
       scope: 'date',
@@ -332,6 +423,9 @@ function inferGioIntent(rawQuestion, parsedDate, context = {}) {
   }
   if (/\b(productos|que consumio|que compro|que comio|que pidio|detalle|desglose|desglosame|cuales|top|mas frecuente|mas pidio|mas compro)\b/.test(question)) {
     return 'products';
+  }
+  if (parsedDate && shouldReuseGioScope(rawQuestion) && context?.lastIntent) {
+    return String(context.lastIntent);
   }
   if (parsedDate) {
     return 'summary';
