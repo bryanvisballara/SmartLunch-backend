@@ -140,7 +140,7 @@ function getBoldPaymentId(payload) {
   ).trim();
 }
 
-function getBoldCheckoutUrl(payload) {
+function getBoldCheckoutUrl(payload, fallbackReference = '') {
   const directUrl = String(
     payload?.checkoutUrl ||
       payload?.checkout_url ||
@@ -170,6 +170,7 @@ function getBoldCheckoutUrl(payload) {
       payload?.data?.reference_id ||
       payload?.data?.reference ||
       payload?.data?.metadata?.reference ||
+      fallbackReference ||
       ''
   ).trim();
   const transactionId = String(
@@ -1207,7 +1208,7 @@ router.post('/bold/recharge', async (req, res) => {
         deviceFingerprint,
       });
 
-      const redirectUrl = getBoldCheckoutUrl(paymentAttempt) || String(paymentAttempt?.next_actions?.redirect_url || '').trim();
+      const redirectUrl = getBoldCheckoutUrl(paymentAttempt, reference) || String(paymentAttempt?.next_actions?.redirect_url || '').trim();
       const redirectMethod = String(
         paymentAttempt?.next_actions?.redirect_method || paymentAttempt?.redirect_method || ''
       ).trim() || (redirectUrl ? 'GET' : '');
