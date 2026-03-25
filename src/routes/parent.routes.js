@@ -167,21 +167,213 @@ function parseDateFromQuestion(rawQuestion, context = {}) {
   return null;
 }
 
-function inferGioIntent(rawQuestion, parsedDate) {
+function parseGioRangeDays(rawQuestion) {
   const question = normalizeAiText(rawQuestion);
   if (!question) {
-    return 'summary';
+    return null;
   }
+
+  const explicitDays = question.match(/\bultim(?:o|os|as)?\s+(\d{1,3})\s+dias\b/);
+  if (explicitDays) {
+    const days = Number(explicitDays[1]);
+    if (Number.isFinite(days) && days > 0 && days <= 365) {
+      return days;
+    }
+  }
+
+  if (/\bultima\s+semana\b|\bultimos\s+7\s+dias\b|\besta\s+semana\b/.test(question)) {
+    return 7;
+  }
+
+  if (/\bultimas\s+2\s+semanas\b|\bultimos\s+14\s+dias\b/.test(question)) {
+    return 14;
+  }
+
+  if (/\bultimo\s+mes\b|\bultimos\s+30\s+dias\b|\beste\s+mes\b/.test(question)) {
+    return 30;
+  }
+
+  return null;
+}
+
+function shouldReuseGioScope(rawQuestion) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return false;
+  }
+
+  return /^(y|entonces|tambien|tambien,|ok|vale|perfecto)\b/.test(question)
+    || /\b(ese dia|aquel dia|ese periodo|ese rango|en ese rango|en ese periodo|de ese dia|de ese periodo|ahi|alli)\b/.test(question)
+    || /\b(y cuanto|y que|y cuales|cuanto fue|cuantas ordenes|cual fue el promedio|y el promedio)\b/.test(question);
+}
+
+function resolveGioTimeframe(rawQuestion, context = {}, history = []) {
+  const parsedDate = parseDateFromQuestion(rawQuestion, context);
   if (parsedDate) {
-    return 'date';
+    return {
+      scope: 'date',
+      parsedDate,
+      fromDate: startOfDayLocal(parsedDate),
+      toDate: endOfDayLocal(parsedDate),
+      rangeDays: 1,
+    };
+  }
+
+  const question = normalizeAiText(rawQuestion);
+  const now = new Date();
+  const explicitRangeDays = parseGioRangeDays(rawQuestion);
+  if (explicitRangeDays) {
+    if (/\beste\s+mes\b/.test(question)) {
+      return {
+        scope: 'range',
+        fromDate: startOfCurrentMonth(),
+        toDate: endOfDayLocal(now),
+        rangeDays: Math.max(1, Math.round((endOfDayLocal(now) - startOfCurrentMonth()) / 86400000) + 1),
+      };
+    }
+
+    const fromDate = startOfDayLocal(now);
+    fromDate.setDate(fromDate.getDate() - (explicitRangeDays - 1));
+    return {
+      scope: 'range',
+      fromDate,
+      toDate: endOfDayLocal(now),
+      rangeDays: explicitRangeDays,
+    };
+  }
+
+  if (/\b(ese periodo|ese rango|en ese rango|en ese periodo)\b/.test(question) && context?.lastFromDate && context?.lastToDate) {
+    const fromDate = new Date(String(context.lastFromDate));
+    const toDate = new Date(String(context.lastToDate));
+    if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+      return {
+        scope: context?.lastScope === 'date' ? 'date' : 'range',
+        parsedDate: context?.lastScope === 'date' ? fromDate : null,
+        fromDate: startOfDayLocal(fromDate),
+        toDate: endOfDayLocal(toDate),
+        rangeDays: Number(context?.lastRangeDays || 1),
+      };
+    }
+  }
+
+  const recentUserMessages = Array.isArray(history)
+    ? history.filter((item) => item && item.role === 'user').slice(-4)
+    : [];
+  const hasFollowUpSignal = shouldReuseGioScope(rawQuestion)
+    || (recentUserMessages.length > 1 && !/\b(hoy|ayer|ultim|semana|mes|dia|dias|fecha|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|enero|febrero)\b/.test(question));
+
+  if (hasFollowUpSignal && context?.lastFromDate && context?.lastToDate) {
+    const fromDate = new Date(String(context.lastFromDate));
+    const toDate = new Date(String(context.lastToDate));
+    if (!Number.isNaN(fromDate.getTime()) && !Number.isNaN(toDate.getTime())) {
+      return {
+        scope: context?.lastScope === 'date' ? 'date' : 'range',
+        parsedDate: context?.lastScope === 'date' ? fromDate : null,
+        fromDate: startOfDayLocal(fromDate),
+        toDate: endOfDayLocal(toDate),
+        rangeDays: Number(context?.lastRangeDays || 1),
+      };
+    }
+  }
+
+  return {
+    scope: 'range',
+    fromDate: startOfDayLocal(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)),
+    toDate: endOfDayLocal(now),
+    rangeDays: 30,
+  };
+}
+
+function inferGioIntent(rawQuestion, parsedDate, context = {}) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return String(context?.lastIntent || 'summary');
   }
   if (/\b(promedio|media|promedi|diario promedio)\b/.test(question)) {
     return 'average';
   }
+  if (/\b(cuantas ordenes|cuantos pedidos|cuantas compras|numero de ordenes|numero de pedidos)\b/.test(question)) {
+    return 'orders';
+  }
+  if (/\b(cuanto|cuanto gasto|cuanto gast[oó]|gasto|valor|total|plata)\b/.test(question)) {
+    return 'total';
+  }
+  if (/\b(productos|que consumio|que compro|que comio|que pidio|detalle|desglose|desglosame|cuales|top|mas frecuente|mas pidio|mas compro)\b/.test(question)) {
+    return 'products';
+  }
+  if (parsedDate) {
+    return 'summary';
+  }
   if (/\b(que consumio|que compro|consumo|comio|compro|pedido|orden)\b/.test(question)) {
-    return 'date';
+    return 'products';
+  }
+  if (shouldReuseGioScope(rawQuestion) && context?.lastIntent) {
+    return String(context.lastIntent);
   }
   return 'summary';
+}
+
+function buildGioMetrics(orders, fromDate, toDate) {
+  const safeOrders = Array.isArray(orders) ? orders : [];
+  const total = safeOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const daysMap = new Map();
+  const productsMap = new Map();
+
+  for (const order of safeOrders) {
+    const dayKey = startOfDayLocal(order.createdAt).toISOString().slice(0, 10);
+    daysMap.set(dayKey, Number(daysMap.get(dayKey) || 0) + Number(order.total || 0));
+
+    for (const item of Array.isArray(order.items) ? order.items : []) {
+      const name = String(item?.nameSnapshot || 'Producto');
+      const quantity = Number(item?.quantity || 0);
+      const subtotal = Number(item?.subtotal || 0);
+      const previous = productsMap.get(name) || { quantity: 0, subtotal: 0 };
+      productsMap.set(name, {
+        quantity: previous.quantity + quantity,
+        subtotal: previous.subtotal + subtotal,
+      });
+    }
+  }
+
+  const topProducts = Array.from(productsMap.entries())
+    .map(([name, data]) => ({ name, quantity: data.quantity, subtotal: data.subtotal }))
+    .sort((a, b) => b.subtotal - a.subtotal);
+
+  const activeDays = daysMap.size;
+  const calendarDays = Math.max(1, Math.round((endOfDayLocal(toDate) - startOfDayLocal(fromDate)) / 86400000) + 1);
+  const averageByActiveDay = activeDays > 0 ? total / activeDays : 0;
+  const averageByCalendarDay = total / calendarDays;
+
+  return {
+    total,
+    ordersCount: safeOrders.length,
+    activeDays,
+    calendarDays,
+    averageByActiveDay,
+    averageByCalendarDay,
+    topProducts,
+  };
+}
+
+function formatGioScopeLabel(scope, fromDate, toDate, rangeDays) {
+  if (scope === 'date') {
+    return formatDateLabelEs(fromDate);
+  }
+
+  if (Number(rangeDays) === 7) {
+    return 'los últimos 7 días';
+  }
+  if (Number(rangeDays) === 14) {
+    return 'los últimos 14 días';
+  }
+  if (Number(rangeDays) === 30) {
+    return 'los últimos 30 días';
+  }
+  if (Number(rangeDays) > 1) {
+    return `los últimos ${rangeDays} días`;
+  }
+
+  return `del ${formatDateLabelEs(fromDate)} al ${formatDateLabelEs(toDate)}`;
 }
 
 function normalizeFoodRestrictionReason(value) {
@@ -1893,6 +2085,16 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
     const studentId = toObjectId(req.body.studentId || req.query.studentId);
     const message = String(req.body?.message || '').trim();
     const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
+    const history = Array.isArray(req.body?.history)
+      ? req.body.history
+        .filter((item) => item && (item.role === 'user' || item.role === 'assistant'))
+        .map((item) => ({
+          role: item.role,
+          content: String(item.content || '').trim(),
+        }))
+        .filter((item) => item.content)
+        .slice(-20)
+      : [];
 
     if (!parentUserId) {
       return res.status(400).json({ message: 'Invalid parent user id' });
@@ -1925,142 +2127,96 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       return res.status(404).json({ message: 'Student not found' });
     }
 
-    const parsedDate = parseDateFromQuestion(message, context);
-    const intent = inferGioIntent(message, parsedDate);
+    const timeframe = resolveGioTimeframe(message, context, history);
+    const parsedDate = timeframe?.parsedDate || null;
+    const intent = inferGioIntent(message, parsedDate, context);
     const studentName = String(student.name || 'el alumno');
-    let answer = '';
-    let nextContext = {
-      studentId: String(studentId),
-      studentName,
-      lastIntent: intent,
-      lastDate: context?.lastDate || null,
-    };
-
-    if (intent === 'date' && parsedDate) {
-      const fromDate = startOfDayLocal(parsedDate);
-      const toDate = endOfDayLocal(parsedDate);
-      const dateOrders = await Order.find({
-        schoolId,
-        studentId,
-        status: 'completed',
-        createdAt: { $gte: fromDate, $lte: toDate },
-      })
-        .select('createdAt total items')
-        .lean();
-
-      const total = dateOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
-      const itemsMap = new Map();
-
-      for (const order of dateOrders) {
-        for (const item of Array.isArray(order.items) ? order.items : []) {
-          const name = String(item?.nameSnapshot || 'Producto');
-          const quantity = Number(item?.quantity || 0);
-          const subtotal = Number(item?.subtotal || 0);
-          const previous = itemsMap.get(name) || { quantity: 0, subtotal: 0 };
-          itemsMap.set(name, {
-            quantity: previous.quantity + quantity,
-            subtotal: previous.subtotal + subtotal,
-          });
-        }
-      }
-
-      const topItems = Array.from(itemsMap.entries())
-        .map(([name, data]) => ({ name, quantity: data.quantity, subtotal: data.subtotal }))
-        .sort((a, b) => b.subtotal - a.subtotal)
-        .slice(0, 5);
-
-      if (!dateOrders.length) {
-        answer = `${studentName} no tiene consumos registrados el ${formatDateLabelEs(fromDate)}.`;
-      } else {
-        const detailsText = topItems.length
-          ? ` Productos principales: ${topItems.map((item) => `${item.name} x${item.quantity}`).join(', ')}.`
-          : '';
-        answer = `${studentName} consumio ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(total)} el ${formatDateLabelEs(fromDate)} en ${dateOrders.length} orden(es).${detailsText}`;
-      }
-
-      nextContext = {
-        ...nextContext,
-        lastIntent: 'date',
-        lastDate: fromDate.toISOString().slice(0, 10),
-      };
-
-      return res.status(200).json({ answer, context: nextContext });
-    }
-
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-    const recentOrders = await Order.find({
+    const fromDate = startOfDayLocal(timeframe.fromDate);
+    const toDate = endOfDayLocal(timeframe.toDate);
+    const scopeLabel = formatGioScopeLabel(timeframe.scope, fromDate, toDate, timeframe.rangeDays);
+    const matchingOrders = await Order.find({
       schoolId,
       studentId,
       status: 'completed',
-      createdAt: { $gte: startOfDayLocal(thirtyDaysAgo) },
+      createdAt: { $gte: fromDate, $lte: toDate },
     })
       .select('createdAt total items')
       .sort({ createdAt: -1 })
       .lean();
-
-    const totalRecent = recentOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
-    const daysMap = new Map();
-    const productsMap = new Map();
-
-    for (const order of recentOrders) {
-      const dayKey = startOfDayLocal(order.createdAt).toISOString().slice(0, 10);
-      daysMap.set(dayKey, Number(daysMap.get(dayKey) || 0) + Number(order.total || 0));
-
-      for (const item of Array.isArray(order.items) ? order.items : []) {
-        const name = String(item?.nameSnapshot || 'Producto');
-        const quantity = Number(item?.quantity || 0);
-        const subtotal = Number(item?.subtotal || 0);
-        const previous = productsMap.get(name) || { quantity: 0, subtotal: 0 };
-        productsMap.set(name, {
-          quantity: previous.quantity + quantity,
-          subtotal: previous.subtotal + subtotal,
-        });
-      }
-    }
-
-    const activeDays = daysMap.size;
-    const averageByActiveDay = activeDays > 0 ? totalRecent / activeDays : 0;
-    const averageByMonthWindow = totalRecent / 30;
-    const topProducts = Array.from(productsMap.entries())
-      .map(([name, data]) => ({ name, quantity: data.quantity, subtotal: data.subtotal }))
-      .sort((a, b) => b.subtotal - a.subtotal)
-      .slice(0, 3);
-
+    const metrics = buildGioMetrics(matchingOrders, fromDate, toDate);
     const currencyFormat = new Intl.NumberFormat('es-CO', {
       style: 'currency',
       currency: 'COP',
       maximumFractionDigits: 0,
     });
 
-    if (!recentOrders.length) {
-      answer = `No encontré consumos recientes de ${studentName} en los últimos 30 días.`;
+    const topProducts = metrics.topProducts.slice(0, 5);
+    let answer = '';
+    const nextContext = {
+      studentId: String(studentId),
+      studentName,
+      lastIntent: intent,
+      lastDate: timeframe.scope === 'date' ? fromDate.toISOString().slice(0, 10) : context?.lastDate || null,
+      lastScope: timeframe.scope,
+      lastFromDate: fromDate.toISOString().slice(0, 10),
+      lastToDate: toDate.toISOString().slice(0, 10),
+      lastRangeDays: Number(timeframe.rangeDays || 1),
+    };
+
+    if (!matchingOrders.length) {
+      answer = timeframe.scope === 'date'
+        ? `${studentName} no tiene consumos registrados el ${formatDateLabelEs(fromDate)}.`
+        : `No encontré consumos de ${studentName} en ${scopeLabel}.`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
     if (intent === 'average') {
-      answer = `En los últimos 30 días, ${studentName} lleva ${currencyFormat.format(totalRecent)} en ${recentOrders.length} orden(es). Promedio por día con consumo: ${currencyFormat.format(averageByActiveDay)}. Promedio diario sobre 30 días: ${currencyFormat.format(averageByMonthWindow)}.`;
+      if (timeframe.scope === 'date') {
+        const averagePerOrder = metrics.ordersCount > 0 ? metrics.total / metrics.ordersCount : 0;
+        answer = `${studentName} registró ${metrics.ordersCount} orden(es) el ${formatDateLabelEs(fromDate)} por ${currencyFormat.format(metrics.total)}. Promedio por orden: ${currencyFormat.format(averagePerOrder)}.`;
+      } else {
+        answer = `En ${scopeLabel}, ${studentName} lleva ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es). Promedio por día con consumo: ${currencyFormat.format(metrics.averageByActiveDay)}. Promedio diario del período: ${currencyFormat.format(metrics.averageByCalendarDay)}.`;
+      }
       return res.status(200).json({
         answer,
-        context: {
-          ...nextContext,
-          lastIntent: 'average',
-        },
+        context: nextContext,
       });
     }
 
+    if (intent === 'orders') {
+      answer = timeframe.scope === 'date'
+        ? `${studentName} hizo ${metrics.ordersCount} orden(es) el ${formatDateLabelEs(fromDate)}.`
+        : `${studentName} hizo ${metrics.ordersCount} orden(es) en ${scopeLabel}, repartidas en ${metrics.activeDays} día(s) con consumo.`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'total') {
+      answer = timeframe.scope === 'date'
+        ? `${studentName} gastó ${currencyFormat.format(metrics.total)} el ${formatDateLabelEs(fromDate)} en ${metrics.ordersCount} orden(es).`
+        : `${studentName} gastó ${currencyFormat.format(metrics.total)} en ${scopeLabel}, con ${metrics.ordersCount} orden(es) en ${metrics.activeDays} día(s) de consumo.`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'products') {
+      const productsText = topProducts.length
+        ? topProducts.map((item) => `${item.name} x${item.quantity}`).join(', ')
+        : 'sin detalle de productos';
+      answer = timeframe.scope === 'date'
+        ? `${studentName} consumió el ${formatDateLabelEs(fromDate)}: ${productsText}. Total del día: ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es).`
+        : `En ${scopeLabel}, ${studentName} consumió principalmente: ${productsText}. Total del período: ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es).`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
     const topProductsText = topProducts.length
-      ? ` Productos más frecuentes: ${topProducts.map((item) => `${item.name} x${item.quantity}`).join(', ')}.`
+      ? ` Productos más frecuentes: ${topProducts.slice(0, 3).map((item) => `${item.name} x${item.quantity}`).join(', ')}.`
       : '';
-    answer = `${studentName} lleva ${currencyFormat.format(totalRecent)} en los últimos 30 días, con ${recentOrders.length} orden(es) en ${activeDays} día(s) de consumo.${topProductsText} Si quieres, te detallo un día específico.`;
+    answer = timeframe.scope === 'date'
+      ? `${studentName} consumió ${currencyFormat.format(metrics.total)} el ${formatDateLabelEs(fromDate)} en ${metrics.ordersCount} orden(es).${topProductsText}`
+      : `${studentName} lleva ${currencyFormat.format(metrics.total)} en ${scopeLabel}, con ${metrics.ordersCount} orden(es) en ${metrics.activeDays} día(s) de consumo.${topProductsText} Si quieres, te detallo productos, promedio o un día específico.`;
 
     return res.status(200).json({
       answer,
-      context: {
-        ...nextContext,
-        lastIntent: 'summary',
-      },
+      context: nextContext,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
