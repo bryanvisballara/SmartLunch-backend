@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { AppLauncher } from '@capacitor/app-launcher';
+import { Browser } from '@capacitor/browser';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import {
@@ -89,6 +92,38 @@ function BoldResultContent() {
   );
 }
 
+function buildBoldDeviceFingerprint() {
+  const userAgent = String(window.navigator?.userAgent || '').trim();
+  const platform = String(window.navigator?.platform || '').trim();
+  const language = String(window.navigator?.language || 'es-CO').trim();
+  const javaEnabled = typeof window.navigator?.javaEnabled === 'function'
+    ? Boolean(window.navigator.javaEnabled())
+    : false;
+  const browser = userAgent.includes('Chrome')
+    ? 'Chrome'
+    : userAgent.includes('Safari')
+      ? 'Safari'
+      : userAgent.includes('Firefox')
+        ? 'Firefox'
+        : 'Unknown';
+  const mobile = /android|iphone|ipad|ipod/i.test(userAgent);
+
+  return {
+    device_type: mobile ? 'SMARTPHONE' : 'DESKTOP',
+    os: platform || 'Unknown',
+    model: '',
+    browser,
+    java_enabled: javaEnabled,
+    language,
+    color_depth: Number(window.screen?.colorDepth || 24),
+    screen_height: Number(window.screen?.height || 0),
+    screen_width: Number(window.screen?.width || 0),
+    time_zone_offset: Number(new Date().getTimezoneOffset() * -1),
+    user_agent: userAgent,
+    platform,
+  };
+}
+
 function currentYearMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -167,14 +202,29 @@ function ParentPortal() {
   const [daviSubmitLoading, setDaviSubmitLoading] = useState(false);
   const [daviSubmitError, setDaviSubmitError] = useState('');
   const [daviSubmitSuccess, setDaviSubmitSuccess] = useState('');
-  const [boldPaymentData, setBoldPaymentData] = useState(null);
-  const [boldButtonLoadError, setBoldButtonLoadError] = useState('');
-  const boldContainerRef = useRef(null);
+  const [showBoldCardForm, setShowBoldCardForm] = useState(false);
+  const [isBoldCardFormClosing, setIsBoldCardFormClosing] = useState(false);
+  const [boldTopupCardNumber, setBoldTopupCardNumber] = useState('');
+  const [boldTopupCardExpiry, setBoldTopupCardExpiry] = useState('');
+  const [boldTopupCardCvv, setBoldTopupCardCvv] = useState('');
+  const [boldTopupCardholderName, setBoldTopupCardholderName] = useState('');
+  const [boldTopupDocumentType, setBoldTopupDocumentType] = useState('CC');
+  const [boldTopupDocumentNumber, setBoldTopupDocumentNumber] = useState('');
+  const [nequiAmount, setNequiAmount] = useState('');
+  const [nequiDocumentType, setNequiDocumentType] = useState('CC');
+  const [nequiDocumentNumber, setNequiDocumentNumber] = useState('');
+  const [nequiSubmitLoading, setNequiSubmitLoading] = useState(false);
+  const [nequiSubmitError, setNequiSubmitError] = useState('');
+  const [nequiSubmitSuccess, setNequiSubmitSuccess] = useState('');
   const [pseAmount, setPseAmount] = useState('');
+  const [pseDocumentType, setPseDocumentType] = useState('CC');
+  const [pseDocumentNumber, setPseDocumentNumber] = useState('');
   const [pseSubmitLoading, setPseSubmitLoading] = useState(false);
   const [pseSubmitError, setPseSubmitError] = useState('');
   const [pseSubmitSuccess, setPseSubmitSuccess] = useState('');
   const [bancolombiaAmount, setBancolombiaAmount] = useState('');
+  const [bancolombiaDocumentType, setBancolombiaDocumentType] = useState('CC');
+  const [bancolombiaDocumentNumber, setBancolombiaDocumentNumber] = useState('');
   const [bancolombiaSubmitLoading, setBancolombiaSubmitLoading] = useState(false);
   const [bancolombiaSubmitError, setBancolombiaSubmitError] = useState('');
   const [bancolombiaSubmitSuccess, setBancolombiaSubmitSuccess] = useState('');
@@ -256,6 +306,7 @@ function ParentPortal() {
   const isTopupsPage = location.pathname === '/parent/recargas';
   const isTopupMethodsPage = location.pathname === '/parent/recargas/metodos';
   const isTopupDaviPlataPage = location.pathname === '/parent/recargas/metodos/daviplata';
+  const isTopupNequiPage = location.pathname === '/parent/recargas/metodos/nequi';
   const isBoldResultPage = location.pathname === '/parent/bold-resultado';
   const isTopupPsePage = location.pathname === '/parent/recargas/metodos/pse';
   const isTopupBancolombiaPage = location.pathname === '/parent/recargas/metodos/bancolombia';
@@ -303,6 +354,14 @@ function ParentPortal() {
   const daviTotalCharge = Number.isFinite(daviAmountNumber) && daviAmountNumber > 0
     ? daviAmountNumber + daviFeeAmount
     : 0;
+  const nequiAmountNumber = Number(nequiAmount || 0);
+  const nequiFeeAmount = Number.isFinite(nequiAmountNumber) && nequiAmountNumber > 0
+    ? Math.round(nequiAmountNumber * rechargeFeeRate)
+    : 0;
+  const nequiTotalCharge = Number.isFinite(nequiAmountNumber) && nequiAmountNumber > 0
+    ? nequiAmountNumber + nequiFeeAmount
+    : 0;
+  const nequiDocumentDigits = String(nequiDocumentNumber || '').replace(/\D/g, '');
   const pseAmountNumber = Number(pseAmount || 0);
   const pseFeeAmount = Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
     ? Math.round(pseAmountNumber * rechargeFeeRate)
@@ -310,6 +369,7 @@ function ParentPortal() {
   const pseTotalCharge = Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
     ? pseAmountNumber + pseFeeAmount
     : 0;
+  const pseDocumentDigits = String(pseDocumentNumber || '').replace(/\D/g, '');
   const bancolombiaAmountNumber = Number(bancolombiaAmount || 0);
   const bancolombiaFeeAmount = Number.isFinite(bancolombiaAmountNumber) && bancolombiaAmountNumber > 0
     ? Math.round(bancolombiaAmountNumber * rechargeFeeRate)
@@ -317,6 +377,7 @@ function ParentPortal() {
   const bancolombiaTotalCharge = Number.isFinite(bancolombiaAmountNumber) && bancolombiaAmountNumber > 0
     ? bancolombiaAmountNumber + bancolombiaFeeAmount
     : 0;
+  const bancolombiaDocumentDigits = String(bancolombiaDocumentNumber || '').replace(/\D/g, '');
   const brebAmountNumber = Number(brebAmount || 0);
   const brebFeeAmount = Number.isFinite(brebAmountNumber) && brebAmountNumber > 0
     ? Math.round(brebAmountNumber * rechargeFeeRate)
@@ -328,11 +389,33 @@ function ParentPortal() {
     Number.isFinite(daviAmountNumber) &&
     daviAmountNumber >= minimumBoldRecharge
   );
+  const canContinueNequiRecharge = Boolean(
+    Number.isFinite(nequiAmountNumber) &&
+    nequiAmountNumber >= minimumBoldRecharge &&
+    nequiDocumentDigits.length >= 5
+  );
+  const boldTopupCardDigits = String(boldTopupCardNumber || '').replace(/\D/g, '');
+  const boldTopupExpiryDigits = String(boldTopupCardExpiry || '').replace(/\D/g, '');
+  const boldTopupCvvDigits = String(boldTopupCardCvv || '').replace(/\D/g, '');
+  const boldTopupDocumentDigits = String(boldTopupDocumentNumber || '').replace(/\D/g, '');
+  const canSubmitBoldCardDetails = Boolean(
+    boldTopupCardDigits.length >= 13 &&
+    boldTopupCardDigits.length <= 19 &&
+    boldTopupExpiryDigits.length === 4 &&
+    boldTopupCvvDigits.length >= 3 &&
+    boldTopupCvvDigits.length <= 4 &&
+    String(boldTopupCardholderName || '').trim().length >= 5 &&
+    boldTopupDocumentDigits.length >= 5
+  );
   const canContinuePseRecharge = Boolean(
-    Number.isFinite(pseAmountNumber) && pseAmountNumber > 0
+    Number.isFinite(pseAmountNumber) &&
+    pseAmountNumber >= minimumBoldRecharge &&
+    pseDocumentDigits.length >= 5
   );
   const canContinueBancolombiaRecharge = Boolean(
-    Number.isFinite(bancolombiaAmountNumber) && bancolombiaAmountNumber > 0
+    Number.isFinite(bancolombiaAmountNumber) &&
+    bancolombiaAmountNumber >= minimumBoldRecharge &&
+    bancolombiaDocumentDigits.length >= 5
   );
   const canContinueBrebRecharge = Boolean(
     Number.isFinite(brebAmountNumber) && brebAmountNumber > 0
@@ -521,7 +604,7 @@ function ParentPortal() {
   }, []);
 
   useEffect(() => {
-    if (location.pathname !== '/parent' || loading || error) {
+    if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
       return;
     }
 
@@ -542,7 +625,7 @@ function ParentPortal() {
   }, [location.pathname, location.search, loading, error, selectedStudent?._id, selectedStudentId]);
 
   useEffect(() => {
-    if (location.pathname !== '/parent' || loading || error) {
+    if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
       return;
     }
 
@@ -571,7 +654,7 @@ function ParentPortal() {
         nextParams.set('studentId', queryStudentId);
       }
       const query = nextParams.toString();
-      return query ? `/parent?${query}` : '/parent';
+      return query ? `/parent/recargas?${query}` : '/parent/recargas';
     };
 
     const finishReturn = (notice) => {
@@ -1245,22 +1328,19 @@ function ParentPortal() {
 
   useEffect(() => {
     if (!isTopupDaviPlataPage) {
-      setBoldPaymentData(null);
-      setBoldButtonLoadError('');
+      setShowBoldCardForm(false);
+      setIsBoldCardFormClosing(false);
       setDaviSubmitError('');
       setDaviSubmitSuccess('');
       return;
     }
 
     if (!selectedStudent?._id) {
-      setBoldPaymentData(null);
       setDaviSubmitError('Selecciona un alumno antes de continuar.');
       return;
     }
 
     if (!canContinueDaviRecharge) {
-      setBoldPaymentData(null);
-      setBoldButtonLoadError('');
       setDaviSubmitSuccess('');
       if (daviAmountNumber > 0) {
         setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
@@ -1270,98 +1350,38 @@ function ParentPortal() {
       return;
     }
 
-    let isCancelled = false;
-    const prepareTimer = setTimeout(async () => {
-      setDaviSubmitLoading(true);
-      setDaviSubmitError('');
-      setDaviSubmitSuccess('');
-      setBoldButtonLoadError('');
-      setBoldPaymentData(null);
-
-      try {
-        const response = await createBoldRechargePayment({
-          studentId: selectedStudent._id,
-          amount: daviAmountNumber,
-          description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
-        });
-
-        if (isCancelled) {
-          return;
-        }
-
-        setBoldPaymentData(response.data);
-        setDaviSubmitSuccess('Botón de Bold listo para continuar con el pago.');
-      } catch (requestError) {
-        if (isCancelled) {
-          return;
-        }
-
-        setBoldPaymentData(null);
-        setDaviSubmitError(
-          requestError?.response?.data?.message || requestError?.message || 'No se pudo preparar el pago con Bold.'
-        );
-      } finally {
-        if (!isCancelled) {
-          setDaviSubmitLoading(false);
-        }
-      }
-    }, 350);
-
-    return () => {
-      isCancelled = true;
-      clearTimeout(prepareTimer);
-    };
-  }, [
-    isTopupDaviPlataPage,
-    selectedStudent?._id,
-    selectedStudent?.name,
-    daviAmountNumber,
-    canContinueDaviRecharge,
-    minimumBoldRecharge,
-  ]);
+    setDaviSubmitError('');
+  }, [isTopupDaviPlataPage, selectedStudent?._id, daviAmountNumber, canContinueDaviRecharge, minimumBoldRecharge]);
 
   useEffect(() => {
-    if (!boldPaymentData || !boldContainerRef.current) return;
-
-    boldContainerRef.current.innerHTML = '';
-    setBoldButtonLoadError('');
-
-    const script = document.createElement('script');
-    script.src = 'https://checkout.bold.co/library/boldPaymentButton.js';
-    script.async = true;
-    script.setAttribute('data-bold-button', '');
-    script.setAttribute('data-api-key', boldPaymentData.apiKey);
-    script.setAttribute('data-amount', String(boldPaymentData.amount));
-    script.setAttribute('data-currency', boldPaymentData.currency || 'COP');
-    script.setAttribute('data-order-id', boldPaymentData.reference);
-    script.setAttribute('data-integrity-signature', boldPaymentData.integritySignature);
-    script.setAttribute('data-redirection-url', boldPaymentData.redirectionUrl);
-    if (boldPaymentData.description) {
-      script.setAttribute('data-description', boldPaymentData.description);
+    if (!isBoldCardFormClosing) {
+      return undefined;
     }
-    script.setAttribute('data-render-mode', 'embedded');
-    script.onerror = () => {
-      setBoldButtonLoadError('No pudimos cargar el botón de Bold. Intenta nuevamente.');
-      setDaviSubmitSuccess('');
-    };
 
-    boldContainerRef.current.appendChild(script);
+    const closeTimer = window.setTimeout(() => {
+      setShowBoldCardForm(false);
+      setIsBoldCardFormClosing(false);
+    }, 220);
 
-    const renderCheck = setTimeout(() => {
-      if (!boldContainerRef.current || boldContainerRef.current.childElementCount === 0) {
-        setBoldButtonLoadError('No pudimos cargar el botón de Bold. Intenta nuevamente.');
-        setDaviSubmitSuccess('');
-      }
-    }, 2500);
+    return () => window.clearTimeout(closeTimer);
+  }, [isBoldCardFormClosing]);
 
-    return () => {
-      clearTimeout(renderCheck);
-    };
-  }, [boldPaymentData]);
+  const openBoldCardModal = () => {
+    setIsBoldCardFormClosing(false);
+    setShowBoldCardForm(true);
+  };
+
+  const closeBoldCardModal = () => {
+    if (daviSubmitLoading || !showBoldCardForm) {
+      return;
+    }
+
+    setIsBoldCardFormClosing(true);
+  };
 
   const onSubmitPseTopup = async () => {
     if (!canContinuePseRecharge) {
-      setPseSubmitError('Ingresa un valor válido para continuar.');
+      setPseSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y un documento válido.`);
       return;
     }
 
@@ -1370,8 +1390,13 @@ function ParentPortal() {
     setPseSubmitSuccess('');
 
     try {
-      // Placeholder UI flow while PSE gateway endpoint is integrated.
-      setPseSubmitSuccess('Recarga PSE registrada. En el siguiente paso te llevaremos a la pasarela de pago.');
+      await startBoldRedirectTopup({
+        amount: pseAmountNumber,
+        paymentMethodName: 'PSE',
+        documentType: pseDocumentType,
+        documentNumber: pseDocumentDigits,
+      });
+      setPseSubmitSuccess('Te estamos redirigiendo a PSE para completar la recarga.');
     } catch (requestError) {
       setPseSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar la recarga por PSE.');
     } finally {
@@ -1379,9 +1404,99 @@ function ParentPortal() {
     }
   };
 
+  const redirectAfterBoldTopupStart = async (payload, studentId) => {
+    const reference = String(payload?.reference || '').trim();
+    const redirectUrl = String(payload?.redirectUrl || '').trim();
+    const redirectMethod = String(payload?.redirectMethod || 'GET').trim().toUpperCase();
+
+    if (redirectUrl) {
+      if (redirectMethod === 'GET' && Capacitor.isNativePlatform()) {
+        try {
+          const result = await AppLauncher.openUrl({ url: redirectUrl });
+          if (result?.completed) {
+            return;
+          }
+        } catch (launchError) {
+          console.warn('[BOLD_REDIRECT_EXTERNAL_LAUNCH_FAILED]', launchError);
+        }
+
+        await Browser.open({ url: redirectUrl });
+        return;
+      }
+
+      if (redirectMethod === 'POST') {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = redirectUrl;
+        form.style.display = 'none';
+        document.body.appendChild(form);
+        form.submit();
+        return;
+      }
+
+      window.location.assign(redirectUrl);
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set('studentId', String(studentId));
+    params.set('paymentSource', 'bold');
+    if (reference) {
+      params.set('paymentReference', reference);
+    }
+    navigate(`/parent/recargas?${params.toString()}`);
+  };
+
+  const startBoldRedirectTopup = async ({ amount, paymentMethodName, documentType, documentNumber }) => {
+    if (!selectedStudent?._id) {
+      throw new Error('Selecciona un alumno antes de continuar.');
+    }
+
+    const response = await createBoldRechargePayment({
+      studentId: selectedStudent._id,
+      amount,
+      description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
+      payer: {
+        documentType,
+        documentNumber,
+      },
+      paymentMethod: {
+        name: paymentMethodName,
+      },
+      deviceFingerprint: buildBoldDeviceFingerprint(),
+    });
+
+    await redirectAfterBoldTopupStart(response.data, selectedStudent._id);
+  };
+
+  const onSubmitNequiTopup = async () => {
+    if (!canContinueNequiRecharge) {
+      setNequiSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y un documento válido.`);
+      return;
+    }
+
+    setNequiSubmitLoading(true);
+    setNequiSubmitError('');
+    setNequiSubmitSuccess('');
+
+    try {
+      await startBoldRedirectTopup({
+        amount: nequiAmountNumber,
+        paymentMethodName: 'NEQUI',
+        documentType: nequiDocumentType,
+        documentNumber: nequiDocumentDigits,
+      });
+      setNequiSubmitSuccess('Te estamos redirigiendo a Nequi para completar la recarga.');
+    } catch (requestError) {
+      setNequiSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar la recarga con Nequi.');
+    } finally {
+      setNequiSubmitLoading(false);
+    }
+  };
+
   const onSubmitBancolombiaTopup = async () => {
     if (!canContinueBancolombiaRecharge) {
-      setBancolombiaSubmitError('Ingresa un valor válido para continuar.');
+      setBancolombiaSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y un documento válido.`);
       return;
     }
 
@@ -1390,7 +1505,13 @@ function ParentPortal() {
     setBancolombiaSubmitSuccess('');
 
     try {
-      setBancolombiaSubmitSuccess('Recarga Bancolombia registrada. En el siguiente paso te llevaremos a la pasarela de pago.');
+      await startBoldRedirectTopup({
+        amount: bancolombiaAmountNumber,
+        paymentMethodName: 'BOTON_BANCOLOMBIA',
+        documentType: bancolombiaDocumentType,
+        documentNumber: bancolombiaDocumentDigits,
+      });
+      setBancolombiaSubmitSuccess('Te estamos redirigiendo a Botón Bancolombia para completar la recarga.');
     } catch (requestError) {
       setBancolombiaSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar la recarga por Bancolombia.');
     } finally {
@@ -1414,6 +1535,61 @@ function ParentPortal() {
       setBrebSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar la recarga por Bre-B.');
     } finally {
       setBrebSubmitLoading(false);
+    }
+  };
+
+  const onSubmitBoldCardTopup = async () => {
+    if (!selectedStudent?._id) {
+      setDaviSubmitError('Selecciona un alumno antes de continuar.');
+      return;
+    }
+
+    if (!canContinueDaviRecharge) {
+      setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
+      return;
+    }
+
+    if (!canSubmitBoldCardDetails) {
+      setDaviSubmitError('Completa correctamente los datos de la tarjeta y del titular.');
+      return;
+    }
+
+    const expiryMonth = boldTopupExpiryDigits.slice(0, 2);
+    const expiryYear = `20${boldTopupExpiryDigits.slice(2, 4)}`;
+
+    setDaviSubmitLoading(true);
+    setDaviSubmitError('');
+    setDaviSubmitSuccess('');
+
+    try {
+      const response = await createBoldRechargePayment({
+        studentId: selectedStudent._id,
+        amount: daviAmountNumber,
+        description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
+        payer: {
+          name: String(boldTopupCardholderName || '').trim(),
+          documentType: boldTopupDocumentType,
+          documentNumber: boldTopupDocumentDigits,
+        },
+        paymentMethod: {
+          cardNumber: boldTopupCardDigits,
+          cardholderName: String(boldTopupCardholderName || '').trim(),
+          expirationMonth: expiryMonth,
+          expirationYear: expiryYear,
+          installments: 1,
+          cvc: boldTopupCvvDigits,
+        },
+        deviceFingerprint: buildBoldDeviceFingerprint(),
+      });
+
+      setDaviSubmitSuccess('Pago enviado a Bold. Estamos validando el resultado.');
+      await redirectAfterBoldTopupStart(response.data, selectedStudent._id);
+    } catch (requestError) {
+      setDaviSubmitError(
+        requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar el pago con Bold.'
+      );
+    } finally {
+      setDaviSubmitLoading(false);
     }
   };
 
@@ -2248,7 +2424,7 @@ function ParentPortal() {
             </div>
 
             <div className="parent-topups-actions parent-topups-actions-single">
-              <button onClick={() => navigate('/parent/recargas/metodos/daviplata')} type="button">
+              <button onClick={() => navigate('/parent/recargas/metodos')} type="button">
                 <span className="parent-topups-action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z" fill="currentColor"/>
@@ -2629,7 +2805,43 @@ function ParentPortal() {
             <div className="parent-topup-methods-list">
               <button onClick={onGoToBoldCheckout} type="button">
                 <div className="left">
-                  <span>Recarga con Bold</span>
+                  <span className="parent-topup-method-icon is-card" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <span className="parent-topup-method-copy">
+                    <strong>Tarjeta de credito o debito</strong>
+                    <small>Visa, Mastercard y otras franquicias</small>
+                  </span>
+                </div>
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
+                </svg>
+              </button>
+
+              <button onClick={() => navigate('/parent/recargas/metodos/nequi')} type="button">
+                <div className="left">
+                  <span className="parent-topup-method-icon is-nequi" aria-hidden="true">N</span>
+                  <span className="parent-topup-method-copy">
+                    <strong>Nequi</strong>
+                    <small>Redirección directa al flujo Bold de Nequi</small>
+                  </span>
+                </div>
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
+                </svg>
+              </button>
+
+              <button onClick={() => navigate('/parent/recargas/metodos/bancolombia')} type="button">
+                <div className="left">
+                  <span className="parent-topup-method-icon is-bancolombia" aria-hidden="true">
+                    <img alt="Bancolombia" className="logo" src={bancolombiaLogo} />
+                  </span>
+                  <span className="parent-topup-method-copy">
+                    <strong>Botón Bancolombia</strong>
+                    <small>Te llevamos al redirect que entregue Bold</small>
+                  </span>
                 </div>
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path d="M9.3 5.3a1 1 0 0 1 1.4 0l6 6a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4-1.4L14.6 12L9.3 6.7a1 1 0 0 1 0-1.4Z" fill="currentColor"/>
@@ -2641,7 +2853,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupDaviPlataPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => { setBoldPaymentData(null); navigate('/parent/recargas'); }} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -2651,10 +2863,6 @@ function ParentPortal() {
             <div className="parent-topup-davi-head">
               <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con Bold</h2>
             </div>
-
-            <p className="parent-topup-fee-note">
-              Usa el botón oficial de Bold. Cuando el monto sea válido, lo cargaremos automáticamente aquí mismo.
-            </p>
 
             <label className="parent-topup-davi-amount">
               ¿Cuánto vas a recargar?
@@ -2669,7 +2877,7 @@ function ParentPortal() {
             </label>
 
             <p className="parent-topup-fee-note">
-              Monto minimo para recargar con Bold: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+              Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
             </p>
 
             {daviAmountNumber > 0 ? (
@@ -2686,19 +2894,147 @@ function ParentPortal() {
               </div>
             ) : null}
 
-            {canContinueDaviRecharge && daviSubmitLoading ? (
-              <p className="parent-topup-fee-note">Preparando botón de Bold...</p>
-            ) : null}
+            <div className="parent-topup-method-selector-wrap">
+              <button
+                className={`parent-topup-method-selector ${showBoldCardForm ? 'is-selected' : ''}`}
+                onClick={openBoldCardModal}
+                type="button"
+              >
+                <span className="parent-topup-method-selector-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
+                  </svg>
+                </span>
+                <span className="parent-topup-method-selector-copy">
+                  <strong>Tarjeta de credito o debito</strong>
+                  <small>Visa, Mastercard y otras franquicias</small>
+                  <small>Si Bold solicita 3DS, te redirigiremos y luego volverás a esta billetera para confirmar la recarga.</small>
+                </span>
+              </button>
+            </div>
 
-            {canContinueDaviRecharge && boldPaymentData ? (
-              <div className="parent-bold-inline-wrap">
-                <div ref={boldContainerRef} className="bold-button-container parent-bold-inline-button" />
+            {showBoldCardForm ? (
+              <div
+                className={`parent-bold-card-modal-overlay ${isBoldCardFormClosing ? 'is-closing' : ''}`}
+                onClick={closeBoldCardModal}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Formulario de tarjeta para recarga Bold"
+              >
+                <div className={`parent-bold-card-modal ${isBoldCardFormClosing ? 'is-closing' : ''}`} onClick={(event) => event.stopPropagation()}>
+                  <button
+                    aria-label="Cerrar formulario de tarjeta"
+                    className="parent-bold-card-modal-close"
+                    disabled={daviSubmitLoading}
+                    onClick={closeBoldCardModal}
+                    type="button"
+                  >
+                    ×
+                  </button>
+
+                  <div className="parent-bold-card-modal-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
+                    </svg>
+                  </div>
+
+                  <div className="parent-bold-card-modal-head">
+                    <h3>Tarjeta de credito o debito</h3>
+                    <p>Completa los datos de la tarjeta para continuar con la recarga.</p>
+                  </div>
+
+                  <div className="parent-topup-card-form">
+                    <label className="parent-topup-davi-amount">
+                      Nombre del titular
+                      <input
+                        type="text"
+                        placeholder="Nombre completo"
+                        value={boldTopupCardholderName}
+                        onChange={(event) => setBoldTopupCardholderName(event.target.value)}
+                      />
+                    </label>
+
+                    <div className="parent-topup-davi-grid">
+                      <label>
+                        Tipo de documento
+                        <select value={boldTopupDocumentType} onChange={(event) => setBoldTopupDocumentType(event.target.value)}>
+                          <option value="CC">Cedula</option>
+                          <option value="CE">Cedula de extranjeria</option>
+                          <option value="PP">Pasaporte</option>
+                          <option value="NIT">NIT</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        Número de documento
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="1234567890"
+                          value={boldTopupDocumentNumber}
+                          onChange={(event) => setBoldTopupDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
+                        />
+                      </label>
+                    </div>
+
+                    <label className="parent-topup-davi-amount">
+                      Número de tarjeta
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="4111 1111 1111 1111"
+                        value={boldTopupCardNumber}
+                        onChange={(event) => {
+                          const digits = event.target.value.replace(/\D/g, '').slice(0, 19);
+                          const chunks = digits.match(/.{1,4}/g) || [];
+                          setBoldTopupCardNumber(chunks.join(' '));
+                        }}
+                      />
+                    </label>
+
+                    <div className="parent-topup-davi-grid">
+                      <label>
+                        Vencimiento
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="MM/AA"
+                          value={boldTopupCardExpiry}
+                          onChange={(event) => {
+                            const digits = event.target.value.replace(/\D/g, '').slice(0, 4);
+                            const formatted = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
+                            setBoldTopupCardExpiry(formatted);
+                          }}
+                        />
+                      </label>
+
+                      <label>
+                        CVV
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          placeholder="123"
+                          value={boldTopupCardCvv}
+                          onChange={(event) => setBoldTopupCardCvv(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <button
+                    className="parent-topup-davi-continue"
+                    disabled={!canSubmitBoldCardDetails || daviSubmitLoading}
+                    onClick={onSubmitBoldCardTopup}
+                    type="button"
+                  >
+                    {daviSubmitLoading ? 'Procesando...' : 'Pagar con tarjeta'}
+                  </button>
+
+                  {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
+                  {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
+                </div>
               </div>
             ) : null}
-
-            {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
-            {boldButtonLoadError ? <p className="parent-error">{boldButtonLoadError}</p> : null}
-            {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
           </section>
         ) : null}
 
@@ -2711,6 +3047,91 @@ function ParentPortal() {
               <span>Ir a recargas</span>
             </button>
             <BoldResultContent />
+          </section>
+        ) : null}
+
+        {!loading && !error && isTopupNequiPage ? (
+          <section className="parent-topup-davi-page">
+            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
+              </svg>
+              <span>Volver</span>
+            </button>
+
+            <div className="parent-topup-davi-head">
+              <h2>Recarga la cuenta de {selectedStudent?.name || 'alumno seleccionado'} con Nequi</h2>
+              <span className="parent-topup-brand-chip is-nequi">Nequi</span>
+            </div>
+
+            <p className="parent-topup-davi-caption">
+              Bold te redirigirá al flujo de Nequi para completar la recarga y luego volverás a la billetera.
+            </p>
+
+            <label className="parent-topup-davi-amount">
+              ¿Cuánto vas a recargar?
+              <input
+                min={minimumBoldRecharge}
+                step="1000"
+                type="number"
+                placeholder="Ingrese un valor"
+                value={nequiAmount}
+                onChange={(event) => setNequiAmount(event.target.value)}
+              />
+            </label>
+
+            <div className="parent-topup-davi-grid">
+              <label>
+                Tipo de documento
+                <select value={nequiDocumentType} onChange={(event) => setNequiDocumentType(event.target.value)}>
+                  <option value="CC">Cedula</option>
+                  <option value="CE">Cedula de extranjeria</option>
+                  <option value="PP">Pasaporte</option>
+                  <option value="NIT">NIT</option>
+                </select>
+              </label>
+
+              <label>
+                Número de documento
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="1234567890"
+                  value={nequiDocumentNumber}
+                  onChange={(event) => setNequiDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
+                />
+              </label>
+            </div>
+
+            <p className="parent-topup-fee-note">
+              Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+            </p>
+
+            {nequiAmountNumber > 0 ? (
+              <div className="parent-topup-davi-fee-box">
+                <p>
+                  Valor a recargar: <strong>{formatCurrency(nequiAmountNumber)}</strong>
+                </p>
+                <p>
+                  Costo de transacción (1.5%): <strong>{formatCurrency(nequiFeeAmount)}</strong>
+                </p>
+                <p className="total">
+                  Total a pagar: <strong>{formatCurrency(nequiTotalCharge)}</strong>
+                </p>
+              </div>
+            ) : null}
+
+            <button
+              className="parent-topup-davi-continue"
+              disabled={!canContinueNequiRecharge || nequiSubmitLoading}
+              onClick={onSubmitNequiTopup}
+              type="button"
+            >
+              {nequiSubmitLoading ? 'Redirigiendo...' : 'Continuar con Nequi'}
+            </button>
+
+            {nequiSubmitError ? <p className="parent-error">{nequiSubmitError}</p> : null}
+            {nequiSubmitSuccess ? <p className="parent-success">{nequiSubmitSuccess}</p> : null}
           </section>
         ) : null}
 
@@ -2731,7 +3152,7 @@ function ParentPortal() {
             <label className="parent-topup-davi-amount">
               ¿Cuánto vas a recargar?
               <input
-                min="1"
+                min={minimumBoldRecharge}
                 step="1000"
                 type="number"
                 placeholder="Ingrese un valor"
@@ -2739,6 +3160,33 @@ function ParentPortal() {
                 onChange={(event) => setPseAmount(event.target.value)}
               />
             </label>
+
+            <div className="parent-topup-davi-grid">
+              <label>
+                Tipo de documento
+                <select value={pseDocumentType} onChange={(event) => setPseDocumentType(event.target.value)}>
+                  <option value="CC">Cedula</option>
+                  <option value="CE">Cedula de extranjeria</option>
+                  <option value="PP">Pasaporte</option>
+                  <option value="NIT">NIT</option>
+                </select>
+              </label>
+
+              <label>
+                Número de documento
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="1234567890"
+                  value={pseDocumentNumber}
+                  onChange={(event) => setPseDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
+                />
+              </label>
+            </div>
+
+            <p className="parent-topup-fee-note">
+              Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+            </p>
 
             {pseAmountNumber > 0 ? (
               <div className="parent-topup-davi-fee-box">
@@ -2785,7 +3233,7 @@ function ParentPortal() {
             <label className="parent-topup-davi-amount">
               ¿Cuánto vas a recargar?
               <input
-                min="1"
+                min={minimumBoldRecharge}
                 step="1000"
                 type="number"
                 placeholder="Ingrese un valor"
@@ -2793,6 +3241,33 @@ function ParentPortal() {
                 onChange={(event) => setBancolombiaAmount(event.target.value)}
               />
             </label>
+
+            <div className="parent-topup-davi-grid">
+              <label>
+                Tipo de documento
+                <select value={bancolombiaDocumentType} onChange={(event) => setBancolombiaDocumentType(event.target.value)}>
+                  <option value="CC">Cedula</option>
+                  <option value="CE">Cedula de extranjeria</option>
+                  <option value="PP">Pasaporte</option>
+                  <option value="NIT">NIT</option>
+                </select>
+              </label>
+
+              <label>
+                Número de documento
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="1234567890"
+                  value={bancolombiaDocumentNumber}
+                  onChange={(event) => setBancolombiaDocumentNumber(event.target.value.replace(/\D/g, '').slice(0, 20))}
+                />
+              </label>
+            </div>
+
+            <p className="parent-topup-fee-note">
+              Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+            </p>
 
             {bancolombiaAmountNumber > 0 ? (
               <div className="parent-topup-davi-fee-box">
@@ -3161,7 +3636,7 @@ function ParentPortal() {
           </section>
         ) : null}
 
-        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
+        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
           <>
             <section className="parent-balance-hero" id="parent-balance-section">
               <p className="meta">Saldo actual</p>

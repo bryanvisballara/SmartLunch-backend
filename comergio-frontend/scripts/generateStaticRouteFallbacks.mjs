@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const DIST_DIR = path.resolve(process.cwd(), 'dist');
-const INDEX_FILE = path.join(DIST_DIR, 'index.html');
+const DIST_DEPLOY_DIR = path.resolve(process.cwd(), 'dist-deploy');
 
 // Fallback directories for hosting providers where SPA rewrites are ignored.
 const ROUTE_FALLBACKS = [
@@ -22,6 +22,7 @@ const ROUTE_FALLBACKS = [
   'parent/recargas',
   'parent/recargas/metodos',
   'parent/recargas/metodos/daviplata',
+  'parent/recargas/metodos/nequi',
   'parent/bold-resultado',
   'parent/recargas/metodos/pse',
   'parent/recargas/metodos/bancolombia',
@@ -39,16 +40,25 @@ const ROUTE_FALLBACKS = [
   'contact',
 ];
 
-async function main() {
-  const indexHtml = await fs.readFile(INDEX_FILE, 'utf8');
+async function generateFallbacksForDir(targetDir) {
+  const indexFile = path.join(targetDir, 'index.html');
+  const indexHtml = await fs.readFile(indexFile, 'utf8');
 
   for (const route of ROUTE_FALLBACKS) {
-    const routeDir = path.join(DIST_DIR, route);
+    const routeDir = path.join(targetDir, route);
     await fs.mkdir(routeDir, { recursive: true });
     await fs.writeFile(path.join(routeDir, 'index.html'), indexHtml, 'utf8');
   }
+}
 
-  console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/`);
+async function main() {
+  await fs.rm(DIST_DEPLOY_DIR, { recursive: true, force: true });
+  await fs.cp(DIST_DIR, DIST_DEPLOY_DIR, { recursive: true });
+
+  await generateFallbacksForDir(DIST_DIR);
+  await generateFallbacksForDir(DIST_DEPLOY_DIR);
+
+  console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);
 }
 
 main().catch((error) => {
