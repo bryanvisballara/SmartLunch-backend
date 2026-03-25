@@ -4,6 +4,9 @@ const webpush = require('web-push');
 
 let vapidConfigured = false;
 let firebaseConfigured = false;
+const ANDROID_PUSH_SOUND = 'pushandroid';
+const ANDROID_PUSH_CHANNEL_ID = 'comergio_alerts_v1';
+const IOS_PUSH_SOUND = 'pushios.wav';
 
 function ensureWebPushConfig() {
   if (vapidConfigured) {
@@ -206,7 +209,8 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
     android: {
       priority: 'high',
       notification: {
-        sound: 'default',
+        channelId: ANDROID_PUSH_CHANNEL_ID,
+        sound: ANDROID_PUSH_SOUND,
       },
     },
     apns: {
@@ -221,7 +225,7 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
             title,
             body,
           },
-          sound: 'default',
+          sound: IOS_PUSH_SOUND,
         },
       },
     },
