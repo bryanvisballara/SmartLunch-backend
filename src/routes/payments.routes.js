@@ -321,6 +321,50 @@ function extractBoldProviderTransactionId(payload) {
   return '';
 }
 
+function extractBoldMerchantId(payload) {
+  const candidates = [
+    payload?.merchant_id,
+    payload?.merchantId,
+    payload?.data?.merchant_id,
+    payload?.data?.merchantId,
+    payload?.payload?.merchant_id,
+    payload?.payload?.merchantId,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function extractBoldWebhookSource(payload) {
+  return String(payload?.source || payload?.data?.source || payload?.payload?.source || '').trim();
+}
+
+function extractBoldWebhookIntegration(payload) {
+  return String(payload?.data?.integration || payload?.integration || payload?.payload?.integration || '').trim();
+}
+
+function getExpectedBoldMerchantId() {
+  return String(process.env.BOLD_MERCHANT_ID || 'H4P5K8VKIL').trim();
+}
+
+function getExpectedBoldWebhookSource(label) {
+  if (label === 'bold_bancolombia') {
+    return '/payments/vnp/bancolombia';
+  }
+
+  if (label === 'bold_nequi') {
+    return '/payments/nequi';
+  }
+
+  return '';
+}
+
 function extractBoldProviderStatus(payload) {
   const candidates = [
     payload?.status,
@@ -963,6 +1007,40 @@ function handleBoldAsyncWebhookAck(req, res, { label }) {
       const providerTransactionId = extractBoldProviderTransactionId(req.body);
       const reference = extractBoldReference(req.body);
       const providerStatus = extractBoldProviderStatus(req.body);
+      const merchantId = extractBoldMerchantId(req.body);
+      const webhookSource = extractBoldWebhookSource(req.body);
+      const integration = extractBoldWebhookIntegration(req.body);
+      const expectedMerchantId = getExpectedBoldMerchantId();
+      const expectedSource = getExpectedBoldWebhookSource(label);
+
+      if (expectedMerchantId && merchantId && merchantId !== expectedMerchantId) {
+        console.warn(`[${label.toUpperCase()}_IGNORED_UNEXPECTED_MERCHANT]`, {
+          merchantId,
+          expectedMerchantId,
+          providerTransactionId,
+          reference,
+        });
+        return;
+      }
+
+      if (expectedSource && webhookSource && webhookSource !== expectedSource) {
+        console.warn(`[${label.toUpperCase()}_IGNORED_UNEXPECTED_SOURCE]`, {
+          webhookSource,
+          expectedSource,
+          providerTransactionId,
+          reference,
+        });
+        return;
+      }
+
+      console.info(`[${label.toUpperCase()}_WEBHOOK_PARSED]`, {
+        merchantId,
+        webhookSource,
+        integration,
+        providerTransactionId,
+        reference,
+        providerStatus,
+      });
 
       if (!providerTransactionId && !reference) {
         console.warn(`[${label.toUpperCase()}_IGNORED_MISSING_IDENTIFIERS]`);
