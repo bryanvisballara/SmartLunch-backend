@@ -219,6 +219,8 @@ function ParentPortal() {
   const [pseAmount, setPseAmount] = useState('');
   const [pseDocumentType, setPseDocumentType] = useState('CC');
   const [pseDocumentNumber, setPseDocumentNumber] = useState('');
+  const [pseBankCode, setPseBankCode] = useState('');
+  const [pseBankName, setPseBankName] = useState('');
   const [pseSubmitLoading, setPseSubmitLoading] = useState(false);
   const [pseSubmitError, setPseSubmitError] = useState('');
   const [pseSubmitSuccess, setPseSubmitSuccess] = useState('');
@@ -370,6 +372,8 @@ function ParentPortal() {
     ? pseAmountNumber + pseFeeAmount
     : 0;
   const pseDocumentDigits = String(pseDocumentNumber || '').replace(/\D/g, '');
+  const pseBankCodeValue = String(pseBankCode || '').trim();
+  const pseBankNameValue = String(pseBankName || '').trim();
   const bancolombiaAmountNumber = Number(bancolombiaAmount || 0);
   const bancolombiaFeeAmount = Number.isFinite(bancolombiaAmountNumber) && bancolombiaAmountNumber > 0
     ? Math.round(bancolombiaAmountNumber * rechargeFeeRate)
@@ -410,7 +414,9 @@ function ParentPortal() {
   const canContinuePseRecharge = Boolean(
     Number.isFinite(pseAmountNumber) &&
     pseAmountNumber >= minimumBoldRecharge &&
-    pseDocumentDigits.length >= 5
+    pseDocumentDigits.length >= 5 &&
+    pseBankCodeValue &&
+    pseBankNameValue
   );
   const canContinueBancolombiaRecharge = Boolean(
     Number.isFinite(bancolombiaAmountNumber) &&
@@ -1381,7 +1387,7 @@ function ParentPortal() {
 
   const onSubmitPseTopup = async () => {
     if (!canContinuePseRecharge) {
-      setPseSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)} y un documento válido.`);
+      setPseSubmitError(`Ingresa un valor de al menos ${formatCurrency(minimumBoldRecharge)}, un documento válido y los datos del banco PSE.`);
       return;
     }
 
@@ -1395,6 +1401,8 @@ function ParentPortal() {
         paymentMethodName: 'PSE',
         documentType: pseDocumentType,
         documentNumber: pseDocumentDigits,
+        bankCode: pseBankCodeValue,
+        bankName: pseBankNameValue,
       });
       setPseSubmitSuccess('Te estamos redirigiendo a PSE para completar la recarga.');
     } catch (requestError) {
@@ -1447,7 +1455,7 @@ function ParentPortal() {
     navigate(`/parent/recargas?${params.toString()}`);
   };
 
-  const startBoldRedirectTopup = async ({ amount, paymentMethodName, documentType, documentNumber }) => {
+  const startBoldRedirectTopup = async ({ amount, paymentMethodName, documentType, documentNumber, bankCode, bankName }) => {
     if (!selectedStudent?._id) {
       throw new Error('Selecciona un alumno antes de continuar.');
     }
@@ -1462,6 +1470,12 @@ function ParentPortal() {
       },
       paymentMethod: {
         name: paymentMethodName,
+        ...(bankCode || bankName
+          ? {
+              bankCode,
+              bankName,
+            }
+          : {}),
       },
       deviceFingerprint: buildBoldDeviceFingerprint(),
     });
@@ -3199,8 +3213,35 @@ function ParentPortal() {
               </label>
             </div>
 
+            <div className="parent-topup-davi-grid">
+              <label>
+                Código del banco PSE
+                <input
+                  type="text"
+                  inputMode="text"
+                  placeholder="Ej. 1007"
+                  value={pseBankCode}
+                  onChange={(event) => setPseBankCode(event.target.value.trimStart().slice(0, 20))}
+                />
+              </label>
+
+              <label>
+                Nombre del banco PSE
+                <input
+                  type="text"
+                  placeholder="Ej. Bancolombia"
+                  value={pseBankName}
+                  onChange={(event) => setPseBankName(event.target.value.trimStart().slice(0, 80))}
+                />
+              </label>
+            </div>
+
             <p className="parent-topup-fee-note">
               Monto minimo para recargar: <strong>{formatCurrency(minimumBoldRecharge)}</strong>
+            </p>
+
+            <p className="parent-topup-fee-note">
+              Debes usar un banco PSE permitido por Bold. Si no conoces el código y nombre exactos, configúralos en el backend o solicítalos a Bold.
             </p>
 
             {pseAmountNumber > 0 ? (
