@@ -164,6 +164,161 @@ function resolveGioReferenceDate(context = {}, history = []) {
   return null;
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatGioNameList(values) {
+  const safeValues = Array.isArray(values)
+    ? values.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+
+  if (!safeValues.length) {
+    return 'los alumnos';
+  }
+  if (safeValues.length === 1) {
+    return safeValues[0];
+  }
+  if (safeValues.length === 2) {
+    return `${safeValues[0]} y ${safeValues[1]}`;
+  }
+  return `${safeValues.slice(0, -1).join(', ')} y ${safeValues[safeValues.length - 1]}`;
+}
+
+function getGioStudentNameCandidates(student) {
+  const fullName = normalizeAiText(student?.name || '');
+  const firstName = fullName.split(/\s+/).filter(Boolean)[0] || '';
+  return Array.from(new Set([fullName, firstName].filter((item) => item.length >= 3)));
+}
+
+function isGioAllStudentsQuestion(rawQuestion) {
+  const question = normalizeAiText(rawQuestion);
+  if (!question) {
+    return false;
+  }
+
+  return /\b(todos|todas|ambos|ambas|los dos|las dos|mis hijos|mis alumn|todos mis hijos|todos mis alumn|cada uno)\b/.test(question)
+    || (/\b(hijos|alumnos)\b/.test(question) && /\b(cuales|cuantos|que|que tal|como van|saldo|recarga|consumo|limite|datos|informacion|resumen)\b/.test(question));
+}
+
+function buildGioChildProfiles({ students, wallets, meriendaSubscriptions }) {
+  const walletByStudentId = (Array.isArray(wallets) ? wallets : []).reduce((acc, wallet) => {
+    acc[String(wallet.studentId)] = wallet;
+    return acc;
+  }, {});
+
+  const meriendaByChildName = (Array.isArray(meriendaSubscriptions) ? meriendaSubscriptions : []).reduce((acc, subscription) => {
+    const key = normalizeAiText(subscription?.childName || '');
+    if (key && !acc[key]) {
+      acc[key] = subscription;
+    }
+    return acc;
+  }, {});
+
+  return (Array.isArray(students) ? students : []).map((student) => {
+    const wallet = walletByStudentId[String(student._id)] || null;
+    const merienda = meriendaByChildName[normalizeAiText(student?.name || '')] || null;
+    return {
+      _id: String(student._id),
+      name: String(student.name || '').trim() || 'Alumno',
+      schoolCode: String(student.schoolCode || '').trim(),
+      grade: String(student.grade || '').trim(),
+      dailyLimit: Number(student.dailyLimit || 0),
+      blockedProducts: Array.isArray(student.blockedProducts)
+        ? student.blockedProducts.map((item) => String(item?.name || '').trim()).filter(Boolean)
+        : [],
+      blockedCategories: Array.isArray(student.blockedCategories)
+        ? student.blockedCategories.map((item) => String(item?.name || '').trim()).filter(Boolean)
+        : [],
+      wallet: {
+        balance: Number(wallet?.balance || 0),
+        autoDebitEnabled: Boolean(wallet?.autoDebitEnabled),
+        autoDebitLimit: Number(wallet?.autoDebitLimit || 0),
+        autoDebitAmount: Number(wallet?.autoDebitAmount || 0),
+        autoDebitLastChargeAt: wallet?.autoDebitLastChargeAt || null,
+        autoDebitRetryAt: wallet?.autoDebitRetryAt || null,
+        autoDebitRetryCount: Number(wallet?.autoDebitRetryCount || 0),
+        autoDebitMonthlyLimit: Number(wallet?.autoDebitMonthlyLimit || 0),
+        autoDebitMonthlyUsed: Number(wallet?.autoDebitMonthlyUsed || 0),
+        autoDebitMonthlyPeriod: String(wallet?.autoDebitMonthlyPeriod || ''),
+        lowBalanceAlertLevel: String(wallet?.lowBalanceAlertLevel || 'none'),
+      },
+      merienda: merienda
+        ? {
+            active: true,
+            paymentStatus: Boolean(merienda.paymentStatus),
+            currentPeriodMonth: String(merienda.currentPeriodMonth || '').trim(),
+            parentRecommendations: String(merienda.parentRecommendations || '').trim(),
+            childFoodRestrictions: String(merienda.childAllergies || '').trim(),
+            restrictionReason: normalizeFoodRestrictionReason(merienda.childFoodRestrictionReason || ''),
+            lastPaymentAt: merienda.lastPaymentAt || null,
+            nextRenewalAt: merienda.nextRenewalAt || null,
+          }
+        : {
+            active: false,
+            paymentStatus: false,
+            currentPeriodMonth: '',
+            parentRecommendations: '',
+            childFoodRestrictions: '',
+            restrictionReason: '',
+            lastPaymentAt: null,
+            nextRenewalAt: null,
+          },
+    };
+  });
+}
+
+function resolveGioTargetStudents(rawQuestion, context = {}, linkedStudents = [], selectedStudentId = null) {
+  const safeStudents = Array.isArray(linkedStudents) ? linkedStudents : [];
+  if (!safeStudents.length) {
+    return [];
+  }
+
+  const question = normalizeAiText(rawQuestion);
+  const selectedStudent = safeStudents.find((item) => String(item._id) === String(selectedStudentId)) || safeStudents[0];
+
+  if (isGioAllStudentsQuestion(rawQuestion)) {
+    return safeStudents;
+  }
+
+  const explicitMatches = safeStudents.filter((student) => getGioStudentNameCandidates(student).some((candidate) => {
+    const matcher = new RegExp(`(^|\\b)${escapeRegExp(candidate)}(\\b|$)`);
+    return matcher.test(question);
+  }));
+
+  if (explicitMatches.length) {
+    return explicitMatches;
+  }
+
+  const lastTargetIds = Array.isArray(context?.lastTargetStudentIds)
+    ? context.lastTargetStudentIds.map((item) => String(item))
+    : [];
+  if (shouldReuseGioScope(rawQuestion) && lastTargetIds.length) {
+    const contextTargets = safeStudents.filter((student) => lastTargetIds.includes(String(student._id)));
+    if (contextTargets.length) {
+      return contextTargets;
+    }
+  }
+
+  return selectedStudent ? [selectedStudent] : safeStudents.slice(0, 1);
+}
+
+function buildGioStudentBreakdownText(perStudentMetrics, currencyFormat) {
+  const safeMetrics = Array.isArray(perStudentMetrics)
+    ? perStudentMetrics.filter((item) => Number(item?.ordersCount || 0) > 0 || Number(item?.total || 0) > 0)
+    : [];
+
+  if (safeMetrics.length <= 1) {
+    return '';
+  }
+
+  const text = safeMetrics
+    .slice(0, 4)
+    .map((item) => `${item.name}: ${currencyFormat.format(item.total)} en ${item.ordersCount} orden(es)`)
+    .join('; ');
+  return ` Detalle por alumno: ${text}.`;
+}
+
 function parseDateFromQuestion(rawQuestion, context = {}, history = []) {
   const question = normalizeAiText(rawQuestion);
   if (!question) {
@@ -406,11 +561,35 @@ function inferGioIntent(rawQuestion, parsedDate, context = {}) {
   if (!question) {
     return String(context?.lastIntent || 'summary');
   }
+  if (/\b(cuales|cuantos|que|qué)\s+(hijos|alumnos)\b|\bmis\s+(hijos|alumnos)\b|\blista\s+de\s+(hijos|alumnos)\b/.test(question)) {
+    return 'children_list';
+  }
   if (isGioSpecificDayFollowUp(rawQuestion, context)) {
     return 'specific_day';
   }
   if (isGioPeakDayQuestion(rawQuestion)) {
     return 'peak_day';
+  }
+  if (/\b(saldo|balance|disponible|wallet)\b/.test(question)) {
+    return 'balance';
+  }
+  if (/\b(limite diario|l[ií]mite diario|tope diario|tope|limite)\b/.test(question)) {
+    return 'daily_limit';
+  }
+  if (/\b(bloquead|restringid|prohibid|alerg|intoleranc|categoria bloqueada|producto bloqueado)\b/.test(question)) {
+    return 'restrictions';
+  }
+  if (/\b(grado|curso|salon|sal[oó]n|codigo escolar|codigo|c[oó]digo)\b/.test(question)) {
+    return 'student_profile';
+  }
+  if (/\b(merienda|meriendas|suscripcion|suscripci[oó]n|snack)\b/.test(question)) {
+    return 'merienda_status';
+  }
+  if (/\b(debito automatico|d[eé]bito automatico|autodebito|autod[eé]bito|auto debit|recarga automatica)\b/.test(question)) {
+    return 'autodebit_status';
+  }
+  if (/\b(info|informacion|informaci[oó]n|datos|perfil|resumen|todo sobre|ficha)\b/.test(question)) {
+    return 'overview';
   }
   if (/\b(promedio|media|promedi|diario promedio)\b/.test(question)) {
     return 'average';
@@ -470,33 +649,64 @@ function formatGioWalletMethod(methodValue) {
   return labels[normalized] || methodValue;
 }
 
-async function findGioRechargeMetrics({ schoolId, studentId }) {
+async function findGioRechargeMetrics({ schoolId, studentIds }) {
+  const safeStudentIds = Array.isArray(studentIds)
+    ? studentIds.map((item) => toObjectId(item)).filter(Boolean)
+    : [toObjectId(studentIds)].filter(Boolean);
+  if (!safeStudentIds.length) {
+    return {
+      totalAmount: 0,
+      count: 0,
+      latest: null,
+      byStudent: [],
+    };
+  }
+
   const transactions = await WalletTransaction.find({
     schoolId,
-    studentId,
+    studentId: { $in: safeStudentIds },
     cancelledAt: null,
     type: 'recharge',
   })
-    .select('amount method createdAt notes')
+    .select('studentId amount method createdAt notes')
     .sort({ createdAt: -1 })
     .limit(200)
     .lean();
 
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
   const totalAmount = safeTransactions.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const byStudentMap = new Map();
+
+  for (const item of safeTransactions) {
+    const key = String(item.studentId || '');
+    const previous = byStudentMap.get(key) || {
+      studentId: key,
+      totalAmount: 0,
+      count: 0,
+      latest: null,
+    };
+    previous.totalAmount += Number(item.amount || 0);
+    previous.count += 1;
+    if (!previous.latest) {
+      previous.latest = item;
+    }
+    byStudentMap.set(key, previous);
+  }
 
   return {
     totalAmount,
     count: safeTransactions.length,
     latest: safeTransactions[0] || null,
+    byStudent: Array.from(byStudentMap.values()),
   };
 }
 
-function buildGioMetrics(orders, fromDate, toDate) {
+function buildGioMetrics(orders, fromDate, toDate, studentNameById = {}) {
   const safeOrders = Array.isArray(orders) ? orders : [];
   const total = safeOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const daysMap = new Map();
   const productsMap = new Map();
+  const studentMetricsMap = new Map();
 
   for (const order of safeOrders) {
     const dayKey = startOfDayLocal(order.createdAt).toISOString().slice(0, 10);
@@ -505,6 +715,19 @@ function buildGioMetrics(orders, fromDate, toDate) {
       total: previousDay.total + Number(order.total || 0),
       ordersCount: previousDay.ordersCount + 1,
     });
+
+    const studentKey = String(order.studentId || '');
+    if (studentKey) {
+      const previousStudent = studentMetricsMap.get(studentKey) || {
+        studentId: studentKey,
+        name: studentNameById[studentKey] || 'Alumno',
+        total: 0,
+        ordersCount: 0,
+      };
+      previousStudent.total += Number(order.total || 0);
+      previousStudent.ordersCount += 1;
+      studentMetricsMap.set(studentKey, previousStudent);
+    }
 
     for (const item of Array.isArray(order.items) ? order.items : []) {
       const name = String(item?.nameSnapshot || 'Producto');
@@ -549,6 +772,7 @@ function buildGioMetrics(orders, fromDate, toDate) {
     averageByCalendarDay,
     topProducts,
     peakDay: dailyTotals[0] || null,
+    perStudent: Array.from(studentMetricsMap.values()).sort((a, b) => b.total - a.total),
   };
 }
 
@@ -2279,7 +2503,7 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       ? req.body.parentUserId || req.query.parentUserId || userId
       : userId;
     const parentUserId = toObjectId(requestedParentUserId);
-    const studentId = toObjectId(req.body.studentId || req.query.studentId);
+    const selectedStudentId = toObjectId(req.body.studentId || req.query.studentId);
     const message = String(req.body?.message || '').trim();
     const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
     const history = Array.isArray(req.body?.history)
@@ -2297,7 +2521,7 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       return res.status(400).json({ message: 'Invalid parent user id' });
     }
 
-    if (!studentId) {
+    if (!selectedStudentId) {
       return res.status(400).json({ message: 'studentId is required' });
     }
 
@@ -2305,29 +2529,71 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       return res.status(400).json({ message: 'message is required' });
     }
 
-    const link = await ParentStudentLink.findOne({
+    const links = await ParentStudentLink.find({
       schoolId,
       parentId: parentUserId,
-      studentId,
       status: 'active',
-    }).lean();
+    })
+      .select('studentId')
+      .lean();
 
-    if (!link) {
+    const allowedStudentIds = links.map((item) => String(item.studentId));
+    if (!allowedStudentIds.length) {
+      return res.status(404).json({ message: 'No linked students found' });
+    }
+
+    if (!allowedStudentIds.includes(String(selectedStudentId))) {
       return res.status(403).json({ message: 'Forbidden studentId' });
     }
 
-    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null })
-      .select('name')
-      .lean();
+    const [students, wallets, meriendaSubscriptions] = await Promise.all([
+      Student.find({
+        schoolId,
+        _id: { $in: allowedStudentIds },
+        deletedAt: null,
+      })
+        .populate('blockedProducts', 'name')
+        .populate('blockedCategories', 'name')
+        .sort({ name: 1 })
+        .lean(),
+      Wallet.find({
+        schoolId,
+        studentId: { $in: allowedStudentIds },
+      }).lean(),
+      MeriendaSubscription.find({
+        schoolId,
+        parentUserId,
+        status: 'active',
+      })
+        .select('childName paymentStatus currentPeriodMonth parentRecommendations childAllergies childFoodRestrictionReason lastPaymentAt nextRenewalAt')
+        .lean(),
+    ]);
 
-    if (!student) {
+    const linkedStudents = buildGioChildProfiles({
+      students,
+      wallets,
+      meriendaSubscriptions,
+    });
+    const selectedStudent = linkedStudents.find((item) => String(item._id) === String(selectedStudentId));
+
+    if (!selectedStudent) {
       return res.status(404).json({ message: 'Student not found' });
     }
+
+    const targetStudents = resolveGioTargetStudents(message, context, linkedStudents, String(selectedStudentId));
+    const effectiveTargets = targetStudents.length ? targetStudents : [selectedStudent];
+    const targetStudentIds = effectiveTargets.map((item) => String(item._id));
+    const targetStudentObjectIds = targetStudentIds.map((item) => toObjectId(item)).filter(Boolean);
+    const targetLabel = formatGioNameList(effectiveTargets.map((item) => item.name));
+    const isMultiTarget = effectiveTargets.length > 1;
+    const studentNameById = effectiveTargets.reduce((acc, item) => {
+      acc[String(item._id)] = item.name;
+      return acc;
+    }, {});
 
     const timeframe = resolveGioTimeframe(message, context, history);
     const parsedDate = timeframe?.parsedDate || null;
     const intent = inferGioIntent(message, parsedDate, context);
-    const studentName = String(student.name || 'el alumno');
     const fromDate = startOfDayLocal(timeframe.fromDate);
     const toDate = endOfDayLocal(timeframe.toDate);
     const scopeLabel = formatGioScopeLabel(timeframe.scope, fromDate, toDate, timeframe.rangeDays);
@@ -2337,8 +2603,8 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       maximumFractionDigits: 0,
     });
     const nextContext = {
-      studentId: String(studentId),
-      studentName,
+      studentId: String(selectedStudentId),
+      studentName: selectedStudent.name,
       lastIntent: intent,
       lastDate: timeframe.scope === 'date' ? fromDate.toISOString().slice(0, 10) : context?.lastDate || null,
       lastScope: timeframe.scope,
@@ -2346,63 +2612,158 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       lastToDate: toDate.toISOString().slice(0, 10),
       lastRangeDays: Number(timeframe.rangeDays || 1),
       lastPeakDate: context?.lastPeakDate || null,
+      lastTargetStudentIds: targetStudentIds,
+      lastTargetStudentNames: effectiveTargets.map((item) => item.name),
     };
+    let answer = '';
+
+    if (intent === 'children_list') {
+      answer = linkedStudents.length === 1
+        ? `Tienes 1 alumno vinculado en Comergio: ${linkedStudents[0].name}.`
+        : `Tienes ${linkedStudents.length} alumnos vinculados en Comergio: ${formatGioNameList(linkedStudents.map((item) => item.name))}.`;
+      nextContext.lastTargetStudentIds = linkedStudents.map((item) => String(item._id));
+      nextContext.lastTargetStudentNames = linkedStudents.map((item) => item.name);
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'balance') {
+      if (effectiveTargets.length === 1) {
+        const target = effectiveTargets[0];
+        const autoDebitText = target.wallet.autoDebitEnabled
+          ? ` Tiene débito automático activo por ${currencyFormat.format(target.wallet.autoDebitAmount || 0)}.`
+          : ' No tiene débito automático activo.';
+        answer = `${target.name} tiene un saldo disponible de ${currencyFormat.format(target.wallet.balance)}.${autoDebitText}`;
+      } else {
+        const totalBalance = effectiveTargets.reduce((sum, item) => sum + Number(item.wallet.balance || 0), 0);
+        const detail = effectiveTargets
+          .map((item) => `${item.name}: ${currencyFormat.format(item.wallet.balance)}`)
+          .join('; ');
+        answer = `Saldos actuales de ${targetLabel}: ${detail}. Total combinado: ${currencyFormat.format(totalBalance)}.`;
+      }
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'daily_limit') {
+      answer = effectiveTargets.length === 1
+        ? `${effectiveTargets[0].name} tiene un límite diario de ${currencyFormat.format(effectiveTargets[0].dailyLimit)}.`
+        : `Límites diarios: ${effectiveTargets.map((item) => `${item.name}: ${currencyFormat.format(item.dailyLimit)}`).join('; ')}.`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'student_profile') {
+      answer = effectiveTargets.length === 1
+        ? `${effectiveTargets[0].name} está en ${effectiveTargets[0].grade || 'curso no registrado'}, código escolar ${effectiveTargets[0].schoolCode || 'no registrado'} y límite diario ${currencyFormat.format(effectiveTargets[0].dailyLimit)}.`
+        : `Datos de ${targetLabel}: ${effectiveTargets.map((item) => `${item.name} (${item.grade || 'curso no registrado'}, código ${item.schoolCode || 'sin código'})`).join('; ')}.`;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'restrictions') {
+      const detail = effectiveTargets.map((item) => {
+        const blockedProductsText = item.blockedProducts.length
+          ? `productos bloqueados: ${item.blockedProducts.join(', ')}`
+          : 'sin productos bloqueados';
+        const blockedCategoriesText = item.blockedCategories.length
+          ? `categorías bloqueadas: ${item.blockedCategories.join(', ')}`
+          : 'sin categorías bloqueadas';
+        const meriendaText = item.merienda.childFoodRestrictions
+          ? `restricciones alimentarias: ${item.merienda.childFoodRestrictions}`
+          : 'sin restricciones alimentarias registradas';
+        return `${item.name}: ${blockedProductsText}; ${blockedCategoriesText}; ${meriendaText}`;
+      }).join(' | ');
+      answer = detail;
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'merienda_status') {
+      answer = effectiveTargets.map((item) => {
+        if (!item.merienda.active) {
+          return `${item.name}: sin suscripción activa de meriendas.`;
+        }
+        return `${item.name}: meriendas activas, pago ${item.merienda.paymentStatus ? 'al día' : 'pendiente'}, período ${item.merienda.currentPeriodMonth || 'sin período'}, restricciones ${item.merienda.childFoodRestrictions || 'no registradas'}.`;
+      }).join(' ');
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'autodebit_status') {
+      answer = effectiveTargets.map((item) => {
+        if (!item.wallet.autoDebitEnabled) {
+          return `${item.name}: sin débito automático activo.`;
+        }
+        return `${item.name}: débito automático activo por ${currencyFormat.format(item.wallet.autoDebitAmount || 0)}, límite ${currencyFormat.format(item.wallet.autoDebitLimit || 0)}, usado este mes ${currencyFormat.format(item.wallet.autoDebitMonthlyUsed || 0)}.`;
+      }).join(' ');
+      return res.status(200).json({ answer, context: nextContext });
+    }
+
+    if (intent === 'overview') {
+      const detail = effectiveTargets.map((item) => `${item.name}: saldo ${currencyFormat.format(item.wallet.balance)}, curso ${item.grade || 'no registrado'}, código ${item.schoolCode || 'no registrado'}, límite diario ${currencyFormat.format(item.dailyLimit)}, débito automático ${item.wallet.autoDebitEnabled ? 'activo' : 'inactivo'}.`).join(' ');
+      answer = detail;
+      return res.status(200).json({ answer, context: nextContext });
+    }
 
     if (intent === 'last_recharge' || intent === 'recharge_total') {
       const rechargeMetrics = await findGioRechargeMetrics({
         schoolId,
-        studentId,
+        studentIds: targetStudentIds,
       });
 
       nextContext.lastIntent = intent;
 
       if (!rechargeMetrics.latest) {
-        answer = `${studentName} no tiene recargas registradas todavía.`;
+        answer = effectiveTargets.length === 1
+          ? `${effectiveTargets[0].name} no tiene recargas registradas todavía.`
+          : `${targetLabel} no tienen recargas registradas todavía.`;
         return res.status(200).json({ answer, context: nextContext });
       }
 
       if (intent === 'recharge_total') {
-        answer = `${studentName} registra ${rechargeMetrics.count} recarga(s) por un total acumulado de ${currencyFormat.format(rechargeMetrics.totalAmount)}.`;
+        const rechargeDetail = rechargeMetrics.byStudent.length > 1
+          ? ` Detalle: ${rechargeMetrics.byStudent
+            .map((item) => `${studentNameById[item.studentId] || 'Alumno'} ${currencyFormat.format(item.totalAmount)} en ${item.count} recarga(s)`)
+            .join('; ')}.`
+          : '';
+        answer = `${targetLabel} ${isMultiTarget ? 'registran' : 'registra'} ${rechargeMetrics.count} recarga(s) por un total acumulado de ${currencyFormat.format(rechargeMetrics.totalAmount)}.${rechargeDetail}`;
         return res.status(200).json({ answer, context: nextContext });
       }
 
       nextContext.lastDate = startOfDayLocal(rechargeMetrics.latest.createdAt).toISOString().slice(0, 10);
-      answer = `La última recarga de ${studentName} fue el ${formatDateLabelEs(rechargeMetrics.latest.createdAt)} por ${currencyFormat.format(rechargeMetrics.latest.amount)} vía ${formatGioWalletMethod(rechargeMetrics.latest.method)}.`;
+      answer = effectiveTargets.length === 1
+        ? `La última recarga de ${effectiveTargets[0].name} fue el ${formatDateLabelEs(rechargeMetrics.latest.createdAt)} por ${currencyFormat.format(rechargeMetrics.latest.amount)} vía ${formatGioWalletMethod(rechargeMetrics.latest.method)}.`
+        : `La recarga más reciente entre ${targetLabel} fue la de ${studentNameById[String(rechargeMetrics.latest.studentId)] || 'Alumno'} el ${formatDateLabelEs(rechargeMetrics.latest.createdAt)} por ${currencyFormat.format(rechargeMetrics.latest.amount)} vía ${formatGioWalletMethod(rechargeMetrics.latest.method)}.`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
     if (intent === 'unsupported') {
-      answer = `Puedo ayudarte con consumo, órdenes, promedios, días específicos y recargas de ${studentName}. Si quieres, pregúntame por ejemplo: "¿qué consumió?", "¿cuánto gastó?" o "¿cuándo fue la última recarga?".`;
+      answer = `Puedo ayudarte con consumo, órdenes, promedios, días específicos, saldos, recargas, límites diarios, bloqueos, meriendas y débito automático de ${targetLabel}. Si quieres, pregúntame por ejemplo: "¿qué consumió?", "¿cuánto saldo tiene?" o "¿cuándo fue la última recarga?".`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
     const matchingOrders = await Order.find({
       schoolId,
-      studentId,
+      studentId: { $in: targetStudentObjectIds },
       status: 'completed',
       createdAt: { $gte: fromDate, $lte: toDate },
     })
-      .select('createdAt total items')
+      .select('studentId createdAt total items')
       .sort({ createdAt: -1 })
       .lean();
-    const metrics = buildGioMetrics(matchingOrders, fromDate, toDate);
+    const metrics = buildGioMetrics(matchingOrders, fromDate, toDate, studentNameById);
 
     const topProducts = metrics.topProducts.slice(0, 5);
-    let answer = '';
+    const studentBreakdownText = buildGioStudentBreakdownText(metrics.perStudent, currencyFormat);
 
     if (!matchingOrders.length) {
       answer = timeframe.scope === 'date'
-        ? `${studentName} no tiene consumos registrados el ${formatDateLabelEs(fromDate)}.`
-        : `No encontré consumos de ${studentName} en ${scopeLabel}.`;
+        ? `${targetLabel} no ${isMultiTarget ? 'tienen' : 'tiene'} consumos registrados el ${formatDateLabelEs(fromDate)}.`
+        : `No encontré consumos de ${targetLabel} en ${scopeLabel}.`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
     if (intent === 'average') {
       if (timeframe.scope === 'date') {
         const averagePerOrder = metrics.ordersCount > 0 ? metrics.total / metrics.ordersCount : 0;
-        answer = `${studentName} registró ${metrics.ordersCount} orden(es) el ${formatDateLabelEs(fromDate)} por ${currencyFormat.format(metrics.total)}. Promedio por orden: ${currencyFormat.format(averagePerOrder)}.`;
+        answer = `${targetLabel} ${isMultiTarget ? 'registraron' : 'registró'} ${metrics.ordersCount} orden(es) el ${formatDateLabelEs(fromDate)} por ${currencyFormat.format(metrics.total)}. Promedio por orden: ${currencyFormat.format(averagePerOrder)}.${studentBreakdownText}`;
       } else {
-        answer = `En ${scopeLabel}, ${studentName} lleva ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es). Promedio por día con consumo: ${currencyFormat.format(metrics.averageByActiveDay)}. Promedio diario del período: ${currencyFormat.format(metrics.averageByCalendarDay)}.`;
+        answer = `En ${scopeLabel}, ${targetLabel} ${isMultiTarget ? 'llevan' : 'lleva'} ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es). Promedio por día con consumo: ${currencyFormat.format(metrics.averageByActiveDay)}. Promedio diario del período: ${currencyFormat.format(metrics.averageByCalendarDay)}.${studentBreakdownText}`;
       }
       return res.status(200).json({
         answer,
@@ -2414,15 +2775,15 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       const peakDayDate = metrics.peakDay ? startOfDayLocal(metrics.peakDay.date) : null;
       if (!peakDayDate || Number.isNaN(peakDayDate.getTime())) {
         answer = timeframe.scope === 'date'
-          ? `${studentName} solo tiene consumos el ${formatDateLabelEs(fromDate)}.`
-          : `No pude determinar un día pico de gasto para ${studentName} en ${scopeLabel}.`;
+          ? `${targetLabel} solo ${isMultiTarget ? 'tienen' : 'tiene'} consumos el ${formatDateLabelEs(fromDate)}.`
+          : `No pude determinar un día pico de gasto para ${targetLabel} en ${scopeLabel}.`;
         return res.status(200).json({ answer, context: nextContext });
       }
 
       nextContext.lastIntent = 'peak_day';
       nextContext.lastDate = peakDayDate.toISOString().slice(0, 10);
       nextContext.lastPeakDate = peakDayDate.toISOString().slice(0, 10);
-      answer = `${studentName} tuvo su mayor gasto en ${scopeLabel} el ${formatDateLabelEs(peakDayDate)}: ${currencyFormat.format(metrics.peakDay.total)} en ${metrics.peakDay.ordersCount} orden(es).`;
+      answer = `${targetLabel} ${isMultiTarget ? 'tuvieron' : 'tuvo'} su mayor gasto en ${scopeLabel} el ${formatDateLabelEs(peakDayDate)}: ${currencyFormat.format(metrics.peakDay.total)} en ${metrics.peakDay.ordersCount} orden(es).${studentBreakdownText}`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
@@ -2437,21 +2798,21 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       nextContext.lastIntent = 'specific_day';
       nextContext.lastDate = referenceDate.toISOString().slice(0, 10);
       nextContext.lastPeakDate = context?.lastPeakDate || referenceDate.toISOString().slice(0, 10);
-      answer = `${studentName} tuvo ese consumo el ${formatDateLabelEs(referenceDate)}.`;
+      answer = `${targetLabel} ${isMultiTarget ? 'tuvieron' : 'tuvo'} ese consumo el ${formatDateLabelEs(referenceDate)}.`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
     if (intent === 'orders') {
       answer = timeframe.scope === 'date'
-        ? `${studentName} hizo ${metrics.ordersCount} orden(es) el ${formatDateLabelEs(fromDate)}.`
-        : `${studentName} hizo ${metrics.ordersCount} orden(es) en ${scopeLabel}, repartidas en ${metrics.activeDays} día(s) con consumo.`;
+        ? `${targetLabel} ${isMultiTarget ? 'hicieron' : 'hizo'} ${metrics.ordersCount} orden(es) el ${formatDateLabelEs(fromDate)}.${studentBreakdownText}`
+        : `${targetLabel} ${isMultiTarget ? 'hicieron' : 'hizo'} ${metrics.ordersCount} orden(es) en ${scopeLabel}, repartidas en ${metrics.activeDays} día(s) con consumo.${studentBreakdownText}`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
     if (intent === 'total') {
       answer = timeframe.scope === 'date'
-        ? `${studentName} gastó ${currencyFormat.format(metrics.total)} el ${formatDateLabelEs(fromDate)} en ${metrics.ordersCount} orden(es).`
-        : `${studentName} gastó ${currencyFormat.format(metrics.total)} en ${scopeLabel}, con ${metrics.ordersCount} orden(es) en ${metrics.activeDays} día(s) de consumo.`;
+        ? `${targetLabel} ${isMultiTarget ? 'gastaron' : 'gastó'} ${currencyFormat.format(metrics.total)} el ${formatDateLabelEs(fromDate)} en ${metrics.ordersCount} orden(es).${studentBreakdownText}`
+        : `${targetLabel} ${isMultiTarget ? 'gastaron' : 'gastó'} ${currencyFormat.format(metrics.total)} en ${scopeLabel}, con ${metrics.ordersCount} orden(es) en ${metrics.activeDays} día(s) de consumo.${studentBreakdownText}`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
@@ -2460,8 +2821,8 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
         ? topProducts.map((item) => `${item.name} x${item.quantity}`).join(', ')
         : 'sin detalle de productos';
       answer = timeframe.scope === 'date'
-        ? `${studentName} consumió el ${formatDateLabelEs(fromDate)}: ${productsText}. Total del día: ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es).`
-        : `En ${scopeLabel}, ${studentName} consumió principalmente: ${productsText}. Total del período: ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es).`;
+        ? `${targetLabel} ${isMultiTarget ? 'consumieron' : 'consumió'} el ${formatDateLabelEs(fromDate)}: ${productsText}. Total del día: ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es).${studentBreakdownText}`
+        : `En ${scopeLabel}, ${targetLabel} ${isMultiTarget ? 'consumieron' : 'consumió'} principalmente: ${productsText}. Total del período: ${currencyFormat.format(metrics.total)} en ${metrics.ordersCount} orden(es).${studentBreakdownText}`;
       return res.status(200).json({ answer, context: nextContext });
     }
 
@@ -2469,8 +2830,8 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       ? ` Productos más frecuentes: ${topProducts.slice(0, 3).map((item) => `${item.name} x${item.quantity}`).join(', ')}.`
       : '';
     answer = timeframe.scope === 'date'
-      ? `${studentName} consumió ${currencyFormat.format(metrics.total)} el ${formatDateLabelEs(fromDate)} en ${metrics.ordersCount} orden(es).${topProductsText}`
-      : `${studentName} lleva ${currencyFormat.format(metrics.total)} en ${scopeLabel}, con ${metrics.ordersCount} orden(es) en ${metrics.activeDays} día(s) de consumo.${topProductsText} Si quieres, te detallo productos, promedio o un día específico.`;
+      ? `${targetLabel} ${isMultiTarget ? 'consumieron' : 'consumió'} ${currencyFormat.format(metrics.total)} el ${formatDateLabelEs(fromDate)} en ${metrics.ordersCount} orden(es).${topProductsText}${studentBreakdownText}`
+      : `${targetLabel} ${isMultiTarget ? 'llevan' : 'lleva'} ${currencyFormat.format(metrics.total)} en ${scopeLabel}, con ${metrics.ordersCount} orden(es) en ${metrics.activeDays} día(s) de consumo.${topProductsText}${studentBreakdownText} Si quieres, te detallo productos, promedio, saldo, recargas o un día específico.`;
 
     return res.status(200).json({
       answer,
