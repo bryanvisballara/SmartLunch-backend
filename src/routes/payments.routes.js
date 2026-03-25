@@ -455,7 +455,7 @@ function buildBoldBillingAddress(input = {}, phone = '') {
 }
 
 function verifyBoldWebhookSignature(rawBodyBuffer, incomingSignature) {
-  const expectedSignature = String(incomingSignature || '').trim();
+  const expectedSignature = extractBoldSignatureDigest(incomingSignature);
   if (!expectedSignature) {
     return false;
   }
@@ -465,12 +465,107 @@ function verifyBoldWebhookSignature(rawBodyBuffer, incomingSignature) {
   const rawBodyText = Buffer.isBuffer(rawBodyBuffer)
     ? rawBodyBuffer.toString('utf8')
     : String(rawBodyBuffer || '');
-  const encodedBody = Buffer.from(rawBodyText, 'utf8').toString('base64');
-  const computedSignature = crypto.createHmac('sha256', secret).update(encodedBody).digest('hex');
-  if (computedSignature.length !== expectedSignature.length) {
-    return false;
+
+  const candidatePayloads = [
+    rawBodyText,
+    Buffer.from(rawBodyText, 'utf8').toString('base64'),
+  ].filter(Boolean);
+
+  for (const payload of candidatePayloads) {
+    const computedSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    if (computedSignature.length === expectedSignature.length) {
+      try {
+        if (crypto.timingSafeEqual(Buffer.from(computedSignature), Buffer.from(expectedSignature))) {
+          return true;
+        }
+      } catch (error) {
+        return false;
+      }
+    }
   }
-  return crypto.timingSafeEqual(Buffer.from(computedSignature), Buffer.from(expectedSignature));
+
+  return false;
+}
+
+function extractBoldSignatureDigest(incomingSignature) {
+  const signature = String(incomingSignature || '').trim();
+  if (!signature) {
+    return '';
+  }
+
+  const exactHexMatch = signature.match(/^[a-f0-9]{64}$/i);
+  if (exactHexMatch) {
+    return exactHexMatch[0].toLowerCase();
+  }
+
+  const labeledMatch = signature.match(/(?:sha256=|v1=|signature=)([a-f0-9]{64})/i);
+  if (labeledMatch?.[1]) {
+    return labeledMatch[1].toLowerCase();
+  }
+
+  const anyHexMatch = signature.match(/[a-f0-9]{64}/i);
+  return String(anyHexMatch?.[0] || '').toLowerCase();
+}
+
+async function reconcileBoldWebhookByProviderLookup({ providerTransactionId, reference, payload, source }) {
+  if (!reference || !isBoldPaymentApiConfigured()) {
+    return null;
+  }
+
+  try {
+    const searchConditions = [];
+    if (providerTransactionId) {
+      searchConditions.push({ providerTransactionId });
+    }
+    if (reference) {
+      searchConditions.push({ reference });
+    }
+
+    if (!searchConditions.length) {
+      return null;
+    }
+
+    const paymentRecord = await PaymentTransaction.findOne({
+      method: { $in: ['bold_auto_debit', 'bold'] },
+      $or: searchConditions,
+    });
+
+    if (!paymentRecord) {
+      console.warn('[BOLD_WEBHOOK_FALLBACK_PAYMENT_NOT_FOUND]', {
+        providerTransactionId,
+        reference,
+      });
+      return { received: true, ignored: true, reason: 'Payment record not found' };
+    }
+
+    const providerPayload = await getPaymentAttemptStatus(reference);
+    const result = await reconcileBoldPaymentRecord(paymentRecord, providerPayload, { source });
+
+    console.info('[BOLD_WEBHOOK_FALLBACK_RECONCILED]', {
+      reference,
+      providerTransactionId,
+      providerStatus: extractBoldProviderStatus(providerPayload),
+    });
+
+    return {
+      ...result,
+      verifiedViaStatusQuery: true,
+      webhookSignatureAccepted: false,
+      webhookType: extractBoldWebhookSource(payload) || 'unknown',
+    };
+  } catch (error) {
+    console.warn('[BOLD_WEBHOOK_FALLBACK_FAILED]', {
+      reference,
+      providerTransactionId,
+      message: error.message,
+    });
+    return {
+      received: true,
+      ignored: true,
+      verifiedViaStatusQuery: false,
+      reason: error.message,
+    };
+  }
 }
 
 async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { source = 'status_sync' } = {}) {
@@ -929,18 +1024,32 @@ async function handleBoldWebhook(req, res) {
       ''
     ).trim();
 
-    if (!verifyBoldWebhookSignature(req.rawBody || Buffer.from(JSON.stringify(req.body || {})), incomingSignature)) {
+    const providerTransactionId = extractBoldProviderTransactionId(req.body);
+    const reference = extractBoldReference(req.body);
+    const providerStatus = extractBoldProviderStatus(req.body);
+    const isSignatureValid = verifyBoldWebhookSignature(
+      req.rawBody || Buffer.from(JSON.stringify(req.body || {})),
+      incomingSignature
+    );
+
+    if (!isSignatureValid) {
       console.warn('[BOLD_WEBHOOK_SIGNATURE_MISMATCH]', {
         hasIncomingSignature: Boolean(incomingSignature),
         signatureHeaders: Object.keys(req.headers || {}).filter((key) => key.toLowerCase().includes('signature')),
         bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 12) : [],
+        providerTransactionId,
+        reference,
       });
-      return res.status(401).json({ message: 'Invalid Bold webhook signature' });
-    }
 
-    const providerTransactionId = extractBoldProviderTransactionId(req.body);
-    const reference = extractBoldReference(req.body);
-    const providerStatus = extractBoldProviderStatus(req.body);
+      const fallbackResult = await reconcileBoldWebhookByProviderLookup({
+        providerTransactionId,
+        reference,
+        payload: req.body,
+        source: 'webhook_status_fallback',
+      });
+
+      return res.status(200).json(fallbackResult || { received: true, ignored: true, reason: 'invalid signature' });
+    }
 
     console.info('[BOLD_WEBHOOK_PARSED_IDENTIFIERS]', {
       providerTransactionId,
@@ -993,20 +1102,31 @@ function handleBoldAsyncWebhookAck(req, res, { label }) {
         ''
       ).trim();
 
-      if (
-        incomingSignature &&
-        !verifyBoldWebhookSignature(req.rawBody || Buffer.from(JSON.stringify(req.body || {})), incomingSignature)
-      ) {
+      const providerTransactionId = extractBoldProviderTransactionId(req.body);
+      const reference = extractBoldReference(req.body);
+      const providerStatus = extractBoldProviderStatus(req.body);
+      const isSignatureValid = verifyBoldWebhookSignature(
+        req.rawBody || Buffer.from(JSON.stringify(req.body || {})),
+        incomingSignature
+      );
+
+      if (incomingSignature && !isSignatureValid) {
         console.warn(`[${label.toUpperCase()}_SIGNATURE_MISMATCH]`, {
           hasIncomingSignature: true,
           bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 12) : [],
+          providerTransactionId,
+          reference,
+        });
+
+        await reconcileBoldWebhookByProviderLookup({
+          providerTransactionId,
+          reference,
+          payload: req.body,
+          source: `${label}_status_fallback`,
         });
         return;
       }
 
-      const providerTransactionId = extractBoldProviderTransactionId(req.body);
-      const reference = extractBoldReference(req.body);
-      const providerStatus = extractBoldProviderStatus(req.body);
       const merchantId = extractBoldMerchantId(req.body);
       const webhookSource = extractBoldWebhookSource(req.body);
       const integration = extractBoldWebhookIntegration(req.body);
