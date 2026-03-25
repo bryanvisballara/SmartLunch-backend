@@ -114,6 +114,31 @@ function getFrontendBaseUrl() {
   return String(process.env.FRONTEND_URL || 'https://comergio.com').trim().replace(/\/$/, '');
 }
 
+function getFrontendBaseUrlFromRequest(req) {
+  const candidates = [
+    req.get('origin'),
+    req.get('referer'),
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (!value) {
+      continue;
+    }
+
+    try {
+      const url = new URL(value);
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        return `${url.origin}`.replace(/\/$/, '');
+      }
+    } catch (error) {
+      // Ignore invalid origin/referer values and keep falling back.
+    }
+  }
+
+  return getFrontendBaseUrl();
+}
+
 function getPublicBackendUrl(req) {
   const explicit = String(process.env.BACKEND_PUBLIC_URL || '').trim();
   if (explicit) {
@@ -598,8 +623,9 @@ function buildBoldWalletReturnUrl({ studentId, reference }) {
   return url.toString();
 }
 
-function buildEpaycoWalletReturnUrl({ studentId, reference, status = '' }) {
-  const url = new URL('/parent/recargas', `${getFrontendBaseUrl()}/`);
+function buildEpaycoWalletReturnUrl({ studentId, reference, status = '', frontendBaseUrl = '' }) {
+  const baseUrl = String(frontendBaseUrl || '').trim() || getFrontendBaseUrl();
+  const url = new URL('/parent/recargas', `${baseUrl}/`);
   if (studentId) {
     url.searchParams.set('studentId', String(studentId));
   }
@@ -746,6 +772,18 @@ function isWebhookSource(source) {
 
 function normalizePhoneNumber(value) {
   return String(value || '').replace(/\D/g, '').trim();
+}
+
+function resolvePayerDocument(parentUser = {}, payer = {}) {
+  const explicitDocumentType = String(payer?.documentType || parentUser?.documentType || '').trim().toUpperCase();
+  const explicitDocumentNumber = String(payer?.documentNumber || parentUser?.documentNumber || '').replace(/\D/g, '').trim();
+  const fallbackDocumentNumber = normalizePhoneNumber(parentUser?.phone || '');
+  const documentNumber = explicitDocumentNumber || fallbackDocumentNumber;
+
+  return {
+    documentType: explicitDocumentType || 'CC',
+    documentNumber,
+  };
 }
 
 function mapBoldDocumentType(value) {
@@ -1649,6 +1687,7 @@ router.get('/epayco/response', async (req, res) => {
     if (reference) {
       const payment = await PaymentTransaction.findOne({ method: 'epayco', reference });
       if (payment) {
+        const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
         try {
           await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response' });
         } catch (responseError) {
@@ -1662,6 +1701,7 @@ router.get('/epayco/response', async (req, res) => {
           studentId: String(payment.studentId || ''),
           reference,
           status: internalStatus,
+          frontendBaseUrl,
         }));
       }
     }
@@ -1685,6 +1725,7 @@ router.post('/epayco/response', async (req, res) => {
     if (reference) {
       const payment = await PaymentTransaction.findOne({ method: 'epayco', reference });
       if (payment) {
+        const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
         try {
           await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response_post' });
         } catch (responseError) {
@@ -1698,6 +1739,7 @@ router.post('/epayco/response', async (req, res) => {
           studentId: String(payment.studentId || ''),
           reference,
           status: internalStatus,
+          frontendBaseUrl,
         }));
       }
     }
@@ -1973,8 +2015,9 @@ router.post('/epayco/recharge', async (req, res) => {
     const payerName = String(payer?.name || parentUser.name || '').trim();
     const payerEmail = String(payer?.email || parentUser.email || '').trim().toLowerCase();
     const payerPhone = normalizePhoneNumber(payer?.phone || parentUser.phone || '');
-    const payerDocumentType = String(payer?.documentType || 'CC').trim().toUpperCase();
-    const payerDocumentNumber = String(payer?.documentNumber || '').replace(/\D/g, '').trim();
+    const payerDocument = resolvePayerDocument(parentUser, payer);
+    const payerDocumentType = payerDocument.documentType;
+    const payerDocumentNumber = payerDocument.documentNumber;
 
     if (!payerName || !payerEmail || payerPhone.length < 7 || payerDocumentNumber.length < 5) {
       return res.status(400).json({
@@ -1985,6 +2028,7 @@ router.post('/epayco/recharge', async (req, res) => {
     const feeAmount = Math.round(numericAmount * 0.015);
     const totalToPay = numericAmount + feeAmount;
     const reference = buildReference();
+    const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
 
     const payment = await PaymentTransaction.create({
       schoolId,
@@ -2025,6 +2069,7 @@ router.post('/epayco/recharge', async (req, res) => {
     };
 
     payment.providerResponse = {
+      frontendBaseUrl,
       rechargeAmount: numericAmount,
       feeAmount,
       totalToPay,
@@ -2109,8 +2154,9 @@ router.post('/bold/recharge', async (req, res) => {
     const payerName = String(payer?.name || paymentMethod?.cardholderName || parentUser.name || '').trim();
     const payerEmail = String(payer?.email || parentUser.email || '').trim().toLowerCase();
     const payerPhone = normalizePhoneNumber(payer?.phone || parentUser.phone || '');
-    const payerDocumentType = mapBoldDocumentType(payer?.documentType);
-    const payerDocumentNumber = String(payer?.documentNumber || '').replace(/\D/g, '').trim();
+    const payerDocument = resolvePayerDocument(parentUser, payer);
+    const payerDocumentType = mapBoldDocumentType(payerDocument.documentType);
+    const payerDocumentNumber = payerDocument.documentNumber;
     const requestedPaymentMethodName = String(paymentMethod?.name || 'CREDIT_CARD').trim().toUpperCase();
     const cardNumber = String(paymentMethod?.cardNumber || '').replace(/\D/g, '').trim();
     const expirationMonth = String(paymentMethod?.expirationMonth || '').replace(/\D/g, '').slice(0, 2);
