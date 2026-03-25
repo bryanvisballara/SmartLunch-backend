@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const mongoose = require('mongoose');
 
@@ -109,11 +110,157 @@ function getBancolombiaRedirectUrl(req) {
   return `${req.protocol}://${req.get('host')}/payments/bancolombia/oauth/callback`;
 }
 
+function getFrontendBaseUrl() {
+  return String(process.env.FRONTEND_URL || 'https://comergio.com').trim().replace(/\/$/, '');
+}
+
+function getPublicBackendUrl(req) {
+  const explicit = String(process.env.BACKEND_PUBLIC_URL || '').trim();
+  if (explicit) {
+    return explicit.replace(/\/$/, '');
+  }
+
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+function getEpaycoEntityClientId() {
+  return String(process.env.EPAYCO_ENTITY_CLIENT_ID || '').trim();
+}
+
+function getEpaycoCheckoutPublicKey() {
+  return String(process.env.EPAYCO_PUBLIC_KEY || '').trim();
+}
+
+function isEpaycoCheckoutConfigured() {
+  return Boolean(getEpaycoEntityClientId() && getEpaycoCheckoutPublicKey());
+}
+
+function isEpaycoTestMode() {
+  return String(process.env.EPAYCO_TEST || 'false').toLowerCase() === 'true';
+}
+
+function buildEpaycoConfirmationUrl(req) {
+  const explicit = String(process.env.EPAYCO_CONFIRMATION_URL || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  return `${getPublicBackendUrl(req)}/payments/epayco/confirmation`;
+}
+
+function buildEpaycoResponseUrl(req) {
+  const explicit = String(process.env.EPAYCO_RESPONSE_URL || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  return `${getPublicBackendUrl(req)}/payments/epayco/response`;
+}
+
 function getLowBalanceLevelForBalance(balance) {
   const value = Number(balance || 0);
   if (value < 10000) return 'lt10';
   if (value < 20000) return 'lt20';
   return 'none';
+}
+
+function extractEpaycoReference(payload) {
+  const candidates = [
+    payload?.x_id_invoice,
+    payload?.x_invoice,
+    payload?.invoice,
+    payload?.reference,
+    payload?.ref_payco,
+    payload?.x_extra1,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function extractEpaycoProviderTransactionId(payload) {
+  const candidates = [
+    payload?.x_ref_payco,
+    payload?.x_transaction_id,
+    payload?.transaction_id,
+    payload?.transactionId,
+    payload?.ref_payco,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function extractEpaycoProviderStatus(payload) {
+  const candidates = [
+    payload?.x_transaction_state,
+    payload?.x_response,
+    payload?.x_cod_response,
+    payload?.status,
+    payload?.state,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return 'Pendiente';
+}
+
+function toEpaycoInternalStatus(providerStatus) {
+  const normalized = String(providerStatus || '').trim().toLowerCase();
+
+  if (['aceptada', 'accepted', 'accept', 'approved', 'aprobada'].includes(normalized)) {
+    return 'approved';
+  }
+
+  if (['pendiente', 'pending', 'en espera'].includes(normalized)) {
+    return 'pending';
+  }
+
+  if (['fallida', 'failed', 'error', 'expirada', 'expired'].includes(normalized)) {
+    return 'failed';
+  }
+
+  if (['rechazada', 'rejected', 'cancelada', 'cancelled', 'abandonada', 'reversada', 'declined'].includes(normalized)) {
+    return 'rejected';
+  }
+
+  return 'pending';
+}
+
+function verifyEpaycoSignature(payload) {
+  const incomingSignature = String(payload?.x_signature || payload?.signature || '').trim().toLowerCase();
+  const merchantId = getEpaycoEntityClientId();
+  const publicKey = getEpaycoCheckoutPublicKey();
+  const refPayco = String(payload?.x_ref_payco || '').trim();
+  const transactionId = String(payload?.x_transaction_id || '').trim();
+  const amount = String(payload?.x_amount || '').trim();
+  const currency = String(payload?.x_currency_code || 'COP').trim().toUpperCase();
+
+  if (!incomingSignature || !merchantId || !publicKey || !refPayco || !transactionId || !amount) {
+    return false;
+  }
+
+  const rawSignature = `${merchantId}^${publicKey}^${refPayco}^${transactionId}^${amount}^${currency}`;
+  const expectedSignature = crypto.createHash('md5').update(rawSignature).digest('hex').toLowerCase();
+
+  return incomingSignature === expectedSignature;
 }
 
 function getBoldPaymentStatus(payload) {
@@ -439,10 +586,6 @@ async function canAccessStudent(user, studentId) {
   return Boolean(link);
 }
 
-function getFrontendBaseUrl() {
-  return String(process.env.FRONTEND_URL || 'https://comergio.com').replace(/\/$/, '');
-}
-
 function buildBoldWalletReturnUrl({ studentId, reference }) {
   const url = new URL('/parent/recargas', `${getFrontendBaseUrl()}/`);
   if (studentId) {
@@ -453,6 +596,148 @@ function buildBoldWalletReturnUrl({ studentId, reference }) {
     url.searchParams.set('paymentReference', String(reference));
   }
   return url.toString();
+}
+
+function buildEpaycoWalletReturnUrl({ studentId, reference, status = '' }) {
+  const url = new URL('/parent/recargas', `${getFrontendBaseUrl()}/`);
+  if (studentId) {
+    url.searchParams.set('studentId', String(studentId));
+  }
+  if (reference) {
+    url.searchParams.set('paymentSource', 'epayco');
+    url.searchParams.set('paymentReference', String(reference));
+  }
+  if (status) {
+    url.searchParams.set('paymentStatus', String(status));
+  }
+  return url.toString();
+}
+
+async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { source = 'confirmation' } = {}) {
+  let session;
+
+  try {
+    const providerTransactionId = extractEpaycoProviderTransactionId(providerPayload) || paymentRecord.providerTransactionId || '';
+    const providerStatus = extractEpaycoProviderStatus(providerPayload);
+    const internalStatus = toEpaycoInternalStatus(providerStatus);
+
+    if (internalStatus !== 'approved') {
+      paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
+      paymentRecord.providerStatus = providerStatus;
+      paymentRecord.status = internalStatus;
+      paymentRecord.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
+      paymentRecord.providerResponse = {
+        ...(paymentRecord.providerResponse || {}),
+        [source]: providerPayload,
+      };
+      if (String(source).includes('confirmation')) {
+        paymentRecord.callbackPayload = providerPayload;
+      }
+      await paymentRecord.save();
+
+      return {
+        received: true,
+        credited: false,
+        status: internalStatus,
+      };
+    }
+
+    if (paymentRecord.walletTransactionId) {
+      return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const lockedPayment = await PaymentTransaction.findById(paymentRecord._id).session(session);
+    if (!lockedPayment) {
+      await session.abortTransaction();
+      return { received: true, credited: false, status: 'failed', message: 'Payment transaction not found' };
+    }
+
+    if (lockedPayment.walletTransactionId) {
+      await session.commitTransaction();
+      return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+    }
+
+    const wallet = await Wallet.findOne({
+      schoolId: lockedPayment.schoolId,
+      studentId: lockedPayment.studentId,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+      return { received: true, credited: false, status: 'failed', message: 'Wallet not found' };
+    }
+
+    const approvedAmount = Number(lockedPayment.amount || 0);
+    wallet.balance += approvedAmount;
+    wallet.lowBalanceAlertLevel = getLowBalanceLevelForBalance(wallet.balance);
+    await wallet.save({ session });
+
+    const [walletTopup] = await WalletTransaction.create(
+      [
+        {
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          walletId: wallet._id,
+          type: 'recharge',
+          amount: approvedAmount,
+          method: 'epayco',
+          createdBy: lockedPayment.parentId,
+          notes: `Recarga aprobada por ePayco (${providerTransactionId || lockedPayment.reference})`,
+        },
+      ],
+      { session }
+    );
+
+    lockedPayment.providerTransactionId = providerTransactionId || lockedPayment.providerTransactionId;
+    lockedPayment.providerStatus = providerStatus;
+    lockedPayment.status = 'approved';
+    lockedPayment.failureReason = null;
+    lockedPayment.walletTransactionId = walletTopup._id;
+    lockedPayment.approvedAt = new Date();
+    lockedPayment.providerResponse = {
+      ...(lockedPayment.providerResponse || {}),
+      [source]: providerPayload,
+    };
+    if (String(source).includes('confirmation')) {
+      lockedPayment.callbackPayload = providerPayload;
+    }
+    await lockedPayment.save({ session });
+
+    await session.commitTransaction();
+
+    setImmediate(async () => {
+      try {
+        await queueAutoDebitRechargeNotification({
+          schoolId: lockedPayment.schoolId,
+          studentId: lockedPayment.studentId,
+          amount: approvedAmount,
+          newBalance: Number(wallet.balance || 0),
+          method: 'epayco',
+        });
+      } catch (notificationError) {
+        console.error(`[RECHARGE_NOTIFICATION_FAILED] source=${source} paymentId=${lockedPayment._id} error=${notificationError.message}`);
+      }
+    });
+
+    return {
+      received: true,
+      credited: true,
+      status: 'approved',
+      rechargeAmount: approvedAmount,
+    };
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    throw error;
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
 }
 
 function isWebhookSource(source) {
@@ -1354,8 +1639,197 @@ router.post('/pse/payments/webhook', (req, res) => handleBoldAsyncWebhookAck(req
 router.post('/vnp/bancolombia', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_bancolombia' }));
 router.post('/vnp/bancolombia/webhook', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_bancolombia' }));
 
+router.get('/epayco/response', async (req, res) => {
+  try {
+    const payload = req.query || {};
+    const reference = extractEpaycoReference(payload);
+    const providerStatus = extractEpaycoProviderStatus(payload);
+    const internalStatus = toEpaycoInternalStatus(providerStatus);
+
+    if (reference) {
+      const payment = await PaymentTransaction.findOne({ method: 'epayco', reference });
+      if (payment) {
+        try {
+          await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response' });
+        } catch (responseError) {
+          console.warn('[EPAYCO_RESPONSE_RECONCILE_FAILED]', {
+            reference,
+            message: responseError.message,
+          });
+        }
+
+        return res.redirect(302, buildEpaycoWalletReturnUrl({
+          studentId: String(payment.studentId || ''),
+          reference,
+          status: internalStatus,
+        }));
+      }
+    }
+
+    return res.redirect(302, buildEpaycoWalletReturnUrl({
+      reference,
+      status: internalStatus || 'failed',
+    }));
+  } catch (error) {
+    return res.redirect(302, buildEpaycoWalletReturnUrl({ status: 'failed' }));
+  }
+});
+
+router.post('/epayco/response', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const reference = extractEpaycoReference(payload);
+    const providerStatus = extractEpaycoProviderStatus(payload);
+    const internalStatus = toEpaycoInternalStatus(providerStatus);
+
+    if (reference) {
+      const payment = await PaymentTransaction.findOne({ method: 'epayco', reference });
+      if (payment) {
+        try {
+          await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response_post' });
+        } catch (responseError) {
+          console.warn('[EPAYCO_RESPONSE_POST_RECONCILE_FAILED]', {
+            reference,
+            message: responseError.message,
+          });
+        }
+
+        return res.redirect(302, buildEpaycoWalletReturnUrl({
+          studentId: String(payment.studentId || ''),
+          reference,
+          status: internalStatus,
+        }));
+      }
+    }
+
+    return res.redirect(302, buildEpaycoWalletReturnUrl({
+      reference,
+      status: internalStatus || 'failed',
+    }));
+  } catch (error) {
+    return res.redirect(302, buildEpaycoWalletReturnUrl({ status: 'failed' }));
+  }
+});
+
+router.post('/epayco/confirmation', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const reference = extractEpaycoReference(payload);
+    const providerTransactionId = extractEpaycoProviderTransactionId(payload);
+    const providerStatus = extractEpaycoProviderStatus(payload);
+
+    console.info('[EPAYCO_CONFIRMATION_RECEIVED]', {
+      reference,
+      providerTransactionId,
+      providerStatus,
+      xRefPayco: String(payload?.x_ref_payco || '').trim(),
+      xTransactionId: String(payload?.x_transaction_id || '').trim(),
+    });
+
+    if (!verifyEpaycoSignature(payload)) {
+      console.warn('[EPAYCO_CONFIRMATION_INVALID_SIGNATURE]', {
+        reference,
+        providerTransactionId,
+        providerStatus,
+      });
+      return res.status(401).json({ message: 'Invalid ePayco signature' });
+    }
+
+    if (!reference && !providerTransactionId) {
+      console.warn('[EPAYCO_CONFIRMATION_MISSING_REFERENCE]', {
+        providerStatus,
+      });
+      return res.status(400).json({ message: 'reference or provider transaction id is required' });
+    }
+
+    const searchConditions = [];
+    if (reference) {
+      searchConditions.push({ reference });
+    }
+    if (providerTransactionId) {
+      searchConditions.push({ providerTransactionId });
+    }
+
+    const payment = await PaymentTransaction.findOne({
+      method: 'epayco',
+      $or: searchConditions,
+    });
+    if (!payment) {
+      console.warn('[EPAYCO_CONFIRMATION_PAYMENT_NOT_FOUND]', {
+        reference,
+        providerTransactionId,
+        providerStatus,
+      });
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    const result = await reconcileEpaycoPaymentRecord(payment, payload, { source: 'confirmation' });
+    console.info('[EPAYCO_CONFIRMATION_RECONCILED]', {
+      reference: payment.reference,
+      providerTransactionId,
+      providerStatus,
+      internalStatus: result?.status || payment.status,
+      credited: Boolean(result?.credited),
+      alreadyProcessed: Boolean(result?.alreadyProcessed),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('[EPAYCO_CONFIRMATION_ERROR]', {
+      message: error.message,
+    });
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
+
+router.get('/epayco/recharge-status', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const reference = String(req.query?.reference || '').trim();
+
+    if (!reference) {
+      return res.status(400).json({ message: 'reference is required' });
+    }
+
+    const paymentQuery = {
+      schoolId,
+      method: 'epayco',
+      reference,
+    };
+
+    if (role !== 'admin') {
+      paymentQuery.parentId = userId;
+    }
+
+    const payment = await PaymentTransaction.findOne(paymentQuery);
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    const wallet = await Wallet.findOne({
+      schoolId,
+      studentId: payment.studentId,
+    })
+      .select('balance')
+      .lean();
+
+    return res.status(200).json({
+      reference: payment.reference,
+      status: payment.status,
+      providerStatus: payment.providerStatus,
+      rechargeAmount: Number(payment.amount || 0),
+      studentId: String(payment.studentId || ''),
+      approvedAt: payment.approvedAt || null,
+      walletBalance: Number(wallet?.balance || 0),
+      walletTransactionId: payment.walletTransactionId ? String(payment.walletTransactionId) : '',
+      failureReason: payment.failureReason || '',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 router.get('/bold/recharge-status', async (req, res) => {
   try {
@@ -1441,6 +1915,139 @@ router.get('/bold/pse-banks', async (req, res) => {
     return res.status(Number(error?.status) || 500).json({
       message: error.message || 'No se pudo consultar el listado de bancos PSE.',
     });
+  }
+});
+
+router.post('/epayco/recharge', async (req, res) => {
+  try {
+    if (!isEpaycoCheckoutConfigured()) {
+      return res.status(503).json({
+        message: 'ePayco no esta configurado para recargas manuales. Define EPAYCO_PUBLIC_KEY y EPAYCO_ENTITY_CLIENT_ID.',
+      });
+    }
+
+    const { schoolId, userId } = req.user;
+    const {
+      studentId,
+      amount,
+      description = 'Recarga Comergio',
+      payer = {},
+    } = req.body || {};
+
+    const studentObjectId = toObjectId(studentId);
+    if (!studentObjectId) {
+      return res.status(400).json({ message: 'studentId is required' });
+    }
+
+    const numericAmount = Math.round(Number(amount));
+    if (!Number.isFinite(numericAmount) || numericAmount < 20000) {
+      return res.status(400).json({ message: 'Amount must be at least 20000 COP' });
+    }
+
+    const allowed = await canAccessStudent(req.user, studentObjectId);
+    if (!allowed) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const student = await Student.findOne({ _id: studentObjectId, schoolId, deletedAt: null, status: 'active' }).select('_id name');
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: studentObjectId });
+    if (!wallet) {
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    const parentUser = await User.findOne({
+      _id: userId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('name email phone');
+
+    if (!parentUser) {
+      return res.status(404).json({ message: 'Parent user not found' });
+    }
+
+    const payerName = String(payer?.name || parentUser.name || '').trim();
+    const payerEmail = String(payer?.email || parentUser.email || '').trim().toLowerCase();
+    const payerPhone = normalizePhoneNumber(payer?.phone || parentUser.phone || '');
+    const payerDocumentType = String(payer?.documentType || 'CC').trim().toUpperCase();
+    const payerDocumentNumber = String(payer?.documentNumber || '').replace(/\D/g, '').trim();
+
+    if (!payerName || !payerEmail || payerPhone.length < 7 || payerDocumentNumber.length < 5) {
+      return res.status(400).json({
+        message: 'Faltan datos del titular para procesar el pago con ePayco. Verifica nombre, correo, telefono y documento.',
+      });
+    }
+
+    const feeAmount = Math.round(numericAmount * 0.015);
+    const totalToPay = numericAmount + feeAmount;
+    const reference = buildReference();
+
+    const payment = await PaymentTransaction.create({
+      schoolId,
+      studentId: studentObjectId,
+      parentId: userId,
+      amount: numericAmount,
+      method: 'epayco',
+      documentType: payerDocumentType,
+      documentNumber: payerDocumentNumber,
+      reference,
+      status: 'pending',
+      providerStatus: 'Pendiente',
+      description: String(description || 'Recarga Comergio').trim(),
+    });
+
+    const checkoutData = {
+      external: 'false',
+      autoclick: 'false',
+      lang: 'es',
+      country: 'co',
+      currency: 'cop',
+      amount: String(totalToPay),
+      tax: '0',
+      tax_base: '0',
+      name: `Recarga Comergio - ${String(student?.name || 'Alumno').trim()}`,
+      description: payment.description,
+      invoice: reference,
+      extra1: String(studentObjectId),
+      extra2: String(userId),
+      extra3: String(schoolId),
+      response: buildEpaycoResponseUrl(req),
+      confirmation: buildEpaycoConfirmationUrl(req),
+      name_billing: payerName,
+      email_billing: payerEmail,
+      mobilephone_billing: payerPhone,
+      number_doc_billing: payerDocumentNumber,
+      type_doc_billing: payerDocumentType,
+    };
+
+    payment.providerResponse = {
+      rechargeAmount: numericAmount,
+      feeAmount,
+      totalToPay,
+      checkoutData,
+    };
+    await payment.save();
+
+    return res.status(200).json({
+      paymentId: payment._id,
+      reference,
+      rechargeAmount: numericAmount,
+      feeAmount,
+      totalToPay,
+      checkout: {
+        publicKey: getEpaycoCheckoutPublicKey(),
+        test: isEpaycoTestMode(),
+        data: checkoutData,
+      },
+      responseUrl: checkoutData.response,
+      confirmationUrl: checkoutData.confirmation,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 });
 
