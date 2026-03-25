@@ -2659,7 +2659,7 @@ function ParentPortal() {
       </header>
 
       <section className="parent-student-switcher">
-        <div className="parent-student-toggle-row">
+        <div className="parent-student-toggle-card">
           <button className="parent-student-toggle" onClick={() => setChildrenOpen((prev) => !prev)} type="button">
             {renderStudentAvatar(selectedStudent)}
             <div className="parent-student-toggle-copy">
