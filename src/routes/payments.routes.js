@@ -199,6 +199,21 @@ function getBoldCheckoutUrl(payload, fallbackReference = '') {
   return '';
 }
 
+function normalizeBoldRedirectMethod(redirectUrl, redirectMethod) {
+  const normalizedUrl = String(redirectUrl || '').trim();
+  const normalizedMethod = String(redirectMethod || '').trim().toUpperCase();
+
+  if (!normalizedUrl) {
+    return '';
+  }
+
+  if (normalizedUrl.startsWith('https://checkout.bold.co/payment/')) {
+    return 'GET';
+  }
+
+  return normalizedMethod || 'GET';
+}
+
 function getBoldPaidAmount(payload) {
   const candidates = [
     payload?.amount?.total_amount,
@@ -1209,9 +1224,10 @@ router.post('/bold/recharge', async (req, res) => {
       });
 
       const redirectUrl = getBoldCheckoutUrl(paymentAttempt, reference) || String(paymentAttempt?.next_actions?.redirect_url || '').trim();
-      const redirectMethod = String(
+      const providerRedirectMethod = String(
         paymentAttempt?.next_actions?.redirect_method || paymentAttempt?.redirect_method || ''
-      ).trim() || (redirectUrl ? 'GET' : '');
+      ).trim();
+      const redirectMethod = normalizeBoldRedirectMethod(redirectUrl, providerRedirectMethod);
 
       payment.providerTransactionId = extractBoldProviderTransactionId(paymentAttempt) || payment.providerTransactionId;
       payment.providerStatus = extractBoldProviderStatus(paymentAttempt) || 'RUNNING';
