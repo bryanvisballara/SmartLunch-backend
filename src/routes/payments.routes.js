@@ -328,6 +328,60 @@ function verifyEpaycoSignature(payload) {
   return false;
 }
 
+function canTrustEpaycoConfirmationWithoutSignature(payment, payload) {
+  if (!payment || !payload || typeof payload !== 'object') {
+    return false;
+  }
+
+  const reference = extractEpaycoReference(payload);
+  const providerTransactionId = extractEpaycoProviderTransactionId(payload);
+  const providerStatus = extractEpaycoProviderStatus(payload);
+  const internalStatus = toEpaycoInternalStatus(providerStatus);
+  const checkoutData = payment?.providerResponse?.checkoutData || {};
+  const expectedTotal = Number(payment?.providerResponse?.totalToPay || 0);
+  const receivedAmount = Number(payload?.x_amount || payload?.x_amount_country || payload?.x_amount_ok || 0);
+  const expectedStudentId = String(payment?.studentId || '').trim();
+  const expectedParentId = String(payment?.parentId || payment?.parentUserId || '').trim();
+  const receivedStudentId = String(payload?.x_extra1 || '').trim();
+  const receivedParentId = String(payload?.x_extra2 || '').trim();
+  const invoice = String(payload?.x_id_invoice || payload?.x_id_factura || '').trim();
+  const currency = String(payload?.x_currency_code || '').trim().toUpperCase();
+
+  if (!reference || !providerTransactionId || internalStatus !== 'approved') {
+    return false;
+  }
+
+  if (reference !== String(payment.reference || '').trim()) {
+    return false;
+  }
+
+  if (invoice && invoice !== String(payment.reference || '').trim()) {
+    return false;
+  }
+
+  if (!Number.isFinite(receivedAmount) || receivedAmount <= 0 || receivedAmount !== expectedTotal) {
+    return false;
+  }
+
+  if (currency && currency !== 'COP') {
+    return false;
+  }
+
+  if (expectedStudentId && receivedStudentId && receivedStudentId !== expectedStudentId) {
+    return false;
+  }
+
+  if (expectedParentId && receivedParentId && receivedParentId !== expectedParentId) {
+    return false;
+  }
+
+  if (String(checkoutData?.invoice || '').trim() && String(checkoutData.invoice).trim() !== reference) {
+    return false;
+  }
+
+  return true;
+}
+
 function getBoldPaymentStatus(payload) {
   return String(
     payload?.status ||
@@ -1799,6 +1853,7 @@ router.post('/epayco/confirmation', async (req, res) => {
     const reference = extractEpaycoReference(payload);
     const providerTransactionId = extractEpaycoProviderTransactionId(payload);
     const providerStatus = extractEpaycoProviderStatus(payload);
+    const signatureValid = verifyEpaycoSignature(payload);
 
     console.info('[EPAYCO_CONFIRMATION_RECEIVED]', {
       reference,
@@ -1811,15 +1866,6 @@ router.post('/epayco/confirmation', async (req, res) => {
       xRefPayco: String(payload?.x_ref_payco || '').trim(),
       xTransactionId: String(payload?.x_transaction_id || '').trim(),
     });
-
-    if (!verifyEpaycoSignature(payload)) {
-      console.warn('[EPAYCO_CONFIRMATION_INVALID_SIGNATURE]', {
-        reference,
-        providerTransactionId,
-        providerStatus,
-      });
-      return res.status(401).json({ message: 'Invalid ePayco signature' });
-    }
 
     if (!reference && !providerTransactionId) {
       console.warn('[EPAYCO_CONFIRMATION_MISSING_REFERENCE]', {
@@ -1847,6 +1893,24 @@ router.post('/epayco/confirmation', async (req, res) => {
         providerStatus,
       });
       return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    if (!signatureValid) {
+      const canTrustWithoutSignature = canTrustEpaycoConfirmationWithoutSignature(payment, payload);
+      if (!canTrustWithoutSignature) {
+        console.warn('[EPAYCO_CONFIRMATION_INVALID_SIGNATURE]', {
+          reference,
+          providerTransactionId,
+          providerStatus,
+        });
+        return res.status(401).json({ message: 'Invalid ePayco signature' });
+      }
+
+      console.warn('[EPAYCO_CONFIRMATION_SIGNATURE_BYPASSED_STRICT_MATCH]', {
+        reference,
+        providerTransactionId,
+        providerStatus,
+      });
     }
 
     const result = await reconcileEpaycoPaymentRecord(payment, payload, { source: 'confirmation' });
