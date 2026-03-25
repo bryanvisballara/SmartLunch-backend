@@ -1057,6 +1057,14 @@ router.post('/bold/recharge', async (req, res) => {
         },
       });
 
+      payment.providerResponse = {
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        paymentIntent,
+      };
+      await payment.save();
+
       const paymentAttempt = await createPaymentAttempt({
         referenceId: reference,
         metadata,
@@ -1112,7 +1120,10 @@ router.post('/bold/recharge', async (req, res) => {
         rechargeAmount: numericAmount,
         feeAmount,
         totalToPay,
-        error: providerError.providerPayload || { message: providerError.message },
+        error: {
+          endpoint: providerError.providerEndpoint || '',
+          ...(providerError.providerPayload || { message: providerError.message }),
+        },
       };
       await payment.save();
       return res.status(Number(providerError?.status) || 500).json({ message: providerError.message });

@@ -208,9 +208,11 @@ async function boldPaymentApiRequest(path, { method = 'GET', body = null, extraH
       .filter(Boolean)
       .join('. ');
     const fallbackMessage = String(data?.message || data?.error || '').trim();
-    const requestError = new Error(providerMessage || fallbackMessage || `Bold payment API request failed (${response.status})`);
+      const endpointLabel = `${method.toUpperCase()} ${url.pathname}`;
+      const requestError = new Error(providerMessage || fallbackMessage || `Bold payment API request failed (${response.status}) on ${endpointLabel}`);
     requestError.status = response.status;
     requestError.providerPayload = data;
+      requestError.providerEndpoint = endpointLabel;
     throw requestError;
   }
 
