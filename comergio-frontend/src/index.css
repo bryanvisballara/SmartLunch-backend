@@ -2654,6 +2654,55 @@ label {
   margin: calc(-1 * (env(safe-area-inset-top, 0px) + 1rem)) -1rem -1rem;
   padding-top: calc(env(safe-area-inset-top, 0px) + 0.15rem);
   padding-bottom: 2rem;
+  overflow-x: hidden;
+}
+
+.parent-pull-refresh-indicator {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.4rem);
+  left: 50%;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.24);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease;
+}
+
+.parent-pull-refresh-indicator.is-ready,
+.parent-pull-refresh-indicator.is-refreshing {
+  background: rgba(14, 165, 233, 0.96);
+}
+
+.parent-pull-refresh-spinner {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  display: inline-block;
+}
+
+.parent-pull-refresh-indicator.is-refreshing .parent-pull-refresh-spinner {
+  animation: parent-pull-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes parent-pull-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .parent-topbar {
@@ -2804,7 +2853,8 @@ label {
 
 .parent-student-switcher {
   padding: 0 1rem;
-  margin-top: -1.05rem;
+  margin-top: -4.15rem;
+  margin-bottom: -3.1rem;
   position: relative;
   z-index: 5;
 }
@@ -2814,7 +2864,8 @@ label {
   border: 1px solid var(--parent-border);
   border-radius: 14px;
   background: #fff;
-  padding: 0.58rem 0.8rem;
+  min-height: 7rem;
+  padding: 3.55rem 0.8rem 0.58rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2888,6 +2939,8 @@ label {
   padding: 0.95rem 1rem 1.5rem;
   display: grid;
   gap: 0.85rem;
+  transition: transform 0.18s ease;
+  will-change: transform;
 }
 
 .parent-menu-page h2 {

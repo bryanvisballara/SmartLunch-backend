@@ -7,12 +7,10 @@ function ProductCard({
   disabledLabel = 'No disponible',
   disabledReason = '',
 }) {
-  const safeStock = isFinite(Number(availableStock)) ? Math.max(0, Number(availableStock)) : Math.max(0, Number(product.stock || 0));
-  const outOfStock = safeStock <= 0;
-  const disabled = product.status !== 'active' || forceDisabled || outOfStock;
+  const safeStock = isFinite(Number(availableStock)) ? Number(availableStock) : Number(product.stock || 0);
+  const disabled = product.status !== 'active' || forceDisabled;
   const cardClassName = `card product-card-compact ${forceDisabled ? 'product-card-blocked' : ''}`;
   const thumbSrc = product.thumbUrl || product.imageUrl || '';
-  const finalDisabledLabel = outOfStock ? 'Sin stock' : disabledLabel;
 
   return (
     <div className={cardClassName}>
@@ -23,10 +21,11 @@ function ProductCard({
         <div className="product-card-thumb product-card-thumb-empty">Sin foto</div>
       )}
       <p>Stock: {safeStock}</p>
+      {quantityInCart > 0 ? <p>En esta orden: {quantityInCart}</p> : null}
       <p className="price">${Number(product.price).toLocaleString('es-CO')}</p>
       {forceDisabled && disabledReason ? <p className="product-lock-reason">{disabledReason}</p> : null}
       <button className="btn" disabled={disabled} onClick={() => onAdd(product)} type="button">
-        {disabled ? finalDisabledLabel : 'Agregar'}
+        {disabled ? disabledLabel : 'Agregar'}
       </button>
     </div>
   );

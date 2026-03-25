@@ -454,9 +454,9 @@ function POS() {
   };
 
   const getAvailableStock = (product) => {
-    const stock = Math.max(0, toSafeNumber(product?.stock));
+     const stock = toSafeNumber(product?.stock);
     const inCart = getCartQuantity(product?._id);
-    return Math.max(0, stock - inCart);
+     return stock - inCart;
   };
 
   const selectStudent = (studentItem) => {
@@ -524,22 +524,10 @@ function POS() {
       return;
     }
 
-    if (getAvailableStock(product) <= 0) {
-      setMessage('No hay stock disponible para este producto');
-      return;
-    }
-
     setItems((previous) => {
       const productId = normalizeId(product._id);
       const found = previous.find((item) => normalizeId(item._id) === productId);
       if (found) {
-        const nextQuantity = toSafeNumber(found.quantity) + 1;
-        const maxStock = Math.max(0, toSafeNumber(product.stock));
-        if (nextQuantity > maxStock) {
-          setMessage('No hay stock disponible para este producto');
-          return previous;
-        }
-
         return previous.map((item) =>
           normalizeId(item._id) === productId
             ? { ...item, quantity: toSafeNumber(item.quantity) + 1 }
@@ -567,15 +555,9 @@ function POS() {
       }
 
       const nextQuantity = toSafeNumber(found.quantity) + delta;
-      const maxStock = Math.max(0, toSafeNumber(found.stock));
 
       if (nextQuantity <= 0) {
         return previous.filter((item) => normalizeId(item._id) !== targetId);
-      }
-
-      if (delta > 0 && nextQuantity > maxStock) {
-        setMessage('No hay stock disponible para este producto');
-        return previous;
       }
 
       if (delta > 0 && dailyLimit > 0) {

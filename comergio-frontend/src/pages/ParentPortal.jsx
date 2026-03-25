@@ -212,6 +212,10 @@ function ParentPortal() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const portalRootRef = useRef(null);
+  const pullStartYRef = useRef(0);
+  const pullTrackingRef = useRef(false);
+  const pullTriggeredRef = useRef(false);
 
   const [overview, setOverview] = useState(null);
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -342,6 +346,9 @@ function ParentPortal() {
   const [gioContext, setGioContext] = useState(null);
   const gioThreadEndRef = useRef(null);
   const processedPaymentReturnKeyRef = useRef('');
+  const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
+  const [pullRefreshActive, setPullRefreshActive] = useState(false);
+  const [pullRefreshReloading, setPullRefreshReloading] = useState(false);
 
   const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
   const isTopupsPage = location.pathname === '/parent/recargas';
@@ -511,6 +518,108 @@ function ParentPortal() {
     Number.isFinite(autoTopupRechargeAmount) &&
     autoTopupRechargeAmount >= 20000
   );
+  const pullRefreshThreshold = 88;
+  const canUsePullRefresh = Capacitor.isNativePlatform();
+
+  const getPortalScrollTop = () => {
+    if (typeof window === 'undefined') {
+      return 0;
+    }
+
+    const scrollingElement = document.scrollingElement || document.documentElement;
+    return Number(scrollingElement?.scrollTop || window.scrollY || 0);
+  };
+
+  const resetPullRefreshState = () => {
+    pullTrackingRef.current = false;
+    pullTriggeredRef.current = false;
+    pullStartYRef.current = 0;
+    setPullRefreshDistance(0);
+    setPullRefreshActive(false);
+  };
+
+  const triggerPortalRefresh = () => {
+    setPullRefreshReloading(true);
+    setPullRefreshDistance(pullRefreshThreshold);
+    setPullRefreshActive(true);
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 140);
+  };
+
+  const onPortalTouchStart = (event) => {
+    if (!canUsePullRefresh || pullRefreshReloading) {
+      return;
+    }
+
+    if (getPortalScrollTop() > 0) {
+      resetPullRefreshState();
+      return;
+    }
+
+    const touch = event.touches?.[0];
+    if (!touch) {
+      return;
+    }
+
+    pullStartYRef.current = touch.clientY;
+    pullTrackingRef.current = true;
+    pullTriggeredRef.current = false;
+    setPullRefreshDistance(0);
+    setPullRefreshActive(false);
+  };
+
+  const onPortalTouchMove = (event) => {
+    if (!canUsePullRefresh || !pullTrackingRef.current || pullRefreshReloading) {
+      return;
+    }
+
+    if (getPortalScrollTop() > 0) {
+      resetPullRefreshState();
+      return;
+    }
+
+    const touch = event.touches?.[0];
+    if (!touch) {
+      return;
+    }
+
+    const deltaY = touch.clientY - pullStartYRef.current;
+    if (deltaY <= 0) {
+      setPullRefreshDistance(0);
+      setPullRefreshActive(false);
+      return;
+    }
+
+    const nextDistance = Math.min(deltaY * 0.45, 120);
+    if (event.cancelable) {
+      event.preventDefault();
+    }
+    setPullRefreshDistance(nextDistance);
+    setPullRefreshActive(nextDistance >= pullRefreshThreshold);
+  };
+
+  const onPortalTouchEnd = () => {
+    if (!canUsePullRefresh || pullRefreshReloading) {
+      return;
+    }
+
+    if (pullRefreshActive && !pullTriggeredRef.current) {
+      pullTriggeredRef.current = true;
+      triggerPortalRefresh();
+      return;
+    }
+
+    resetPullRefreshState();
+  };
+
+  const onPortalTouchCancel = () => {
+    if (pullRefreshReloading) {
+      return;
+    }
+
+    resetPullRefreshState();
+  };
 
   useEffect(() => {
     if (!autoDebitMenuOpen) {
@@ -2393,7 +2502,22 @@ function ParentPortal() {
   const drawerHeaderName = overview?.parent?.name || user?.name || user?.username || 'Padre';
 
   return (
-    <div className="parent-mobile-page">
+    <div
+      className={`parent-mobile-page${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshReloading ? ' parent-mobile-page-refreshing' : ''}`}
+      ref={portalRootRef}
+      onTouchCancel={onPortalTouchCancel}
+      onTouchEnd={onPortalTouchEnd}
+      onTouchMove={onPortalTouchMove}
+      onTouchStart={onPortalTouchStart}
+    >
+      <div
+        aria-hidden="true"
+        className={`parent-pull-refresh-indicator${pullRefreshActive ? ' is-ready' : ''}${pullRefreshReloading ? ' is-refreshing' : ''}`}
+        style={{ opacity: pullRefreshDistance > 0 || pullRefreshReloading ? 1 : 0, transform: `translate(-50%, ${Math.min(pullRefreshDistance, pullRefreshThreshold)}px)` }}
+      >
+        <span className="parent-pull-refresh-spinner" />
+        <span>{pullRefreshReloading ? 'Actualizando...' : pullRefreshActive ? 'Suelta para actualizar' : 'Desliza para actualizar'}</span>
+      </div>
       <header className="parent-topbar">
         <button aria-label="Abrir menu" className="parent-icon-btn" onClick={() => setDrawerOpen(true)} type="button">
           <span />
@@ -2460,7 +2584,7 @@ function ParentPortal() {
         ) : null}
       </section>
 
-      <main className="parent-mobile-content">
+      <main className="parent-mobile-content" style={{ transform: `translateY(${pullRefreshReloading ? pullRefreshThreshold * 0.4 : pullRefreshDistance}px)` }}>
         {loading ? <div className="parent-loading">Cargando portal...</div> : null}
         {!loading && error ? <div className="parent-error">{error}</div> : null}
         {!loading && !error && walletReturnNotice?.message ? (
