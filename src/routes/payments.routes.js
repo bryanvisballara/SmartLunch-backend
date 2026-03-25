@@ -1115,9 +1115,6 @@ router.post('/bold/recharge', async (req, res) => {
       const metadata = {
         reference,
         student_id: String(studentObjectId),
-        parent_id: String(userId),
-        recharge_amount: numericAmount,
-        fee_amount: feeAmount,
         source: 'comergio_wallet_topup',
       };
 
