@@ -363,7 +363,23 @@ function getExpectedBoldWebhookSource(label) {
     return '/payments/nequi';
   }
 
+  if (label === 'bold_pse') {
+    return '/payments/pse/payments';
+  }
+
   return '';
+}
+
+function getBoldPseBankConfig(paymentMethod = {}) {
+  const requestedBankCode = String(paymentMethod?.bankCode || paymentMethod?.bank_code || '').trim();
+  const requestedBankName = String(paymentMethod?.bankName || paymentMethod?.bank_name || '').trim();
+  const configuredBankCode = String(process.env.BOLD_PSE_BANK_CODE || '').trim();
+  const configuredBankName = String(process.env.BOLD_PSE_BANK_NAME || '').trim();
+
+  return {
+    bankCode: requestedBankCode || configuredBankCode || '1234',
+    bankName: requestedBankName || configuredBankName || 'BOLD CF',
+  };
 }
 
 function extractBoldProviderStatus(payload) {
@@ -1317,6 +1333,8 @@ router.post('/bold/webhook', handleBoldWebhook);
 router.post('/bold/callback', handleBoldWebhook);
 router.post('/nequi', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_nequi' }));
 router.post('/nequi/webhook', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_nequi' }));
+router.post('/pse/payments', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_pse' }));
+router.post('/pse/payments/webhook', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_pse' }));
 router.post('/vnp/bancolombia', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_bancolombia' }));
 router.post('/vnp/bancolombia/webhook', (req, res) => handleBoldAsyncWebhookAck(req, res, { label: 'bold_bancolombia' }));
 
@@ -1453,8 +1471,9 @@ router.post('/bold/recharge', async (req, res) => {
     const installments = Math.max(1, Number(paymentMethod?.installments || 1));
     const cvc = String(paymentMethod?.cvc || '').replace(/\D/g, '').slice(0, 4);
     const supportsCardDetails = requestedPaymentMethodName === 'CREDIT_CARD';
+    const pseBankConfig = requestedPaymentMethodName === 'PSE' ? getBoldPseBankConfig(paymentMethod) : null;
 
-    if (!['CREDIT_CARD', 'NEQUI', 'BOTON_BANCOLOMBIA'].includes(requestedPaymentMethodName)) {
+    if (!['CREDIT_CARD', 'NEQUI', 'BOTON_BANCOLOMBIA', 'PSE'].includes(requestedPaymentMethodName)) {
       return res.status(400).json({ message: 'Metodo de pago Bold no soportado.' });
     }
 
@@ -1532,7 +1551,7 @@ router.post('/bold/recharge', async (req, res) => {
           email: payerEmail,
           document_type: payerDocumentType,
           document_number: payerDocumentNumber,
-          ...(requestedPaymentMethodName === 'BOTON_BANCOLOMBIA'
+          ...(['BOTON_BANCOLOMBIA', 'PSE'].includes(requestedPaymentMethodName)
             ? {
                 billing_address: buildBoldBillingAddress(payer?.billingAddress || payer?.billing_address, payerPhone),
               }
@@ -1550,6 +1569,12 @@ router.post('/bold/recharge', async (req, res) => {
             }
           : {
               name: requestedPaymentMethodName,
+              ...(requestedPaymentMethodName === 'PSE'
+                ? {
+                    bank_code: pseBankConfig?.bankCode,
+                    bank_name: pseBankConfig?.bankName,
+                  }
+                : {}),
             },
         deviceFingerprint,
       });
