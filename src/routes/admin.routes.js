@@ -11,7 +11,18 @@ const Store = require('../models/store.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const Wallet = require('../models/wallet.model');
+const WalletTransaction = require('../models/walletTransaction.model');
+const WalletTopupRequest = require('../models/walletTopupRequest.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
+const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
+const PaymentTransaction = require('../models/paymentTransaction.model');
+const Notification = require('../models/notification.model');
+const DeviceToken = require('../models/deviceToken.model');
+const PasswordResetCode = require('../models/passwordResetCode.model');
+const MeriendaSubscription = require('../models/meriendaSubscription.model');
+const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
+const MeriendaFailedPayment = require('../models/meriendaFailedPayment.model');
+const Order = require('../models/order.model');
 const FixedCost = require('../models/fixedCost.model');
 const Supplier = require('../models/supplier.model');
 const AccountingFeeSetting = require('../models/accountingFeeSetting.model');
@@ -47,6 +58,15 @@ function normalizeNonNegativeNumber(value, { max = null } = {}) {
   }
 
   return parsed;
+}
+
+function toObjectIdOrNull(value) {
+  const normalized = String(value || '').trim();
+  if (!mongoose.Types.ObjectId.isValid(normalized)) {
+    return null;
+  }
+
+  return new mongoose.Types.ObjectId(normalized);
 }
 
 const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
@@ -1111,9 +1131,319 @@ router.delete('/users/:id', async (req, res) => {
 
     user.deletedAt = new Date();
     user.status = 'inactive';
+    user.deletionRequestedByUser = false;
+    user.deletionRequestedAt = null;
     await user.save();
 
     return res.status(200).json({ message: 'User deleted' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/deleted-accounts', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+
+    const deletedParents = await User.find({
+      schoolId,
+      role: 'parent',
+      deletionRequestedByUser: true,
+      deletedAt: { $ne: null },
+    })
+      .select('_id name username email phone createdAt deletedAt deletionRequestedAt status')
+      .sort({ deletedAt: -1, createdAt: -1 })
+      .lean();
+
+    if (deletedParents.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    const parentIds = deletedParents.map((parent) => parent._id);
+    const links = await ParentStudentLink.find({ schoolId, parentId: { $in: parentIds } })
+      .populate('studentId', 'name schoolCode grade status deletedAt createdAt')
+      .lean();
+
+    const studentIds = Array.from(
+      new Set(
+        links
+          .map((link) => link?.studentId?._id)
+          .filter(Boolean)
+          .map((id) => String(id))
+      )
+    ).map((id) => new mongoose.Types.ObjectId(id));
+
+    const [orderSummaries, rechargeSummaries] = await Promise.all([
+      studentIds.length > 0
+        ? Order.aggregate([
+          { $match: { schoolId, studentId: { $in: studentIds } } },
+          {
+            $group: {
+              _id: '$studentId',
+              count: { $sum: 1 },
+              totalAmount: { $sum: '$total' },
+              lastAt: { $max: '$createdAt' },
+            },
+          },
+        ])
+        : [],
+      studentIds.length > 0
+        ? WalletTransaction.aggregate([
+          {
+            $match: {
+              schoolId,
+              studentId: { $in: studentIds },
+              type: 'recharge',
+              amount: { $gt: 0 },
+            },
+          },
+          {
+            $group: {
+              _id: '$studentId',
+              count: { $sum: 1 },
+              totalAmount: { $sum: '$amount' },
+              lastAt: { $max: '$createdAt' },
+            },
+          },
+        ])
+        : [],
+    ]);
+
+    const orderSummaryByStudentId = new Map(orderSummaries.map((item) => [String(item._id), item]));
+    const rechargeSummaryByStudentId = new Map(rechargeSummaries.map((item) => [String(item._id), item]));
+
+    const studentsByParentId = links.reduce((accumulator, link) => {
+      const parentId = String(link.parentId || '');
+      const student = link.studentId;
+      if (!parentId || !student?._id) {
+        return accumulator;
+      }
+
+      const studentId = String(student._id);
+      const orderSummary = orderSummaryByStudentId.get(studentId) || null;
+      const rechargeSummary = rechargeSummaryByStudentId.get(studentId) || null;
+
+      if (!accumulator[parentId]) {
+        accumulator[parentId] = [];
+      }
+
+      accumulator[parentId].push({
+        _id: student._id,
+        name: student.name || 'Alumno',
+        schoolCode: student.schoolCode || '',
+        grade: student.grade || '',
+        status: student.status || 'inactive',
+        deletedAt: student.deletedAt || null,
+        linkedStatus: link.status || 'active',
+        createdAt: student.createdAt || null,
+        orderCount: Number(orderSummary?.count || 0),
+        orderTotalAmount: Number(orderSummary?.totalAmount || 0),
+        lastOrderAt: orderSummary?.lastAt || null,
+        rechargeCount: Number(rechargeSummary?.count || 0),
+        rechargeTotalAmount: Number(rechargeSummary?.totalAmount || 0),
+        lastRechargeAt: rechargeSummary?.lastAt || null,
+      });
+
+      return accumulator;
+    }, {});
+
+    const response = deletedParents.map((parent) => {
+      const students = (studentsByParentId[String(parent._id)] || []).sort((left, right) =>
+        String(left.name || '').localeCompare(String(right.name || ''), 'es')
+      );
+
+      return {
+        ...parent,
+        students,
+        studentCount: students.length,
+        orderCountTotal: students.reduce((sum, student) => sum + Number(student.orderCount || 0), 0),
+        orderTotalAmount: students.reduce((sum, student) => sum + Number(student.orderTotalAmount || 0), 0),
+        rechargeCountTotal: students.reduce((sum, student) => sum + Number(student.rechargeCount || 0), 0),
+        rechargeTotalAmount: students.reduce((sum, student) => sum + Number(student.rechargeTotalAmount || 0), 0),
+      };
+    });
+
+    return res.status(200).json(response);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/deleted-accounts/:parentId/students/:studentId/orders', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const parentId = toObjectIdOrNull(req.params.parentId);
+    const studentId = toObjectIdOrNull(req.params.studentId);
+
+    if (!parentId || !studentId) {
+      return res.status(400).json({ message: 'parentId or studentId is invalid' });
+    }
+
+    const deletedParent = await User.findOne({
+      _id: parentId,
+      schoolId,
+      role: 'parent',
+      deletionRequestedByUser: true,
+      deletedAt: { $ne: null },
+    }).select('_id');
+
+    if (!deletedParent) {
+      return res.status(404).json({ message: 'Deleted parent account not found' });
+    }
+
+    const link = await ParentStudentLink.findOne({ schoolId, parentId, studentId }).select('_id');
+    if (!link) {
+      return res.status(404).json({ message: 'Linked student not found for this deleted account' });
+    }
+
+    const orders = await Order.find({ schoolId, studentId })
+      .populate('storeId', 'name')
+      .populate('vendorId', 'name username')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json(
+      orders.map((order) => ({
+        ...order,
+        storeName: order.storeId?.name || '',
+        vendorName: order.vendorId?.name || order.vendorId?.username || '',
+        storeId: order.storeId?._id || order.storeId || null,
+        vendorId: order.vendorId?._id || order.vendorId || null,
+      }))
+    );
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/deleted-accounts/:parentId/students/:studentId/recharges', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const parentId = toObjectIdOrNull(req.params.parentId);
+    const studentId = toObjectIdOrNull(req.params.studentId);
+
+    if (!parentId || !studentId) {
+      return res.status(400).json({ message: 'parentId or studentId is invalid' });
+    }
+
+    const deletedParent = await User.findOne({
+      _id: parentId,
+      schoolId,
+      role: 'parent',
+      deletionRequestedByUser: true,
+      deletedAt: { $ne: null },
+    }).select('_id');
+
+    if (!deletedParent) {
+      return res.status(404).json({ message: 'Deleted parent account not found' });
+    }
+
+    const link = await ParentStudentLink.findOne({ schoolId, parentId, studentId }).select('_id');
+    if (!link) {
+      return res.status(404).json({ message: 'Linked student not found for this deleted account' });
+    }
+
+    const recharges = await WalletTransaction.find({
+      schoolId,
+      studentId,
+      type: 'recharge',
+      amount: { $gt: 0 },
+    })
+      .populate('createdBy', 'name username role')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json(
+      recharges.map((item) => ({
+        ...item,
+        createdByName: item.createdBy?.name || item.createdBy?.username || '',
+        createdByRole: item.createdBy?.role || '',
+        createdBy: item.createdBy?._id || item.createdBy || null,
+      }))
+    );
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/deleted-accounts/:parentId/permanent', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const parentId = toObjectIdOrNull(req.params.parentId);
+
+    if (!parentId) {
+      return res.status(400).json({ message: 'parentId is invalid' });
+    }
+
+    const deletedParent = await User.findOne({
+      _id: parentId,
+      schoolId,
+      role: 'parent',
+      deletionRequestedByUser: true,
+      deletedAt: { $ne: null },
+    }).select('_id');
+
+    if (!deletedParent) {
+      return res.status(404).json({ message: 'Deleted parent account not found' });
+    }
+
+    const parentLinks = await ParentStudentLink.find({ schoolId, parentId }).select('studentId').lean();
+    const studentIds = Array.from(new Set(parentLinks.map((link) => String(link.studentId || '')).filter(Boolean))).map(
+      (id) => new mongoose.Types.ObjectId(id)
+    );
+
+    if (studentIds.length > 0) {
+      const otherParentLinks = await ParentStudentLink.find({
+        schoolId,
+        studentId: { $in: studentIds },
+        parentId: { $ne: parentId },
+      })
+        .populate('studentId', 'name schoolCode grade')
+        .lean();
+
+      if (otherParentLinks.length > 0) {
+        return res.status(409).json({
+          message: 'No se puede eliminar definitivamente porque uno o más alumnos siguen vinculados a otro acudiente.',
+          sharedStudents: otherParentLinks.map((link) => ({
+            _id: link.studentId?._id || null,
+            name: link.studentId?.name || 'Alumno',
+            schoolCode: link.studentId?.schoolCode || '',
+            grade: link.studentId?.grade || '',
+          })),
+        });
+      }
+    }
+
+    const results = await Promise.all([
+      DeviceToken.deleteMany({ schoolId, userId: parentId }),
+      ParentPaymentMethod.deleteMany({ schoolId, parentUserId: parentId }),
+      PaymentTransaction.deleteMany({ schoolId, parentId }),
+      Notification.deleteMany({ schoolId, parentId }),
+      PasswordResetCode.deleteMany({ schoolId, userId: parentId }),
+      MeriendaSubscription.deleteMany({ schoolId, parentUserId: parentId }),
+      MeriendaWaitlist.deleteMany({ schoolId, parentUserId: parentId }),
+      MeriendaFailedPayment.deleteMany({ schoolId, parentUserId: parentId }),
+      ParentStudentLink.deleteMany({ schoolId, parentId }),
+      studentIds.length > 0 ? Order.deleteMany({ schoolId, studentId: { $in: studentIds } }) : { deletedCount: 0 },
+      studentIds.length > 0 ? WalletTransaction.deleteMany({ schoolId, studentId: { $in: studentIds } }) : { deletedCount: 0 },
+      studentIds.length > 0 ? WalletTopupRequest.deleteMany({ schoolId, studentId: { $in: studentIds } }) : { deletedCount: 0 },
+      studentIds.length > 0 ? PaymentTransaction.deleteMany({ schoolId, studentId: { $in: studentIds } }) : { deletedCount: 0 },
+      studentIds.length > 0 ? Notification.deleteMany({ schoolId, studentId: { $in: studentIds } }) : { deletedCount: 0 },
+      studentIds.length > 0 ? Wallet.deleteMany({ schoolId, studentId: { $in: studentIds } }) : { deletedCount: 0 },
+      studentIds.length > 0 ? Student.deleteMany({ schoolId, _id: { $in: studentIds } }) : { deletedCount: 0 },
+      User.deleteOne({ schoolId, _id: parentId }),
+    ]);
+
+    return res.status(200).json({
+      message: 'Cuenta eliminada definitivamente de MongoDB.',
+      summary: {
+        deletedParentCount: Number(results[16]?.deletedCount || 0),
+        deletedStudentCount: Number(results[15]?.deletedCount || 0),
+        deletedOrderCount: Number(results[9]?.deletedCount || 0),
+        deletedRechargeCount: Number(results[10]?.deletedCount || 0),
+        deletedRechargeRequestCount: Number(results[11]?.deletedCount || 0),
+      },
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

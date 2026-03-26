@@ -15,6 +15,10 @@ const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const EmailVerification = require('../models/emailVerification.model');
 const PasswordResetCode = require('../models/passwordResetCode.model');
+const DeviceToken = require('../models/deviceToken.model');
+const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
+const MeriendaSubscription = require('../models/meriendaSubscription.model');
+const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
 const { signAccessToken } = require('../utils/token');
 
@@ -889,6 +893,105 @@ router.post('/biometric/login/verify', async (req, res) => {
     await user.save();
 
     return res.status(200).json(toAuthResponse(user));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/account', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findOne({ _id: req.user.userId, status: 'active', deletedAt: null });
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    if (user.role !== 'parent') {
+      return res.status(403).json({ message: 'Solo las cuentas de acudiente pueden eliminarse desde la app.' });
+    }
+
+    const password = String(req.body?.password || '');
+    if (!password.trim()) {
+      return res.status(400).json({ message: 'Debes ingresar tu contrasena para eliminar la cuenta.' });
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    if (!passwordMatches) {
+      return res.status(401).json({ message: 'La contrasena es incorrecta. Intenta de nuevo.' });
+    }
+
+    const deletedAt = new Date();
+
+    const paymentMethods = await ParentPaymentMethod.find({
+      schoolId: user.schoolId,
+      parentUserId: user._id,
+      deletedAt: null,
+    }).select('_id');
+
+    const paymentMethodIds = paymentMethods.map((item) => item._id);
+
+    if (paymentMethodIds.length > 0) {
+      await Wallet.updateMany(
+        {
+          schoolId: user.schoolId,
+          autoDebitPaymentMethodId: { $in: paymentMethodIds },
+        },
+        {
+          $set: {
+            autoDebitEnabled: false,
+            autoDebitLimit: 0,
+            autoDebitAmount: 0,
+            autoDebitPaymentMethodId: null,
+            autoDebitAgreementId: '',
+            autoDebitAgreementStatus: '',
+            autoDebitAgreementLastSyncAt: null,
+            autoDebitInProgress: false,
+            autoDebitLockAt: null,
+            autoDebitRetryAt: null,
+            autoDebitRetryCount: 0,
+          },
+        }
+      );
+    }
+
+    await Promise.all([
+      ParentStudentLink.updateMany(
+        { schoolId: user.schoolId, parentId: user._id, status: 'active' },
+        { $set: { status: 'inactive' } }
+      ),
+      DeviceToken.updateMany(
+        { schoolId: user.schoolId, userId: user._id, status: 'active' },
+        { $set: { status: 'revoked', lastSeenAt: deletedAt } }
+      ),
+      ParentPaymentMethod.updateMany(
+        { schoolId: user.schoolId, parentUserId: user._id, deletedAt: null },
+        { $set: { status: 'inactive', deletedAt } }
+      ),
+      MeriendaSubscription.updateMany(
+        { schoolId: user.schoolId, parentUserId: user._id, status: 'active' },
+        { $set: { status: 'inactive', endedAt: deletedAt } }
+      ),
+      PasswordResetCode.updateMany(
+        {
+          schoolId: user.schoolId,
+          userId: user._id,
+          status: { $in: ['pending', 'verified'] },
+        },
+        {
+          $set: {
+            status: 'consumed',
+            consumedAt: deletedAt,
+          },
+        }
+      ),
+    ]);
+
+    user.status = 'inactive';
+    user.deletedAt = deletedAt;
+    user.deletionRequestedByUser = true;
+    user.deletionRequestedAt = deletedAt;
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Cuenta eliminada correctamente.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

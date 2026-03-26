@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 
-function authMiddleware(req, res, next) {
+const User = require('../models/user.model');
+
+async function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
   const [, token] = header.split(' ');
 
@@ -10,7 +12,23 @@ function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    const activeUser = await User.findOne({
+      _id: decoded.userId,
+      status: 'active',
+      deletedAt: null,
+    }).select('schoolId role name');
+
+    if (!activeUser) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    req.user = {
+      ...decoded,
+      userId: String(activeUser._id),
+      schoolId: activeUser.schoolId,
+      role: activeUser.role,
+      name: activeUser.name,
+    };
     return next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid token' });

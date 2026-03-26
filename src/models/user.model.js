@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ['parent', 'admin', 'vendor', 'merienda_operator'], required: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     deletedAt: { type: Date, default: null },
+    deletionRequestedByUser: { type: Boolean, default: false, index: true },
+    deletionRequestedAt: { type: Date, default: null },
     webauthn: {
       registrationChallenge: { type: String, default: null },
       authenticationChallenge: { type: String, default: null },
