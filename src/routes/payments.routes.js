@@ -2056,10 +2056,10 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       </div>
     </div>
     <script>
-      const checkoutConfig = ${escapeInlineJson({
-        key: getEpaycoCheckoutPublicKey(),
+      const launcherConfig = ${escapeInlineJson({
+        publicKey: getEpaycoCheckoutPublicKey(),
         test: isEpaycoTestMode(),
-        data: {
+        checkoutData: {
           ...checkoutData,
           external: 'true',
           autoclick: 'false',
@@ -2071,12 +2071,135 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       const errorNode = document.getElementById('error');
       const continueButton = document.getElementById('continueButton');
       const backButton = document.getElementById('backButton');
-      let launchTimeoutId = null;
+      let redirectTimeoutId = null;
       let continueHintTimeoutId = null;
+      let isLaunching = false;
+
+      function generateFallbackGuid() {
+        const bytes = new Uint8Array(16);
+        if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+          window.crypto.getRandomValues(bytes);
+        } else {
+          for (let index = 0; index < bytes.length; index += 1) {
+            bytes[index] = Math.floor(Math.random() * 256);
+          }
+        }
+        const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+        return [
+          hex.slice(0, 8),
+          hex.slice(8, 12),
+          hex.slice(12, 16),
+          hex.slice(16, 20),
+          hex.slice(20, 32),
+        ].join('-');
+      }
+
+      function getBrowserSessionKey() {
+        try {
+          const existing = window.localStorage.getItem('keySessionPay');
+          if (existing) {
+            return existing;
+          }
+          const created = typeof window.crypto?.randomUUID === 'function'
+            ? window.crypto.randomUUID()
+            : generateFallbackGuid();
+          window.localStorage.setItem('keySessionPay', created);
+          return created;
+        } catch (error) {
+          return typeof window.crypto?.randomUUID === 'function'
+            ? window.crypto.randomUUID()
+            : generateFallbackGuid();
+        }
+      }
+
+      function isMobileBrowser() {
+        return /android|iphone|ipad|ipod|mobile/i.test(window.navigator.userAgent || '');
+      }
+
+      function toEpaycoFieldName(key) {
+        return 'epayco' + String(key || '')
+          .split('_')
+          .filter(Boolean)
+          .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+          .join('');
+      }
+
+      function buildTransactionPayload() {
+        const payload = {};
+        Object.entries(launcherConfig.checkoutData || {}).forEach(([key, value]) => {
+          if (value === undefined || value === null || value === '') {
+            return;
+          }
+          payload[toEpaycoFieldName(key)] = value;
+        });
+        payload.epaycoKey = launcherConfig.publicKey;
+        payload.epaycoTest = launcherConfig.test ? 'true' : 'false';
+        payload.epaycoExternal = 'true';
+        payload.epaycoConfig = JSON.stringify({ external: 'true' });
+        return payload;
+      }
+
+      async function fetchClientIp() {
+        try {
+          const response = await window.fetch('https://apify-private.epayco.co/getip', {
+            method: 'GET',
+            cache: 'no-store',
+          });
+          if (!response.ok) {
+            throw new Error('ip-' + response.status);
+          }
+          const data = await response.json();
+          return String(data?.data || '0.0.0.0').trim() || '0.0.0.0';
+        } catch (error) {
+          return '0.0.0.0';
+        }
+      }
+
+      async function createCheckoutTransaction() {
+        const payload = buildTransactionPayload();
+        payload.epaycoIp = await fetchClientIp();
+
+        const sessionKey = getBrowserSessionKey();
+        const response = await window.fetch(
+          'https://secure.epayco.co/create/transaction/'
+            + encodeURIComponent(launcherConfig.publicKey)
+            + '/'
+            + encodeURIComponent(sessionKey),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            },
+            body: 'fname=' + encodeURIComponent(JSON.stringify(payload)),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('create-transaction-' + response.status);
+        }
+
+        const data = await response.json();
+        const transactionId = String(data?.data?.id_session || data?.id_session || '').trim();
+
+        if (!transactionId) {
+          throw new Error('missing-id-session');
+        }
+
+        return transactionId;
+      }
+
+      function buildCheckoutRedirectUrl(transactionId) {
+        const checkoutUrl = isMobileBrowser()
+          ? new URL('https://msecure.epayco.co/v1/transaction/payment.html')
+          : new URL('https://secure.epayco.co/payment/methods');
+        checkoutUrl.searchParams.set('transaction', transactionId);
+        return checkoutUrl.toString();
+      }
 
       function showContinueButton(message) {
         if (continueButton) {
           continueButton.hidden = false;
+          continueButton.disabled = false;
         }
         if (messageNode && message) {
           messageNode.textContent = message;
@@ -2093,10 +2216,11 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       }
 
       function showError(message) {
-        if (launchTimeoutId) {
-          window.clearTimeout(launchTimeoutId);
-          launchTimeoutId = null;
+        if (redirectTimeoutId) {
+          window.clearTimeout(redirectTimeoutId);
+          redirectTimeoutId = null;
         }
+        isLaunching = false;
         if (messageNode) {
           messageNode.textContent = 'No pudimos abrir ePayco correctamente.';
         }
@@ -2139,13 +2263,21 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
         }
       });
 
-      function openCheckout({ userInitiated = false } = {}) {
+      async function openCheckout({ userInitiated = false } = {}) {
+        if (isLaunching) {
+          return;
+        }
+
         try {
-          if (launchTimeoutId) {
-            window.clearTimeout(launchTimeoutId);
+          isLaunching = true;
+          if (redirectTimeoutId) {
+            window.clearTimeout(redirectTimeoutId);
           }
           if (continueHintTimeoutId) {
             window.clearTimeout(continueHintTimeoutId);
+          }
+          if (continueButton) {
+            continueButton.disabled = true;
           }
           if (errorNode) {
             errorNode.hidden = true;
@@ -2153,31 +2285,28 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
           }
           if (messageNode) {
             messageNode.textContent = userInitiated
-              ? 'Abriendo ePayco con tu confirmacion...'
-              : 'Te estamos llevando al checkout seguro para completar la recarga.';
+              ? 'Preparando ePayco con tu confirmacion...'
+              : 'Preparando el checkout seguro de ePayco...';
           }
-          const handler = window.ePayco.checkout.configure({
-            key: checkoutConfig.key,
-            test: Boolean(checkoutConfig.test),
-          });
           continueHintTimeoutId = window.setTimeout(() => {
             showContinueButton('Si no abre automaticamente, toca "Continuar a ePayco".');
           }, 1500);
-          launchTimeoutId = window.setTimeout(() => {
-            showError('ePayco no respondio a tiempo desde este navegador. Toca "Continuar a ePayco" o intenta de nuevo desde la app.');
-          }, 6000);
-          handler.open(checkoutConfig.data);
+          redirectTimeoutId = window.setTimeout(() => {
+            showError('ePayco no respondio a tiempo al crear la sesion. Toca "Continuar a ePayco" o intenta de nuevo desde la app.');
+          }, 8000);
+
+          const transactionId = await createCheckoutTransaction();
+          const checkoutUrl = buildCheckoutRedirectUrl(transactionId);
+          if (messageNode) {
+            messageNode.textContent = 'Redirigiendo a ePayco...';
+          }
+          window.location.assign(checkoutUrl);
         } catch (error) {
           showError(error?.message || 'Intenta de nuevo desde la app.');
         }
       }
 
-      const script = document.createElement('script');
-      script.src = 'https://checkout.epayco.co/checkout.js';
-      script.async = true;
-      script.onload = () => openCheckout();
-      script.onerror = () => showError('No se pudo cargar checkout.js de ePayco.');
-      document.body.appendChild(script);
+      openCheckout();
     </script>
   </body>
 </html>`;
