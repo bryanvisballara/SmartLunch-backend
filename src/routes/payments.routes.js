@@ -2048,13 +2048,18 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       const checkoutConfig = ${escapeInlineJson({
         key: getEpaycoCheckoutPublicKey(),
         test: isEpaycoTestMode(),
-        data: checkoutData,
+        data: {
+          ...checkoutData,
+          external: 'true',
+          autoclick: 'false',
+        },
       })};
       const abandonedReturnUrl = ${escapeInlineJson(abandonedReturnUrl)};
       const storageKey = ${escapeInlineJson(`epayco_checkout_${reference}`)};
       const messageNode = document.getElementById('message');
       const errorNode = document.getElementById('error');
       const backButton = document.getElementById('backButton');
+      let launchTimeoutId = null;
 
       function returnToComergio() {
         try {
@@ -2066,6 +2071,10 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       }
 
       function showError(message) {
+        if (launchTimeoutId) {
+          window.clearTimeout(launchTimeoutId);
+          launchTimeoutId = null;
+        }
         if (messageNode) {
           messageNode.textContent = 'No pudimos abrir ePayco correctamente.';
         }
@@ -2112,6 +2121,9 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
             key: checkoutConfig.key,
             test: Boolean(checkoutConfig.test),
           });
+          launchTimeoutId = window.setTimeout(() => {
+            showError('ePayco no respondio a tiempo desde este navegador. Intenta de nuevo desde la app.');
+          }, 6000);
           handler.open(checkoutConfig.data);
         } catch (error) {
           showError(error?.message || 'Intenta de nuevo desde la app.');
