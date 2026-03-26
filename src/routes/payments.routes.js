@@ -182,6 +182,91 @@ function buildEpaycoResponseUrl(req) {
   return `${getPublicBackendUrl(req)}/payments/epayco/response`;
 }
 
+function extractRequestIp(req) {
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '').trim();
+  const candidates = [
+    forwardedFor.split(',')[0],
+    req.headers['cf-connecting-ip'],
+    req.headers['x-real-ip'],
+    req.ip,
+    req.socket?.remoteAddress,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim().replace(/^::ffff:/, '');
+    if (value) {
+      return value;
+    }
+  }
+
+  return '0.0.0.0';
+}
+
+function toEpaycoCheckoutFieldName(key) {
+  return 'epayco' + String(key || '')
+    .split('_')
+    .filter(Boolean)
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join('');
+}
+
+function buildEpaycoHostedCheckoutPayload(checkoutData, clientIp) {
+  const payload = {};
+
+  for (const [key, value] of Object.entries(checkoutData || {})) {
+    if (value == null || value === '') {
+      continue;
+    }
+
+    payload[toEpaycoCheckoutFieldName(key)] = value;
+  }
+
+  payload.epaycoKey = getEpaycoCheckoutPublicKey();
+  payload.epaycoTest = isEpaycoTestMode() ? 'true' : 'false';
+  payload.epaycoExternal = 'true';
+  payload.epaycoIp = String(clientIp || '0.0.0.0').trim() || '0.0.0.0';
+  payload.epaycoConfig = JSON.stringify({ external: 'true' });
+
+  return payload;
+}
+
+async function createEpaycoHostedCheckoutSession({ checkoutData, clientIp }) {
+  const publicKey = getEpaycoCheckoutPublicKey();
+  if (!publicKey) {
+    throw new Error('EPAYCO_PUBLIC_KEY no esta configurado.');
+  }
+
+  const sessionKey = crypto.randomUUID();
+  const payload = buildEpaycoHostedCheckoutPayload(checkoutData, clientIp);
+  const response = await fetch(
+    `https://secure.epayco.co/create/transaction/${encodeURIComponent(publicKey)}/${encodeURIComponent(sessionKey)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      },
+      body: `fname=${encodeURIComponent(JSON.stringify(payload))}`,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`ePayco checkout session failed (${response.status})`);
+  }
+
+  const result = await response.json();
+  const sessionId = String(result?.data?.id_session || result?.id_session || '').trim();
+  if (!sessionId) {
+    throw new Error('ePayco no devolvio id_session para el checkout hospedado.');
+  }
+
+  return {
+    sessionId,
+    sessionKey,
+    checkoutUrl: `https://msecure.epayco.co/v1/transaction/payment.html?transaction=${encodeURIComponent(sessionId)}`,
+    raw: result,
+  };
+}
+
 function getLowBalanceLevelForBalance(balance) {
   const value = Number(balance || 0);
   if (value < 10000) return 'lt10';
@@ -2524,6 +2609,7 @@ router.post('/epayco/recharge', async (req, res) => {
     const reference = buildReference();
     const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
     const checkoutToken = crypto.randomBytes(24).toString('hex');
+    const clientIp = extractRequestIp(req);
 
     const payment = await PaymentTransaction.create({
       schoolId,
@@ -2563,6 +2649,34 @@ router.post('/epayco/recharge', async (req, res) => {
       type_doc_billing: payerDocumentType,
     };
 
+    let hostedCheckout = null;
+    try {
+      hostedCheckout = await createEpaycoHostedCheckoutSession({
+        checkoutData,
+        clientIp,
+      });
+    } catch (hostedCheckoutError) {
+      payment.status = 'failed';
+      payment.providerStatus = 'CheckoutSessionFailed';
+      payment.failureReason = hostedCheckoutError.message;
+      payment.providerResponse = {
+        frontendBaseUrl,
+        checkoutToken,
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        checkoutData,
+        clientIp,
+        hostedCheckoutError: hostedCheckoutError.message,
+      };
+      await payment.save();
+
+      return res.status(502).json({
+        message: 'No fue posible crear la sesion hospedada de ePayco para esta recarga.',
+        detail: hostedCheckoutError.message,
+      });
+    }
+
     payment.providerResponse = {
       frontendBaseUrl,
       checkoutToken,
@@ -2570,6 +2684,8 @@ router.post('/epayco/recharge', async (req, res) => {
       feeAmount,
       totalToPay,
       checkoutData,
+      clientIp,
+      hostedCheckout,
     };
     await payment.save();
 
@@ -2584,7 +2700,7 @@ router.post('/epayco/recharge', async (req, res) => {
         test: isEpaycoTestMode(),
         data: checkoutData,
       },
-      checkoutUrl: buildEpaycoNativeCheckoutUrl(req, { reference, token: checkoutToken }),
+      checkoutUrl: String(hostedCheckout?.checkoutUrl || '').trim() || buildEpaycoNativeCheckoutUrl(req, { reference, token: checkoutToken }),
       responseUrl: checkoutData.response,
       confirmationUrl: checkoutData.confirmation,
     });
