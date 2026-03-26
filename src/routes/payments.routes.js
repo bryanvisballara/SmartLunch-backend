@@ -283,7 +283,6 @@ function extractEpaycoReference(payload) {
     payload?.x_invoice,
     payload?.invoice,
     payload?.reference,
-    payload?.ref_payco,
     payload?.x_extra1,
   ];
 
@@ -295,6 +294,33 @@ function extractEpaycoReference(payload) {
   }
 
   return '';
+}
+
+async function findEpaycoPaymentRecord({ reference = '', providerTransactionId = '', extraQuery = {}, lean = false } = {}) {
+  const normalizedReference = String(reference || '').trim();
+  const normalizedProviderTransactionId = String(providerTransactionId || '').trim();
+  const searchConditions = [];
+
+  if (normalizedReference) {
+    searchConditions.push({ reference: normalizedReference });
+  }
+
+  if (normalizedProviderTransactionId) {
+    searchConditions.push({ providerTransactionId: normalizedProviderTransactionId });
+  }
+
+  if (!searchConditions.length) {
+    return null;
+  }
+
+  const query = {
+    ...extraQuery,
+    method: 'epayco',
+    $or: searchConditions,
+  };
+
+  const paymentQuery = PaymentTransaction.findOne(query);
+  return lean ? paymentQuery.lean() : paymentQuery;
 }
 
 function extractEpaycoProviderTransactionId(payload) {
@@ -1880,33 +1906,33 @@ router.get('/epayco/response', async (req, res) => {
   try {
     const payload = req.query || {};
     const reference = extractEpaycoReference(payload);
+    const providerTransactionId = extractEpaycoProviderTransactionId(payload);
     const providerStatus = extractEpaycoProviderStatus(payload);
     const internalStatus = toEpaycoInternalStatus(providerStatus);
 
-    if (reference) {
-      const payment = await PaymentTransaction.findOne({ method: 'epayco', reference });
-      if (payment) {
-        const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
-        try {
-          await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response' });
-        } catch (responseError) {
-          console.warn('[EPAYCO_RESPONSE_RECONCILE_FAILED]', {
-            reference,
-            message: responseError.message,
-          });
-        }
-
-        return res.redirect(302, buildEpaycoWalletReturnUrl({
-          studentId: String(payment.studentId || ''),
-          reference,
-          status: internalStatus,
-          frontendBaseUrl,
-        }));
+    const payment = await findEpaycoPaymentRecord({ reference, providerTransactionId });
+    if (payment) {
+      const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
+      try {
+        await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response' });
+      } catch (responseError) {
+        console.warn('[EPAYCO_RESPONSE_RECONCILE_FAILED]', {
+          reference: payment.reference,
+          providerTransactionId,
+          message: responseError.message,
+        });
       }
+
+      return res.redirect(302, buildEpaycoWalletReturnUrl({
+        studentId: String(payment.studentId || ''),
+        reference: payment.reference,
+        status: internalStatus,
+        frontendBaseUrl,
+      }));
     }
 
     return res.redirect(302, buildEpaycoWalletReturnUrl({
-      reference,
+      reference: reference || providerTransactionId,
       status: internalStatus || 'failed',
     }));
   } catch (error) {
@@ -1918,33 +1944,33 @@ router.post('/epayco/response', async (req, res) => {
   try {
     const payload = getMergedEpaycoPayload(req);
     const reference = extractEpaycoReference(payload);
+    const providerTransactionId = extractEpaycoProviderTransactionId(payload);
     const providerStatus = extractEpaycoProviderStatus(payload);
     const internalStatus = toEpaycoInternalStatus(providerStatus);
 
-    if (reference) {
-      const payment = await PaymentTransaction.findOne({ method: 'epayco', reference });
-      if (payment) {
-        const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
-        try {
-          await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response_post' });
-        } catch (responseError) {
-          console.warn('[EPAYCO_RESPONSE_POST_RECONCILE_FAILED]', {
-            reference,
-            message: responseError.message,
-          });
-        }
-
-        return res.redirect(302, buildEpaycoWalletReturnUrl({
-          studentId: String(payment.studentId || ''),
-          reference,
-          status: internalStatus,
-          frontendBaseUrl,
-        }));
+    const payment = await findEpaycoPaymentRecord({ reference, providerTransactionId });
+    if (payment) {
+      const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
+      try {
+        await reconcileEpaycoPaymentRecord(payment, payload, { source: 'response_post' });
+      } catch (responseError) {
+        console.warn('[EPAYCO_RESPONSE_POST_RECONCILE_FAILED]', {
+          reference: payment.reference,
+          providerTransactionId,
+          message: responseError.message,
+        });
       }
+
+      return res.redirect(302, buildEpaycoWalletReturnUrl({
+        studentId: String(payment.studentId || ''),
+        reference: payment.reference,
+        status: internalStatus,
+        frontendBaseUrl,
+      }));
     }
 
     return res.redirect(302, buildEpaycoWalletReturnUrl({
-      reference,
+      reference: reference || providerTransactionId,
       status: internalStatus || 'failed',
     }));
   } catch (error) {
@@ -2290,15 +2316,17 @@ router.get('/epayco/recharge-status', async (req, res) => {
 
     const paymentQuery = {
       schoolId,
-      method: 'epayco',
-      reference,
     };
 
     if (role !== 'admin') {
       paymentQuery.parentId = userId;
     }
 
-    const payment = await PaymentTransaction.findOne(paymentQuery);
+    const payment = await findEpaycoPaymentRecord({
+      reference,
+      providerTransactionId: reference,
+      extraQuery: paymentQuery,
+    });
     if (!payment) {
       return res.status(404).json({ message: 'Payment transaction not found' });
     }
@@ -2481,6 +2509,8 @@ router.post('/epayco/recharge', async (req, res) => {
     const feeAmount = Math.round(numericAmount * 0.015);
     const totalToPay = numericAmount + feeAmount;
     const reference = buildReference();
+    const checkoutToken = crypto.randomUUID();
+    const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
 
     const payment = await PaymentTransaction.create({
       schoolId,
@@ -2520,11 +2550,25 @@ router.post('/epayco/recharge', async (req, res) => {
       type_doc_billing: payerDocumentType,
     };
 
+    let hostedCheckoutUrl = '';
+    try {
+      const hostedSession = await createEpaycoHostedCheckoutSession({
+        checkoutData,
+        clientIp: extractRequestIp(req),
+      });
+      hostedCheckoutUrl = String(hostedSession?.checkoutUrl || '').trim();
+    } catch (hostedCheckoutError) {
+      console.warn('[EPAYCO_HOSTED_CHECKOUT_SESSION_ERROR]', hostedCheckoutError?.message || 'unknown');
+    }
+
     payment.providerResponse = {
       rechargeAmount: numericAmount,
       feeAmount,
       totalToPay,
+      checkoutToken,
       checkoutData,
+      frontendBaseUrl,
+      hostedCheckoutUrl,
     };
     await payment.save();
 
@@ -2538,6 +2582,8 @@ router.post('/epayco/recharge', async (req, res) => {
         publicKey: getEpaycoCheckoutPublicKey(),
         test: isEpaycoTestMode(),
         data: checkoutData,
+        hostedUrl: hostedCheckoutUrl,
+        nativeUrl: buildEpaycoNativeCheckoutUrl(req, { reference, token: checkoutToken }),
       },
       responseUrl: checkoutData.response,
       confirmationUrl: checkoutData.confirmation,
