@@ -2020,7 +2020,13 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       }
       h1 { margin: 0 0 8px; font-size: 1.2rem; }
       p { margin: 0; color: #475569; line-height: 1.45; }
-      .actions { margin-top: 18px; }
+      .actions {
+        margin-top: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+      }
       button {
         border: 0;
         border-radius: 999px;
@@ -2029,6 +2035,10 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
         padding: 12px 18px;
         font: inherit;
         font-weight: 600;
+      }
+      button.secondary {
+        background: #e2e8f0;
+        color: #0f172a;
       }
       .error { color: #b91c1c; margin-top: 14px; }
       @keyframes spin { to { transform: rotate(360deg); } }
@@ -2041,6 +2051,7 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       <p id="message">Te estamos llevando al checkout seguro para completar la recarga.</p>
       <p class="error" id="error" hidden></p>
       <div class="actions">
+        <button type="button" id="continueButton" hidden>Continuar a ePayco</button>
         <button type="button" id="backButton">Volver a Comergio</button>
       </div>
     </div>
@@ -2058,8 +2069,19 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       const storageKey = ${escapeInlineJson(`epayco_checkout_${reference}`)};
       const messageNode = document.getElementById('message');
       const errorNode = document.getElementById('error');
+      const continueButton = document.getElementById('continueButton');
       const backButton = document.getElementById('backButton');
       let launchTimeoutId = null;
+      let continueHintTimeoutId = null;
+
+      function showContinueButton(message) {
+        if (continueButton) {
+          continueButton.hidden = false;
+        }
+        if (messageNode && message) {
+          messageNode.textContent = message;
+        }
+      }
 
       function returnToComergio() {
         try {
@@ -2078,6 +2100,7 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
         if (messageNode) {
           messageNode.textContent = 'No pudimos abrir ePayco correctamente.';
         }
+        showContinueButton('Si ePayco no abre solo, toca "Continuar a ePayco".');
         if (errorNode) {
           errorNode.hidden = false;
           errorNode.textContent = message;
@@ -2085,6 +2108,7 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       }
 
       backButton?.addEventListener('click', returnToComergio);
+      continueButton?.addEventListener('click', () => openCheckout({ userInitiated: true }));
 
       let shouldReturnWhenVisible = false;
 
@@ -2115,14 +2139,32 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
         }
       });
 
-      function openCheckout() {
+      function openCheckout({ userInitiated = false } = {}) {
         try {
+          if (launchTimeoutId) {
+            window.clearTimeout(launchTimeoutId);
+          }
+          if (continueHintTimeoutId) {
+            window.clearTimeout(continueHintTimeoutId);
+          }
+          if (errorNode) {
+            errorNode.hidden = true;
+            errorNode.textContent = '';
+          }
+          if (messageNode) {
+            messageNode.textContent = userInitiated
+              ? 'Abriendo ePayco con tu confirmacion...'
+              : 'Te estamos llevando al checkout seguro para completar la recarga.';
+          }
           const handler = window.ePayco.checkout.configure({
             key: checkoutConfig.key,
             test: Boolean(checkoutConfig.test),
           });
+          continueHintTimeoutId = window.setTimeout(() => {
+            showContinueButton('Si no abre automaticamente, toca "Continuar a ePayco".');
+          }, 1500);
           launchTimeoutId = window.setTimeout(() => {
-            showError('ePayco no respondio a tiempo desde este navegador. Intenta de nuevo desde la app.');
+            showError('ePayco no respondio a tiempo desde este navegador. Toca "Continuar a ePayco" o intenta de nuevo desde la app.');
           }, 6000);
           handler.open(checkoutConfig.data);
         } catch (error) {
@@ -2133,7 +2175,7 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       const script = document.createElement('script');
       script.src = 'https://checkout.epayco.co/checkout.js';
       script.async = true;
-      script.onload = openCheckout;
+      script.onload = () => openCheckout();
       script.onerror = () => showError('No se pudo cargar checkout.js de ePayco.');
       document.body.appendChild(script);
     </script>
