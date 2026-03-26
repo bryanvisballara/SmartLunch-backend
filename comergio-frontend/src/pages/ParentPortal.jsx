@@ -365,6 +365,10 @@ function ParentPortal() {
   const [gioContext, setGioContext] = useState(null);
   const gioThreadEndRef = useRef(null);
   const processedPaymentReturnKeyRef = useRef('');
+  const epaycoBrowserListenerRef = useRef(null);
+  const epaycoActiveReferenceRef = useRef('');
+  const epaycoActiveStudentIdRef = useRef('');
+  const epaycoReturnHandledRef = useRef('');
   const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
   const [pullRefreshActive, setPullRefreshActive] = useState(false);
   const [pullRefreshReloading, setPullRefreshReloading] = useState(false);
@@ -386,6 +390,89 @@ function ParentPortal() {
   const isHistoryPage = location.pathname === '/parent/historial-ordenes';
   const isLimitPage = location.pathname === '/parent/limitar-consumo';
   const isGioIaPage = location.pathname === '/parent/gio-ia';
+  const buildWalletRechargeUrl = (studentId = '') => {
+    const params = new URLSearchParams();
+    if (studentId) {
+      params.set('studentId', String(studentId));
+    }
+    const query = params.toString();
+    return query ? `/parent/recargas?${query}` : '/parent/recargas';
+  };
+
+  const clearEpaycoBrowserListener = async () => {
+    const listenerHandle = epaycoBrowserListenerRef.current;
+    epaycoBrowserListenerRef.current = null;
+
+    if (!listenerHandle?.remove) {
+      return;
+    }
+
+    try {
+      await listenerHandle.remove();
+    } catch {
+      // Ignore listener cleanup failures.
+    }
+  };
+
+  const resetEpaycoCheckoutSession = () => {
+    epaycoActiveReferenceRef.current = '';
+    epaycoActiveStudentIdRef.current = '';
+    epaycoReturnHandledRef.current = '';
+  };
+
+  const closeNativeEpaycoBrowserSession = async () => {
+    await clearEpaycoBrowserListener();
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await Browser.close();
+      } catch {
+        // Ignore close failures when the browser is already gone.
+      }
+    }
+
+    resetEpaycoCheckoutSession();
+  };
+
+  const openNativeEpaycoCheckout = async ({ checkoutUrl, reference, studentId }) => {
+    await clearEpaycoBrowserListener();
+    epaycoReturnHandledRef.current = '';
+    epaycoActiveReferenceRef.current = String(reference || '').trim();
+    epaycoActiveStudentIdRef.current = String(studentId || '').trim();
+
+    epaycoBrowserListenerRef.current = await Browser.addListener('browserFinished', async () => {
+      const activeReference = String(epaycoActiveReferenceRef.current || '').trim();
+      const activeStudentId = String(epaycoActiveStudentIdRef.current || '').trim();
+      const returnHandled = epaycoReturnHandledRef.current === activeReference;
+
+      await clearEpaycoBrowserListener();
+
+      if (!activeReference) {
+        return;
+      }
+
+      resetEpaycoCheckoutSession();
+
+      if (returnHandled) {
+        return;
+      }
+
+      setWalletReturnNotice({
+        type: 'info',
+        message: 'Regresaste desde ePayco. Ya te llevamos de nuevo a la billetera para que revises o intentes otra recarga.',
+      });
+      navigate(buildWalletRechargeUrl(activeStudentId), { replace: true });
+    });
+
+    try {
+      await Browser.open({ url: checkoutUrl });
+    } catch (error) {
+      await clearEpaycoBrowserListener();
+      resetEpaycoCheckoutSession();
+      throw error;
+    }
+  };
+
   const menuCategoryId = useMemo(() => {
     const prefix = '/parent/menu/';
     if (!location.pathname.startsWith(prefix)) {
@@ -790,6 +877,12 @@ function ParentPortal() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      void clearEpaycoBrowserListener();
+    };
+  }, []);
+
+  useEffect(() => {
     if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
       return;
     }
@@ -963,6 +1056,11 @@ function ParentPortal() {
     const finishReturn = (notice) => {
       if (cancelled) {
         return;
+      }
+
+      if (paymentReference && epaycoActiveReferenceRef.current === paymentReference) {
+        epaycoReturnHandledRef.current = paymentReference;
+        void closeNativeEpaycoBrowserSession();
       }
 
       setWalletReturnNotice(notice);
@@ -1910,6 +2008,22 @@ function ParentPortal() {
       const checkout = response?.data?.checkout || null;
       const checkoutData = checkout?.data || null;
       const publicKey = String(checkout?.publicKey || '').trim();
+      const checkoutUrl = String(response?.data?.checkoutUrl || '').trim();
+      const reference = String(response?.data?.reference || checkoutData?.invoice || '').trim();
+
+      if (Capacitor.isNativePlatform()) {
+        if (!checkoutUrl || !reference) {
+          throw new Error('No recibimos la configuración nativa de checkout para ePayco.');
+        }
+
+        await openNativeEpaycoCheckout({
+          checkoutUrl,
+          reference,
+          studentId: selectedStudent._id,
+        });
+        setEpaycoSubmitSuccess('Abrimos ePayco para que completes la recarga. Cuando regreses, volverás a la billetera.');
+        return;
+      }
 
       if (!publicKey || !checkoutData) {
         throw new Error('No recibimos la configuración de checkout de ePayco.');
@@ -4233,6 +4347,18 @@ function ParentPortal() {
           </>
         ) : null}
       </main>
+
+        {studentPhotoUploading ? (
+          <div className="brand-popup-overlay" role="status" aria-live="polite" aria-busy="true">
+            <div className="brand-popup">
+              <div className="legacy-migration-spinner" aria-hidden="true" />
+              <h3>Subiendo foto...</h3>
+              <p>
+                Estamos actualizando la foto de {selectedStudent?.name || 'tu alumno'}. Esto puede tardar unos segundos.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
       {selectedOrderDetail ? (
         <div className="parent-order-detail-overlay" onClick={onCloseOrderDetail} role="dialog" aria-modal="true" aria-label="Detalle de orden">

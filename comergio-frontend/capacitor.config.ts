@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.comergio.app',
-  appName: 'Comergio App',
+  appName: 'Comergio',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

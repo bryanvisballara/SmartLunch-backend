@@ -2706,7 +2706,7 @@ label {
 }
 
 .parent-topbar {
-  height: 142px;
+  height: 132px;
   display: flex;
   align-items: flex-start;
   gap: 0.65rem;
@@ -2853,8 +2853,8 @@ label {
 
 .parent-student-switcher {
   padding: 0 1rem;
-  margin-top: -0.55rem;
-  margin-bottom: 0.18rem;
+  margin-top: -2.35rem;
+  margin-bottom: -0.1rem;
   position: relative;
   z-index: 5;
 }
@@ -3056,7 +3056,7 @@ label {
 }
 
 .parent-mobile-content {
-  padding: 0.95rem 1rem 1.5rem;
+  padding: 0.4rem 1rem 1.5rem;
   display: grid;
   gap: 0.85rem;
   transition: transform 0.18s ease;
@@ -6175,10 +6175,28 @@ label {
 
 @media (min-width: 700px) {
   .parent-mobile-page {
-    max-width: 430px;
-    margin: -1rem auto;
-    border-left: 1px solid #d7e2ef;
-    border-right: 1px solid #d7e2ef;
-    box-shadow: 0 18px 38px rgba(15, 23, 42, 0.08);
+    width: auto;
+    max-width: none;
+    margin: calc(-1 * (env(safe-area-inset-top, 0px) + 1rem)) -1rem -1rem;
+    border-left: 0;
+    border-right: 0;
+    box-shadow: none;
+  }
+
+  .parent-topbar,
+  .parent-student-switcher,
+  .parent-mobile-content {
+    padding-left: clamp(1.35rem, 4vw, 2.75rem);
+    padding-right: clamp(1.35rem, 4vw, 2.75rem);
+  }
+
+  .parent-mobile-content {
+    gap: 1rem;
+  }
+
+  .parent-student-options,
+  .parent-balance-hero,
+  .parent-section {
+    max-width: 100%;
   }
 }
