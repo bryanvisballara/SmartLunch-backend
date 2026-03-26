@@ -733,6 +733,23 @@ function buildEpaycoWalletReturnUrl({ studentId, reference, status = '', fronten
   return url.toString();
 }
 
+function buildEpaycoNativeCheckoutUrl(req, { reference, token }) {
+  const url = new URL(`/payments/epayco/checkout/${encodeURIComponent(String(reference || '').trim())}`, `${getPublicBackendUrl(req)}/`);
+  if (token) {
+    url.searchParams.set('token', String(token));
+  }
+  return url.toString();
+}
+
+function escapeInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { source = 'confirmation' } = {}) {
   let session;
 
@@ -1931,6 +1948,192 @@ router.post('/epayco/confirmation', async (req, res) => {
   }
 });
 
+router.get('/epayco/checkout/:reference', async (req, res) => {
+  try {
+    if (!isEpaycoCheckoutConfigured()) {
+      return res.status(503).send('<!doctype html><html><body><p>ePayco no esta configurado.</p></body></html>');
+    }
+
+    const reference = String(req.params?.reference || '').trim();
+    const token = String(req.query?.token || '').trim();
+
+    if (!reference || !token) {
+      return res.status(400).send('<!doctype html><html><body><p>Solicitud invalida.</p></body></html>');
+    }
+
+    const payment = await PaymentTransaction.findOne({ method: 'epayco', reference }).lean();
+    if (!payment) {
+      return res.status(404).send('<!doctype html><html><body><p>Recarga no encontrada.</p></body></html>');
+    }
+
+    const checkoutToken = String(payment?.providerResponse?.checkoutToken || '').trim();
+    const checkoutData = payment?.providerResponse?.checkoutData || null;
+    const frontendBaseUrl = String(payment?.providerResponse?.frontendBaseUrl || '').trim();
+
+    if (!checkoutToken || checkoutToken !== token || !checkoutData) {
+      return res.status(403).send('<!doctype html><html><body><p>No autorizado.</p></body></html>');
+    }
+
+    const abandonedReturnUrl = buildEpaycoWalletReturnUrl({
+      studentId: payment.studentId,
+      reference: payment.reference,
+      status: 'abandoned',
+      frontendBaseUrl,
+    });
+
+    const html = `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Comergio | ePayco</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+        color: #0f172a;
+      }
+      .card {
+        width: min(420px, 100%);
+        background: #ffffff;
+        border: 1px solid #dbe6f3;
+        border-radius: 22px;
+        padding: 24px;
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+        text-align: center;
+      }
+      .spinner {
+        width: 40px;
+        height: 40px;
+        margin: 0 auto 16px;
+        border-radius: 999px;
+        border: 3px solid #dbeafe;
+        border-top-color: #1473e6;
+        animation: spin 0.8s linear infinite;
+      }
+      h1 { margin: 0 0 8px; font-size: 1.2rem; }
+      p { margin: 0; color: #475569; line-height: 1.45; }
+      .actions { margin-top: 18px; }
+      button {
+        border: 0;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #fff;
+        padding: 12px 18px;
+        font: inherit;
+        font-weight: 600;
+      }
+      .error { color: #b91c1c; margin-top: 14px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="spinner" aria-hidden="true"></div>
+      <h1>Abriendo ePayco...</h1>
+      <p id="message">Te estamos llevando al checkout seguro para completar la recarga.</p>
+      <p class="error" id="error" hidden></p>
+      <div class="actions">
+        <button type="button" id="backButton">Volver a Comergio</button>
+      </div>
+    </div>
+    <script>
+      const checkoutConfig = ${escapeInlineJson({
+        key: getEpaycoCheckoutPublicKey(),
+        test: isEpaycoTestMode(),
+        data: checkoutData,
+      })};
+      const abandonedReturnUrl = ${escapeInlineJson(abandonedReturnUrl)};
+      const storageKey = ${escapeInlineJson(`epayco_checkout_${reference}`)};
+      const messageNode = document.getElementById('message');
+      const errorNode = document.getElementById('error');
+      const backButton = document.getElementById('backButton');
+
+      function returnToComergio() {
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch (error) {
+          // Ignore sessionStorage failures.
+        }
+        window.location.replace(abandonedReturnUrl);
+      }
+
+      function showError(message) {
+        if (messageNode) {
+          messageNode.textContent = 'No pudimos abrir ePayco correctamente.';
+        }
+        if (errorNode) {
+          errorNode.hidden = false;
+          errorNode.textContent = message;
+        }
+      }
+
+      backButton?.addEventListener('click', returnToComergio);
+
+      let shouldReturnWhenVisible = false;
+
+      try {
+        if (window.sessionStorage.getItem(storageKey) === 'opened') {
+          returnToComergio();
+        } else {
+          window.sessionStorage.setItem(storageKey, 'opened');
+        }
+      } catch (error) {
+        // Ignore sessionStorage failures.
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          shouldReturnWhenVisible = true;
+          return;
+        }
+
+        if (shouldReturnWhenVisible) {
+          window.setTimeout(returnToComergio, 120);
+        }
+      });
+
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted) {
+          window.setTimeout(returnToComergio, 120);
+        }
+      });
+
+      function openCheckout() {
+        try {
+          const handler = window.ePayco.checkout.configure({
+            key: checkoutConfig.key,
+            test: Boolean(checkoutConfig.test),
+          });
+          handler.open(checkoutConfig.data);
+        } catch (error) {
+          showError(error?.message || 'Intenta de nuevo desde la app.');
+        }
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://checkout.epayco.co/checkout.js';
+      script.async = true;
+      script.onload = openCheckout;
+      script.onerror = () => showError('No se pudo cargar checkout.js de ePayco.');
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>`;
+
+    return res.status(200).type('html').send(html);
+  } catch (error) {
+    return res.status(500).send(`<!doctype html><html><body><p>${String(error.message || 'No se pudo abrir ePayco.')}</p></body></html>`);
+  }
+});
+
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
 
@@ -2137,6 +2340,7 @@ router.post('/epayco/recharge', async (req, res) => {
     const totalToPay = numericAmount + feeAmount;
     const reference = buildReference();
     const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
+    const checkoutToken = crypto.randomBytes(24).toString('hex');
 
     const payment = await PaymentTransaction.create({
       schoolId,
@@ -2178,6 +2382,7 @@ router.post('/epayco/recharge', async (req, res) => {
 
     payment.providerResponse = {
       frontendBaseUrl,
+      checkoutToken,
       rechargeAmount: numericAmount,
       feeAmount,
       totalToPay,
@@ -2196,6 +2401,7 @@ router.post('/epayco/recharge', async (req, res) => {
         test: isEpaycoTestMode(),
         data: checkoutData,
       },
+      checkoutUrl: buildEpaycoNativeCheckoutUrl(req, { reference, token: checkoutToken }),
       responseUrl: checkoutData.response,
       confirmationUrl: checkoutData.confirmation,
     });
