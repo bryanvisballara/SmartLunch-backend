@@ -16,6 +16,7 @@ export const sendForgotPasswordCode = (data) => api.post('/auth/password/forgot/
 export const verifyForgotPasswordCode = (data) => api.post('/auth/password/forgot/verify-code', data);
 export const resetForgotPassword = (data) => api.post('/auth/password/forgot/reset', data);
 export const me = () => api.get('/auth/me');
+export const deleteAccount = (data) => api.delete('/auth/account', { data });
 export const getBiometricRegistrationOptions = () => api.post('/auth/biometric/register/options');
 export const verifyBiometricRegistration = (data) => api.post('/auth/biometric/register/verify', data);
 export const getBiometricLoginOptions = (data) => api.post('/auth/biometric/login/options', data);

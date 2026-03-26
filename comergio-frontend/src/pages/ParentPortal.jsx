@@ -4,6 +4,7 @@ import { AppLauncher } from '@capacitor/app-launcher';
 import { Browser } from '@capacitor/browser';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
+import { deleteAccount } from '../services/auth.service';
 import {
   addToMeriendasWaitlist,
   askParentGioIaChat,
@@ -229,6 +230,7 @@ function ParentPortal() {
   const { user, logout } = useAuthStore();
   const portalRootRef = useRef(null);
   const studentPhotoInputRef = useRef(null);
+  const deleteAccountRedirectTimeoutRef = useRef(null);
   const pullStartYRef = useRef(0);
   const pullTrackingRef = useRef(false);
   const pullTriggeredRef = useRef(false);
@@ -365,13 +367,15 @@ function ParentPortal() {
   const [gioContext, setGioContext] = useState(null);
   const gioThreadEndRef = useRef(null);
   const processedPaymentReturnKeyRef = useRef('');
-  const epaycoBrowserListenerRef = useRef(null);
-  const epaycoActiveReferenceRef = useRef('');
-  const epaycoActiveStudentIdRef = useRef('');
-  const epaycoReturnHandledRef = useRef('');
   const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
   const [pullRefreshActive, setPullRefreshActive] = useState(false);
   const [pullRefreshReloading, setPullRefreshReloading] = useState(false);
+  const [showDeleteAccountConfirmModal, setShowDeleteAccountConfirmModal] = useState(false);
+  const [showDeleteAccountPasswordModal, setShowDeleteAccountPasswordModal] = useState(false);
+  const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
+  const [deleteAccountError, setDeleteAccountError] = useState('');
+  const [deleteAccountSuccess, setDeleteAccountSuccess] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
   const isTopupsPage = location.pathname === '/parent/recargas';
@@ -397,80 +401,6 @@ function ParentPortal() {
     }
     const query = params.toString();
     return query ? `/parent/recargas?${query}` : '/parent/recargas';
-  };
-
-  const clearEpaycoBrowserListener = async () => {
-    const listenerHandle = epaycoBrowserListenerRef.current;
-    epaycoBrowserListenerRef.current = null;
-
-    if (!listenerHandle?.remove) {
-      return;
-    }
-
-    try {
-      await listenerHandle.remove();
-    } catch {
-      // Ignore listener cleanup failures.
-    }
-  };
-
-  const resetEpaycoCheckoutSession = () => {
-    epaycoActiveReferenceRef.current = '';
-    epaycoActiveStudentIdRef.current = '';
-    epaycoReturnHandledRef.current = '';
-  };
-
-  const closeNativeEpaycoBrowserSession = async () => {
-    await clearEpaycoBrowserListener();
-
-    if (Capacitor.isNativePlatform()) {
-      try {
-        await Browser.close();
-      } catch {
-        // Ignore close failures when the browser is already gone.
-      }
-    }
-
-    resetEpaycoCheckoutSession();
-  };
-
-  const openNativeEpaycoCheckout = async ({ checkoutUrl, reference, studentId }) => {
-    await clearEpaycoBrowserListener();
-    epaycoReturnHandledRef.current = '';
-    epaycoActiveReferenceRef.current = String(reference || '').trim();
-    epaycoActiveStudentIdRef.current = String(studentId || '').trim();
-
-    epaycoBrowserListenerRef.current = await Browser.addListener('browserFinished', async () => {
-      const activeReference = String(epaycoActiveReferenceRef.current || '').trim();
-      const activeStudentId = String(epaycoActiveStudentIdRef.current || '').trim();
-      const returnHandled = epaycoReturnHandledRef.current === activeReference;
-
-      await clearEpaycoBrowserListener();
-
-      if (!activeReference) {
-        return;
-      }
-
-      resetEpaycoCheckoutSession();
-
-      if (returnHandled) {
-        return;
-      }
-
-      setWalletReturnNotice({
-        type: 'info',
-        message: 'Regresaste desde ePayco. Ya te llevamos de nuevo a la billetera para que revises o intentes otra recarga.',
-      });
-      navigate(buildWalletRechargeUrl(activeStudentId), { replace: true });
-    });
-
-    try {
-      await Browser.open({ url: checkoutUrl });
-    } catch (error) {
-      await clearEpaycoBrowserListener();
-      resetEpaycoCheckoutSession();
-      throw error;
-    }
   };
 
   const menuCategoryId = useMemo(() => {
@@ -644,13 +574,120 @@ function ParentPortal() {
     setPullRefreshActive(false);
   };
 
-  const triggerPortalRefresh = () => {
+  const resolvePortalRefreshStudentId = () => {
+    const params = new URLSearchParams(location.search || '');
+    return String(
+      params.get('studentId') ||
+      selectedStudentId ||
+      selectedStudent?._id ||
+      overview?.selectedStudentId ||
+      ''
+    ).trim();
+  };
+
+  const triggerPortalRefresh = async () => {
     setPullRefreshReloading(true);
     setPullRefreshDistance(pullRefreshThreshold);
     setPullRefreshActive(true);
-    window.setTimeout(() => {
-      window.location.reload();
-    }, 140);
+
+    try {
+      const studentId = resolvePortalRefreshStudentId();
+      const refreshErrors = [];
+
+      const overviewRefresh = await loadOverview(studentId, { silent: true });
+      if (overviewRefresh?.error) {
+        refreshErrors.push(overviewRefresh.error);
+      }
+
+      if (isHistoryPage && studentId) {
+        await loadOrdersHistory(historyFilters);
+      }
+
+      if (isMenuRoute) {
+        try {
+          setCategoriesLoading(true);
+          setCategoriesError('');
+          const response = await getParentPortalCategories();
+          setCategories(Array.isArray(response.data) ? response.data : []);
+        } catch (requestError) {
+          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar las categorías.';
+          setCategoriesError(message);
+          setCategories([]);
+          refreshErrors.push(message);
+        } finally {
+          setCategoriesLoading(false);
+        }
+      }
+
+      if (isMenuProductsPage) {
+        try {
+          setMenuProductsLoading(true);
+          setMenuProductsError('');
+          const response = await getProducts({ categoryId: menuCategoryId });
+          setMenuProducts(dedupeParentMenuProducts(response.data));
+        } catch (requestError) {
+          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar los productos.';
+          setMenuProductsError(message);
+          setMenuProducts([]);
+          refreshErrors.push(message);
+        } finally {
+          setMenuProductsLoading(false);
+        }
+      }
+
+      if (isTopupsPage || isTopupMethodsPage || isTopupDaviPlataPage || isAutoTopupPage) {
+        try {
+          await loadSavedCards();
+        } catch (requestError) {
+          refreshErrors.push(requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar las tarjetas guardadas.');
+        }
+      }
+
+      if ((isMeriendasPage || isMeriendasDayPage) && studentId) {
+        try {
+          await loadMeriendasData();
+        } catch (requestError) {
+          refreshErrors.push(requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar la página de meriendas.');
+        }
+      }
+
+      if (isTopupPsePage) {
+        try {
+          setPseBanksLoading(true);
+          setPseSubmitError('');
+          const response = await getBoldPseBanks();
+          const banks = Array.isArray(response?.data?.banks) ? response.data.banks : [];
+          setPseBanks(banks);
+          setPseSelectedBankCode((current) => {
+            if (current && banks.some((bank) => String(bank.bankCode) === String(current))) {
+              return current;
+            }
+
+            return String(banks[0]?.bankCode || '');
+          });
+        } catch (requestError) {
+          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar la lista de bancos PSE.';
+          setPseBanks([]);
+          setPseSelectedBankCode('');
+          setPseSubmitError(message);
+          refreshErrors.push(message);
+        } finally {
+          setPseBanksLoading(false);
+        }
+      }
+
+      if (refreshErrors.length > 0) {
+        setWalletReturnNotice({
+          type: 'error',
+          message: refreshErrors[0],
+        });
+      }
+    } finally {
+      window.setTimeout(() => {
+        setPullRefreshReloading(false);
+        resetPullRefreshState();
+      }, 220);
+    }
   };
 
   const onPortalTouchStart = (event) => {
@@ -756,6 +793,12 @@ function ParentPortal() {
     setAutoDebitMenuOpen(false);
   }, [location.pathname, selectedStudent?._id]);
 
+  useEffect(() => {
+    if (location.pathname !== '/parent' && location.pathname !== '/parent/recargas') {
+      setWalletReturnNotice(null);
+    }
+  }, [location.pathname]);
+
   const meriendaSubscription = meriendasData?.subscription || null;
   const isMeriendasSubscribed = Boolean(meriendaSubscription?.active);
   const meriendaScheduleDays = useMemo(
@@ -853,9 +896,13 @@ function ParentPortal() {
     setStudentPhotoSuccess('');
   }, [selectedStudent?._id, selectedStudent?.dailyLimit, selectedStudent?.grade]);
 
-  const loadOverview = async (studentId = '') => {
-    setLoading(true);
-    setError('');
+  const loadOverview = async (studentId = '', options = {}) => {
+    const silent = Boolean(options?.silent);
+
+    if (!silent) {
+      setLoading(true);
+      setError('');
+    }
 
     try {
       const response = await getParentPortalOverview(studentId ? { studentId } : {});
@@ -865,10 +912,18 @@ function ParentPortal() {
       if (!studentId && payload?.selectedStudentId) {
         setSelectedStudentId(String(payload.selectedStudentId));
       }
+
+      return { payload, error: '' };
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar el portal del padre.');
+      const message = requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar el portal del padre.';
+      if (!silent) {
+        setError(message);
+      }
+      return { payload: null, error: message };
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -941,7 +996,7 @@ function ParentPortal() {
         return;
       }
 
-      setWalletReturnNotice(notice);
+      setWalletReturnNotice(notice?.type === 'error' ? notice : null);
       navigate(buildParentUrl(), { replace: true });
     };
 
@@ -1058,11 +1113,6 @@ function ParentPortal() {
         return;
       }
 
-      if (paymentReference && epaycoActiveReferenceRef.current === paymentReference) {
-        epaycoReturnHandledRef.current = paymentReference;
-        void closeNativeEpaycoBrowserSession();
-      }
-
       setWalletReturnNotice(notice);
       navigate(buildParentUrl(), { replace: true });
     };
@@ -1081,11 +1131,6 @@ function ParentPortal() {
         await loadOverview(queryStudentId);
       }
 
-      setWalletReturnNotice({
-        type: 'info',
-        message: 'Estamos confirmando tu recarga con ePayco y actualizando el saldo de la billetera.',
-      });
-
       for (let attempt = 0; attempt < 8; attempt += 1) {
         if (cancelled) {
           return;
@@ -1102,10 +1147,7 @@ function ParentPortal() {
               await loadOverview(responseStudentId);
             }
 
-            finishReturn({
-              type: 'success',
-              message: 'La recarga fue acreditada correctamente. Ya actualizamos el saldo de la billetera.',
-            });
+            finishReturn(null);
             return;
           }
 
@@ -1118,10 +1160,7 @@ function ParentPortal() {
           }
         } catch (requestError) {
           if (attempt === 7) {
-            finishReturn({
-              type: 'info',
-              message: requestError?.response?.data?.message || 'No pudimos confirmar la recarga todavía. Vuelve a revisar la billetera en unos segundos.',
-            });
+            finishReturn(null);
             return;
           }
         }
@@ -1129,10 +1168,7 @@ function ParentPortal() {
         await new Promise((resolve) => setTimeout(resolve, 1800));
       }
 
-      finishReturn({
-        type: 'info',
-        message: 'Seguimos verificando la recarga. Si el saldo aún no cambia, vuelve a entrar en unos segundos.',
-      });
+      finishReturn(null);
     };
 
     syncEpaycoReturn();
@@ -1445,6 +1481,77 @@ function ParentPortal() {
   const onLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  useEffect(() => () => {
+    if (deleteAccountRedirectTimeoutRef.current) {
+      clearTimeout(deleteAccountRedirectTimeoutRef.current);
+    }
+  }, []);
+
+  const onOpenDeleteAccountConfirm = () => {
+    setDrawerOpen(false);
+    setProfileMenuOpen(false);
+    setDeleteAccountPassword('');
+    setDeleteAccountError('');
+    setDeleteAccountSuccess('');
+    setShowDeleteAccountPasswordModal(false);
+    setShowDeleteAccountConfirmModal(true);
+  };
+
+  const onCloseDeleteAccountConfirm = () => {
+    if (deletingAccount) {
+      return;
+    }
+
+    setShowDeleteAccountConfirmModal(false);
+  };
+
+  const onCloseDeleteAccountPasswordModal = () => {
+    if (deletingAccount || deleteAccountSuccess) {
+      return;
+    }
+
+    setShowDeleteAccountPasswordModal(false);
+    setDeleteAccountPassword('');
+    setDeleteAccountError('');
+    setDeleteAccountSuccess('');
+  };
+
+  const onContinueDeleteAccount = () => {
+    setShowDeleteAccountConfirmModal(false);
+    setDeleteAccountPassword('');
+    setDeleteAccountError('');
+    setDeleteAccountSuccess('');
+    setShowDeleteAccountPasswordModal(true);
+  };
+
+  const onSubmitDeleteAccount = async () => {
+    const trimmedPassword = String(deleteAccountPassword || '').trim();
+    if (!trimmedPassword || deletingAccount || deleteAccountSuccess) {
+      if (!trimmedPassword) {
+        setDeleteAccountError('Debes ingresar tu contrasena para continuar.');
+      }
+      return;
+    }
+
+    setDeletingAccount(true);
+    setDeleteAccountError('');
+
+    try {
+      await deleteAccount({ password: trimmedPassword });
+      setDeleteAccountSuccess('Tu cuenta fue eliminada correctamente. Redirigiendo...');
+      deleteAccountRedirectTimeoutRef.current = window.setTimeout(() => {
+        logout();
+        navigate('/login', { replace: true });
+      }, 900);
+    } catch (requestError) {
+      setDeleteAccountError(
+        requestError?.response?.data?.message || requestError?.message || 'No se pudo eliminar la cuenta.'
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
   const onSelectChild = (studentId) => {
@@ -2008,20 +2115,12 @@ function ParentPortal() {
       const checkout = response?.data?.checkout || null;
       const checkoutData = checkout?.data || null;
       const publicKey = String(checkout?.publicKey || '').trim();
-      const checkoutUrl = String(response?.data?.checkoutUrl || '').trim();
-      const reference = String(response?.data?.reference || checkoutData?.invoice || '').trim();
+      const hostedCheckoutUrl = String(checkout?.hostedUrl || '').trim();
+      const nativeCheckoutUrl = String(checkout?.nativeUrl || '').trim();
 
-      if (Capacitor.isNativePlatform()) {
-        if (!checkoutUrl || !reference) {
-          throw new Error('No recibimos la configuración nativa de checkout para ePayco.');
-        }
-
-        await openNativeEpaycoCheckout({
-          checkoutUrl,
-          reference,
-          studentId: selectedStudent._id,
-        });
-        setEpaycoSubmitSuccess('Abrimos ePayco para que completes la recarga. Cuando regreses, volverás a la billetera.');
+      if (Capacitor.isNativePlatform() && (hostedCheckoutUrl || nativeCheckoutUrl)) {
+        await AppLauncher.openUrl({ url: hostedCheckoutUrl || nativeCheckoutUrl });
+        setEpaycoSubmitSuccess('Abrimos ePayco para que completes la recarga.');
         return;
       }
 
@@ -2692,6 +2791,13 @@ function ParentPortal() {
         </svg>
       );
     }
+    if (icon === 'trash') {
+      return (
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 3.5h6l.7 1.5H20v2h-1v11a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4V5h4.3L9 3.5Zm-2 3.5v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7H7Zm3 2h2v7h-2V9Zm4 0h2v7h-2V9Z" fill="currentColor"/>
+        </svg>
+      );
+    }
 
     return (
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -2832,7 +2938,7 @@ function ParentPortal() {
       <main className="parent-mobile-content" style={{ transform: `translateY(${pullRefreshReloading ? pullRefreshThreshold * 0.4 : pullRefreshDistance}px)` }}>
         {loading ? <div className="parent-loading">Cargando portal...</div> : null}
         {!loading && error ? <div className="parent-error">{error}</div> : null}
-        {!loading && !error && walletReturnNotice?.message ? (
+        {!loading && !error && walletReturnNotice?.message && walletReturnNotice?.type !== 'info' ? (
           <div className={walletReturnNotice?.type === 'error' ? 'parent-error' : walletReturnNotice?.type === 'success' ? 'parent-success' : 'parent-topup-fee-note'}>
             {walletReturnNotice.message}
           </div>
@@ -4530,6 +4636,82 @@ function ParentPortal() {
           tabIndex={0}
         />
       ) : null}
+
+      {showDeleteAccountConfirmModal ? (
+        <div className="parent-meriendas-cancel-modal-overlay" role="dialog" aria-modal="true" aria-label="Confirmar eliminación de cuenta">
+          <div className="parent-meriendas-cancel-modal parent-delete-account-modal">
+            <p className="kicker">Eliminar cuenta</p>
+            <h4>¿Deseas eliminar tu cuenta?</h4>
+            <p>
+              Esta acción eliminará tu acceso a Comergio y perderás toda la información registrada hasta ahora.
+            </p>
+            <div className="parent-meriendas-cancel-modal-actions">
+              <button
+                className="btn-secondary"
+                disabled={deletingAccount}
+                onClick={onCloseDeleteAccountConfirm}
+                type="button"
+              >
+                No
+              </button>
+              <button
+                className="btn-danger"
+                disabled={deletingAccount}
+                onClick={onContinueDeleteAccount}
+                type="button"
+              >
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showDeleteAccountPasswordModal ? (
+        <div className="parent-meriendas-cancel-modal-overlay" role="dialog" aria-modal="true" aria-label="Ingresar contraseña para eliminar cuenta">
+          <div className="parent-meriendas-cancel-modal parent-delete-account-modal">
+            <p className="kicker">Confirmación final</p>
+            <h4>Ingresa tu contrasena</h4>
+            <p>
+              Para confirmar la eliminación de la cuenta, escribe tu contrasena actual.
+            </p>
+            <label className="parent-delete-account-field" htmlFor="delete-account-password">
+              <span>Contrasena actual</span>
+              <input
+                autoComplete="current-password"
+                id="delete-account-password"
+                onChange={(event) => setDeleteAccountPassword(event.target.value)}
+                placeholder="Escribe tu contrasena"
+                type="password"
+                value={deleteAccountPassword}
+              />
+            </label>
+
+            {deleteAccountError ? <p className="parent-error parent-delete-account-feedback">{deleteAccountError}</p> : null}
+            {deleteAccountSuccess ? <p className="parent-success parent-delete-account-feedback">{deleteAccountSuccess}</p> : null}
+
+            <div className="parent-meriendas-cancel-modal-actions">
+              <button
+                className="btn-secondary"
+                disabled={deletingAccount || Boolean(deleteAccountSuccess)}
+                onClick={onCloseDeleteAccountPasswordModal}
+                type="button"
+              >
+                Volver
+              </button>
+              <button
+                className="btn-danger"
+                disabled={deletingAccount || Boolean(deleteAccountSuccess)}
+                onClick={onSubmitDeleteAccount}
+                type="button"
+              >
+                {deletingAccount ? 'Validando...' : 'Eliminar cuenta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <aside className={`parent-drawer ${drawerOpen ? 'open' : ''}`}>
         <h3>Hola, {drawerHeaderName}</h3>
         <p className="parent-drawer-subtitle">¿Qué quieres hacer hoy?</p>
@@ -4541,6 +4723,11 @@ function ParentPortal() {
             </button>
           ))}
         </nav>
+
+        <button className="parent-delete-account-btn" onClick={onOpenDeleteAccountConfirm} type="button">
+          <span className="icon" aria-hidden="true">{renderProfileIcon('trash')}</span>
+          <span>Eliminar cuenta</span>
+        </button>
 
         <button className="parent-logout-btn" onClick={onLogout} type="button">
           <span className="icon" aria-hidden="true">

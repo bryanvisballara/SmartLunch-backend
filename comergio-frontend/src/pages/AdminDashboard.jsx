@@ -47,6 +47,10 @@ import {
   deleteMeriendaVariableCost,
   getMeriendaOperationsHistory,
   getMeriendaIntakeHistory,
+  getDeletedAccountsForAdmin,
+  getDeletedStudentOrdersForAdmin,
+  getDeletedStudentRechargesForAdmin,
+  permanentlyDeleteDeletedAccount,
   updateAdminCategory,
   updateAdminProduct,
   updateAdminStore,
@@ -119,6 +123,13 @@ const paymentMethodLabel = {
   dataphone: 'Datáfono',
   transfer: 'Transferencia',
   school_billing: 'Cuenta de cobro colegio',
+  daviplata: 'DaviPlata',
+  bancolombia: 'Bancolombia',
+  bold: 'Bold',
+  epayco: 'ePayco',
+  mercadopago_auto_debit: 'Mercado Pago auto',
+  bold_auto_debit: 'Bold auto',
+  epayco_auto_debit: 'ePayco auto',
 };
 
 const pushTypeLabel = {
@@ -399,6 +410,7 @@ const modules = [
   { id: 'school_billing', label: 'Cuentas de cobro colegio' },
   { id: 'notifications', label: 'Auditoria push' },
   { id: 'topups', label: 'Recargas' },
+  { id: 'deleted_accounts', label: 'Cuentas eliminadas' },
   { id: 'creation', label: 'Creaciones' },
   { id: 'edit', label: 'Base de datos' },
   { id: 'modify', label: 'Modificaciones' },
@@ -440,6 +452,17 @@ function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [links, setLinks] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [deletedAccounts, setDeletedAccounts] = useState([]);
+  const [deletedAccountsLoading, setDeletedAccountsLoading] = useState(false);
+  const [deletedAccountsError, setDeletedAccountsError] = useState('');
+  const [expandedDeletedParentIds, setExpandedDeletedParentIds] = useState([]);
+  const [expandedDeletedStudentViews, setExpandedDeletedStudentViews] = useState({});
+  const [deletedStudentOrdersByKey, setDeletedStudentOrdersByKey] = useState({});
+  const [deletedStudentRechargesByKey, setDeletedStudentRechargesByKey] = useState({});
+  const [deletedStudentHistoryLoadingByKey, setDeletedStudentHistoryLoadingByKey] = useState({});
+  const [deletedStudentHistoryErrorByKey, setDeletedStudentHistoryErrorByKey] = useState({});
+  const [deletedAccountPurgeTarget, setDeletedAccountPurgeTarget] = useState(null);
+  const [deletingDeletedAccountId, setDeletingDeletedAccountId] = useState('');
 
   const [pendingInventory, setPendingInventory] = useState([]);
   const [pendingCancellations, setPendingCancellations] = useState([]);
@@ -722,6 +745,7 @@ function AdminDashboard() {
   const [loadingEditStudentBalance, setLoadingEditStudentBalance] = useState(false);
 
   const parentUsers = useMemo(() => users.filter((u) => u.role === 'parent'), [users]);
+  const getDeletedStudentHistoryKey = (parentId, studentId) => `${parentId}:${studentId}`;
   const supplierProductOptions = useMemo(() => {
     const activeProducts = (products || [])
       .filter((product) => String(product.status || 'active') === 'active')
@@ -1925,6 +1949,20 @@ function AdminDashboard() {
     setSuppliers(response.data || []);
   };
 
+  const loadDeletedAccounts = async () => {
+    setDeletedAccountsLoading(true);
+    setDeletedAccountsError('');
+
+    try {
+      const response = await getDeletedAccountsForAdmin();
+      setDeletedAccounts(Array.isArray(response.data) ? response.data : []);
+    } catch (requestError) {
+      setDeletedAccountsError(requestError?.response?.data?.message || 'No se pudieron cargar las cuentas eliminadas.');
+    } finally {
+      setDeletedAccountsLoading(false);
+    }
+  };
+
   const onAskAiQuestion = async (event) => {
     event.preventDefault();
     const trimmed = String(aiQuestion || '').trim();
@@ -2017,6 +2055,109 @@ function AdminDashboard() {
 
     const response = await getOrders(params);
     setOrders(response.data || []);
+  };
+
+  const onToggleDeletedParent = (parentId) => {
+    setExpandedDeletedParentIds((previous) =>
+      previous.includes(parentId)
+        ? previous.filter((item) => item !== parentId)
+        : [...previous, parentId]
+    );
+  };
+
+  const onToggleDeletedStudentHistory = async (parentId, studentId, type) => {
+    const historyKey = getDeletedStudentHistoryKey(parentId, studentId);
+    const currentView = expandedDeletedStudentViews[historyKey] || '';
+    const nextView = currentView === type ? '' : type;
+
+    setExpandedDeletedStudentViews((previous) => ({
+      ...previous,
+      [historyKey]: nextView,
+    }));
+
+    if (!nextView) {
+      return;
+    }
+
+    if (type === 'orders' && deletedStudentOrdersByKey[historyKey]) {
+      return;
+    }
+
+    if (type === 'recharges' && deletedStudentRechargesByKey[historyKey]) {
+      return;
+    }
+
+    setDeletedStudentHistoryLoadingByKey((previous) => ({ ...previous, [historyKey]: true }));
+    setDeletedStudentHistoryErrorByKey((previous) => ({ ...previous, [historyKey]: '' }));
+
+    try {
+      if (type === 'orders') {
+        const response = await getDeletedStudentOrdersForAdmin(parentId, studentId);
+        setDeletedStudentOrdersByKey((previous) => ({
+          ...previous,
+          [historyKey]: Array.isArray(response.data) ? response.data : [],
+        }));
+      } else {
+        const response = await getDeletedStudentRechargesForAdmin(parentId, studentId);
+        setDeletedStudentRechargesByKey((previous) => ({
+          ...previous,
+          [historyKey]: Array.isArray(response.data) ? response.data : [],
+        }));
+      }
+    } catch (requestError) {
+      setDeletedStudentHistoryErrorByKey((previous) => ({
+        ...previous,
+        [historyKey]: requestError?.response?.data?.message || 'No se pudo cargar el historial solicitado.',
+      }));
+    } finally {
+      setDeletedStudentHistoryLoadingByKey((previous) => ({ ...previous, [historyKey]: false }));
+    }
+  };
+
+  const onConfirmPermanentDeleteDeletedAccount = async () => {
+    const parentId = String(deletedAccountPurgeTarget?._id || '');
+    if (!parentId || deletingDeletedAccountId) {
+      return;
+    }
+
+    setDeletingDeletedAccountId(parentId);
+    clearMessages();
+
+    try {
+      const response = await permanentlyDeleteDeletedAccount(parentId);
+      setDeletedAccountPurgeTarget(null);
+      setExpandedDeletedParentIds((previous) => previous.filter((item) => item !== parentId));
+      setExpandedDeletedStudentViews((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${parentId}:`)))
+      );
+      setDeletedStudentOrdersByKey((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${parentId}:`)))
+      );
+      setDeletedStudentRechargesByKey((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${parentId}:`)))
+      );
+      setDeletedStudentHistoryLoadingByKey((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${parentId}:`)))
+      );
+      setDeletedStudentHistoryErrorByKey((previous) =>
+        Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith(`${parentId}:`)))
+      );
+
+      const [studentsRes, usersRes, linksRes] = await Promise.all([
+        getStudents(),
+        getAdminUsers(),
+        getParentStudentLinks(),
+      ]);
+      setStudents(studentsRes.data || []);
+      setUsers(usersRes.data || []);
+      setLinks(linksRes.data || []);
+      await loadDeletedAccounts();
+      setOk(response?.data?.message || 'Cuenta eliminada definitivamente.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo eliminar definitivamente la cuenta.');
+    } finally {
+      setDeletingDeletedAccountId('');
+    }
   };
 
   const loadTopupHistory = async () => {
@@ -2157,6 +2298,14 @@ function AdminDashboard() {
       .finally(() => {
         setLoading(false);
       });
+  }, [activeModule]);
+
+  useEffect(() => {
+    if (activeModule !== 'deleted_accounts') {
+      return;
+    }
+
+    loadDeletedAccounts();
   }, [activeModule]);
 
   useEffect(() => {
@@ -5692,6 +5841,202 @@ function AdminDashboard() {
         </section>
       ) : null}
 
+      {activeModule === 'deleted_accounts' ? (
+        <section className="panel admin-section">
+          <h3>Cuentas eliminadas por acudientes</h3>
+          <p className="muted">
+            Estas cuentas ya no pueden ingresar, pero sus datos se conservan como evidencia hasta que un administrador apruebe la eliminación definitiva.
+          </p>
+
+          {deletedAccountsLoading ? <p>Cargando cuentas eliminadas...</p> : null}
+          {deletedAccountsError ? <p className="parent-error">{deletedAccountsError}</p> : null}
+          {!deletedAccountsLoading && !deletedAccountsError && deletedAccounts.length === 0 ? (
+            <p>No hay cuentas eliminadas pendientes de revisión.</p>
+          ) : null}
+
+          <div className="admin-deleted-accounts-list">
+            {deletedAccounts.map((parent) => {
+              const parentId = String(parent._id || '');
+              const isExpanded = expandedDeletedParentIds.includes(parentId);
+
+              return (
+                <article className="admin-deleted-account-card" key={parentId}>
+                  <button
+                    className="admin-deleted-account-toggle"
+                    onClick={() => onToggleDeletedParent(parentId)}
+                    type="button"
+                  >
+                    <div>
+                      <strong>{parent.name || 'Acudiente eliminado'}</strong>
+                      <p>
+                        {parent.username || 'Sin usuario'}
+                        {parent.phone ? ` · ${parent.phone}` : ''}
+                        {parent.email ? ` · ${parent.email}` : ''}
+                      </p>
+                    </div>
+                    <div className="admin-deleted-account-meta">
+                      <span>{parent.studentCount || 0} alumnos</span>
+                      <span>{parent.orderCountTotal || 0} órdenes</span>
+                      <span>{parent.rechargeCountTotal || 0} recargas</span>
+                      <span>Eliminada: {formatDateTime(parent.deletedAt)}</span>
+                    </div>
+                  </button>
+
+                  {isExpanded ? (
+                    <div className="admin-deleted-account-body">
+                      <div className="admin-deleted-account-toolbar">
+                        <div className="admin-deleted-account-totals">
+                          <span>Total órdenes: {formatCurrency(parent.orderTotalAmount || 0)}</span>
+                          <span>Total recargas: {formatCurrency(parent.rechargeTotalAmount || 0)}</span>
+                        </div>
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => setDeletedAccountPurgeTarget(parent)}
+                          type="button"
+                        >
+                          Eliminar definitivamente
+                        </button>
+                      </div>
+
+                      {(parent.students || []).length === 0 ? <p>No hay alumnos vinculados para esta cuenta.</p> : null}
+
+                      <div className="admin-deleted-students">
+                        {(parent.students || []).map((student) => {
+                          const studentId = String(student._id || '');
+                          const historyKey = getDeletedStudentHistoryKey(parentId, studentId);
+                          const activeView = expandedDeletedStudentViews[historyKey] || '';
+                          const ordersHistory = deletedStudentOrdersByKey[historyKey] || [];
+                          const rechargeHistory = deletedStudentRechargesByKey[historyKey] || [];
+                          const loadingHistory = Boolean(deletedStudentHistoryLoadingByKey[historyKey]);
+                          const historyError = deletedStudentHistoryErrorByKey[historyKey] || '';
+
+                          return (
+                            <div className="admin-deleted-student-card" key={studentId}>
+                              <div className="admin-deleted-student-summary">
+                                <div>
+                                  <strong>{student.name || 'Alumno'}</strong>
+                                  <p>
+                                    {student.schoolCode ? `${student.schoolCode} · ` : ''}
+                                    {student.grade || 'Sin grado'}
+                                    {student.linkedStatus === 'inactive' ? ' · Vínculo inactivo' : ''}
+                                  </p>
+                                </div>
+                                <div className="admin-deleted-student-meta">
+                                  <span>{student.orderCount || 0} órdenes</span>
+                                  <span>{student.rechargeCount || 0} recargas</span>
+                                  <span>Órdenes: {formatCurrency(student.orderTotalAmount || 0)}</span>
+                                  <span>Recargas: {formatCurrency(student.rechargeTotalAmount || 0)}</span>
+                                </div>
+                              </div>
+
+                              <div className="admin-deleted-student-actions">
+                                <button
+                                  className={`btn btn-chip ${activeView === 'orders' ? 'is-active' : ''}`}
+                                  onClick={() => onToggleDeletedStudentHistory(parentId, studentId, 'orders')}
+                                  type="button"
+                                >
+                                  Historial de órdenes
+                                </button>
+                                <button
+                                  className={`btn btn-chip ${activeView === 'recharges' ? 'is-active' : ''}`}
+                                  onClick={() => onToggleDeletedStudentHistory(parentId, studentId, 'recharges')}
+                                  type="button"
+                                >
+                                  Historial de recargas
+                                </button>
+                              </div>
+
+                              {activeView ? (
+                                <div className="admin-deleted-history-panel">
+                                  {loadingHistory ? <p>Cargando historial...</p> : null}
+                                  {historyError ? <p className="parent-error">{historyError}</p> : null}
+
+                                  {activeView === 'orders' && !loadingHistory && !historyError ? (
+                                    <>
+                                      {ordersHistory.length === 0 ? <p>No hay órdenes registradas para este alumno.</p> : null}
+                                      {ordersHistory.length > 0 ? (
+                                        <div className="approval-history-scroll approval-history-table-scroll">
+                                          <table className="simple-table">
+                                            <thead>
+                                              <tr>
+                                                <th>Fecha</th>
+                                                <th>Tienda</th>
+                                                <th>Pago</th>
+                                                <th>Total</th>
+                                                <th>Estado</th>
+                                                <th>Items</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {ordersHistory.map((order) => (
+                                                <tr key={order._id}>
+                                                  <td>{formatDateTime(order.createdAt)}</td>
+                                                  <td>{order.storeName || 'Sin tienda'}</td>
+                                                  <td>{paymentMethodLabel[order.paymentMethod] || order.paymentMethod || 'N/A'}</td>
+                                                  <td>{formatCurrency(order.total || 0)}</td>
+                                                  <td>{order.status || 'N/A'}</td>
+                                                  <td>
+                                                    {(order.items || [])
+                                                      .map((item) => `${item.quantity || 0}x ${item.nameSnapshot || 'Producto'}`)
+                                                      .join(', ') || 'Sin items'}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  ) : null}
+
+                                  {activeView === 'recharges' && !loadingHistory && !historyError ? (
+                                    <>
+                                      {rechargeHistory.length === 0 ? <p>No hay recargas registradas para este alumno.</p> : null}
+                                      {rechargeHistory.length > 0 ? (
+                                        <div className="approval-history-scroll approval-history-table-scroll">
+                                          <table className="simple-table">
+                                            <thead>
+                                              <tr>
+                                                <th>Fecha</th>
+                                                <th>Método</th>
+                                                <th>Monto</th>
+                                                <th>Registró</th>
+                                                <th>Estado</th>
+                                                <th>Observaciones</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {rechargeHistory.map((transaction) => (
+                                                <tr key={transaction._id}>
+                                                  <td>{formatDateTime(transaction.createdAt)}</td>
+                                                  <td>{paymentMethodLabel[transaction.method] || transaction.method || 'N/A'}</td>
+                                                  <td>{formatCurrency(transaction.amount || 0)}</td>
+                                                  <td>{transaction.createdByName || 'N/A'}</td>
+                                                  <td>{transaction.cancelledAt ? 'Cancelada' : 'Aplicada'}</td>
+                                                  <td>{transaction.notes || '-'}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : null}
+                                    </>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       {activeModule === 'creation' ? (
         <section className="panel admin-section">
           <h3>Creaciones</h3>
@@ -8312,6 +8657,36 @@ function AdminDashboard() {
                 }}
               >
                 Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deletedAccountPurgeTarget ? (
+        <div className="brand-popup-overlay" role="dialog" aria-modal="true" aria-label="Eliminar definitivamente cuenta eliminada">
+          <div className="brand-popup brand-popup-warning">
+            <h3>Eliminar definitivamente de MongoDB</h3>
+            <p>
+              Vas a borrar permanentemente la cuenta de <strong>{deletedAccountPurgeTarget.name || 'este acudiente'}</strong>, sus alumnos vinculados,
+              pedidos, recargas y demás evidencia asociada. Esta acción no se puede deshacer.
+            </p>
+            <div className="brand-popup-actions">
+              <button
+                className="btn"
+                type="button"
+                disabled={Boolean(deletingDeletedAccountId)}
+                onClick={() => setDeletedAccountPurgeTarget(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-danger"
+                type="button"
+                disabled={Boolean(deletingDeletedAccountId)}
+                onClick={onConfirmPermanentDeleteDeletedAccount}
+              >
+                {deletingDeletedAccountId ? 'Eliminando...' : 'Sí, borrar todo'}
               </button>
             </div>
           </div>

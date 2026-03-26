@@ -42,6 +42,12 @@ export const getAdminUsers = (params = {}) => api.get('/admin/users', { params }
 export const createAdminUser = (data) => api.post('/admin/users', data);
 export const updateAdminUser = (id, data) => api.patch(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);
+export const getDeletedAccountsForAdmin = () => api.get('/admin/deleted-accounts');
+export const getDeletedStudentOrdersForAdmin = (parentId, studentId) =>
+	api.get(`/admin/deleted-accounts/${parentId}/students/${studentId}/orders`);
+export const getDeletedStudentRechargesForAdmin = (parentId, studentId) =>
+	api.get(`/admin/deleted-accounts/${parentId}/students/${studentId}/recharges`);
+export const permanentlyDeleteDeletedAccount = (parentId) => api.delete(`/admin/deleted-accounts/${parentId}/permanent`);
 
 export const createAdminStudent = (data) => api.post('/admin/students', data);
 export const importAdminLegacyStudents = (data) => api.post('/admin/students/import-legacy', data);
