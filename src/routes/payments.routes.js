@@ -218,7 +218,10 @@ function buildEpaycoHostedCheckoutPayload(checkoutData, clientIp) {
       continue;
     }
 
-    payload[toEpaycoCheckoutFieldName(key)] = value;
+    const fieldName = toEpaycoCheckoutFieldName(key);
+    payload[fieldName] = ['response', 'confirmation'].includes(String(key || '').trim())
+      ? encodeURIComponent(String(value))
+      : value;
   }
 
   payload.epaycoKey = getEpaycoCheckoutPublicKey();
