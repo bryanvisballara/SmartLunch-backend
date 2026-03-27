@@ -14,6 +14,10 @@ const userSchema = new mongoose.Schema(
     deletedAt: { type: Date, default: null },
     deletionRequestedByUser: { type: Boolean, default: false, index: true },
     deletionRequestedAt: { type: Date, default: null },
+    deletionFeedback: { type: String, trim: true, default: '' },
+    deletionFeedbackSubmittedAt: { type: Date, default: null },
+    deletionFeedbackTokenHash: { type: String, default: '' },
+    deletionFeedbackTokenExpiresAt: { type: Date, default: null },
     webauthn: {
       registrationChallenge: { type: String, default: null },
       authenticationChallenge: { type: String, default: null },

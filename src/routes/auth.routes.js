@@ -51,6 +51,10 @@ function hashResetToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
+function hashDeletionFeedbackToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
 function generateVerificationCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
@@ -920,6 +924,8 @@ router.delete('/account', authMiddleware, async (req, res) => {
     }
 
     const deletedAt = new Date();
+  const feedbackToken = crypto.randomBytes(24).toString('hex');
+  const feedbackTokenExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
     const paymentMethods = await ParentPaymentMethod.find({
       schoolId: user.schoolId,
@@ -989,9 +995,61 @@ router.delete('/account', authMiddleware, async (req, res) => {
     user.deletedAt = deletedAt;
     user.deletionRequestedByUser = true;
     user.deletionRequestedAt = deletedAt;
+    user.deletionFeedback = '';
+    user.deletionFeedbackSubmittedAt = null;
+    user.deletionFeedbackTokenHash = hashDeletionFeedbackToken(feedbackToken);
+    user.deletionFeedbackTokenExpiresAt = feedbackTokenExpiresAt;
     await user.save();
 
-    return res.status(200).json({ success: true, message: 'Cuenta eliminada correctamente.' });
+    return res.status(200).json({
+      success: true,
+      message: 'Cuenta eliminada correctamente.',
+      feedbackToken,
+      deletedDisplayName: String(user.name || '').trim(),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/account/deletion-feedback', async (req, res) => {
+  try {
+    const feedbackToken = String(req.body?.feedbackToken || '').trim();
+    const feedbackText = String(req.body?.feedbackText || '').trim();
+
+    if (!feedbackToken) {
+      return res.status(400).json({ message: 'No se encontro una sesion valida para enviar comentarios.' });
+    }
+
+    if (!feedbackText) {
+      return res.status(400).json({ message: 'Escribe un comentario antes de enviarlo.' });
+    }
+
+    if (feedbackText.length > 2000) {
+      return res.status(400).json({ message: 'El comentario es demasiado largo. Usa maximo 2000 caracteres.' });
+    }
+
+    const user = await User.findOne({
+      deletionRequestedByUser: true,
+      deletedAt: { $ne: null },
+      deletionFeedbackTokenHash: hashDeletionFeedbackToken(feedbackToken),
+      deletionFeedbackTokenExpiresAt: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'La sesion para enviar comentarios ya no esta disponible.' });
+    }
+
+    user.deletionFeedback = feedbackText;
+    user.deletionFeedbackSubmittedAt = new Date();
+    user.deletionFeedbackTokenHash = '';
+    user.deletionFeedbackTokenExpiresAt = null;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Gracias por compartirnos tu experiencia. Tu comentario fue recibido.',
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

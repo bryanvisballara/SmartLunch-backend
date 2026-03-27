@@ -1151,7 +1151,7 @@ router.get('/deleted-accounts', async (req, res) => {
       deletionRequestedByUser: true,
       deletedAt: { $ne: null },
     })
-      .select('_id name username email phone createdAt deletedAt deletionRequestedAt status')
+      .select('_id name username email phone createdAt deletedAt deletionRequestedAt status deletionFeedback deletionFeedbackSubmittedAt')
       .sort({ deletedAt: -1, createdAt: -1 })
       .lean();
 
