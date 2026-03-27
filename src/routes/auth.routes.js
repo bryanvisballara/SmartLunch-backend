@@ -27,7 +27,7 @@ const rpName = process.env.WEBAUTHN_RP_NAME || 'Comergio';
 const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
 const expectedOrigins = (process.env.WEBAUTHN_ORIGIN
   ? process.env.WEBAUTHN_ORIGIN.split(',')
-  : ['http://localhost:5173'])
+  : ['http://localhost:5173', 'http://localhost', 'https://localhost', 'capacitor://localhost', 'ionic://localhost'])
   .map((origin) => origin.trim())
   .filter(Boolean);
 
