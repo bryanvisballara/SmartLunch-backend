@@ -9,7 +9,7 @@ function resolveSenderName() {
 
 async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
   const apiKey = String(process.env.BREVO_API_KEY || '').trim();
-  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'comergio@comergio.com').trim();
+  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'verify@comergio.com').trim();
   const senderName = resolveSenderName();
 
   if (!apiKey) {
@@ -102,7 +102,7 @@ async function sendRegistrationVerificationEmail({ toEmail, toName, code }) {
 
 async function sendPasswordResetCodeEmail({ toEmail, toName, code }) {
   const apiKey = String(process.env.BREVO_API_KEY || '').trim();
-  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'comergio@comergio.com').trim();
+  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'verify@comergio.com').trim();
   const senderName = resolveSenderName();
 
   if (!apiKey) {
