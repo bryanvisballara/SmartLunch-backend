@@ -343,17 +343,31 @@ router.post('/register/email/verify-code', async (req, res) => {
     const verification = await EmailVerification.findOne({
       schoolId: normalizedSchoolId,
       email: normalizedEmail,
-      status: 'pending',
+      status: { $in: ['pending', 'verified'] },
     }).sort({ createdAt: -1 });
 
     if (!verification) {
-      return res.status(400).json({ message: 'No se encontro una verificacion pendiente para este correo.' });
+      return res.status(400).json({ message: 'No se encontro una verificacion valida para este correo. Solicita un nuevo codigo.' });
     }
 
     if (verification.expiresAt.getTime() < Date.now()) {
       verification.status = 'failed';
       await verification.save();
       return res.status(400).json({ message: 'El codigo vencio. Solicita uno nuevo.' });
+    }
+
+    if (verification.status === 'verified') {
+      return res.status(200).json({
+        success: true,
+        message: 'Correo verificado correctamente.',
+        registrationProfile: {
+          schoolId: verification.schoolId,
+          firstName: verification.firstName,
+          lastName: verification.lastName,
+          phone: verification.phone,
+          email: verification.email,
+        },
+      });
     }
 
     if (Number(verification.attempts || 0) >= 5) {
