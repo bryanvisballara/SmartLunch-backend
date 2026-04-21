@@ -7,7 +7,7 @@ function safeParse(rawValue, fallback = null) {
 
   try {
     return JSON.parse(rawValue);
-  } catch (error) {
+  } catch {
     return fallback;
   }
 }
@@ -17,14 +17,21 @@ const savedStoreRaw = localStorage.getItem('currentStore');
 
 const useAuthStore = create((set) => ({
   token: localStorage.getItem('token') || '',
+  refreshToken: localStorage.getItem('refreshToken') || '',
   user: safeParse(savedUserRaw, null),
   currentStore: safeParse(savedStoreRaw, null),
-  setAuth: ({ token, user }) => {
+  setAuth: ({ token, refreshToken, user }) => {
     const assignedStore = user?.role === 'vendor' ? user?.assignedStore || null : null;
     localStorage.setItem('token', token);
+    localStorage.setItem('refreshToken', String(refreshToken || ''));
     localStorage.setItem('user', JSON.stringify(user || null));
     localStorage.setItem('currentStore', JSON.stringify(assignedStore));
-    set({ token, user: user || null, currentStore: assignedStore });
+    set({
+      token,
+      refreshToken: String(refreshToken || ''),
+      user: user || null,
+      currentStore: assignedStore,
+    });
   },
   setUser: (user) => {
     const assignedStore = user?.role === 'vendor' ? user?.assignedStore || null : null;
@@ -38,9 +45,10 @@ const useAuthStore = create((set) => ({
   },
   logout: () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');
     localStorage.removeItem('currentStore');
-    set({ token: '', user: null, currentStore: null });
+    set({ token: '', refreshToken: '', user: null, currentStore: null });
   },
 }));
 

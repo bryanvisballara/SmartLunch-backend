@@ -12,6 +12,15 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ['parent', 'admin', 'vendor', 'merienda_operator'], required: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     deletedAt: { type: Date, default: null },
+    authSessions: [
+      {
+        tokenHash: { type: String, required: true },
+        expiresAt: { type: Date, required: true },
+        createdAt: { type: Date, default: Date.now },
+        lastUsedAt: { type: Date, default: Date.now },
+        revokedAt: { type: Date, default: null },
+      },
+    ],
     deletionRequestedByUser: { type: Boolean, default: false, index: true },
     deletionRequestedAt: { type: Date, default: null },
     deletionFeedback: { type: String, trim: true, default: '' },

@@ -20,9 +20,15 @@ const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const MeriendaSubscription = require('../models/meriendaSubscription.model');
 const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
-const { signAccessToken } = require('../utils/token');
+const {
+  signAccessToken,
+  createRefreshToken,
+  hashRefreshToken,
+  getRefreshTokenExpiresAt,
+} = require('../utils/token');
 
 const router = express.Router();
+const MAX_AUTH_SESSIONS_PER_USER = 8;
 const rpName = process.env.WEBAUTHN_RP_NAME || 'Comergio';
 const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
 const expectedOrigins = (process.env.WEBAUTHN_ORIGIN
@@ -561,7 +567,27 @@ router.post('/register/complete', async (req, res) => {
   }
 });
 
-function toAuthResponse(user) {
+function pruneAuthSessions(sessions) {
+  const now = Date.now();
+
+  return (Array.isArray(sessions) ? sessions : [])
+    .filter((session) => {
+      if (!session?.tokenHash || session?.revokedAt) {
+        return false;
+      }
+
+      const expiresAt = new Date(session.expiresAt || 0).getTime();
+      return Number.isFinite(expiresAt) && expiresAt > now;
+    })
+    .sort((left, right) => {
+      const leftCreatedAt = new Date(left.createdAt || 0).getTime();
+      const rightCreatedAt = new Date(right.createdAt || 0).getTime();
+      return leftCreatedAt - rightCreatedAt;
+    })
+    .slice(-MAX_AUTH_SESSIONS_PER_USER);
+}
+
+function buildAuthResponse(user, refreshToken) {
   const token = signAccessToken(user);
   const assignedStoreSource = user?.assignedStoreId && typeof user.assignedStoreId === 'object' && user.assignedStoreId.name
     ? user.assignedStoreId
@@ -576,6 +602,7 @@ function toAuthResponse(user) {
 
   return {
     token,
+    refreshToken,
     user: {
       id: user._id,
       schoolId: user.schoolId,
@@ -586,6 +613,24 @@ function toAuthResponse(user) {
       assignedStore,
     },
   };
+}
+
+async function issueAuthResponse(user) {
+  const refreshToken = createRefreshToken();
+  const now = new Date();
+  const nextSession = {
+    tokenHash: hashRefreshToken(refreshToken),
+    expiresAt: getRefreshTokenExpiresAt(),
+    createdAt: now,
+    lastUsedAt: now,
+    revokedAt: null,
+  };
+
+  user.authSessions = [...pruneAuthSessions(user.authSessions), nextSession]
+    .slice(-MAX_AUTH_SESSIONS_PER_USER);
+  await user.save();
+
+  return buildAuthResponse(user, refreshToken);
 }
 
 function ensureParent(user, res) {
@@ -630,7 +675,7 @@ router.post('/register', async (req, res) => {
       phone: String(phone || '').trim(),
     });
 
-    return res.status(201).json(toAuthResponse(user));
+    return res.status(201).json(await issueAuthResponse(user));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -683,7 +728,62 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    return res.status(200).json(toAuthResponse(user));
+    return res.status(200).json(await issueAuthResponse(user));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/refresh', async (req, res) => {
+  try {
+    const refreshToken = String(req.body?.refreshToken || '').trim();
+    if (!refreshToken) {
+      return res.status(400).json({ message: 'refreshToken is required' });
+    }
+
+    const tokenHash = hashRefreshToken(refreshToken);
+    const now = new Date();
+    const user = await User.findOne({
+      status: 'active',
+      deletedAt: null,
+      authSessions: {
+        $elemMatch: {
+          tokenHash,
+          revokedAt: null,
+          expiresAt: { $gt: now },
+        },
+      },
+    }).populate('assignedStoreId', 'name status');
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid refresh token' });
+    }
+
+    const activeSessions = pruneAuthSessions(user.authSessions);
+    const matchedSession = activeSessions.find((session) => session.tokenHash === tokenHash);
+
+    if (!matchedSession) {
+      user.authSessions = activeSessions;
+      await user.save();
+      return res.status(401).json({ message: 'Invalid refresh token' });
+    }
+
+    const rotatedRefreshToken = createRefreshToken();
+    const rotatedSession = {
+      tokenHash: hashRefreshToken(rotatedRefreshToken),
+      expiresAt: getRefreshTokenExpiresAt(),
+      createdAt: matchedSession.createdAt || now,
+      lastUsedAt: now,
+      revokedAt: null,
+    };
+
+    user.authSessions = [
+      ...activeSessions.filter((session) => session.tokenHash !== tokenHash),
+      rotatedSession,
+    ].slice(-MAX_AUTH_SESSIONS_PER_USER);
+    await user.save();
+
+    return res.status(200).json(buildAuthResponse(user, rotatedRefreshToken));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -910,7 +1010,7 @@ router.post('/biometric/login/verify', async (req, res) => {
     authenticator.lastUsedAt = new Date();
     await user.save();
 
-    return res.status(200).json(toAuthResponse(user));
+    return res.status(200).json(await issueAuthResponse(user));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -1006,6 +1106,7 @@ router.delete('/account', authMiddleware, async (req, res) => {
     ]);
 
     user.status = 'inactive';
+    user.authSessions = [];
     user.deletedAt = deletedAt;
     user.deletionRequestedByUser = true;
     user.deletionRequestedAt = deletedAt;
