@@ -2487,7 +2487,7 @@ router.post('/epayco/recharge', async (req, res) => {
       schoolId,
       deletedAt: null,
       status: 'active',
-    }).select('name email phone');
+    }).select('name email phone documentType documentNumber');
 
     if (!parentUser) {
       return res.status(404).json({ message: 'Parent user not found' });
@@ -2639,7 +2639,7 @@ router.post('/bold/recharge', async (req, res) => {
       schoolId,
       deletedAt: null,
       status: 'active',
-    }).select('name email phone');
+    }).select('name email phone documentType documentNumber');
 
     if (!parentUser) {
       return res.status(404).json({ message: 'Parent user not found' });

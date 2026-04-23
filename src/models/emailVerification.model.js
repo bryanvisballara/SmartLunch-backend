@@ -16,6 +16,7 @@ const emailVerificationSchema = new mongoose.Schema(
     firstName: { type: String, trim: true, default: '' },
     lastName: { type: String, trim: true, default: '' },
     phone: { type: String, trim: true, default: '' },
+    documentNumber: { type: String, trim: true, default: '' },
     verifiedAt: { type: Date, default: null },
   },
   { timestamps: true }

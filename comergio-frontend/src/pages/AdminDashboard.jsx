@@ -388,7 +388,7 @@ const daysInIsoMonth = (monthIso) => {
 const buildEmptyMeriendaSchedule = (monthIso) => {
   const totalDays = daysInIsoMonth(monthIso);
   return Array.from({ length: totalDays }, (_, index) => String(index + 1)).reduce((acc, day) => {
-    acc[day] = { firstSnackId: '', secondSnackId: '' };
+    acc[day] = { firstSnackId: '', secondSnackId: '', drinkSnackId: '' };
     return acc;
   }, {});
 };
@@ -561,7 +561,17 @@ function AdminDashboard() {
   const [uploadingProductImage, setUploadingProductImage] = useState(false);
   const [uploadingEditProductImageId, setUploadingEditProductImageId] = useState('');
   const [uploadingEditCategoryImageId, setUploadingEditCategoryImageId] = useState('');
-  const [userForm, setUserForm] = useState({ name: '', username: '', phone: '', password: '', role: 'parent', assignedStoreId: '' });
+  const [userForm, setUserForm] = useState({
+    name: '',
+    username: '',
+    email: '',
+    phone: '',
+    documentType: 'CC',
+    documentNumber: '',
+    password: '',
+    role: 'parent',
+    assignedStoreId: '',
+  });
   const [studentForm, setStudentForm] = useState({ name: '', grade: '', parentId: '' });
 
   const [linkForm, setLinkForm] = useState({ parentId: '', studentId: '', relationship: 'parent' });
@@ -1272,6 +1282,11 @@ function AdminDashboard() {
     [meriendasSnacks]
   );
 
+  const meriendasDrinkSnackOptions = useMemo(
+    () => meriendasSnacks.filter((snack) => snack.type === 'drink'),
+    [meriendasSnacks]
+  );
+
   const snackTitleById = useMemo(() => {
     return (meriendasSnacks || []).reduce((acc, snack) => {
       const snackId = String(snack._id || snack.id || '');
@@ -1303,6 +1318,7 @@ function AdminDashboard() {
           day,
           firstSnackId: meriendasScheduleDraft?.[day]?.firstSnackId || '',
           secondSnackId: meriendasScheduleDraft?.[day]?.secondSnackId || '',
+          drinkSnackId: meriendasScheduleDraft?.[day]?.drinkSnackId || '',
         };
       }),
     ];
@@ -1310,12 +1326,13 @@ function AdminDashboard() {
 
   const selectedDaySchedule = useMemo(() => {
     if (!selectedScheduleDay) {
-      return { firstSnackId: '', secondSnackId: '' };
+      return { firstSnackId: '', secondSnackId: '', drinkSnackId: '' };
     }
 
     return {
       firstSnackId: meriendasScheduleDraft?.[selectedScheduleDay]?.firstSnackId || '',
       secondSnackId: meriendasScheduleDraft?.[selectedScheduleDay]?.secondSnackId || '',
+      drinkSnackId: meriendasScheduleDraft?.[selectedScheduleDay]?.drinkSnackId || '',
     };
   }, [meriendasScheduleDraft, selectedScheduleDay]);
 
@@ -1388,6 +1405,7 @@ function AdminDashboard() {
       nextDraft[dayKey] = {
         firstSnackId: String(item.firstSnackId?._id || item.firstSnackId || ''),
         secondSnackId: String(item.secondSnackId?._id || item.secondSnackId || ''),
+        drinkSnackId: String(item.drinkSnackId?._id || item.drinkSnackId || ''),
       };
     });
 
@@ -1572,6 +1590,7 @@ function AdminDashboard() {
       [day]: {
         firstSnackId: prev?.[day]?.firstSnackId || '',
         secondSnackId: prev?.[day]?.secondSnackId || '',
+        drinkSnackId: prev?.[day]?.drinkSnackId || '',
         [field]: value,
       },
     }));
@@ -1585,6 +1604,7 @@ function AdminDashboard() {
         day: Number(day),
         firstSnackId: value?.firstSnackId || null,
         secondSnackId: value?.secondSnackId || null,
+        drinkSnackId: value?.drinkSnackId || null,
       }));
 
       await saveMeriendaSchedule(meriendasMonth, { days: payloadDays });
@@ -2900,10 +2920,23 @@ function AdminDashboard() {
       return;
     }
 
+    if (userForm.role === 'parent' && !String(userForm.email || '').trim()) {
+      setError('Debes registrar el correo del acudiente.');
+      return;
+    }
+
+    if (userForm.role === 'parent' && String(userForm.documentNumber || '').replace(/\D/g, '').trim().length < 5) {
+      setError('Debes registrar un documento valido para el acudiente.');
+      return;
+    }
+
     const payload = {
       name: userForm.name,
       username: userForm.username,
+      email: userForm.email,
       phone: userForm.phone,
+      documentType: userForm.role === 'parent' ? userForm.documentType : undefined,
+      documentNumber: userForm.role === 'parent' ? userForm.documentNumber : undefined,
       password: userForm.password,
       role: userForm.role,
       assignedStoreId: userForm.role === 'vendor' ? userForm.assignedStoreId : undefined,
@@ -2912,7 +2945,17 @@ function AdminDashboard() {
     runAction(() => createAdminUser(payload), 'Usuario creado.', async () => {
       const usersRes = await getAdminUsers();
       setUsers(usersRes.data || []);
-      setUserForm({ name: '', username: '', phone: '', password: '', role: 'parent', assignedStoreId: '' });
+      setUserForm({
+        name: '',
+        username: '',
+        email: '',
+        phone: '',
+        documentType: 'CC',
+        documentNumber: '',
+        password: '',
+        role: 'parent',
+        assignedStoreId: '',
+      });
     });
   };
 
@@ -5884,6 +5927,20 @@ function AdminDashboard() {
 
                   {isExpanded ? (
                     <div className="admin-deleted-account-body">
+                      <div className="admin-deleted-account-feedback-box">
+                        <strong>Comentario al eliminar la cuenta</strong>
+                        {parent.deletionFeedback ? (
+                          <>
+                            <p>{parent.deletionFeedback}</p>
+                            <span>
+                              Enviado: {formatDateTime(parent.deletionFeedbackSubmittedAt || parent.deletedAt)}
+                            </span>
+                          </>
+                        ) : (
+                          <p className="muted">Este acudiente no dejo comentarios al cerrar la cuenta.</p>
+                        )}
+                      </div>
+
                       <div className="admin-deleted-account-toolbar">
                         <div className="admin-deleted-account-totals">
                           <span>Total órdenes: {formatCurrency(parent.orderTotalAmount || 0)}</span>
@@ -6218,10 +6275,47 @@ function AdminDashboard() {
                 Nombre de usuario
                 <input value={userForm.username} onChange={(event) => setUserForm((prev) => ({ ...prev, username: event.target.value }))} required />
               </label>
+              {userForm.role === 'parent' ? (
+                <label>
+                  Correo
+                  <input
+                    type="email"
+                    value={userForm.email}
+                    onChange={(event) => setUserForm((prev) => ({ ...prev, email: event.target.value }))}
+                    required
+                  />
+                </label>
+              ) : null}
               <label>
                 Teléfono
                 <input value={userForm.phone} onChange={(event) => setUserForm((prev) => ({ ...prev, phone: event.target.value }))} />
               </label>
+              {userForm.role === 'parent' ? (
+                <>
+                  <label>
+                    Tipo de documento
+                    <select
+                      value={userForm.documentType}
+                      onChange={(event) => setUserForm((prev) => ({ ...prev, documentType: event.target.value }))}
+                    >
+                      <option value="CC">CC</option>
+                      <option value="TI">TI</option>
+                      <option value="CE">CE</option>
+                      <option value="PP">Pasaporte</option>
+                      <option value="NIT">NIT</option>
+                    </select>
+                  </label>
+                  <label>
+                    Documento
+                    <input
+                      inputMode="numeric"
+                      value={userForm.documentNumber}
+                      onChange={(event) => setUserForm((prev) => ({ ...prev, documentNumber: event.target.value }))}
+                      required
+                    />
+                  </label>
+                </>
+              ) : null}
               <label>
                 Password
                 <input type="text" value={userForm.password} onChange={(event) => setUserForm((prev) => ({ ...prev, password: event.target.value }))} required />
@@ -7462,6 +7556,7 @@ function AdminDashboard() {
                       <strong>{cell.day}</strong>
                       <span>{cell.firstSnackId ? snackTitleById[cell.firstSnackId] || '1er snack' : 'Sin 1er snack'}</span>
                       <span>{cell.secondSnackId ? snackTitleById[cell.secondSnackId] || '2do snack' : 'Sin 2do snack'}</span>
+                      <span>{cell.drinkSnackId ? snackTitleById[cell.drinkSnackId] || 'Bebida' : 'Sin bebida'}</span>
                     </button>
                   );
                 })}
@@ -7493,6 +7588,19 @@ function AdminDashboard() {
                   >
                     <option value="">Selecciona snack</option>
                     {meriendasSecondSnackOptions.map((snack) => (
+                      <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Bebida
+                  <select
+                    value={selectedDaySchedule.drinkSnackId}
+                    onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'drinkSnackId', event.target.value)}
+                    disabled={!selectedScheduleDay}
+                  >
+                    <option value="">Selecciona bebida</option>
+                    {meriendasDrinkSnackOptions.map((snack) => (
                       <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
                     ))}
                   </select>

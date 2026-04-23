@@ -273,11 +273,12 @@ router.post('/register/email/send-code', async (req, res) => {
       firstName,
       lastName,
       phone,
+      documentNumber,
       email,
     } = req.body;
 
-    if (!schoolId || !firstName || !lastName || !phone || !email) {
-      return res.status(400).json({ message: 'schoolId, firstName, lastName, phone and email are required' });
+    if (!schoolId || !firstName || !lastName || !phone || !documentNumber || !email) {
+      return res.status(400).json({ message: 'schoolId, firstName, lastName, phone, documentNumber and email are required' });
     }
 
     const normalizedSchoolId = normalizeSchoolId(schoolId);
@@ -285,8 +286,16 @@ router.post('/register/email/send-code', async (req, res) => {
     const normalizedFirstName = String(firstName || '').trim();
     const normalizedLastName = String(lastName || '').trim();
     const normalizedPhone = String(phone || '').trim();
+    const normalizedDocumentNumber = String(documentNumber || '').replace(/\D/g, '').trim();
 
-    if (!normalizedSchoolId || !normalizedFirstName || !normalizedLastName || !normalizedPhone || !isValidEmail(normalizedEmail)) {
+    if (
+      !normalizedSchoolId ||
+      !normalizedFirstName ||
+      !normalizedLastName ||
+      !normalizedPhone ||
+      normalizedDocumentNumber.length < 5 ||
+      !isValidEmail(normalizedEmail)
+    ) {
       return res.status(400).json({ message: 'Please provide valid registration data' });
     }
 
@@ -313,6 +322,7 @@ router.post('/register/email/send-code', async (req, res) => {
       firstName: normalizedFirstName,
       lastName: normalizedLastName,
       phone: normalizedPhone,
+      documentNumber: normalizedDocumentNumber,
     });
 
     await sendRegistrationVerificationEmail({
@@ -371,6 +381,7 @@ router.post('/register/email/verify-code', async (req, res) => {
           firstName: verification.firstName,
           lastName: verification.lastName,
           phone: verification.phone,
+          documentNumber: verification.documentNumber,
           email: verification.email,
         },
       });
@@ -404,6 +415,7 @@ router.post('/register/email/verify-code', async (req, res) => {
         firstName: verification.firstName,
         lastName: verification.lastName,
         phone: verification.phone,
+        documentNumber: verification.documentNumber,
         email: verification.email,
       },
     });
@@ -479,6 +491,8 @@ router.post('/register/complete', async (req, res) => {
           status: 'active',
           email: normalizedEmail,
           phone: String(verification.phone || '').trim(),
+          documentType: 'CC',
+          documentNumber: String(verification.documentNumber || '').replace(/\D/g, '').trim(),
         },
       ],
       { session }

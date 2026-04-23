@@ -7,6 +7,8 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, lowercase: true, trim: true },
     email: { type: String, lowercase: true, trim: true, default: '' },
     phone: { type: String, trim: true },
+    documentType: { type: String, enum: ['CC', 'TI', 'CE', 'PP', 'NIT', ''], default: '' },
+    documentNumber: { type: String, trim: true, default: '' },
     assignedStoreId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', default: null },
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ['parent', 'admin', 'vendor', 'merienda_operator'], required: true },

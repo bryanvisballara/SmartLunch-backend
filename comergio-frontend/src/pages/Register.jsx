@@ -19,6 +19,7 @@ function Register() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
+  const [documentNumber, setDocumentNumber] = useState('');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
@@ -46,6 +47,7 @@ function Register() {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       phone: phone.trim(),
+      documentNumber: documentNumber.trim(),
       email: normalizeEmail(email),
     });
   };
@@ -60,8 +62,13 @@ function Register() {
       return;
     }
 
-    if (!firstName.trim() || !lastName.trim() || !phone.trim() || !email.trim()) {
+    if (!firstName.trim() || !lastName.trim() || !phone.trim() || !documentNumber.trim() || !email.trim()) {
       setError('Completa todos los campos obligatorios.');
+      return;
+    }
+
+    if (String(documentNumber || '').replace(/\D/g, '').trim().length < 5) {
+      setError('Ingresa un documento valido.');
       return;
     }
 
@@ -163,6 +170,14 @@ function Register() {
         <label>
           Numero de telefono
           <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+        </label>
+        <label>
+          Documento
+          <input
+            inputMode="numeric"
+            value={documentNumber}
+            onChange={(e) => setDocumentNumber(e.target.value)}
+          />
         </label>
         <label>
           Correo electronico (nombre de usuario)

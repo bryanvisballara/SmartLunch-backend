@@ -47,6 +47,23 @@ const DEFAULT_ACCOUNTING_FEE_SETTINGS = {
   qrPercent: 0,
 };
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^\S+@\S+\.\S+$/.test(String(value || '').trim());
+}
+
+function normalizeDocumentType(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return ['CC', 'TI', 'CE', 'PP', 'NIT'].includes(normalized) ? normalized : '';
+}
+
+function normalizeDocumentNumber(value) {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
 function normalizeNonNegativeNumber(value, { max = null } = {}) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -849,7 +866,7 @@ router.get('/users', async (req, res) => {
     }
 
     const users = await User.find(filter)
-      .select('_id name username phone role status createdAt assignedStoreId')
+      .select('_id name username email phone documentType documentNumber role status createdAt assignedStoreId')
       .populate('assignedStoreId', 'name status')
       .sort({ createdAt: -1 })
       .lean();
@@ -879,7 +896,7 @@ router.get('/users', async (req, res) => {
 router.post('/users', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { name, username, phone, password, role, assignedStoreId } = req.body;
+    const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber } = req.body;
 
     if (!name || !username || !password || !role) {
       return res.status(400).json({ message: 'name, username, password and role are required' });
@@ -904,6 +921,24 @@ router.post('/users', async (req, res) => {
     }
 
     const normalizedUsername = String(username).toLowerCase().trim();
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedDocumentType = normalizeDocumentType(documentType);
+    const normalizedDocumentNumber = normalizeDocumentNumber(documentNumber);
+
+    if (normalizedEmail && !isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: 'Invalid email' });
+    }
+
+    if (String(role) === 'parent') {
+      if (!normalizedEmail) {
+        return res.status(400).json({ message: 'email is required for parent users' });
+      }
+
+      if (!normalizedDocumentType || normalizedDocumentNumber.length < 5) {
+        return res.status(400).json({ message: 'documentType and documentNumber are required for parent users' });
+      }
+    }
+
     const existing = await User.findOne({ username: normalizedUsername });
     if (existing) {
       return res.status(409).json({ message: 'Username already registered' });
@@ -914,7 +949,10 @@ router.post('/users', async (req, res) => {
       schoolId,
       name: String(name).trim(),
       username: normalizedUsername,
+      email: normalizedEmail,
       phone: String(phone || '').trim(),
+      documentType: normalizedDocumentType,
+      documentNumber: normalizedDocumentNumber,
       assignedStoreId: resolvedAssignedStoreId,
       passwordHash,
       role,
@@ -925,7 +963,10 @@ router.post('/users', async (req, res) => {
       _id: user._id,
       name: user.name,
       username: user.username,
+      email: user.email,
       phone: user.phone,
+      documentType: user.documentType,
+      documentNumber: user.documentNumber,
       role: user.role,
       status: user.status,
       assignedStoreId: user.assignedStoreId || null,
@@ -1032,7 +1073,7 @@ router.post('/users/import-legacy-parents', async (req, res) => {
 router.patch('/users/:id', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const { name, username, phone, role, status, password, assignedStoreId } = req.body;
+    const { name, username, email, phone, role, status, password, assignedStoreId, documentType, documentNumber } = req.body;
 
     const user = await User.findOne({ _id: req.params.id, schoolId, deletedAt: null });
     if (!user) {
@@ -1062,6 +1103,29 @@ router.patch('/users/:id', async (req, res) => {
       user.phone = String(phone || '').trim();
     }
 
+    if (Object.prototype.hasOwnProperty.call(req.body, 'email')) {
+      const normalizedEmail = normalizeEmail(email);
+      if (normalizedEmail && !isValidEmail(normalizedEmail)) {
+        return res.status(400).json({ message: 'Invalid email' });
+      }
+      user.email = normalizedEmail;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'documentType')) {
+      if (String(documentType || '').trim() && !normalizeDocumentType(documentType)) {
+        return res.status(400).json({ message: 'Invalid document type' });
+      }
+      user.documentType = normalizeDocumentType(documentType);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'documentNumber')) {
+      const normalizedDocumentNumber = normalizeDocumentNumber(documentNumber);
+      if (String(documentNumber || '').trim() && normalizedDocumentNumber.length < 5) {
+        return res.status(400).json({ message: 'Invalid document number' });
+      }
+      user.documentNumber = normalizedDocumentNumber;
+    }
+
     if (Object.prototype.hasOwnProperty.call(req.body, 'role')) {
       if (!['parent', 'vendor', 'admin', 'merienda_operator'].includes(String(role))) {
         return res.status(400).json({ message: 'Invalid role' });
@@ -1070,6 +1134,16 @@ router.patch('/users/:id', async (req, res) => {
     }
 
     const targetRole = Object.prototype.hasOwnProperty.call(req.body, 'role') ? String(role) : String(user.role);
+
+    if (targetRole === 'parent') {
+      if (!user.email) {
+        return res.status(400).json({ message: 'email is required for parent users' });
+      }
+
+      if (!user.documentType || String(user.documentNumber || '').length < 5) {
+        return res.status(400).json({ message: 'documentType and documentNumber are required for parent users' });
+      }
+    }
 
     if (targetRole === 'vendor') {
       const nextAssignedStoreId = Object.prototype.hasOwnProperty.call(req.body, 'assignedStoreId')
@@ -1107,7 +1181,10 @@ router.patch('/users/:id', async (req, res) => {
       _id: user._id,
       name: user.name,
       username: user.username,
+      email: user.email,
       phone: user.phone,
+      documentType: user.documentType,
+      documentNumber: user.documentNumber,
       role: user.role,
       status: user.status,
       assignedStoreId: user.assignedStoreId || null,
