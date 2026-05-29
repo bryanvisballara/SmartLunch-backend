@@ -3787,6 +3787,29 @@ async function dispatchCommunication({ schoolId, schoolName, communication, pare
   };
 }
 
+function dispatchCommunicationInBackground({ schoolId, schoolName, communicationId, parents }) {
+  setImmediate(async () => {
+    try {
+      const communication = await AcademicCommunication.findOne({ _id: communicationId, schoolId });
+      if (!communication) {
+        return;
+      }
+
+      const deliverySummary = await dispatchCommunication({
+        schoolId,
+        schoolName,
+        communication,
+        parents,
+      });
+
+      communication.deliverySummary = deliverySummary;
+      await communication.save();
+    } catch (error) {
+      console.warn(`[ACADEMIC_COMMUNICATION_BACKGROUND_DELIVERY_FAILED] communicationId=${communicationId} error=${error.message}`);
+    }
+  });
+}
+
 async function dispatchAcademicCalendarAssignmentNotification({ schoolId, assignment }) {
   let parentIds = [];
 
@@ -6727,17 +6750,14 @@ router.post('/communications', async (req, res) => {
       sentAt: new Date(),
     });
 
-    const deliverySummary = await dispatchCommunication({
+    dispatchCommunicationInBackground({
       schoolId,
       schoolName,
-      communication,
+      communicationId: communication._id,
       parents: audience.parents,
     });
 
-    communication.deliverySummary = deliverySummary;
-    await communication.save();
-
-    return res.status(201).json({ communication, deliverySummary });
+    return res.status(201).json({ communication, deliverySummary: { status: 'queued' } });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
