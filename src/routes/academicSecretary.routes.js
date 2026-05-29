@@ -886,10 +886,14 @@ function filterAcademicFeeSettingsByGradeKeys(feeSettings = {}, gradeKeys = new 
     return feeSettings;
   }
 
+  const serializedFeeSettings = feeSettings.toObject ? feeSettings.toObject() : feeSettings;
+
   return {
-    ...feeSettings,
-    gradeSettings: Array.isArray(feeSettings.gradeSettings)
-      ? feeSettings.gradeSettings.filter((setting) => gradeKeys.has(normalizeAcademicStructureGradeKey(setting?.grade)))
+    ...serializedFeeSettings,
+    benefitRules: normalizeBenefitRules(serializedFeeSettings.benefitRules || []),
+    enrollmentBenefitRules: normalizeEnrollmentBenefitRules(serializedFeeSettings.enrollmentBenefitRules || []),
+    gradeSettings: Array.isArray(serializedFeeSettings.gradeSettings)
+      ? serializedFeeSettings.gradeSettings.filter((setting) => gradeKeys.has(normalizeAcademicStructureGradeKey(setting?.grade)))
       : [],
   };
 }
