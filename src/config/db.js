@@ -123,6 +123,20 @@ function getRegisteredModelNames() {
   return [...schoolModelRegistry.keys()].sort((left, right) => left.localeCompare(right));
 }
 
+function ensureRegisteredModelsForConnection(connection) {
+  for (const [modelName, metadata] of schoolModelRegistry.entries()) {
+    if (connection.models[modelName]) {
+      continue;
+    }
+
+    if (metadata.collectionName) {
+      connection.model(modelName, metadata.schema, metadata.collectionName);
+    } else {
+      connection.model(modelName, metadata.schema);
+    }
+  }
+}
+
 function resolveRegisteredModel(modelName, explicitSchoolId = '') {
   const metadata = schoolModelRegistry.get(modelName);
   if (!metadata) {
@@ -131,6 +145,8 @@ function resolveRegisteredModel(modelName, explicitSchoolId = '') {
 
   const schoolId = normalizeSchoolId(explicitSchoolId || getCurrentSchoolId());
   const connection = schoolId ? getSchoolConnection(schoolId) : ensureRootConnection();
+
+  ensureRegisteredModelsForConnection(connection);
 
   if (connection.models[modelName]) {
     return connection.model(modelName);
