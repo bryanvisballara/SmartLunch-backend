@@ -2651,6 +2651,7 @@ function normalizeEnrollmentBenefitRules(rules = []) {
         discountType,
         discountPercent: discountType === 'percent' ? Math.min(100, Math.max(0, Number(rule?.discountPercent || 0))) : 0,
         fixedAmountsByGrade: normalizeBenefitFixedAmountsByGrade(rule?.fixedAmountsByGrade),
+        targetGradeKeys: Array.isArray(rule?.targetGradeKeys) ? rule.targetGradeKeys.map(normalizeText).filter(Boolean) : [],
       };
     })
     .filter(Boolean)
@@ -2783,13 +2784,33 @@ function getMaxBenefitFixedAmount(rule = {}) {
     };
   }
 
-  function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], entryDateValue = null) {
+  function doesEnrollmentBenefitRuleApplyToGrade(rule = {}, grade = '') {
+    const aliases = new Set(getFeeGradeAliases(grade));
+    const targetGradeKeys = Array.isArray(rule?.targetGradeKeys) ? rule.targetGradeKeys.flatMap(getFeeGradeAliases) : [];
+    if (targetGradeKeys.length > 0) {
+      return targetGradeKeys.some((gradeKey) => aliases.has(gradeKey));
+    }
+
+    const amountsByGrade = normalizeBenefitFixedAmountsByGrade(rule?.fixedAmountsByGrade || {});
+    const hasFixedAmountsByGrade = Object.keys(amountsByGrade).length > 0;
+    if (normalizeText(rule?.discountType) === 'fixed' || hasFixedAmountsByGrade) {
+      return getFixedBenefitAmountForGrade(rule, grade) > 0;
+    }
+
+    return true;
+  }
+
+  function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], entryDateValue = null, grade = '') {
     const entryDate = parseAcademicCalendarDate(entryDateValue);
     if (!entryDate) {
       return null;
     }
 
     return (Array.isArray(enrollmentBenefitRules) ? enrollmentBenefitRules : []).find((rule) => {
+      if (!doesEnrollmentBenefitRuleApplyToGrade(rule, grade)) {
+        return false;
+      }
+
       const startDate = parseAcademicCalendarDate(rule?.startDate);
       const endDate = parseAcademicCalendarDate(rule?.endDate);
       if (!startDate || !endDate) {
@@ -2874,7 +2895,7 @@ function getMaxBenefitFixedAmount(rule = {}) {
     const baseAmount = Math.round((safeAnnualAmount * remainingMonths) / schoolYearConfiguration.totalMonths);
     const lateEnrollmentSurchargeAmount = resolveAcademicLateEnrollmentSurchargeAmount(baseAmount, elapsedMonths, schoolYearConfiguration);
     const amountBeforeDiscount = baseAmount + lateEnrollmentSurchargeAmount;
-    const enrollmentBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, parsedEntryDate);
+    const enrollmentBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, parsedEntryDate, grade);
     const enrollmentBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(amountBeforeDiscount, enrollmentBenefitRule, grade);
 
     return {
