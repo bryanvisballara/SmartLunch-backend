@@ -7,6 +7,10 @@ const schoolConnectionCache = new Map();
 const schoolModelRegistry = new Map();
 const schoolModelProxyCache = new Map();
 const RESERVED_DATABASE_NAMES = new Set(['admin', 'local', 'config', 'test']);
+const DEFAULT_CONTROL_DB_SCHOOL_IDS = [
+  'International Berckley School',
+  'international_berckley_school',
+];
 
 function normalizeSchoolId(value) {
   return String(value || '').trim();
@@ -23,6 +27,29 @@ function slugifySchoolId(value) {
 
 function getControlDbName() {
   return normalizeSchoolId(process.env.MONGO_DB_NAME) || undefined;
+}
+
+function getControlDbSchoolIds() {
+  return new Set(
+    [
+      ...DEFAULT_CONTROL_DB_SCHOOL_IDS,
+      ...String(process.env.CONTROL_DB_SCHOOL_IDS || '')
+        .split(',')
+        .map((schoolId) => schoolId.trim())
+        .filter(Boolean),
+    ].map((schoolId) => normalizeSchoolId(schoolId).toLowerCase())
+  );
+}
+
+function shouldUseControlDbForSchool(schoolId) {
+  const normalizedSchoolId = normalizeSchoolId(schoolId);
+  if (!normalizedSchoolId) {
+    return true;
+  }
+
+  const controlSchoolIds = getControlDbSchoolIds();
+  return controlSchoolIds.has(normalizedSchoolId.toLowerCase())
+    || controlSchoolIds.has(slugifySchoolId(normalizedSchoolId).toLowerCase());
 }
 
 function getCurrentSchoolId() {
@@ -105,7 +132,7 @@ function resolveSchoolDbName(schoolId) {
 
 function getSchoolConnection(schoolId) {
   const normalizedSchoolId = normalizeSchoolId(schoolId);
-  if (!normalizedSchoolId) {
+  if (!normalizedSchoolId || shouldUseControlDbForSchool(normalizedSchoolId)) {
     return ensureRootConnection();
   }
 
