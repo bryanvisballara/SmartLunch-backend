@@ -859,7 +859,7 @@ router.post('/login', async (req, res) => {
     if (isSuperAdminLogin(normalizedIdentifier, password)) {
       const superAdminSchoolId = await resolveSuperAdminSchoolId(normalizedSchoolId);
       const superAdminUser = await ensureSuperAdminUser(superAdminSchoolId);
-      return res.status(200).json(toAuthResponse(superAdminUser));
+      return res.status(200).json(await issueAuthResponse(superAdminUser));
     }
 
     const identifierFilter = {
