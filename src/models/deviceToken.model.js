@@ -13,6 +13,7 @@ const deviceTokenSchema = new mongoose.Schema(
 );
 
 deviceTokenSchema.index({ userId: 1, schoolId: 1, status: 1 });
-deviceTokenSchema.index({ token: 1 }, { unique: true });
+deviceTokenSchema.index({ schoolId: 1, userId: 1, token: 1 }, { unique: true });
+deviceTokenSchema.index({ token: 1 });
 
 module.exports = registerSchoolScopedModel('DeviceToken', deviceTokenSchema);

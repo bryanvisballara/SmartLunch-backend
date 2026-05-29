@@ -53,6 +53,7 @@ const uploadAcademicDatabaseMigrationFile = multer({
 
 const ACADEMIC_SECRETARY_FULL_ACCESS_ROLES = ['academic_secretary', 'admin', 'rectoria', 'direccion'];
 const ACADEMIC_BILLING_ACCESS_ROLES = ['billing', 'admin', 'rectoria', 'direccion'];
+const ACADEMIC_COMMUNICATION_EMAIL_DELIVERY_ENABLED = false;
 const ACADEMIC_SECRETARY_FEE_SETTINGS_ROLES = ['academic_secretary', 'billing', 'admin', 'rectoria', 'direccion'];
 const ACADEMIC_ADMISSIONS_READ_ROLES = ['admissions'];
 const ACADEMIC_COORDINATION_READ_ROLES = ['coordination'];
@@ -3759,7 +3760,7 @@ async function dispatchCommunication({ schoolId, schoolName, communication, pare
     : { notificationsCreated: 0, tokensFound: 0 };
 
   let emailed = 0;
-  if (communication.channels?.email) {
+  if (ACADEMIC_COMMUNICATION_EMAIL_DELIVERY_ENABLED && communication.channels?.email) {
     for (const parent of parents) {
       if (!normalizeEmail(parent.email)) {
         continue;
@@ -6745,7 +6746,7 @@ router.post('/communications', async (req, res) => {
       media: normalizedMedia,
       channels: {
         push: channels?.push !== false,
-        email: channels?.email !== false,
+        email: false,
       },
       sentAt: new Date(),
     });
@@ -6821,7 +6822,7 @@ router.put('/communications/:id', async (req, res) => {
     communication.media = normalizeCommunicationMedia(media);
     communication.channels = {
       push: channels?.push !== false,
-      email: channels?.email !== false,
+      email: false,
     };
 
     await communication.save();
@@ -7513,7 +7514,7 @@ router.post('/billing/follow-ups', async (req, res) => {
       pushDelivered = Number(pushResult?.directDelivery?.delivered || 0);
       pushTokensFound = Number(pushResult?.tokensFound || 0);
 
-      if (normalizeEmail(parent.email)) {
+      if (ACADEMIC_COMMUNICATION_EMAIL_DELIVERY_ENABLED && normalizeEmail(parent.email)) {
         try {
           await sendAcademicCommunicationEmail({
             toEmail: parent.email,

@@ -2,11 +2,13 @@ const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
+const sharp = require('sharp');
 const { v2: cloudinary } = require('cloudinary');
 
 const MAX_CAMPUS_MATERIAL_FILE_BYTES = Number(process.env.CAMPUS_MATERIAL_MAX_FILE_BYTES || 100 * 1024 * 1024);
 const MAX_CAMPUS_MATERIAL_FILES = Number(process.env.CAMPUS_MATERIAL_MAX_FILES || 6);
 const CLOUDINARY_FOLDER = String(process.env.CLOUDINARY_UPLOAD_FOLDER || 'comergio').trim();
+const CAMPUS_IMAGE_JPEG_QUALITY = Number(process.env.CAMPUS_IMAGE_JPEG_QUALITY || 86);
 
 const allowedMimeTypes = new Set([
   'application/pdf',
@@ -111,6 +113,25 @@ function detectMaterialKind(file) {
   return 'file';
 }
 
+async function normalizeCampusImageFile(file) {
+  const mimeType = String(file?.mimetype || '').toLowerCase();
+  if (!mimeType.startsWith('image/')) {
+    return null;
+  }
+
+  const buffer = await sharp(file.buffer)
+    .rotate()
+    .jpeg({ quality: CAMPUS_IMAGE_JPEG_QUALITY, mozjpeg: true })
+    .toBuffer();
+
+  return {
+    buffer,
+    extension: 'jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: buffer.length,
+  };
+}
+
 function isAllowedMaterialFile(file) {
   const mimeType = String(file?.mimetype || '').toLowerCase();
   return (
@@ -175,20 +196,24 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
 
   const processedFiles = [];
   for (const file of normalizedFiles) {
-    const originalExtension = sanitizeExtension(path.extname(String(file.originalname || '')).replace(/^\./, '')) || 'bin';
+    const normalizedImage = await normalizeCampusImageFile(file);
+    const originalExtension = normalizedImage?.extension || sanitizeExtension(path.extname(String(file.originalname || '')).replace(/^\./, '')) || 'bin';
     const filenameBase = `${slugifyFilename(path.parse(file.originalname || '').name) || 'campus-file'}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const filename = `${filenameBase}.${originalExtension}`;
+    const outputBuffer = normalizedImage?.buffer || file.buffer;
+    const outputMimeType = normalizedImage?.mimeType || String(file.mimetype || '').trim();
+    const outputSizeBytes = normalizedImage?.sizeBytes || Number(file.size || 0);
 
     if (isCloudinaryEnabled()) {
-      const uploadResult = await uploadBufferToCloudinary(file.buffer, { publicId: filenameBase, extension: originalExtension });
+      const uploadResult = await uploadBufferToCloudinary(outputBuffer, { publicId: filenameBase, extension: originalExtension });
       processedFiles.push({
         sourceType: 'file',
         kind: detectMaterialKind(file),
         title: String(file.originalname || '').trim(),
         url: String(uploadResult?.secure_url || '').trim(),
         fileName: filename,
-        mimeType: String(file.mimetype || '').trim(),
-        sizeBytes: Number(file.size || 0),
+        mimeType: outputMimeType,
+        sizeBytes: outputSizeBytes,
         extension: originalExtension,
         storage: 'cloudinary',
       });
@@ -196,7 +221,7 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
     }
 
     const outputPath = path.join(targetFolderPath, filename);
-    await fs.writeFile(outputPath, file.buffer);
+    await fs.writeFile(outputPath, outputBuffer);
 
     processedFiles.push({
       sourceType: 'file',
@@ -204,8 +229,8 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
       title: String(file.originalname || '').trim(),
       url: buildPublicUrl(safeFolder, filename),
       fileName: filename,
-      mimeType: String(file.mimetype || '').trim(),
-      sizeBytes: Number(file.size || 0),
+      mimeType: outputMimeType,
+      sizeBytes: outputSizeBytes,
       extension: originalExtension,
       storage: 'local',
     });

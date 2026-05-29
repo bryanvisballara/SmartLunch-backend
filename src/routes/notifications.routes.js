@@ -8,6 +8,35 @@ const Notification = require('../models/notification.model');
 
 const router = express.Router();
 
+let deviceTokenIndexMigrationPromise = null;
+
+async function ensureDeviceTokenIndexes() {
+  if (!deviceTokenIndexMigrationPromise) {
+    deviceTokenIndexMigrationPromise = (async () => {
+      try {
+        const indexes = await DeviceToken.collection.indexes();
+        const legacyTokenIndex = indexes.find((index) => index.name === 'token_1' && index.unique === true);
+        if (legacyTokenIndex) {
+          await DeviceToken.collection.dropIndex('token_1');
+          console.info('[DEVICE_TOKEN_INDEX] dropped legacy unique token_1 index');
+        }
+      } catch (error) {
+        if (error?.codeName !== 'IndexNotFound') {
+          console.warn(`[DEVICE_TOKEN_INDEX_MIGRATION_FAILED] ${error.message}`);
+        }
+      }
+
+      try {
+        await DeviceToken.collection.createIndex({ schoolId: 1, userId: 1, token: 1 }, { unique: true, name: 'schoolId_1_userId_1_token_1' });
+      } catch (error) {
+        console.warn(`[DEVICE_TOKEN_INDEX_CREATE_FAILED] ${error.message}`);
+      }
+    })();
+  }
+
+  return deviceTokenIndexMigrationPromise;
+}
+
 router.use(authMiddleware);
 
 router.post('/device-tokens', async (req, res) => {
@@ -23,8 +52,10 @@ router.post('/device-tokens', async (req, res) => {
       return res.status(400).json({ message: 'Invalid platform' });
     }
 
+    await ensureDeviceTokenIndexes();
+
     const deviceToken = await DeviceToken.findOneAndUpdate(
-      { token },
+      { schoolId, userId, token },
       {
         schoolId,
         userId,
