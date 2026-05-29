@@ -25,6 +25,19 @@ const academicFeeConfigurationSchema = new mongoose.Schema(
       ],
       default: [],
     },
+    enrollmentBenefitRules: {
+      type: [
+        {
+          label: { type: String, trim: true, default: '' },
+          startDate: { type: Date, default: null },
+          endDate: { type: Date, default: null },
+          discountType: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
+          discountPercent: { type: Number, min: 0, max: 100, default: 0 },
+          fixedAmountsByGrade: { type: Map, of: Number, default: {} },
+        },
+      ],
+      default: [],
+    },
     gradeSettings: {
       type: [
         {

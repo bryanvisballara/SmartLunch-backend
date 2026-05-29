@@ -2624,6 +2624,31 @@ function normalizeBenefitRules(rules = []) {
     .sort((left, right) => left.startDay - right.startDay || getMaxBenefitFixedAmount(right) - getMaxBenefitFixedAmount(left) || right.discountPercent - left.discountPercent);
 }
 
+function normalizeEnrollmentBenefitRules(rules = []) {
+  return (Array.isArray(rules) ? rules : [])
+    .map((rule, index) => {
+      const discountType = normalizeText(rule?.discountType) === 'fixed' ? 'fixed' : 'percent';
+      const startDate = parseAcademicCalendarDate(rule?.startDate);
+      const endDate = parseAcademicCalendarDate(rule?.endDate);
+      if (!startDate || !endDate) {
+        return null;
+      }
+
+      const firstDate = startDate.getTime() <= endDate.getTime() ? startDate : endDate;
+      const lastDate = startDate.getTime() <= endDate.getTime() ? endDate : startDate;
+      return {
+        label: normalizeText(rule?.label) || `Beneficio matricula ${index + 1}`,
+        startDate: firstDate,
+        endDate: lastDate,
+        discountType,
+        discountPercent: discountType === 'percent' ? Math.min(100, Math.max(0, Number(rule?.discountPercent || 0))) : 0,
+        fixedAmountsByGrade: normalizeBenefitFixedAmountsByGrade(rule?.fixedAmountsByGrade),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.startDate.getTime() - right.startDate.getTime() || right.discountPercent - left.discountPercent || getMaxBenefitFixedAmount(right) - getMaxBenefitFixedAmount(left));
+}
+
 function normalizeBenefitFixedAmountsByGrade(rawAmounts = {}) {
   const entries = rawAmounts instanceof Map ? Array.from(rawAmounts.entries()) : Object.entries(rawAmounts || {});
   return entries.reduce((accumulator, [grade, amount]) => {
@@ -2746,7 +2771,38 @@ function getMaxBenefitFixedAmount(rule = {}) {
       totalMonths: Math.max(1, getAcademicMonthDiff(startOfAcademicMonthUtc(startDate), startOfAcademicMonthUtc(endDate)) + 1),
       lateEnrollmentSurchargeType: normalizeAcademicLateEnrollmentSurchargeType(configuration?.lateEnrollmentSurchargeType),
       lateEnrollmentSurchargeValue: Math.max(0, Number(configuration?.lateEnrollmentSurchargeValue || 0)),
+      enrollmentBenefitRules: normalizeEnrollmentBenefitRules(configuration?.enrollmentBenefitRules || []),
     };
+  }
+
+  function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], entryDateValue = null) {
+    const entryDate = parseAcademicCalendarDate(entryDateValue);
+    if (!entryDate) {
+      return null;
+    }
+
+    return (Array.isArray(enrollmentBenefitRules) ? enrollmentBenefitRules : []).find((rule) => {
+      const startDate = parseAcademicCalendarDate(rule?.startDate);
+      const endDate = parseAcademicCalendarDate(rule?.endDate);
+      if (!startDate || !endDate) {
+        return false;
+      }
+
+      return entryDate.getTime() >= startDate.getTime() && entryDate.getTime() <= endDate.getTime();
+    }) || null;
+  }
+
+  function resolveAcademicEnrollmentBenefitDiscountAmount(amount, benefitRule = null, grade = '') {
+    const safeAmount = Math.max(0, Math.round(Number(amount || 0)));
+    if (!benefitRule || safeAmount <= 0) {
+      return 0;
+    }
+
+    if (normalizeText(benefitRule.discountType) === 'fixed') {
+      return Math.min(safeAmount, Math.max(0, Math.round(getFixedBenefitAmountForGrade(benefitRule, grade))));
+    }
+
+    return Math.min(safeAmount, Math.round((safeAmount * Math.min(100, Math.max(0, Number(benefitRule.discountPercent || 0)))) / 100));
   }
 
   function resolveAcademicLateEnrollmentSurchargeAmount(baseAmount, elapsedMonths, configuration = {}) {
@@ -2765,7 +2821,7 @@ function getMaxBenefitFixedAmount(rule = {}) {
     return 0;
   }
 
-  function calculateProratedAcademicEnrollmentFee(annualAmount, entryDateValue = null, configuration = {}) {
+  function calculateProratedAcademicEnrollmentFee(annualAmount, entryDateValue = null, configuration = {}, grade = '') {
     const safeAnnualAmount = Math.max(0, Math.round(Number(annualAmount || 0)));
     const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration);
     const parsedEntryDate = parseAcademicCalendarDate(entryDateValue);
@@ -2779,6 +2835,8 @@ function getMaxBenefitFixedAmount(rule = {}) {
         elapsedMonths: 0,
         lateEnrollmentSurchargeAmount: 0,
         isLateEnrollment: false,
+        enrollmentBenefitDiscountAmount: 0,
+        enrollmentBenefitLabel: '',
       };
     }
 
@@ -2798,6 +2856,8 @@ function getMaxBenefitFixedAmount(rule = {}) {
         elapsedMonths: schoolYearConfiguration.totalMonths,
         lateEnrollmentSurchargeAmount: 0,
         isLateEnrollment: false,
+        enrollmentBenefitDiscountAmount: 0,
+        enrollmentBenefitLabel: '',
       };
     }
 
@@ -2805,15 +2865,20 @@ function getMaxBenefitFixedAmount(rule = {}) {
     const remainingMonths = Math.max(1, Math.min(schoolYearConfiguration.totalMonths, schoolYearConfiguration.totalMonths - elapsedMonths));
     const baseAmount = Math.round((safeAnnualAmount * remainingMonths) / schoolYearConfiguration.totalMonths);
     const lateEnrollmentSurchargeAmount = resolveAcademicLateEnrollmentSurchargeAmount(baseAmount, elapsedMonths, schoolYearConfiguration);
+    const amountBeforeDiscount = baseAmount + lateEnrollmentSurchargeAmount;
+    const enrollmentBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, parsedEntryDate);
+    const enrollmentBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(amountBeforeDiscount, enrollmentBenefitRule, grade);
 
     return {
       baseAmount,
-      amount: baseAmount + lateEnrollmentSurchargeAmount,
+      amount: Math.max(0, amountBeforeDiscount - enrollmentBenefitDiscountAmount),
       totalMonths: schoolYearConfiguration.totalMonths,
       remainingMonths,
       elapsedMonths,
       lateEnrollmentSurchargeAmount,
       isLateEnrollment: lateEnrollmentSurchargeAmount > 0,
+      enrollmentBenefitDiscountAmount,
+      enrollmentBenefitLabel: normalizeText(enrollmentBenefitRule?.label),
     };
   }
 
@@ -3215,6 +3280,7 @@ async function ensureAcademicFeeConfiguration(schoolId, grades = []) {
       lateEnrollmentSurchargeType: 'none',
       lateEnrollmentSurchargeValue: 0,
       benefitRules: [],
+      enrollmentBenefitRules: [],
       gradeSettings: normalizeGradeFeeSettings(grades.map((grade) => ({ grade }))),
     });
   }
@@ -5945,6 +6011,7 @@ router.put('/fee-settings', async (req, res) => {
         lateEnrollmentSurchargeType: schoolYearConfiguration.lateEnrollmentSurchargeType,
         lateEnrollmentSurchargeValue: schoolYearConfiguration.lateEnrollmentSurchargeValue,
         benefitRules: normalizeBenefitRules(payload.benefitRules),
+        enrollmentBenefitRules: normalizeEnrollmentBenefitRules(payload.enrollmentBenefitRules),
         gradeSettings: normalizeGradeFeeSettings(payload.gradeSettings),
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -6961,7 +7028,7 @@ router.post('/enrollments', async (req, res) => {
       const monthlyTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(rawStudent?.monthlyTuitionAdditionalDiscountPercent);
       const monthlyTuitionAdditionalDiscountLabel = normalizeText(rawStudent?.monthlyTuitionAdditionalDiscountLabel);
       const initialEnrollmentAndFirstTuitionPaid = false;
-      const enrollmentPricing = calculateProratedAcademicEnrollmentFee(gradeFeeSetting?.enrollmentFee || 0, entryDate, feeConfiguration);
+      const enrollmentPricing = calculateProratedAcademicEnrollmentFee(gradeFeeSetting?.enrollmentFee || 0, entryDate, feeConfiguration, grade);
       const proratedAnnualTuitionAmount = enrollmentPricing.amount;
       const chargeReferenceDate = entryDate && !Number.isNaN(entryDate.getTime()) ? entryDate : new Date();
 
@@ -7003,6 +7070,9 @@ router.post('/enrollments', async (req, res) => {
           enrollmentBonusInstallments,
           annualTuitionAmount: proratedAnnualTuitionAmount,
           annualTuitionInstallments,
+          annualTuitionBaseAmount: enrollmentPricing.baseAmount,
+          annualTuitionDiscountAmount: enrollmentPricing.enrollmentBenefitDiscountAmount,
+          annualTuitionBenefitLabel: enrollmentPricing.enrollmentBenefitLabel,
           monthlyTuitionAmount: Number(gradeFeeSetting?.monthlyTuition || 0),
           initialEnrollmentAndFirstTuitionPaid,
           monthlyTuitionAdditionalDiscountPercent,
@@ -7087,7 +7157,7 @@ router.post('/enrollments', async (req, res) => {
               audienceType: 'enrollment',
               targetGrade: student.grade,
               targetCourse: student.course,
-              description: `${entryDate && !Number.isNaN(entryDate.getTime()) ? `Matrícula prorrateada por ingreso en ${entryDate.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' })}. ` : ''}${enrollmentPricing.lateEnrollmentSurchargeAmount > 0 ? `Incluye recargo por matrícula tardía de ${enrollmentPricing.lateEnrollmentSurchargeAmount}. ` : ''}${installmentAmounts.length > 1 ? `Plan de financiamiento de la matrícula a ${installmentAmounts.length} meses.` : ''}`.trim(),
+              description: `${entryDate && !Number.isNaN(entryDate.getTime()) ? `Matrícula prorrateada por ingreso en ${entryDate.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' })}. ` : ''}${enrollmentPricing.lateEnrollmentSurchargeAmount > 0 ? `Incluye recargo por matrícula tardía de ${enrollmentPricing.lateEnrollmentSurchargeAmount}. ` : ''}${enrollmentPricing.enrollmentBenefitDiscountAmount > 0 ? `Aplica beneficio ${enrollmentPricing.enrollmentBenefitLabel || 'matrícula'} por ${enrollmentPricing.enrollmentBenefitDiscountAmount}. ` : ''}${installmentAmounts.length > 1 ? `Plan de financiamiento de la matrícula a ${installmentAmounts.length} meses.` : ''}`.trim(),
             });
           }
         }
