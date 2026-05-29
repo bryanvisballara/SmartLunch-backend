@@ -3,6 +3,7 @@ const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
+const { listTenantSchoolContexts, runWithSchoolContext } = require('../config/db');
 const User = require('../models/user.model');
 const {
   isEpaycoConfigured,
@@ -65,99 +66,103 @@ async function runAutoDebitCycle() {
   }
 
   try {
-    const wallets = await Wallet.find({
-      autoDebitEnabled: true,
-      status: 'active',
-      autoDebitAmount: { $gt: 0 },
-      autoDebitLimit: { $gt: 0 },
-      autoDebitPaymentMethodId: { $ne: null },
-    })
-      .select('_id schoolId studentId balance autoDebitLimit autoDebitAmount autoDebitPaymentMethodId autoDebitLastChargeAt autoDebitRetryAt autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
-      .lean();
+    const tenantContexts = await listTenantSchoolContexts();
 
-    for (const wallet of wallets) {
-      const currentBalance = Number(wallet?.balance || 0);
-      const threshold = Number(wallet?.autoDebitLimit || 0);
-      if (currentBalance >= threshold) {
-        continue;
-      }
+    for (const tenantContext of tenantContexts) {
+      await runWithSchoolContext(tenantContext.schoolId, async () => {
+        const wallets = await Wallet.find({
+          autoDebitEnabled: true,
+          status: 'active',
+          autoDebitAmount: { $gt: 0 },
+          autoDebitLimit: { $gt: 0 },
+          autoDebitPaymentMethodId: { $ne: null },
+        })
+          .select('_id schoolId studentId balance autoDebitLimit autoDebitAmount autoDebitPaymentMethodId autoDebitLastChargeAt autoDebitRetryAt autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
+          .lean();
 
-      const retryAtMs = wallet?.autoDebitRetryAt ? new Date(wallet.autoDebitRetryAt).getTime() : 0;
-      if (retryAtMs && retryAtMs > Date.now()) {
-        continue;
-      }
+        for (const wallet of wallets) {
+          const currentBalance = Number(wallet?.balance || 0);
+          const threshold = Number(wallet?.autoDebitLimit || 0);
+          if (currentBalance >= threshold) {
+            continue;
+          }
 
-      const lastChargeAtMs = wallet?.autoDebitLastChargeAt ? new Date(wallet.autoDebitLastChargeAt).getTime() : 0;
-      if (lastChargeAtMs && Date.now() - lastChargeAtMs < AUTO_DEBIT_COOLDOWN_MS) {
-        continue;
-      }
+          const retryAtMs = wallet?.autoDebitRetryAt ? new Date(wallet.autoDebitRetryAt).getTime() : 0;
+          if (retryAtMs && retryAtMs > Date.now()) {
+            continue;
+          }
 
-      const lockFilter = {
-        _id: wallet._id,
-        autoDebitEnabled: true,
-        status: 'active',
-        autoDebitAmount: { $gt: 0 },
-        autoDebitLimit: { $gt: 0 },
-        autoDebitPaymentMethodId: { $ne: null },
-      };
+          const lastChargeAtMs = wallet?.autoDebitLastChargeAt ? new Date(wallet.autoDebitLastChargeAt).getTime() : 0;
+          if (lastChargeAtMs && Date.now() - lastChargeAtMs < AUTO_DEBIT_COOLDOWN_MS) {
+            continue;
+          }
 
-      // Enforce balance-threshold and cooldown atomically to prevent parallel charges.
-      lockFilter.$expr = {
-        $lt: ['$balance', '$autoDebitLimit'],
-      };
-      lockFilter.$or = [
-        {
-          autoDebitInProgress: { $ne: true },
-          $or: [
-            { autoDebitLastChargeAt: null },
-            { autoDebitLastChargeAt: { $lte: new Date(Date.now() - AUTO_DEBIT_COOLDOWN_MS) } },
-          ],
-        },
-        {
-          autoDebitInProgress: true,
-          autoDebitLockAt: { $lte: new Date(Date.now() - AUTO_DEBIT_LOCK_TIMEOUT_MS) },
-        },
-      ];
+          const lockFilter = {
+            _id: wallet._id,
+            autoDebitEnabled: true,
+            status: 'active',
+            autoDebitAmount: { $gt: 0 },
+            autoDebitLimit: { $gt: 0 },
+            autoDebitPaymentMethodId: { $ne: null },
+          };
 
-      lockFilter.$and = [
-        {
-          $or: [
-            { autoDebitRetryAt: null },
-            { autoDebitRetryAt: { $lte: new Date() } },
-          ],
-        },
-      ];
+          // Enforce balance-threshold and cooldown atomically to prevent parallel charges.
+          lockFilter.$expr = {
+            $lt: ['$balance', '$autoDebitLimit'],
+          };
+          lockFilter.$or = [
+            {
+              autoDebitInProgress: { $ne: true },
+              $or: [
+                { autoDebitLastChargeAt: null },
+                { autoDebitLastChargeAt: { $lte: new Date(Date.now() - AUTO_DEBIT_COOLDOWN_MS) } },
+              ],
+            },
+            {
+              autoDebitInProgress: true,
+              autoDebitLockAt: { $lte: new Date(Date.now() - AUTO_DEBIT_LOCK_TIMEOUT_MS) },
+            },
+          ];
 
-      const lockedWallet = await Wallet.findOneAndUpdate(
-        lockFilter,
-        {
-          $set: {
-            autoDebitInProgress: true,
-            autoDebitLockAt: new Date(),
-            autoDebitLastAttempt: new Date(),
-          },
-        },
-        {
-          new: true,
-        }
-      )
-        .select('_id schoolId studentId autoDebitAmount autoDebitPaymentMethodId autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
-        .lean();
+          lockFilter.$and = [
+            {
+              $or: [
+                { autoDebitRetryAt: null },
+                { autoDebitRetryAt: { $lte: new Date() } },
+              ],
+            },
+          ];
 
-      if (!lockedWallet) {
-        continue;
-      }
+          const lockedWallet = await Wallet.findOneAndUpdate(
+            lockFilter,
+            {
+              $set: {
+                autoDebitInProgress: true,
+                autoDebitLockAt: new Date(),
+                autoDebitLastAttempt: new Date(),
+              },
+            },
+            {
+              new: true,
+            }
+          )
+            .select('_id schoolId studentId autoDebitAmount autoDebitPaymentMethodId autoDebitRetryCount autoDebitMonthlyLimit autoDebitMonthlyUsed autoDebitMonthlyPeriod')
+            .lean();
 
-      const studentId = lockedWallet.studentId;
-      const schoolId = lockedWallet.schoolId;
-      const amount = Number(lockedWallet?.autoDebitAmount || 0);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        await Wallet.updateOne(
-          { _id: lockedWallet._id },
-          { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
-        );
-        continue;
-      }
+          if (!lockedWallet) {
+            continue;
+          }
+
+          const studentId = lockedWallet.studentId;
+          const schoolId = lockedWallet.schoolId;
+          const amount = Number(lockedWallet?.autoDebitAmount || 0);
+          if (!Number.isFinite(amount) || amount <= 0) {
+            await Wallet.updateOne(
+              { _id: lockedWallet._id },
+              { $set: { autoDebitInProgress: false, autoDebitLockAt: null } }
+            );
+            continue;
+          }
 
       const period = currentYearMonth();
       let monthlyUsed = Number(lockedWallet?.autoDebitMonthlyUsed || 0);
@@ -191,7 +196,7 @@ async function runAutoDebitCycle() {
       }
 
       const parentId = link.parentId;
-      const parentUser = await User.findById(parentId).select('email').lean();
+          const parentUser = await User.findOne({ _id: parentId, schoolId }).select('email').lean();
       const parentEmail = String(parentUser?.email || '').trim().toLowerCase();
       const paymentMethodIdFromWallet = lockedWallet?.autoDebitPaymentMethodId || null;
 
@@ -380,6 +385,8 @@ async function runAutoDebitCycle() {
           currentRetryCount: Number(lockedWallet?.autoDebitRetryCount || 0),
         });
       }
+        }
+      });
     }
   } finally {
     inProgress = false;

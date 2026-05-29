@@ -26,6 +26,9 @@ const Order = require('../models/order.model');
 const FixedCost = require('../models/fixedCost.model');
 const Supplier = require('../models/supplier.model');
 const AccountingFeeSetting = require('../models/accountingFeeSetting.model');
+const AcademicGradePromotionRequest = require('../models/academicGradePromotionRequest.model');
+const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
+const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const {
   uploadImageMiddleware,
   processAndStoreUploadedImage,
@@ -38,7 +41,7 @@ const { invalidateSchoolMenuCache } = require('../services/menuCache.service');
 const router = express.Router();
 
 router.use(authMiddleware);
-router.use(roleMiddleware('admin'));
+router.use(roleMiddleware('admin', 'rectoria', 'direccion'));
 
 const DEFAULT_ACCOUNTING_FEE_SETTINGS = {
   dataphonePercent: 0,
@@ -62,6 +65,155 @@ function normalizeDocumentType(value) {
 
 function normalizeDocumentNumber(value) {
   return String(value || '').replace(/\D/g, '').trim();
+}
+
+const ADMIN_MANAGED_USER_ROLES = ['parent', 'vendor', 'admin', 'rectoria', 'direccion', 'merienda_operator', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'];
+const HARD_DELETE_USER_ROLES = ADMIN_MANAGED_USER_ROLES.filter((role) => role !== 'parent');
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+async function releaseDeletedInstitutionalUsername({ schoolId, username, excludedUserId = null }) {
+  const normalizedUsername = String(username || '').toLowerCase().trim();
+  if (!normalizedUsername) {
+    return null;
+  }
+
+  const filter = { username: normalizedUsername };
+  if (excludedUserId) {
+    filter._id = { $ne: excludedUserId };
+  }
+
+  const existing = await User.findOne(filter).select('_id schoolId role deletedAt').lean();
+  if (!existing) {
+    return null;
+  }
+
+  const canRelease =
+    String(existing.schoolId) === String(schoolId) &&
+    existing.deletedAt &&
+    HARD_DELETE_USER_ROLES.includes(String(existing.role));
+
+  if (!canRelease) {
+    return existing;
+  }
+
+  await User.deleteOne({ _id: existing._id, schoolId, deletedAt: { $ne: null } });
+  return null;
+}
+
+function normalizeCoordinationScope(value) {
+  return String(value || '').trim();
+}
+
+function normalizeStringArray(values) {
+  if (Array.isArray(values)) {
+    return Array.from(new Set(values.map((item) => normalizeText(item)).filter(Boolean)));
+  }
+
+  return Array.from(
+    new Set(
+      String(values || '')
+        .split(',')
+        .map((item) => normalizeText(item))
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeBenefitRules(rules = []) {
+  return (Array.isArray(rules) ? rules : [])
+    .map((rule, index) => {
+      const discountType = normalizeText(rule?.discountType) === 'fixed' ? 'fixed' : 'percent';
+      return {
+        label: normalizeText(rule?.label) || `Beneficio ${index + 1}`,
+        startDay: Math.min(31, Math.max(1, Number(rule?.startDay || 1))),
+        endDay: Math.min(31, Math.max(1, Number(rule?.endDay || 10))),
+        discountType,
+        discountPercent: discountType === 'percent' ? Math.min(100, Math.max(0, Number(rule?.discountPercent || 0))) : 0,
+        fixedAmountsByGrade: normalizeBenefitFixedAmountsByGrade(rule?.fixedAmountsByGrade || {}),
+      };
+    })
+    .filter((rule) => rule.endDay >= rule.startDay)
+    .sort((left, right) => left.startDay - right.startDay || right.discountPercent - left.discountPercent);
+}
+
+function normalizeBenefitFixedAmountsByGrade(rawAmounts = {}) {
+  const entries = rawAmounts instanceof Map ? Array.from(rawAmounts.entries()) : Object.entries(rawAmounts || {});
+  return entries.reduce((accumulator, [grade, amount]) => {
+    const normalizedGrade = normalizeText(grade).toLowerCase();
+    if (!normalizedGrade) {
+      return accumulator;
+    }
+
+    accumulator[normalizedGrade] = Math.max(0, Math.round(Number(amount || 0)));
+    return accumulator;
+  }, {});
+}
+
+function getCurrentAcademicYear() {
+  return String(new Date().getFullYear());
+}
+
+function findGradeFeeSetting(configuration, grade) {
+  const settings = Array.isArray(configuration?.gradeSettings) ? configuration.gradeSettings : [];
+  const normalizedGrade = normalizeText(grade).toLowerCase();
+  return settings.find((item) => normalizeText(item?.grade).toLowerCase() === normalizedGrade) || null;
+}
+
+function getPromotedGradeValue(rawGrade) {
+  const grade = normalizeText(rawGrade);
+  if (!grade) {
+    return '';
+  }
+
+  const normalized = grade
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  const preschoolMap = {
+    prejardin: 'Jardin',
+    jardin: 'Transicion',
+    transicion: '1',
+  };
+
+  if (preschoolMap[normalized]) {
+    return preschoolMap[normalized];
+  }
+
+  const numericMatch = grade.match(/^(\d{1,2})(.*)$/);
+  if (!numericMatch) {
+    return '';
+  }
+
+  const numericGrade = Number(numericMatch[1]);
+  if (!Number.isFinite(numericGrade) || numericGrade >= 11) {
+    return '';
+  }
+
+  return `${numericGrade + 1}${numericMatch[2] || ''}`.trim();
+}
+
+function serializeAcademicGradePromotionRequest(item) {
+  if (!item) {
+    return null;
+  }
+
+  return {
+    _id: item._id,
+    status: normalizeText(item.status) || 'pending',
+    requestedAt: item.requestedAt || item.createdAt || null,
+    requestedByName: normalizeText(item.requestedByName),
+    reviewedAt: item.reviewedAt || null,
+    reviewedByName: normalizeText(item.reviewedByName),
+    reviewNotes: normalizeText(item.reviewNotes),
+    totalStudents: Number(item.totalStudents || 0),
+    promotableStudents: Number(item.promotableStudents || 0),
+    skippedStudents: Number(item.skippedStudents || 0),
+    appliedStudents: Number(item.appliedStudents || 0),
+    preview: Array.isArray(item.preview) ? item.preview : [],
+  };
 }
 
 function normalizeNonNegativeNumber(value, { max = null } = {}) {
@@ -165,6 +317,120 @@ function normalizeObjectIdList(values = []) {
 
   return ids;
 }
+
+router.get('/academic-grade-promotions', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const status = normalizeText(req.query?.status);
+    const filter = { schoolId };
+    if (['pending', 'approved', 'rejected'].includes(status)) {
+      filter.status = status;
+    }
+
+    const items = await AcademicGradePromotionRequest.find(filter).sort({ requestedAt: -1, createdAt: -1 }).lean();
+    return res.status(200).json(items.map(serializeAcademicGradePromotionRequest));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/academic-grade-promotions/:id/approve', async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const requestId = toObjectIdOrNull(req.params.id);
+    if (!requestId) {
+      return res.status(400).json({ message: 'Solicitud invalida.' });
+    }
+
+    const requestRecord = await AcademicGradePromotionRequest.findOne({ _id: requestId, schoolId });
+    if (!requestRecord) {
+      return res.status(404).json({ message: 'No se encontró la solicitud.' });
+    }
+
+    if (requestRecord.status !== 'pending') {
+      return res.status(400).json({ message: 'La solicitud ya fue atendida.' });
+    }
+
+    const students = await Student.find({ schoolId, deletedAt: null });
+    const configuration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+    let appliedStudents = 0;
+
+    for (const student of students) {
+      const nextGrade = getPromotedGradeValue(student.grade);
+      if (!nextGrade) {
+        continue;
+      }
+
+      student.grade = nextGrade;
+      await student.save();
+      appliedStudents += 1;
+
+      const billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
+      if (!billingProfile) {
+        continue;
+      }
+
+      const gradeFeeSetting = findGradeFeeSetting(configuration, nextGrade);
+      billingProfile.grade = nextGrade;
+      billingProfile.academicYear = normalizeText(configuration?.academicYear) || getCurrentAcademicYear();
+      billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
+      billingProfile.annualTuitionAmount = Number(gradeFeeSetting?.enrollmentFee || 0);
+      billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
+      billingProfile.dueDay = Math.min(28, Math.max(1, Number(gradeFeeSetting?.dueDay || 10)));
+      billingProfile.benefitRules = normalizeBenefitRules(gradeFeeSetting?.benefitRules || []);
+      await billingProfile.save();
+    }
+
+    requestRecord.status = 'approved';
+    requestRecord.reviewNotes = normalizeText(req.body?.reviewNotes);
+    requestRecord.reviewedAt = new Date();
+    requestRecord.reviewedByUserId = userId;
+    requestRecord.reviewedByName = normalizeText(name) || 'Rectoría';
+    requestRecord.appliedStudents = appliedStudents;
+    await requestRecord.save();
+
+    return res.status(200).json({
+      message: 'Promoción general aprobada y aplicada a la base académica.',
+      item: serializeAcademicGradePromotionRequest(requestRecord),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/academic-grade-promotions/:id/reject', async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const requestId = toObjectIdOrNull(req.params.id);
+    if (!requestId) {
+      return res.status(400).json({ message: 'Solicitud invalida.' });
+    }
+
+    const requestRecord = await AcademicGradePromotionRequest.findOne({ _id: requestId, schoolId });
+    if (!requestRecord) {
+      return res.status(404).json({ message: 'No se encontró la solicitud.' });
+    }
+
+    if (requestRecord.status !== 'pending') {
+      return res.status(400).json({ message: 'La solicitud ya fue atendida.' });
+    }
+
+    requestRecord.status = 'rejected';
+    requestRecord.reviewNotes = normalizeText(req.body?.reviewNotes);
+    requestRecord.reviewedAt = new Date();
+    requestRecord.reviewedByUserId = userId;
+    requestRecord.reviewedByName = normalizeText(name) || 'Rectoría';
+    requestRecord.appliedStudents = 0;
+    await requestRecord.save();
+
+    return res.status(200).json({
+      message: 'Solicitud de promoción general rechazada.',
+      item: serializeAcademicGradePromotionRequest(requestRecord),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 function normalizeImageUrl(value, includeImageData) {
   if (includeImageData) {
@@ -853,7 +1119,7 @@ router.delete('/stores/:id', async (req, res) => {
 
 router.get('/users', async (req, res) => {
   try {
-    const { schoolId } = req.user;
+    const { schoolId, role: requesterRole } = req.user;
     const { role } = req.query;
 
     const filter = {
@@ -866,22 +1132,39 @@ router.get('/users', async (req, res) => {
     }
 
     const users = await User.find(filter)
-      .select('_id name username email phone documentType documentNumber role status createdAt assignedStoreId')
-      .populate('assignedStoreId', 'name status')
+      .select('_id name username email phone documentType documentNumber role status createdAt assignedStoreId coordinationScope assignedSubjects')
       .sort({ createdAt: -1 })
       .lean();
 
+    const validAssignedStoreIds = Array.from(new Set(
+      users
+        .map((item) => String(item?.assignedStoreId || '').trim())
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    )).map((id) => new mongoose.Types.ObjectId(id));
+
+    const stores = validAssignedStoreIds.length > 0
+      ? await Store.find({ _id: { $in: validAssignedStoreIds }, schoolId, deletedAt: null })
+        .select('_id name status')
+        .lean()
+      : [];
+
+    const storeById = stores.reduce((accumulator, store) => {
+      accumulator[String(store._id)] = {
+        _id: store._id,
+        name: store.name,
+        status: store.status,
+      };
+      return accumulator;
+    }, {});
+
     const normalizedUsers = users.map((item) => {
-      const assignedStore = item.assignedStoreId
-        ? {
-          _id: item.assignedStoreId._id,
-          name: item.assignedStoreId.name,
-          status: item.assignedStoreId.status,
-        }
-        : null;
+      const assignedStoreId = String(item?.assignedStoreId || '').trim();
+      const assignedStore = assignedStoreId ? storeById[assignedStoreId] || null : null;
 
       return {
         ...item,
+        coordinationScope: item.coordinationScope || '',
+        assignedSubjects: Array.isArray(item.assignedSubjects) ? item.assignedSubjects : [],
         assignedStoreId: assignedStore?._id || null,
         assignedStore,
       };
@@ -895,15 +1178,22 @@ router.get('/users', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   try {
-    const { schoolId } = req.user;
-    const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber } = req.body;
+    const { schoolId, role: requesterRole } = req.user;
+  const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber, coordinationScope = '', assignedSubjects = [] } = req.body;
 
     if (!name || !username || !password || !role) {
       return res.status(400).json({ message: 'name, username, password and role are required' });
     }
 
-    if (!['parent', 'vendor', 'admin', 'merienda_operator'].includes(role)) {
+    if (!ADMIN_MANAGED_USER_ROLES.includes(role)) {
       return res.status(400).json({ message: 'Invalid role' });
+    }
+
+    const normalizedCoordinationScope = normalizeCoordinationScope(coordinationScope);
+    const normalizedAssignedSubjects = normalizeStringArray(assignedSubjects);
+
+    if (String(role) === 'coordination' && !normalizedCoordinationScope) {
+      return res.status(400).json({ message: 'coordinationScope is required for coordination users' });
     }
 
     let resolvedAssignedStoreId = null;
@@ -939,7 +1229,7 @@ router.post('/users', async (req, res) => {
       }
     }
 
-    const existing = await User.findOne({ username: normalizedUsername });
+    const existing = await releaseDeletedInstitutionalUsername({ schoolId, username: normalizedUsername });
     if (existing) {
       return res.status(409).json({ message: 'Username already registered' });
     }
@@ -954,6 +1244,8 @@ router.post('/users', async (req, res) => {
       documentType: normalizedDocumentType,
       documentNumber: normalizedDocumentNumber,
       assignedStoreId: resolvedAssignedStoreId,
+      coordinationScope: String(role) === 'coordination' ? normalizedCoordinationScope : '',
+      assignedSubjects: String(role) === 'teacher' ? normalizedAssignedSubjects : [],
       passwordHash,
       role,
       status: 'active',
@@ -968,6 +1260,8 @@ router.post('/users', async (req, res) => {
       documentType: user.documentType,
       documentNumber: user.documentNumber,
       role: user.role,
+      coordinationScope: user.coordinationScope || '',
+      assignedSubjects: Array.isArray(user.assignedSubjects) ? user.assignedSubjects : [],
       status: user.status,
       assignedStoreId: user.assignedStoreId || null,
     });
@@ -1072,8 +1366,8 @@ router.post('/users/import-legacy-parents', async (req, res) => {
 
 router.patch('/users/:id', async (req, res) => {
   try {
-    const { schoolId } = req.user;
-    const { name, username, email, phone, role, status, password, assignedStoreId, documentType, documentNumber } = req.body;
+    const { schoolId, role: requesterRole } = req.user;
+  const { name, username, email, phone, role, status, password, assignedStoreId, documentType, documentNumber, coordinationScope, assignedSubjects } = req.body;
 
     const user = await User.findOne({ _id: req.params.id, schoolId, deletedAt: null });
     if (!user) {
@@ -1092,7 +1386,7 @@ router.patch('/users/:id', async (req, res) => {
         return res.status(400).json({ message: 'username is required' });
       }
       const normalizedUsername = String(username).toLowerCase().trim();
-      const existing = await User.findOne({ username: normalizedUsername, _id: { $ne: user._id } });
+      const existing = await releaseDeletedInstitutionalUsername({ schoolId, username: normalizedUsername, excludedUserId: user._id });
       if (existing) {
         return res.status(409).json({ message: 'Username already registered' });
       }
@@ -1127,13 +1421,15 @@ router.patch('/users/:id', async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'role')) {
-      if (!['parent', 'vendor', 'admin', 'merienda_operator'].includes(String(role))) {
+      if (!ADMIN_MANAGED_USER_ROLES.includes(String(role))) {
         return res.status(400).json({ message: 'Invalid role' });
       }
       user.role = String(role);
     }
 
     const targetRole = Object.prototype.hasOwnProperty.call(req.body, 'role') ? String(role) : String(user.role);
+    const normalizedCoordinationScope = normalizeCoordinationScope(coordinationScope);
+    const normalizedAssignedSubjects = normalizeStringArray(assignedSubjects);
 
     if (targetRole === 'parent') {
       if (!user.email) {
@@ -1164,6 +1460,28 @@ router.patch('/users/:id', async (req, res) => {
       user.assignedStoreId = null;
     }
 
+    if (targetRole === 'coordination') {
+      const nextCoordinationScope = Object.prototype.hasOwnProperty.call(req.body, 'coordinationScope')
+        ? normalizedCoordinationScope
+        : String(user.coordinationScope || '');
+
+      if (!nextCoordinationScope) {
+        return res.status(400).json({ message: 'coordinationScope is required for coordination users' });
+      }
+
+      user.coordinationScope = nextCoordinationScope;
+    } else {
+      user.coordinationScope = '';
+    }
+
+    if (targetRole === 'teacher') {
+      user.assignedSubjects = Object.prototype.hasOwnProperty.call(req.body, 'assignedSubjects')
+        ? normalizedAssignedSubjects
+        : Array.isArray(user.assignedSubjects) ? user.assignedSubjects : [];
+    } else {
+      user.assignedSubjects = [];
+    }
+
     if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
       if (!['active', 'inactive'].includes(String(status))) {
         return res.status(400).json({ message: 'Invalid status' });
@@ -1186,6 +1504,8 @@ router.patch('/users/:id', async (req, res) => {
       documentType: user.documentType,
       documentNumber: user.documentNumber,
       role: user.role,
+      coordinationScope: user.coordinationScope || '',
+      assignedSubjects: Array.isArray(user.assignedSubjects) ? user.assignedSubjects : [],
       status: user.status,
       assignedStoreId: user.assignedStoreId || null,
     });
@@ -1196,7 +1516,7 @@ router.patch('/users/:id', async (req, res) => {
 
 router.delete('/users/:id', async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role: requesterRole } = req.user;
     const user = await User.findOne({ _id: req.params.id, schoolId, deletedAt: null });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
@@ -1204,6 +1524,11 @@ router.delete('/users/:id', async (req, res) => {
 
     if (String(user._id) === String(userId)) {
       return res.status(400).json({ message: 'No puedes eliminar tu propio usuario admin' });
+    }
+
+    if (HARD_DELETE_USER_ROLES.includes(String(user.role))) {
+      await User.deleteOne({ _id: user._id, schoolId });
+      return res.status(200).json({ message: 'User deleted' });
     }
 
     user.deletedAt = new Date();
@@ -1533,6 +1858,7 @@ router.post('/students', async (req, res) => {
       name,
       schoolCode = '',
       grade = '',
+      course = '',
       dailyLimit = 0,
       blockedProducts = [],
       blockedCategories = [],
@@ -1548,6 +1874,7 @@ router.post('/students', async (req, res) => {
       name: String(name).trim(),
       schoolCode: String(schoolCode || '').trim(),
       grade: String(grade || '').trim(),
+      course: String(course || '').trim(),
       dailyLimit: Number(dailyLimit || 0),
       blockedProducts,
       blockedCategories,
@@ -1718,6 +2045,7 @@ router.patch('/students/:id', async (req, res) => {
       name,
       schoolCode,
       grade,
+      course,
       dailyLimit,
       status,
       blockedProducts,
@@ -1743,6 +2071,10 @@ router.patch('/students/:id', async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'grade')) {
       student.grade = String(grade || '').trim();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'course')) {
+      student.course = String(course || '').trim();
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'dailyLimit')) {

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const walletSchema = new mongoose.Schema(
   {
@@ -30,4 +30,4 @@ const walletSchema = new mongoose.Schema(
 walletSchema.index({ autoDebitEnabled: 1, autoDebitInProgress: 1, autoDebitLastChargeAt: 1 });
 walletSchema.index({ autoDebitEnabled: 1, autoDebitRetryAt: 1, autoDebitLockAt: 1 });
 
-module.exports = mongoose.model('Wallet', walletSchema);
+module.exports = registerSchoolScopedModel('Wallet', walletSchema);

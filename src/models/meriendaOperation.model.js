@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const meriendaCostItemSchema = new mongoose.Schema(
   {
@@ -22,4 +22,4 @@ const meriendaOperationSchema = new mongoose.Schema(
 
 meriendaOperationSchema.index({ schoolId: 1, month: 1 }, { unique: true });
 
-module.exports = mongoose.model('MeriendaOperation', meriendaOperationSchema);
+module.exports = registerSchoolScopedModel('MeriendaOperation', meriendaOperationSchema);

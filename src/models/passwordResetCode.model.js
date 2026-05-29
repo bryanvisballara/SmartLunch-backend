@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const passwordResetCodeSchema = new mongoose.Schema(
   {
@@ -23,4 +23,4 @@ const passwordResetCodeSchema = new mongoose.Schema(
 
 passwordResetCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-module.exports = mongoose.model('PasswordResetCode', passwordResetCodeSchema);
+module.exports = registerSchoolScopedModel('PasswordResetCode', passwordResetCodeSchema);

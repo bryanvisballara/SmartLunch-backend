@@ -1,7 +1,6 @@
 require('dotenv').config();
 
-const mongoose = require('mongoose');
-const { connectDB } = require('../config/db');
+const { connectDB, getRegisteredModelNames, resolveRegisteredModel, runWithSchoolContext } = require('../config/db');
 
 // Load all model definitions so Mongoose can create collections and indexes.
 require('../models');
@@ -10,21 +9,23 @@ async function initCollections() {
   try {
     await connectDB();
 
-    const modelNames = mongoose.modelNames();
+    const modelNames = getRegisteredModelNames();
 
     for (const modelName of modelNames) {
-      const model = mongoose.model(modelName);
-      await model.createCollection();
-      await model.syncIndexes();
-      console.log(`Initialized: ${model.collection.collectionName}`);
+      await runWithSchoolContext('', async () => {
+        const model = resolveRegisteredModel(modelName);
+        await model.createCollection();
+        await model.syncIndexes();
+        console.log(`Initialized: ${model.collection.collectionName}`);
+      });
     }
 
     console.log('All collections and indexes were initialized successfully.');
-    await mongoose.connection.close();
+    await require('mongoose').connection.close();
     process.exit(0);
   } catch (error) {
     console.error('Failed to initialize collections:', error.message);
-    await mongoose.connection.close();
+    await require('mongoose').connection.close();
     process.exit(1);
   }
 }

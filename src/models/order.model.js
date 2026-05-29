@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const orderItemSchema = new mongoose.Schema(
   {
@@ -36,4 +36,4 @@ orderSchema.index({ studentId: 1, createdAt: -1 });
 orderSchema.index({ schoolId: 1, studentId: 1, createdAt: -1 });
 orderSchema.index({ createdAt: -1 });
 
-module.exports = mongoose.model('Order', orderSchema);
+module.exports = registerSchoolScopedModel('Order', orderSchema);

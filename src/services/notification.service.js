@@ -4,6 +4,7 @@ const Notification = require('../models/notification.model');
 const DeviceToken = require('../models/deviceToken.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
+const { runWithSchoolContext } = require('../config/db');
 const { enqueueNotificationJobs } = require('../config/queue');
 const { sendPushToParent } = require('./push.service');
 
@@ -47,44 +48,46 @@ function buildPurchaseBody({ items, total, remainingBalance }) {
 }
 
 async function queueOrderCreatedNotifications({ schoolId, student, order }) {
-  const parentLinks = await ParentStudentLink.find({
-    schoolId,
-    studentId: student._id,
-    status: 'active',
-  }).select('parentId');
-
-  if (!parentLinks.length) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
-
-  const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).select('balance');
-  const remainingBalance = wallet?.balance || 0;
-
-  const childName = firstName(student.name);
-  const title = `${childName} ha realizado una compra`;
-  const body = buildPurchaseBody({
-    items: order.items,
-    total: order.total,
-    remainingBalance,
-  });
-
-  const parentIds = parentLinks.map((link) => link.parentId);
-
-  return queueNotificationsForParents({
-    schoolId,
-    parentIds,
-    studentId: student._id,
-    orderId: order._id,
-    title,
-    body,
-    payload: {
-      type: 'order.created',
-      orderId: order._id,
+  return runWithSchoolContext(schoolId, async () => {
+    const parentLinks = await ParentStudentLink.find({
+      schoolId,
       studentId: student._id,
+      status: 'active',
+    }).select('parentId');
+
+    if (!parentLinks.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).select('balance');
+    const remainingBalance = wallet?.balance || 0;
+
+    const childName = firstName(student.name);
+    const title = `${childName} ha realizado una compra`;
+    const body = buildPurchaseBody({
+      items: order.items,
       total: order.total,
       remainingBalance,
-      paymentMethod: order.paymentMethod,
-    },
+    });
+
+    const parentIds = parentLinks.map((link) => link.parentId);
+
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds,
+      studentId: student._id,
+      orderId: order._id,
+      title,
+      body,
+      payload: {
+        type: 'order.created',
+        orderId: order._id,
+        studentId: student._id,
+        total: order.total,
+        remainingBalance,
+        paymentMethod: order.paymentMethod,
+      },
+    });
   });
 }
 
@@ -97,199 +100,333 @@ async function queueNotificationsForParents({
   body,
   payload = {},
 }) {
-  const normalizedParentIds = (parentIds || []).filter(Boolean);
-  if (!normalizedParentIds.length) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
+  return runWithSchoolContext(schoolId, async () => {
+    const normalizedParentIds = (parentIds || []).filter(Boolean);
+    if (!normalizedParentIds.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
 
-  const notifications = normalizedParentIds.map((parentId) => ({
-    schoolId,
-    studentId,
-    parentId,
-    orderId,
-    title,
-    body,
-    payload,
-    status: 'pending',
-  }));
+    const notifications = normalizedParentIds.map((parentId) => ({
+      schoolId,
+      studentId,
+      parentId,
+      orderId,
+      title,
+      body,
+      payload,
+      status: 'pending',
+    }));
 
-  const insertedNotifications = await Notification.insertMany(notifications);
+    const insertedNotifications = await Notification.insertMany(notifications);
 
-  const tokensFound = await DeviceToken.countDocuments({
-    schoolId,
-    userId: { $in: normalizedParentIds },
-    status: 'active',
-  });
+    const tokensFound = await DeviceToken.countDocuments({
+      schoolId,
+      userId: { $in: normalizedParentIds },
+      status: 'active',
+    });
 
-  const directDelivery = { attempted: insertedNotifications.length > 0, delivered: 0, failed: 0 };
-  const retryJobs = [];
+    const directDelivery = { attempted: insertedNotifications.length > 0, delivered: 0, failed: 0 };
+    const retryJobs = [];
 
-  for (const notification of insertedNotifications) {
-    try {
-      const delivery = await sendPushToParent({
-        schoolId,
-        parentId: notification.parentId,
-        title: notification.title,
-        body: notification.body,
-        payload: notification.payload,
-      });
+    for (const notification of insertedNotifications) {
+      try {
+        const delivery = await sendPushToParent({
+          schoolId,
+          parentId: notification.parentId,
+          title: notification.title,
+          body: notification.body,
+          payload: notification.payload,
+        });
 
-      if (delivery.delivered) {
-        directDelivery.delivered += 1;
-        console.info(`[PUSH_SENT] notificationId=${notification._id} parentId=${notification.parentId}`);
+        if (delivery.delivered) {
+          directDelivery.delivered += 1;
+          console.info(`[PUSH_SENT] notificationId=${notification._id} parentId=${notification.parentId}`);
+          await Notification.updateOne(
+            { _id: notification._id },
+            { status: 'sent', sentAt: new Date(), lastError: null }
+          );
+          continue;
+        }
+
+        directDelivery.failed += 1;
+        const reason = delivery.reason || 'Push delivery failed';
+        console.warn(`[PUSH_FAILED] notificationId=${notification._id} parentId=${notification.parentId} reason=${reason}`);
         await Notification.updateOne(
           { _id: notification._id },
-          { status: 'sent', sentAt: new Date(), lastError: null }
+          { status: 'failed', lastError: reason }
         );
-        continue;
+
+        retryJobs.push({
+          notificationId: String(notification._id),
+          schoolId,
+          parentId: String(notification.parentId),
+        });
+      } catch (directError) {
+        directDelivery.failed += 1;
+        const reason = directError.message || 'Direct push delivery failed';
+        await Notification.updateOne(
+          { _id: notification._id },
+          { status: 'failed', lastError: reason }
+        );
+
+        retryJobs.push({
+          notificationId: String(notification._id),
+          schoolId,
+          parentId: String(notification.parentId),
+        });
       }
-
-      directDelivery.failed += 1;
-      const reason = delivery.reason || 'Push delivery failed';
-      console.warn(`[PUSH_FAILED] notificationId=${notification._id} parentId=${notification.parentId} reason=${reason}`);
-      await Notification.updateOne(
-        { _id: notification._id },
-        { status: 'failed', lastError: reason }
-      );
-
-      retryJobs.push({
-        notificationId: String(notification._id),
-        schoolId,
-        parentId: String(notification.parentId),
-      });
-    } catch (directError) {
-      directDelivery.failed += 1;
-      const reason = directError.message || 'Direct push delivery failed';
-      await Notification.updateOne(
-        { _id: notification._id },
-        { status: 'failed', lastError: reason }
-      );
-
-      retryJobs.push({
-        notificationId: String(notification._id),
-        schoolId,
-        parentId: String(notification.parentId),
-      });
     }
-  }
 
-  let queueResult = { queued: true, reason: 'all_delivered_direct', count: 0 };
-  if (retryJobs.length) {
-    try {
-      queueResult = await withTimeout(
-        enqueueNotificationJobs(retryJobs),
-        process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
-        'Notification queue timeout'
-      );
-    } catch (queueError) {
-      queueResult = {
-        queued: false,
-        reason: queueError.message || 'enqueue_failed',
-        count: 0,
-      };
+    let queueResult = { queued: true, reason: 'all_delivered_direct', count: 0 };
+    if (retryJobs.length) {
+      try {
+        queueResult = await withTimeout(
+          enqueueNotificationJobs(retryJobs),
+          process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
+          'Notification queue timeout'
+        );
+      } catch (queueError) {
+        queueResult = {
+          queued: false,
+          reason: queueError.message || 'enqueue_failed',
+          count: 0,
+        };
+      }
     }
-  }
 
-  return {
-    notificationsCreated: notifications.length,
-    tokensFound,
-    queued: queueResult.queued,
-    queuedCount: queueResult.count || 0,
-    queueReason: queueResult.reason || null,
-    directAttempted: directDelivery.attempted,
-    directDelivered: directDelivery.delivered,
-    directFailed: directDelivery.failed,
-  };
+    return {
+      notificationsCreated: notifications.length,
+      tokensFound,
+      queued: queueResult.queued,
+      queuedCount: queueResult.count || 0,
+      queueReason: queueResult.reason || null,
+      directAttempted: directDelivery.attempted,
+      directDelivered: directDelivery.delivered,
+      directFailed: directDelivery.failed,
+    };
+  });
 }
 
 function firstName(name) {
   return String(name || '').trim().split(/\s+/)[0] || 'El alumno';
 }
 
-async function queueLowBalanceAlertNotification({ schoolId, student, balance, threshold }) {
-  if (!student?._id) {
-    return { notificationsCreated: 0, tokensFound: 0 };
+function summarizeNotificationResults(results = []) {
+  return results.reduce((summary, result) => ({
+    notificationsCreated: summary.notificationsCreated + Number(result?.notificationsCreated || 0),
+    tokensFound: summary.tokensFound + Number(result?.tokensFound || 0),
+    queuedCount: summary.queuedCount + Number(result?.queuedCount || 0),
+    directDelivered: summary.directDelivered + Number(result?.directDelivered || 0),
+    directFailed: summary.directFailed + Number(result?.directFailed || 0),
+  }), {
+    notificationsCreated: 0,
+    tokensFound: 0,
+    queuedCount: 0,
+    directDelivered: 0,
+    directFailed: 0,
+  });
+}
+
+function normalizeStudentNotificationRef(student) {
+  const rawId = student?._id || student?.studentId || student?.id || student;
+  const studentId = rawId ? String(rawId) : '';
+  if (!studentId) {
+    return null;
   }
 
-  const parentLinks = await ParentStudentLink.find({
-    schoolId,
-    studentId: student._id,
-    status: 'active',
-  }).select('parentId');
-
-  if (!parentLinks.length) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
-
-  const parentIds = parentLinks.map((link) => link.parentId);
-  const childName = firstName(student.name);
-  const normalizedThreshold = String(threshold || 'lt20');
-
-  const messageByThreshold = {
-    lt20: {
-      title: `A ${childName} le quedan menos de $20,000`,
-      body: `${childName} tiene bajo saldo y se puede quedar sin merendar. Recarga cuanto antes.`,
-    },
-    lt10: {
-      title: `Ultimo aviso de saldo para ${childName}`,
-      body: `Ultimo aviso! ${childName} esta a punto de quedarse sin saldo. Recarga AHORA!`,
-    },
+  return {
+    ...((student && typeof student === 'object') ? student : {}),
+    studentId,
   };
+}
 
-  const message = messageByThreshold[normalizedThreshold] || messageByThreshold.lt20;
+async function queueStudentParentNotification({ schoolId, studentId, title, body, payload = {} }) {
+  return runWithSchoolContext(schoolId, async () => {
+    if (!studentId) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
 
-  return queueNotificationsForParents({
-    schoolId,
-    parentIds,
-    studentId: student._id,
-    title: message.title,
-    body: message.body,
-    payload: {
-      type: 'wallet.low_balance',
+    const parentLinks = await ParentStudentLink.find({
+      schoolId,
+      studentId,
+      status: 'active',
+    }).select('parentId').lean();
+
+    const parentIds = [...new Set(parentLinks.map((link) => String(link.parentId || '')).filter(Boolean))];
+    if (!parentIds.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds,
+      studentId,
+      title,
+      body,
+      payload: {
+        studentId,
+        ...payload,
+      },
+    });
+  });
+}
+
+async function queueStudentParentNotifications({ schoolId, students = [], buildNotification }) {
+  return runWithSchoolContext(schoolId, async () => {
+    if (typeof buildNotification !== 'function') {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const uniqueStudents = [];
+    const seenStudentIds = new Set();
+    for (const item of students) {
+      const normalized = normalizeStudentNotificationRef(item);
+      if (!normalized || seenStudentIds.has(normalized.studentId)) {
+        continue;
+      }
+      seenStudentIds.add(normalized.studentId);
+      uniqueStudents.push(normalized);
+    }
+
+    if (!uniqueStudents.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const links = await ParentStudentLink.find({
+      schoolId,
+      studentId: { $in: uniqueStudents.map((student) => student.studentId) },
+      status: 'active',
+    }).select('studentId parentId').lean();
+
+    const parentIdsByStudentId = new Map();
+    for (const link of links) {
+      const key = String(link.studentId || '');
+      const parentId = String(link.parentId || '');
+      if (!key || !parentId) {
+        continue;
+      }
+      const parentIds = parentIdsByStudentId.get(key) || new Set();
+      parentIds.add(parentId);
+      parentIdsByStudentId.set(key, parentIds);
+    }
+
+    const results = [];
+    for (const student of uniqueStudents) {
+      const parentIds = [...(parentIdsByStudentId.get(student.studentId) || [])];
+      if (!parentIds.length) {
+        continue;
+      }
+
+      const notification = buildNotification(student) || {};
+      if (!notification.title || !notification.body) {
+        continue;
+      }
+
+      results.push(await queueNotificationsForParents({
+        schoolId,
+        parentIds,
+        studentId: student.studentId,
+        title: notification.title,
+        body: notification.body,
+        payload: {
+          studentId: student.studentId,
+          ...(notification.payload || {}),
+        },
+      }));
+    }
+
+    return summarizeNotificationResults(results);
+  });
+}
+
+async function queueLowBalanceAlertNotification({ schoolId, student, balance, threshold }) {
+  return runWithSchoolContext(schoolId, async () => {
+    if (!student?._id) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const parentLinks = await ParentStudentLink.find({
+      schoolId,
       studentId: student._id,
-      threshold: normalizedThreshold,
-      balance,
-    },
+      status: 'active',
+    }).select('parentId');
+
+    if (!parentLinks.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const parentIds = parentLinks.map((link) => link.parentId);
+    const childName = firstName(student.name);
+    const normalizedThreshold = String(threshold || 'lt20');
+
+    const messageByThreshold = {
+      lt20: {
+        title: `A ${childName} le quedan menos de $20,000`,
+        body: `${childName} tiene bajo saldo y se puede quedar sin merendar. Recarga cuanto antes.`,
+      },
+      lt10: {
+        title: `Ultimo aviso de saldo para ${childName}`,
+        body: `Ultimo aviso! ${childName} esta a punto de quedarse sin saldo. Recarga AHORA!`,
+      },
+    };
+
+    const message = messageByThreshold[normalizedThreshold] || messageByThreshold.lt20;
+
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds,
+      studentId: student._id,
+      title: message.title,
+      body: message.body,
+      payload: {
+        type: 'wallet.low_balance',
+        studentId: student._id,
+        threshold: normalizedThreshold,
+        balance,
+      },
+    });
   });
 }
 
 async function queueAutoDebitRechargeNotification({ schoolId, studentId, amount, newBalance, method = '' }) {
-  if (!studentId) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
+  return runWithSchoolContext(schoolId, async () => {
+    if (!studentId) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
 
-  const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('name').lean();
-  if (!student) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('name').lean();
+    if (!student) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
 
-  const parentLinks = await ParentStudentLink.find({
-    schoolId,
-    studentId,
-    status: 'active',
-  }).select('parentId');
-
-  if (!parentLinks.length) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
-
-  const parentIds = parentLinks.map((link) => link.parentId);
-  const childName = firstName(student.name);
-  const rechargeAmount = Number(amount || 0);
-
-  return queueNotificationsForParents({
-    schoolId,
-    parentIds,
-    studentId,
-    title: 'Recarga exitosa!',
-    body: `se han acreditado $${formatCurrency(rechargeAmount)} a ${childName}.`,
-    payload: {
-      type: 'wallet.recharge',
+    const parentLinks = await ParentStudentLink.find({
+      schoolId,
       studentId,
-      amount: rechargeAmount,
-      balance: newBalance,
-      method,
-    },
+      status: 'active',
+    }).select('parentId');
+
+    if (!parentLinks.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const parentIds = parentLinks.map((link) => link.parentId);
+    const childName = firstName(student.name);
+    const rechargeAmount = Number(amount || 0);
+
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds,
+      studentId,
+      title: 'Recarga exitosa!',
+      body: `se han acreditado $${formatCurrency(rechargeAmount)} a ${childName}.`,
+      payload: {
+        type: 'wallet.recharge',
+        studentId,
+        amount: rechargeAmount,
+        balance: newBalance,
+        method,
+      },
+    });
   });
 }
 
@@ -302,28 +439,30 @@ async function queueTutorCommentNotification({
   observations,
   date,
 }) {
-  if (!parentId || !String(observations || '').trim()) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
+  return runWithSchoolContext(schoolId, async () => {
+    if (!parentId || !String(observations || '').trim()) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
 
-  const normalizedChildName = firstName(childName || 'Tu hijo');
-  const comment = String(observations || '').trim();
-  const who = String(tutorName || '').trim();
+    const normalizedChildName = firstName(childName || 'Tu hijo');
+    const comment = String(observations || '').trim();
+    const who = String(tutorName || '').trim();
 
-  return queueNotificationsForParents({
-    schoolId,
-    parentIds: [parentId],
-    studentId,
-    title: 'Nuevo comentario del Tutor de alimentacion',
-    body: `${normalizedChildName}: ${comment}${who ? ` (Tutor: ${who})` : ''}`,
-    payload: {
-      type: 'meriendas.tutor_comment',
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds: [parentId],
       studentId,
-      childName: normalizedChildName,
-      comment,
-      date: String(date || ''),
-      tutorName: who,
-    },
+      title: 'Nuevo comentario del Tutor de alimentacion',
+      body: `${normalizedChildName}: ${comment}${who ? ` (Tutor: ${who})` : ''}`,
+      payload: {
+        type: 'meriendas.tutor_comment',
+        studentId,
+        childName: normalizedChildName,
+        comment,
+        date: String(date || ''),
+        tutorName: who,
+      },
+    });
   });
 }
 
@@ -333,36 +472,40 @@ async function queueApprovalPendingNotificationForAdmins({
   body,
   payload = {},
 }) {
-  const admins = await User.find({
-    schoolId,
-    role: 'admin',
-    status: 'active',
-    deletedAt: null,
-  })
-    .select('_id')
-    .lean();
+  return runWithSchoolContext(schoolId, async () => {
+    const admins = await User.find({
+      schoolId,
+      role: 'admin',
+      status: 'active',
+      deletedAt: null,
+    })
+      .select('_id')
+      .lean();
 
-  const adminIds = admins.map((admin) => admin._id).filter(Boolean);
-  if (!adminIds.length) {
-    return { notificationsCreated: 0, tokensFound: 0 };
-  }
+    const adminIds = admins.map((admin) => admin._id).filter(Boolean);
+    if (!adminIds.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
 
-  return queueNotificationsForParents({
-    schoolId,
-    parentIds: adminIds,
-    title,
-    body,
-    payload: {
-      url: '/admin',
-      ...payload,
-      audience: 'admin',
-    },
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds: adminIds,
+      title,
+      body,
+      payload: {
+        url: '/admin',
+        ...payload,
+        audience: 'admin',
+      },
+    });
   });
 }
 
 module.exports = {
   queueOrderCreatedNotifications,
   queueNotificationsForParents,
+  queueStudentParentNotification,
+  queueStudentParentNotifications,
   queueLowBalanceAlertNotification,
   queueAutoDebitRechargeNotification,
   queueTutorCommentNotification,

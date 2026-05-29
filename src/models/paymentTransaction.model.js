@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const paymentTransactionSchema = new mongoose.Schema(
   {
@@ -40,4 +40,4 @@ paymentTransactionSchema.index(
   }
 );
 
-module.exports = mongoose.model('PaymentTransaction', paymentTransactionSchema);
+module.exports = registerSchoolScopedModel('PaymentTransaction', paymentTransactionSchema);

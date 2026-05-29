@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const sanitizeImageLikeUrl = (value) => {
   const normalized = String(value || '').trim();
@@ -54,4 +54,4 @@ categorySchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function san
   next();
 });
 
-module.exports = mongoose.model('Category', categorySchema);
+module.exports = registerSchoolScopedModel('Category', categorySchema);

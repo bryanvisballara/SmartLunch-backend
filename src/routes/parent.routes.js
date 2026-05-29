@@ -19,6 +19,19 @@ const User = require('../models/user.model');
 const Category = require('../models/category.model');
 const Product = require('../models/product.model');
 const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
+const AcademicCharge = require('../models/academicCharge.model');
+const AcademicChargePayment = require('../models/academicChargePayment.model');
+const AcademicCommunication = require('../models/academicCommunication.model');
+const AcademicCalendarAssignment = require('../models/academicCalendarAssignment.model');
+const CampusCourse = require('../models/campusCourse.model');
+const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
+const CampusPost = require('../models/campusPost.model');
+const AcademicStructure = require('../models/academicStructure.model');
+const StudentBillingProfile = require('../models/studentBillingProfile.model');
+const CampusGradeEntry = require('../models/campusGradeEntry.model');
+const PsychologyCase = require('../models/psychologyCase.model');
+const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
+const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const {
   isEpaycoConfigured,
   createCardToken: createEpaycoCardToken,
@@ -32,12 +45,472 @@ const {
   uploadImageMiddleware,
   processAndStoreUploadedImage,
 } = require('../utils/imageUpload');
+const { queueNotificationsForParents } = require('../services/notification.service');
 
 const router = express.Router();
 const uploadParentStudentPhoto = uploadImageMiddleware.single('image');
+const ACADEMIC_CYCLE_START_MONTH = 7;
+const ACADEMIC_CYCLE_END_MONTH = 4;
+const DEFAULT_ACADEMIC_MONTHLY_DUE_DAY = 10;
+const DATASCHOOL_WHATSAPP_NUMBER = String(process.env.DATASCHOOL_WHATSAPP_NUMBER || '573007265868').replace(/\D/g, '');
+const DEFAULT_PARENT_APP_FEATURES = {
+  home: true,
+  finance: true,
+  academic: true,
+  cafeteria: true,
+  nursing: true,
+  wellbeing: true,
+  coexistence: true,
+  transport: true,
+};
 
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function formatAcademicCurrency(value) {
+  return Number(value || 0).toLocaleString('es-CO');
+}
+
+function normalizeParentAppFeatures(rawFeatures = {}) {
+  return Object.keys(DEFAULT_PARENT_APP_FEATURES).reduce((features, key) => {
+    features[key] = rawFeatures[key] === undefined ? DEFAULT_PARENT_APP_FEATURES[key] : Boolean(rawFeatures[key]);
+    return features;
+  }, {});
+}
+
+function serializeParentPsychologyCase(item = {}) {
+  const rawCase = typeof item?.toObject === 'function' ? item.toObject() : item;
+  const student = rawCase.studentId && typeof rawCase.studentId === 'object' ? rawCase.studentId : null;
+  const notes = Array.isArray(rawCase.notes)
+    ? rawCase.notes
+        .filter((note) => ['family', 'shared_all'].includes(normalizeText(note.visibility)))
+        .map((note) => ({
+          id: String(note._id || ''),
+          visibility: normalizeText(note.visibility) || 'private',
+          content: normalizeText(note.content),
+          recommendations: normalizeText(note.recommendations),
+          createdAt: note.createdAt || null,
+        }))
+    : [];
+
+  return {
+    id: String(rawCase._id || ''),
+    studentId: String(student?._id || rawCase.studentId || ''),
+    student: student ? { id: String(student._id), name: normalizeText(student.name) } : null,
+    title: normalizeText(rawCase.title) || 'Seguimiento de bienestar',
+    caseType: normalizeText(rawCase.caseType) || 'other',
+    priority: normalizeText(rawCase.priority) || 'medium',
+    status: normalizeText(rawCase.status) || 'open',
+    notes,
+    createdAt: rawCase.createdAt || null,
+    updatedAt: rawCase.updatedAt || null,
+  };
+}
+
+function serializeParentCoexistenceObservation(item = {}) {
+  const rawObservation = typeof item?.toObject === 'function' ? item.toObject() : item;
+  const student = rawObservation.studentId && typeof rawObservation.studentId === 'object' ? rawObservation.studentId : null;
+
+  return {
+    id: String(rawObservation._id || ''),
+    studentId: String(student?._id || rawObservation.studentId || ''),
+    student: student ? { id: String(student._id), name: normalizeText(student.name) } : null,
+    teacherName: normalizeText(rawObservation.teacherName),
+    courseTitle: normalizeText(rawObservation.courseTitle),
+    subject: normalizeText(rawObservation.subject),
+    studentGradeKey: normalizeText(rawObservation.studentGradeKey),
+    studentName: normalizeText(rawObservation.studentName || student?.name),
+    studentSchoolCode: normalizeText(rawObservation.studentSchoolCode),
+    studentGrade: normalizeText(rawObservation.studentGrade),
+    studentCourse: normalizeText(rawObservation.studentCourse),
+    observation: normalizeText(rawObservation.observation),
+    status: normalizeText(rawObservation.status) || 'submitted',
+    submittedAt: rawObservation.submittedAt || rawObservation.createdAt || null,
+    createdAt: rawObservation.createdAt || null,
+    updatedAt: rawObservation.updatedAt || null,
+  };
+}
+
+function buildStoredGradeComponentKey(componentKey, subcomponentKey = '') {
+  const normalizedComponentKey = normalizeText(componentKey);
+  const normalizedSubcomponentKey = normalizeText(subcomponentKey);
+  return normalizedSubcomponentKey ? `${normalizedComponentKey}::${normalizedSubcomponentKey}` : normalizedComponentKey;
+}
+
+function defaultParentGradingComponents() {
+  return [];
+}
+
+function defaultParentAcademicPeriods() {
+  return [
+    { key: 'period_1', name: 'Periodo 1', weight: 100, order: 10, gradingComponents: defaultParentGradingComponents() },
+  ];
+}
+
+function getParentCoursePeriodComponents(course, period) {
+  if (Array.isArray(period?.gradingComponents) && period.gradingComponents.length > 0) {
+    return period.gradingComponents;
+  }
+
+  if (Array.isArray(course?.gradingComponents) && course.gradingComponents.length > 0) {
+    return course.gradingComponents;
+  }
+
+  return defaultParentGradingComponents();
+}
+
+function getParentCoursePeriods(course) {
+  const periods = Array.isArray(course?.academicPeriods) && course.academicPeriods.length > 0
+    ? course.academicPeriods
+    : defaultParentAcademicPeriods();
+
+  return periods.map((period) => ({
+    ...period,
+    gradingComponents: getParentCoursePeriodComponents(course, period),
+  }));
+}
+
+function normalizeParentSubjectKey(course) {
+  return normalizeAiText(course?.subject || course?.title || String(course?._id || '')) || String(course?._id || '');
+}
+
+function normalizeParentSubjectValue(value) {
+  return normalizeAiText(value).replace(/[^a-z0-9]+/g, '');
+}
+
+function hasParentGradebookStructure(course) {
+  return getParentCoursePeriods(course).some((period) => Array.isArray(period.gradingComponents) && period.gradingComponents.length > 0);
+}
+
+function dedupeParentGradebookCourses(courses = [], gradeEntryCourseIds = new Set(), courseValues = []) {
+  const courseValueSet = new Set((Array.isArray(courseValues) ? courseValues : []).map((item) => normalizeAiText(item)).filter(Boolean));
+  const bestBySubject = new Map();
+
+  (Array.isArray(courses) ? courses : []).forEach((course) => {
+    if (!course?._id) {
+      return;
+    }
+
+    const subjectKey = normalizeParentSubjectKey(course);
+    const courseId = String(course._id);
+    const sectionKey = normalizeAiText(course.section);
+    const titleKey = normalizeAiText(course.title);
+    const score = (gradeEntryCourseIds.has(courseId) ? 1000 : 0)
+      + (courseValueSet.has(sectionKey) || courseValueSet.has(titleKey) ? 100 : 0)
+      + (hasParentGradebookStructure(course) ? 10 : 0)
+      + (normalizeText(course.subject) ? 1 : 0);
+    const current = bestBySubject.get(subjectKey);
+
+    if (!current || score > current.score) {
+      bestBySubject.set(subjectKey, { course, score });
+    }
+  });
+
+  return [...bestBySubject.values()]
+    .map((item) => item.course)
+    .sort((left, right) => normalizeText(left.subject || left.title).localeCompare(normalizeText(right.subject || right.title)));
+}
+
+function buildParentCourseKeyValues(gradeValues = [], courseValues = []) {
+  return new Set([
+    ...(Array.isArray(courseValues) ? courseValues : []),
+    ...(Array.isArray(gradeValues) ? gradeValues : []),
+  ].map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
+}
+
+function buildParentAcademicStructurePeriods(academicStructure) {
+  const periods = Array.isArray(academicStructure?.academicPeriods) ? academicStructure.academicPeriods : [];
+  return periods.length
+    ? periods.map((period, index) => ({
+      key: normalizeText(period?.key) || `period_${index + 1}`,
+      name: normalizeText(period?.name) || `Periodo ${index + 1}`,
+      weight: Number(period?.weight || 0),
+      order: Number(period?.order || index + 1),
+      startDate: period?.startDate || null,
+      endDate: period?.endDate || null,
+      gradingComponents: [],
+    }))
+    : defaultParentAcademicPeriods();
+}
+
+function getParentMappedSubjectKeys({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [] }) {
+  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
+    .map((item) => normalizeText(item).toLowerCase())
+    .filter(Boolean));
+  const normalizedCourseValues = buildParentCourseKeyValues(gradeValues, [...(courseValues || []), ...(courseTitleValues || [])]);
+  const subjectKeys = new Set();
+  const addSubjectKey = (value) => {
+    const subjectKey = normalizeText(value);
+    if (subjectKey) {
+      subjectKeys.add(subjectKey);
+    }
+  };
+
+  (Array.isArray(academicStructure?.subjects) ? academicStructure.subjects : []).forEach((subject) => {
+    if (normalizeText(subject?.status || 'active') === 'archived') {
+      return;
+    }
+
+    const subjectGradeKeys = (Array.isArray(subject?.gradeKeys) ? subject.gradeKeys : [])
+      .map((item) => normalizeText(item).toLowerCase())
+      .filter(Boolean);
+    if (subjectGradeKeys.some((gradeKey) => normalizedGradeValues.has(gradeKey))) {
+      addSubjectKey(subject?.key);
+    }
+  });
+
+  (Array.isArray(academicStructure?.subjectLoadTemplates) ? academicStructure.subjectLoadTemplates : []).forEach((template) => {
+    const templateGradeKeys = (Array.isArray(template?.gradeKeys) ? template.gradeKeys : [])
+      .map((item) => normalizeText(item).toLowerCase())
+      .filter(Boolean);
+    if (templateGradeKeys.some((gradeKey) => normalizedGradeValues.has(gradeKey))) {
+      addSubjectKey(template?.subjectKey);
+    }
+  });
+
+  (Array.isArray(academicStructure?.gradeSchedules) ? academicStructure.gradeSchedules : []).forEach((schedule) => {
+    const scheduleGradeKey = normalizeText(schedule?.gradeKey).toLowerCase();
+    if (!normalizedGradeValues.has(scheduleGradeKey)) {
+      return;
+    }
+
+    const scheduleCourseKey = normalizeText(schedule?.courseKey).toLowerCase();
+    if (scheduleCourseKey && !normalizedCourseValues.has(scheduleCourseKey)) {
+      return;
+    }
+
+    (Array.isArray(schedule?.subjectLoads) ? schedule.subjectLoads : []).forEach((load) => addSubjectKey(load?.subjectKey));
+    (Array.isArray(schedule?.weeklySchedule) ? schedule.weeklySchedule : []).forEach((entry) => {
+      if (normalizeText(entry?.entryType || 'class') !== 'break') {
+        addSubjectKey(entry?.subjectKey);
+      }
+    });
+  });
+
+  return subjectKeys;
+}
+
+function buildParentSubjectTeacherAssignments({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [] }) {
+  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
+    .map((item) => normalizeText(item).toLowerCase())
+    .filter(Boolean));
+  const normalizedCourseValues = buildParentCourseKeyValues(gradeValues, [...(courseValues || []), ...(courseTitleValues || [])]);
+  const teacherBySubjectKey = new Map();
+  const assignTeacher = (subjectKey, teacherUserId) => {
+    const normalizedSubjectKey = normalizeText(subjectKey);
+    const normalizedTeacherUserId = normalizeText(teacherUserId);
+    if (normalizedSubjectKey && normalizedTeacherUserId && !teacherBySubjectKey.has(normalizedSubjectKey)) {
+      teacherBySubjectKey.set(normalizedSubjectKey, normalizedTeacherUserId);
+    }
+  };
+
+  (Array.isArray(academicStructure?.gradeSchedules) ? academicStructure.gradeSchedules : []).forEach((schedule) => {
+    const scheduleGradeKey = normalizeText(schedule?.gradeKey).toLowerCase();
+    if (!normalizedGradeValues.has(scheduleGradeKey)) {
+      return;
+    }
+
+    const scheduleCourseKey = normalizeText(schedule?.courseKey).toLowerCase();
+    if (scheduleCourseKey && !normalizedCourseValues.has(scheduleCourseKey)) {
+      return;
+    }
+
+    (Array.isArray(schedule?.subjectLoads) ? schedule.subjectLoads : []).forEach((load) => {
+      assignTeacher(load?.subjectKey, load?.teacherUserId);
+    });
+    (Array.isArray(schedule?.weeklySchedule) ? schedule.weeklySchedule : []).forEach((entry) => {
+      if (normalizeText(entry?.entryType || 'class') !== 'break') {
+        assignTeacher(entry?.subjectKey, entry?.teacherUserId);
+      }
+    });
+  });
+
+  (Array.isArray(academicStructure?.subjectLoadTemplates) ? academicStructure.subjectLoadTemplates : []).forEach((template) => {
+    const templateGradeKeys = (Array.isArray(template?.gradeKeys) ? template.gradeKeys : [])
+      .map((item) => normalizeText(item).toLowerCase())
+      .filter(Boolean);
+    if (templateGradeKeys.some((gradeKey) => normalizedGradeValues.has(gradeKey))) {
+      assignTeacher(template?.subjectKey, template?.teacherUserId);
+    }
+  });
+
+  return teacherBySubjectKey;
+}
+
+function findParentCourseForSubject({ subject, courses = [], gradeEntryCourseIds = new Set(), courseValues = [], courseTitleValues = [] }) {
+  const subjectKey = normalizeText(subject?.key);
+  const subjectLabel = normalizeText(subject?.label || subject?.key);
+  const subjectCandidates = new Set([
+    normalizeParentSubjectValue(subjectKey),
+    normalizeParentSubjectValue(subjectLabel),
+  ].filter(Boolean));
+  const courseValueSet = new Set([
+    ...(Array.isArray(courseValues) ? courseValues : []),
+    ...(Array.isArray(courseTitleValues) ? courseTitleValues : []),
+  ].map((item) => normalizeAiText(item)).filter(Boolean));
+
+  return (Array.isArray(courses) ? courses : [])
+    .filter((course) => {
+      const courseSubjectCandidates = [course?.subject, course?.title].map(normalizeParentSubjectValue).filter(Boolean);
+      return courseSubjectCandidates.some((candidate) => subjectCandidates.has(candidate));
+    })
+    .map((course) => {
+      const courseId = String(course?._id || '');
+      const sectionKey = normalizeAiText(course?.section);
+      const titleKey = normalizeAiText(course?.title);
+      return {
+        course,
+        score: (gradeEntryCourseIds.has(courseId) ? 1000 : 0)
+          + (courseValueSet.has(sectionKey) || courseValueSet.has(titleKey) ? 100 : 0)
+          + (hasParentGradebookStructure(course) ? 10 : 0),
+      };
+    })
+    .sort((left, right) => right.score - left.score)[0]?.course || null;
+}
+
+function buildParentGradebookCoursesFromStructure({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [], courses = [], gradeEntryCourseIds = new Set() }) {
+  const subjectKeys = getParentMappedSubjectKeys({ academicStructure, gradeValues, courseValues, courseTitleValues });
+  const teacherBySubjectKey = buildParentSubjectTeacherAssignments({ academicStructure, gradeValues, courseValues, courseTitleValues });
+  const subjectsByKey = new Map((Array.isArray(academicStructure?.subjects) ? academicStructure.subjects : [])
+    .map((subject) => [normalizeText(subject?.key), subject]));
+  const periods = buildParentAcademicStructurePeriods(academicStructure);
+  const primaryGradeKey = (Array.isArray(gradeValues) ? gradeValues : []).map(normalizeText).find(Boolean) || '';
+  const primaryCourseKey = (Array.isArray(courseValues) ? courseValues : []).map(normalizeText).find(Boolean) || '';
+  const mappedCourses = [];
+
+  subjectKeys.forEach((subjectKey) => {
+    const subject = subjectsByKey.get(subjectKey) || { key: subjectKey, label: subjectKey };
+    const matchedCourse = findParentCourseForSubject({ subject, courses, gradeEntryCourseIds, courseValues, courseTitleValues });
+    if (matchedCourse) {
+      mappedCourses.push({
+        ...matchedCourse,
+        subject: normalizeText(matchedCourse.subject) || normalizeText(subject.label || subject.key),
+        teacherUserId: normalizeText(matchedCourse.teacherUserId) || teacherBySubjectKey.get(subjectKey) || '',
+        academicPeriods: getParentCoursePeriods(matchedCourse),
+      });
+      return;
+    }
+
+    const subjectLabel = normalizeText(subject.label || subject.key) || 'Materia';
+    mappedCourses.push({
+      _id: `academic-structure:${primaryGradeKey || 'grade'}:${primaryCourseKey || 'course'}:${subjectKey}`,
+      title: subjectLabel,
+      subject: subjectLabel,
+      gradeLevel: primaryGradeKey,
+      section: primaryCourseKey,
+      studentGradeKey: primaryGradeKey,
+      teacherUserId: teacherBySubjectKey.get(subjectKey) || '',
+      academicPeriods: periods,
+      gradingComponents: [],
+      status: 'active',
+      isVirtualAcademicStructureCourse: true,
+    });
+  });
+
+  if (mappedCourses.length > 0) {
+    return dedupeParentGradebookCourses(mappedCourses, gradeEntryCourseIds, courseValues);
+  }
+
+  return dedupeParentGradebookCourses(courses, gradeEntryCourseIds, courseValues);
+}
+
+const DEFAULT_PARENT_PERFORMANCE_LEVELS = [
+  { key: 'deficiente', label: 'Deficiente', minScore: 0, maxScore: 59, color: '#ef4444', order: 10 },
+  { key: 'insuficiente', label: 'Insuficiente', minScore: 60, maxScore: 69, color: '#f97316', order: 20 },
+  { key: 'aceptable', label: 'Aceptable', minScore: 70, maxScore: 79, color: '#eab308', order: 30 },
+  { key: 'bueno', label: 'Bueno', minScore: 80, maxScore: 89, color: '#65a30d', order: 40 },
+  { key: 'sobresaliente', label: 'Sobresaliente', minScore: 90, maxScore: 95, color: '#15803d', order: 50 },
+  { key: 'excelente', label: 'Excelente', minScore: 96, maxScore: 100, color: '#166534', order: 60 },
+];
+
+function normalizeParentGradingScale(rawScale = {}) {
+  const sourceLevels = Array.isArray(rawScale?.performanceLevels) && rawScale.performanceLevels.length
+    ? rawScale.performanceLevels
+    : DEFAULT_PARENT_PERFORMANCE_LEVELS;
+
+  return {
+    minScore: Number(rawScale?.minScore ?? 0),
+    maxScore: Number(rawScale?.maxScore ?? 100),
+    passingScore: Number(rawScale?.passingScore ?? 70),
+    performanceLevels: sourceLevels
+      .map((level, index) => ({
+        key: normalizeText(level?.key) || `performance_level_${index + 1}`,
+        label: normalizeText(level?.label) || `Nivel ${index + 1}`,
+        minScore: Number(level?.minScore ?? 0),
+        maxScore: Number(level?.maxScore ?? 100),
+        color: normalizeText(level?.color) || DEFAULT_PARENT_PERFORMANCE_LEVELS[index]?.color || '#174a68',
+        order: Number(level?.order || (index + 1) * 10),
+      }))
+      .sort((left, right) => Number(left.minScore || 0) - Number(right.minScore || 0) || Number(left.order || 0) - Number(right.order || 0)),
+  };
+}
+
+function resolveParentGradingScaleForGrade(academicStructure, gradeValues = []) {
+  const defaultScale = normalizeParentGradingScale(academicStructure?.gradingScale || {});
+  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean));
+  const matchedGrade = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+    .find((grade) => normalizedGradeValues.has(normalizeText(grade?.key).toLowerCase()) || normalizedGradeValues.has(normalizeText(grade?.label).toLowerCase()));
+  const levelKey = normalizeText(matchedGrade?.levelKey);
+  const levelScale = (Array.isArray(academicStructure?.gradingScalesByLevel) ? academicStructure.gradingScalesByLevel : [])
+    .find((scale) => normalizeText(scale?.levelKey) === levelKey);
+
+  return levelScale ? normalizeParentGradingScale(levelScale) : defaultScale;
+}
+
+function resolveParentPerformanceLevel(score, gradingScale = {}) {
+  if (score === null || score === undefined || score === '') {
+    return null;
+  }
+
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return null;
+  }
+
+  return (Array.isArray(gradingScale?.performanceLevels) ? gradingScale.performanceLevels : [])
+    .find((level) => numericScore >= Number(level.minScore) && numericScore <= Number(level.maxScore)) || null;
+}
+
+function isParentVisibleScore(score, gradingScale = {}) {
+  if (score === null || score === undefined || score === '') {
+    return false;
+  }
+
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return false;
+  }
+
+  const minScore = Number.isFinite(Number(gradingScale?.minScore)) ? Number(gradingScale.minScore) : 0;
+  const maxScore = Number.isFinite(Number(gradingScale?.maxScore)) ? Number(gradingScale.maxScore) : 100;
+  return numericScore >= minScore && numericScore <= maxScore;
+}
+
+function calculateWeightedAverage(items, getWeight) {
+  let total = 0;
+  let gradedWeightTotal = 0;
+  let hasAnyValue = false;
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const currentValue = item?.score ?? item?.average;
+    if (currentValue === null || currentValue === undefined || currentValue === '') {
+      return;
+    }
+
+    hasAnyValue = true;
+    const weight = Number(getWeight(item) || 0);
+    gradedWeightTotal += weight;
+    total += Number(currentValue) * weight;
+  });
+
+  return hasAnyValue && gradedWeightTotal > 0 ? Number((total / gradedWeightTotal).toFixed(2)) : null;
+}
 
 function toObjectId(id) {
   if (!id || !mongoose.Types.ObjectId.isValid(String(id))) {
@@ -69,6 +542,43 @@ function currentYearMonth() {
   return `${year}-${month}`;
 }
 
+function formatDateLabel(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value));
+}
+
+function buildMonthKey(dateValue) {
+  const date = new Date(dateValue);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function parseYearMonth(value, fallbackDate = new Date()) {
+  const rawValue = normalizeText(value);
+  const match = rawValue.match(/^(\d{4})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const monthIndex = Number(match[2]) - 1;
+    if (year >= 2000 && monthIndex >= 0 && monthIndex <= 11) {
+      return new Date(year, monthIndex, 1);
+    }
+  }
+
+  return new Date(fallbackDate.getFullYear(), fallbackDate.getMonth(), 1);
+}
+
+function getMonthRange(value, fallbackDate = new Date()) {
+  const monthStart = parseYearMonth(value, fallbackDate);
+  return {
+    monthStart,
+    monthEnd: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1),
+    monthKey: buildMonthKey(monthStart),
+  };
+}
+
 function normalizeAiText(value) {
   return String(value || '')
     .normalize('NFD')
@@ -95,6 +605,485 @@ function formatDateLabelEs(dateValue) {
     month: 'long',
     year: 'numeric',
   }).format(dateValue);
+}
+
+function normalizeAcademicFeedMedia(mediaItems = []) {
+  if (!Array.isArray(mediaItems)) {
+    return [];
+  }
+
+  return mediaItems
+    .map((item, index) => {
+      const kind = String(item?.kind || '').trim().toLowerCase() === 'video' ? 'video' : 'image';
+      const src = kind === 'image'
+        ? normalizeStoredImageUrl(item?.src)
+        : String(item?.src || '').trim();
+
+      if (!src) {
+        return null;
+      }
+
+      return {
+        id: `${String(item?._id || 'media')}-${index + 1}`,
+        kind,
+        src,
+        thumbUrl: normalizeStoredImageUrl(item?.thumbUrl) || (kind === 'image' ? deriveThumbUrlFromImageUrl(src) : ''),
+        alt: String(item?.alt || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function getActorName(user = {}) {
+  return String(user.name || user.fullName || user.username || user.email || 'Acudiente').trim() || 'Acudiente';
+}
+
+function sameObjectId(left, right) {
+  return String(left || '') === String(right || '');
+}
+
+function normalizeAcademicFeedLike(like = {}) {
+  return {
+    userId: String(like.userId || ''),
+    name: String(like.name || 'Acudiente').trim() || 'Acudiente',
+    createdAt: like.createdAt || null,
+  };
+}
+
+function normalizeUniqueAcademicFeedLikes(rawLikes = []) {
+  const likesByUserId = new Map();
+  for (const like of Array.isArray(rawLikes) ? rawLikes : []) {
+    const normalizedLike = normalizeAcademicFeedLike(like);
+    if (!normalizedLike.userId || likesByUserId.has(normalizedLike.userId)) {
+      continue;
+    }
+    likesByUserId.set(normalizedLike.userId, normalizedLike);
+  }
+  return [...likesByUserId.values()];
+}
+
+function buildToggledAcademicFeedLikesExpression(likesExpression, userId, nextLike) {
+  return {
+    $let: {
+      vars: {
+        currentLikes: { $ifNull: [likesExpression, []] },
+      },
+      in: {
+        $cond: [
+          {
+            $in: [
+              userId,
+              { $map: { input: '$$currentLikes', as: 'like', in: '$$like.userId' } },
+            ],
+          },
+          {
+            $filter: {
+              input: '$$currentLikes',
+              as: 'like',
+              cond: { $ne: ['$$like.userId', userId] },
+            },
+          },
+          { $concatArrays: ['$$currentLikes', [nextLike]] },
+        ],
+      },
+    },
+  };
+}
+
+function serializeAcademicFeedComment(comment = {}, currentUserId = '') {
+  const likes = normalizeUniqueAcademicFeedLikes(comment.likes);
+  return {
+    id: String(comment._id || comment.id || ''),
+    userId: String(comment.userId || ''),
+    name: String(comment.name || 'Acudiente').trim() || 'Acudiente',
+    body: String(comment.body || '').trim(),
+    createdAt: comment.createdAt || null,
+    likedByMe: likes.some((like) => sameObjectId(like.userId, currentUserId)),
+    likesCount: likes.length,
+    likes,
+    canDelete: sameObjectId(comment.userId, currentUserId),
+  };
+}
+
+function isCourseTargetSubjectCandidate(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized) return false;
+  if (/^\d{1,2}[A-Z]?$/i.test(normalized)) return false;
+  if (/^(PREJARDIN|JARDIN|TRANSICION|PRIMARIA|SECUNDARIA|MEDIA)(:|\b)/i.test(normalized)) return false;
+  return true;
+}
+
+function buildAcademicFeedAuthorName(item = {}) {
+  const authorName = String(item.authorName || '').trim();
+  if (authorName) return authorName;
+
+  const createdByName = String(item.createdByName || '').trim();
+  const approvalMarker = /\s*[·-]\s*Aprobado desde secretar[ií]a\s*$/i;
+  if (!approvalMarker.test(createdByName)) {
+    return createdByName || 'Secretaría académica';
+  }
+
+  const teacherName = createdByName.replace(approvalMarker, '').trim() || 'Docente';
+  const subjectLabel = (Array.isArray(item.courseTargets) ? item.courseTargets : [])
+    .map((target) => String(target || '').trim())
+    .find(isCourseTargetSubjectCandidate);
+
+  return subjectLabel ? `${teacherName} - ${subjectLabel.split(' - ')[0].trim()}` : teacherName;
+}
+
+function serializeAcademicFeedItem(item = {}, currentUserId = '') {
+  const likes = normalizeUniqueAcademicFeedLikes(item.likes);
+  const comments = Array.isArray(item.comments)
+    ? item.comments.map((comment) => serializeAcademicFeedComment(comment, currentUserId)).filter((comment) => comment.id && comment.body)
+    : [];
+
+  return {
+    ...item,
+    authorName: buildAcademicFeedAuthorName(item),
+    media: normalizeAcademicFeedMedia(item.media),
+    publishedAtLabel: item.sentAt ? formatDateLabelEs(item.sentAt) : formatDateLabelEs(item.createdAt),
+    likedByMe: likes.some((like) => sameObjectId(like.userId, currentUserId)),
+    likesCount: likes.length,
+    likes,
+    commentsCount: comments.length,
+    comments,
+  };
+}
+
+async function findParentAcademicCommunication({ schoolId, communicationId, parentUserId }) {
+  const communicationObjectId = toObjectId(communicationId);
+  if (!communicationObjectId || !parentUserId) {
+    return null;
+  }
+
+  return AcademicCommunication.findOne({
+    _id: communicationObjectId,
+    schoolId,
+    recipientParentIds: parentUserId,
+  });
+}
+
+function getApplicableAcademicBenefitRule(benefitRules = [], referenceDate = new Date()) {
+  const currentDay = new Date(referenceDate).getDate();
+  return (Array.isArray(benefitRules) ? benefitRules : []).find((rule) => currentDay >= Number(rule?.startDay || 0) && currentDay <= Number(rule?.endDay || 0)) || null;
+}
+
+function normalizeAcademicAdditionalDiscountPercent(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function normalizeBenefitFixedAmountsByGrade(rawAmounts = {}) {
+  const entries = rawAmounts instanceof Map ? Array.from(rawAmounts.entries()) : Object.entries(rawAmounts || {});
+  return entries.reduce((accumulator, [grade, amount]) => {
+    const normalizedGrade = String(grade || '').trim().toLowerCase();
+    if (!normalizedGrade) {
+      return accumulator;
+    }
+
+    accumulator[normalizedGrade] = Math.max(0, Math.round(Number(amount || 0)));
+    return accumulator;
+  }, {});
+}
+
+function getFeeGradeAliases(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return [];
+  const aliases = new Set([normalized]);
+  const [, suffix] = normalized.split(':');
+  if (suffix) aliases.add(String(suffix || '').trim().toLowerCase());
+  return [...aliases].filter(Boolean);
+}
+
+function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
+  const amountsByGrade = normalizeBenefitFixedAmountsByGrade(rule.fixedAmountsByGrade || {});
+  const aliases = getFeeGradeAliases(grade);
+  for (const alias of aliases) {
+    if (Object.prototype.hasOwnProperty.call(amountsByGrade, alias)) {
+      return Math.max(0, Number(amountsByGrade[alias] || 0));
+    }
+  }
+
+  return 0;
+}
+
+function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = new Date()) {
+  const benefitRule = getApplicableAcademicBenefitRule(billingProfile?.benefitRules || [], referenceDate);
+  const isFixedBenefit = String(benefitRule?.discountType || '').trim().toLowerCase() === 'fixed';
+  const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
+  const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, billingProfile?.grade) : 0;
+  const additionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(billingProfile?.monthlyTuitionAdditionalDiscountPercent || 0);
+  const discountPercent = Math.min(100, baseDiscountPercent + additionalDiscountPercent);
+  const labels = [String(benefitRule?.label || '').trim(), String(billingProfile?.monthlyTuitionAdditionalDiscountLabel || '').trim()].filter(Boolean);
+
+  return {
+    discountPercent,
+    fixedDiscountAmount,
+    benefitLabel: labels.join(' + '),
+  };
+}
+
+function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
+  const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  const monthlyDiscountConfig = String(charge?.category || '') === 'monthly_tuition'
+    ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
+    : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' };
+  const discountPercent = monthlyDiscountConfig.discountPercent;
+  const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(monthlyDiscountConfig.fixedDiscountAmount || 0)));
+  const amountAfterFixedDiscount = Math.max(0, baseAmount - fixedDiscountAmount);
+  const effectiveAmount = discountPercent > 0 || fixedDiscountAmount > 0
+    ? Math.max(0, Math.round(amountAfterFixedDiscount * (1 - (discountPercent / 100))))
+    : baseAmount;
+
+  return {
+    baseAmount,
+    effectiveAmount,
+    discountPercent,
+    fixedDiscountAmount,
+    benefitLabel: monthlyDiscountConfig.benefitLabel,
+  };
+}
+
+function addMonthsLocal(dateValue, monthsToAdd) {
+  const date = new Date(dateValue);
+  const day = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + Number(monthsToAdd || 0));
+  date.setDate(Math.min(day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function resolveAcademicCycleRange(profile = {}, referenceDate = new Date()) {
+  const academicYear = normalizeText(profile.academicYear);
+  const yearMatch = academicYear.match(/(20\d{2})\D+(20\d{2})/);
+  if (yearMatch) {
+    return {
+      start: new Date(Number(yearMatch[1]), ACADEMIC_CYCLE_START_MONTH, 1),
+      end: new Date(Number(yearMatch[2]), ACADEMIC_CYCLE_END_MONTH, 31),
+    };
+  }
+
+  const singleYearMatch = academicYear.match(/(20\d{2})/);
+  if (singleYearMatch) {
+    const year = Number(singleYearMatch[1]);
+    const safeReferenceDate = new Date(referenceDate);
+    const startYear = safeReferenceDate.getMonth() < ACADEMIC_CYCLE_START_MONTH && year === safeReferenceDate.getFullYear()
+      ? year - 1
+      : year;
+    return {
+      start: new Date(startYear, ACADEMIC_CYCLE_START_MONTH, 1),
+      end: new Date(startYear + 1, ACADEMIC_CYCLE_END_MONTH, 31),
+    };
+  }
+
+  const safeReferenceDate = new Date(referenceDate);
+  const currentYear = safeReferenceDate.getFullYear();
+  const currentMonth = safeReferenceDate.getMonth();
+  const startYear = currentMonth >= ACADEMIC_CYCLE_START_MONTH ? currentYear : currentYear - 1;
+  return {
+    start: new Date(startYear, ACADEMIC_CYCLE_START_MONTH, 1),
+    end: new Date(startYear + 1, ACADEMIC_CYCLE_END_MONTH, 31),
+  };
+}
+
+function buildAcademicCycleMonthlyDueDates(profile = {}, referenceDate = new Date()) {
+  const { start, end } = resolveAcademicCycleRange(profile, referenceDate);
+  const dueDay = Math.min(28, Math.max(1, Number(profile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY)));
+  const entryDate = profile.entryDate ? startOfDayLocal(profile.entryDate) : null;
+  const effectiveStart = entryDate && entryDate > start ? new Date(entryDate.getFullYear(), entryDate.getMonth(), 1) : start;
+  const referenceMonthEnd = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
+  const effectiveEnd = referenceMonthEnd < end ? referenceMonthEnd : end;
+  const dueDates = [];
+
+  for (let cursor = new Date(effectiveStart.getFullYear(), effectiveStart.getMonth(), 1); cursor <= effectiveEnd; cursor = addMonthsLocal(cursor, 1)) {
+    dueDates.push(new Date(cursor.getFullYear(), cursor.getMonth(), dueDay));
+  }
+
+  return dueDates;
+}
+
+async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role, studentIds = [], billingProfiles = [], referenceDate = new Date() }) {
+  const linkedStudentIdSet = new Set(studentIds.map((item) => String(item)));
+  const profiles = (billingProfiles || []).filter((profile) => linkedStudentIdSet.has(String(profile.studentId)) && Number(profile.monthlyTuitionAmount || 0) > 0);
+
+  for (const profile of profiles) {
+    const dueDates = buildAcademicCycleMonthlyDueDates(profile, referenceDate);
+    for (const dueDate of dueDates) {
+      const monthKey = buildMonthKey(dueDate);
+      const existingCharge = await AcademicCharge.exists({
+        schoolId,
+        studentId: profile.studentId,
+        category: 'monthly_tuition',
+        monthKey,
+        status: { $ne: 'cancelled' },
+      });
+      if (existingCharge) {
+        continue;
+      }
+
+      const pricing = resolveAcademicChargeAmounts(
+        { category: 'monthly_tuition', amount: Number(profile.monthlyTuitionAmount || 0), originalAmount: Number(profile.monthlyTuitionAmount || 0) },
+        profile,
+        dueDate
+      );
+      if (pricing.effectiveAmount <= 0) {
+        continue;
+      }
+
+      await AcademicCharge.create({
+        schoolId,
+        createdByUserId: parentUserId,
+        createdByRole: role,
+        parentId: parentUserId,
+        studentId: profile.studentId,
+        billingProfileId: profile._id,
+        category: 'monthly_tuition',
+        concept: `Pensión ${formatDateLabel(dueDate)}`,
+        description: pricing.benefitLabel ? `Beneficio aplicado: ${pricing.benefitLabel}` : 'Cargo mensual generado por calendario académico.',
+        amount: pricing.effectiveAmount,
+        originalAmount: pricing.baseAmount,
+        dueDate,
+        monthKey,
+        audienceType: 'individual',
+        targetGrade: profile.grade,
+      });
+    }
+  }
+}
+
+function getAcademicChargeMonthsOverdue(charges = [], referenceDate = new Date()) {
+  const overdueMonthKeys = new Set((charges || [])
+    .filter((charge) => String(charge.category || '') === 'monthly_tuition')
+    .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()))
+    .filter((charge) => new Date(charge.dueDate) < startOfDayLocal(referenceDate))
+    .map((charge) => normalizeText(charge.monthKey) || buildMonthKey(charge.dueDate))
+    .filter(Boolean));
+
+  return overdueMonthKeys.size;
+}
+
+function buildDataSchoolWhatsappUrl({ studentName = '', amount = 0, overdueMonths = 0 } = {}) {
+  const message = `Hola DataSchool, necesito ayuda con la cartera academica${studentName ? ` de ${studentName}` : ''}. Tengo ${overdueMonths} meses vencidos y requiero orientacion para normalizar el pago.`;
+  return `https://wa.me/${DATASCHOOL_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+}
+
+function buildParentAcademicBillingSummaryByStudent({ charges = [], referenceDate = new Date() }) {
+  const grouped = new Map();
+  for (const charge of charges || []) {
+    const studentId = String(charge.studentId?._id || charge.studentId || '');
+    if (!studentId) continue;
+    if (!grouped.has(studentId)) {
+      grouped.set(studentId, []);
+    }
+    grouped.get(studentId).push(charge);
+  }
+
+  return [...grouped.entries()].map(([studentId, studentCharges]) => {
+    const pendingCharges = studentCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
+    const overdueMonths = getAcademicChargeMonthsOverdue(studentCharges, referenceDate);
+    const requiresDataSchoolContact = overdueMonths >= 3;
+    const concepts = pendingCharges.map((charge) => ({
+      _id: charge._id,
+      category: charge.category,
+      concept: charge.concept,
+      description: charge.description || '',
+      amount: Number(charge.amount || 0),
+      originalAmount: Number(charge.originalAmount || charge.amount || 0),
+      dueDate: charge.dueDate,
+      status: charge.status,
+      monthKey: charge.monthKey || '',
+    }));
+    const amount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
+    const studentName = normalizeText(pendingCharges[0]?.studentName || studentCharges[0]?.studentName) || 'Estudiante';
+
+    return {
+      studentId,
+      studentName,
+      amount,
+      pendingCount: concepts.length,
+      overdueMonths,
+      requiresDataSchoolContact,
+      dataSchoolWhatsappUrl: requiresDataSchoolContact ? buildDataSchoolWhatsappUrl({ studentName, amount, overdueMonths }) : '',
+      payableChargeIds: requiresDataSchoolContact ? [] : concepts.map((concept) => concept._id),
+      concepts,
+    };
+  });
+}
+
+function getParentCalendarPostDate(post = {}) {
+  const value = post.deliveryMode === 'class' ? post.scheduledClassDate : post.dueAt;
+  return value || post.dueAt || post.scheduledClassDate || post.publishedAt || post.createdAt || null;
+}
+
+function getParentCalendarAccent(type = '') {
+  const normalizedType = normalizeText(type).toLowerCase();
+  if (/quiz|examen|evaluaci/.test(normalizedType)) return 'warn';
+  if (/tarea|proyecto|entrega|laboratorio/.test(normalizedType)) return 'sky';
+  if (/material|aviso/.test(normalizedType)) return 'neutral';
+  return 'good';
+}
+
+function serializeParentAcademicCalendarPost(post = {}) {
+  const postDate = getParentCalendarPostDate(post);
+  const course = post.courseId && typeof post.courseId === 'object' ? post.courseId : {};
+  const courseTitle = normalizeText(course.title);
+  const subject = normalizeText(course.subject) || courseTitle;
+  const type = normalizeText(post.type) || 'Aviso';
+
+  return {
+    id: String(post._id || post.id || ''),
+    date: postDate,
+    dateKey: postDate ? buildMonthKey(postDate) + `-${String(new Date(postDate).getDate()).padStart(2, '0')}` : '',
+    type,
+    accent: getParentCalendarAccent(type),
+    title: normalizeText(post.title) || type,
+    detail: normalizeText(post.body) || 'Actividad publicada por el docente.',
+    courseId: String(course._id || post.courseId || ''),
+    courseTitle,
+    subject,
+    deliveryMode: normalizeText(post.deliveryMode) || 'date',
+    dueAt: post.dueAt || null,
+    scheduledClassDate: post.scheduledClassDate || null,
+    scheduledClassSession: post.scheduledClassSession || null,
+    publishedAt: post.publishedAt || null,
+    attachments: Array.isArray(post.attachments) ? post.attachments.map((attachment) => ({
+      sourceType: normalizeText(attachment.sourceType) || 'file',
+      kind: normalizeText(attachment.kind) || 'file',
+      title: normalizeText(attachment.title),
+      url: normalizeText(attachment.url),
+      fileName: normalizeText(attachment.fileName),
+      mimeType: normalizeText(attachment.mimeType),
+    })) : [],
+  };
+}
+
+function serializeParentAcademicCalendarAssignment(item = {}) {
+  const type = normalizeText(item.type) || 'Actividad';
+  return {
+    id: String(item._id || item.id || ''),
+    date: item.scheduledAt || null,
+    dateKey: item.scheduledAt ? buildMonthKey(item.scheduledAt) + `-${String(new Date(item.scheduledAt).getDate()).padStart(2, '0')}` : '',
+    type,
+    accent: getParentCalendarAccent(type),
+    title: normalizeText(item.title) || type,
+    detail: normalizeText(item.body) || 'Actividad institucional publicada por el colegio.',
+    courseId: '',
+    courseTitle: 'Todo el colegio',
+    subject: normalizeText(item.scope) === 'all_school' ? 'Actividad institucional' : 'Actividad por grado',
+    deliveryMode: 'date',
+    dueAt: item.scheduledAt || null,
+    scheduledClassDate: null,
+    scheduledClassSession: null,
+    publishedAt: item.createdAt || null,
+    authorName: normalizeText(item.authorName),
+    source: 'institutional_assignment',
+    attachments: [],
+  };
 }
 
 function buildDateWithReference(referenceDateValue, day) {
@@ -173,6 +1162,424 @@ function resolveGioReferenceDate(context = {}, history = []) {
 
 function escapeRegExp(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildFlexibleCompactRegExp(value) {
+  const compact = String(value || '').replace(/\s+/g, '');
+  if (!compact) {
+    return null;
+  }
+
+  return new RegExp(compact.split('').map((char) => escapeRegExp(char)).join('\\s*'), 'i');
+}
+
+function buildSectionLabelFromCourseToken(grade, courseToken) {
+  const normalizedGrade = String(grade || '').replace(/\s+/g, '');
+  const normalizedToken = String(courseToken || '').replace(/\s+/g, '');
+
+  if (!normalizedGrade || !normalizedToken) {
+    return '';
+  }
+
+  if (/^\d+$/.test(normalizedToken)) {
+    const index = Number(normalizedToken);
+    if (index >= 1 && index <= 26) {
+      return `${normalizedGrade}${String.fromCharCode(64 + index)}`;
+    }
+  }
+
+  if (/^[a-z]$/i.test(normalizedToken)) {
+    return `${normalizedGrade}${normalizedToken.toUpperCase()}`;
+  }
+
+  if (/^\d+[a-z]$/i.test(normalizedToken)) {
+    return normalizedToken.toUpperCase();
+  }
+
+  return normalizedToken;
+}
+
+function buildLookupMap(items = [], { keyField = 'key', labelField = 'label' } = {}) {
+  const map = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const key = normalizeText(item?.[keyField]);
+    if (!key) {
+      return;
+    }
+
+    map.set(key, normalizeText(item?.[labelField]) || key);
+  });
+
+  return map;
+}
+
+function parseScheduleTimeToMinutes(value) {
+  const match = normalizeText(value).match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  return (hours * 60) + minutes;
+}
+
+function formatScheduleMinutes(minutes) {
+  const safeMinutes = Number(minutes || 0);
+  const hours = Math.floor(safeMinutes / 60);
+  const remainder = safeMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
+function buildAcademicScheduleBlockSlots(academicStructure, { gradeValues = [], entries = [] } = {}) {
+  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
+    .map((item) => normalizeText(item).toLowerCase())
+    .filter(Boolean));
+  const groups = Array.isArray(academicStructure?.scheduleSettings?.groups) ? academicStructure.scheduleSettings.groups : [];
+  const dayRanges = new Map();
+
+  groups.forEach((group) => {
+    const groupGradeKeys = new Set((Array.isArray(group?.gradeKeys) ? group.gradeKeys : [])
+      .map((item) => normalizeText(item).toLowerCase())
+      .filter(Boolean));
+    const appliesToGrade = !groupGradeKeys.size || [...normalizedGradeValues].some((gradeKey) => groupGradeKeys.has(gradeKey));
+    if (!appliesToGrade) {
+      return;
+    }
+
+    const weekdays = (Array.isArray(group?.weekdays) ? group.weekdays : []).map((weekday) => Number(weekday)).filter((weekday) => weekday >= 1 && weekday <= 5);
+    const startMinutes = parseScheduleTimeToMinutes(group?.dayStartTime);
+    if (!weekdays.length || startMinutes === null) {
+      return;
+    }
+
+    let cursor = startMinutes;
+    (Array.isArray(group?.blocks) ? group.blocks : [])
+      .slice()
+      .sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || Number(left.block || 0) - Number(right.block || 0))
+      .forEach((block) => {
+        const durationMinutes = Number(block?.durationMinutes || 0);
+        if (durationMinutes <= 0) {
+          return;
+        }
+        cursor += durationMinutes;
+      });
+
+    weekdays.forEach((weekday) => {
+      const existingRange = dayRanges.get(weekday);
+      dayRanges.set(weekday, {
+        start: Math.min(existingRange?.start ?? startMinutes, startMinutes),
+        end: Math.max(existingRange?.end ?? cursor, cursor),
+      });
+    });
+  });
+
+  const entriesByWeekday = new Map();
+  (Array.isArray(entries) ? entries : []).forEach((entry) => {
+    const weekday = Number(entry?.weekday || 0);
+    const start = parseScheduleTimeToMinutes(entry?.startTime);
+    const end = parseScheduleTimeToMinutes(entry?.endTime);
+    if (weekday < 1 || weekday > 5 || start === null || end === null || end <= start) {
+      return;
+    }
+
+    if (!entriesByWeekday.has(weekday)) {
+      entriesByWeekday.set(weekday, []);
+    }
+    entriesByWeekday.get(weekday).push({ start, end });
+  });
+
+  const slotsByKey = new Map();
+  dayRanges.forEach((range, weekday) => {
+    const dayEntries = (entriesByWeekday.get(weekday) || []).sort((left, right) => left.start - right.start || left.end - right.end);
+    let cursor = range.start;
+
+    dayEntries.forEach((entry) => {
+      if (entry.start > cursor) {
+        const startTime = formatScheduleMinutes(cursor);
+        const endTime = formatScheduleMinutes(entry.start);
+        slotsByKey.set(`${weekday}:${startTime}-${endTime}`, { weekday, startTime, endTime, order: cursor });
+      }
+
+      const startTime = formatScheduleMinutes(entry.start);
+      const endTime = formatScheduleMinutes(entry.end);
+      slotsByKey.set(`${weekday}:${startTime}-${endTime}`, { weekday, startTime, endTime, order: entry.start });
+      cursor = Math.max(cursor, entry.end);
+    });
+
+    if (range.end > cursor) {
+      const startTime = formatScheduleMinutes(cursor);
+      const endTime = formatScheduleMinutes(range.end);
+      slotsByKey.set(`${weekday}:${startTime}-${endTime}`, { weekday, startTime, endTime, order: cursor });
+    }
+  });
+
+  return Array.from(slotsByKey.values()).sort((left, right) => left.order - right.order || left.weekday - right.weekday || left.endTime.localeCompare(right.endTime));
+}
+
+function findParentAcademicStructureSchedule(academicStructure, { gradeValues = [], courseValues = [], courseTitleValues = [] } = {}) {
+  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : []).map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
+  const normalizedCourseValues = new Set([
+    ...(Array.isArray(courseValues) ? courseValues : []),
+    ...(Array.isArray(courseTitleValues) ? courseTitleValues : []),
+  ].map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
+
+  if (!academicStructure || !normalizedGradeValues.size) {
+    return null;
+  }
+
+  const schedules = Array.isArray(academicStructure.gradeSchedules) ? academicStructure.gradeSchedules : [];
+  const gradeSchedules = schedules.filter((schedule) => normalizedGradeValues.has(normalizeText(schedule?.gradeKey).toLowerCase()));
+  const courseSchedule = gradeSchedules.find((schedule) => {
+    const courseKey = normalizeText(schedule?.courseKey).toLowerCase();
+    return courseKey && normalizedCourseValues.has(courseKey);
+  });
+
+  if (courseSchedule) {
+    return courseSchedule;
+  }
+
+  const gradeMap = new Map((Array.isArray(academicStructure.grades) ? academicStructure.grades : [])
+    .map((grade) => [normalizeText(grade?.key).toLowerCase(), grade]));
+
+  for (const schedule of gradeSchedules) {
+    const courseKey = normalizeText(schedule?.courseKey);
+    if (!courseKey) {
+      continue;
+    }
+
+    const grade = gradeMap.get(normalizeText(schedule?.gradeKey).toLowerCase()) || null;
+    const course = (Array.isArray(grade?.courses) ? grade.courses : []).find((item) => normalizeText(item?.key).toLowerCase() === courseKey.toLowerCase());
+    const courseLabels = [course?.label, course?.section].map((item) => normalizeText(item).toLowerCase()).filter(Boolean);
+    if (courseLabels.some((label) => normalizedCourseValues.has(label))) {
+      return schedule;
+    }
+  }
+
+  return gradeSchedules.find((schedule) => !normalizeText(schedule?.courseKey)) || null;
+}
+
+async function buildParentAcademicScheduleFromStructure({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [] }) {
+  const gradeSchedule = findParentAcademicStructureSchedule(academicStructure, { gradeValues, courseValues, courseTitleValues });
+  const entries = Array.isArray(gradeSchedule?.weeklySchedule) ? gradeSchedule.weeklySchedule : [];
+  const blockSlots = buildAcademicScheduleBlockSlots(academicStructure, { gradeValues, entries });
+
+  if (!entries.length && !blockSlots.length) {
+    return [];
+  }
+
+  const subjectLabelByKey = buildLookupMap(academicStructure?.subjects || []);
+  const teacherIds = Array.from(new Set(entries
+    .map((entry) => normalizeText(entry?.teacherUserId))
+    .filter((teacherId) => mongoose.Types.ObjectId.isValid(teacherId))));
+  const teachers = teacherIds.length
+    ? await User.find({ _id: { $in: teacherIds } }).select('name').lean()
+    : [];
+  const teacherNameById = new Map(teachers.map((teacher) => [String(teacher._id), normalizeText(teacher.name)]));
+
+  const scheduleCourses = entries
+    .map((entry) => {
+      const weekday = Number(entry?.weekday || 0);
+      const startTime = normalizeText(entry?.startTime);
+      const endTime = normalizeText(entry?.endTime);
+      const entryType = normalizeText(entry?.entryType || 'class') === 'break' ? 'break' : 'class';
+
+      if (weekday < 1 || weekday > 5 || !startTime || !endTime) {
+        return null;
+      }
+
+      const subjectKey = normalizeText(entry?.subjectKey);
+      const subject = entryType === 'break'
+        ? (normalizeText(entry?.breakLabel) || 'Break')
+        : (subjectLabelByKey.get(subjectKey) || subjectKey || 'Clase');
+      const teacherName = teacherNameById.get(normalizeText(entry?.teacherUserId)) || '';
+
+      return {
+        courseId: normalizeText(entry?.key) || `${weekday}-${entry?.block || startTime}`,
+        title: subject,
+        subject,
+        gradeKey: normalizeText(gradeSchedule?.gradeKey),
+        section: normalizeText(gradeSchedule?.courseKey),
+        classSessions: [{
+          weekday,
+          startTime,
+          endTime,
+          label: entryType === 'break' ? normalizeText(entry?.breakKey) : teacherName,
+          type: entryType === 'break' ? (normalizeText(entry?.breakKey) || 'break') : 'class',
+        }],
+      };
+    })
+    .filter(Boolean);
+
+  return { courses: scheduleCourses, slots: blockSlots };
+}
+
+async function buildParentAcademicGradebook({ schoolId, studentId, courses = [], gradingScale = null }) {
+  const normalizedCourses = Array.isArray(courses) ? courses : [];
+  const courseIds = normalizedCourses
+    .map((course) => course._id)
+    .filter((courseId) => mongoose.Types.ObjectId.isValid(String(courseId)));
+  if (!studentId || normalizedCourses.length === 0) {
+    return [];
+  }
+
+  const teacherUserIds = Array.from(new Set(normalizedCourses.map((course) => normalizeText(course.teacherUserId)).filter(Boolean)));
+  const [entries, teachers] = await Promise.all([
+    courseIds.length
+      ? CampusGradeEntry.find({ schoolId, studentId, courseId: { $in: courseIds } }).lean()
+      : Promise.resolve([]),
+    teacherUserIds.length
+      ? User.find({ _id: { $in: teacherUserIds }, schoolId }).select('name username').lean()
+      : Promise.resolve([]),
+  ]);
+  const entriesByCoursePeriodComponent = new Map(entries.map((entry) => [
+    `${String(entry.courseId)}:${normalizeText(entry.academicPeriodKey)}:${normalizeText(entry.componentKey)}`,
+    entry,
+  ]));
+  const teachersById = new Map(teachers.map((teacher) => [String(teacher._id), normalizeText(teacher.name || teacher.username)]));
+
+  return normalizedCourses.map((course) => {
+    const periods = getParentCoursePeriods(course)
+      .map((period, periodIndex) => {
+        const components = (Array.isArray(period.gradingComponents) ? period.gradingComponents : [])
+          .map((component, componentIndex) => {
+            const subcomponents = Array.isArray(component.subcomponents) ? component.subcomponents : [];
+            const evaluations = subcomponents.length > 0
+              ? subcomponents.map((subcomponent, subcomponentIndex) => {
+                const entry = entriesByCoursePeriodComponent.get(`${String(course._id)}:${normalizeText(period.key)}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`);
+                return {
+                  id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}-${normalizeText(component.key) || componentIndex}-${normalizeText(subcomponent.key) || subcomponentIndex}`,
+                  title: normalizeText(subcomponent.name) || `Subcomponente ${subcomponentIndex + 1}`,
+                  date: normalizeText(subcomponent.date),
+                  topic: normalizeText(subcomponent.topic) || 'Sin tematica',
+                  weight: Number(subcomponent.weight || 0),
+                  score: entry ? Number(entry.score) : null,
+                  feedback: normalizeText(entry?.feedback),
+                  gradedAt: entry?.gradedAt || null,
+                };
+              })
+              : (() => {
+                const entry = entriesByCoursePeriodComponent.get(`${String(course._id)}:${normalizeText(period.key)}:${normalizeText(component.key)}`);
+                return entry ? [{
+                  id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}-${normalizeText(component.key) || componentIndex}`,
+                  title: normalizeText(component.name) || `Componente ${componentIndex + 1}`,
+                  date: entry.gradedAt || entry.updatedAt || '',
+                  topic: normalizeText(course.subject) || 'Sin tematica',
+                  weight: Number(component.weight || 0),
+                  score: Number(entry.score),
+                  feedback: normalizeText(entry.feedback),
+                  gradedAt: entry.gradedAt || null,
+                }] : [];
+              })();
+            const visibleEvaluations = evaluations.filter((evaluation) => isParentVisibleScore(evaluation.score, gradingScale));
+            const average = subcomponents.length > 0
+              ? calculateWeightedAverage(visibleEvaluations, (evaluation) => evaluation.weight)
+              : (visibleEvaluations[0]?.score ?? null);
+
+            return {
+              id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}-${normalizeText(component.key) || componentIndex}`,
+              key: normalizeText(component.key),
+              label: normalizeText(component.name) || `Componente ${componentIndex + 1}`,
+              weight: Number(component.weight || 0),
+              average,
+              evaluations: visibleEvaluations,
+            };
+          })
+          .filter((component) => component.label && isParentVisibleScore(component.average, gradingScale));
+        const average = calculateWeightedAverage(components, (component) => component.weight);
+
+        return {
+          id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}`,
+          key: normalizeText(period.key),
+          label: normalizeText(period.name) || `Periodo ${periodIndex + 1}`,
+          weight: Number(period.weight || 0),
+          average,
+          components,
+        };
+      });
+    const finalAverage = calculateWeightedAverage(periods, (period) => period.weight);
+    const performanceLevel = resolveParentPerformanceLevel(finalAverage, gradingScale);
+
+    return {
+      id: String(course._id),
+      name: normalizeText(course.subject || course.title) || 'Materia',
+      teacher: teachersById.get(normalizeText(course.teacherUserId)) || 'Docente',
+      finalAverage,
+      performanceLevel: performanceLevel ? {
+        key: performanceLevel.key,
+        label: performanceLevel.label,
+        color: performanceLevel.color,
+      } : null,
+      color: performanceLevel?.color || '',
+      periods,
+    };
+  }).filter((subject) => subject.name)
+    .sort((left, right) => {
+      const leftHasGrade = left.finalAverage !== null && left.finalAverage !== undefined;
+      const rightHasGrade = right.finalAverage !== null && right.finalAverage !== undefined;
+      if (leftHasGrade !== rightHasGrade) {
+        return leftHasGrade ? -1 : 1;
+      }
+      if (leftHasGrade && rightHasGrade && Number(right.finalAverage) !== Number(left.finalAverage)) {
+        return Number(right.finalAverage) - Number(left.finalAverage);
+      }
+      return normalizeText(left.name).localeCompare(normalizeText(right.name));
+    });
+}
+
+async function buildParentAcademicRanking({ schoolId, selectedStudentId, selectedStudentGrade = '', selectedStudentCourse = '', courses = [], currentAverage = null, gradingScale = null }) {
+  const totalStudents = await Student.countDocuments({
+    schoolId,
+    deletedAt: null,
+    grade: selectedStudentGrade,
+    course: selectedStudentCourse,
+  });
+
+  if (currentAverage === null || currentAverage === undefined || currentAverage === '') {
+    return {
+      position: null,
+      total: totalStudents,
+      label: totalStudents ? `Sin ranking/${totalStudents} alumnos` : 'Sin ranking',
+    };
+  }
+
+  const classmates = await Student.find({
+    schoolId,
+    deletedAt: null,
+    grade: selectedStudentGrade,
+    course: selectedStudentCourse,
+  }).select('_id').lean();
+  const averages = [];
+
+  for (const classmate of classmates) {
+    const gradebook = await buildParentAcademicGradebook({
+      schoolId,
+      studentId: classmate._id,
+      courses,
+      gradingScale,
+    });
+    const gradedSubjects = gradebook.filter((subject) => subject.finalAverage !== null && subject.finalAverage !== undefined);
+    if (!gradedSubjects.length) {
+      continue;
+    }
+
+    const average = Math.round(gradedSubjects.reduce((sum, subject) => sum + Number(subject.finalAverage || 0), 0) / gradedSubjects.length);
+    averages.push({ studentId: String(classmate._id), average });
+  }
+
+  averages.sort((left, right) => right.average - left.average || left.studentId.localeCompare(right.studentId));
+  const position = averages.findIndex((item) => item.studentId === String(selectedStudentId)) + 1;
+
+  return {
+    position: position || null,
+    total: totalStudents,
+    label: position && totalStudents ? `${position}/${totalStudents} alumnos` : (totalStudents ? `Sin ranking/${totalStudents} alumnos` : 'Sin ranking'),
+  };
 }
 
 function formatGioNameList(values) {
@@ -934,6 +2341,8 @@ router.get('/portal/overview', async (req, res) => {
       .lean();
     const parentName = parentUser?.name || name || username || 'Padre';
     const parentUsername = parentUser?.username || username || '';
+    const schoolSettings = await SuperAdminSchoolSettings.findOne({ schoolId }).select('parentFeatures').lean();
+    const parentAppFeatures = normalizeParentAppFeatures(schoolSettings?.parentFeatures || {});
 
     const links = await ParentStudentLink.find({
       schoolId,
@@ -960,8 +2369,11 @@ router.get('/portal/overview', async (req, res) => {
           week: 0,
           month: 0,
         },
+        psychologyCases: [],
+        coexistenceObservations: [],
         recentTopups: [],
         recentOrders: [],
+        parentAppFeatures,
       });
     }
 
@@ -973,14 +2385,12 @@ router.get('/portal/overview', async (req, res) => {
       return res.status(400).json({ message: 'Invalid student id' });
     }
 
-    const [students, wallets, meriendaSubscriptions] = await Promise.all([
+    const [students, wallets, meriendaSubscriptions, psychologyCases, coexistenceObservations] = await Promise.all([
       Student.find({
         schoolId,
         _id: { $in: studentIds },
         deletedAt: null,
       })
-        .populate('blockedProducts', 'name')
-        .populate('blockedCategories', 'name')
         .sort({ name: 1 })
         .lean(),
       Wallet.find({
@@ -994,7 +2404,36 @@ router.get('/portal/overview', async (req, res) => {
       })
         .select('childName paymentStatus currentPeriodMonth parentRecommendations childAllergies')
         .lean(),
+      PsychologyCase.find({
+        schoolId,
+        studentId: { $in: studentIds },
+        status: { $in: ['open', 'follow_up', 'escalated'] },
+      })
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean(),
+      CampusDisciplineObservation.find({
+        schoolId,
+        studentId: { $in: studentIds },
+        status: { $in: ['submitted', 'reviewed'] },
+      })
+        .sort({ submittedAt: -1, createdAt: -1 })
+        .limit(100)
+        .lean(),
     ]);
+
+    const blockedProductIds = Array.from(new Set(students.flatMap((student) => (
+      Array.isArray(student.blockedProducts) ? student.blockedProducts.map((id) => String(id)).filter(Boolean) : []
+    ))));
+    const blockedCategoryIds = Array.from(new Set(students.flatMap((student) => (
+      Array.isArray(student.blockedCategories) ? student.blockedCategories.map((id) => String(id)).filter(Boolean) : []
+    ))));
+    const [blockedProducts, blockedCategories] = await Promise.all([
+      blockedProductIds.length ? Product.find({ schoolId, _id: { $in: blockedProductIds } }).select('name').lean() : Promise.resolve([]),
+      blockedCategoryIds.length ? Category.find({ schoolId, _id: { $in: blockedCategoryIds } }).select('name').lean() : Promise.resolve([]),
+    ]);
+    const blockedProductNameById = new Map(blockedProducts.map((item) => [String(item._id), item.name || '']));
+    const blockedCategoryNameById = new Map(blockedCategories.map((item) => [String(item._id), item.name || '']));
 
     const walletByStudentId = wallets.reduce((acc, wallet) => {
       acc[String(wallet.studentId)] = wallet;
@@ -1019,15 +2458,22 @@ router.get('/portal/overview', async (req, res) => {
         name: student.name,
         schoolCode: student.schoolCode || '',
         grade: student.grade || '',
+        course: student.course || '',
         ...serializeStudentPhotoFields(student),
         dailyLimit: Number(student.dailyLimit || 0),
         blockedProductsCount: Array.isArray(student.blockedProducts) ? student.blockedProducts.length : 0,
         blockedCategoriesCount: Array.isArray(student.blockedCategories) ? student.blockedCategories.length : 0,
         blockedProducts: Array.isArray(student.blockedProducts)
-          ? student.blockedProducts.map((item) => ({ _id: item._id, name: item.name || '' }))
+          ? student.blockedProducts.map((item) => {
+            const itemId = String(item?._id || item || '');
+            return { _id: itemId, name: blockedProductNameById.get(itemId) || '' };
+          })
           : [],
         blockedCategories: Array.isArray(student.blockedCategories)
-          ? student.blockedCategories.map((item) => ({ _id: item._id, name: item.name || '' }))
+          ? student.blockedCategories.map((item) => {
+            const itemId = String(item?._id || item || '');
+            return { _id: itemId, name: blockedCategoryNameById.get(itemId) || '' };
+          })
           : [],
         wallet: {
           balance: Number(wallet?.balance || 0),
@@ -1067,7 +2513,40 @@ router.get('/portal/overview', async (req, res) => {
 
     const selectedStudent = children.find((child) => String(child._id) === selectedStudentId) || null;
 
-    const [day, week, month, recentTopups, recentOrders] = await Promise.all([
+    const selectedStudentGrade = String(selectedStudent?.grade || '').trim();
+    const selectedStudentCourse = String(selectedStudent?.course || '').trim();
+    const selectedStudentCourseCompact = selectedStudentCourse.replace(/\s+/g, '');
+    const selectedStudentCourseParts = selectedStudentCourse.split(':').map((part) => part.trim()).filter(Boolean);
+    const selectedStudentGradeKeyFromCourse = selectedStudentCourseParts.length >= 2
+      ? `${selectedStudentCourseParts[0].toLowerCase()}:${selectedStudentCourseParts[1]}`
+      : '';
+    const selectedStudentCourseToken = selectedStudentCourseParts.length >= 3 ? selectedStudentCourseParts.slice(2).join(':') : '';
+    const selectedStudentCourseLabel = buildSectionLabelFromCourseToken(selectedStudentGrade, selectedStudentCourseToken);
+    const selectedStudentSection = selectedStudentGrade && selectedStudentCourseCompact.toLowerCase().startsWith(selectedStudentGrade.replace(/\s+/g, '').toLowerCase())
+      ? selectedStudentCourseCompact.slice(selectedStudentGrade.replace(/\s+/g, '').length)
+      : '';
+    const selectedStudentGradeValues = Array.from(new Set([
+      selectedStudentGrade,
+      selectedStudentGradeKeyFromCourse,
+    ].map((item) => String(item || '').trim()).filter(Boolean)));
+    const selectedStudentCourseValues = Array.from(new Set([
+      selectedStudentCourse,
+      selectedStudentCourseCompact,
+      selectedStudentSection,
+      selectedStudentCourseLabel,
+    ].map((item) => String(item || '').trim()).filter(Boolean)));
+    const selectedStudentGradeCompact = selectedStudentGrade.replace(/\s+/g, '');
+    const selectedStudentCourseTitleValues = Array.from(new Set([
+      selectedStudentCourse.includes(':') ? '' : selectedStudentCourse,
+      selectedStudentCourse.includes(':') ? '' : selectedStudentCourseCompact,
+      selectedStudentSection && selectedStudentGradeCompact ? `${selectedStudentGradeCompact}${selectedStudentSection}` : '',
+      selectedStudentCourseLabel,
+    ].map((item) => String(item || '').trim()).filter((item) => item.length > 1)));
+    const selectedStudentCourseTitleMatchers = selectedStudentCourseTitleValues
+      .map((value) => buildFlexibleCompactRegExp(value))
+      .filter(Boolean);
+
+    const [day, week, month, recentTopups, recentOrders, academicContentCourses, academicGradeCourses, academicGradeEntryRefs, academicStructure] = await Promise.all([
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfToday() }),
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfCurrentWeek() }),
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfCurrentMonth() }),
@@ -1095,7 +2574,92 @@ router.get('/portal/overview', async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(5)
         .lean(),
+      selectedStudentGrade
+        ? CampusCourse.find({
+          schoolId,
+          status: 'active',
+          studentGradeKey: { $in: selectedStudentGradeValues },
+          ...(selectedStudentCourseValues.length ? {
+            $or: [
+              { section: { $in: selectedStudentCourseValues } },
+              ...selectedStudentCourseTitleMatchers.map((matcher) => ({ title: matcher })),
+            ],
+          } : {}),
+        })
+          .select('title subject gradeLevel section studentGradeKey academicContent classSessions')
+          .sort({ title: 1 })
+          .lean()
+        : Promise.resolve([]),
+      selectedStudentGrade
+        ? CampusCourse.find({
+          schoolId,
+          status: 'active',
+          studentGradeKey: { $in: selectedStudentGradeValues },
+        })
+          .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+          .sort({ title: 1 })
+          .lean()
+        : Promise.resolve([]),
+      CampusGradeEntry.find({ schoolId, studentId: selectedStudentObjectId })
+        .select('courseId')
+        .lean(),
+      AcademicStructure.findOne({ schoolId }).lean(),
     ]);
+
+    const academicGradeCourseIds = new Set((Array.isArray(academicGradeCourses) ? academicGradeCourses : []).map((course) => String(course._id)));
+    const gradeEntryCourseIds = Array.from(new Set((Array.isArray(academicGradeEntryRefs) ? academicGradeEntryRefs : [])
+      .map((entry) => String(entry.courseId || ''))
+      .filter((courseId) => courseId && !academicGradeCourseIds.has(courseId))));
+    const academicGradeEntryCourses = gradeEntryCourseIds.length > 0
+      ? await CampusCourse.find({
+        schoolId,
+        status: 'active',
+        _id: { $in: gradeEntryCourseIds },
+      })
+        .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+        .sort({ title: 1 })
+        .lean()
+      : [];
+    const gradeEntryCourseIdSet = new Set((Array.isArray(academicGradeEntryRefs) ? academicGradeEntryRefs : [])
+      .map((entry) => String(entry.courseId || ''))
+      .filter(Boolean));
+    const parentGradebookCourses = buildParentGradebookCoursesFromStructure({
+      academicStructure,
+      gradeValues: selectedStudentGradeValues,
+      courseValues: selectedStudentCourseValues,
+      courseTitleValues: selectedStudentCourseTitleValues,
+      courses: [...academicGradeCourses, ...academicGradeEntryCourses],
+      gradeEntryCourseIds: gradeEntryCourseIdSet,
+    });
+
+    const academicStructureSchedule = await buildParentAcademicScheduleFromStructure({
+      academicStructure,
+      gradeValues: selectedStudentGradeValues,
+      courseValues: selectedStudentCourseValues,
+      courseTitleValues: selectedStudentCourseTitleValues,
+    });
+    const parentGradingScale = resolveParentGradingScaleForGrade(academicStructure, selectedStudentGradeValues);
+    const academicGrades = await buildParentAcademicGradebook({
+      schoolId,
+      studentId: selectedStudentObjectId,
+      courses: parentGradebookCourses,
+      gradingScale: parentGradingScale,
+    });
+    const gradedAcademicSubjects = academicGrades.filter((subject) => subject.finalAverage !== null && subject.finalAverage !== undefined);
+    const academicAverage = gradedAcademicSubjects.length
+      ? Math.round(gradedAcademicSubjects.reduce((sum, subject) => sum + Number(subject.finalAverage || 0), 0) / gradedAcademicSubjects.length)
+      : null;
+    const academicRanking = await buildParentAcademicRanking({
+      schoolId,
+      selectedStudentId: selectedStudentObjectId,
+      selectedStudentGrade,
+      selectedStudentCourse,
+      courses: parentGradebookCourses,
+      currentAverage: academicAverage,
+      gradingScale: parentGradingScale,
+    });
+    const academicStructureScheduleCourses = Array.isArray(academicStructureSchedule?.courses) ? academicStructureSchedule.courses : [];
+    const academicStructureScheduleSlots = Array.isArray(academicStructureSchedule?.slots) ? academicStructureSchedule.slots : [];
 
     return res.status(200).json({
       parent: {
@@ -1104,6 +2668,8 @@ router.get('/portal/overview', async (req, res) => {
         username: parentUsername,
       },
       children,
+      psychologyCases: psychologyCases.map(serializeParentPsychologyCase),
+      coexistenceObservations: coexistenceObservations.map(serializeParentCoexistenceObservation),
       selectedStudentId,
       selectedStudent,
       spending: {
@@ -1152,7 +2718,703 @@ router.get('/portal/overview', async (req, res) => {
           : 0,
         storeName: order.storeId?.name || 'Tienda',
       })),
+      academicContent: academicContentCourses.map((course) => ({
+        courseId: String(course._id),
+        title: String(course.title || '').trim(),
+        subject: String(course.subject || '').trim(),
+        gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
+        section: String(course.section || '').trim(),
+        periods: Array.isArray(course.academicContent) ? course.academicContent.map((period) => ({
+          periodKey: String(period.periodKey || '').trim(),
+          periodName: String(period.periodName || '').trim(),
+          startDate: String(period.startDate || '').trim(),
+          endDate: String(period.endDate || '').trim(),
+          topics: Array.isArray(period.topics) ? period.topics.map((topic) => ({
+            key: String(topic.key || '').trim(),
+            title: String(topic.title || '').trim(),
+            description: String(topic.description || '').trim(),
+          })).filter((topic) => topic.title) : [],
+        })) : [],
+      })).filter((course) => course.periods.some((period) => period.topics.length > 0)),
+      academicGrades,
+      academicRanking,
+      academicSchedule: {
+        gradeKey: selectedStudentGrade,
+        section: selectedStudentCourse,
+        slots: academicStructureScheduleSlots,
+        courses: (academicStructureScheduleCourses.length ? academicStructureScheduleCourses : academicContentCourses.map((course) => ({
+          courseId: String(course._id),
+          title: String(course.title || '').trim(),
+          subject: String(course.subject || '').trim(),
+          gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
+          section: String(course.section || '').trim(),
+          classSessions: Array.isArray(course.classSessions) ? course.classSessions.map((session) => ({
+            weekday: Number(session.weekday || 0),
+            startTime: String(session.startTime || '').trim(),
+            endTime: String(session.endTime || '').trim(),
+            label: String(session.label || '').trim(),
+          })).filter((session) => session.weekday >= 1 && session.weekday <= 5 && session.startTime && session.endTime) : [],
+        })).filter((course) => course.classSessions.length > 0)),
+      },
+      parentAppFeatures,
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/academic-feed', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+
+    if (!parentUserId) {
+      return res.status(400).json({ message: 'Invalid parent user id' });
+    }
+
+    const feed = await AcademicCommunication.find({ schoolId, recipientParentIds: parentUserId })
+      .sort({ sentAt: -1, createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return res.status(200).json(feed.map((item) => serializeAcademicFeedItem(item, parentUserId)));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/academic-feed/:communicationId/like', async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const parentUserId = toObjectId(userId);
+    const communicationId = toObjectId(req.params.communicationId);
+
+    if (!parentUserId || !communicationId) {
+      return res.status(400).json({ message: 'Invalid communication id' });
+    }
+
+    const query = { _id: communicationId, schoolId, recipientParentIds: parentUserId };
+    const updatedCommunication = await AcademicCommunication.findOneAndUpdate(
+      query,
+      [
+        {
+          $set: {
+            likes: buildToggledAcademicFeedLikesExpression('$likes', parentUserId, {
+              userId: parentUserId,
+              name: getActorName(req.user),
+              createdAt: new Date(),
+            }),
+          },
+        },
+      ],
+      { new: true }
+    );
+    if (!updatedCommunication) {
+      return res.status(404).json({ message: 'Comunicado no encontrado.' });
+    }
+
+    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/academic-feed/:communicationId/comments', async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const parentUserId = toObjectId(userId);
+    const body = String(req.body?.body || '').trim();
+
+    if (!body) {
+      return res.status(400).json({ message: 'Escribe un comentario.' });
+    }
+
+    const communication = await findParentAcademicCommunication({
+      schoolId,
+      communicationId: req.params.communicationId,
+      parentUserId,
+    });
+
+    if (!communication) {
+      return res.status(404).json({ message: 'Comunicado no encontrado.' });
+    }
+
+    communication.comments.push({
+      userId: parentUserId,
+      name: getActorName(req.user),
+      body: body.slice(0, 800),
+      likes: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await communication.save();
+    return res.status(201).json(serializeAcademicFeedItem(communication.toObject(), parentUserId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/portal/academic-feed/:communicationId/comments/:commentId', async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const parentUserId = toObjectId(userId);
+    const communication = await findParentAcademicCommunication({
+      schoolId,
+      communicationId: req.params.communicationId,
+      parentUserId,
+    });
+
+    if (!communication) {
+      return res.status(404).json({ message: 'Comunicado no encontrado.' });
+    }
+
+    const comment = communication.comments.id(req.params.commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Comentario no encontrado.' });
+    }
+
+    if (!sameObjectId(comment.userId, parentUserId)) {
+      return res.status(403).json({ message: 'Solo puedes borrar tus comentarios.' });
+    }
+
+    comment.deleteOne();
+    await communication.save();
+    return res.status(200).json(serializeAcademicFeedItem(communication.toObject(), parentUserId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/academic-feed/:communicationId/comments/:commentId/like', async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const parentUserId = toObjectId(userId);
+    const communicationId = toObjectId(req.params.communicationId);
+    const commentId = toObjectId(req.params.commentId);
+
+    if (!parentUserId || !communicationId || !commentId) {
+      return res.status(400).json({ message: 'Invalid comment id' });
+    }
+
+    const query = {
+      _id: communicationId,
+      schoolId,
+      recipientParentIds: parentUserId,
+    };
+    const nextCommentLike = { userId: parentUserId, name: getActorName(req.user), createdAt: new Date() };
+    const updatedCommunication = await AcademicCommunication.findOneAndUpdate(
+      { ...query, 'comments._id': commentId },
+      [
+        {
+          $set: {
+            comments: {
+              $map: {
+                input: { $ifNull: ['$comments', []] },
+                as: 'comment',
+                in: {
+                  $cond: [
+                    { $eq: ['$$comment._id', commentId] },
+                    {
+                      $mergeObjects: [
+                        '$$comment',
+                        {
+                          likes: buildToggledAcademicFeedLikesExpression('$$comment.likes', parentUserId, nextCommentLike),
+                        },
+                      ],
+                    },
+                    '$$comment',
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+      { new: true }
+    );
+    if (!updatedCommunication) {
+      return res.status(404).json({ message: 'Comunicado no encontrado.' });
+    }
+
+    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/academic-calendar', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.query.parentUserId || userId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+    const studentId = toObjectId(req.query.studentId);
+
+    if (!parentUserId || !studentId) {
+      return res.status(400).json({ message: 'Invalid student id' });
+    }
+
+    const linkedStudent = await ParentStudentLink.exists({
+      schoolId,
+      parentId: parentUserId,
+      studentId,
+      status: 'active',
+    });
+
+    if (!linkedStudent && role !== 'admin') {
+      return res.status(403).json({ message: 'Student does not belong to this parent' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null })
+      .select('name grade course')
+      .lean();
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const { monthStart, monthEnd, monthKey } = getMonthRange(req.query.month);
+    const grade = normalizeText(student.grade);
+    const course = normalizeText(student.course);
+    const courseCompact = course.replace(/\s+/g, '');
+    const courseParts = course.split(':').map((part) => part.trim()).filter(Boolean);
+    const gradeKeyFromCourse = courseParts.length >= 2 ? `${courseParts[0].toLowerCase()}:${courseParts[1]}` : '';
+    const courseToken = courseParts.length >= 3 ? courseParts.slice(2).join(':') : '';
+    const courseLabel = buildSectionLabelFromCourseToken(grade, courseToken);
+    const section = grade && courseCompact.toLowerCase().startsWith(grade.replace(/\s+/g, '').toLowerCase())
+      ? courseCompact.slice(grade.replace(/\s+/g, '').length)
+      : '';
+    const gradeValues = Array.from(new Set([grade, gradeKeyFromCourse].map((item) => normalizeText(item)).filter(Boolean)));
+    const courseValues = Array.from(new Set([course, courseCompact, section, courseLabel].map((item) => normalizeText(item)).filter(Boolean)));
+    const gradeCompact = grade.replace(/\s+/g, '');
+    const courseTitleValues = Array.from(new Set([
+      course.includes(':') ? '' : course,
+      course.includes(':') ? '' : courseCompact,
+      section && gradeCompact ? `${gradeCompact}${section}` : '',
+      courseLabel,
+    ].map((item) => normalizeText(item)).filter((item) => item.length > 1)));
+    const courseTitleMatchers = courseTitleValues.map((value) => buildFlexibleCompactRegExp(value)).filter(Boolean);
+    const courseQuery = {
+      schoolId,
+      status: 'active',
+      ...(gradeValues.length ? { studentGradeKey: { $in: gradeValues } } : {}),
+      ...(courseValues.length || courseTitleMatchers.length ? {
+        $or: [
+          ...(courseValues.length ? [{ section: { $in: courseValues } }] : []),
+          ...courseTitleMatchers.map((matcher) => ({ title: matcher })),
+        ],
+      } : {}),
+    };
+
+    const courses = await CampusCourse.find(courseQuery)
+      .select('title subject section studentGradeKey')
+      .lean();
+    const courseIds = courses.map((item) => item._id).filter(Boolean);
+    const assignmentQuery = {
+      schoolId,
+      status: 'published',
+      scheduledAt: { $gte: monthStart, $lt: monthEnd },
+      $or: [
+        { scope: 'all_school' },
+        ...(gradeValues.length ? [{ scope: 'grades', targetGradeKeys: { $in: gradeValues } }] : []),
+      ],
+    };
+
+    if (!courseIds.length) {
+      const assignments = await AcademicCalendarAssignment.find(assignmentQuery)
+        .sort({ scheduledAt: 1, createdAt: 1 })
+        .lean();
+
+      return res.status(200).json({
+        student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
+        month: monthKey,
+        items: assignments.map(serializeParentAcademicCalendarAssignment).filter((item) => item.id && item.date),
+      });
+    }
+
+    const [posts, assignments] = await Promise.all([
+      CampusPost.find({
+        schoolId,
+        courseId: { $in: courseIds },
+        status: 'published',
+        $or: [
+          { dueAt: { $gte: monthStart, $lt: monthEnd } },
+          { scheduledClassDate: { $gte: monthStart, $lt: monthEnd } },
+          { dueAt: null, scheduledClassDate: null, publishedAt: { $gte: monthStart, $lt: monthEnd } },
+        ],
+      })
+        .populate('courseId', 'title subject section studentGradeKey')
+        .sort({ dueAt: 1, scheduledClassDate: 1, publishedAt: 1, createdAt: 1 })
+        .lean(),
+      AcademicCalendarAssignment.find(assignmentQuery)
+        .sort({ scheduledAt: 1, createdAt: 1 })
+        .lean(),
+    ]);
+
+    return res.status(200).json({
+      student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
+      month: monthKey,
+      items: [
+        ...posts.map(serializeParentAcademicCalendarPost),
+        ...assignments.map(serializeParentAcademicCalendarAssignment),
+      ].filter((item) => item.id && item.date).sort((left, right) => new Date(left.date) - new Date(right.date)),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/academic-attendance', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.query.parentUserId || userId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+    const studentId = toObjectId(req.query.studentId);
+
+    if (!parentUserId || !studentId) {
+      return res.status(400).json({ message: 'Invalid student id' });
+    }
+
+    const linkedStudent = await ParentStudentLink.exists({
+      schoolId,
+      parentId: parentUserId,
+      studentId,
+      status: 'active',
+    });
+
+    if (!linkedStudent && role !== 'admin') {
+      return res.status(403).json({ message: 'Student does not belong to this parent' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null })
+      .select('name grade course')
+      .lean();
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const statusLabels = {
+      present: 'Presente',
+      late: 'Llegada tarde',
+      absent: 'Ausente',
+      excused: 'Excusado',
+    };
+    const typeLabels = {
+      guidance_routine: 'Llegada al colegio',
+      subject_class: 'Asistencia a clase',
+    };
+
+    const serializeAttendanceRecord = (session) => {
+      const record = (Array.isArray(session.records) ? session.records : [])
+        .find((item) => String(item.studentId || '') === String(studentId));
+      const status = ['present', 'late', 'absent', 'excused'].includes(String(record?.status || '')) ? String(record.status) : 'present';
+      const date = normalizeText(session.date);
+      return {
+        id: String(session._id),
+        date,
+        dateLabel: date,
+        attendanceType: normalizeText(session.attendanceType),
+        attendanceTypeLabel: typeLabels[normalizeText(session.attendanceType)] || 'Asistencia',
+        courseTitle: normalizeText(session.courseTitleSnapshot),
+        subject: normalizeText(session.subjectSnapshot),
+        status,
+        statusLabel: statusLabels[status],
+        note: normalizeText(record?.notes),
+        classSessionKey: normalizeText(session.classSessionKey),
+        recordedAt: record?.recordedAt || null,
+        submittedAt: session.submittedAt || null,
+      };
+    };
+
+    const requestedAttendanceType = normalizeText(req.query.attendanceType);
+    if (requestedAttendanceType === 'guidance_routine') {
+      const requestedPage = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+      const pageSize = Math.min(10, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
+      const query = { schoolId, attendanceType: 'guidance_routine', 'records.studentId': studentId };
+      const totalRecords = await CampusAttendanceSession.countDocuments(query);
+      const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+      const sessions = await CampusAttendanceSession.find(query)
+        .sort({ date: -1, updatedAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .lean();
+
+      return res.status(200).json({
+        student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
+        records: sessions.map(serializeAttendanceRecord),
+        pagination: {
+          page,
+          pageSize,
+          totalRecords,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
+      });
+    }
+
+    const sessions = await CampusAttendanceSession.find({
+      schoolId,
+      'records.studentId': studentId,
+    })
+      .sort({ date: -1, updatedAt: -1 })
+      .limit(60)
+      .lean();
+
+    const buildAttendanceSummary = (items = []) => {
+      const grouped = (Array.isArray(items) ? items : []).reduce((accumulator, item) => {
+        accumulator[item.status] = Number(accumulator[item.status] || 0) + 1;
+        return accumulator;
+      }, { present: 0, late: 0, absent: 0, excused: 0 });
+      const totalItems = Number(items.length || 0);
+
+      return {
+        total: totalItems,
+        present: grouped.present || 0,
+        late: grouped.late || 0,
+        absent: grouped.absent || 0,
+        excused: grouped.excused || 0,
+        unexcusedAbsences: grouped.absent || 0,
+        excusedAbsences: grouped.excused || 0,
+        lateCount: grouped.late || 0,
+        attendanceRate: totalItems > 0 ? `${Math.round((Number(grouped.present || 0) / totalItems) * 100)}%` : 'Sin datos',
+      };
+    };
+
+    const records = sessions.map(serializeAttendanceRecord);
+
+    const guidanceRoutineRecords = records.filter((record) => record.attendanceType === 'guidance_routine');
+    const subjectClassRecords = records.filter((record) => record.attendanceType === 'subject_class');
+    const subjectGroupsMap = new Map();
+
+    subjectClassRecords.forEach((record) => {
+      const groupKey = normalizeText(record.subject) || normalizeText(record.courseTitle) || 'clase';
+      const existingGroup = subjectGroupsMap.get(groupKey) || {
+        key: groupKey,
+        subject: normalizeText(record.subject),
+        courseTitle: normalizeText(record.courseTitle),
+        records: [],
+      };
+
+      existingGroup.records.push(record);
+      if (!existingGroup.subject && record.subject) {
+        existingGroup.subject = normalizeText(record.subject);
+      }
+      if (!existingGroup.courseTitle && record.courseTitle) {
+        existingGroup.courseTitle = normalizeText(record.courseTitle);
+      }
+      subjectGroupsMap.set(groupKey, existingGroup);
+    });
+
+    const subjectGroups = Array.from(subjectGroupsMap.values())
+      .map((group) => ({
+        ...group,
+        summary: buildAttendanceSummary(group.records),
+      }))
+      .sort((left, right) => String(left.subject || left.courseTitle || '').localeCompare(String(right.subject || right.courseTitle || ''), 'es', { sensitivity: 'base' }));
+
+    const overallSummary = buildAttendanceSummary(records);
+
+    return res.status(200).json({
+      student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
+      summary: overallSummary,
+      records,
+      guidanceRoutine: {
+        summary: buildAttendanceSummary(guidanceRoutineRecords),
+        records: [],
+      },
+      classAttendance: {
+        summary: buildAttendanceSummary(subjectClassRecords),
+        records: subjectClassRecords,
+        subjects: subjectGroups,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/academic-billing', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+
+    if (!parentUserId) {
+      return res.status(400).json({ message: 'Invalid parent user id' });
+    }
+
+    const links = await ParentStudentLink.find({
+      schoolId,
+      parentId: parentUserId,
+      status: 'active',
+    }).select('studentId').lean();
+    const linkedStudentIds = links.map((link) => toObjectId(link.studentId)).filter(Boolean);
+
+    if (!linkedStudentIds.length) {
+      return res.status(200).json({
+        summary: { pendingAmount: 0, pendingCount: 0 },
+        charges: [],
+        payments: [],
+      });
+    }
+
+    let [charges, payments, billingProfiles] = await Promise.all([
+      AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds } })
+        .populate('studentId', 'name grade course')
+        .sort({ dueDate: 1, createdAt: -1 })
+        .lean(),
+      AcademicChargePayment.find({ schoolId, studentId: { $in: linkedStudentIds } })
+        .populate('studentId', 'name grade course')
+        .sort({ paidAt: -1, createdAt: -1 })
+        .limit(20)
+        .lean(),
+      StudentBillingProfile.find({ schoolId, active: true }).lean(),
+    ]);
+
+    const now = new Date();
+    await ensureParentAcademicMonthlyCharges({
+      schoolId,
+      parentUserId,
+      role,
+      studentIds: linkedStudentIds,
+      billingProfiles,
+      referenceDate: now,
+    });
+
+    charges = await AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds } })
+      .populate('studentId', 'name grade course')
+      .sort({ dueDate: 1, createdAt: -1 })
+      .lean();
+
+    const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile._id), profile]));
+    const normalizedCharges = charges.map((charge) => {
+      const dueDate = new Date(charge.dueDate);
+      const isOverdue = ['pending', 'overdue'].includes(String(charge.status)) && dueDate < now;
+      const billingProfile = billingProfileMap.get(String(charge.billingProfileId || '')) || null;
+      const pricing = resolveAcademicChargeAmounts(charge, billingProfile, now);
+      return {
+        ...charge,
+        status: isOverdue ? 'overdue' : charge.status,
+        baseAmount: pricing.baseAmount,
+        amount: pricing.effectiveAmount,
+        discountPercent: pricing.discountPercent,
+        fixedDiscountAmount: pricing.fixedDiscountAmount,
+        benefitLabel: pricing.benefitLabel,
+        studentName: charge.studentId?.name || 'Familia',
+        studentGrade: charge.studentId?.grade || '',
+        studentCourse: charge.studentId?.course || '',
+      };
+    });
+    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: normalizedCharges, referenceDate: now });
+
+    return res.status(200).json({
+      summary: {
+        pendingAmount: studentSummaries.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+        pendingCount: studentSummaries.reduce((sum, item) => sum + Number(item.pendingCount || 0), 0),
+      },
+      studentSummaries,
+      charges: normalizedCharges,
+      payments: payments.map((payment) => ({
+        ...payment,
+        studentName: payment.studentId?.name || 'Familia',
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const requestedParentUserId = role === 'admin' ? req.body?.parentUserId || userId : userId;
+    const parentUserId = toObjectId(requestedParentUserId);
+    const chargeId = toObjectId(req.params.chargeId);
+
+    if (!parentUserId || !chargeId) {
+      return res.status(400).json({ message: 'Invalid charge id' });
+    }
+
+    const charge = await AcademicCharge.findOne({
+      _id: chargeId,
+      schoolId,
+      status: { $in: ['pending', 'overdue'] },
+    });
+
+    if (!charge) {
+      return res.status(404).json({ message: 'Charge not found or already paid' });
+    }
+
+    const linkedChargeStudent = await ParentStudentLink.exists({
+      schoolId,
+      parentId: parentUserId,
+      studentId: charge.studentId,
+      status: 'active',
+    });
+
+    if (!linkedChargeStudent) {
+      return res.status(403).json({ message: 'Charge does not belong to a linked student' });
+    }
+
+    const studentOpenCharges = await AcademicCharge.find({
+      schoolId,
+      studentId: charge.studentId,
+      status: { $in: ['pending', 'overdue'] },
+    })
+      .populate('studentId', 'name')
+      .lean();
+    const overdueMonths = getAcademicChargeMonthsOverdue(studentOpenCharges, new Date());
+    if (overdueMonths >= 3) {
+      const amount = studentOpenCharges.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const studentName = normalizeText(studentOpenCharges[0]?.studentId?.name) || 'Estudiante';
+      return res.status(409).json({
+        message: 'Debes comunicarte con DataSchool para normalizar esta cartera.',
+        requiresDataSchoolContact: true,
+        dataSchoolWhatsappUrl: buildDataSchoolWhatsappUrl({ studentName, amount, overdueMonths }),
+      });
+    }
+
+    const billingProfile = charge.billingProfileId
+      ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
+      : null;
+    const pricing = resolveAcademicChargeAmounts(charge, billingProfile, new Date());
+
+    const payment = await AcademicChargePayment.create({
+      schoolId,
+      chargeId: charge._id,
+      studentId: charge.studentId || null,
+      parentId: parentUserId,
+      recordedByUserId: userId,
+      recordedByRole: role,
+      amount: pricing.effectiveAmount,
+      method: normalizeText(req.body?.method) || 'parent_portal',
+      notes: normalizeText(req.body?.notes),
+      paidAt: new Date(),
+    });
+
+    charge.status = 'paid';
+    charge.paidAt = payment.paidAt;
+    charge.paymentMethod = payment.method;
+    await charge.save();
+
+    queueNotificationsForParents({
+      schoolId,
+      parentIds: [parentUserId],
+      studentId: charge.studentId,
+      title: 'Pago academico registrado',
+      body: `Recibimos tu pago de $${formatAcademicCurrency(payment.amount)} por ${normalizeText(charge.concept) || 'un cobro academico'}.`,
+      payload: {
+        type: 'academic.billing.payment_registered',
+        chargeId: String(charge._id),
+        paymentId: String(payment._id),
+        amount: payment.amount,
+        url: '/parent/pagos',
+      },
+    }).catch((error) => console.warn(`[ACADEMIC_PAYMENT_NOTIFY_WARNING] payment=${payment._id} error=${error.message}`));
+
+    return res.status(200).json({ message: 'Pago registrado con exito.', payment });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

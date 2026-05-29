@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const mongoose = require('mongoose');
 
+const { findOneAcrossTenantSchoolDbs, runWithSchoolContext } = require('../config/db');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const ParentStudentLink = require('../models/parentStudentLink.model');
@@ -52,6 +53,20 @@ function buildReference() {
 function currentYearMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+async function findPaymentTransactionRecord(query, { lean = false } = {}) {
+  if (query?.schoolId) {
+    const directQuery = PaymentTransaction.findOne(query);
+    return lean ? directQuery.lean() : directQuery;
+  }
+
+  const locatedPayment = await findOneAcrossTenantSchoolDbs(() => {
+    const paymentQuery = PaymentTransaction.findOne(query);
+    return lean ? paymentQuery.lean() : paymentQuery;
+  });
+
+  return locatedPayment?.doc || null;
 }
 
 function resolveRetryDelayMs(nextRetryCount) {
@@ -319,8 +334,7 @@ async function findEpaycoPaymentRecord({ reference = '', providerTransactionId =
     $or: searchConditions,
   };
 
-  const paymentQuery = PaymentTransaction.findOne(query);
-  return lean ? paymentQuery.lean() : paymentQuery;
+  return findPaymentTransactionRecord(query, { lean });
 }
 
 function extractEpaycoProviderTransactionId(payload) {
@@ -865,9 +879,10 @@ function escapeInlineJson(value) {
 }
 
 async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { source = 'confirmation' } = {}) {
-  let session;
+  return runWithSchoolContext(paymentRecord?.schoolId, async () => {
+    let session;
 
-  try {
+    try {
     const providerTransactionId = extractEpaycoProviderTransactionId(providerPayload) || paymentRecord.providerTransactionId || '';
     const providerStatus = extractEpaycoProviderStatus(providerPayload);
     const internalStatus = toEpaycoInternalStatus(providerStatus);
@@ -973,22 +988,23 @@ async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { so
       }
     });
 
-    return {
-      received: true,
-      credited: true,
-      status: 'approved',
-      rechargeAmount: approvedAmount,
-    };
-  } catch (error) {
-    if (session && session.inTransaction()) {
-      await session.abortTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        rechargeAmount: approvedAmount,
+      };
+    } catch (error) {
+      if (session && session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      throw error;
+    } finally {
+      if (session) {
+        session.endSession();
+      }
     }
-    throw error;
-  } finally {
-    if (session) {
-      session.endSession();
-    }
-  }
+  });
 }
 
 function isWebhookSource(source) {
@@ -1106,7 +1122,7 @@ async function reconcileBoldWebhookByProviderLookup({ providerTransactionId, ref
       return null;
     }
 
-    const paymentRecord = await PaymentTransaction.findOne({
+    const paymentRecord = await findPaymentTransactionRecord({
       method: { $in: ['bold_auto_debit', 'bold'] },
       $or: searchConditions,
     });
@@ -1244,9 +1260,10 @@ function scheduleBoldWebhookFallbackRetry({ providerTransactionId, reference, pa
 }
 
 async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { source = 'status_sync' } = {}) {
-  let session;
+  return runWithSchoolContext(paymentRecord?.schoolId, async () => {
+    let session;
 
-  try {
+    try {
     const providerTransactionId = extractBoldProviderTransactionId(providerPayload) || paymentRecord.providerTransactionId || '';
     const providerStatus = extractBoldProviderStatus(providerPayload);
     const internalStatus = toBoldInternalStatus(providerStatus);
@@ -1383,23 +1400,24 @@ async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { sour
       }
     });
 
-    return {
-      received: true,
-      credited: true,
-      status: 'approved',
-      rechargeAmount: approvedAmount,
-      paidAmount: paidAmount || undefined,
-    };
-  } catch (error) {
-    if (session && session.inTransaction()) {
-      await session.abortTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        rechargeAmount: approvedAmount,
+        paidAmount: paidAmount || undefined,
+      };
+    } catch (error) {
+      if (session && session.inTransaction()) {
+        await session.abortTransaction();
+      }
+      throw error;
+    } finally {
+      if (session) {
+        session.endSession();
+      }
     }
-    throw error;
-  } finally {
-    if (session) {
-      session.endSession();
-    }
-  }
+  });
 }
 
 router.get('/daviplata/oauth/callback', async (req, res) => {
@@ -1438,7 +1456,7 @@ router.post('/daviplata/callback', async (req, res) => {
       searchConditions.push({ reference });
     }
 
-    const payment = await PaymentTransaction.findOne({ $or: searchConditions });
+    const payment = await findPaymentTransactionRecord({ $or: searchConditions });
     if (!payment) {
       return res.status(404).json({ message: 'Payment transaction not found' });
     }
@@ -1577,7 +1595,7 @@ router.post('/bancolombia/callback', async (req, res) => {
       searchConditions.push({ reference });
     }
 
-    const payment = await PaymentTransaction.findOne({
+    const payment = await findPaymentTransactionRecord({
       method: 'bancolombia',
       $or: searchConditions,
     });
@@ -1755,7 +1773,7 @@ async function handleBoldWebhook(req, res) {
       searchConditions.push({ reference });
     }
 
-    const paymentRecord = await PaymentTransaction.findOne({
+    const paymentRecord = await findPaymentTransactionRecord({
       method: { $in: ['bold_auto_debit', 'bold'] },
       $or: searchConditions,
     });
@@ -1869,7 +1887,7 @@ function handleBoldAsyncWebhookAck(req, res, { label }) {
         searchConditions.push({ reference });
       }
 
-      const paymentRecord = await PaymentTransaction.findOne({
+      const paymentRecord = await findPaymentTransactionRecord({
         method: { $in: ['bold_auto_debit', 'bold'] },
         $or: searchConditions,
       });
@@ -2013,7 +2031,7 @@ router.post('/epayco/confirmation', async (req, res) => {
       searchConditions.push({ providerTransactionId });
     }
 
-    const payment = await PaymentTransaction.findOne({
+    const payment = await findPaymentTransactionRecord({
       method: 'epayco',
       $or: searchConditions,
     });
@@ -2075,7 +2093,7 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
       return res.status(400).send('<!doctype html><html><body><p>Solicitud invalida.</p></body></html>');
     }
 
-    const payment = await PaymentTransaction.findOne({ method: 'epayco', reference }).lean();
+    const payment = await findPaymentTransactionRecord({ method: 'epayco', reference }, { lean: true });
     if (!payment) {
       return res.status(404).send('<!doctype html><html><body><p>Recarga no encontrada.</p></body></html>');
     }

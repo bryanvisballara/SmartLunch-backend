@@ -6,6 +6,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 
+require('./models');
+
 const authRoutes = require('./routes/auth.routes');
 const studentRoutes = require('./routes/students.routes');
 const walletRoutes = require('./routes/wallet.routes');
@@ -20,6 +22,15 @@ const adminRoutes = require('./routes/admin.routes');
 const meriendasRoutes = require('./routes/meriendas.routes');
 const parentRoutes = require('./routes/parent.routes');
 const paymentsRoutes = require('./routes/payments.routes');
+const campusRoutes = require('./routes/campus.routes');
+const nursingRoutes = require('./routes/nursing.routes');
+const psychologyRoutes = require('./routes/psychology.routes');
+const hrRoutes = require('./routes/hr.routes');
+const academicSecretaryRoutes = require('./routes/academicSecretary.routes');
+const admissionsRoutes = require('./routes/admissions.routes');
+const schoolCreationRoutes = require('./routes/schoolCreation.routes');
+const superAdminRoutes = require('./routes/superAdmin.routes');
+const schoolContextMiddleware = require('./middleware/schoolContextMiddleware');
 
 const app = express();
 
@@ -42,7 +53,11 @@ const defaultOrigins = [
   'https://www.comergio.com',
 ];
 
-const defaultOriginRegexes = [/^https:\/\/[a-z0-9-]+\.hostingersite\.com$/i];
+const defaultOriginRegexes = [
+  /^https:\/\/[a-z0-9-]+\.hostingersite\.com$/i,
+  /^https?:\/\/localhost(?::\d+)?$/i,
+  /^https?:\/\/127\.0\.0\.1(?::\d+)?$/i,
+];
 
 const envOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
@@ -114,6 +129,7 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('dev'));
+app.use(schoolContextMiddleware);
 app.use(
   '/assets',
   express.static(uploadsRootPath, {
@@ -121,6 +137,8 @@ app.use(
     immutable: true,
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
     },
   })
 );
@@ -133,6 +151,8 @@ app.use(
     immutable: true,
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
     },
   })
 );
@@ -160,6 +180,14 @@ app.use('/admin', adminRoutes);
 app.use('/admin/meriendas', meriendasRoutes);
 app.use('/meriendas', meriendasRoutes);
 app.use('/parent', parentRoutes);
+app.use('/campus', campusRoutes);
+app.use('/nursing', nursingRoutes);
+app.use('/psychology', psychologyRoutes);
+app.use('/hr', hrRoutes);
+app.use('/academic-secretary/admissions', admissionsRoutes);
+app.use('/academic-secretary', academicSecretaryRoutes);
+app.use('/school-creation', limiter, schoolCreationRoutes);
+app.use('/super-admin', superAdminRoutes);
 app.use('/payments', paymentsRoutes);
 app.use('/webhooks', paymentsRoutes);
 

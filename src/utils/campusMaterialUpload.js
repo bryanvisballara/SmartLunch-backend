@@ -1,0 +1,222 @@
+const fs = require('fs/promises');
+const path = require('path');
+const crypto = require('crypto');
+const multer = require('multer');
+const { v2: cloudinary } = require('cloudinary');
+
+const MAX_CAMPUS_MATERIAL_FILE_BYTES = Number(process.env.CAMPUS_MATERIAL_MAX_FILE_BYTES || 100 * 1024 * 1024);
+const MAX_CAMPUS_MATERIAL_FILES = Number(process.env.CAMPUS_MATERIAL_MAX_FILES || 6);
+const CLOUDINARY_FOLDER = String(process.env.CLOUDINARY_UPLOAD_FOLDER || 'comergio').trim();
+
+const allowedMimeTypes = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip',
+  'application/x-zip-compressed',
+  'text/plain',
+]);
+
+function isCloudinaryEnabled() {
+  return (
+    Boolean(String(process.env.CLOUDINARY_CLOUD_NAME || '').trim()) &&
+    Boolean(String(process.env.CLOUDINARY_API_KEY || '').trim()) &&
+    Boolean(String(process.env.CLOUDINARY_API_SECRET || '').trim())
+  );
+}
+
+function configureCloudinary() {
+  cloudinary.config({
+    cloud_name: String(process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
+    api_key: String(process.env.CLOUDINARY_API_KEY || '').trim(),
+    api_secret: String(process.env.CLOUDINARY_API_SECRET || '').trim(),
+    secure: true,
+  });
+}
+
+function getUploadsRootPath() {
+  const configured = String(process.env.UPLOADS_ROOT_PATH || '').trim();
+  if (configured) {
+    return configured.replace(/\/uploads\/?$/i, '/assets');
+  }
+
+  return path.resolve(process.cwd(), 'public', 'assets');
+}
+
+function getUploadsPublicBaseUrl() {
+  const configured = String(process.env.UPLOADS_PUBLIC_BASE_URL || '').trim();
+  if (configured) {
+    return configured.replace(/\s+/g, '').replace(/\/uploads\/?$/i, '/assets').replace(/\/+$/, '');
+  }
+
+  return '/assets';
+}
+
+function slugifyFilename(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function sanitizeExtension(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 12);
+}
+
+function sanitizeFolder(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-_]/g, '');
+}
+
+function buildPublicUrl(folder, filename) {
+  const base = getUploadsPublicBaseUrl();
+  const cleanFolder = sanitizeFolder(folder);
+  const cleanFilename = String(filename || '').trim().replace(/^\/+/, '');
+
+  if (!cleanFolder) {
+    return `${base}/${cleanFilename}`.replace(/([^:]\/)\/+/, '$1');
+  }
+
+  return `${base}/${cleanFolder}/${cleanFilename}`.replace(/([^:]\/)\/+/, '$1');
+}
+
+function detectMaterialKind(file) {
+  const mimeType = String(file?.mimetype || '').toLowerCase();
+
+  if (mimeType === 'application/pdf') {
+    return 'pdf';
+  }
+  if (mimeType.startsWith('video/')) {
+    return 'video';
+  }
+  if (mimeType.startsWith('audio/')) {
+    return 'audio';
+  }
+  if (mimeType.startsWith('image/')) {
+    return 'image';
+  }
+
+  return 'file';
+}
+
+function isAllowedMaterialFile(file) {
+  const mimeType = String(file?.mimetype || '').toLowerCase();
+  return (
+    mimeType.startsWith('image/') ||
+    mimeType.startsWith('video/') ||
+    mimeType.startsWith('audio/') ||
+    allowedMimeTypes.has(mimeType)
+  );
+}
+
+function uploadBufferToCloudinary(buffer, { publicId, extension }) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: 'auto',
+        folder: CLOUDINARY_FOLDER,
+        public_id: publicId,
+        overwrite: true,
+        format: extension || undefined,
+      },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+        return resolve(result);
+      }
+    );
+
+    stream.end(buffer);
+  });
+}
+
+const uploadCampusMaterialsMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_CAMPUS_MATERIAL_FILE_BYTES,
+    files: MAX_CAMPUS_MATERIAL_FILES,
+  },
+  fileFilter: (_req, file, callback) => {
+    if (isAllowedMaterialFile(file)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Solo se permiten PDF, video, audio, imagenes y archivos de apoyo comunes.'));
+  },
+});
+
+async function processStoredCampusMaterialFiles(files, { folder = 'campus-materials' } = {}) {
+  const normalizedFiles = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (normalizedFiles.length === 0) {
+    return [];
+  }
+
+  const safeFolder = sanitizeFolder(folder);
+  const uploadsRootPath = getUploadsRootPath();
+  const targetFolderPath = path.join(uploadsRootPath, safeFolder);
+  await fs.mkdir(targetFolderPath, { recursive: true });
+
+  if (isCloudinaryEnabled()) {
+    configureCloudinary();
+  }
+
+  const processedFiles = [];
+  for (const file of normalizedFiles) {
+    const originalExtension = sanitizeExtension(path.extname(String(file.originalname || '')).replace(/^\./, '')) || 'bin';
+    const filenameBase = `${slugifyFilename(path.parse(file.originalname || '').name) || 'campus-file'}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const filename = `${filenameBase}.${originalExtension}`;
+
+    if (isCloudinaryEnabled()) {
+      const uploadResult = await uploadBufferToCloudinary(file.buffer, { publicId: filenameBase, extension: originalExtension });
+      processedFiles.push({
+        sourceType: 'file',
+        kind: detectMaterialKind(file),
+        title: String(file.originalname || '').trim(),
+        url: String(uploadResult?.secure_url || '').trim(),
+        fileName: filename,
+        mimeType: String(file.mimetype || '').trim(),
+        sizeBytes: Number(file.size || 0),
+        extension: originalExtension,
+        storage: 'cloudinary',
+      });
+      continue;
+    }
+
+    const outputPath = path.join(targetFolderPath, filename);
+    await fs.writeFile(outputPath, file.buffer);
+
+    processedFiles.push({
+      sourceType: 'file',
+      kind: detectMaterialKind(file),
+      title: String(file.originalname || '').trim(),
+      url: buildPublicUrl(safeFolder, filename),
+      fileName: filename,
+      mimeType: String(file.mimetype || '').trim(),
+      sizeBytes: Number(file.size || 0),
+      extension: originalExtension,
+      storage: 'local',
+    });
+  }
+
+  return processedFiles;
+}
+
+module.exports = {
+  MAX_CAMPUS_MATERIAL_FILE_BYTES,
+  MAX_CAMPUS_MATERIAL_FILES,
+  uploadCampusMaterialsMiddleware,
+  processStoredCampusMaterialFiles,
+};

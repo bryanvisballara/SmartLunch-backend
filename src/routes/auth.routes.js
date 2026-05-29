@@ -9,16 +9,21 @@ const {
 } = require('@simplewebauthn/server');
 
 const authMiddleware = require('../middleware/authMiddleware');
+const { findOneAcrossTenantSchoolDbs, listTenantSchoolContexts, runWithSchoolContext, resolveRegisteredModel } = require('../config/db');
+require('../models/store.model');
 const User = require('../models/user.model');
 const Student = require('../models/student.model');
 const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
+const AcademicStructure = require('../models/academicStructure.model');
+const SchoolCreationSnapshot = require('../models/schoolCreationSnapshot.model');
 const EmailVerification = require('../models/emailVerification.model');
 const PasswordResetCode = require('../models/passwordResetCode.model');
 const DeviceToken = require('../models/deviceToken.model');
 const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const MeriendaSubscription = require('../models/meriendaSubscription.model');
 const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
+const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
 const {
   signAccessToken,
@@ -31,6 +36,8 @@ const router = express.Router();
 const MAX_AUTH_SESSIONS_PER_USER = 8;
 const rpName = process.env.WEBAUTHN_RP_NAME || 'Comergio';
 const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+const SUPER_ADMIN_USERNAME = normalizeEmail(process.env.SUPER_ADMIN_USERNAME || 'gerencia@comergio.com');
+const SUPER_ADMIN_PASSWORD = String(process.env.SUPER_ADMIN_PASSWORD || 'B@rranquilla96');
 const expectedOrigins = (process.env.WEBAUTHN_ORIGIN
   ? process.env.WEBAUTHN_ORIGIN.split(',')
   : ['http://localhost:5173', 'http://localhost', 'https://localhost', 'capacitor://localhost', 'ionic://localhost'])
@@ -47,6 +54,10 @@ function normalizeSchoolId(schoolId) {
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
+}
+
+function ensureStoreModelForSchool(schoolId = '') {
+  resolveRegisteredModel('Store', schoolId);
 }
 
 function hashVerificationCode(code) {
@@ -69,6 +80,92 @@ function isValidEmail(value) {
   return /^\S+@\S+\.\S+$/.test(String(value || ''));
 }
 
+function compareSchoolOptions(left, right) {
+  return String(left?.label || left?.id || '').localeCompare(String(right?.label || right?.id || ''), 'es', { sensitivity: 'base' });
+}
+
+function humanizeSchoolId(value) {
+  const normalizedValue = normalizeSchoolId(value)
+    .replace(/[_-][a-z0-9]{5}$/i, '')
+    .replace(/[_-]+/g, ' ');
+
+  return normalizedValue.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function normalizeSchoolLabelKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function buildSchoolOptionLabel(rawLabel, schoolId) {
+  const label = normalizeSchoolId(rawLabel);
+  if (label && label !== schoolId) {
+    return label;
+  }
+
+  return humanizeSchoolId(schoolId);
+}
+
+function isSuperAdminLogin(identifier, password) {
+  return normalizeUsername(identifier) === SUPER_ADMIN_USERNAME && String(password || '') === SUPER_ADMIN_PASSWORD;
+}
+
+async function resolveSuperAdminSchoolId(requestedSchoolId) {
+  const normalizedSchoolId = normalizeSchoolId(requestedSchoolId);
+  if (normalizedSchoolId) {
+    return normalizedSchoolId;
+  }
+
+  const tenantContexts = await listTenantSchoolContexts();
+  return tenantContexts[0]?.schoolId || 'comergio-demo';
+}
+
+async function ensureSuperAdminUser(schoolId) {
+  return runWithSchoolContext(schoolId, async () => {
+    const existingUser = await User.findOne({ schoolId, username: SUPER_ADMIN_USERNAME, deletedAt: null });
+    const passwordHash = await bcrypt.hash(SUPER_ADMIN_PASSWORD, 10);
+
+    if (existingUser) {
+      let changed = false;
+      if (existingUser.role !== 'super_admin') {
+        existingUser.role = 'super_admin';
+        changed = true;
+      }
+      if (existingUser.status !== 'active') {
+        existingUser.status = 'active';
+        changed = true;
+      }
+      if (!existingUser.email) {
+        existingUser.email = SUPER_ADMIN_USERNAME;
+        changed = true;
+      }
+      const passwordMatches = await bcrypt.compare(SUPER_ADMIN_PASSWORD, existingUser.passwordHash);
+      if (!passwordMatches) {
+        existingUser.passwordHash = passwordHash;
+        changed = true;
+      }
+      if (changed) {
+        await existingUser.save();
+      }
+      return existingUser;
+    }
+
+    return User.create({
+      schoolId,
+      name: 'Gerencia Comergio',
+      username: SUPER_ADMIN_USERNAME,
+      email: SUPER_ADMIN_USERNAME,
+      passwordHash,
+      role: 'super_admin',
+      status: 'active',
+    });
+  });
+}
+
 function safePasswordResetSuccessMessage() {
   return 'Si el correo existe, enviamos un codigo de recuperacion.';
 }
@@ -86,6 +183,56 @@ function normalizeStudentPayload(rawStudent) {
     fullName,
   };
 }
+
+router.get('/schools', async (_req, res) => {
+  try {
+    const tenantContexts = await listTenantSchoolContexts();
+    const schools = [];
+
+    for (const tenantContext of tenantContexts) {
+      const school = await runWithSchoolContext(tenantContext.schoolId, async () => {
+        const snapshot = await SchoolCreationSnapshot.findOne({ schoolId: tenantContext.schoolId })
+          .sort({ completedAt: -1, updatedAt: -1 })
+          .select('schoolId schoolName updatedAt completedAt')
+          .lean();
+        const academicStructure = snapshot?.schoolName
+          ? null
+          : await AcademicStructure.findOne({ schoolId: tenantContext.schoolId })
+            .select('schoolId schoolName updatedAt')
+            .lean();
+        const rawLabel = snapshot?.schoolName || academicStructure?.schoolName || tenantContext.schoolId;
+
+        return {
+          id: tenantContext.schoolId,
+          label: buildSchoolOptionLabel(rawLabel, tenantContext.schoolId),
+          hasExplicitLabel: Boolean(snapshot?.schoolName || academicStructure?.schoolName),
+        };
+      });
+
+      if (school.id) {
+        schools.push(school);
+      }
+    }
+
+    const schoolsByLabel = new Map();
+    schools.forEach((school) => {
+      const labelKey = normalizeSchoolLabelKey(school.label || school.id);
+      const existingSchool = schoolsByLabel.get(labelKey);
+
+      if (!existingSchool || (!existingSchool.hasExplicitLabel && school.hasExplicitLabel)) {
+        schoolsByLabel.set(labelKey, school);
+      }
+    });
+
+    const dedupedSchools = Array.from(schoolsByLabel.values())
+      .map(({ hasExplicitLabel, ...school }) => school)
+      .sort(compareSchoolOptions);
+
+    return res.status(200).json({ schools: dedupedSchools });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 router.post('/password/forgot/send-code', async (req, res) => {
   try {
@@ -623,6 +770,7 @@ function buildAuthResponse(user, refreshToken) {
       name: user.name,
       username: user.username,
       role: user.role,
+      coordinationScope: String(user.coordinationScope || '').trim(),
       biometricEnabled: Boolean(user.webauthn?.credentials?.length),
       assignedStore,
     },
@@ -707,6 +855,12 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'email or username and password are required' });
     }
 
+    if (isSuperAdminLogin(normalizedIdentifier, password)) {
+      const superAdminSchoolId = await resolveSuperAdminSchoolId(normalizedSchoolId);
+      const superAdminUser = await ensureSuperAdminUser(superAdminSchoolId);
+      return res.status(200).json(toAuthResponse(superAdminUser));
+    }
+
     const identifierFilter = {
       status: 'active',
       deletedAt: null,
@@ -716,12 +870,14 @@ router.post('/login', async (req, res) => {
     let user = null;
 
     if (normalizedSchoolId) {
+      ensureStoreModelForSchool(normalizedSchoolId);
       user = await User.findOne({
         ...identifierFilter,
         schoolId: normalizedSchoolId,
       })
         .populate('assignedStoreId', 'name status');
     } else {
+      ensureStoreModelForSchool('');
       const matches = await User.find(identifierFilter)
         .populate('assignedStoreId', 'name status')
         .limit(2);
@@ -805,7 +961,7 @@ router.post('/refresh', async (req, res) => {
 
 router.post('/biometric/register/options', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findOne({ _id: req.user.userId, status: 'active', deletedAt: null });
+    const user = await User.findOne({ _id: req.user.userId, schoolId: req.user.schoolId, status: 'active', deletedAt: null });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -854,7 +1010,7 @@ router.post('/biometric/register/verify', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'registrationResponse is required' });
     }
 
-    const user = await User.findOne({ _id: req.user.userId, status: 'active', deletedAt: null });
+    const user = await User.findOne({ _id: req.user.userId, schoolId: req.user.schoolId, status: 'active', deletedAt: null });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -1032,7 +1188,7 @@ router.post('/biometric/login/verify', async (req, res) => {
 
 router.delete('/account', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findOne({ _id: req.user.userId, status: 'active', deletedAt: null });
+    const user = await User.findOne({ _id: req.user.userId, schoolId: req.user.schoolId, status: 'active', deletedAt: null });
     if (!user) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
@@ -1158,26 +1314,30 @@ router.post('/account/deletion-feedback', async (req, res) => {
       return res.status(400).json({ message: 'El comentario es demasiado largo. Usa maximo 2000 caracteres.' });
     }
 
-    const user = await User.findOne({
+    const locatedUser = await findOneAcrossTenantSchoolDbs(() => User.findOne({
       deletionRequestedByUser: true,
       deletedAt: { $ne: null },
       deletionFeedbackTokenHash: hashDeletionFeedbackToken(feedbackToken),
       deletionFeedbackTokenExpiresAt: { $gt: new Date() },
-    });
+    }));
+
+    const user = locatedUser?.doc || null;
 
     if (!user) {
       return res.status(404).json({ message: 'La sesion para enviar comentarios ya no esta disponible.' });
     }
 
-    user.deletionFeedback = feedbackText;
-    user.deletionFeedbackSubmittedAt = new Date();
-    user.deletionFeedbackTokenHash = '';
-    user.deletionFeedbackTokenExpiresAt = null;
-    await user.save();
+    return runWithSchoolContext(user.schoolId, async () => {
+      user.deletionFeedback = feedbackText;
+      user.deletionFeedbackSubmittedAt = new Date();
+      user.deletionFeedbackTokenHash = '';
+      user.deletionFeedbackTokenExpiresAt = null;
+      await user.save();
 
-    return res.status(200).json({
-      success: true,
-      message: 'Gracias por compartirnos tu experiencia. Tu comentario fue recibido.',
+      return res.status(200).json({
+        success: true,
+        message: 'Gracias por compartirnos tu experiencia. Tu comentario fue recibido.',
+      });
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -1186,6 +1346,7 @@ router.post('/account/deletion-feedback', async (req, res) => {
 
 router.get('/me', authMiddleware, async (req, res) => {
   try {
+    ensureStoreModelForSchool(req.user.schoolId);
     const user = await User.findById(req.user.userId)
       .select('-passwordHash -webauthn')
       .populate('assignedStoreId', 'name status');

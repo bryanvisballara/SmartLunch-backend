@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const accountingFeeSettingSchema = new mongoose.Schema(
   {
@@ -11,4 +11,4 @@ const accountingFeeSettingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model('AccountingFeeSetting', accountingFeeSettingSchema);
+module.exports = registerSchoolScopedModel('AccountingFeeSetting', accountingFeeSettingSchema);

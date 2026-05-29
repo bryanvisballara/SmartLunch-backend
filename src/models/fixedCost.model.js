@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const fixedCostSchema = new mongoose.Schema(
   {
@@ -21,4 +21,4 @@ const fixedCostSchema = new mongoose.Schema(
 fixedCostSchema.index({ schoolId: 1, status: 1, deletedAt: 1, storeId: 1, type: 1 });
 fixedCostSchema.index({ schoolId: 1, monthKey: 1, weekStart: 1, type: 1, storeId: 1 });
 
-module.exports = mongoose.model('FixedCost', fixedCostSchema);
+module.exports = registerSchoolScopedModel('FixedCost', fixedCostSchema);

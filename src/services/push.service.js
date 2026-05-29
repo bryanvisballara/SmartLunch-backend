@@ -1,4 +1,5 @@
 const DeviceToken = require('../models/deviceToken.model');
+const { runWithSchoolContext } = require('../config/db');
 const admin = require('firebase-admin');
 const webpush = require('web-push');
 
@@ -260,39 +261,41 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
 }
 
 async function sendPushToParent({ schoolId, parentId, title, body, payload }) {
-  const tokens = await DeviceToken.find({
-    schoolId,
-    userId: parentId,
-    status: 'active',
-  }).select('platform token');
+  return runWithSchoolContext(schoolId, async () => {
+    const tokens = await DeviceToken.find({
+      schoolId,
+      userId: parentId,
+      status: 'active',
+    }).select('platform token');
 
-  console.info(`[PUSH_TO_PARENT] parentId=${parentId} tokensFound=${tokens.length}`);
+    console.info(`[PUSH_TO_PARENT] parentId=${parentId} tokensFound=${tokens.length}`);
 
-  if (!tokens.length) {
-    return { delivered: false, tokens: 0, reason: 'No active device tokens' };
-  }
+    if (!tokens.length) {
+      return { delivered: false, tokens: 0, reason: 'No active device tokens' };
+    }
 
-  const webTokens = tokens.filter((item) => item.platform === 'web');
-  const nativeTokens = tokens.filter((item) => item.platform === 'ios' || item.platform === 'android');
+    const webTokens = tokens.filter((item) => item.platform === 'web');
+    const nativeTokens = tokens.filter((item) => item.platform === 'ios' || item.platform === 'android');
 
-  const [webResult, nativeResult] = await Promise.all([
-    sendWebPushTokens({ webTokens, title, body, payload }),
-    sendNativePushTokens({ nativeTokens, title, body, payload }),
-  ]);
+    const [webResult, nativeResult] = await Promise.all([
+      sendWebPushTokens({ webTokens, title, body, payload }),
+      sendNativePushTokens({ nativeTokens, title, body, payload }),
+    ]);
 
-  const deliveredCount = Number(webResult.delivered || 0) + Number(nativeResult.delivered || 0);
-  const tokenCount = Number(webResult.total || 0) + Number(nativeResult.total || 0);
+    const deliveredCount = Number(webResult.delivered || 0) + Number(nativeResult.delivered || 0);
+    const tokenCount = Number(webResult.total || 0) + Number(nativeResult.total || 0);
 
-  if (deliveredCount === 0) {
-    const reasonParts = [webResult.reason, nativeResult.reason].filter(Boolean);
-    return {
-      delivered: false,
-      tokens: tokenCount,
-      reason: reasonParts.join(' | ') || 'Push delivery failed',
-    };
-  }
+    if (deliveredCount === 0) {
+      const reasonParts = [webResult.reason, nativeResult.reason].filter(Boolean);
+      return {
+        delivered: false,
+        tokens: tokenCount,
+        reason: reasonParts.join(' | ') || 'Push delivery failed',
+      };
+    }
 
-  return { delivered: true, tokens: deliveredCount };
+    return { delivered: true, tokens: deliveredCount };
+  });
 }
 
 module.exports = { sendPushToParent };

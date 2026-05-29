@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const supplierSchema = new mongoose.Schema(
   {
@@ -18,4 +18,4 @@ const supplierSchema = new mongoose.Schema(
 supplierSchema.index({ schoolId: 1, name: 1 }, { unique: true });
 supplierSchema.index({ schoolId: 1, status: 1, deletedAt: 1 });
 
-module.exports = mongoose.model('Supplier', supplierSchema);
+module.exports = registerSchoolScopedModel('Supplier', supplierSchema);

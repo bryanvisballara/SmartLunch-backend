@@ -3,47 +3,50 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const { Worker } = require('bullmq');
 
-const { connectDB } = require('../config/db');
+const { connectDB, runWithSchoolContext } = require('../config/db');
 const Notification = require('../models/notification.model');
 const { buildRedisConnection, NOTIFICATION_QUEUE_NAME } = require('../config/queue');
 const { sendPushToParent } = require('../services/push.service');
 
 async function processNotificationJob(job) {
   const { notificationId } = job.data;
+  const schoolId = String(job.data?.schoolId || '').trim();
 
-  const notification = await Notification.findById(notificationId);
-  if (!notification) {
-    return { skipped: true, reason: 'Notification not found' };
-  }
-
-  try {
-    const result = await sendPushToParent({
-      schoolId: notification.schoolId,
-      parentId: notification.parentId,
-      title: notification.title,
-      body: notification.body,
-      payload: notification.payload,
-    });
-
-    if (!result.delivered) {
-      notification.status = 'failed';
-      notification.lastError = result.reason || 'Push delivery failed';
-      await notification.save();
-      return { delivered: false, reason: notification.lastError };
+  return runWithSchoolContext(schoolId, async () => {
+    const notification = await Notification.findById(notificationId);
+    if (!notification) {
+      return { skipped: true, reason: 'Notification not found' };
     }
 
-    notification.status = 'sent';
-    notification.sentAt = new Date();
-    notification.lastError = null;
-    await notification.save();
+    try {
+      const result = await sendPushToParent({
+        schoolId: notification.schoolId,
+        parentId: notification.parentId,
+        title: notification.title,
+        body: notification.body,
+        payload: notification.payload,
+      });
 
-    return { delivered: true, tokens: result.tokens };
-  } catch (error) {
-    notification.status = 'failed';
-    notification.lastError = error.message;
-    await notification.save();
-    throw error;
-  }
+      if (!result.delivered) {
+        notification.status = 'failed';
+        notification.lastError = result.reason || 'Push delivery failed';
+        await notification.save();
+        return { delivered: false, reason: notification.lastError };
+      }
+
+      notification.status = 'sent';
+      notification.sentAt = new Date();
+      notification.lastError = null;
+      await notification.save();
+
+      return { delivered: true, tokens: result.tokens };
+    } catch (error) {
+      notification.status = 'failed';
+      notification.lastError = error.message;
+      await notification.save();
+      throw error;
+    }
+  });
 }
 
 async function startWorker() {

@@ -14,9 +14,10 @@ async function authMiddleware(req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const activeUser = await User.findOne({
       _id: decoded.userId,
+      schoolId: decoded.schoolId,
       status: 'active',
       deletedAt: null,
-    }).select('schoolId role name');
+    }).select('schoolId role name username coordinationScope');
 
     if (!activeUser) {
       return res.status(401).json({ message: 'Invalid token' });
@@ -28,6 +29,8 @@ async function authMiddleware(req, res, next) {
       schoolId: activeUser.schoolId,
       role: activeUser.role,
       name: activeUser.name,
+      username: String(activeUser.username || '').trim().toLowerCase(),
+      coordinationScope: String(activeUser.coordinationScope || '').trim(),
     };
     return next();
   } catch (error) {

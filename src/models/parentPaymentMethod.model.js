@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const parentPaymentMethodSchema = new mongoose.Schema(
   {
@@ -44,4 +44,4 @@ parentPaymentMethodSchema.index(
   { unique: true, partialFilterExpression: { deletedAt: null } }
 );
 
-module.exports = mongoose.model('ParentPaymentMethod', parentPaymentMethodSchema);
+module.exports = registerSchoolScopedModel('ParentPaymentMethod', parentPaymentMethodSchema);

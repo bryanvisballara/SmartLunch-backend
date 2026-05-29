@@ -11,12 +11,19 @@
     "migrate:usernames": "node src/scripts/migrateUsernames.js",
     "migrate:schoolid-international-berckley": "node src/scripts/migrateSchoolIdToInternationalBerckley.js",
     "migrate:schoolid-all-collections": "node src/scripts/migrateAllSchoolIdsToInternationalBerckley.js",
+    "migrate:school-dbs": "node src/scripts/migrateSchoolDatabases.js",
     "backfill:products-all-stores": "node src/scripts/backfillZeroStockProductsToAllStores.js",
+    "backfill:user-emails": "node src/scripts/backfillMissingUserEmails.js",
     "migrate:meriendas-indexes": "node src/scripts/migrateMeriendasIndexes.js",
     "migrate:legacy-students": "node src/scripts/migrateLegacyStudents.js",
     "migrate:image-domain:dry": "node src/scripts/migrateImageUrlDomain.js",
     "migrate:image-domain:apply": "node src/scripts/migrateImageUrlDomain.js --apply=true",
-    "seed": "node src/scripts/seed.js"
+    "seed": "node src/scripts/seed.js",
+    "seed:campus-laura": "node src/scripts/seedCampusLauraMedina.js",
+    "seed:millennium": "node src/scripts/seedMillenniumSchool.js",
+    "seed:millennium:academic-secretary": "node src/scripts/seedMillenniumAcademicSecretary.js",
+    "seed:millennium:rectoria": "node src/scripts/seedMillenniumRectoria.js",
+    "seed:rectoria": "node src/scripts/seedRectoriaBase.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.2.3",
@@ -37,8 +44,10 @@
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
     "openai": "^6.27.0",
+    "react-select": "^5.8.0",
     "sharp": "^0.34.5",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

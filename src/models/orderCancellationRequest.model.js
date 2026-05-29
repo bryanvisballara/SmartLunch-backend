@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const orderCancellationRequestSchema = new mongoose.Schema(
   {
@@ -18,4 +18,4 @@ const orderCancellationRequestSchema = new mongoose.Schema(
 
 orderCancellationRequestSchema.index({ schoolId: 1, status: 1, createdAt: -1 });
 
-module.exports = mongoose.model('OrderCancellationRequest', orderCancellationRequestSchema);
+module.exports = registerSchoolScopedModel('OrderCancellationRequest', orderCancellationRequestSchema);

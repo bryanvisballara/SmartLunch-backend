@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const inventoryMovementSchema = new mongoose.Schema(
   {
@@ -16,4 +16,4 @@ const inventoryMovementSchema = new mongoose.Schema(
 
 inventoryMovementSchema.index({ storeId: 1, productId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('InventoryMovement', inventoryMovementSchema);
+module.exports = registerSchoolScopedModel('InventoryMovement', inventoryMovementSchema);

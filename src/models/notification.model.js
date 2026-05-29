@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const notificationSchema = new mongoose.Schema(
   {
@@ -19,4 +19,4 @@ const notificationSchema = new mongoose.Schema(
 notificationSchema.index({ parentId: 1, createdAt: -1 });
 notificationSchema.index({ schoolId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('Notification', notificationSchema);
+module.exports = registerSchoolScopedModel('Notification', notificationSchema);

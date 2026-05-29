@@ -12,11 +12,12 @@ const WalletTransaction = require('../models/walletTransaction.model');
 const Category = require('../models/category.model');
 const Supplier = require('../models/supplier.model');
 const AccountingFeeSetting = require('../models/accountingFeeSetting.model');
+const User = require('../models/user.model');
 
 const router = express.Router();
 
 router.use(authMiddleware);
-router.use(roleMiddleware('admin'));
+router.use(roleMiddleware('admin', 'rectoria', 'direccion'));
 
 const DEFAULT_ACCOUNTING_FEE_SETTINGS = {
   dataphonePercent: 0,
@@ -415,6 +416,9 @@ router.get('/admin-home', async (req, res) => {
       accountingSalesRaw,
       topupsRaw,
       accountingFeeSettingsRaw,
+      studentsWithoutCourseCount,
+      studentsWithoutCourseRaw,
+      academicUsersByRoleRaw,
     ] = await Promise.all([
       orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
@@ -700,12 +704,54 @@ router.get('/admin-home', async (req, res) => {
         },
       ]).allowDiskUse(true),
       AccountingFeeSetting.findOne({ schoolId }).lean(),
+      Student.countDocuments({
+        schoolId,
+        deletedAt: null,
+        $or: [
+          { course: { $exists: false } },
+          { course: null },
+          { course: '' },
+        ],
+      }),
+      Student.find({
+        schoolId,
+        deletedAt: null,
+        $or: [
+          { course: { $exists: false } },
+          { course: null },
+          { course: '' },
+        ],
+      })
+        .select('_id name schoolCode grade course createdAt')
+        .sort({ createdAt: -1 })
+        .limit(12)
+        .lean(),
+      User.aggregate([
+        {
+          $match: {
+            schoolId,
+            deletedAt: null,
+            role: { $in: ['rectoria', 'direccion', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'] },
+          },
+        },
+        {
+          $group: {
+            _id: '$role',
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const accountingFeeSettings = {
       ...DEFAULT_ACCOUNTING_FEE_SETTINGS,
       ...normalizeFeeSettings(accountingFeeSettingsRaw),
     };
+    const studentsWithoutCourse = Array.isArray(studentsWithoutCourseRaw) ? studentsWithoutCourseRaw : [];
+    const academicUsersByRole = (Array.isArray(academicUsersByRoleRaw) ? academicUsersByRoleRaw : []).reduce((accumulator, item) => {
+      accumulator[String(item._id || '')] = Number(item.count || 0);
+      return accumulator;
+    }, {});
 
     const calculateQrFee = (amount) => (Number(amount || 0) * accountingFeeSettings.qrPercent) / 100;
     const calculateDataphoneFee = (amount) => (
@@ -1124,6 +1170,9 @@ router.get('/admin-home', async (req, res) => {
       accountingFeeSettings,
       weeklyAccountingSummary,
       aiRecommendations,
+      studentsWithoutCourseCount: Number(studentsWithoutCourseCount || 0),
+      studentsWithoutCourse,
+      academicUsersByRole,
       totalSubscribedStudents,
       totalAutoDebitActiveStudents,
       generatedAt: new Date().toISOString(),

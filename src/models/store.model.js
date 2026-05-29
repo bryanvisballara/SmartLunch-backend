@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const storeSchema = new mongoose.Schema(
   {
@@ -11,4 +11,4 @@ const storeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model('Store', storeSchema);
+module.exports = registerSchoolScopedModel('Store', storeSchema);

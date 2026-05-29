@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const userSchema = new mongoose.Schema(
   {
@@ -7,11 +7,16 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, lowercase: true, trim: true },
     email: { type: String, lowercase: true, trim: true, default: '' },
     phone: { type: String, trim: true },
+    address: { type: String, trim: true, default: '' },
     documentType: { type: String, enum: ['CC', 'TI', 'CE', 'PP', 'NIT', ''], default: '' },
     documentNumber: { type: String, trim: true, default: '' },
+    campusPhotoUrl: { type: String, trim: true, default: '' },
+    campusPhotoThumbUrl: { type: String, trim: true, default: '' },
     assignedStoreId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', default: null },
     passwordHash: { type: String, required: true },
-    role: { type: String, enum: ['parent', 'admin', 'vendor', 'merienda_operator'], required: true },
+    role: { type: String, enum: ['parent', 'admin', 'rectoria', 'direccion', 'super_admin', 'vendor', 'merienda_operator', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'], required: true },
+    coordinationScope: { type: String, trim: true, default: '' },
+    assignedSubjects: { type: [String], default: [] },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     deletedAt: { type: Date, default: null },
     authSessions: [
@@ -50,5 +55,6 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.index({ username: 1 }, { unique: true });
+userSchema.index({ schoolId: 1, documentNumber: 1 });
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = registerSchoolScopedModel('User', userSchema);

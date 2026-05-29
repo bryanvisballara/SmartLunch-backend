@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const deviceTokenSchema = new mongoose.Schema(
   {
@@ -15,4 +15,4 @@ const deviceTokenSchema = new mongoose.Schema(
 deviceTokenSchema.index({ userId: 1, schoolId: 1, status: 1 });
 deviceTokenSchema.index({ token: 1 }, { unique: true });
 
-module.exports = mongoose.model('DeviceToken', deviceTokenSchema);
+module.exports = registerSchoolScopedModel('DeviceToken', deviceTokenSchema);

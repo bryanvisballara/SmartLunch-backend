@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const walletTransactionSchema = new mongoose.Schema(
   {
@@ -25,4 +25,4 @@ const walletTransactionSchema = new mongoose.Schema(
 walletTransactionSchema.index({ studentId: 1, createdAt: -1 });
 walletTransactionSchema.index({ schoolId: 1, studentId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('WalletTransaction', walletTransactionSchema);
+module.exports = registerSchoolScopedModel('WalletTransaction', walletTransactionSchema);

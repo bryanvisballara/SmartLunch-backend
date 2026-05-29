@@ -48,6 +48,7 @@ function signAccessToken(user) {
       schoolId: user.schoolId,
       role: user.role,
       name: user.name,
+      coordinationScope: String(user.coordinationScope || '').trim(),
     },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || DEFAULT_ACCESS_TOKEN_EXPIRES_IN }

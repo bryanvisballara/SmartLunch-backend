@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const emailVerificationSchema = new mongoose.Schema(
   {
@@ -24,4 +24,4 @@ const emailVerificationSchema = new mongoose.Schema(
 
 emailVerificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-module.exports = mongoose.model('EmailVerification', emailVerificationSchema);
+module.exports = registerSchoolScopedModel('EmailVerification', emailVerificationSchema);

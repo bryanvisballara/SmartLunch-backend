@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const walletTopupRequestSchema = new mongoose.Schema(
   {
@@ -21,4 +21,4 @@ const walletTopupRequestSchema = new mongoose.Schema(
 
 walletTopupRequestSchema.index({ schoolId: 1, status: 1, createdAt: -1 });
 
-module.exports = mongoose.model('WalletTopupRequest', walletTopupRequestSchema);
+module.exports = registerSchoolScopedModel('WalletTopupRequest', walletTopupRequestSchema);

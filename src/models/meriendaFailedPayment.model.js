@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const meriendaFailedPaymentSchema = new mongoose.Schema(
   {
@@ -25,4 +25,4 @@ const meriendaFailedPaymentSchema = new mongoose.Schema(
 meriendaFailedPaymentSchema.index({ schoolId: 1, status: 1, failedAt: -1 });
 meriendaFailedPaymentSchema.index({ schoolId: 1, targetMonth: 1, failedAt: -1 });
 
-module.exports = mongoose.model('MeriendaFailedPayment', meriendaFailedPaymentSchema);
+module.exports = registerSchoolScopedModel('MeriendaFailedPayment', meriendaFailedPaymentSchema);

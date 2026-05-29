@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const meriendaScheduleDaySchema = new mongoose.Schema(
   {
@@ -20,4 +20,4 @@ const meriendaScheduleSchema = new mongoose.Schema(
 
 meriendaScheduleSchema.index({ schoolId: 1, month: 1 }, { unique: true });
 
-module.exports = mongoose.model('MeriendaSchedule', meriendaScheduleSchema);
+module.exports = registerSchoolScopedModel('MeriendaSchedule', meriendaScheduleSchema);

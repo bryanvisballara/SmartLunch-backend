@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
 const dailyClosureSchema = new mongoose.Schema(
   {
@@ -25,4 +25,4 @@ const dailyClosureSchema = new mongoose.Schema(
 
 dailyClosureSchema.index({ storeId: 1, vendorId: 1, date: 1 }, { unique: true });
 
-module.exports = mongoose.model('DailyClosure', dailyClosureSchema);
+module.exports = registerSchoolScopedModel('DailyClosure', dailyClosureSchema);
