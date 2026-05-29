@@ -80,7 +80,11 @@ router.use((req, res, next) => {
     || (req.path === '/billing/reminders' && method === 'POST')
     || (req.path === '/billing/follow-ups' && method === 'POST');
 
-  if (isFeeSettingsRoute && ['GET', 'PUT'].includes(method)) {
+  if (isFeeSettingsRoute && method === 'GET') {
+    return roleMiddleware([...ACADEMIC_SECRETARY_FEE_SETTINGS_ROLES, ...ACADEMIC_ADMISSIONS_READ_ROLES])(req, res, next);
+  }
+
+  if (isFeeSettingsRoute && method === 'PUT') {
     return roleMiddleware(ACADEMIC_SECRETARY_FEE_SETTINGS_ROLES)(req, res, next);
   }
 
