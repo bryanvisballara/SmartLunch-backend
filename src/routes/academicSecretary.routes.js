@@ -25,7 +25,7 @@ const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
-const { queueNotificationsForParents } = require('../services/notification.service');
+const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   normalizeStoredImageUrl,
@@ -5995,8 +5995,31 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
       return res.status(400).json({ message: 'El curso seleccionado no pertenece al grado del alumno.' });
     }
 
+    const previousCourseKey = normalizeText(student.course);
     student.course = selectedCourse.key;
     await student.save();
+
+    let courseAssignmentNotification = { notificationsCreated: 0, tokensFound: 0 };
+    if (previousCourseKey !== selectedCourse.key) {
+      const courseLabel = buildAcademicCourseDisplayLabel(grade, selectedCourse, grade.courses) || selectedCourse.label || selectedCourse.key;
+      try {
+        courseAssignmentNotification = await queueStudentParentNotification({
+          schoolId,
+          studentId: student._id,
+          title: 'Curso asignado',
+          body: `El alumno ${student.name || 'seleccionado'} ha sido asignado al curso ${courseLabel}.`,
+          payload: {
+            type: 'academic.course_assigned',
+            courseKey: selectedCourse.key,
+            courseLabel,
+            gradeKey: grade.key,
+            url: '/parent/academic',
+          },
+        });
+      } catch (notificationError) {
+        console.warn(`[ACADEMIC_COURSE_ASSIGNMENT_PUSH_FAILED] studentId=${student._id} course=${selectedCourse.key} error=${notificationError.message}`);
+      }
+    }
 
     return res.status(200).json({
       student: {
@@ -6006,6 +6029,7 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
         course: student.course,
       },
       academicStructure: serialized,
+      notification: courseAssignmentNotification,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
