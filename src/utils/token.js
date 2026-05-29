@@ -1,14 +1,16 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
-const DEFAULT_ACCESS_TOKEN_EXPIRES_IN = '30d';
-const DEFAULT_REFRESH_TOKEN_EXPIRES_IN = '365d';
+const DEFAULT_ACCESS_TOKEN_EXPIRES_IN = '3650d';
+const DEFAULT_REFRESH_TOKEN_EXPIRES_IN = '3650d';
+const MIN_AUTH_SESSION_MS = 3650 * 24 * 60 * 60 * 1000;
 const DURATION_UNITS_MS = {
   s: 1000,
   m: 60 * 1000,
   h: 60 * 60 * 1000,
   d: 24 * 60 * 60 * 1000,
   w: 7 * 24 * 60 * 60 * 1000,
+  y: 365 * 24 * 60 * 60 * 1000,
 };
 
 function parseDurationToMs(rawValue, fallbackMs) {
@@ -17,7 +19,7 @@ function parseDurationToMs(rawValue, fallbackMs) {
   }
 
   const normalizedValue = String(rawValue || '').trim().toLowerCase();
-  const match = normalizedValue.match(/^(\d+)(ms|s|m|h|d|w)?$/);
+  const match = normalizedValue.match(/^(\d+)(ms|s|m|h|d|w|y)?$/);
 
   if (!match) {
     return fallbackMs;
@@ -41,6 +43,16 @@ function parseDurationToMs(rawValue, fallbackMs) {
   return amount * multiplier;
 }
 
+function resolveDurationAtLeast(rawValue, fallbackValue, minimumMs) {
+  const normalizedValue = String(rawValue || '').trim();
+  if (!normalizedValue) {
+    return fallbackValue;
+  }
+
+  const parsedMs = parseDurationToMs(normalizedValue, minimumMs);
+  return parsedMs >= minimumMs ? normalizedValue : fallbackValue;
+}
+
 function signAccessToken(user) {
   return jwt.sign(
     {
@@ -51,7 +63,13 @@ function signAccessToken(user) {
       coordinationScope: String(user.coordinationScope || '').trim(),
     },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || DEFAULT_ACCESS_TOKEN_EXPIRES_IN }
+    {
+      expiresIn: resolveDurationAtLeast(
+        process.env.JWT_EXPIRES_IN,
+        DEFAULT_ACCESS_TOKEN_EXPIRES_IN,
+        MIN_AUTH_SESSION_MS
+      ),
+    }
   );
 }
 
@@ -64,13 +82,12 @@ function hashRefreshToken(token) {
 }
 
 function getRefreshTokenExpiresAt() {
-  const fallbackMs = 365 * 24 * 60 * 60 * 1000;
   const ttlMs = parseDurationToMs(
     process.env.REFRESH_TOKEN_EXPIRES_IN || DEFAULT_REFRESH_TOKEN_EXPIRES_IN,
-    fallbackMs
+    MIN_AUTH_SESSION_MS
   );
 
-  return new Date(Date.now() + ttlMs);
+  return new Date(Date.now() + Math.max(ttlMs, MIN_AUTH_SESSION_MS));
 }
 
 module.exports = {

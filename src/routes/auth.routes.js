@@ -205,6 +205,7 @@ router.get('/schools', async (_req, res) => {
         return {
           id: tenantContext.schoolId,
           label: buildSchoolOptionLabel(rawLabel, tenantContext.schoolId),
+          country: 'CO',
           hasExplicitLabel: Boolean(snapshot?.schoolName || academicStructure?.schoolName),
         };
       });
