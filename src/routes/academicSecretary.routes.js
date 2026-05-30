@@ -78,6 +78,7 @@ router.use((req, res, next) => {
   const isCalendarAssignmentRoute = /^\/academic-management\/assignments(\/|$)/.test(req.path);
   const isCourseAssignmentRoute = /^\/academic-management\/students\/[^/]+\/course$/.test(req.path) && method === 'PATCH';
   const isBillingAccessRoute = (req.path === '/billing' && method === 'GET')
+    || (/^\/billing\/charges\/[^/]+\/pay$/.test(req.path) && method === 'POST')
     || (req.path === '/billing/reminders' && method === 'POST')
     || (req.path === '/billing/follow-ups' && method === 'POST');
 
@@ -3968,7 +3969,7 @@ async function dispatchBillingNotice({ schoolId, schoolName, parents, title, int
 
 async function buildBillingSummary(schoolId) {
   const now = new Date();
-  const [charges, recentPayments, billingProfiles, primaryParentByStudentId, followUps] = await Promise.all([
+  const [charges, recentPayments, chargePayments, billingProfiles, primaryParentByStudentId, followUps, students] = await Promise.all([
     AcademicCharge.find({ schoolId })
       .populate('parentId', 'name email phone')
       .populate('studentId', 'name grade course')
@@ -3981,20 +3982,40 @@ async function buildBillingSummary(schoolId) {
       .sort({ paidAt: -1, createdAt: -1 })
       .limit(25)
       .lean(),
+    AcademicChargePayment.find({ schoolId })
+      .select('chargeId parentId studentId recordedByUserId recordedByRole amount method notes paidAt createdAt')
+      .sort({ paidAt: -1, createdAt: -1 })
+      .lean(),
     StudentBillingProfile.find({ schoolId, active: true }).lean(),
     resolvePrimaryParentContacts(schoolId),
     buildBillingFollowUpSummary(schoolId),
+    Student.find({ schoolId, deletedAt: null })
+      .select('name grade course documentNumber')
+      .sort({ name: 1 })
+      .lean(),
   ]);
 
   const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile._id), profile]));
+  const paymentTotalsByChargeId = new Map();
+  chargePayments.forEach((payment) => {
+    const chargeKey = String(payment.chargeId || '').trim();
+    if (!chargeKey) return;
+    paymentTotalsByChargeId.set(chargeKey, Number(paymentTotalsByChargeId.get(chargeKey) || 0) + Number(payment.amount || 0));
+  });
+
+  const chargeById = new Map();
 
   const pendingCharges = [];
   const dedupedChargeKeys = new Map();
   charges.forEach((charge) => {
-    const overdueMonths = ['pending', 'overdue'].includes(String(charge.status)) ? calculateOverdueMonths(charge.dueDate, now) : 0;
-    const normalizedStatus = charge.status === 'pending' && overdueMonths > 0 ? 'overdue' : charge.status;
+    chargeById.set(String(charge._id), charge);
     const billingProfile = billingProfileMap.get(String(charge.billingProfileId || '')) || null;
     const pricing = resolveAcademicChargeAmounts(charge, billingProfile, now);
+    const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0);
+    const settledPaidAmount = String(charge.status) === 'paid' && rawPaidAmount <= 0 ? pricing.effectiveAmount : rawPaidAmount;
+    const outstandingAmount = String(charge.status) === 'paid' ? 0 : Math.max(0, pricing.effectiveAmount - settledPaidAmount);
+    const overdueMonths = ['pending', 'overdue'].includes(String(charge.status)) && outstandingAmount > 0 ? calculateOverdueMonths(charge.dueDate, now) : 0;
+    const normalizedStatus = outstandingAmount <= 0 ? 'paid' : (charge.status === 'pending' && overdueMonths > 0 ? 'overdue' : charge.status);
     const studentId = String(charge.studentId?._id || charge.studentId || '').trim();
     const primaryParent = studentId ? primaryParentByStudentId.get(studentId) || null : null;
     const displayParentId = String(primaryParent?._id || charge.parentId?._id || charge.parentId || '').trim();
@@ -4003,7 +4024,10 @@ async function buildBillingSummary(schoolId) {
       status: normalizedStatus,
       overdueMonths,
       baseAmount: pricing.baseAmount,
-      amount: pricing.effectiveAmount,
+      chargeAmount: pricing.effectiveAmount,
+      paidAmount: Math.min(pricing.effectiveAmount, settledPaidAmount),
+      outstandingAmount,
+      amount: outstandingAmount,
       discountPercent: pricing.discountPercent,
       fixedDiscountAmount: pricing.fixedDiscountAmount,
       benefitLabel: pricing.benefitLabel,
@@ -4025,6 +4049,80 @@ async function buildBillingSummary(schoolId) {
   });
 
   pendingCharges.push(...Array.from(dedupedChargeKeys.values()));
+
+  const chargesByStudentId = new Map();
+  pendingCharges.forEach((charge) => {
+    const studentKey = String(charge.studentId?._id || charge.studentId || '').trim();
+    if (!studentKey) return;
+    if (!chargesByStudentId.has(studentKey)) chargesByStudentId.set(studentKey, []);
+    chargesByStudentId.get(studentKey).push(charge);
+  });
+
+  const paymentsByStudentId = new Map();
+  chargePayments.forEach((payment) => {
+    const studentKey = String(payment.studentId || chargeById.get(String(payment.chargeId || ''))?.studentId?._id || chargeById.get(String(payment.chargeId || ''))?.studentId || '').trim();
+    if (!studentKey) return;
+    if (!paymentsByStudentId.has(studentKey)) paymentsByStudentId.set(studentKey, []);
+    const charge = chargeById.get(String(payment.chargeId || '')) || null;
+    paymentsByStudentId.get(studentKey).push({
+      _id: payment._id,
+      chargeId: payment.chargeId,
+      concept: charge?.concept || payment.notes || 'Pago académico',
+      amount: Number(payment.amount || 0),
+      method: payment.method || '',
+      methodLabel: labelAcademicPaymentMethod(payment.method),
+      notes: payment.notes || '',
+      paidAt: payment.paidAt || payment.createdAt,
+      recordedByRole: payment.recordedByRole || '',
+    });
+  });
+
+  const studentAccounts = students.map((student) => {
+    const studentId = String(student._id);
+    const relatedCharges = (chargesByStudentId.get(studentId) || [])
+      .sort((left, right) => new Date(left.dueDate || 0) - new Date(right.dueDate || 0));
+    const pendingStudentCharges = relatedCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status)) && Number(charge.outstandingAmount || charge.amount || 0) > 0);
+    const hasOverdue = pendingStudentCharges.some((charge) => String(charge.status) === 'overdue' || Number(charge.overdueMonths || 0) > 0);
+    const pendingAmount = pendingStudentCharges.reduce((sum, charge) => sum + Number(charge.outstandingAmount || charge.amount || 0), 0);
+    const primaryParent = primaryParentByStudentId.get(studentId) || null;
+    const payments = paymentsByStudentId.get(studentId) || [];
+
+    return {
+      studentId,
+      studentName: student.name || 'Alumno',
+      documentNumber: student.documentNumber || '',
+      grade: student.grade || '',
+      course: student.course || '',
+      parentId: primaryParent?._id || '',
+      parentName: primaryParent?.name || 'Sin acudiente principal',
+      parentPhone: primaryParent?.phone || '',
+      parentEmail: primaryParent?.email || '',
+      pendingAmount,
+      pendingCount: pendingStudentCharges.length,
+      paidAmount: payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+      overdueMonths: pendingStudentCharges.reduce((maxMonths, charge) => Math.max(maxMonths, Number(charge.overdueMonths || 0)), 0),
+      status: pendingStudentCharges.length ? (hasOverdue ? 'overdue' : 'pending') : 'current',
+      statusLabel: pendingStudentCharges.length ? (hasOverdue ? 'En mora' : 'Pendiente') : 'Al día',
+      charges: relatedCharges.map((charge) => ({
+        _id: charge._id,
+        concept: charge.concept,
+        category: charge.category,
+        dueDate: charge.dueDate,
+        status: charge.status,
+        amount: Number(charge.outstandingAmount || charge.amount || 0),
+        chargeAmount: Number(charge.chargeAmount || 0),
+        paidAmount: Number(charge.paidAmount || 0),
+        originalAmount: Number(charge.originalAmount || charge.baseAmount || charge.chargeAmount || 0),
+        overdueMonths: Number(charge.overdueMonths || 0),
+      })),
+      payments,
+    };
+  }).sort((left, right) => {
+    if (Number(right.pendingAmount > 0) !== Number(left.pendingAmount > 0)) return Number(right.pendingAmount > 0) - Number(left.pendingAmount > 0);
+    if (right.overdueMonths !== left.overdueMonths) return right.overdueMonths - left.overdueMonths;
+    if (right.pendingAmount !== left.pendingAmount) return right.pendingAmount - left.pendingAmount;
+    return String(left.studentName).localeCompare(String(right.studentName), 'es', { numeric: true });
+  });
 
   const overdueParentsMap = new Map();
   for (const charge of pendingCharges) {
@@ -4083,6 +4181,7 @@ async function buildBillingSummary(schoolId) {
       overdueBuckets: bucketCounts,
     },
     charges: pendingCharges,
+    studentAccounts,
     recentPayments: recentPayments.map((payment) => ({
       ...payment,
       parentId: primaryParentByStudentId.get(String(payment.studentId?._id || payment.studentId || ''))?._id || payment.parentId,
@@ -4109,6 +4208,7 @@ function createEmptyBillingSummary() {
       overdueBuckets: { '2': 0, '3': 0, '4': 0, '5': 0, '6_plus': 0 },
     },
     charges: [],
+    studentAccounts: [],
     recentPayments: [],
     overdueParents: [],
     followUps: [],
@@ -4154,6 +4254,34 @@ async function createCharge({ schoolId, createdByUserId, createdByRole, parentId
     targetCourse,
     monthKey,
   });
+}
+
+async function getAcademicChargeOutstandingAmount(charge, referenceDate = new Date()) {
+  const [billingProfile, payments] = await Promise.all([
+    charge.billingProfileId
+      ? StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId: charge.schoolId }).lean()
+      : null,
+    AcademicChargePayment.find({ schoolId: charge.schoolId, chargeId: charge._id }).select('amount').lean(),
+  ]);
+  const pricing = resolveAcademicChargeAmounts(charge, billingProfile, referenceDate);
+  const paidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+  return {
+    chargeAmount: pricing.effectiveAmount,
+    paidAmount,
+    outstandingAmount: Math.max(0, pricing.effectiveAmount - paidAmount),
+  };
+}
+
+function normalizeAcademicManualPaymentMethod(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (['cash', 'bank_transfer', 'card', 'pse', 'epayco', 'bold', 'other'].includes(normalized)) {
+    return normalized;
+  }
+  if (['transferencia', 'transfer', 'bank'].includes(normalized)) return 'bank_transfer';
+  if (['datafono', 'dataphone', 'tarjeta'].includes(normalized)) return 'card';
+  if (['efectivo'].includes(normalized)) return 'cash';
+  return 'other';
 }
 
 async function markAcademicChargeAsPaidAtEnrollment({ charge, schoolId, parentId, studentId, recordedByUserId, recordedByRole, amount }) {
@@ -7409,6 +7537,99 @@ router.post('/billing/charges', async (req, res) => {
     });
 
     return res.status(201).json({ createdCharges: createdCharges.length });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/billing/charges/:chargeId/pay', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const chargeId = toObjectId(req.params.chargeId);
+    if (!chargeId) {
+      return res.status(400).json({ message: 'chargeId no es válido.' });
+    }
+
+    const charge = await AcademicCharge.findOne({
+      _id: chargeId,
+      schoolId,
+      status: { $in: ['pending', 'overdue'] },
+    });
+
+    if (!charge) {
+      return res.status(404).json({ message: 'El cargo no existe o ya está pagado.' });
+    }
+
+    const { outstandingAmount } = await getAcademicChargeOutstandingAmount(charge, new Date());
+    if (outstandingAmount <= 0) {
+      charge.status = 'paid';
+      charge.paidAt = charge.paidAt || new Date();
+      await charge.save();
+      return res.status(409).json({ message: 'Este cargo ya no tiene saldo pendiente.' });
+    }
+
+    const requestedAmount = Number(req.body?.amount || outstandingAmount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      return res.status(400).json({ message: 'Ingresa un valor de pago válido.' });
+    }
+
+    const paymentAmount = Math.min(Math.round(requestedAmount), Math.round(outstandingAmount));
+    const paidAt = req.body?.paidAt ? new Date(req.body.paidAt) : new Date();
+    if (Number.isNaN(paidAt.getTime())) {
+      return res.status(400).json({ message: 'La fecha de pago no es válida.' });
+    }
+
+    const primaryParent = String(charge.studentId || '').trim()
+      ? (await resolvePrimaryParentContacts(schoolId)).get(String(charge.studentId))
+      : null;
+    const parentId = primaryParent?._id || charge.parentId;
+    const method = normalizeAcademicManualPaymentMethod(req.body?.method);
+    const payment = await AcademicChargePayment.create({
+      schoolId,
+      chargeId: charge._id,
+      studentId: charge.studentId || null,
+      parentId,
+      recordedByUserId: userId,
+      recordedByRole: role,
+      amount: paymentAmount,
+      method,
+      notes: normalizeText(req.body?.notes),
+      paidAt,
+    });
+
+    const remainingAmount = Math.max(0, outstandingAmount - paymentAmount);
+    if (remainingAmount <= 0) {
+      charge.status = 'paid';
+      charge.paidAt = payment.paidAt;
+    } else if (new Date(charge.dueDate) < new Date()) {
+      charge.status = 'overdue';
+    } else {
+      charge.status = 'pending';
+    }
+    charge.paymentMethod = method;
+    await charge.save();
+
+    queueNotificationsForParents({
+      schoolId,
+      parentIds: [parentId],
+      studentId: charge.studentId,
+      title: 'Pago academico registrado',
+      body: `Se registró un pago de ${formatCurrency(payment.amount)} por ${normalizeText(charge.concept) || 'un cobro academico'}.`,
+      payload: {
+        type: 'academic.billing.payment_registered',
+        chargeId: String(charge._id),
+        paymentId: String(payment._id),
+        amount: payment.amount,
+        url: '/parent/pagos',
+      },
+    }).catch((error) => console.warn(`[ACADEMIC_PAYMENT_NOTIFY_WARNING] payment=${payment._id} error=${error.message}`));
+
+    return res.status(200).json({
+      message: 'Pago registrado con éxito.',
+      payment,
+      remainingAmount,
+      chargeStatus: charge.status,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

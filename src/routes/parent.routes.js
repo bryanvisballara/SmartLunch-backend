@@ -3288,17 +3288,33 @@ router.get('/portal/academic-billing', async (req, res) => {
       .sort({ dueDate: 1, createdAt: -1 })
       .lean();
 
+    const chargePayments = charges.length > 0
+      ? await AcademicChargePayment.find({ schoolId, chargeId: { $in: charges.map((charge) => charge._id) } }).select('chargeId amount').lean()
+      : [];
+    const paymentTotalsByChargeId = new Map();
+    chargePayments.forEach((payment) => {
+      const chargeKey = String(payment.chargeId || '').trim();
+      if (!chargeKey) return;
+      paymentTotalsByChargeId.set(chargeKey, Number(paymentTotalsByChargeId.get(chargeKey) || 0) + Number(payment.amount || 0));
+    });
+
     const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile._id), profile]));
     const normalizedCharges = charges.map((charge) => {
-      const dueDate = new Date(charge.dueDate);
-      const isOverdue = ['pending', 'overdue'].includes(String(charge.status)) && dueDate < now;
       const billingProfile = billingProfileMap.get(String(charge.billingProfileId || '')) || null;
       const pricing = resolveAcademicChargeAmounts(charge, billingProfile, now);
+      const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0);
+      const settledPaidAmount = String(charge.status) === 'paid' && rawPaidAmount <= 0 ? pricing.effectiveAmount : rawPaidAmount;
+      const outstandingAmount = String(charge.status) === 'paid' ? 0 : Math.max(0, pricing.effectiveAmount - settledPaidAmount);
+      const dueDate = new Date(charge.dueDate);
+      const isOverdue = ['pending', 'overdue'].includes(String(charge.status)) && outstandingAmount > 0 && dueDate < now;
       return {
         ...charge,
-        status: isOverdue ? 'overdue' : charge.status,
+        status: outstandingAmount <= 0 ? 'paid' : (isOverdue ? 'overdue' : charge.status),
         baseAmount: pricing.baseAmount,
-        amount: pricing.effectiveAmount,
+        amount: outstandingAmount,
+        chargeAmount: pricing.effectiveAmount,
+        paidAmount: Math.min(pricing.effectiveAmount, settledPaidAmount),
+        outstandingAmount,
         discountPercent: pricing.discountPercent,
         fixedDiscountAmount: pricing.fixedDiscountAmount,
         benefitLabel: pricing.benefitLabel,
@@ -3380,6 +3396,15 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
       ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
       : null;
     const pricing = resolveAcademicChargeAmounts(charge, billingProfile, new Date());
+    const previousPayments = await AcademicChargePayment.find({ schoolId, chargeId: charge._id }).select('amount').lean();
+    const previousPaidAmount = previousPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const outstandingAmount = Math.max(0, pricing.effectiveAmount - previousPaidAmount);
+    if (outstandingAmount <= 0) {
+      charge.status = 'paid';
+      charge.paidAt = charge.paidAt || new Date();
+      await charge.save();
+      return res.status(409).json({ message: 'Este cobro ya fue pagado.' });
+    }
 
     const payment = await AcademicChargePayment.create({
       schoolId,
@@ -3388,7 +3413,7 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
       parentId: parentUserId,
       recordedByUserId: userId,
       recordedByRole: role,
-      amount: pricing.effectiveAmount,
+      amount: outstandingAmount,
       method: normalizeText(req.body?.method) || 'parent_portal',
       notes: normalizeText(req.body?.notes),
       paidAt: new Date(),
