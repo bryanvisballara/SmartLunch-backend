@@ -37,6 +37,43 @@ const schoolContextMiddleware = require('./middleware/schoolContextMiddleware');
 const app = express();
 
 const uploadsRootPath = String(process.env.UPLOADS_ROOT_PATH || '').trim() || path.resolve(process.cwd(), 'public', 'assets');
+const bundledAssetsRootPath = path.resolve(process.cwd(), 'public', 'assets');
+const staticAssetRootPaths = Array.from(new Set([
+  path.resolve(uploadsRootPath),
+  bundledAssetsRootPath,
+]));
+
+function isPathInsideRoot(absolutePath, rootPath) {
+  return absolutePath === rootPath || absolutePath.startsWith(`${rootPath}${path.sep}`);
+}
+
+async function resolveStaticAssetPath(assetPath) {
+  const requestedPath = path.normalize(decodeURIComponent(assetPath)).replace(/^[/\\]+/, '');
+
+  for (const rootPath of staticAssetRootPaths) {
+    const absolutePath = path.resolve(rootPath, requestedPath);
+    if (!isPathInsideRoot(absolutePath, rootPath)) {
+      return { invalid: true };
+    }
+
+    try {
+      await fs.access(absolutePath);
+      return { absolutePath };
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  return { absolutePath: '' };
+}
+
+function setStaticAssetHeaders(res) {
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+}
 
 // Render runs behind a proxy; trust first hop so rate-limit/IP detection works.
 app.set('trust proxy', 1);
@@ -142,24 +179,22 @@ app.use(['/assets', '/uploads'], async (req, res, next) => {
   }
 
   try {
-    const requestedPath = path.normalize(decodeURIComponent(assetPath)).replace(/^[/\\]+/, '');
-    const absolutePath = path.resolve(uploadsRootPath, requestedPath);
-    const uploadsRoot = path.resolve(uploadsRootPath);
-
-    if (!absolutePath.startsWith(`${uploadsRoot}${path.sep}`) && absolutePath !== uploadsRoot) {
+    const resolvedAsset = await resolveStaticAssetPath(assetPath);
+    if (resolvedAsset.invalid) {
       return res.status(400).json({ message: 'Invalid asset path' });
     }
+    if (!resolvedAsset.absolutePath) {
+      return next();
+    }
 
-    const imageBuffer = await fs.readFile(absolutePath);
+    const imageBuffer = await fs.readFile(resolvedAsset.absolutePath);
     const jpegBuffer = await sharp(imageBuffer)
       .rotate()
       .jpeg({ quality: Number(process.env.IOS_WEBP_JPEG_QUALITY || 86), mozjpeg: true })
       .toBuffer();
 
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    setStaticAssetHeaders(res);
 
     if (method === 'HEAD') {
       res.setHeader('Content-Length', String(jpegBuffer.length));
@@ -171,32 +206,28 @@ app.use(['/assets', '/uploads'], async (req, res, next) => {
     return next(error);
   }
 });
-app.use(
-  '/assets',
-  express.static(uploadsRootPath, {
-    maxAge: '1y',
-    immutable: true,
-    setHeaders: (res) => {
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    },
-  })
-);
+for (const staticAssetRootPath of staticAssetRootPaths) {
+  app.use(
+    '/assets',
+    express.static(staticAssetRootPath, {
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: setStaticAssetHeaders,
+    })
+  );
+}
 
 // Legacy alias for previously generated /uploads URLs.
-app.use(
-  '/uploads',
-  express.static(uploadsRootPath, {
-    maxAge: '1y',
-    immutable: true,
-    setHeaders: (res) => {
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    },
-  })
-);
+for (const staticAssetRootPath of staticAssetRootPaths) {
+  app.use(
+    '/uploads',
+    express.static(staticAssetRootPath, {
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: setStaticAssetHeaders,
+    })
+  );
+}
 
 app.get('/health', (req, res) => {
   res.status(200).json({
