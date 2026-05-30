@@ -5,6 +5,8 @@ const morgan = require('morgan');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs/promises');
+const sharp = require('sharp');
 
 require('./models');
 
@@ -130,6 +132,45 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(schoolContextMiddleware);
+app.use(['/assets', '/uploads'], async (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  const wantsJpeg = ['jpg', 'jpeg'].includes(String(req.query?.format || '').toLowerCase());
+  const assetPath = String(req.path || '');
+
+  if (!['GET', 'HEAD'].includes(method) || !wantsJpeg || !/\.webp$/i.test(assetPath)) {
+    return next();
+  }
+
+  try {
+    const requestedPath = path.normalize(decodeURIComponent(assetPath)).replace(/^[/\\]+/, '');
+    const absolutePath = path.resolve(uploadsRootPath, requestedPath);
+    const uploadsRoot = path.resolve(uploadsRootPath);
+
+    if (!absolutePath.startsWith(`${uploadsRoot}${path.sep}`) && absolutePath !== uploadsRoot) {
+      return res.status(400).json({ message: 'Invalid asset path' });
+    }
+
+    const imageBuffer = await fs.readFile(absolutePath);
+    const jpegBuffer = await sharp(imageBuffer)
+      .rotate()
+      .jpeg({ quality: Number(process.env.IOS_WEBP_JPEG_QUALITY || 86), mozjpeg: true })
+      .toBuffer();
+
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (method === 'HEAD') {
+      res.setHeader('Content-Length', String(jpegBuffer.length));
+      return res.end();
+    }
+
+    return res.send(jpegBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
 app.use(
   '/assets',
   express.static(uploadsRootPath, {
