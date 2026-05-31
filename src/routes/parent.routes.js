@@ -32,6 +32,7 @@ const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const PsychologyCase = require('../models/psychologyCase.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
+const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
 const {
   isEpaycoConfigured,
   createCardToken: createEpaycoCardToken,
@@ -794,9 +795,72 @@ function getFeeGradeAliases(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return [];
   const aliases = new Set([normalized]);
-  const [, suffix] = normalized.split(':');
-  if (suffix) aliases.add(String(suffix || '').trim().toLowerCase());
+
+  normalized.split(':').map((part) => String(part || '').trim().toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
+
+  const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*[a-z]$/i);
+  if (sectionMatch) {
+    aliases.add(sectionMatch[1]);
+  }
+
+  const numericMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:\s*[-_/ ]?\s*[a-z])?(?:$|[^\d])/i);
+  if (numericMatch) {
+    aliases.add(numericMatch[1]);
+  }
+
   return [...aliases].filter(Boolean);
+}
+
+function findGradeFeeSetting(configuration, grade) {
+  const aliases = new Set(getFeeGradeAliases(grade));
+  const candidates = (configuration?.gradeSettings || []).filter((item) => getFeeGradeAliases(item?.grade).some((alias) => aliases.has(alias)));
+  return candidates.find((item) => Number(item?.enrollmentFee || 0) > 0 || Number(item?.monthlyTuition || 0) > 0 || Number(item?.enrollmentBonus || 0) > 0) || candidates[0] || null;
+}
+
+function doesEnrollmentBenefitRuleApplyToGrade(rule = {}, grade = '') {
+  const aliases = new Set(getFeeGradeAliases(grade));
+  const targetGradeKeys = Array.isArray(rule?.targetGradeKeys) ? rule.targetGradeKeys.flatMap(getFeeGradeAliases) : [];
+  if (targetGradeKeys.length > 0) {
+    return targetGradeKeys.some((gradeKey) => aliases.has(gradeKey));
+  }
+
+  const amountsByGrade = normalizeBenefitFixedAmountsByGrade(rule?.fixedAmountsByGrade || {});
+  const hasFixedAmountsByGrade = Object.keys(amountsByGrade).length > 0;
+  if (String(rule?.discountType || '').trim().toLowerCase() === 'fixed' || hasFixedAmountsByGrade) {
+    return getFixedBenefitAmountForGrade(rule, grade) > 0;
+  }
+
+  return true;
+}
+
+function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], referenceDate = new Date(), grade = '') {
+  const safeReferenceDate = startOfDayLocal(referenceDate);
+  return (Array.isArray(enrollmentBenefitRules) ? enrollmentBenefitRules : []).find((rule) => {
+    if (!doesEnrollmentBenefitRuleApplyToGrade(rule, grade)) {
+      return false;
+    }
+
+    const startDate = rule?.startDate ? startOfDayLocal(rule.startDate) : null;
+    const endDate = rule?.endDate ? startOfDayLocal(rule.endDate) : null;
+    if (!startDate || !endDate || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return false;
+    }
+
+    return safeReferenceDate.getTime() >= startDate.getTime() && safeReferenceDate.getTime() <= endDate.getTime();
+  }) || null;
+}
+
+function resolveAcademicEnrollmentBenefitDiscountAmount(amount, benefitRule = null, grade = '') {
+  const safeAmount = Math.max(0, Math.round(Number(amount || 0)));
+  if (!benefitRule || safeAmount <= 0) {
+    return 0;
+  }
+
+  if (String(benefitRule?.discountType || '').trim().toLowerCase() === 'fixed') {
+    return Math.min(safeAmount, Math.max(0, Math.round(getFixedBenefitAmountForGrade(benefitRule, grade))));
+  }
+
+  return Math.min(safeAmount, Math.round((safeAmount * Math.min(100, Math.max(0, Number(benefitRule.discountPercent || 0)))) / 100));
 }
 
 function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
@@ -829,6 +893,17 @@ function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = ne
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (String(charge?.category || '') === 'annual_tuition') {
+    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
+    return {
+      baseAmount,
+      effectiveAmount,
+      discountPercent: 0,
+      fixedDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
+      benefitLabel: normalizeText(billingProfile?.annualTuitionBenefitLabel) || normalizeText(billingProfile?.annualTuitionAdditionalDiscountLabel),
+    };
+  }
+
   const monthlyDiscountConfig = String(charge?.category || '') === 'monthly_tuition'
     ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
     : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' };
@@ -856,6 +931,77 @@ function addMonthsLocal(dateValue, monthsToAdd) {
   date.setDate(Math.min(day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
   date.setHours(0, 0, 0, 0);
   return date;
+}
+
+function normalizeAcademicInstallmentCount(value, fallback = 1) {
+  const parsed = Number(value || fallback || 1);
+  if (!Number.isFinite(parsed)) {
+    return 1;
+  }
+
+  return Math.min(12, Math.max(1, Math.round(parsed)));
+}
+
+function splitAcademicAmountIntoInstallments(totalAmount, installmentCount) {
+  const safeTotal = Math.max(0, Math.round(Number(totalAmount || 0)));
+  const safeInstallments = normalizeAcademicInstallmentCount(installmentCount, 1);
+  if (safeTotal <= 0) {
+    return [];
+  }
+
+  const baseAmount = Math.floor(safeTotal / safeInstallments);
+  let remainder = safeTotal % safeInstallments;
+
+  return Array.from({ length: safeInstallments }, () => {
+    const nextAmount = baseAmount + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) {
+      remainder -= 1;
+    }
+    return nextAmount;
+  }).filter((amount) => amount > 0);
+}
+
+function buildAcademicInstallmentDueDate(referenceDateValue = new Date(), installmentIndex = 0) {
+  return addMonthsLocal(startOfDayLocal(referenceDateValue), Math.max(0, Number(installmentIndex || 0)));
+}
+
+function resolveParentAnnualTuitionPricing(profile = {}, feeConfiguration = {}, referenceDate = new Date()) {
+  const grade = normalizeText(profile.grade);
+  const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, grade);
+  const baseAmount = Math.max(0, Math.round(Number(
+    profile.annualTuitionBaseAmount
+    || profile.annualTuitionAmount
+    || gradeFeeSetting?.enrollmentFee
+    || 0
+  )));
+  const activeBenefitRule = getApplicableEnrollmentBenefitRule(feeConfiguration?.enrollmentBenefitRules || [], referenceDate, grade);
+  const rectoriaDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(baseAmount, activeBenefitRule, grade);
+  const amountAfterRectoriaDiscount = Math.max(0, baseAmount - rectoriaDiscountAmount);
+  const additionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(profile.annualTuitionAdditionalDiscountPercent || 0);
+  const additionalDiscountAmount = additionalDiscountPercent > 0
+    ? Math.min(amountAfterRectoriaDiscount, Math.round(amountAfterRectoriaDiscount * (additionalDiscountPercent / 100)))
+    : Math.min(amountAfterRectoriaDiscount, Math.max(0, Number(profile.annualTuitionAdditionalDiscountAmount || 0)));
+  const effectiveAmount = Math.max(0, amountAfterRectoriaDiscount - additionalDiscountAmount);
+  const benefitLabels = [
+    normalizeText(activeBenefitRule?.label),
+    normalizeText(profile.annualTuitionAdditionalDiscountLabel),
+  ].filter(Boolean);
+  const benefitParts = [];
+  if (rectoriaDiscountAmount > 0) {
+    benefitParts.push(`Beneficio de matrícula: $${formatAcademicCurrency(rectoriaDiscountAmount)}`);
+  }
+  if (additionalDiscountAmount > 0) {
+    benefitParts.push(`Descuento adicional: $${formatAcademicCurrency(additionalDiscountAmount)}`);
+  }
+
+  return {
+    baseAmount,
+    effectiveAmount,
+    rectoriaDiscountAmount,
+    additionalDiscountAmount,
+    benefitLabel: benefitLabels.join(' + '),
+    description: benefitParts.length ? benefitParts.join('. ') : 'Cargo de matrícula anual generado por calendario académico.',
+  };
 }
 
 function resolveAcademicCycleRange(profile = {}, referenceDate = new Date()) {
@@ -954,6 +1100,70 @@ async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role
       });
     }
   }
+}
+
+async function ensureParentAcademicAnnualTuitionCharges({ schoolId, parentUserId, role, studentIds = [], billingProfiles = [], feeConfiguration = null, referenceDate = new Date() }) {
+  const linkedStudentIdSet = new Set(studentIds.map((item) => String(item)));
+  const profiles = (billingProfiles || []).filter((profile) => linkedStudentIdSet.has(String(profile.studentId)));
+
+  for (const profile of profiles) {
+    const existingCharge = await AcademicCharge.exists({
+      schoolId,
+      studentId: profile.studentId,
+      category: 'annual_tuition',
+      status: { $ne: 'cancelled' },
+    });
+    if (existingCharge) {
+      continue;
+    }
+
+    const pricing = resolveParentAnnualTuitionPricing(profile, feeConfiguration, referenceDate);
+    if (pricing.effectiveAmount <= 0) {
+      continue;
+    }
+
+    const installmentCount = normalizeAcademicInstallmentCount(profile.annualTuitionInstallments, 1);
+    const installmentAmounts = splitAcademicAmountIntoInstallments(pricing.effectiveAmount, installmentCount);
+    const baseInstallmentAmounts = splitAcademicAmountIntoInstallments(pricing.baseAmount, installmentCount);
+    const firstDueDate = startOfDayLocal(profile.entryDate || referenceDate);
+    const isFinanced = installmentAmounts.length > 1;
+
+    for (const [installmentIndex, installmentAmount] of installmentAmounts.entries()) {
+      const dueDate = buildAcademicInstallmentDueDate(firstDueDate, installmentIndex);
+      await AcademicCharge.create({
+        schoolId,
+        createdByUserId: parentUserId,
+        createdByRole: role,
+        parentId: parentUserId,
+        studentId: profile.studentId,
+        billingProfileId: profile._id,
+        category: 'annual_tuition',
+        concept: isFinanced ? `Matrícula anual ${dueDate.getFullYear()} · cuota ${installmentIndex + 1}/${installmentAmounts.length}` : `Matrícula anual ${dueDate.getFullYear()}`,
+        description: pricing.description,
+        amount: installmentAmount,
+        originalAmount: baseInstallmentAmounts[installmentIndex] || installmentAmount,
+        dueDate,
+        audienceType: 'individual',
+        targetGrade: profile.grade,
+      });
+    }
+  }
+}
+
+function getAcademicChargeSortWeight(charge = {}) {
+  const category = String(charge.category || '').toLowerCase();
+  if (category === 'annual_tuition') return 0;
+  if (category === 'enrollment_bonus') return 1;
+  if (category === 'monthly_tuition') return 2;
+  return 3;
+}
+
+function sortAcademicChargesForDisplay(charges = []) {
+  return [...(charges || [])].sort((left, right) => {
+    const categoryDiff = getAcademicChargeSortWeight(left) - getAcademicChargeSortWeight(right);
+    if (categoryDiff !== 0) return categoryDiff;
+    return new Date(left.dueDate || 0) - new Date(right.dueDate || 0);
+  });
 }
 
 function getAcademicChargeMonthsOverdue(charges = [], referenceDate = new Date()) {
@@ -3260,7 +3470,7 @@ router.get('/portal/academic-billing', async (req, res) => {
       });
     }
 
-    let [charges, payments, billingProfiles] = await Promise.all([
+    let [charges, payments, billingProfiles, feeConfiguration] = await Promise.all([
       AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds } })
         .populate('studentId', 'name grade course')
         .sort({ dueDate: 1, createdAt: -1 })
@@ -3271,9 +3481,19 @@ router.get('/portal/academic-billing', async (req, res) => {
         .limit(20)
         .lean(),
       StudentBillingProfile.find({ schoolId, active: true }).lean(),
+      AcademicFeeConfiguration.findOne({ schoolId }).lean(),
     ]);
 
     const now = new Date();
+    await ensureParentAcademicAnnualTuitionCharges({
+      schoolId,
+      parentUserId,
+      role,
+      studentIds: linkedStudentIds,
+      billingProfiles,
+      feeConfiguration,
+      referenceDate: now,
+    });
     await ensureParentAcademicMonthlyCharges({
       schoolId,
       parentUserId,
@@ -3323,7 +3543,8 @@ router.get('/portal/academic-billing', async (req, res) => {
         studentCourse: charge.studentId?.course || '',
       };
     });
-    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: normalizedCharges, referenceDate: now });
+    const sortedNormalizedCharges = sortAcademicChargesForDisplay(normalizedCharges);
+    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: sortedNormalizedCharges, referenceDate: now });
 
     return res.status(200).json({
       summary: {
@@ -3331,7 +3552,7 @@ router.get('/portal/academic-billing', async (req, res) => {
         pendingCount: studentSummaries.reduce((sum, item) => sum + Number(item.pendingCount || 0), 0),
       },
       studentSummaries,
-      charges: normalizedCharges,
+      charges: sortedNormalizedCharges,
       payments: payments.map((payment) => ({
         ...payment,
         studentName: payment.studentId?.name || 'Familia',

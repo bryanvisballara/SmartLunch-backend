@@ -3474,9 +3474,22 @@ function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (charge?.category === 'annual_tuition') {
+    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
+    return {
+      baseAmount,
+      effectiveAmount,
+      discountPercent: 0,
+      fixedDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
+      benefitLabel: normalizeText(billingProfile?.annualTuitionBenefitLabel) || normalizeText(billingProfile?.annualTuitionAdditionalDiscountLabel),
+      benefitWindowLabel: '',
+      category: charge?.category || '',
+    };
+  }
+
   const discountConfig = charge?.category === 'monthly_tuition'
     ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
-    : (charge?.category === 'annual_tuition' ? resolveAcademicAnnualTuitionDiscountConfig(billingProfile) : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' });
+    : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' };
   const discountPercent = discountConfig.discountPercent;
   const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(discountConfig.fixedDiscountAmount || 0)));
   const amountAfterFixedDiscount = Math.max(0, baseAmount - fixedDiscountAmount);
@@ -3624,20 +3637,26 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
   if (!annualTuitionRows.length && (Number(effectiveBillingProfile.annualTuitionBaseAmount || 0) > 0 || Number(effectiveBillingProfile.annualTuitionAmount || 0) > 0)) {
     const annualDiscountConfig = resolveAcademicAnnualTuitionDiscountConfig(effectiveBillingProfile);
     const annualBaseAmount = Math.max(0, Number(effectiveBillingProfile.annualTuitionBaseAmount || effectiveBillingProfile.annualTuitionAmount || 0));
-    const annualAmount = Math.max(0, Number(effectiveBillingProfile.annualTuitionAmount || 0));
+    const activeAnnualBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, now, effectiveBillingProfile.grade);
+    const activeAnnualBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(annualBaseAmount, activeAnnualBenefitRule, effectiveBillingProfile.grade);
+    const amountAfterActiveAnnualBenefit = Math.max(0, annualBaseAmount - activeAnnualBenefitDiscountAmount);
+    const activeAnnualAdditionalDiscountAmount = Number(annualDiscountConfig.discountPercent || 0) > 0
+      ? Math.min(amountAfterActiveAnnualBenefit, Math.round(amountAfterActiveAnnualBenefit * (Number(annualDiscountConfig.discountPercent || 0) / 100)))
+      : Math.min(amountAfterActiveAnnualBenefit, Math.max(0, Number(effectiveBillingProfile.annualTuitionAdditionalDiscountAmount || 0)));
+    const annualAmount = Math.max(0, amountAfterActiveAnnualBenefit - activeAnnualAdditionalDiscountAmount);
     const annualInstallmentCount = normalizeAcademicInstallmentCount(effectiveBillingProfile.annualTuitionInstallments, 1);
     const annualInstallmentAmounts = annualAmount > 0 ? splitAcademicAmountIntoInstallments(annualAmount, annualInstallmentCount) : [0];
     const annualBaseInstallmentAmounts = annualBaseAmount > 0 ? splitAcademicAmountIntoInstallments(annualBaseAmount, annualInstallmentCount) : annualInstallmentAmounts;
     const annualBenefitLabel = [
-      normalizeText(effectiveBillingProfile.annualTuitionBenefitLabel),
+      normalizeText(activeAnnualBenefitRule?.label),
       normalizeText(annualDiscountConfig.benefitLabel),
     ].filter(Boolean).join(' + ');
     const annualBenefitParts = [];
-    if (Number(effectiveBillingProfile.annualTuitionDiscountAmount || 0) > 0) {
-      annualBenefitParts.push(`${formatCurrency(effectiveBillingProfile.annualTuitionDiscountAmount)} de beneficio de matrícula`);
+    if (activeAnnualBenefitDiscountAmount > 0) {
+      annualBenefitParts.push(`${formatCurrency(activeAnnualBenefitDiscountAmount)} de beneficio de matrícula`);
     }
-    if (Number(effectiveBillingProfile.annualTuitionAdditionalDiscountAmount || 0) > 0) {
-      annualBenefitParts.push(`${formatCurrency(effectiveBillingProfile.annualTuitionAdditionalDiscountAmount)} de descuento adicional`);
+    if (activeAnnualAdditionalDiscountAmount > 0) {
+      annualBenefitParts.push(`${formatCurrency(activeAnnualAdditionalDiscountAmount)} de descuento adicional`);
     }
 
     annualInstallmentAmounts.forEach((installmentAmount, index) => {
