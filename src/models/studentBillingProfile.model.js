@@ -11,6 +11,7 @@ const studentBillingProfileSchema = new mongoose.Schema(
     enrollmentBonusInstallments: { type: Number, min: 1, max: 12, default: 1 },
     annualTuitionAmount: { type: Number, min: 0, default: 0 },
     annualTuitionInstallments: { type: Number, min: 1, max: 12, default: 1 },
+    annualTuitionDueDate: { type: Date, default: null },
     annualTuitionBaseAmount: { type: Number, min: 0, default: 0 },
     annualTuitionDiscountAmount: { type: Number, min: 0, default: 0 },
     annualTuitionBenefitLabel: { type: String, trim: true, default: '' },

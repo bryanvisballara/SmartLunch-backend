@@ -933,6 +933,32 @@ function addMonthsLocal(dateValue, monthsToAdd) {
   return date;
 }
 
+function normalizeAcademicDueDateForBogota(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 5, 0, 0, 0));
+}
+
+function addAcademicDueDateMonths(dateValue, monthsToAdd = 0) {
+  const baseDate = normalizeAcademicDueDateForBogota(dateValue);
+  if (!baseDate) {
+    return normalizeAcademicDueDateForBogota(new Date());
+  }
+
+  const targetMonth = baseDate.getUTCMonth() + Math.max(0, Number(monthsToAdd || 0));
+  const targetYear = baseDate.getUTCFullYear() + Math.floor(targetMonth / 12);
+  const normalizedTargetMonth = ((targetMonth % 12) + 12) % 12;
+  const lastTargetDay = new Date(Date.UTC(targetYear, normalizedTargetMonth + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(targetYear, normalizedTargetMonth, Math.min(baseDate.getUTCDate(), lastTargetDay), 5, 0, 0, 0));
+}
+
 function normalizeAcademicInstallmentCount(value, fallback = 1) {
   const parsed = Number(value || fallback || 1);
   if (!Number.isFinite(parsed)) {
@@ -963,6 +989,10 @@ function splitAcademicAmountIntoInstallments(totalAmount, installmentCount) {
 
 function buildAcademicInstallmentDueDate(referenceDateValue = new Date(), installmentIndex = 0) {
   return addMonthsLocal(startOfDayLocal(referenceDateValue), Math.max(0, Number(installmentIndex || 0)));
+}
+
+function buildAcademicAnnualTuitionInstallmentDueDate(referenceDateValue = new Date(), installmentIndex = 0) {
+  return addAcademicDueDateMonths(referenceDateValue, installmentIndex);
 }
 
 function resolveParentAnnualTuitionPricing(profile = {}, feeConfiguration = {}, referenceDate = new Date()) {
@@ -997,11 +1027,66 @@ function resolveParentAnnualTuitionPricing(profile = {}, feeConfiguration = {}, 
   return {
     baseAmount,
     effectiveAmount,
+    benefitDueDate: activeBenefitRule?.endDate ? normalizeAcademicDueDateForBogota(activeBenefitRule.endDate) : null,
     rectoriaDiscountAmount,
     additionalDiscountAmount,
     benefitLabel: benefitLabels.join(' + '),
     description: benefitParts.length ? benefitParts.join('. ') : 'Cargo de matrícula anual generado por calendario académico.',
   };
+}
+
+function resolveParentAnnualTuitionFirstDueDate(profile = {}, pricing = {}, fallbackDate = new Date()) {
+  return normalizeAcademicDueDateForBogota(pricing?.benefitDueDate || profile?.annualTuitionDueDate)
+    || normalizeAcademicDueDateForBogota(fallbackDate)
+    || normalizeAcademicDueDateForBogota(new Date());
+}
+
+function sameAcademicDueDate(left, right) {
+  const leftDate = normalizeAcademicDueDateForBogota(left);
+  const rightDate = normalizeAcademicDueDateForBogota(right);
+  return Boolean(leftDate && rightDate && leftDate.getTime() === rightDate.getTime());
+}
+
+async function syncParentAnnualTuitionDueDatesFromRectoria({ schoolId, studentIds = [], billingProfiles = [], feeConfiguration = null, referenceDate = new Date() }) {
+  const linkedStudentIdSet = new Set(studentIds.map((item) => String(item)));
+  const profiles = (billingProfiles || []).filter((profile) => linkedStudentIdSet.has(String(profile.studentId)));
+  let modifiedCount = 0;
+
+  for (const profile of profiles) {
+    const pricing = resolveParentAnnualTuitionPricing(profile, feeConfiguration, referenceDate);
+    const firstDueDate = normalizeAcademicDueDateForBogota(pricing.benefitDueDate || profile.annualTuitionDueDate);
+    if (!firstDueDate) {
+      continue;
+    }
+
+    if (pricing.benefitDueDate && !sameAcademicDueDate(profile.annualTuitionDueDate, pricing.benefitDueDate)) {
+      await StudentBillingProfile.updateOne(
+        { schoolId, _id: profile._id },
+        { $set: { annualTuitionDueDate: pricing.benefitDueDate } }
+      );
+      profile.annualTuitionDueDate = pricing.benefitDueDate;
+    }
+
+    const charges = await AcademicCharge.find({
+      schoolId,
+      studentId: profile.studentId,
+      category: 'annual_tuition',
+      status: { $in: ['pending', 'overdue'] },
+    }).sort({ dueDate: 1, createdAt: 1 });
+
+    for (const [installmentIndex, charge] of charges.entries()) {
+      const nextDueDate = buildAcademicAnnualTuitionInstallmentDueDate(firstDueDate, installmentIndex);
+      if (sameAcademicDueDate(charge.dueDate, nextDueDate)) {
+        continue;
+      }
+
+      charge.dueDate = nextDueDate;
+      await charge.save();
+      modifiedCount += 1;
+    }
+  }
+
+  return modifiedCount;
 }
 
 function resolveAcademicCycleRange(profile = {}, referenceDate = new Date()) {
@@ -1125,11 +1210,11 @@ async function ensureParentAcademicAnnualTuitionCharges({ schoolId, parentUserId
     const installmentCount = normalizeAcademicInstallmentCount(profile.annualTuitionInstallments, 1);
     const installmentAmounts = splitAcademicAmountIntoInstallments(pricing.effectiveAmount, installmentCount);
     const baseInstallmentAmounts = splitAcademicAmountIntoInstallments(pricing.baseAmount, installmentCount);
-    const firstDueDate = startOfDayLocal(profile.entryDate || referenceDate);
+    const firstDueDate = resolveParentAnnualTuitionFirstDueDate(profile, pricing, profile.entryDate || referenceDate);
     const isFinanced = installmentAmounts.length > 1;
 
     for (const [installmentIndex, installmentAmount] of installmentAmounts.entries()) {
-      const dueDate = buildAcademicInstallmentDueDate(firstDueDate, installmentIndex);
+      const dueDate = buildAcademicAnnualTuitionInstallmentDueDate(firstDueDate, installmentIndex);
       await AcademicCharge.create({
         schoolId,
         createdByUserId: parentUserId,
@@ -3489,6 +3574,13 @@ router.get('/portal/academic-billing', async (req, res) => {
       schoolId,
       parentUserId,
       role,
+      studentIds: linkedStudentIds,
+      billingProfiles,
+      feeConfiguration,
+      referenceDate: now,
+    });
+    await syncParentAnnualTuitionDueDatesFromRectoria({
+      schoolId,
       studentIds: linkedStudentIds,
       billingProfiles,
       feeConfiguration,

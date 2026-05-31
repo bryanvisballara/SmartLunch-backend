@@ -707,6 +707,57 @@ async function resolvePrimaryParentContacts(schoolId) {
   return primaryParentByStudentId;
 }
 
+function sameAcademicDueDate(left, right) {
+  const leftDate = normalizeAcademicDueDateForBogota(left);
+  const rightDate = normalizeAcademicDueDateForBogota(right);
+  return Boolean(leftDate && rightDate && leftDate.getTime() === rightDate.getTime());
+}
+
+async function syncAnnualTuitionDueDatesFromRectoria({ schoolId, billingProfiles = [], feeConfiguration = null, studentIds = [], referenceDate = new Date() }) {
+  const studentIdFilter = new Set(studentIds.map((item) => String(item)).filter(Boolean));
+  const profiles = (billingProfiles || []).filter((profile) => {
+    const studentId = String(profile?.studentId || '').trim();
+    return studentId && (!studentIdFilter.size || studentIdFilter.has(studentId));
+  });
+  let modifiedCount = 0;
+
+  for (const profile of profiles) {
+    const activeDueDate = resolveActiveEnrollmentBenefitDueDate(feeConfiguration || {}, profile.grade || '', referenceDate);
+    const firstDueDate = activeDueDate || normalizeAcademicDueDateForBogota(profile.annualTuitionDueDate);
+    if (!firstDueDate) {
+      continue;
+    }
+
+    if (activeDueDate && !sameAcademicDueDate(profile.annualTuitionDueDate, activeDueDate)) {
+      await StudentBillingProfile.updateOne(
+        { schoolId, _id: profile._id },
+        { $set: { annualTuitionDueDate: activeDueDate } }
+      );
+      profile.annualTuitionDueDate = activeDueDate;
+    }
+
+    const charges = await AcademicCharge.find({
+      schoolId,
+      studentId: profile.studentId,
+      category: 'annual_tuition',
+      status: { $in: ['pending', 'overdue'] },
+    }).sort({ dueDate: 1, createdAt: 1 });
+
+    for (const [installmentIndex, charge] of charges.entries()) {
+      const nextDueDate = buildAcademicAnnualTuitionInstallmentDueDate(firstDueDate, installmentIndex);
+      if (sameAcademicDueDate(charge.dueDate, nextDueDate)) {
+        continue;
+      }
+
+      charge.dueDate = nextDueDate;
+      await charge.save();
+      modifiedCount += 1;
+    }
+  }
+
+  return modifiedCount;
+}
+
 function buildBillingChargeDedupKey(charge, displayParentId) {
   const studentId = String(charge?.studentId?._id || charge?.studentId || '').trim();
   if (!studentId) {
@@ -2762,6 +2813,24 @@ function getMaxBenefitFixedAmount(rule = {}) {
     return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
   }
 
+  function normalizeAcademicDueDateForBogota(value) {
+    const parsed = parseAcademicCalendarDate(value);
+    if (!parsed) {
+      return null;
+    }
+
+    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 5, 0, 0, 0));
+  }
+
+  function buildAcademicAnnualTuitionInstallmentDueDate(referenceDateValue = new Date(), installmentIndex = 0) {
+    const baseDate = normalizeAcademicDueDateForBogota(referenceDateValue) || normalizeAcademicDueDateForBogota(new Date());
+    const targetMonth = baseDate.getUTCMonth() + Math.max(0, Number(installmentIndex || 0));
+    const targetYear = baseDate.getUTCFullYear() + Math.floor(targetMonth / 12);
+    const normalizedTargetMonth = ((targetMonth % 12) + 12) % 12;
+    const lastTargetDay = new Date(Date.UTC(targetYear, normalizedTargetMonth + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(targetYear, normalizedTargetMonth, Math.min(baseDate.getUTCDate(), lastTargetDay), 5, 0, 0, 0));
+  }
+
   function startOfAcademicMonthUtc(date) {
     return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
   }
@@ -2831,6 +2900,20 @@ function getMaxBenefitFixedAmount(rule = {}) {
     }) || null;
   }
 
+  function resolveActiveEnrollmentBenefitDueDate(configuration = {}, grade = '', referenceDate = new Date()) {
+    const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration || {});
+    const activeRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, referenceDate, grade);
+    return activeRule?.endDate ? normalizeAcademicDueDateForBogota(activeRule.endDate) : null;
+  }
+
+  function resolveAcademicAnnualTuitionFirstDueDate({ feeConfiguration = {}, grade = '', fallbackDate = new Date(), referenceDate = new Date(), enrollmentPricing = null, billingProfile = null } = {}) {
+    return resolveActiveEnrollmentBenefitDueDate(feeConfiguration, grade, referenceDate)
+      || normalizeAcademicDueDateForBogota(enrollmentPricing?.enrollmentBenefitEndDate)
+      || normalizeAcademicDueDateForBogota(billingProfile?.annualTuitionDueDate)
+      || normalizeAcademicDueDateForBogota(fallbackDate)
+      || normalizeAcademicDueDateForBogota(new Date());
+  }
+
   function resolveAcademicEnrollmentBenefitDiscountAmount(amount, benefitRule = null, grade = '') {
     const safeAmount = Math.max(0, Math.round(Number(amount || 0)));
     if (!benefitRule || safeAmount <= 0) {
@@ -2876,6 +2959,8 @@ function getMaxBenefitFixedAmount(rule = {}) {
         isLateEnrollment: false,
         enrollmentBenefitDiscountAmount: 0,
         enrollmentBenefitLabel: '',
+        enrollmentBenefitStartDate: null,
+        enrollmentBenefitEndDate: null,
       };
     }
 
@@ -2897,6 +2982,8 @@ function getMaxBenefitFixedAmount(rule = {}) {
         isLateEnrollment: false,
         enrollmentBenefitDiscountAmount: 0,
         enrollmentBenefitLabel: '',
+        enrollmentBenefitStartDate: null,
+        enrollmentBenefitEndDate: null,
       };
     }
 
@@ -2918,6 +3005,8 @@ function getMaxBenefitFixedAmount(rule = {}) {
       isLateEnrollment: lateEnrollmentSurchargeAmount > 0,
       enrollmentBenefitDiscountAmount,
       enrollmentBenefitLabel: normalizeText(enrollmentBenefitRule?.label),
+      enrollmentBenefitStartDate: enrollmentBenefitRule?.startDate || null,
+      enrollmentBenefitEndDate: enrollmentBenefitRule?.endDate || null,
     };
   }
 
@@ -3556,6 +3645,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     monthlyTuitionAdditionalDiscountLabel: billingProfile?.monthlyTuitionAdditionalDiscountLabel || '',
     annualTuitionAmount: profileAnnualTuitionAmount > 0 ? profileAnnualTuitionAmount : derivedAnnualTuitionAmount,
     annualTuitionInstallments: normalizeAcademicInstallmentCount(billingProfile?.annualTuitionInstallments, 1),
+    annualTuitionDueDate: billingProfile?.annualTuitionDueDate || null,
     annualTuitionBaseAmount,
     annualTuitionDiscountAmount,
     annualTuitionBenefitLabel: billingProfile?.annualTuitionBenefitLabel || '',
@@ -3638,6 +3728,13 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     const annualDiscountConfig = resolveAcademicAnnualTuitionDiscountConfig(effectiveBillingProfile);
     const annualBaseAmount = Math.max(0, Number(effectiveBillingProfile.annualTuitionBaseAmount || effectiveBillingProfile.annualTuitionAmount || 0));
     const activeAnnualBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, now, effectiveBillingProfile.grade);
+    const annualTuitionDueDate = resolveAcademicAnnualTuitionFirstDueDate({
+      feeConfiguration,
+      grade: effectiveBillingProfile.grade,
+      fallbackDate: parsedEntryDate,
+      referenceDate: now,
+      billingProfile: effectiveBillingProfile,
+    });
     const activeAnnualBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(annualBaseAmount, activeAnnualBenefitRule, effectiveBillingProfile.grade);
     const amountAfterActiveAnnualBenefit = Math.max(0, annualBaseAmount - activeAnnualBenefitDiscountAmount);
     const activeAnnualAdditionalDiscountAmount = Number(annualDiscountConfig.discountPercent || 0) > 0
@@ -3660,7 +3757,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     }
 
     annualInstallmentAmounts.forEach((installmentAmount, index) => {
-      const installmentDueDate = buildAcademicInstallmentDueDate(parsedEntryDate, index);
+      const installmentDueDate = buildAcademicAnnualTuitionInstallmentDueDate(annualTuitionDueDate, index);
       const isFinanced = annualInstallmentAmounts.length > 1;
       annualTuitionRows.push({
         key: `annual_tuition-profile-${index + 1}`,
@@ -4359,7 +4456,7 @@ async function dispatchBillingNotice({ schoolId, schoolName, parents, title, int
 
 async function buildBillingSummary(schoolId) {
   const now = new Date();
-  const [charges, recentPayments, chargePayments, billingProfiles, primaryParentByStudentId, followUps, students] = await Promise.all([
+  let [charges, recentPayments, chargePayments, billingProfiles, primaryParentByStudentId, followUps, students] = await Promise.all([
     AcademicCharge.find({ schoolId })
       .populate('parentId', 'name email phone')
       .populate('studentId', 'name grade course')
@@ -4388,6 +4485,19 @@ async function buildBillingSummary(schoolId) {
   const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile._id), profile]));
   const billingProfileByStudentId = new Map(billingProfiles.map((profile) => [String(profile.studentId || ''), profile]));
   const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, students.map((student) => student.grade).filter(Boolean));
+  const syncedAnnualTuitionDueDates = await syncAnnualTuitionDueDatesFromRectoria({
+    schoolId,
+    billingProfiles,
+    feeConfiguration,
+    referenceDate: now,
+  });
+  if (syncedAnnualTuitionDueDates > 0) {
+    charges = await AcademicCharge.find({ schoolId })
+      .populate('parentId', 'name email phone')
+      .populate('studentId', 'name grade course')
+      .sort({ dueDate: 1, createdAt: -1 })
+      .lean();
+  }
   const paymentTotalsByChargeId = new Map();
   const paymentsByChargeId = new Map();
   chargePayments.forEach((payment) => {
@@ -6761,6 +6871,13 @@ router.patch('/database/:studentId', async (req, res) => {
     const annualTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(req.body?.annualTuitionAdditionalDiscountPercent);
     const annualTuitionAdditionalDiscountAmount = Math.max(0, Math.round(Number(enrollmentPricing.amount || 0) * (annualTuitionAdditionalDiscountPercent / 100)));
     const annualTuitionAmount = Math.max(0, Number(enrollmentPricing.amount || 0) - annualTuitionAdditionalDiscountAmount);
+    const annualTuitionDueDate = resolveAcademicAnnualTuitionFirstDueDate({
+      feeConfiguration,
+      grade,
+      fallbackDate: entryDate || new Date(),
+      referenceDate: new Date(),
+      enrollmentPricing,
+    });
     let billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
     if (!billingProfile) {
       billingProfile = new StudentBillingProfile({ schoolId, studentId: student._id, active: true });
@@ -6772,6 +6889,7 @@ router.patch('/database/:studentId', async (req, res) => {
     billingProfile.enrollmentBonusInstallments = normalizeAcademicInstallmentCount(req.body?.enrollmentBonusInstallments, billingProfile.enrollmentBonusInstallments || 1);
     billingProfile.annualTuitionAmount = annualTuitionAmount;
     billingProfile.annualTuitionInstallments = normalizeAcademicInstallmentCount(req.body?.annualTuitionInstallments, billingProfile.annualTuitionInstallments || 1);
+    billingProfile.annualTuitionDueDate = annualTuitionDueDate;
     billingProfile.annualTuitionBaseAmount = Number(enrollmentPricing.baseAmount || 0);
     billingProfile.annualTuitionDiscountAmount = Number(enrollmentPricing.enrollmentBenefitDiscountAmount || 0);
     billingProfile.annualTuitionBenefitLabel = normalizeText(enrollmentPricing.enrollmentBenefitLabel);
@@ -7682,6 +7800,13 @@ router.post('/enrollments', async (req, res) => {
       const annualTuitionAdditionalDiscountAmount = Math.max(0, Math.round(proratedAnnualTuitionAmount * (annualTuitionAdditionalDiscountPercent / 100)));
       const discountedAnnualTuitionAmount = Math.max(0, proratedAnnualTuitionAmount - annualTuitionAdditionalDiscountAmount);
       const chargeReferenceDate = entryDate && !Number.isNaN(entryDate.getTime()) ? entryDate : new Date();
+      const annualTuitionDueDate = resolveAcademicAnnualTuitionFirstDueDate({
+        feeConfiguration,
+        grade,
+        fallbackDate: chargeReferenceDate,
+        referenceDate: new Date(),
+        enrollmentPricing,
+      });
 
       let student = await findExistingEnrollmentStudent({ schoolId, rawStudent, linkedParents });
       const hadExistingStudent = Boolean(student);
@@ -7720,6 +7845,7 @@ router.post('/enrollments', async (req, res) => {
       billingProfile.enrollmentBonusInstallments = enrollmentBonusInstallments;
       billingProfile.annualTuitionAmount = discountedAnnualTuitionAmount;
       billingProfile.annualTuitionInstallments = annualTuitionInstallments;
+      billingProfile.annualTuitionDueDate = annualTuitionDueDate;
       billingProfile.annualTuitionBaseAmount = enrollmentPricing.baseAmount;
       billingProfile.annualTuitionDiscountAmount = enrollmentPricing.enrollmentBenefitDiscountAmount;
       billingProfile.annualTuitionBenefitLabel = enrollmentPricing.enrollmentBenefitLabel;
@@ -7801,7 +7927,7 @@ router.post('/enrollments', async (req, res) => {
               concept: installmentAmounts.length > 1 ? `Matrícula anual ${new Date().getFullYear()} · cuota ${installmentIndex + 1}/${installmentAmounts.length}` : `Matrícula anual ${new Date().getFullYear()}`,
               amount: installmentAmount,
               originalAmount: baseInstallmentAmounts[installmentIndex] || installmentAmount,
-              dueDate: buildAcademicInstallmentDueDate(chargeReferenceDate, installmentIndex),
+              dueDate: buildAcademicAnnualTuitionInstallmentDueDate(annualTuitionDueDate, installmentIndex),
               audienceType: 'enrollment',
               targetGrade: student.grade,
               targetCourse: student.course,
