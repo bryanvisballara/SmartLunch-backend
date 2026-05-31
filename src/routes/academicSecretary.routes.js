@@ -3711,13 +3711,15 @@ function buildAcademicGradePromotionPreview(students = []) {
 }
 
 async function buildAcademicDatabaseSummary(schoolId) {
-  const [students, links, parents] = await Promise.all([
+  const [students, links, parents, billingProfiles] = await Promise.all([
     Student.find({ schoolId, deletedAt: null }).sort({ grade: 1, lastName: 1, firstName: 1, name: 1 }).lean(),
     ParentStudentLink.find({ schoolId, status: 'active' }).lean(),
     User.find({ schoolId, role: 'parent', deletedAt: null }).select('name email phone documentType documentNumber').lean(),
+    StudentBillingProfile.find({ schoolId }).select('studentId entryDate enrollmentBonusInstallments annualTuitionInstallments initialEnrollmentAndFirstTuitionPaid monthlyTuitionAdditionalDiscountPercent monthlyTuitionAdditionalDiscountLabel').lean(),
   ]);
 
   const parentMap = new Map(parents.map((parent) => [String(parent._id), parent]));
+  const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile.studentId), profile]));
   const relationMap = new Map();
   for (const link of links) {
     const studentKey = String(link.studentId);
@@ -3741,22 +3743,31 @@ async function buildAcademicDatabaseSummary(schoolId) {
 
   return students.map((student) => {
     const relations = relationMap.get(String(student._id)) || { mother: null, father: null, acudiente: [] };
+    const billingProfile = billingProfileMap.get(String(student._id)) || null;
     const mother = relations.mother || relations.acudiente[0] || null;
     const father = relations.father || relations.acudiente[1] || null;
     return {
       _id: student._id,
       grade: student.grade || '',
       course: student.course || '',
+      schoolCode: student.schoolCode || '',
       lastName: student.lastName || '',
       firstName: student.firstName || student.name || '',
       gender: student.gender || '',
       documentType: student.documentType || '',
       documentNumber: student.documentNumber || '',
       birthDate: student.birthDate || null,
+      entryDate: student.entryDate || billingProfile?.entryDate || null,
       age: calculateAge(student.birthDate),
       bloodType: student.bloodType || '',
+      medicalProfile: student.medicalProfile || {},
       birthPlace: student.birthPlace || '',
       address: student.address || '',
+      enrollmentBonusInstallments: billingProfile?.enrollmentBonusInstallments || 1,
+      annualTuitionInstallments: billingProfile?.annualTuitionInstallments || 1,
+      initialEnrollmentAndFirstTuitionPaid: Boolean(billingProfile?.initialEnrollmentAndFirstTuitionPaid),
+      monthlyTuitionAdditionalDiscountPercent: billingProfile?.monthlyTuitionAdditionalDiscountPercent ?? '',
+      monthlyTuitionAdditionalDiscountLabel: billingProfile?.monthlyTuitionAdditionalDiscountLabel || '',
       motherId: mother?._id || null,
       motherName: mother?.name || '',
       motherDocumentType: mother?.documentType || '',
@@ -6479,6 +6490,11 @@ router.patch('/database/:studentId', async (req, res) => {
       return res.status(400).json({ message: 'La fecha de nacimiento no tiene un formato valido.' });
     }
 
+    const entryDate = parseAcademicDatabaseEditDate(req.body?.entryDate);
+    if (entryDate === 'invalid') {
+      return res.status(400).json({ message: 'La fecha de ingreso no tiene un formato valido.' });
+    }
+
     const firstName = normalizeText(req.body?.firstName);
     const lastName = normalizeText(req.body?.lastName);
     const grade = normalizeText(req.body?.grade);
@@ -6492,13 +6508,18 @@ router.patch('/database/:studentId', async (req, res) => {
     student.name = normalizeText(`${firstName} ${lastName}`);
     student.grade = grade;
     student.course = normalizeText(req.body?.course);
+    student.schoolCode = normalizeText(req.body?.schoolCode);
     student.gender = normalizeAcademicDatabaseGender(req.body?.gender);
     student.documentType = normalizeAcademicDatabaseDocumentType(req.body?.documentType);
     student.documentNumber = normalizeText(req.body?.documentNumber);
     student.birthDate = birthDate;
+    student.entryDate = entryDate;
     student.bloodType = normalizeText(req.body?.bloodType);
     student.birthPlace = normalizeText(req.body?.birthPlace);
     student.address = normalizeText(req.body?.address);
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'medicalProfile')) {
+      student.medicalProfile = normalizeAcademicStudentMedicalProfile(req.body?.medicalProfile);
+    }
     await student.save();
 
     const parentConfigs = [
@@ -6559,9 +6580,15 @@ router.patch('/database/:studentId', async (req, res) => {
     if (billingProfile) {
       billingProfile.grade = grade;
       billingProfile.academicYear = normalizeText(feeConfiguration?.academicYear) || getCurrentAcademicYear();
+      billingProfile.entryDate = entryDate;
       billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
+      billingProfile.enrollmentBonusInstallments = normalizeAcademicInstallmentCount(req.body?.enrollmentBonusInstallments, billingProfile.enrollmentBonusInstallments || 1);
       billingProfile.annualTuitionAmount = Number(gradeFeeSetting?.enrollmentFee || 0);
+      billingProfile.annualTuitionInstallments = normalizeAcademicInstallmentCount(req.body?.annualTuitionInstallments, billingProfile.annualTuitionInstallments || 1);
       billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
+      billingProfile.initialEnrollmentAndFirstTuitionPaid = Boolean(req.body?.initialEnrollmentAndFirstTuitionPaid);
+      billingProfile.monthlyTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(req.body?.monthlyTuitionAdditionalDiscountPercent);
+      billingProfile.monthlyTuitionAdditionalDiscountLabel = normalizeText(req.body?.monthlyTuitionAdditionalDiscountLabel);
       billingProfile.dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_DAY;
       billingProfile.benefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
       await billingProfile.save();
