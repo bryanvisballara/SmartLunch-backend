@@ -3421,6 +3421,17 @@ function buildAcademicMonthlyPricingAfterBenefitDueDate(monthlyBaseAmount, billi
   };
 }
 
+function resolveAcademicAnnualTuitionDiscountConfig(billingProfile = {}) {
+  const discountPercent = normalizeAcademicAdditionalDiscountPercent(billingProfile?.annualTuitionAdditionalDiscountPercent || 0);
+
+  return {
+    discountPercent,
+    fixedDiscountAmount: 0,
+    benefitLabel: discountPercent > 0 ? normalizeText(billingProfile?.annualTuitionAdditionalDiscountLabel) || 'Descuento individual en matrícula' : '',
+    benefitWindowLabel: '',
+  };
+}
+
 function addAcademicMonthsUtc(date, monthCount = 0) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + Number(monthCount || 0), 1));
 }
@@ -3463,11 +3474,11 @@ function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
-  const monthlyDiscountConfig = charge?.category === 'monthly_tuition'
+  const discountConfig = charge?.category === 'monthly_tuition'
     ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
-    : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' };
-  const discountPercent = monthlyDiscountConfig.discountPercent;
-  const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(monthlyDiscountConfig.fixedDiscountAmount || 0)));
+    : (charge?.category === 'annual_tuition' ? resolveAcademicAnnualTuitionDiscountConfig(billingProfile) : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' });
+  const discountPercent = discountConfig.discountPercent;
+  const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(discountConfig.fixedDiscountAmount || 0)));
   const amountAfterFixedDiscount = Math.max(0, baseAmount - fixedDiscountAmount);
   const effectiveAmount = discountPercent > 0 || fixedDiscountAmount > 0
     ? Math.max(0, Math.round(amountAfterFixedDiscount * (1 - (discountPercent / 100))))
@@ -3478,8 +3489,9 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
     effectiveAmount,
     discountPercent,
     fixedDiscountAmount,
-    benefitLabel: monthlyDiscountConfig.benefitLabel,
-    benefitWindowLabel: monthlyDiscountConfig.benefitWindowLabel || '',
+    benefitLabel: discountConfig.benefitLabel,
+    benefitWindowLabel: discountConfig.benefitWindowLabel || '',
+    category: charge?.category || '',
   };
 }
 
@@ -3492,7 +3504,8 @@ function formatAcademicDiscountDescription(pricing = {}) {
     parts.push(`${pricing.discountPercent}% off`);
   }
 
-  return parts.length ? `${pricing.benefitLabel || 'Beneficio'} · ${parts.join(' + ')} sobre pensión.` : '';
+  const targetLabel = pricing.category === 'annual_tuition' ? 'matrícula' : 'pensión';
+  return parts.length ? `${pricing.benefitLabel || 'Beneficio'} · ${parts.join(' + ')} sobre ${targetLabel}.` : '';
 }
 
 function buildAcademicPaymentPlanBenefitDescription(pricing = {}) {
@@ -3586,11 +3599,13 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
         ? buildAcademicMonthlyPricingAfterBenefitDueDate(monthlyBaseAmount, effectiveBillingProfile)
         : resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, chargeIsPaid ? paidReferenceDate : dueDate);
       const effectiveAmount = chargeIsPaid
-        ? Number(existingCharge?.chargeAmount || existingCharge?.amount || rawPaidAmount || pricing.effectiveAmount || 0)
+        ? Number(rawPaidAmount || existingCharge?.chargeAmount || existingCharge?.amount || pricing.effectiveAmount || 0)
         : Number(pricing.effectiveAmount || 0);
-      const paidAmount = Math.min(effectiveAmount, rawPaidAmount || (String(existingCharge?.status || '') === 'paid' ? effectiveAmount : 0));
-      const outstandingAmount = Math.max(0, effectiveAmount - paidAmount);
-      const isPaid = outstandingAmount <= 0 && (paidAmount > 0 || String(existingCharge?.status || '') === 'paid');
+      const paidAmount = chargeIsPaid
+        ? Number(rawPaidAmount || effectiveAmount || 0)
+        : Math.min(effectiveAmount, rawPaidAmount || 0);
+      const outstandingAmount = chargeIsPaid ? 0 : Math.max(0, effectiveAmount - paidAmount);
+      const isPaid = chargeIsPaid || (outstandingAmount <= 0 && paidAmount > 0);
       const isOverdue = !isPaid && dueDate.getTime() < now.getTime();
       const isUpcoming = !isPaid && dueDate.getTime() >= now.getTime();
       const paymentMethod = latestPayment?.method || existingCharge?.paymentMethod || '';
@@ -3615,6 +3630,16 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
         paymentMethod,
         paymentMethodLabel: isPaid ? labelAcademicPaymentMethod(paymentMethod) : '',
         paidAt: isPaid ? paidReferenceDate : null,
+        paymentNotes: isPaid ? latestPayment?.notes || '' : '',
+        paymentDetails: isPaid ? chargePayments.map((payment) => ({
+          _id: payment._id,
+          amount: Number(payment.amount || 0),
+          method: payment.method || '',
+          methodLabel: labelAcademicPaymentMethod(payment.method),
+          notes: payment.notes || '',
+          paidAt: payment.paidAt || payment.createdAt || null,
+          recordedByRole: payment.recordedByRole || '',
+        })) : [],
         existingChargeId: existingCharge?._id || '',
       };
     }),
@@ -3732,7 +3757,7 @@ async function buildAcademicDatabaseSummary(schoolId) {
     Student.find({ schoolId, deletedAt: null }).sort({ grade: 1, lastName: 1, firstName: 1, name: 1 }).lean(),
     ParentStudentLink.find({ schoolId, status: 'active' }).lean(),
     User.find({ schoolId, role: 'parent', deletedAt: null }).select('name email phone documentType documentNumber').lean(),
-    StudentBillingProfile.find({ schoolId }).select('studentId entryDate enrollmentBonusInstallments annualTuitionInstallments initialEnrollmentAndFirstTuitionPaid monthlyTuitionAdditionalDiscountPercent monthlyTuitionAdditionalDiscountLabel').lean(),
+    StudentBillingProfile.find({ schoolId }).select('studentId entryDate enrollmentBonusInstallments annualTuitionInstallments initialEnrollmentAndFirstTuitionPaid annualTuitionAdditionalDiscountPercent annualTuitionAdditionalDiscountLabel monthlyTuitionAdditionalDiscountPercent monthlyTuitionAdditionalDiscountLabel').lean(),
   ]);
 
   const parentMap = new Map(parents.map((parent) => [String(parent._id), parent]));
@@ -3783,6 +3808,8 @@ async function buildAcademicDatabaseSummary(schoolId) {
       enrollmentBonusInstallments: billingProfile?.enrollmentBonusInstallments || 1,
       annualTuitionInstallments: billingProfile?.annualTuitionInstallments || 1,
       initialEnrollmentAndFirstTuitionPaid: Boolean(billingProfile?.initialEnrollmentAndFirstTuitionPaid),
+      annualTuitionAdditionalDiscountPercent: billingProfile?.annualTuitionAdditionalDiscountPercent ?? '',
+      annualTuitionAdditionalDiscountLabel: billingProfile?.annualTuitionAdditionalDiscountLabel || '',
       monthlyTuitionAdditionalDiscountPercent: billingProfile?.monthlyTuitionAdditionalDiscountPercent ?? '',
       monthlyTuitionAdditionalDiscountLabel: billingProfile?.monthlyTuitionAdditionalDiscountLabel || '',
       motherId: mother?._id || null,
@@ -6594,6 +6621,9 @@ router.patch('/database/:studentId', async (req, res) => {
     const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, [grade]);
     const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, grade);
     const enrollmentPricing = calculateProratedAcademicEnrollmentFee(gradeFeeSetting?.enrollmentFee || 0, entryDate, feeConfiguration, grade);
+    const annualTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(req.body?.annualTuitionAdditionalDiscountPercent);
+    const annualTuitionAdditionalDiscountAmount = Math.max(0, Math.round(Number(enrollmentPricing.amount || 0) * (annualTuitionAdditionalDiscountPercent / 100)));
+    const annualTuitionAmount = Math.max(0, Number(enrollmentPricing.amount || 0) - annualTuitionAdditionalDiscountAmount);
     let billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
     if (!billingProfile) {
       billingProfile = new StudentBillingProfile({ schoolId, studentId: student._id, active: true });
@@ -6603,11 +6633,14 @@ router.patch('/database/:studentId', async (req, res) => {
     billingProfile.entryDate = entryDate;
     billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
     billingProfile.enrollmentBonusInstallments = normalizeAcademicInstallmentCount(req.body?.enrollmentBonusInstallments, billingProfile.enrollmentBonusInstallments || 1);
-    billingProfile.annualTuitionAmount = Number(enrollmentPricing.amount || 0);
+    billingProfile.annualTuitionAmount = annualTuitionAmount;
     billingProfile.annualTuitionInstallments = normalizeAcademicInstallmentCount(req.body?.annualTuitionInstallments, billingProfile.annualTuitionInstallments || 1);
     billingProfile.annualTuitionBaseAmount = Number(enrollmentPricing.baseAmount || 0);
     billingProfile.annualTuitionDiscountAmount = Number(enrollmentPricing.enrollmentBenefitDiscountAmount || 0);
     billingProfile.annualTuitionBenefitLabel = normalizeText(enrollmentPricing.enrollmentBenefitLabel);
+    billingProfile.annualTuitionAdditionalDiscountPercent = annualTuitionAdditionalDiscountPercent;
+    billingProfile.annualTuitionAdditionalDiscountAmount = annualTuitionAdditionalDiscountAmount;
+    billingProfile.annualTuitionAdditionalDiscountLabel = normalizeText(req.body?.annualTuitionAdditionalDiscountLabel);
     billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
     billingProfile.initialEnrollmentAndFirstTuitionPaid = Boolean(req.body?.initialEnrollmentAndFirstTuitionPaid);
     billingProfile.monthlyTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(req.body?.monthlyTuitionAdditionalDiscountPercent);
@@ -7502,11 +7535,15 @@ router.post('/enrollments', async (req, res) => {
       const benefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
       const enrollmentBonusInstallments = normalizeAcademicInstallmentCount(rawStudent?.enrollmentBonusInstallments, 1);
       const annualTuitionInstallments = normalizeAcademicInstallmentCount(rawStudent?.annualTuitionInstallments, 1);
+      const annualTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(rawStudent?.annualTuitionAdditionalDiscountPercent);
+      const annualTuitionAdditionalDiscountLabel = normalizeText(rawStudent?.annualTuitionAdditionalDiscountLabel);
       const monthlyTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(rawStudent?.monthlyTuitionAdditionalDiscountPercent);
       const monthlyTuitionAdditionalDiscountLabel = normalizeText(rawStudent?.monthlyTuitionAdditionalDiscountLabel);
       const initialEnrollmentAndFirstTuitionPaid = false;
       const enrollmentPricing = calculateProratedAcademicEnrollmentFee(gradeFeeSetting?.enrollmentFee || 0, entryDate, feeConfiguration, grade);
-      const proratedAnnualTuitionAmount = enrollmentPricing.amount;
+      const proratedAnnualTuitionAmount = Number(enrollmentPricing.amount || 0);
+      const annualTuitionAdditionalDiscountAmount = Math.max(0, Math.round(proratedAnnualTuitionAmount * (annualTuitionAdditionalDiscountPercent / 100)));
+      const discountedAnnualTuitionAmount = Math.max(0, proratedAnnualTuitionAmount - annualTuitionAdditionalDiscountAmount);
       const chargeReferenceDate = entryDate && !Number.isNaN(entryDate.getTime()) ? entryDate : new Date();
 
       let student = await findExistingEnrollmentStudent({ schoolId, rawStudent, linkedParents });
@@ -7544,11 +7581,14 @@ router.post('/enrollments', async (req, res) => {
       billingProfile.entryDate = entryDate && !Number.isNaN(entryDate.getTime()) ? entryDate : null;
       billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
       billingProfile.enrollmentBonusInstallments = enrollmentBonusInstallments;
-      billingProfile.annualTuitionAmount = proratedAnnualTuitionAmount;
+      billingProfile.annualTuitionAmount = discountedAnnualTuitionAmount;
       billingProfile.annualTuitionInstallments = annualTuitionInstallments;
       billingProfile.annualTuitionBaseAmount = enrollmentPricing.baseAmount;
       billingProfile.annualTuitionDiscountAmount = enrollmentPricing.enrollmentBenefitDiscountAmount;
       billingProfile.annualTuitionBenefitLabel = enrollmentPricing.enrollmentBenefitLabel;
+      billingProfile.annualTuitionAdditionalDiscountPercent = annualTuitionAdditionalDiscountPercent;
+      billingProfile.annualTuitionAdditionalDiscountAmount = annualTuitionAdditionalDiscountAmount;
+      billingProfile.annualTuitionAdditionalDiscountLabel = annualTuitionAdditionalDiscountLabel;
       billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
       billingProfile.initialEnrollmentAndFirstTuitionPaid = initialEnrollmentAndFirstTuitionPaid;
       billingProfile.monthlyTuitionAdditionalDiscountPercent = monthlyTuitionAdditionalDiscountPercent;
@@ -7610,7 +7650,8 @@ router.post('/enrollments', async (req, res) => {
         }
 
         if (proratedAnnualTuitionAmount > 0) {
-          const installmentAmounts = splitAcademicAmountIntoInstallments(proratedAnnualTuitionAmount, annualTuitionInstallments);
+          const baseInstallmentAmounts = splitAcademicAmountIntoInstallments(proratedAnnualTuitionAmount, annualTuitionInstallments);
+          const installmentAmounts = splitAcademicAmountIntoInstallments(discountedAnnualTuitionAmount, annualTuitionInstallments);
           for (const [installmentIndex, installmentAmount] of installmentAmounts.entries()) {
             await createCharge({
               schoolId,
@@ -7622,12 +7663,12 @@ router.post('/enrollments', async (req, res) => {
               category: 'annual_tuition',
               concept: installmentAmounts.length > 1 ? `Matrícula anual ${new Date().getFullYear()} · cuota ${installmentIndex + 1}/${installmentAmounts.length}` : `Matrícula anual ${new Date().getFullYear()}`,
               amount: installmentAmount,
-              originalAmount: installmentAmount,
+              originalAmount: baseInstallmentAmounts[installmentIndex] || installmentAmount,
               dueDate: buildAcademicInstallmentDueDate(chargeReferenceDate, installmentIndex),
               audienceType: 'enrollment',
               targetGrade: student.grade,
               targetCourse: student.course,
-              description: `${entryDate && !Number.isNaN(entryDate.getTime()) ? `Matrícula prorrateada por ingreso en ${entryDate.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' })}. ` : ''}${enrollmentPricing.lateEnrollmentSurchargeAmount > 0 ? `Incluye recargo por matrícula tardía de ${enrollmentPricing.lateEnrollmentSurchargeAmount}. ` : ''}${enrollmentPricing.enrollmentBenefitDiscountAmount > 0 ? `Aplica beneficio ${enrollmentPricing.enrollmentBenefitLabel || 'matrícula'} por ${enrollmentPricing.enrollmentBenefitDiscountAmount}. ` : ''}${installmentAmounts.length > 1 ? `Plan de financiamiento de la matrícula a ${installmentAmounts.length} meses.` : ''}`.trim(),
+              description: `${entryDate && !Number.isNaN(entryDate.getTime()) ? `Matrícula prorrateada por ingreso en ${entryDate.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' })}. ` : ''}${enrollmentPricing.lateEnrollmentSurchargeAmount > 0 ? `Incluye recargo por matrícula tardía de ${enrollmentPricing.lateEnrollmentSurchargeAmount}. ` : ''}${enrollmentPricing.enrollmentBenefitDiscountAmount > 0 ? `Aplica beneficio ${enrollmentPricing.enrollmentBenefitLabel || 'matrícula'} por ${enrollmentPricing.enrollmentBenefitDiscountAmount}. ` : ''}${annualTuitionAdditionalDiscountAmount > 0 ? `Aplica descuento adicional de matrícula ${annualTuitionAdditionalDiscountPercent}%${annualTuitionAdditionalDiscountLabel ? ` (${annualTuitionAdditionalDiscountLabel})` : ''}. ` : ''}${installmentAmounts.length > 1 ? `Plan de financiamiento de la matrícula a ${installmentAmounts.length} meses.` : ''}`.trim(),
             });
           }
         }
@@ -7865,12 +7906,15 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
       return res.status(409).json({ message: 'Este cargo ya no tiene saldo pendiente.' });
     }
 
+    const settleAsPaid = Boolean(req.body?.settleAsPaid);
     const requestedAmount = Number(req.body?.amount || outstandingAmount);
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
       return res.status(400).json({ message: 'Ingresa un valor de pago válido.' });
     }
 
-    const paymentAmount = Math.min(Math.round(requestedAmount), Math.round(outstandingAmount));
+    const paymentAmount = settleAsPaid
+      ? Math.round(requestedAmount)
+      : Math.min(Math.round(requestedAmount), Math.round(outstandingAmount));
 
     const primaryParent = String(charge.studentId || '').trim()
       ? (await resolvePrimaryParentContacts(schoolId)).get(String(charge.studentId))
@@ -7890,8 +7934,12 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
       paidAt,
     });
 
-    const remainingAmount = Math.max(0, outstandingAmount - paymentAmount);
-    if (remainingAmount <= 0) {
+    const remainingAmount = settleAsPaid ? 0 : Math.max(0, outstandingAmount - paymentAmount);
+    if (settleAsPaid) {
+      charge.amount = paymentAmount;
+      charge.status = 'paid';
+      charge.paidAt = payment.paidAt;
+    } else if (remainingAmount <= 0) {
       charge.status = 'paid';
       charge.paidAt = payment.paidAt;
     } else if (new Date(charge.dueDate) < new Date()) {
