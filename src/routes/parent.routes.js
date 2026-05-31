@@ -1293,18 +1293,23 @@ function buildParentAcademicBillingSummaryByStudent({ charges = [], referenceDat
       status: charge.status,
       monthKey: charge.monthKey || '',
     }));
-    const amount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
+    const totalAmount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
+    const nextPayableConcept = concepts[0] || null;
+    const amount = requiresDataSchoolContact ? totalAmount : Number(nextPayableConcept?.amount || 0);
     const studentName = normalizeText(pendingCharges[0]?.studentName || studentCharges[0]?.studentName) || 'Estudiante';
 
     return {
       studentId,
       studentName,
       amount,
+      totalAmount,
+      nextChargeAmount: Number(nextPayableConcept?.amount || 0),
+      nextChargeId: nextPayableConcept?._id || null,
       pendingCount: concepts.length,
       overdueMonths,
       requiresDataSchoolContact,
-      dataSchoolWhatsappUrl: requiresDataSchoolContact ? buildDataSchoolWhatsappUrl({ studentName, amount, overdueMonths }) : '',
-      payableChargeIds: requiresDataSchoolContact ? [] : concepts.map((concept) => concept._id),
+      dataSchoolWhatsappUrl: requiresDataSchoolContact ? buildDataSchoolWhatsappUrl({ studentName, amount: totalAmount, overdueMonths }) : '',
+      payableChargeIds: requiresDataSchoolContact || !nextPayableConcept?._id ? [] : [nextPayableConcept._id],
       concepts,
     };
   });
