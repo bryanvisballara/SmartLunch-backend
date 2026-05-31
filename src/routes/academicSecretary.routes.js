@@ -77,6 +77,9 @@ router.use((req, res, next) => {
     || /^\/communication-requests(\/|$)/.test(req.path);
   const isCalendarAssignmentRoute = /^\/academic-management\/assignments(\/|$)/.test(req.path);
   const isCourseAssignmentRoute = /^\/academic-management\/students\/[^/]+\/course$/.test(req.path) && method === 'PATCH';
+  const isEnrollmentRoute = req.path === '/enrollments' && method === 'POST';
+  const isAcademicDatabaseAccessRoute = (req.path === '/database' && method === 'GET')
+    || (/^\/database\/[^/]+$/.test(req.path) && method === 'PATCH');
   const isBillingAccessRoute = (req.path === '/billing' && method === 'GET')
     || (req.path === '/billing/charges' && method === 'POST')
     || (/^\/billing\/charges\/[^/]+\/pay$/.test(req.path) && method === 'POST')
@@ -109,6 +112,10 @@ router.use((req, res, next) => {
 
   if (isBillingAccessRoute) {
     return roleMiddleware([...ACADEMIC_SECRETARY_FULL_ACCESS_ROLES, ...ACADEMIC_BILLING_ACCESS_ROLES])(req, res, next);
+  }
+
+  if (isEnrollmentRoute || isAcademicDatabaseAccessRoute) {
+    return roleMiddleware([...ACADEMIC_SECRETARY_FULL_ACCESS_ROLES, ...ACADEMIC_ADMISSIONS_READ_ROLES])(req, res, next);
   }
 
   return roleMiddleware(ACADEMIC_SECRETARY_FULL_ACCESS_ROLES)(req, res, next);
@@ -5086,7 +5093,7 @@ router.get('/bootstrap', async (req, res) => {
       communicationRequestCounts: isBillingUser || isAdmissionsUser ? createEmptyCommunicationRequestSummary().counts : requestSummary.counts,
       calendarAssignments: isBillingUser || isAdmissionsUser ? [] : visibleCalendarAssignments.map(serializeAcademicCalendarAssignment),
       feeSettings,
-      academicDatabase: isBillingUser || isAdmissionsUser ? [] : visibleAcademicDatabase,
+      academicDatabase: isBillingUser ? [] : visibleAcademicDatabase,
       academicStructure: visibleAcademicStructure,
     });
   } catch (error) {
@@ -6484,6 +6491,7 @@ router.patch('/database/:studentId', async (req, res) => {
     student.lastName = lastName;
     student.name = normalizeText(`${firstName} ${lastName}`);
     student.grade = grade;
+    student.course = normalizeText(req.body?.course);
     student.gender = normalizeAcademicDatabaseGender(req.body?.gender);
     student.documentType = normalizeAcademicDatabaseDocumentType(req.body?.documentType);
     student.documentNumber = normalizeText(req.body?.documentNumber);
