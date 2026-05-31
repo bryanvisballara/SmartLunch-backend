@@ -2926,6 +2926,7 @@ function getMaxBenefitFixedAmount(rule = {}) {
       discountPercent,
       fixedDiscountAmount,
       benefitLabel: labels.join(' + '),
+      benefitWindowLabel: getAcademicBenefitWindowLabel(benefitRule),
     };
   }
 
@@ -3361,6 +3362,34 @@ function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date())
   return (benefitRules || []).find((rule) => currentDay >= Number(rule.startDay || 0) && currentDay <= Number(rule.endDay || 0)) || null;
 }
 
+function addAcademicMonthsUtc(date, monthCount = 0) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + Number(monthCount || 0), 1));
+}
+
+function buildAcademicDueDateForMonth(monthDate, dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_DAY) {
+  return new Date(Date.UTC(
+    monthDate.getUTCFullYear(),
+    monthDate.getUTCMonth(),
+    Math.min(28, Math.max(1, Math.round(Number(dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY))))
+  ));
+}
+
+function formatAcademicMonthKey(date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatAcademicMonthLabel(date) {
+  return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
+function getAcademicBenefitWindowLabel(rule = null) {
+  if (!rule) {
+    return '';
+  }
+
+  return `Aplica del ${Number(rule.startDay || 1)} al ${Number(rule.endDay || 31)} de cada mes`;
+}
+
 function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
   const amountsByGrade = normalizeBenefitFixedAmountsByGrade(rule.fixedAmountsByGrade || {});
   const aliases = getFeeGradeAliases(grade);
@@ -3391,6 +3420,7 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
     discountPercent,
     fixedDiscountAmount,
     benefitLabel: monthlyDiscountConfig.benefitLabel,
+    benefitWindowLabel: monthlyDiscountConfig.benefitWindowLabel || '',
   };
 }
 
@@ -3404,6 +3434,101 @@ function formatAcademicDiscountDescription(pricing = {}) {
   }
 
   return parts.length ? `${pricing.benefitLabel || 'Beneficio'} · ${parts.join(' + ')} sobre pensión.` : '';
+}
+
+function buildAcademicPaymentPlanBenefitDescription(pricing = {}) {
+  const discountDescription = formatAcademicDiscountDescription(pricing);
+  const windowLabel = normalizeText(pricing.benefitWindowLabel);
+  if (discountDescription && windowLabel) {
+    return `${discountDescription} ${windowLabel}.`;
+  }
+
+  if (discountDescription) {
+    return discountDescription;
+  }
+
+  return windowLabel || 'Sin beneficio económico activo para la fecha actual.';
+}
+
+function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfiguration, relatedCharges = [], now = new Date() }) {
+  if (!billingProfile) {
+    return {
+      academicYear: feeConfiguration?.academicYear || '',
+      schoolYearStartDate: feeConfiguration?.schoolYearStartDate || null,
+      schoolYearEndDate: feeConfiguration?.schoolYearEndDate || null,
+      rows: [],
+    };
+  }
+
+  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(feeConfiguration || {});
+  const parsedEntryDate = parseAcademicCalendarDate(billingProfile.entryDate) || schoolYearConfiguration.startDate;
+  const schoolYearStartMonth = startOfAcademicMonthUtc(schoolYearConfiguration.startDate);
+  const schoolYearEndMonth = startOfAcademicMonthUtc(schoolYearConfiguration.endDate);
+  const entryMonth = startOfAcademicMonthUtc(parsedEntryDate);
+  const scheduleStartMonth = entryMonth.getTime() > schoolYearStartMonth.getTime() ? entryMonth : schoolYearStartMonth;
+  if (scheduleStartMonth.getTime() > schoolYearEndMonth.getTime()) {
+    return {
+      academicYear: billingProfile.academicYear || feeConfiguration?.academicYear || '',
+      schoolYearStartDate: schoolYearConfiguration.startDate,
+      schoolYearEndDate: schoolYearConfiguration.endDate,
+      rows: [],
+    };
+  }
+
+  const monthlyChargesByMonthKey = new Map();
+  relatedCharges
+    .filter((charge) => String(charge.category || '') === 'monthly_tuition')
+    .forEach((charge) => {
+      const chargeDueDate = parseAcademicCalendarDate(charge.dueDate);
+      const monthKey = normalizeText(charge.monthKey) || (chargeDueDate ? formatAcademicMonthKey(chargeDueDate) : '');
+      if (!monthKey) return;
+      const existing = monthlyChargesByMonthKey.get(monthKey);
+      if (!existing || Number(charge.paidAmount || 0) > Number(existing.paidAmount || 0)) {
+        monthlyChargesByMonthKey.set(monthKey, charge);
+      }
+    });
+
+  const totalMonths = Math.max(1, getAcademicMonthDiff(scheduleStartMonth, schoolYearEndMonth) + 1);
+  const monthlyBaseAmount = Math.max(0, Number(billingProfile.monthlyTuitionAmount || 0));
+  const pricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, billingProfile, now);
+
+  return {
+    academicYear: billingProfile.academicYear || feeConfiguration?.academicYear || '',
+    schoolYearStartDate: schoolYearConfiguration.startDate,
+    schoolYearEndDate: schoolYearConfiguration.endDate,
+    rows: Array.from({ length: totalMonths }, (_, index) => {
+      const monthDate = addAcademicMonthsUtc(scheduleStartMonth, index);
+      const monthKey = formatAcademicMonthKey(monthDate);
+      const dueDate = buildAcademicDueDateForMonth(monthDate, billingProfile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY);
+      const existingCharge = monthlyChargesByMonthKey.get(monthKey) || null;
+      const effectiveAmount = Number(existingCharge?.chargeAmount || pricing.effectiveAmount || 0);
+      const paidAmount = Math.min(effectiveAmount, Number(existingCharge?.paidAmount || 0));
+      const outstandingAmount = Math.max(0, effectiveAmount - paidAmount);
+      const isPaid = outstandingAmount <= 0 && (paidAmount > 0 || String(existingCharge?.status || '') === 'paid');
+      const isOverdue = !isPaid && dueDate.getTime() < now.getTime();
+      const isUpcoming = !isPaid && dueDate.getTime() >= now.getTime();
+
+      return {
+        key: monthKey,
+        monthKey,
+        monthLabel: formatAcademicMonthLabel(monthDate),
+        category: 'monthly_tuition',
+        concept: existingCharge?.concept || `Pensión ${formatAcademicMonthLabel(monthDate)}`,
+        dueDate,
+        status: isPaid ? 'paid' : (isOverdue ? 'overdue' : (isUpcoming ? 'upcoming' : 'pending')),
+        statusLabel: isPaid ? 'Pagado' : (isOverdue ? 'En mora' : 'Pendiente'),
+        baseAmount: monthlyBaseAmount,
+        amount: isPaid ? effectiveAmount : outstandingAmount,
+        chargeAmount: effectiveAmount,
+        paidAmount,
+        outstandingAmount,
+        benefitLabel: pricing.benefitLabel || '',
+        benefitWindowLabel: pricing.benefitWindowLabel || '',
+        benefitDescription: buildAcademicPaymentPlanBenefitDescription(pricing),
+        existingChargeId: existingCharge?._id || '',
+      };
+    }),
+  };
 }
 
 function calculateAge(birthDateValue) {
@@ -3996,6 +4121,8 @@ async function buildBillingSummary(schoolId) {
   ]);
 
   const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile._id), profile]));
+  const billingProfileByStudentId = new Map(billingProfiles.map((profile) => [String(profile.studentId || ''), profile]));
+  const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, students.map((student) => student.grade).filter(Boolean));
   const paymentTotalsByChargeId = new Map();
   chargePayments.forEach((payment) => {
     const chargeKey = String(payment.chargeId || '').trim();
@@ -4086,6 +4213,14 @@ async function buildBillingSummary(schoolId) {
     const pendingAmount = pendingStudentCharges.reduce((sum, charge) => sum + Number(charge.outstandingAmount || charge.amount || 0), 0);
     const primaryParent = primaryParentByStudentId.get(studentId) || null;
     const payments = paymentsByStudentId.get(studentId) || [];
+    const billingProfile = billingProfileByStudentId.get(studentId) || null;
+    const paymentPlan = buildAcademicStudentPaymentPlan({
+      student,
+      billingProfile,
+      feeConfiguration,
+      relatedCharges,
+      now,
+    });
 
     return {
       studentId,
@@ -4116,6 +4251,7 @@ async function buildBillingSummary(schoolId) {
         overdueMonths: Number(charge.overdueMonths || 0),
       })),
       payments,
+      paymentPlan,
     };
   }).sort((left, right) => {
     if (Number(right.pendingAmount > 0) !== Number(left.pendingAmount > 0)) return Number(right.pendingAmount > 0) - Number(left.pendingAmount > 0);
