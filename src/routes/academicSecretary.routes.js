@@ -3451,7 +3451,24 @@ function buildAcademicPaymentPlanBenefitDescription(pricing = {}) {
 }
 
 function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfiguration, relatedCharges = [], now = new Date() }) {
-  if (!billingProfile) {
+  const studentGrade = normalizeText(billingProfile?.grade || student?.grade || '');
+  const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, studentGrade);
+  const fallbackBenefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
+  const effectiveBillingProfile = {
+    ...(billingProfile || {}),
+    grade: billingProfile?.grade || student?.grade || gradeFeeSetting?.grade || '',
+    academicYear: billingProfile?.academicYear || feeConfiguration?.academicYear || '',
+    entryDate: billingProfile?.entryDate || feeConfiguration?.schoolYearStartDate || null,
+    monthlyTuitionAmount: Number(billingProfile?.monthlyTuitionAmount || 0) || Number(gradeFeeSetting?.monthlyTuition || 0),
+    monthlyTuitionAdditionalDiscountPercent: Number(billingProfile?.monthlyTuitionAdditionalDiscountPercent || 0),
+    monthlyTuitionAdditionalDiscountLabel: billingProfile?.monthlyTuitionAdditionalDiscountLabel || '',
+    dueDay: Number(billingProfile?.dueDay || 0) || Number(gradeFeeSetting?.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY),
+    benefitRules: Array.isArray(billingProfile?.benefitRules) && billingProfile.benefitRules.length
+      ? billingProfile.benefitRules
+      : fallbackBenefitRules,
+  };
+
+  if (Number(effectiveBillingProfile.monthlyTuitionAmount || 0) <= 0) {
     return {
       academicYear: feeConfiguration?.academicYear || '',
       schoolYearStartDate: feeConfiguration?.schoolYearStartDate || null,
@@ -3461,14 +3478,14 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
   }
 
   const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(feeConfiguration || {});
-  const parsedEntryDate = parseAcademicCalendarDate(billingProfile.entryDate) || schoolYearConfiguration.startDate;
+  const parsedEntryDate = parseAcademicCalendarDate(effectiveBillingProfile.entryDate) || schoolYearConfiguration.startDate;
   const schoolYearStartMonth = startOfAcademicMonthUtc(schoolYearConfiguration.startDate);
   const schoolYearEndMonth = startOfAcademicMonthUtc(schoolYearConfiguration.endDate);
   const entryMonth = startOfAcademicMonthUtc(parsedEntryDate);
   const scheduleStartMonth = entryMonth.getTime() > schoolYearStartMonth.getTime() ? entryMonth : schoolYearStartMonth;
   if (scheduleStartMonth.getTime() > schoolYearEndMonth.getTime()) {
     return {
-      academicYear: billingProfile.academicYear || feeConfiguration?.academicYear || '',
+      academicYear: effectiveBillingProfile.academicYear || feeConfiguration?.academicYear || '',
       schoolYearStartDate: schoolYearConfiguration.startDate,
       schoolYearEndDate: schoolYearConfiguration.endDate,
       rows: [],
@@ -3489,17 +3506,17 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     });
 
   const totalMonths = Math.max(1, getAcademicMonthDiff(scheduleStartMonth, schoolYearEndMonth) + 1);
-  const monthlyBaseAmount = Math.max(0, Number(billingProfile.monthlyTuitionAmount || 0));
-  const pricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, billingProfile, now);
+  const monthlyBaseAmount = Math.max(0, Number(effectiveBillingProfile.monthlyTuitionAmount || 0));
+  const pricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, now);
 
   return {
-    academicYear: billingProfile.academicYear || feeConfiguration?.academicYear || '',
+    academicYear: effectiveBillingProfile.academicYear || feeConfiguration?.academicYear || '',
     schoolYearStartDate: schoolYearConfiguration.startDate,
     schoolYearEndDate: schoolYearConfiguration.endDate,
     rows: Array.from({ length: totalMonths }, (_, index) => {
       const monthDate = addAcademicMonthsUtc(scheduleStartMonth, index);
       const monthKey = formatAcademicMonthKey(monthDate);
-      const dueDate = buildAcademicDueDateForMonth(monthDate, billingProfile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY);
+      const dueDate = buildAcademicDueDateForMonth(monthDate, effectiveBillingProfile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY);
       const existingCharge = monthlyChargesByMonthKey.get(monthKey) || null;
       const effectiveAmount = Number(existingCharge?.chargeAmount || pricing.effectiveAmount || 0);
       const paidAmount = Math.min(effectiveAmount, Number(existingCharge?.paidAmount || 0));
