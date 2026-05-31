@@ -78,6 +78,7 @@ router.use((req, res, next) => {
   const isCalendarAssignmentRoute = /^\/academic-management\/assignments(\/|$)/.test(req.path);
   const isCourseAssignmentRoute = /^\/academic-management\/students\/[^/]+\/course$/.test(req.path) && method === 'PATCH';
   const isBillingAccessRoute = (req.path === '/billing' && method === 'GET')
+    || (req.path === '/billing/charges' && method === 'POST')
     || (/^\/billing\/charges\/[^/]+\/pay$/.test(req.path) && method === 'POST')
     || (req.path === '/billing/reminders' && method === 'POST')
     || (req.path === '/billing/follow-ups' && method === 'POST');
