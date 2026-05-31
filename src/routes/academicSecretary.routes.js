@@ -3526,6 +3526,13 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
   const studentGrade = normalizeText(billingProfile?.grade || student?.grade || student?.course || '');
   const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, studentGrade);
   const fallbackBenefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
+  const configuredAnnualTuitionAmount = Number(gradeFeeSetting?.enrollmentFee || 0);
+  const profileAnnualTuitionAmount = Number(billingProfile?.annualTuitionAmount || 0);
+  const profileAnnualTuitionBaseAmount = Number(billingProfile?.annualTuitionBaseAmount || 0);
+  const annualTuitionBaseAmount = profileAnnualTuitionBaseAmount || configuredAnnualTuitionAmount;
+  const annualTuitionDiscountAmount = Number(billingProfile?.annualTuitionDiscountAmount || 0);
+  const annualTuitionAdditionalDiscountAmount = Number(billingProfile?.annualTuitionAdditionalDiscountAmount || 0);
+  const derivedAnnualTuitionAmount = Math.max(0, annualTuitionBaseAmount - annualTuitionDiscountAmount - annualTuitionAdditionalDiscountAmount);
   const effectiveBillingProfile = {
     ...(billingProfile || {}),
     grade: billingProfile?.grade || student?.grade || gradeFeeSetting?.grade || '',
@@ -3534,12 +3541,13 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     monthlyTuitionAmount: Number(billingProfile?.monthlyTuitionAmount || 0) || Number(gradeFeeSetting?.monthlyTuition || 0),
     monthlyTuitionAdditionalDiscountPercent: Number(billingProfile?.monthlyTuitionAdditionalDiscountPercent || 0),
     monthlyTuitionAdditionalDiscountLabel: billingProfile?.monthlyTuitionAdditionalDiscountLabel || '',
-    annualTuitionAmount: Number(billingProfile?.annualTuitionAmount || 0) || Number(gradeFeeSetting?.enrollmentFee || 0),
-    annualTuitionBaseAmount: Number(billingProfile?.annualTuitionBaseAmount || 0) || Number(gradeFeeSetting?.enrollmentFee || 0),
-    annualTuitionDiscountAmount: Number(billingProfile?.annualTuitionDiscountAmount || 0),
+    annualTuitionAmount: profileAnnualTuitionAmount > 0 ? profileAnnualTuitionAmount : derivedAnnualTuitionAmount,
+    annualTuitionInstallments: normalizeAcademicInstallmentCount(billingProfile?.annualTuitionInstallments, 1),
+    annualTuitionBaseAmount,
+    annualTuitionDiscountAmount,
     annualTuitionBenefitLabel: billingProfile?.annualTuitionBenefitLabel || '',
     annualTuitionAdditionalDiscountPercent: Number(billingProfile?.annualTuitionAdditionalDiscountPercent || 0),
-    annualTuitionAdditionalDiscountAmount: Number(billingProfile?.annualTuitionAdditionalDiscountAmount || 0),
+    annualTuitionAdditionalDiscountAmount,
     annualTuitionAdditionalDiscountLabel: billingProfile?.annualTuitionAdditionalDiscountLabel || '',
     dueDay: Number(billingProfile?.dueDay || 0) || Number(gradeFeeSetting?.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY),
     benefitRules: Array.isArray(billingProfile?.benefitRules) && billingProfile.benefitRules.length
@@ -3591,6 +3599,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       monthKey: '',
       monthLabel: annualTuitionCharges.length > 1 ? `Matrícula · cuota ${index + 1}/${annualTuitionCharges.length}` : 'Matrícula',
       category: 'annual_tuition',
+      paymentConceptLabel: annualTuitionCharges.length > 1 ? 'Matrícula financiada' : 'Matrícula',
       concept: charge?.concept || 'Matrícula anual',
       dueDate,
       status: isPaid ? 'paid' : (isOverdue ? 'overdue' : 'upcoming'),
@@ -3612,10 +3621,13 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     };
   });
 
-  if (!annualTuitionRows.length && Number(effectiveBillingProfile.annualTuitionAmount || 0) > 0) {
+  if (!annualTuitionRows.length && (Number(effectiveBillingProfile.annualTuitionBaseAmount || 0) > 0 || Number(effectiveBillingProfile.annualTuitionAmount || 0) > 0)) {
     const annualDiscountConfig = resolveAcademicAnnualTuitionDiscountConfig(effectiveBillingProfile);
     const annualBaseAmount = Math.max(0, Number(effectiveBillingProfile.annualTuitionBaseAmount || effectiveBillingProfile.annualTuitionAmount || 0));
     const annualAmount = Math.max(0, Number(effectiveBillingProfile.annualTuitionAmount || 0));
+    const annualInstallmentCount = normalizeAcademicInstallmentCount(effectiveBillingProfile.annualTuitionInstallments, 1);
+    const annualInstallmentAmounts = annualAmount > 0 ? splitAcademicAmountIntoInstallments(annualAmount, annualInstallmentCount) : [0];
+    const annualBaseInstallmentAmounts = annualBaseAmount > 0 ? splitAcademicAmountIntoInstallments(annualBaseAmount, annualInstallmentCount) : annualInstallmentAmounts;
     const annualBenefitLabel = [
       normalizeText(effectiveBillingProfile.annualTuitionBenefitLabel),
       normalizeText(annualDiscountConfig.benefitLabel),
@@ -3628,29 +3640,34 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       annualBenefitParts.push(`${formatCurrency(effectiveBillingProfile.annualTuitionAdditionalDiscountAmount)} de descuento adicional`);
     }
 
-    annualTuitionRows.push({
-      key: 'annual_tuition-profile',
-      monthKey: '',
-      monthLabel: 'Matrícula',
-      category: 'annual_tuition',
-      concept: `Matrícula anual ${new Date(parsedEntryDate || now).getUTCFullYear()}`,
-      dueDate: parsedEntryDate,
-      status: parsedEntryDate.getTime() < now.getTime() ? 'overdue' : 'upcoming',
-      statusLabel: parsedEntryDate.getTime() < now.getTime() ? 'En mora' : 'Pendiente',
-      baseAmount: annualBaseAmount,
-      amount: annualAmount,
-      chargeAmount: annualAmount,
-      paidAmount: 0,
-      outstandingAmount: annualAmount,
-      benefitLabel: annualBenefitLabel,
-      benefitWindowLabel: '',
-      benefitDescription: annualBenefitParts.length ? `${annualBenefitParts.join(' + ')}.` : 'Sin beneficio económico activo para matrícula.',
-      paymentMethod: '',
-      paymentMethodLabel: '',
-      paidAt: null,
-      paymentNotes: '',
-      paymentDetails: [],
-      existingChargeId: '',
+    annualInstallmentAmounts.forEach((installmentAmount, index) => {
+      const installmentDueDate = buildAcademicInstallmentDueDate(parsedEntryDate, index);
+      const isFinanced = annualInstallmentAmounts.length > 1;
+      annualTuitionRows.push({
+        key: `annual_tuition-profile-${index + 1}`,
+        monthKey: '',
+        monthLabel: isFinanced ? `Matrícula · cuota ${index + 1}/${annualInstallmentAmounts.length}` : 'Matrícula',
+        category: 'annual_tuition',
+        paymentConceptLabel: isFinanced ? 'Matrícula financiada' : 'Matrícula',
+        concept: isFinanced ? `Matrícula anual ${new Date(parsedEntryDate || now).getUTCFullYear()} · cuota ${index + 1}/${annualInstallmentAmounts.length}` : `Matrícula anual ${new Date(parsedEntryDate || now).getUTCFullYear()}`,
+        dueDate: installmentDueDate,
+        status: installmentDueDate.getTime() < now.getTime() ? 'overdue' : 'upcoming',
+        statusLabel: installmentDueDate.getTime() < now.getTime() ? 'En mora' : 'Pendiente',
+        baseAmount: annualBaseInstallmentAmounts[index] || installmentAmount,
+        amount: installmentAmount,
+        chargeAmount: installmentAmount,
+        paidAmount: 0,
+        outstandingAmount: installmentAmount,
+        benefitLabel: annualBenefitLabel,
+        benefitWindowLabel: '',
+        benefitDescription: annualBenefitParts.length ? `${annualBenefitParts.join(' + ')}.` : 'Sin beneficio económico activo para matrícula.',
+        paymentMethod: '',
+        paymentMethodLabel: '',
+        paidAt: null,
+        paymentNotes: '',
+        paymentDetails: [],
+        existingChargeId: '',
+      });
     });
   }
 
@@ -3723,6 +3740,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
         monthKey,
         monthLabel: formatAcademicMonthLabel(monthDate),
         category: 'monthly_tuition',
+        paymentConceptLabel: 'Pensión',
         concept: existingCharge?.concept || `Pensión ${formatAcademicMonthLabel(monthDate)}`,
         dueDate,
         status: isPaid ? 'paid' : (isOverdue ? 'overdue' : (isUpcoming ? 'upcoming' : 'pending')),
