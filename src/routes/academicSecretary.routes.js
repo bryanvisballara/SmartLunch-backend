@@ -3369,8 +3369,31 @@ function getFeeGradeAliases(value) {
 }
 
 function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date()) {
-  const currentDay = new Date(referenceDate).getDate();
+  const currentDay = new Date(referenceDate).getUTCDate();
   return (benefitRules || []).find((rule) => currentDay >= Number(rule.startDay || 0) && currentDay <= Number(rule.endDay || 0)) || null;
+}
+
+function getAcademicPaymentPlanBenefitDueDay(billingProfile = {}) {
+  const benefitRules = normalizeBenefitRules(billingProfile?.benefitRules || []);
+  const grade = billingProfile?.grade || '';
+  const benefitRule = benefitRules.find((rule) => (
+    Number(rule.discountPercent || 0) > 0
+    || (normalizeText(rule.discountType) === 'fixed' && getFixedBenefitAmountForGrade(rule, grade) > 0)
+  ));
+
+  return benefitRule ? Number(benefitRule.endDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY) : Number(billingProfile?.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY);
+}
+
+function buildAcademicFullMonthlyPricing(monthlyBaseAmount) {
+  const baseAmount = Math.max(0, Number(monthlyBaseAmount || 0));
+  return {
+    baseAmount,
+    effectiveAmount: baseAmount,
+    discountPercent: 0,
+    fixedDiscountAmount: 0,
+    benefitLabel: '',
+    benefitWindowLabel: '',
+  };
 }
 
 function addAcademicMonthsUtc(date, monthCount = 0) {
@@ -3518,6 +3541,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
 
   const totalMonths = Math.max(1, getAcademicMonthDiff(scheduleStartMonth, schoolYearEndMonth) + 1);
   const monthlyBaseAmount = Math.max(0, Number(effectiveBillingProfile.monthlyTuitionAmount || 0));
+  const benefitDueDay = getAcademicPaymentPlanBenefitDueDay(effectiveBillingProfile);
   return {
     academicYear: effectiveBillingProfile.academicYear || feeConfiguration?.academicYear || '',
     schoolYearStartDate: schoolYearConfiguration.startDate,
@@ -3525,15 +3549,17 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     rows: Array.from({ length: totalMonths }, (_, index) => {
       const monthDate = addAcademicMonthsUtc(scheduleStartMonth, index);
       const monthKey = formatAcademicMonthKey(monthDate);
-      const dueDate = buildAcademicDueDateForMonth(monthDate, effectiveBillingProfile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY);
+      const dueDate = buildAcademicDueDateForMonth(monthDate, benefitDueDay);
       const existingCharge = monthlyChargesByMonthKey.get(monthKey) || null;
       const chargePayments = existingCharge?._id ? paymentsByChargeId.get(String(existingCharge._id)) || [] : [];
       const latestPayment = chargePayments[0] || null;
       const rawPaidAmount = chargePayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0) || Number(existingCharge?.paidAmount || 0);
       const paidReferenceDate = latestPayment?.paidAt || existingCharge?.paidAt || dueDate;
       const chargeIsPaid = String(existingCharge?.status || '') === 'paid';
-      const pricingReferenceDate = chargeIsPaid ? paidReferenceDate : (dueDate.getTime() >= now.getTime() ? dueDate : now);
-      const pricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, pricingReferenceDate);
+      const benefitDueDateHasExpired = dueDate.getTime() < now.getTime();
+      const pricing = !chargeIsPaid && benefitDueDateHasExpired
+        ? buildAcademicFullMonthlyPricing(monthlyBaseAmount)
+        : resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, chargeIsPaid ? paidReferenceDate : dueDate);
       const effectiveAmount = chargeIsPaid
         ? Number(existingCharge?.chargeAmount || existingCharge?.amount || rawPaidAmount || pricing.effectiveAmount || 0)
         : Number(pricing.effectiveAmount || 0);
