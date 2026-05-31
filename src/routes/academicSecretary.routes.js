@@ -3404,6 +3404,23 @@ function buildAcademicFullMonthlyPricing(monthlyBaseAmount) {
   };
 }
 
+function buildAcademicMonthlyPricingAfterBenefitDueDate(monthlyBaseAmount, billingProfile = {}) {
+  const baseAmount = Math.max(0, Number(monthlyBaseAmount || 0));
+  const discountPercent = normalizeAcademicAdditionalDiscountPercent(billingProfile?.monthlyTuitionAdditionalDiscountPercent || 0);
+  const effectiveAmount = discountPercent > 0
+    ? Math.max(0, Math.round(baseAmount * (1 - (discountPercent / 100))))
+    : baseAmount;
+
+  return {
+    baseAmount,
+    effectiveAmount,
+    discountPercent,
+    fixedDiscountAmount: 0,
+    benefitLabel: discountPercent > 0 ? normalizeText(billingProfile?.monthlyTuitionAdditionalDiscountLabel) || 'Descuento individual' : '',
+    benefitWindowLabel: '',
+  };
+}
+
 function addAcademicMonthsUtc(date, monthCount = 0) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + Number(monthCount || 0), 1));
 }
@@ -3566,7 +3583,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       const chargeIsPaid = String(existingCharge?.status || '') === 'paid';
       const benefitDueDateHasExpired = dueDate.getTime() < now.getTime();
       const pricing = !chargeIsPaid && benefitDueDateHasExpired
-        ? buildAcademicFullMonthlyPricing(monthlyBaseAmount)
+        ? buildAcademicMonthlyPricingAfterBenefitDueDate(monthlyBaseAmount, effectiveBillingProfile)
         : resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, chargeIsPaid ? paidReferenceDate : dueDate);
       const effectiveAmount = chargeIsPaid
         ? Number(existingCharge?.chargeAmount || existingCharge?.amount || rawPaidAmount || pricing.effectiveAmount || 0)
@@ -6576,23 +6593,29 @@ router.patch('/database/:studentId', async (req, res) => {
 
     const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, [grade]);
     const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, grade);
-    const billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
-    if (billingProfile) {
-      billingProfile.grade = grade;
-      billingProfile.academicYear = normalizeText(feeConfiguration?.academicYear) || getCurrentAcademicYear();
-      billingProfile.entryDate = entryDate;
-      billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
-      billingProfile.enrollmentBonusInstallments = normalizeAcademicInstallmentCount(req.body?.enrollmentBonusInstallments, billingProfile.enrollmentBonusInstallments || 1);
-      billingProfile.annualTuitionAmount = Number(gradeFeeSetting?.enrollmentFee || 0);
-      billingProfile.annualTuitionInstallments = normalizeAcademicInstallmentCount(req.body?.annualTuitionInstallments, billingProfile.annualTuitionInstallments || 1);
-      billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
-      billingProfile.initialEnrollmentAndFirstTuitionPaid = Boolean(req.body?.initialEnrollmentAndFirstTuitionPaid);
-      billingProfile.monthlyTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(req.body?.monthlyTuitionAdditionalDiscountPercent);
-      billingProfile.monthlyTuitionAdditionalDiscountLabel = normalizeText(req.body?.monthlyTuitionAdditionalDiscountLabel);
-      billingProfile.dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_DAY;
-      billingProfile.benefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
-      await billingProfile.save();
+    const enrollmentPricing = calculateProratedAcademicEnrollmentFee(gradeFeeSetting?.enrollmentFee || 0, entryDate, feeConfiguration, grade);
+    let billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
+    if (!billingProfile) {
+      billingProfile = new StudentBillingProfile({ schoolId, studentId: student._id, active: true });
     }
+    billingProfile.grade = grade;
+    billingProfile.academicYear = normalizeText(feeConfiguration?.academicYear) || getCurrentAcademicYear();
+    billingProfile.entryDate = entryDate;
+    billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
+    billingProfile.enrollmentBonusInstallments = normalizeAcademicInstallmentCount(req.body?.enrollmentBonusInstallments, billingProfile.enrollmentBonusInstallments || 1);
+    billingProfile.annualTuitionAmount = Number(enrollmentPricing.amount || 0);
+    billingProfile.annualTuitionInstallments = normalizeAcademicInstallmentCount(req.body?.annualTuitionInstallments, billingProfile.annualTuitionInstallments || 1);
+    billingProfile.annualTuitionBaseAmount = Number(enrollmentPricing.baseAmount || 0);
+    billingProfile.annualTuitionDiscountAmount = Number(enrollmentPricing.enrollmentBenefitDiscountAmount || 0);
+    billingProfile.annualTuitionBenefitLabel = normalizeText(enrollmentPricing.enrollmentBenefitLabel);
+    billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
+    billingProfile.initialEnrollmentAndFirstTuitionPaid = Boolean(req.body?.initialEnrollmentAndFirstTuitionPaid);
+    billingProfile.monthlyTuitionAdditionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(req.body?.monthlyTuitionAdditionalDiscountPercent);
+    billingProfile.monthlyTuitionAdditionalDiscountLabel = normalizeText(req.body?.monthlyTuitionAdditionalDiscountLabel);
+    billingProfile.dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_DAY;
+    billingProfile.benefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
+    billingProfile.active = true;
+    await billingProfile.save();
 
     const rows = await buildAcademicDatabaseSummary(schoolId);
     const updatedRow = rows.find((item) => String(item._id) === String(student._id)) || null;
