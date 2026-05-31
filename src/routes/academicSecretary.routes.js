@@ -3461,7 +3461,7 @@ function buildAcademicPaymentPlanBenefitDescription(pricing = {}) {
   return windowLabel || 'Sin beneficio económico activo para la fecha actual.';
 }
 
-function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfiguration, relatedCharges = [], now = new Date() }) {
+function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfiguration, relatedCharges = [], paymentsByChargeId = new Map(), now = new Date() }) {
   const studentGrade = normalizeText(billingProfile?.grade || student?.grade || student?.course || '');
   const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, studentGrade);
   const fallbackBenefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
@@ -3518,8 +3518,6 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
 
   const totalMonths = Math.max(1, getAcademicMonthDiff(scheduleStartMonth, schoolYearEndMonth) + 1);
   const monthlyBaseAmount = Math.max(0, Number(effectiveBillingProfile.monthlyTuitionAmount || 0));
-  const pricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, now);
-
   return {
     academicYear: effectiveBillingProfile.academicYear || feeConfiguration?.academicYear || '',
     schoolYearStartDate: schoolYearConfiguration.startDate,
@@ -3529,12 +3527,22 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       const monthKey = formatAcademicMonthKey(monthDate);
       const dueDate = buildAcademicDueDateForMonth(monthDate, effectiveBillingProfile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY);
       const existingCharge = monthlyChargesByMonthKey.get(monthKey) || null;
-      const effectiveAmount = Number(existingCharge?.chargeAmount || pricing.effectiveAmount || 0);
-      const paidAmount = Math.min(effectiveAmount, Number(existingCharge?.paidAmount || 0));
+      const chargePayments = existingCharge?._id ? paymentsByChargeId.get(String(existingCharge._id)) || [] : [];
+      const latestPayment = chargePayments[0] || null;
+      const rawPaidAmount = chargePayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0) || Number(existingCharge?.paidAmount || 0);
+      const paidReferenceDate = latestPayment?.paidAt || existingCharge?.paidAt || dueDate;
+      const chargeIsPaid = String(existingCharge?.status || '') === 'paid';
+      const pricingReferenceDate = chargeIsPaid ? paidReferenceDate : (dueDate.getTime() >= now.getTime() ? dueDate : now);
+      const pricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, pricingReferenceDate);
+      const effectiveAmount = chargeIsPaid
+        ? Number(existingCharge?.chargeAmount || existingCharge?.amount || rawPaidAmount || pricing.effectiveAmount || 0)
+        : Number(pricing.effectiveAmount || 0);
+      const paidAmount = Math.min(effectiveAmount, rawPaidAmount || (String(existingCharge?.status || '') === 'paid' ? effectiveAmount : 0));
       const outstandingAmount = Math.max(0, effectiveAmount - paidAmount);
       const isPaid = outstandingAmount <= 0 && (paidAmount > 0 || String(existingCharge?.status || '') === 'paid');
       const isOverdue = !isPaid && dueDate.getTime() < now.getTime();
       const isUpcoming = !isPaid && dueDate.getTime() >= now.getTime();
+      const paymentMethod = latestPayment?.method || existingCharge?.paymentMethod || '';
 
       return {
         key: monthKey,
@@ -3553,6 +3561,9 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
         benefitLabel: pricing.benefitLabel || '',
         benefitWindowLabel: pricing.benefitWindowLabel || '',
         benefitDescription: buildAcademicPaymentPlanBenefitDescription(pricing),
+        paymentMethod,
+        paymentMethodLabel: isPaid ? labelAcademicPaymentMethod(paymentMethod) : '',
+        paidAt: isPaid ? paidReferenceDate : null,
         existingChargeId: existingCharge?._id || '',
       };
     }),
@@ -4152,10 +4163,13 @@ async function buildBillingSummary(schoolId) {
   const billingProfileByStudentId = new Map(billingProfiles.map((profile) => [String(profile.studentId || ''), profile]));
   const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, students.map((student) => student.grade).filter(Boolean));
   const paymentTotalsByChargeId = new Map();
+  const paymentsByChargeId = new Map();
   chargePayments.forEach((payment) => {
     const chargeKey = String(payment.chargeId || '').trim();
     if (!chargeKey) return;
     paymentTotalsByChargeId.set(chargeKey, Number(paymentTotalsByChargeId.get(chargeKey) || 0) + Number(payment.amount || 0));
+    if (!paymentsByChargeId.has(chargeKey)) paymentsByChargeId.set(chargeKey, []);
+    paymentsByChargeId.get(chargeKey).push(payment);
   });
 
   const chargeById = new Map();
@@ -4247,6 +4261,7 @@ async function buildBillingSummary(schoolId) {
       billingProfile,
       feeConfiguration,
       relatedCharges,
+      paymentsByChargeId,
       now,
     });
 
