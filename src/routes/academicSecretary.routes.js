@@ -3352,8 +3352,19 @@ function getFeeGradeAliases(value) {
   const normalized = normalizeText(value).toLowerCase();
   if (!normalized) return [];
   const aliases = new Set([normalized]);
-  const [, suffix] = normalized.split(':');
-  if (suffix) aliases.add(normalizeText(suffix).toLowerCase());
+
+  normalized.split(':').map((part) => normalizeText(part).toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
+
+  const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*[a-z]$/i);
+  if (sectionMatch) {
+    aliases.add(sectionMatch[1]);
+  }
+
+  const numericMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:\s*[-_/ ]?\s*[a-z])?(?:$|[^\d])/i);
+  if (numericMatch) {
+    aliases.add(numericMatch[1]);
+  }
+
   return [...aliases].filter(Boolean);
 }
 
@@ -3451,7 +3462,7 @@ function buildAcademicPaymentPlanBenefitDescription(pricing = {}) {
 }
 
 function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfiguration, relatedCharges = [], now = new Date() }) {
-  const studentGrade = normalizeText(billingProfile?.grade || student?.grade || '');
+  const studentGrade = normalizeText(billingProfile?.grade || student?.grade || student?.course || '');
   const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, studentGrade);
   const fallbackBenefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
   const effectiveBillingProfile = {
