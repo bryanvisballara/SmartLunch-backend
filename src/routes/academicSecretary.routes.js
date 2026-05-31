@@ -7537,33 +7537,26 @@ router.post('/enrollments', async (req, res) => {
       let billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
       const hadBillingProfile = Boolean(billingProfile);
       if (!billingProfile) {
-        billingProfile = await StudentBillingProfile.create({
-          schoolId,
-          studentId: student._id,
-          grade,
-          academicYear: normalizeText(feeConfiguration?.academicYear) || getCurrentAcademicYear(),
-          entryDate: entryDate && !Number.isNaN(entryDate.getTime()) ? entryDate : null,
-          enrollmentBonusAmount: Number(gradeFeeSetting?.enrollmentBonus || 0),
-          enrollmentBonusInstallments,
-          annualTuitionAmount: proratedAnnualTuitionAmount,
-          annualTuitionInstallments,
-          annualTuitionBaseAmount: enrollmentPricing.baseAmount,
-          annualTuitionDiscountAmount: enrollmentPricing.enrollmentBenefitDiscountAmount,
-          annualTuitionBenefitLabel: enrollmentPricing.enrollmentBenefitLabel,
-          monthlyTuitionAmount: Number(gradeFeeSetting?.monthlyTuition || 0),
-          initialEnrollmentAndFirstTuitionPaid,
-          monthlyTuitionAdditionalDiscountPercent,
-          monthlyTuitionAdditionalDiscountLabel,
-          dueDay: DEFAULT_ACADEMIC_MONTHLY_DUE_DAY,
-          benefitRules,
-          active: true,
-        });
+        billingProfile = new StudentBillingProfile({ schoolId, studentId: student._id });
       }
-
-      if (billingProfile.initialEnrollmentAndFirstTuitionPaid !== initialEnrollmentAndFirstTuitionPaid) {
-        billingProfile.initialEnrollmentAndFirstTuitionPaid = initialEnrollmentAndFirstTuitionPaid;
-        await billingProfile.save();
-      }
+      billingProfile.grade = grade;
+      billingProfile.academicYear = normalizeText(feeConfiguration?.academicYear) || getCurrentAcademicYear();
+      billingProfile.entryDate = entryDate && !Number.isNaN(entryDate.getTime()) ? entryDate : null;
+      billingProfile.enrollmentBonusAmount = Number(gradeFeeSetting?.enrollmentBonus || 0);
+      billingProfile.enrollmentBonusInstallments = enrollmentBonusInstallments;
+      billingProfile.annualTuitionAmount = proratedAnnualTuitionAmount;
+      billingProfile.annualTuitionInstallments = annualTuitionInstallments;
+      billingProfile.annualTuitionBaseAmount = enrollmentPricing.baseAmount;
+      billingProfile.annualTuitionDiscountAmount = enrollmentPricing.enrollmentBenefitDiscountAmount;
+      billingProfile.annualTuitionBenefitLabel = enrollmentPricing.enrollmentBenefitLabel;
+      billingProfile.monthlyTuitionAmount = Number(gradeFeeSetting?.monthlyTuition || 0);
+      billingProfile.initialEnrollmentAndFirstTuitionPaid = initialEnrollmentAndFirstTuitionPaid;
+      billingProfile.monthlyTuitionAdditionalDiscountPercent = monthlyTuitionAdditionalDiscountPercent;
+      billingProfile.monthlyTuitionAdditionalDiscountLabel = monthlyTuitionAdditionalDiscountLabel;
+      billingProfile.dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_DAY;
+      billingProfile.benefitRules = benefitRules;
+      billingProfile.active = true;
+      await billingProfile.save();
 
       const resolvedPrimaryParent = linkedParents.find((item) => item.relationship === primaryRelationship) || linkedParents[0];
 
