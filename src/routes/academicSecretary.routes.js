@@ -4478,6 +4478,17 @@ async function getAcademicChargeOutstandingAmount(charge, referenceDate = new Da
   };
 }
 
+function resolveAcademicChargePaymentReferenceDate(charge, paidAt = new Date()) {
+  const parsedPaidAt = paidAt instanceof Date ? paidAt : new Date(paidAt);
+  const safePaidAt = Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt;
+  const dueDate = new Date(charge?.dueDate || safePaidAt);
+  if (String(charge?.category || '') === 'monthly_tuition' && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() >= safePaidAt.getTime()) {
+    return dueDate;
+  }
+
+  return safePaidAt;
+}
+
 function normalizeAcademicManualPaymentMethod(value) {
   const normalized = normalizeText(value).toLowerCase();
   if (['cash', 'bank_transfer', 'card', 'pse', 'epayco', 'bold', 'other'].includes(normalized)) {
@@ -7659,8 +7670,12 @@ router.post('/billing/charges', async (req, res) => {
       concept,
       description = '',
       amount,
+      originalAmount = null,
       dueDate,
       audienceType,
+      category = 'additional',
+      monthKey = '',
+      suppressNotice = false,
       gradeTargets = [],
       courseTargets = [],
       parentTargets = [],
@@ -7681,25 +7696,41 @@ router.post('/billing/charges', async (req, res) => {
       ? await ParentStudentLink.find({ schoolId, studentId: { $in: audience.studentIds }, status: 'active' }).lean()
       : [];
     const studentMap = new Map(audience.students.map((student) => [String(student._id), student]));
+    const normalizedCategory = ['enrollment_bonus', 'annual_tuition', 'monthly_tuition', 'additional'].includes(normalizeText(category)) ? normalizeText(category) : 'additional';
+    const billingProfilesByStudentId = normalizedCategory === 'monthly_tuition' && audience.studentIds.length > 0
+      ? new Map((await StudentBillingProfile.find({ schoolId, studentId: { $in: audience.studentIds } }).lean()).map((profile) => [String(profile.studentId || ''), profile]))
+      : new Map();
     const createdCharges = [];
 
     if (links.length > 0) {
       for (const link of links) {
         const student = studentMap.get(String(link.studentId));
+        const billingProfile = billingProfilesByStudentId.get(String(link.studentId || '')) || null;
+        const existingMonthlyCharge = normalizedCategory === 'monthly_tuition' && normalizeText(monthKey)
+          ? await AcademicCharge.findOne({ schoolId, studentId: link.studentId, category: 'monthly_tuition', monthKey: normalizeText(monthKey), status: { $ne: 'cancelled' } })
+          : null;
+        if (existingMonthlyCharge) {
+          createdCharges.push(existingMonthlyCharge);
+          continue;
+        }
+
         createdCharges.push(await createCharge({
           schoolId,
           createdByUserId: userId,
           createdByRole: role,
           parentId: link.parentId,
           studentId: link.studentId,
-          category: 'additional',
+          billingProfileId: billingProfile?._id || null,
+          category: normalizedCategory,
           concept: normalizeText(concept),
           description: normalizeText(description),
           amount,
+          originalAmount: normalizedCategory === 'monthly_tuition' && !billingProfile ? amount : originalAmount,
           dueDate,
           audienceType: normalizeText(audienceType) || 'individual',
           targetGrade: student?.grade || '',
           targetCourse: student?.course || '',
+          monthKey: normalizeText(monthKey),
         }));
       }
     } else {
@@ -7709,39 +7740,43 @@ router.post('/billing/charges', async (req, res) => {
           createdByUserId: userId,
           createdByRole: role,
           parentId: parent._id,
-          category: 'additional',
+          category: normalizedCategory,
           concept: normalizeText(concept),
           description: normalizeText(description),
           amount,
+          originalAmount,
           dueDate,
           audienceType: normalizeText(audienceType) || 'individual',
+          monthKey: normalizeText(monthKey),
         }));
       }
     }
 
-    await dispatchBillingNotice({
-      schoolId,
-      schoolName,
-      parents: audience.parents,
-      title: `Nuevo cobro: ${normalizeText(concept)}`,
-      intro: 'Se registró un nuevo cobro académico para tu familia.',
-      charges: createdCharges.map((charge) => {
-        const student = studentMap.get(String(charge.studentId || ''));
-        return {
-          ...charge.toObject(),
-          parentId: charge.parentId,
-          studentName: student?.name || 'Familia',
-          amount: charge.amount,
-          dueDate: charge.dueDate,
-          concept: charge.concept,
-        };
-      }),
-      pushTitle: 'Nuevo cobro académico',
-      pushBody: `${normalizeText(concept)} por ${formatCurrency(amount)} ya está disponible en tu sección de pagos.`,
-      payload: { type: 'academic.billing.charge_created', url: '/parent/pagos' },
-    });
+    if (!suppressNotice) {
+      await dispatchBillingNotice({
+        schoolId,
+        schoolName,
+        parents: audience.parents,
+        title: `Nuevo cobro: ${normalizeText(concept)}`,
+        intro: 'Se registró un nuevo cobro académico para tu familia.',
+        charges: createdCharges.map((charge) => {
+          const student = studentMap.get(String(charge.studentId || ''));
+          return {
+            ...charge.toObject(),
+            parentId: charge.parentId,
+            studentName: student?.name || 'Familia',
+            amount: charge.amount,
+            dueDate: charge.dueDate,
+            concept: charge.concept,
+          };
+        }),
+        pushTitle: 'Nuevo cobro académico',
+        pushBody: `${normalizeText(concept)} por ${formatCurrency(amount)} ya está disponible en tu sección de pagos.`,
+        payload: { type: 'academic.billing.charge_created', url: '/parent/pagos' },
+      });
+    }
 
-    return res.status(201).json({ createdCharges: createdCharges.length });
+    return res.status(201).json({ createdCharges: createdCharges.length, charges: createdCharges.map((charge) => ({ _id: charge._id, id: charge._id })) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -7765,7 +7800,12 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
       return res.status(404).json({ message: 'El cargo no existe o ya está pagado.' });
     }
 
-    const { outstandingAmount } = await getAcademicChargeOutstandingAmount(charge, new Date());
+    const paidAt = req.body?.paidAt ? new Date(req.body.paidAt) : new Date();
+    if (Number.isNaN(paidAt.getTime())) {
+      return res.status(400).json({ message: 'La fecha de pago no es válida.' });
+    }
+
+    const { outstandingAmount } = await getAcademicChargeOutstandingAmount(charge, resolveAcademicChargePaymentReferenceDate(charge, paidAt));
     if (outstandingAmount <= 0) {
       charge.status = 'paid';
       charge.paidAt = charge.paidAt || new Date();
@@ -7779,10 +7819,6 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
     }
 
     const paymentAmount = Math.min(Math.round(requestedAmount), Math.round(outstandingAmount));
-    const paidAt = req.body?.paidAt ? new Date(req.body.paidAt) : new Date();
-    if (Number.isNaN(paidAt.getTime())) {
-      return res.status(400).json({ message: 'La fecha de pago no es válida.' });
-    }
 
     const primaryParent = String(charge.studentId || '').trim()
       ? (await resolvePrimaryParentContacts(schoolId)).get(String(charge.studentId))
