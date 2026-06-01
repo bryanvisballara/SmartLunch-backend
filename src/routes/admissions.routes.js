@@ -6,7 +6,7 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const AdmissionApplicant = require('../models/admissionApplicant.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
-const { sendAdmissionAppointmentEmail } = require('../services/brevo.service');
+const { sendAdmissionAppointmentEmail, sendAdmissionMarketingEmail } = require('../services/brevo.service');
 const {
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
@@ -14,6 +14,7 @@ const {
 
 const router = express.Router();
 const uploadAdmissionDocuments = uploadCampusMaterialsMiddleware.array('files', 6);
+const uploadAdmissionMarketingImage = uploadCampusMaterialsMiddleware.array('files', 1);
 const ADMISSION_ROLES = ['academic_secretary', 'admissions', 'admin', 'rectoria', 'direccion'];
 
 const admissionStageTemplates = [
@@ -248,6 +249,19 @@ function serializeApplicant(applicant) {
   };
 }
 
+function serializeMarketingRecipient(applicant) {
+  const plain = typeof applicant?.toObject === 'function' ? applicant.toObject() : applicant;
+  return {
+    id: String(plain?._id || plain?.id || ''),
+    studentName: getStudentName(plain),
+    guardianName: normalizeText(plain?.guardian?.name),
+    guardianEmail: normalizeEmail(plain?.guardian?.email),
+    grade: normalizeText(plain?.grade),
+    status: normalizeStatus(plain?.status, plain?.currentStageKey),
+    currentStageKey: normalizeStageKey(plain?.currentStageKey),
+  };
+}
+
 function buildApplicantPayload(body = {}, existingApplicant = null) {
   const existing = existingApplicant || {};
   const student = body.student && typeof body.student === 'object' ? body.student : body;
@@ -422,6 +436,101 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo cargar admisiones.' });
+  }
+});
+
+router.post('/marketing/uploads/image', uploadAdmissionMarketingImage, async (req, res) => {
+  try {
+    const [file] = await processStoredCampusMaterialFiles(req.files || [], { folder: 'admissions-marketing' });
+    if (!file?.url) {
+      return res.status(400).json({ message: 'No se pudo subir la imagen.' });
+    }
+
+    return res.status(201).json({
+      image: {
+        url: file.url || '',
+        thumbUrl: file.thumbUrl || file.url || '',
+        fileName: file.fileName || '',
+        originalName: file.title || file.fileName || '',
+        mimeType: file.mimeType || '',
+        sizeBytes: file.sizeBytes || 0,
+        storage: file.storage || '',
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo subir la imagen de marketing.' });
+  }
+});
+
+router.post('/marketing/send', async (req, res) => {
+  try {
+    const subject = normalizeText(req.body?.subject);
+    const title = normalizeText(req.body?.title || subject);
+    const body = normalizeText(req.body?.body);
+    const imageUrl = normalizeText(req.body?.imageUrl);
+    const imageAlt = normalizeText(req.body?.imageAlt || title);
+    const applicantIds = Array.isArray(req.body?.applicantIds) ? req.body.applicantIds : [];
+    const objectIds = applicantIds
+      .map((id) => normalizeText(id))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    if (!subject) {
+      return res.status(400).json({ message: 'El asunto del correo es requerido.' });
+    }
+    if (!body && !imageUrl) {
+      return res.status(400).json({ message: 'Escribe un mensaje o sube una imagen para enviar el boletín.' });
+    }
+    if (!objectIds.length) {
+      return res.status(400).json({ message: 'Selecciona al menos un aspirante con correo de acudiente.' });
+    }
+
+    const [schoolName, applicants] = await Promise.all([
+      getAdmissionSchoolName(req.user.schoolId),
+      AdmissionApplicant.find({
+        _id: { $in: objectIds },
+        schoolId: req.user.schoolId,
+        deletedAt: null,
+      }).sort({ updatedAt: -1, createdAt: -1 }),
+    ]);
+
+    const recipientsByEmail = new Map();
+    applicants.forEach((applicant) => {
+      const recipient = serializeMarketingRecipient(applicant);
+      if (!isValidEmail(recipient.guardianEmail) || recipientsByEmail.has(recipient.guardianEmail)) return;
+      recipientsByEmail.set(recipient.guardianEmail, { applicant, recipient });
+    });
+
+    const delivery = { requested: applicantIds.length, eligible: recipientsByEmail.size, sent: 0, failed: 0, skipped: Math.max(0, applicants.length - recipientsByEmail.size), failures: [] };
+    const sentRecipients = [];
+
+    for (const { recipient } of recipientsByEmail.values()) {
+      try {
+        await sendAdmissionMarketingEmail({
+          toEmail: recipient.guardianEmail,
+          toName: recipient.guardianName || 'Acudiente',
+          schoolName,
+          subject,
+          title,
+          body,
+          imageUrl,
+          imageAlt,
+        });
+        delivery.sent += 1;
+        sentRecipients.push(recipient);
+      } catch (sendError) {
+        delivery.failed += 1;
+        delivery.failures.push({ email: recipient.guardianEmail, message: sendError.message || 'No se pudo enviar.' });
+      }
+    }
+
+    return res.status(200).json({
+      message: delivery.sent ? `Boletín enviado a ${delivery.sent} acudiente(s).` : 'No se pudo enviar el boletín.',
+      delivery,
+      recipients: sentRecipients,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo enviar el boletín de marketing.' });
   }
 });
 

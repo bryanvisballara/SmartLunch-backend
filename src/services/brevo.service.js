@@ -389,6 +389,58 @@ async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, appl
   });
 }
 
+async function sendAdmissionMarketingEmail({ toEmail, toName, schoolName, subject, title, body, imageUrl = '', imageAlt = '' }) {
+  const safeSchoolName = schoolName || 'Colegio';
+  const safeTitle = title || subject || 'Información de admisiones';
+  const safeBody = String(body || '').trim();
+  const imageBlock = imageUrl ? `
+    <div style="margin:0 0 22px 0;border-radius:22px;overflow:hidden;border:1px solid #dbe7ef;background:#f8fafc;">
+      <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(imageAlt || safeTitle)}" style="display:block;width:100%;height:auto;border:0;" />
+    </div>
+  ` : '';
+  const htmlContent = `
+    <div style="margin:0;padding:0;background:#eef4f7;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eef4f7;padding:28px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:650px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(15,23,42,0.18);">
+              <tr>
+                <td style="background:#0f2f3d;background-image:linear-gradient(135deg,#0f172a 0%,#155e75 56%,#2dd4bf 120%);padding:34px 30px 38px;color:#ffffff;">
+                  <p style="margin:0 0 12px 0;font-size:12px;letter-spacing:1.6px;text-transform:uppercase;opacity:0.9;">Admisiones</p>
+                  <h1 style="margin:0;font-size:32px;line-height:1.12;font-weight:900;">${escapeHtml(safeSchoolName)}</h1>
+                  <p style="margin:14px 0 0 0;font-size:16px;line-height:1.6;opacity:0.96;">${escapeHtml(safeTitle)}</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:30px;color:#102033;">
+                  <p style="margin:0 0 18px 0;font-size:16px;line-height:1.65;">Hola${toName ? ` ${escapeHtml(toName)}` : ''},</p>
+                  ${imageBlock}
+                  <div style="background:#f8fafc;border:1px solid #dbe7ef;border-radius:18px;padding:18px 20px;color:#334155;font-size:15px;line-height:1.75;white-space:pre-line;">${escapeHtml(safeBody).replace(/\n/g, '<br/>')}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 30px 30px;color:#64748b;font-size:12px;line-height:1.65;">
+                  Este correo fue enviado por el equipo de admisiones a través de Comergio.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+
+  return sendBrevoEmail({
+    toEmail,
+    toName,
+    subject: `${safeSchoolName} | ${subject || safeTitle}`,
+    senderEmail: process.env.ADMISSIONS_SENDER_EMAIL || 'berckley@comergio.com',
+    senderName: `${safeSchoolName} Admisiones`,
+    htmlContent,
+    textContent: `${safeSchoolName}\n\n${safeTitle}\n\n${safeBody}`,
+  });
+}
+
 module.exports = {
   sendRegistrationVerificationEmail,
   sendPasswordResetCodeEmail,
@@ -396,4 +448,5 @@ module.exports = {
   sendAcademicCommunicationEmail,
   sendAcademicBillingEmail,
   sendAdmissionAppointmentEmail,
+  sendAdmissionMarketingEmail,
 };
