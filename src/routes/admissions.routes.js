@@ -486,7 +486,7 @@ router.get('/', async (req, res) => {
 
 router.post('/marketing/uploads/image', uploadAdmissionMarketingImage, async (req, res) => {
   try {
-    const [file] = await processStoredCampusMaterialFiles(req.files || [], { folder: 'admissions-marketing' });
+    const [file] = await processStoredCampusMaterialFiles(req.files || [], { folder: 'admissions-marketing', requireCloudinary: true });
     if (!file?.url) {
       return res.status(400).json({ message: 'No se pudo subir la imagen.' });
     }

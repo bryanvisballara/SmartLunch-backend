@@ -179,10 +179,14 @@ const uploadCampusMaterialsMiddleware = multer({
   },
 });
 
-async function processStoredCampusMaterialFiles(files, { folder = 'campus-materials' } = {}) {
+async function processStoredCampusMaterialFiles(files, { folder = 'campus-materials', requireCloudinary = false } = {}) {
   const normalizedFiles = Array.isArray(files) ? files.filter(Boolean) : [];
   if (normalizedFiles.length === 0) {
     return [];
+  }
+
+  if (requireCloudinary && !isCloudinaryEnabled()) {
+    throw new Error('Cloudinary no esta configurado para guardar archivos publicos.');
   }
 
   const safeFolder = sanitizeFolder(folder);
