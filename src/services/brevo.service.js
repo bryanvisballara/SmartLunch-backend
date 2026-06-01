@@ -1,4 +1,7 @@
-function resolveSenderName() {
+function resolveSenderName(senderName = '') {
+  const requestedName = String(senderName || '').trim();
+  if (requestedName) return requestedName;
+
   const configuredName = String(process.env.BREVO_SENDER_NAME || '').trim();
   if (!configuredName || /smart\s*lunch|comergio/i.test(configuredName)) {
     return 'Comergio App';
@@ -7,10 +10,19 @@ function resolveSenderName() {
   return configuredName;
 }
 
-async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textContent }) {
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textContent, senderEmail: requestedSenderEmail = '', senderName: requestedSenderName = '' }) {
   const apiKey = String(process.env.BREVO_API_KEY || '').trim();
-  const senderEmail = String(process.env.BREVO_SENDER_EMAIL || 'verify@comergio.com').trim();
-  const senderName = resolveSenderName();
+  const senderEmail = String(requestedSenderEmail || process.env.BREVO_SENDER_EMAIL || 'verify@comergio.com').trim();
+  const senderName = resolveSenderName(requestedSenderName);
   const safeEmail = String(toEmail || '').trim().toLowerCase();
 
   if (!safeEmail || !subject || !htmlContent || !textContent) {
@@ -260,10 +272,128 @@ async function sendAcademicBillingEmail({ toEmail, toName, schoolName, title, in
   });
 }
 
+function buildGoogleCalendarLink({ title, details, location, date, time, durationMinutes = 60 }) {
+  const [year, month, day] = String(date || '').split('-');
+  const [hour = '00', minute = '00'] = String(time || '').split(':');
+  if (!year || !month || !day) return '';
+
+  const start = `${year}${month}${day}T${hour.padStart(2, '0')}${minute.padStart(2, '0')}00`;
+  const startDate = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  if (Number.isNaN(startDate.getTime())) return '';
+
+  const endDate = new Date(startDate.getTime() + Number(durationMinutes || 60) * 60 * 1000);
+  const end = `${endDate.getFullYear()}${String(endDate.getMonth() + 1).padStart(2, '0')}${String(endDate.getDate()).padStart(2, '0')}T${String(endDate.getHours()).padStart(2, '0')}${String(endDate.getMinutes()).padStart(2, '0')}00`;
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    dates: `${start}/${end}`,
+    details,
+    location,
+    ctz: 'America/Bogota',
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, applicantName, grade, appointmentTypeLabel, appointmentDateLabel, appointmentDate, appointmentTime, notes, calendarLocation }) {
+  const safeSchoolName = schoolName || 'Colegio';
+  const safeApplicantName = applicantName || 'Aspirante';
+  const safeAppointmentType = appointmentTypeLabel || 'Cita de admisiones';
+  const safeDateLabel = appointmentDateLabel || appointmentDate || 'Fecha por confirmar';
+  const safeTime = appointmentTime || 'Hora por confirmar';
+  const safeLocation = calendarLocation || safeSchoolName;
+  const subject = `${safeSchoolName} | Cita de admisiones confirmada`;
+  const calendarDetails = [
+    `Cita de admisiones para ${safeApplicantName}`,
+    `Colegio: ${safeSchoolName}`,
+    grade ? `Grado/programa: ${grade}` : '',
+    `Tipo de cita: ${safeAppointmentType}`,
+    notes ? `Notas: ${notes}` : '',
+    'Este evento fue generado desde Comergio.',
+  ].filter(Boolean).join('\n');
+  const calendarLink = buildGoogleCalendarLink({
+    title: `${safeSchoolName} - Cita de admisiones`,
+    details: calendarDetails,
+    location: safeLocation,
+    date: appointmentDate,
+    time: appointmentTime,
+    durationMinutes: 60,
+  });
+  const notesBlock = notes ? `
+    <div style="margin-top:18px;background:#fff7ed;border:1px solid #fed7aa;border-radius:18px;padding:16px 18px;color:#7c2d12;">
+      <p style="margin:0 0 6px 0;font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#9a3412;">Mensaje de admisiones</p>
+      <p style="margin:0;font-size:14px;line-height:1.65;">${escapeHtml(notes)}</p>
+    </div>
+  ` : '';
+  const calendarButton = calendarLink ? `
+    <a href="${calendarLink}" style="display:inline-block;margin-top:22px;background:#155e75;color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 20px;font-size:14px;font-weight:900;box-shadow:0 12px 24px rgba(21,94,117,0.24);">Añadir a Google Calendar</a>
+  ` : '';
+  const htmlContent = `
+    <div style="margin:0;padding:0;background:#eef4f7;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eef4f7;padding:28px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:650px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(15,23,42,0.18);">
+              <tr>
+                <td style="background:#0f2f3d;background-image:linear-gradient(135deg,#0f172a 0%,#155e75 56%,#2dd4bf 120%);padding:34px 30px 38px;color:#ffffff;">
+                  <p style="margin:0 0 12px 0;font-size:12px;letter-spacing:1.6px;text-transform:uppercase;opacity:0.9;">Proceso de admisiones</p>
+                  <h1 style="margin:0;font-size:32px;line-height:1.12;font-weight:900;">${escapeHtml(safeSchoolName)}</h1>
+                  <p style="margin:14px 0 0 0;font-size:16px;line-height:1.6;opacity:0.96;">Tu cita de admisiones ha sido registrada. Te compartimos los detalles para que puedas asistir con tranquilidad.</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:30px;color:#102033;">
+                  <p style="margin:0 0 18px 0;font-size:16px;line-height:1.65;">Hola${toName ? ` ${escapeHtml(toName)}` : ''},</p>
+                  <p style="margin:0 0 22px 0;font-size:15px;line-height:1.7;color:#3b4a5f;">La cita para el proceso de admisión de <strong style="color:#0f172a;">${escapeHtml(safeApplicantName)}</strong>${grade ? `, aspirante a <strong style="color:#0f172a;">${escapeHtml(grade)}</strong>` : ''}, quedó programada con la siguiente información:</p>
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;border-spacing:0 10px;">
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Tipo</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeAppointmentType)}</td>
+                    </tr>
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Fecha</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeDateLabel)}</td>
+                    </tr>
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Hora</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeTime)}</td>
+                    </tr>
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Lugar</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeLocation)}</td>
+                    </tr>
+                  </table>
+                  ${notesBlock}
+                  ${calendarButton}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 30px 30px;color:#64748b;font-size:12px;line-height:1.65;">
+                  Este correo fue enviado automaticamente por el equipo de admisiones a traves de Comergio. Si necesitas reprogramar, responde este mensaje o contacta al colegio.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+
+  return sendBrevoEmail({
+    toEmail,
+    toName,
+    subject,
+    senderEmail: process.env.ADMISSIONS_SENDER_EMAIL || 'berckley@comergio.com',
+    senderName: `${safeSchoolName} Admisiones`,
+    htmlContent,
+    textContent: `${safeSchoolName}\n\nCita de admisiones confirmada\n\nAspirante: ${safeApplicantName}\nGrado/programa: ${grade || '-'}\nTipo: ${safeAppointmentType}\nFecha: ${safeDateLabel}\nHora: ${safeTime}\nLugar: ${safeLocation}${calendarLink ? `\n\nGoogle Calendar: ${calendarLink}` : ''}`,
+  });
+}
+
 module.exports = {
   sendRegistrationVerificationEmail,
   sendPasswordResetCodeEmail,
   sendBrevoEmail,
   sendAcademicCommunicationEmail,
   sendAcademicBillingEmail,
+  sendAdmissionAppointmentEmail,
 };

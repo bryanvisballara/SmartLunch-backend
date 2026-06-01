@@ -6,6 +6,7 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const AdmissionApplicant = require('../models/admissionApplicant.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
+const { sendAdmissionAppointmentEmail } = require('../services/brevo.service');
 const {
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
@@ -82,7 +83,58 @@ async function getAdmissionGradeOptions(schoolId) {
 }
 
 function normalizeEmail(value) {
-  return normalizeAdmissionText(value);
+  return normalizeText(value).toLowerCase();
+}
+
+function isValidEmail(value) {
+  const email = normalizeEmail(value);
+  return Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+}
+
+function humanizeSchoolName(value) {
+  const normalizedValue = normalizeText(value).replace(/[_-][a-z0-9]{5}$/i, '').replace(/[_-]+/g, ' ');
+  return normalizedValue.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatAdmissionAppointmentDateLabel(value) {
+  if (!value) return '';
+  const [year, month, day] = String(value).split('-').map(Number);
+  if (!year || !month || !day) return value;
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function resolveAdmissionCalendarLocation(schoolName, appointmentType) {
+  if (appointmentType === 'virtual') return 'Cita virtual';
+  if (appointmentType === 'phone') return 'Llamada telefonica';
+  return schoolName || 'Instalaciones del colegio';
+}
+
+async function getAdmissionSchoolName(schoolId) {
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('schoolName').lean();
+  return normalizeText(academicStructure?.schoolName) || humanizeSchoolName(schoolId) || 'Colegio';
+}
+
+async function notifyAdmissionAppointment(applicant, eventPayload, schoolId) {
+  if (!eventPayload?.appointment?.type) return { skipped: true };
+  const toEmail = normalizeEmail(eventPayload.appointment.guardianEmail || applicant.guardian?.email);
+  if (!toEmail) return { skipped: true };
+
+  const schoolName = await getAdmissionSchoolName(schoolId);
+  return sendAdmissionAppointmentEmail({
+    toEmail,
+    toName: normalizeText(applicant.guardian?.name) || 'Acudiente',
+    schoolName,
+    applicantName: getStudentName(applicant),
+    grade: normalizeText(applicant.grade),
+    appointmentTypeLabel: eventPayload.appointment.label || appointmentTypeLabels[eventPayload.appointment.type] || eventPayload.appointment.type,
+    appointmentDateLabel: formatAdmissionAppointmentDateLabel(eventPayload.appointment.date),
+    appointmentDate: eventPayload.appointment.date,
+    appointmentTime: eventPayload.appointment.time,
+    notes: normalizeText(eventPayload.notes),
+    calendarLocation: resolveAdmissionCalendarLocation(schoolName, eventPayload.appointment.type),
+  });
 }
 
 function normalizeStageKey(value) {
@@ -102,13 +154,20 @@ function buildAppointmentPayload(body = {}) {
   const type = normalizeAppointmentType(body.appointment?.type || body.appointmentType);
   const date = normalizeText(body.appointment?.date || body.appointmentDate);
   const time = normalizeText(body.appointment?.time || body.appointmentTime);
+  const guardianEmail = normalizeEmail(body.appointment?.guardianEmail || body.guardianEmail);
 
-  if (!type && !date && !time) {
-    return { type: '', label: '', date: '', time: '', scheduledAt: null };
+  if (!type && !date && !time && !guardianEmail) {
+    return { type: '', label: '', date: '', time: '', guardianEmail: '', scheduledAt: null };
   }
 
   if (!type || !date || !time) {
     const error = new Error('Tipo, fecha y hora de la cita son requeridos.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!isValidEmail(guardianEmail)) {
+    const error = new Error('Correo electrónico del acudiente requerido para enviar la cita.');
     error.statusCode = 400;
     throw error;
   }
@@ -125,6 +184,7 @@ function buildAppointmentPayload(body = {}) {
     label: appointmentTypeLabels[type] || '',
     date,
     time,
+    guardianEmail,
     scheduledAt,
   };
 }
@@ -524,6 +584,11 @@ router.post('/:applicantId/events', async (req, res) => {
     applicant.status = normalizeStatus(applicant.status, eventPayload.stageKey);
     applicant.admissionStages = buildDefaultStages(eventPayload.stageKey, applicant.admissionStages);
     await applicant.save();
+    try {
+      await notifyAdmissionAppointment(applicant, eventPayload, req.user.schoolId);
+    } catch (emailError) {
+      console.warn(`[ADMISSION_APPOINTMENT_EMAIL_FAILED] applicantId=${applicant._id} email=${eventPayload.appointment?.guardianEmail || ''} error=${emailError.message}`);
+    }
     return res.status(201).json({ applicant: serializeApplicant(applicant), summary: await buildAdmissionSummary(req.user.schoolId) });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo crear el evento.' });
