@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const AdmissionApplicant = require('../models/admissionApplicant.model');
+const AdmissionMarketingCampaign = require('../models/admissionMarketingCampaign.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
 const { sendAdmissionAppointmentEmail, sendAdmissionMarketingEmail } = require('../services/brevo.service');
@@ -95,6 +96,33 @@ function isValidEmail(value) {
 function humanizeSchoolName(value) {
   const normalizedValue = normalizeText(value).replace(/[_-][a-z0-9]{5}$/i, '').replace(/[_-]+/g, ' ');
   return normalizedValue.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getPublicBackendBaseUrl(req) {
+  const explicit = String(process.env.BACKEND_PUBLIC_URL || process.env.PUBLIC_BACKEND_URL || process.env.API_PUBLIC_URL || '').trim();
+  if (explicit) return explicit.replace(/\/+$/, '');
+
+  const uploadsPublicBaseUrl = String(process.env.UPLOADS_PUBLIC_BASE_URL || '').trim();
+  if (/^https?:\/\//i.test(uploadsPublicBaseUrl)) {
+    return uploadsPublicBaseUrl.replace(/\/assets\/?$/i, '').replace(/\/+$/, '');
+  }
+
+  const forwardedHost = normalizeText(req.get('x-forwarded-host')).split(',')[0];
+  const requestHost = forwardedHost || normalizeText(req.get('host'));
+  if (!requestHost || /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(requestHost)) {
+    return 'https://smartlunch-backend-3uqr.onrender.com';
+  }
+
+  const forwardedProto = normalizeText(req.get('x-forwarded-proto')).split(',')[0];
+  const protocol = forwardedProto || req.protocol || 'https';
+  return `${protocol}://${requestHost}`.replace(/\/+$/, '');
+}
+
+function resolvePublicEmailAssetUrl(req, value) {
+  const rawUrl = normalizeText(value);
+  if (!rawUrl || /^(?:https?:|data:)/i.test(rawUrl)) return rawUrl;
+  const cleanPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
+  return `${getPublicBackendBaseUrl(req)}${cleanPath}`;
 }
 
 function formatAdmissionAppointmentDateLabel(value) {
@@ -259,6 +287,23 @@ function serializeMarketingRecipient(applicant) {
     grade: normalizeText(plain?.grade),
     status: normalizeStatus(plain?.status, plain?.currentStageKey),
     currentStageKey: normalizeStageKey(plain?.currentStageKey),
+  };
+}
+
+function serializeAdmissionMarketingCampaign(campaign) {
+  const plain = typeof campaign?.toObject === 'function' ? campaign.toObject() : campaign;
+  return {
+    id: String(plain?._id || plain?.id || ''),
+    subject: plain?.subject || '',
+    title: plain?.title || '',
+    body: plain?.body || '',
+    imageUrl: plain?.imageUrl || '',
+    imageAlt: plain?.imageAlt || '',
+    recipients: Array.isArray(plain?.recipients) ? plain.recipients : [],
+    delivery: plain?.delivery || null,
+    createdByName: plain?.createdByName || '',
+    sentAt: plain?.sentAt || plain?.createdAt || null,
+    createdAt: plain?.createdAt || null,
   };
 }
 
@@ -449,6 +494,7 @@ router.post('/marketing/uploads/image', uploadAdmissionMarketingImage, async (re
     return res.status(201).json({
       image: {
         url: file.url || '',
+        publicUrl: resolvePublicEmailAssetUrl(req, file.url || ''),
         thumbUrl: file.thumbUrl || file.url || '',
         fileName: file.fileName || '',
         originalName: file.title || file.fileName || '',
@@ -462,12 +508,24 @@ router.post('/marketing/uploads/image', uploadAdmissionMarketingImage, async (re
   }
 });
 
+router.get('/marketing/history', async (req, res) => {
+  try {
+    const campaigns = await AdmissionMarketingCampaign.find({ schoolId: req.user.schoolId })
+      .sort({ sentAt: -1, createdAt: -1 })
+      .limit(50)
+      .lean();
+    return res.status(200).json({ campaigns: campaigns.map(serializeAdmissionMarketingCampaign) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar el historial de marketing.' });
+  }
+});
+
 router.post('/marketing/send', async (req, res) => {
   try {
     const subject = normalizeText(req.body?.subject);
     const title = normalizeText(req.body?.title || subject);
     const body = normalizeText(req.body?.body);
-    const imageUrl = normalizeText(req.body?.imageUrl);
+    const imageUrl = resolvePublicEmailAssetUrl(req, req.body?.imageUrl);
     const imageAlt = normalizeText(req.body?.imageAlt || title);
     const applicantIds = Array.isArray(req.body?.applicantIds) ? req.body.applicantIds : [];
     const objectIds = applicantIds
@@ -524,10 +582,33 @@ router.post('/marketing/send', async (req, res) => {
       }
     }
 
+    const campaign = await AdmissionMarketingCampaign.create({
+      schoolId: req.user.schoolId,
+      subject,
+      title,
+      body,
+      imageUrl,
+      imageAlt,
+      recipients: sentRecipients.map((recipient) => ({
+        applicantId: mongoose.Types.ObjectId.isValid(recipient.id) ? new mongoose.Types.ObjectId(recipient.id) : null,
+        studentName: recipient.studentName || '',
+        guardianName: recipient.guardianName || '',
+        guardianEmail: recipient.guardianEmail || '',
+        grade: recipient.grade || '',
+        currentStageKey: recipient.currentStageKey || '',
+        status: recipient.status || '',
+      })),
+      delivery,
+      createdByUserId: mongoose.Types.ObjectId.isValid(req.user?.userId) ? new mongoose.Types.ObjectId(req.user.userId) : null,
+      createdByName: normalizeText(req.user?.name || req.user?.username),
+      sentAt: new Date(),
+    });
+
     return res.status(200).json({
       message: delivery.sent ? `Boletín enviado a ${delivery.sent} acudiente(s).` : 'No se pudo enviar el boletín.',
       delivery,
       recipients: sentRecipients,
+      campaign: serializeAdmissionMarketingCampaign(campaign),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo enviar el boletín de marketing.' });
