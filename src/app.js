@@ -9,6 +9,8 @@ const fs = require('fs/promises');
 const sharp = require('sharp');
 
 require('./models');
+const AdmissionMarketingAsset = require('./models/admissionMarketingAsset.model');
+const { findOneAcrossTenantSchoolDbs } = require('./config/db');
 
 const authRoutes = require('./routes/auth.routes');
 const studentRoutes = require('./routes/students.routes');
@@ -169,6 +171,41 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('dev'));
 app.use(schoolContextMiddleware);
+app.use(['/assets/admissions-marketing/:fileName', '/uploads/admissions-marketing/:fileName'], async (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  if (!['GET', 'HEAD'].includes(method)) {
+    return next();
+  }
+
+  const fileName = String(req.params?.fileName || '').trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(fileName)) {
+    return res.status(400).json({ message: 'Invalid asset path' });
+  }
+
+  try {
+    let asset = await AdmissionMarketingAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec();
+    if (!asset) {
+      const tenantAsset = await findOneAcrossTenantSchoolDbs(() => AdmissionMarketingAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec());
+      asset = tenantAsset?.doc || null;
+    }
+    if (!asset?.data) {
+      return next();
+    }
+
+    const imageBuffer = Buffer.from(asset.data);
+    res.setHeader('Content-Type', asset.mimeType || 'image/jpeg');
+    res.setHeader('Content-Length', String(imageBuffer.length));
+    setStaticAssetHeaders(res);
+
+    if (method === 'HEAD') {
+      return res.end();
+    }
+
+    return res.send(imageBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
 app.use(['/assets', '/uploads'], async (req, res, next) => {
   const method = String(req.method || '').toUpperCase();
   const wantsJpeg = ['jpg', 'jpeg'].includes(String(req.query?.format || '').toLowerCase());

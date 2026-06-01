@@ -46,3 +46,5 @@ require('./studentBillingProfile.model');
 require('./academicCharge.model');
 require('./academicChargePayment.model');
 require('./admissionApplicant.model');
+require('./admissionMarketingAsset.model');
+require('./admissionMarketingCampaign.model');

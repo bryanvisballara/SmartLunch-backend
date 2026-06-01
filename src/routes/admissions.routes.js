@@ -1,9 +1,12 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
+const sharp = require('sharp');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const AdmissionApplicant = require('../models/admissionApplicant.model');
+const AdmissionMarketingAsset = require('../models/admissionMarketingAsset.model');
 const AdmissionMarketingCampaign = require('../models/admissionMarketingCampaign.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
@@ -123,6 +126,57 @@ function resolvePublicEmailAssetUrl(req, value) {
   if (!rawUrl || /^(?:https?:|data:)/i.test(rawUrl)) return rawUrl;
   const cleanPath = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
   return `${getPublicBackendBaseUrl(req)}${cleanPath}`;
+}
+
+function slugifyMarketingAssetName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 72) || 'marketing';
+}
+
+function buildAdmissionMarketingAssetUrl(req, fileName) {
+  return `${getPublicBackendBaseUrl(req)}/assets/admissions-marketing/${encodeURIComponent(fileName)}`;
+}
+
+async function storeAdmissionMarketingImage(req, file) {
+  if (!file?.buffer) {
+    throw new Error('No se recibio ninguna imagen.');
+  }
+
+  const image = sharp(file.buffer).rotate();
+  const metadata = await image.metadata();
+  const imageBuffer = await sharp(file.buffer)
+    .rotate()
+    .resize({ width: 1400, withoutEnlargement: true, fit: 'inside' })
+    .jpeg({ quality: 86, mozjpeg: true })
+    .toBuffer();
+  const fileName = `${slugifyMarketingAssetName(file.originalname || 'marketing')}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.jpg`;
+
+  const asset = await AdmissionMarketingAsset.create({
+    schoolId: req.user.schoolId,
+    fileName,
+    originalName: normalizeText(file.originalname),
+    mimeType: 'image/jpeg',
+    sizeBytes: imageBuffer.length,
+    width: Number(metadata?.width || 0),
+    height: Number(metadata?.height || 0),
+    data: imageBuffer,
+    createdByUserId: mongoose.Types.ObjectId.isValid(req.user?.userId) ? new mongoose.Types.ObjectId(req.user.userId) : null,
+  });
+
+  return {
+    url: buildAdmissionMarketingAssetUrl(req, asset.fileName),
+    thumbUrl: buildAdmissionMarketingAssetUrl(req, asset.fileName),
+    fileName: asset.fileName,
+    title: asset.originalName,
+    mimeType: asset.mimeType,
+    sizeBytes: asset.sizeBytes,
+    storage: 'mongodb',
+  };
 }
 
 function formatAdmissionAppointmentDateLabel(value) {
@@ -486,7 +540,8 @@ router.get('/', async (req, res) => {
 
 router.post('/marketing/uploads/image', uploadAdmissionMarketingImage, async (req, res) => {
   try {
-    const [file] = await processStoredCampusMaterialFiles(req.files || [], { folder: 'admissions-marketing', requireCloudinary: true });
+    const [uploadedFile] = Array.isArray(req.files) ? req.files : [];
+    const file = await storeAdmissionMarketingImage(req, uploadedFile);
     if (!file?.url) {
       return res.status(400).json({ message: 'No se pudo subir la imagen.' });
     }
