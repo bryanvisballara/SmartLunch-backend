@@ -12,6 +12,24 @@ const academicFeeConfigurationSchema = new mongoose.Schema(
       default: 'none',
     },
     lateEnrollmentSurchargeValue: { type: Number, min: 0, default: 0 },
+    schoolYearLevels: {
+      type: [
+        {
+          levelKey: { type: String, trim: true, default: '' },
+          label: { type: String, trim: true, default: '' },
+          gradeKeys: { type: [String], default: [] },
+          schoolYearStartDate: { type: Date, default: null },
+          schoolYearEndDate: { type: Date, default: null },
+          lateEnrollmentSurchargeType: {
+            type: String,
+            enum: ['none', 'percent', 'fixed'],
+            default: 'none',
+          },
+          lateEnrollmentSurchargeValue: { type: Number, min: 0, default: 0 },
+        },
+      ],
+      default: [],
+    },
     benefitRules: {
       type: [
         {

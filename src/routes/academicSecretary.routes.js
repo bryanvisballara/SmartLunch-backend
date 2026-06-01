@@ -2844,12 +2844,22 @@ function getMaxBenefitFixedAmount(rule = {}) {
     return ['percent', 'fixed'].includes(normalized) ? normalized : 'none';
   }
 
-  function normalizeAcademicSchoolYearConfiguration(configuration = {}) {
+  function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '') {
+    const aliases = new Set(getFeeGradeAliases(grade));
+    return (Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : []).find((levelSetting) => {
+      const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
+      return gradeKeys.some((gradeKey) => getFeeGradeAliases(gradeKey).some((alias) => aliases.has(alias)));
+    }) || null;
+  }
+
+  function normalizeAcademicSchoolYearConfiguration(configuration = {}, grade = '') {
+    const levelSetting = resolveAcademicSchoolYearLevelSetting(configuration, grade);
+    const sourceConfiguration = levelSetting || configuration || {};
     const currentYear = new Date().getUTCFullYear();
     const fallbackStartDate = new Date(Date.UTC(currentYear, 0, 1));
     const fallbackEndDate = new Date(Date.UTC(currentYear, 11, 31));
-    const parsedStartDate = parseAcademicCalendarDate(configuration?.schoolYearStartDate || configuration?.startDate) || fallbackStartDate;
-    const parsedEndDate = parseAcademicCalendarDate(configuration?.schoolYearEndDate || configuration?.endDate) || fallbackEndDate;
+    const parsedStartDate = parseAcademicCalendarDate(sourceConfiguration?.schoolYearStartDate || sourceConfiguration?.startDate || configuration?.schoolYearStartDate || configuration?.startDate) || fallbackStartDate;
+    const parsedEndDate = parseAcademicCalendarDate(sourceConfiguration?.schoolYearEndDate || sourceConfiguration?.endDate || configuration?.schoolYearEndDate || configuration?.endDate) || fallbackEndDate;
     const startDate = parsedStartDate.getTime() <= parsedEndDate.getTime() ? parsedStartDate : parsedEndDate;
     const endDate = parsedStartDate.getTime() <= parsedEndDate.getTime() ? parsedEndDate : parsedStartDate;
 
@@ -2857,11 +2867,35 @@ function getMaxBenefitFixedAmount(rule = {}) {
       startDate,
       endDate,
       totalMonths: Math.max(1, getAcademicMonthDiff(startOfAcademicMonthUtc(startDate), startOfAcademicMonthUtc(endDate)) + 1),
-      lateEnrollmentSurchargeType: normalizeAcademicLateEnrollmentSurchargeType(configuration?.lateEnrollmentSurchargeType),
-      lateEnrollmentSurchargeValue: Math.max(0, Number(configuration?.lateEnrollmentSurchargeValue || 0)),
+      lateEnrollmentSurchargeType: normalizeAcademicLateEnrollmentSurchargeType(sourceConfiguration?.lateEnrollmentSurchargeType),
+      lateEnrollmentSurchargeValue: Math.max(0, Number(sourceConfiguration?.lateEnrollmentSurchargeValue || 0)),
       enrollmentBenefitRules: normalizeEnrollmentBenefitRules(configuration?.enrollmentBenefitRules || []),
+      levelKey: normalizeText(levelSetting?.levelKey),
+      levelLabel: normalizeText(levelSetting?.label),
     };
   }
+
+function normalizeAcademicSchoolYearLevelSettings(levelSettings = []) {
+  return (Array.isArray(levelSettings) ? levelSettings : [])
+    .map((item) => {
+      const levelKey = normalizeText(item?.levelKey);
+      const parsedStartDate = parseAcademicCalendarDate(item?.schoolYearStartDate || item?.startDate);
+      const parsedEndDate = parseAcademicCalendarDate(item?.schoolYearEndDate || item?.endDate);
+      const startDate = parsedStartDate && parsedEndDate && parsedStartDate.getTime() > parsedEndDate.getTime() ? parsedEndDate : parsedStartDate;
+      const endDate = parsedStartDate && parsedEndDate && parsedStartDate.getTime() > parsedEndDate.getTime() ? parsedStartDate : parsedEndDate;
+      const surchargeType = normalizeAcademicLateEnrollmentSurchargeType(item?.lateEnrollmentSurchargeType);
+      return {
+        levelKey,
+        label: normalizeText(item?.label),
+        gradeKeys: uniqueNormalizedValues(item?.gradeKeys).map((gradeKey) => normalizeAcademicStructureGradeKey(gradeKey)).filter(Boolean),
+        schoolYearStartDate: startDate || null,
+        schoolYearEndDate: endDate || null,
+        lateEnrollmentSurchargeType: surchargeType,
+        lateEnrollmentSurchargeValue: surchargeType === 'none' ? 0 : Math.max(0, Number(item?.lateEnrollmentSurchargeValue || 0)),
+      };
+    })
+    .filter((item) => item.levelKey && item.gradeKeys.length > 0 && item.schoolYearStartDate && item.schoolYearEndDate);
+}
 
   function doesEnrollmentBenefitRuleApplyToGrade(rule = {}, grade = '') {
     const aliases = new Set(getFeeGradeAliases(grade));
@@ -2901,7 +2935,7 @@ function getMaxBenefitFixedAmount(rule = {}) {
   }
 
   function resolveActiveEnrollmentBenefitDueDate(configuration = {}, grade = '', referenceDate = new Date()) {
-    const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration || {});
+    const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration || {}, grade);
     const activeRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, referenceDate, grade);
     return activeRule?.endDate ? normalizeAcademicDueDateForBogota(activeRule.endDate) : null;
   }
@@ -2945,7 +2979,7 @@ function getMaxBenefitFixedAmount(rule = {}) {
 
   function calculateProratedAcademicEnrollmentFee(annualAmount, entryDateValue = null, configuration = {}, grade = '') {
     const safeAnnualAmount = Math.max(0, Math.round(Number(annualAmount || 0)));
-    const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration);
+    const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration, grade);
     const parsedEntryDate = parseAcademicCalendarDate(entryDateValue);
 
     if (!parsedEntryDate) {
@@ -3449,6 +3483,10 @@ function getFeeGradeAliases(value) {
   const normalized = normalizeText(value).toLowerCase();
   if (!normalized) return [];
   const aliases = new Set([normalized]);
+  const academicGradeLevel = normalizeText(extractAcademicGradeLevel(normalized)).toLowerCase();
+  if (academicGradeLevel) {
+    aliases.add(academicGradeLevel);
+  }
 
   normalized.split(':').map((part) => normalizeText(part).toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
 
@@ -3658,7 +3696,7 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       : fallbackBenefitRules,
   };
 
-  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(feeConfiguration || {});
+  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(feeConfiguration || {}, effectiveBillingProfile.grade);
   const parsedEntryDate = parseAcademicCalendarDate(effectiveBillingProfile.entryDate) || schoolYearConfiguration.startDate;
   const schoolYearStartMonth = startOfAcademicMonthUtc(schoolYearConfiguration.startDate);
   const schoolYearEndMonth = startOfAcademicMonthUtc(schoolYearConfiguration.endDate);
@@ -6741,6 +6779,7 @@ router.put('/fee-settings', async (req, res) => {
         schoolYearEndDate: schoolYearConfiguration.endDate,
         lateEnrollmentSurchargeType: schoolYearConfiguration.lateEnrollmentSurchargeType,
         lateEnrollmentSurchargeValue: schoolYearConfiguration.lateEnrollmentSurchargeValue,
+        schoolYearLevels: normalizeAcademicSchoolYearLevelSettings(payload.schoolYearLevels),
         benefitRules: normalizeBenefitRules(payload.benefitRules),
         enrollmentBenefitRules: normalizeEnrollmentBenefitRules(payload.enrollmentBenefitRules),
         gradeSettings: normalizeGradeFeeSettings(payload.gradeSettings),
