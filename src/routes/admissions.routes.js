@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const AdmissionApplicant = require('../models/admissionApplicant.model');
+const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
 const {
   uploadCampusMaterialsMiddleware,
@@ -50,6 +51,34 @@ function normalizeText(value) {
 
 function normalizeAdmissionText(value) {
   return normalizeText(value).toLocaleUpperCase('es-CO');
+}
+
+function serializeAdmissionGradeOptions(academicStructure = {}) {
+  const seenValues = new Set();
+  return (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+    .filter((grade) => normalizeText(grade?.status || 'active') !== 'archived')
+    .map((grade) => {
+      const key = normalizeText(grade?.key);
+      const label = normalizeText(grade?.label || grade?.key);
+      return {
+        key,
+        value: label || key,
+        label: label || key,
+        levelKey: normalizeText(grade?.levelKey),
+        order: Number(grade?.order || 0),
+      };
+    })
+    .filter((grade) => {
+      if (!grade.value || seenValues.has(grade.value)) return false;
+      seenValues.add(grade.value);
+      return true;
+    })
+    .sort((left, right) => (left.order - right.order) || left.label.localeCompare(right.label, 'es', { numeric: true }));
+}
+
+async function getAdmissionGradeOptions(schoolId) {
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('grades').lean();
+  return serializeAdmissionGradeOptions(academicStructure);
 }
 
 function normalizeEmail(value) {
@@ -320,11 +349,15 @@ router.get('/', async (req, res) => {
   try {
     const query = buildQuery(req);
     const applicants = await AdmissionApplicant.find(query).sort({ updatedAt: -1, createdAt: -1 }).limit(250);
-    const summary = await buildAdmissionSummary(req.user.schoolId);
+    const [summary, gradeOptions] = await Promise.all([
+      buildAdmissionSummary(req.user.schoolId),
+      getAdmissionGradeOptions(req.user.schoolId),
+    ]);
     return res.status(200).json({
       applicants: applicants.map(serializeApplicant),
       stageTemplates: admissionStageTemplates,
       documentTypes: documentTypeLabels,
+      gradeOptions,
       ...summary,
     });
   } catch (error) {
