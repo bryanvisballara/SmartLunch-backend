@@ -725,6 +725,18 @@ router.patch('/:applicantId', async (req, res) => {
   }
 });
 
+router.delete('/:applicantId', async (req, res) => {
+  try {
+    const applicant = await findApplicant(req, res);
+    if (!applicant) return null;
+    applicant.deletedAt = new Date();
+    await applicant.save();
+    return res.status(200).json({ message: 'Aspirante eliminado.', summary: await buildAdmissionSummary(req.user.schoolId) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo eliminar el aspirante.' });
+  }
+});
+
 router.patch('/:applicantId/stages/:stageKey', async (req, res) => {
   try {
     const applicant = await findApplicant(req, res);
