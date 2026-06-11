@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import {
   getBiometricLoginOptions,
   getBiometricRegistrationOptions,
+  getSchoolOptions,
   login,
   me,
   resetForgotPassword,
@@ -12,15 +14,44 @@ import {
   verifyBiometricLogin,
   verifyBiometricRegistration,
 } from '../services/auth.service';
-import useAuthStore from '../store/auth.store';
 import loginLogo from '../assets/logonuevo.png';
+import useAuthStore from '../store/auth.store';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
 import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
-import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
+import { SCHOOL_OPTIONS, getSchoolOptionsByCountry, normalizeSchoolOptions, rememberSchoolOptions } from '../lib/schools';
+
+const DEV_DIRECT_LOGIN_PROFILES = {
+  'laura-medina': {
+    schoolId: 'comergio-demo',
+    username: 'laura.medina',
+    password: 'Campus2026!',
+    redirectPath: '/campus/teacher',
+  },
+  'rectoria': {
+    schoolId: 'Millennium School',
+    username: 'millennium.rector',
+    password: 'Millennium2026!',
+    redirectPath: '/rectoria',
+  },
+};
+
+const INSTITUTIONAL_PLACEHOLDER_ROLES = ['coordination', 'nursing', 'psychology', 'human_resources'];
+const COUNTRY_OPTIONS = [
+  { id: 'CO', label: 'Colombia' },
+  { id: 'MX', label: 'Mexico' },
+];
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
 }
 
 function canUseBiometricAuth() {
@@ -28,6 +59,14 @@ function canUseBiometricAuth() {
 }
 
 function InputAdornment({ kind }) {
+  if (kind === 'country') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.5 9h-3.1a15.6 15.6 0 0 0-1-5 8.1 8.1 0 0 1 4.1 5ZM12 4.1c.7 1 1.3 3.4 1.5 6.9h-3c.2-3.5.8-5.9 1.5-6.9ZM4.3 13h3.3c.1 1.9.4 3.7.9 5a8 8 0 0 1-4.2-5Zm3.3-2H4.3a8 8 0 0 1 4.2-5 18 18 0 0 0-.9 5Zm4.4 8.9c-.7-1-1.3-3.4-1.5-6.9h3c-.2 3.5-.8 5.9-1.5 6.9Zm3.5-1.9c.5-1.3.8-3.1.9-5h3.3a8 8 0 0 1-4.2 5Z" fill="currentColor" />
+      </svg>
+    );
+  }
+
   if (kind === 'school') {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -51,7 +90,12 @@ function InputAdornment({ kind }) {
   );
 }
 
-function Login() {
+function Login({ devDirectProfile = '', postLoginPath = '' }) {
+  const isNativeAndroid = Capacitor.getPlatform() === 'android' && Capacitor.isNativePlatform();
+  const directLoginProfile = import.meta.env.DEV
+    ? DEV_DIRECT_LOGIN_PROFILES[String(devDirectProfile || '').trim()] || null
+    : null;
+
     const setupPushIfPossible = async () => {
       try {
         const result = await ensurePortalPushNotifications();
@@ -69,7 +113,12 @@ function Login() {
 
   const navigate = useNavigate();
   const { token, user, setAuth, setUser } = useAuthStore();
-  const [selectedSchoolId, setSelectedSchoolId] = useState(() => localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID);
+  const [schoolOptions, setSchoolOptions] = useState(() => normalizeSchoolOptions(SCHOOL_OPTIONS));
+  const [selectedCountry, setSelectedCountry] = useState(() => localStorage.getItem('selectedCountry') || COUNTRY_OPTIONS[0].id);
+  const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [schoolSearch, setSchoolSearch] = useState('');
+  const [isCountryPickerOpen, setIsCountryPickerOpen] = useState(false);
+  const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -88,6 +137,112 @@ function Login() {
   const [forgotInfo, setForgotInfo] = useState('');
   const [forgotResendCountdown, setForgotResendCountdown] = useState(0);
   const hasUserTypedRef = useRef(false);
+  const directLoginAttemptedRef = useRef(false);
+  const schoolPickerRef = useRef(null);
+  const countryPickerRef = useRef(null);
+
+  const selectedCountryOption = useMemo(() => (
+    COUNTRY_OPTIONS.find((country) => country.id === selectedCountry) || COUNTRY_OPTIONS[0]
+  ), [selectedCountry]);
+
+  const countrySchoolOptions = useMemo(() => (
+    getSchoolOptionsByCountry(schoolOptions, selectedCountry)
+  ), [schoolOptions, selectedCountry]);
+
+  const selectedSchool = useMemo(() => (
+    countrySchoolOptions.find((school) => school.id === selectedSchoolId) || null
+  ), [countrySchoolOptions, selectedSchoolId]);
+
+  const filteredSchoolOptions = useMemo(() => {
+    const query = normalizeSearchText(schoolSearch);
+    if (!query) {
+      return countrySchoolOptions;
+    }
+
+    return countrySchoolOptions.filter((school) => (
+      normalizeSearchText(`${school.label} ${school.id}`).includes(query)
+    ));
+  }, [countrySchoolOptions, schoolSearch]);
+
+  useEffect(() => {
+    document.documentElement.classList.add('login-route-active');
+    document.body.classList.add('login-route-active');
+
+    return () => {
+      document.documentElement.classList.remove('login-route-active');
+      document.body.classList.remove('login-route-active');
+    };
+  }, []);
+
+  useEffect(() => {
+    setSchoolSearch(selectedSchool?.label || '');
+  }, [selectedSchool?.label]);
+
+  useEffect(() => {
+    localStorage.setItem('selectedCountry', selectedCountry);
+  }, [selectedCountry]);
+
+  useEffect(() => {
+    if (!isCountryPickerOpen || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const onPointerDown = (event) => {
+      if (!countryPickerRef.current?.contains(event.target)) {
+        setIsCountryPickerOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isCountryPickerOpen]);
+
+  useEffect(() => {
+    if (!isSchoolPickerOpen || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const onPointerDown = (event) => {
+      if (!schoolPickerRef.current?.contains(event.target)) {
+        setIsSchoolPickerOpen(false);
+        setSchoolSearch(selectedSchool?.label || '');
+      }
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isSchoolPickerOpen, selectedSchool?.label]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getSchoolOptions()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        const fetchedSchoolOptions = normalizeSchoolOptions(response.data?.schools || []);
+        const nextSchoolOptions = rememberSchoolOptions(fetchedSchoolOptions.length ? fetchedSchoolOptions : SCHOOL_OPTIONS);
+        setSchoolOptions(nextSchoolOptions);
+        setSelectedSchoolId((currentSchoolId) => {
+          if (currentSchoolId && nextSchoolOptions.some((school) => school.id === currentSchoolId)) {
+            return currentSchoolId;
+          }
+
+          return '';
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSchoolOptions(normalizeSchoolOptions(SCHOOL_OPTIONS));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const clearIfUntouched = () => {
@@ -113,6 +268,33 @@ function Login() {
     hasUserTypedRef.current = true;
   };
 
+  const blurActiveLoginControl = () => {
+    if (typeof document === 'undefined') return;
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) {
+      activeElement.blur();
+    }
+  };
+
+  const selectCountryOption = (countryId) => {
+    if (countryId !== selectedCountry) {
+      setSelectedCountry(countryId);
+      setSelectedSchoolId('');
+      setSchoolSearch('');
+      localStorage.removeItem('selectedSchoolId');
+    }
+
+    setIsCountryPickerOpen(false);
+    blurActiveLoginControl();
+  };
+
+  const selectSchoolOption = (school) => {
+    setSelectedSchoolId(school.id);
+    setSchoolSearch(school.label);
+    setIsSchoolPickerOpen(false);
+    blurActiveLoginControl();
+  };
+
   useEffect(() => {
     if (forgotResendCountdown <= 0) {
       return;
@@ -125,41 +307,101 @@ function Login() {
     return () => clearInterval(timer);
   }, [forgotResendCountdown]);
 
-  const navigateByRole = useCallback((role) => {
+  const navigateByRole = useCallback((role, preferredPath = '') => {
     const pendingPath = consumePostLoginRedirect();
-    if (pendingPath && (role === 'parent' || role === 'admin')) {
-      navigate(pendingPath, { replace: true });
+    const targetPath = String(preferredPath || '').trim() || pendingPath;
+    if (targetPath) {
+      navigate(targetPath, { replace: true });
       return;
     }
 
     if (role === 'vendor') {
-      navigate('/daily-closure');
+      navigate('/daily-closure', { replace: true });
       return;
     }
 
     if (role === 'merienda_operator') {
-      navigate('/meriendas/operator');
+      navigate('/meriendas/operator', { replace: true });
       return;
     }
 
     if (role === 'parent') {
-      navigate('/parent');
+      navigate('/parent', { replace: true });
       return;
     }
 
     if (role === 'admin') {
-      navigate('/admin');
+      navigate('/admin', { replace: true });
       return;
     }
 
-    navigate('/pos');
+    if (role === 'super_admin') {
+      navigate('/super-admin', { replace: true });
+      return;
+    }
+
+    if (role === 'rectoria') {
+      navigate('/rectoria', { replace: true });
+      return;
+    }
+
+    if (role === 'coordination') {
+      navigate('/coordinacion', { replace: true });
+      return;
+    }
+
+    if (role === 'direccion') {
+      navigate('/direccion', { replace: true });
+      return;
+    }
+
+    if (role === 'academic_secretary' || role === 'billing') {
+      navigate(role === 'billing' ? '/cartera' : '/academic-secretary', { replace: true });
+      return;
+    }
+
+    if (role === 'teacher') {
+      navigate('/campus/teacher', { replace: true });
+      return;
+    }
+
+    if (role === 'school_route') {
+      navigate('/campus/route', { replace: true });
+      return;
+    }
+
+    if (INSTITUTIONAL_PLACEHOLDER_ROLES.includes(role)) {
+      navigate('/portal-institucional', { replace: true });
+      return;
+    }
+
+    navigate('/pos', { replace: true });
   }, [navigate]);
+
+  const finalizeAuth = useCallback(async (authResponse, normalizedUsername, preferredPath = '', schoolIdOverride = '') => {
+    setAuth(authResponse);
+    localStorage.setItem('selectedSchoolId', schoolIdOverride || selectedSchoolId);
+
+    if (authResponse?.user?.role === 'parent') {
+      localStorage.setItem('lastParentUsername', normalizedUsername);
+      await maybePromptEnableBiometric(authResponse, normalizedUsername);
+      if (!isNativeAndroid) {
+        setupPushIfPossible();
+      }
+    }
+
+    if (['admin', 'rectoria', 'direccion', 'super_admin'].includes(authResponse?.user?.role) && !isNativeAndroid) {
+      setupPushIfPossible();
+    }
+
+    navigateByRole(authResponse?.user?.role, preferredPath);
+  }, [isNativeAndroid, navigateByRole, selectedSchoolId, setAuth]);
 
   const maybePromptEnableBiometric = async (authResponse, normalizedUsername) => {
     const role = authResponse?.user?.role;
     const biometricEnabled = Boolean(authResponse?.user?.biometricEnabled);
 
-    if (role !== 'parent' || biometricEnabled || !canUseBiometricAuth()) {
+    if (role !== 'parent' || biometricEnabled || !canUseBiometricAuth() || isNativeAndroid) {
       return;
     }
 
@@ -199,10 +441,10 @@ function Login() {
     }
 
     if (user?.role) {
-      if (user.role === 'parent' || user.role === 'admin') {
+      if (!isNativeAndroid && (user.role === 'parent' || user.role === 'admin')) {
         setupPushIfPossible();
       }
-      navigateByRole(user.role);
+      navigateByRole(user.role, postLoginPath);
       return;
     }
 
@@ -227,10 +469,10 @@ function Login() {
         };
 
         setUser(hydratedUser);
-        if (hydratedUser.role === 'parent' || hydratedUser.role === 'admin') {
+        if (!isNativeAndroid && (hydratedUser.role === 'parent' || hydratedUser.role === 'admin')) {
           setupPushIfPossible();
         }
-        navigateByRole(hydratedUser.role);
+        navigateByRole(hydratedUser.role, postLoginPath);
       } catch {
         // If token is invalid, user stays on login page and can authenticate again.
       }
@@ -241,37 +483,70 @@ function Login() {
     return () => {
       cancelled = true;
     };
-  }, [token, user?.role, navigateByRole, setUser]);
+  }, [isNativeAndroid, token, user?.role, navigateByRole, postLoginPath, setUser]);
+
+  useEffect(() => {
+    if (!directLoginProfile || token || loading || directLoginAttemptedRef.current) {
+      return;
+    }
+
+    directLoginAttemptedRef.current = true;
+    hasUserTypedRef.current = true;
+    setSelectedSchoolId(directLoginProfile.schoolId);
+    setUsername(directLoginProfile.username);
+    setPassword(directLoginProfile.password);
+    setError('');
+    setLoading(true);
+
+    login({
+      username: directLoginProfile.username,
+      password: directLoginProfile.password,
+      schoolId: directLoginProfile.schoolId,
+    })
+      .then(async (response) => {
+        await finalizeAuth(
+          response.data,
+          normalizeUsername(directLoginProfile.username),
+          directLoginProfile.redirectPath || postLoginPath
+        );
+      })
+      .catch((requestError) => {
+        setError(
+          requestError?.response?.data?.message ||
+            requestError?.message ||
+            'No se pudo iniciar sesión. Revisa backend o credenciales.'
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [directLoginProfile, finalizeAuth, loading, postLoginPath, token]);
 
   const onSubmit = async (event) => {
     event.preventDefault();
     setError('');
 
-    if (!selectedSchoolId) {
+    const typedSchoolKey = normalizeSearchText(schoolSearch);
+    const exactTypedSchool = countrySchoolOptions.find((school) => normalizeSearchText(school.label) === typedSchoolKey || normalizeSearchText(school.id) === typedSchoolKey);
+    const selectedCountrySchoolId = countrySchoolOptions.some((school) => school.id === selectedSchoolId) ? selectedSchoolId : '';
+    const resolvedSchoolId = selectedCountrySchoolId || exactTypedSchool?.id || (filteredSchoolOptions.length === 1 ? filteredSchoolOptions[0].id : '');
+
+    if (!resolvedSchoolId) {
       setError('Selecciona un colegio para continuar.');
       return;
+    }
+
+    if (resolvedSchoolId !== selectedSchoolId) {
+      setSelectedSchoolId(resolvedSchoolId);
     }
 
     setLoading(true);
 
     try {
-      const response = await login({ username, password, schoolId: selectedSchoolId });
+      const response = await login({ username, password, schoolId: resolvedSchoolId, country: selectedCountry });
       const authResponse = response.data;
       const normalizedUsername = normalizeUsername(username);
-      setAuth(authResponse);
-      localStorage.setItem('selectedSchoolId', selectedSchoolId);
-
-      if (authResponse?.user?.role === 'parent') {
-        localStorage.setItem('lastParentUsername', normalizedUsername);
-        await maybePromptEnableBiometric(authResponse, normalizedUsername);
-        setupPushIfPossible();
-      }
-
-      if (authResponse?.user?.role === 'admin') {
-        setupPushIfPossible();
-      }
-
-      navigateByRole(authResponse?.user?.role);
+      await finalizeAuth(authResponse, normalizedUsername, postLoginPath, resolvedSchoolId);
     } catch (requestError) {
       setError(
         requestError?.response?.data?.message ||
@@ -315,14 +590,14 @@ function Login() {
       setAuth(verifyResponse.data);
       localStorage.setItem('lastParentUsername', normalizedUsername);
       localStorage.setItem('selectedSchoolId', selectedSchoolId);
-      if (verifyResponse.data?.user?.role === 'parent') {
+      if (verifyResponse.data?.user?.role === 'parent' && !isNativeAndroid) {
         setupPushIfPossible();
       }
 
-      if (verifyResponse.data?.user?.role === 'admin') {
+      if (verifyResponse.data?.user?.role === 'admin' && !isNativeAndroid) {
         setupPushIfPossible();
       }
-      navigateByRole(verifyResponse.data?.user?.role);
+      navigateByRole(verifyResponse.data?.user?.role, postLoginPath);
     } catch (requestError) {
       const message =
         requestError?.response?.data?.message ||
@@ -465,7 +740,7 @@ function Login() {
 
   return (
     <div className="page-center login-page login-page-auth">
-      <section className="login-auth-hero" aria-label="Encabezado de login">
+      <section className="login-auth-hero" aria-label="Identidad de Comergio">
         <div className="login-auth-logo-wrap" aria-hidden="true">
           <img className="login-auth-sublogo-image" src={loginLogo} alt="Comergio" />
         </div>
@@ -478,17 +753,117 @@ function Login() {
         </div>
 
         <label>
+          <span>País</span>
+          <div className="login-input-shell login-country-picker" ref={countryPickerRef}>
+            <span className="login-input-icon"><InputAdornment kind="country" /></span>
+            <button
+              aria-controls="login-country-options"
+              aria-expanded={isCountryPickerOpen}
+              className="login-country-trigger"
+              onClick={() => setIsCountryPickerOpen((currentValue) => !currentValue)}
+              type="button"
+            >
+              <span>{selectedCountryOption.label}</span>
+            </button>
+            <button
+              aria-label="Mostrar países"
+              className={`login-school-combobox-toggle${isCountryPickerOpen ? ' is-open' : ''}`}
+              onClick={() => setIsCountryPickerOpen((currentValue) => !currentValue)}
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="m5 7 5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+              </svg>
+            </button>
+            {isCountryPickerOpen ? (
+              <div className="login-school-options login-country-options" id="login-country-options" role="listbox">
+                {COUNTRY_OPTIONS.map((country) => (
+                  <button
+                    aria-selected={country.id === selectedCountry}
+                    className={country.id === selectedCountry ? 'is-selected' : ''}
+                    key={country.id}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      selectCountryOption(country.id);
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      selectCountryOption(country.id);
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    {country.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </label>
+
+        <label>
           <span>Colegio</span>
-          <div className="login-input-shell">
+          <div className="login-input-shell login-school-combobox" ref={schoolPickerRef}>
             <span className="login-input-icon"><InputAdornment kind="school" /></span>
-            <select value={selectedSchoolId} onChange={(e) => setSelectedSchoolId(e.target.value)}>
-              <option value="">Selecciona tu colegio</option>
-              {SCHOOL_OPTIONS.map((school) => (
-                <option key={school.id} value={school.id}>
-                  {school.label}
-                </option>
-              ))}
-            </select>
+            <input
+              aria-autocomplete="list"
+              aria-controls="login-school-options"
+              aria-expanded={isSchoolPickerOpen}
+              autoCapitalize="words"
+              autoComplete="off"
+              autoCorrect="off"
+              name="comergio_school"
+              onChange={(e) => {
+                const nextValue = e.target.value;
+                setSchoolSearch(nextValue);
+                setIsSchoolPickerOpen(true);
+                if (selectedSchool && normalizeSearchText(nextValue) !== normalizeSearchText(selectedSchool.label)) {
+                  setSelectedSchoolId('');
+                }
+              }}
+              onFocus={() => setIsSchoolPickerOpen(true)}
+              placeholder="Busca tu colegio"
+              role="combobox"
+              spellCheck={false}
+              value={schoolSearch}
+            />
+            <button
+              aria-label="Mostrar colegios"
+              className={`login-school-combobox-toggle${isSchoolPickerOpen ? ' is-open' : ''}`}
+              onClick={() => setIsSchoolPickerOpen((currentValue) => !currentValue)}
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="m5 7 5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+              </svg>
+            </button>
+            {isSchoolPickerOpen ? (
+              <div className="login-school-options" id="login-school-options" role="listbox">
+                {filteredSchoolOptions.length ? filteredSchoolOptions.map((school) => (
+                  <button
+                    aria-selected={school.id === selectedSchoolId}
+                    className={school.id === selectedSchoolId ? 'is-selected' : ''}
+                    key={school.id}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      selectSchoolOption(school);
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      selectSchoolOption(school);
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    {school.label}
+                  </button>
+                )) : (
+                  <span className="login-school-options-empty">
+                    {countrySchoolOptions.length ? 'No encontramos colegios con ese nombre.' : 'No hay colegios disponibles para este país.'}
+                  </span>
+                )}
+              </div>
+            ) : null}
           </div>
         </label>
 

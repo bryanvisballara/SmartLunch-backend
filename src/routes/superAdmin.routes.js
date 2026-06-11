@@ -2,7 +2,7 @@ const express = require('express');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
-const { listTenantSchoolContexts, runWithSchoolContext } = require('../config/db');
+const { deleteSchoolTenant, listTenantSchoolContexts, runWithSchoolContext } = require('../config/db');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const AcademicStructure = require('../models/academicStructure.model');
@@ -158,6 +158,20 @@ router.patch('/schools/:schoolId/settings', async (req, res) => {
     return res.status(200).json({ school });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/schools/:schoolId', async (req, res) => {
+  try {
+    const targetSchoolId = normalizeText(req.params.schoolId);
+    const deletionResult = await deleteSchoolTenant(targetSchoolId);
+    return res.status(200).json({
+      message: 'Colegio eliminado permanentemente.',
+      ...deletionResult,
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 

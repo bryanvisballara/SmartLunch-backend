@@ -1,6 +1,11 @@
 import api from '../lib/api';
 
-export const getAdminHomepage = (params = {}) => api.get('/stats/admin-home', { params });
+const DASHBOARD_HEAVY_REQUEST_TIMEOUT_MS = 45000;
+
+export const getAdminHomepage = (params = {}) => api.get('/stats/admin-home', {
+	params,
+	timeout: DASHBOARD_HEAVY_REQUEST_TIMEOUT_MS,
+});
 export const getAiInsights = (params = {}) => api.get('/stats/ai-insights', { params });
 export const askAiInsights = (data) => api.post('/stats/ai-insights/ask', data);
 export const getAdminFixedCosts = (params = {}) => api.get('/admin/fixed-costs', { params });
@@ -83,3 +88,6 @@ export const deleteMeriendaFixedCost = (month, costId) => api.delete(`/meriendas
 export const deleteMeriendaVariableCost = (month, costId) => api.delete(`/meriendas/operations/${month}/variable-costs/${costId}`);
 export const getMeriendaOperationsHistory = () => api.get('/meriendas/operations-history');
 export const getMeriendaIntakeHistory = (params = {}) => api.get('/meriendas/operator/intake-history', { params });
+export const getAcademicGradePromotionRequests = (params = {}) => api.get('/admin/academic-grade-promotions', { params });
+export const approveAcademicGradePromotionRequest = (id, data = {}) => api.post(`/admin/academic-grade-promotions/${id}/approve`, data);
+export const rejectAcademicGradePromotionRequest = (id, data = {}) => api.post(`/admin/academic-grade-promotions/${id}/reject`, data);

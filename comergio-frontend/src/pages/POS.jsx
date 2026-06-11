@@ -9,21 +9,30 @@ import { createOrder, getOrders } from '../services/orders.service';
 import { getProducts } from '../services/products.service';
 import { getStores } from '../services/stores.service';
 import useAuthStore from '../store/auth.store';
+import { scheduleLocalStorageJsonSave } from '../lib/nonBlockingStorage';
 
 const OFFLINE_POS_ORDERS_KEY = 'comergio_pos_offline_orders_v1';
+let cachedOfflinePosOrders = null;
 
 const getOfflinePosOrders = () => {
+  if (Array.isArray(cachedOfflinePosOrders)) {
+    return [...cachedOfflinePosOrders];
+  }
+
   try {
     const raw = localStorage.getItem(OFFLINE_POS_ORDERS_KEY);
     const parsed = JSON.parse(raw || '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    cachedOfflinePosOrders = Array.isArray(parsed) ? parsed : [];
+    return [...cachedOfflinePosOrders];
   } catch {
+    cachedOfflinePosOrders = [];
     return [];
   }
 };
 
 const setOfflinePosOrders = (orders) => {
-  localStorage.setItem(OFFLINE_POS_ORDERS_KEY, JSON.stringify(Array.isArray(orders) ? orders : []));
+  cachedOfflinePosOrders = Array.isArray(orders) ? [...orders] : [];
+  scheduleLocalStorageJsonSave(OFFLINE_POS_ORDERS_KEY, cachedOfflinePosOrders, { timeout: 600 });
 };
 
 const isNetworkError = (error) => {

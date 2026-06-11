@@ -1,11 +1,14 @@
 import { Capacitor } from '@capacitor/core';
 import { FirebaseMessaging } from '@capacitor-firebase/messaging';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { registerDeviceToken } from '../services/notifications.service';
 
 const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
 const ANDROID_PUSH_CHANNEL_ID = 'comergio_alerts_v1';
 let nativePushSetupPromise = null;
+let nativeForegroundListenerPromise = null;
+let foregroundNotificationId = Math.floor(Date.now() % 100000);
 
 async function ensureAndroidPushChannel() {
   try {
@@ -21,6 +24,97 @@ async function ensureAndroidPushChannel() {
   } catch (error) {
     console.warn('[PUSH_CHANNEL_CREATE_FAILED]', error);
   }
+}
+
+async function ensureNativeLocalNotificationChannel() {
+  if (Capacitor.getPlatform() !== 'android') {
+    return;
+  }
+
+  try {
+    await LocalNotifications.createChannel({
+      id: ANDROID_PUSH_CHANNEL_ID,
+      name: 'Notificaciones Comergio',
+      description: 'Alertas importantes de Comergio',
+      importance: 5,
+      visibility: 1,
+      sound: 'pushandroid',
+      vibration: true,
+    });
+  } catch (error) {
+    console.warn('[LOCAL_PUSH_CHANNEL_CREATE_FAILED]', error);
+  }
+}
+
+async function ensureLocalNotificationPermission() {
+  let permission = await LocalNotifications.checkPermissions();
+
+  if (permission.display === 'prompt' || permission.display === 'prompt-with-rationale') {
+    permission = await LocalNotifications.requestPermissions();
+  }
+
+  return permission.display === 'granted';
+}
+
+function getNextForegroundNotificationId() {
+  foregroundNotificationId = (foregroundNotificationId % 2147483000) + 1;
+  return foregroundNotificationId;
+}
+
+function resolveForegroundNotification(event) {
+  const notification = event?.notification || {};
+  const data = notification.data || event?.data || {};
+  const title = String(notification.title || data.title || 'Comergio').trim();
+  const body = String(notification.body || data.body || 'Tienes una nueva notificacion.').trim();
+
+  return { title, body, data };
+}
+
+async function ensureNativeForegroundPresentation() {
+  if (nativeForegroundListenerPromise) {
+    return nativeForegroundListenerPromise;
+  }
+
+  nativeForegroundListenerPromise = (async () => {
+    if (!Capacitor.isNativePlatform()) {
+      return;
+    }
+
+    await ensureNativeLocalNotificationChannel();
+    const canDisplayLocalNotifications = await ensureLocalNotificationPermission();
+
+    if (!canDisplayLocalNotifications) {
+      console.warn('[FOREGROUND_PUSH_DISABLED] Permiso de notificacion local no concedido');
+      return;
+    }
+
+    await FirebaseMessaging.addListener('notificationReceived', async (event) => {
+      const { title, body, data } = resolveForegroundNotification(event);
+
+      if (!title && !body) {
+        return;
+      }
+
+      try {
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              id: getNextForegroundNotificationId(),
+              title,
+              body,
+              extra: data,
+              channelId: ANDROID_PUSH_CHANNEL_ID,
+              schedule: { at: new Date(Date.now() + 100) },
+            },
+          ],
+        });
+      } catch (error) {
+        console.warn('[FOREGROUND_PUSH_PRESENTATION_FAILED]', error);
+      }
+    });
+  })();
+
+  return nativeForegroundListenerPromise;
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -66,6 +160,12 @@ async function ensureNativePushNotifications() {
 
     if (permission.receive !== 'granted') {
       return { enabled: false, reason: 'Permiso de notificaciones nativas no concedido' };
+    }
+
+    try {
+      await ensureNativeForegroundPresentation();
+    } catch (error) {
+      console.warn('[FOREGROUND_PUSH_SETUP_FAILED]', error);
     }
 
     let fcmResult = { token: '', reason: null };

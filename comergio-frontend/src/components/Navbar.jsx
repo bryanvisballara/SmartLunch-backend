@@ -3,6 +3,16 @@ import { Link, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import { getStores } from '../services/stores.service';
 import { me } from '../services/auth.service';
+import { redirectToLoginPage } from '../lib/authNavigation';
+
+const INSTITUTIONAL_PLACEHOLDER_ROLE_LABELS = {
+  coordination: 'Coordinación',
+  teacher: 'Docentes',
+  nursing: 'Enfermería',
+  psychology: 'Psicología',
+  human_resources: 'Recursos y gestion de compras',
+  school_route: 'Ruta escolar',
+};
 
 function Navbar() {
   const navigate = useNavigate();
@@ -10,7 +20,7 @@ function Navbar() {
 
   const onLogout = () => {
     logout();
-    navigate('/login');
+    redirectToLoginPage();
   };
 
   useEffect(() => {
@@ -65,8 +75,14 @@ function Navbar() {
 
   const isVendor = user?.role === 'vendor';
   const isAdmin = user?.role === 'admin';
+  const isRectoria = user?.role === 'rectoria';
+  const isDireccion = user?.role === 'direccion';
+  const isCoordination = user?.role === 'coordination';
+  const isAcademicSecretary = user?.role === 'academic_secretary';
+  const isBilling = user?.role === 'billing';
   const isMeriendaOperator = user?.role === 'merienda_operator';
   const isParent = user?.role === 'parent';
+  const institutionalPlaceholderLabel = ['nursing', 'psychology', 'human_resources'].includes(user?.role) ? '' : INSTITUTIONAL_PLACEHOLDER_ROLE_LABELS[user?.role] || '';
 
   return (
     <nav className="nav">
@@ -74,6 +90,78 @@ function Navbar() {
       {isAdmin ? (
         <div className="nav-admin-right">
           <span className="nav-meta">Administrador: {user?.name || user?.username || 'N/A'}</span>
+          {token ? (
+            <button className="btn btn-outline" onClick={onLogout} type="button">
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">Login</Link>
+          )}
+        </div>
+      ) : isRectoria || isDireccion || isCoordination ? (
+        <div className="nav-admin-right">
+          <Link to={isCoordination ? '/coordinacion' : (isDireccion ? '/direccion' : '/rectoria')}>{isCoordination ? 'Coordinación' : (isDireccion ? 'Dirección' : 'Rectoría')}</Link>
+          <span className="nav-meta">{isCoordination ? 'Coordinación' : (isDireccion ? 'Dirección' : 'Rectoría')}: {user?.name || user?.username || 'N/A'}</span>
+          {token ? (
+            <button className="btn btn-outline" onClick={onLogout} type="button">
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">Login</Link>
+          )}
+        </div>
+      ) : isAcademicSecretary || isBilling ? (
+        <div className="nav-admin-right">
+          <Link to={isBilling ? '/cartera' : '/academic-secretary'}>{isBilling ? 'Cartera' : 'Secretaría académica'}</Link>
+          <span className="nav-meta">{isBilling ? 'Cartera' : 'Secretaría'}: {user?.name || user?.username || 'N/A'}</span>
+          {token ? (
+            <button className="btn btn-outline" onClick={onLogout} type="button">
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">Login</Link>
+          )}
+        </div>
+      ) : user?.role === 'nursing' ? (
+        <div className="nav-admin-right">
+          <Link to="/enfermeria">Enfermería</Link>
+          <span className="nav-meta">Enfermería: {user?.name || user?.username || 'N/A'}</span>
+          {token ? (
+            <button className="btn btn-outline" onClick={onLogout} type="button">
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">Login</Link>
+          )}
+        </div>
+      ) : user?.role === 'psychology' ? (
+        <div className="nav-admin-right">
+          <Link to="/psicologia">Psicología</Link>
+          <span className="nav-meta">Psicología: {user?.name || user?.username || 'N/A'}</span>
+          {token ? (
+            <button className="btn btn-outline" onClick={onLogout} type="button">
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">Login</Link>
+          )}
+        </div>
+      ) : user?.role === 'human_resources' ? (
+        <div className="nav-admin-right">
+          <Link to="/recursos-humanos">Recursos y gestion de compras</Link>
+          <span className="nav-meta">RRHH: {user?.name || user?.username || 'N/A'}</span>
+          {token ? (
+            <button className="btn btn-outline" onClick={onLogout} type="button">
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">Login</Link>
+          )}
+        </div>
+      ) : institutionalPlaceholderLabel ? (
+        <div className="nav-admin-right">
+          <Link to="/portal-institucional">{institutionalPlaceholderLabel}</Link>
+          <span className="nav-meta">{institutionalPlaceholderLabel}: {user?.name || user?.username || 'N/A'}</span>
           {token ? (
             <button className="btn btn-outline" onClick={onLogout} type="button">
               Logout

@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { AppLauncher } from '@capacitor/app-launcher';
 import { Browser } from '@capacitor/browser';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import { deleteAccount } from '../services/auth.service';
+import { redirectToAccountDeletedPage, redirectToLoginPage } from '../lib/authNavigation';
+import { saveDeletedAccountFeedbackContext } from '../lib/deletedAccountFeedback';
 import {
   addToMeriendasWaitlist,
   askParentGioIaChat,
@@ -190,6 +193,29 @@ function parseYearMonth(value) {
   return { year, month };
 }
 
+function normalizeParentBasePath(basePath = '/parent') {
+  const rawValue = String(basePath || '/parent').trim();
+  if (!rawValue) {
+    return '/parent';
+  }
+
+  const prefixed = rawValue.startsWith('/') ? rawValue : `/${rawValue}`;
+  return prefixed.endsWith('/') ? prefixed.slice(0, -1) : prefixed;
+}
+
+function buildParentPath(basePath, suffix = '') {
+  const normalizedBasePath = normalizeParentBasePath(basePath);
+  if (!suffix) {
+    return normalizedBasePath;
+  }
+
+  return `${normalizedBasePath}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function dedupeParentMenuProducts(products) {
   const map = new Map();
 
@@ -224,11 +250,65 @@ function getStudentInitials(name) {
   return parts.map((part) => part.charAt(0).toUpperCase()).join('');
 }
 
-function ParentPortal() {
+function ParentStudentOptionsPortal({ anchorRef, children, isOpen }) {
+  const [menuStyle, setMenuStyle] = useState(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setMenuStyle(null);
+      return undefined;
+    }
+
+    const updatePosition = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) {
+        return;
+      }
+
+      const visualAnchor = anchor.querySelector?.('.parent-student-toggle-card') || anchor;
+      const rect = visualAnchor.getBoundingClientRect();
+      const viewportPadding = 8;
+      const menuWidth = Math.min(rect.width, window.innerWidth - (viewportPadding * 2));
+      const clampedLeft = Math.min(
+        window.innerWidth - menuWidth - viewportPadding,
+        Math.max(viewportPadding, rect.left),
+      );
+
+      setMenuStyle({
+        left: `${clampedLeft}px`,
+        top: `${rect.bottom + 4}px`,
+        width: `${menuWidth}px`,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [anchorRef, isOpen]);
+
+  if (!isOpen || !menuStyle || typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(
+    <div className="parent-student-options parent-student-options--portal" style={menuStyle}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+function ParentPortal({ basePath = '/parent', embedded = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
   const portalRootRef = useRef(null);
+  const studentSwitcherRef = useRef(null);
   const studentPhotoInputRef = useRef(null);
   const deleteAccountRedirectTimeoutRef = useRef(null);
   const pullStartYRef = useRef(0);
@@ -377,39 +457,59 @@ function ParentPortal() {
   const [deleteAccountSuccess, setDeleteAccountSuccess] = useState('');
   const [deletingAccount, setDeletingAccount] = useState(false);
 
-  const isMenuRoute = location.pathname === '/parent/menu' || location.pathname.startsWith('/parent/menu/');
-  const isTopupsPage = location.pathname === '/parent/recargas';
-  const isTopupMethodsPage = location.pathname === '/parent/recargas/metodos';
-  const isTopupDaviPlataPage = location.pathname === '/parent/recargas/metodos/daviplata';
-  const isTopupEpaycoPage = location.pathname === '/parent/recargas/metodos/epayco';
-  const isTopupNequiPage = location.pathname === '/parent/recargas/metodos/nequi';
-  const isBoldResultPage = location.pathname === '/parent/bold-resultado';
-  const isTopupPsePage = location.pathname === '/parent/recargas/metodos/pse';
-  const isTopupBancolombiaPage = location.pathname === '/parent/recargas/metodos/bancolombia';
-  const isTopupBrebPage = location.pathname === '/parent/recargas/metodos/breb';
-  const isAddCardPage = location.pathname === '/parent/recargas/agregar-tarjeta';
-  const isAutoTopupPage = location.pathname === '/parent/recargas/automatica';
-  const isMeriendasDayPage = /^\/parent\/meriendas\/dia\/\d+$/.test(location.pathname);
-  const isMeriendasPage = location.pathname === '/parent/meriendas';
-  const isHistoryPage = location.pathname === '/parent/historial-ordenes';
-  const isLimitPage = location.pathname === '/parent/limitar-consumo';
-  const isGioIaPage = location.pathname === '/parent/gio-ia';
+  const normalizedBasePath = useMemo(() => normalizeParentBasePath(basePath), [basePath]);
+  const menuPath = useMemo(() => buildParentPath(normalizedBasePath, '/menu'), [normalizedBasePath]);
+  const topupsPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas'), [normalizedBasePath]);
+  const topupMethodsPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos'), [normalizedBasePath]);
+  const topupDaviPlataPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/daviplata'), [normalizedBasePath]);
+  const topupEpaycoPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/epayco'), [normalizedBasePath]);
+  const topupNequiPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/nequi'), [normalizedBasePath]);
+  const boldResultPath = useMemo(() => buildParentPath(normalizedBasePath, '/bold-resultado'), [normalizedBasePath]);
+  const topupPsePath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/pse'), [normalizedBasePath]);
+  const topupBancolombiaPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/bancolombia'), [normalizedBasePath]);
+  const topupBrebPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/breb'), [normalizedBasePath]);
+  const addCardPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/agregar-tarjeta'), [normalizedBasePath]);
+  const autoTopupPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/automatica'), [normalizedBasePath]);
+  const meriendasPath = useMemo(() => buildParentPath(normalizedBasePath, '/meriendas'), [normalizedBasePath]);
+  const historyPath = useMemo(() => buildParentPath(normalizedBasePath, '/historial-ordenes'), [normalizedBasePath]);
+  const limitPath = useMemo(() => buildParentPath(normalizedBasePath, '/limitar-consumo'), [normalizedBasePath]);
+  const gioIaPath = useMemo(() => buildParentPath(normalizedBasePath, '/gio-ia'), [normalizedBasePath]);
+  const escapedBasePath = useMemo(() => escapeRegExp(normalizedBasePath), [normalizedBasePath]);
+  const meriendasDayPattern = useMemo(() => new RegExp(`^${escapedBasePath}\\/meriendas\\/dia\\/\\d+$`), [escapedBasePath]);
+
+  const isMenuRoute = location.pathname === menuPath || location.pathname.startsWith(`${menuPath}/`);
+  const isTopupsPage = location.pathname === topupsPath;
+  const isTopupMethodsPage = location.pathname === topupMethodsPath;
+  const isTopupDaviPlataPage = location.pathname === topupDaviPlataPath;
+  const isTopupEpaycoPage = location.pathname === topupEpaycoPath;
+  const isTopupNequiPage = location.pathname === topupNequiPath;
+  const isBoldResultPage = location.pathname === boldResultPath;
+  const isTopupPsePage = location.pathname === topupPsePath;
+  const isTopupBancolombiaPage = location.pathname === topupBancolombiaPath;
+  const isTopupBrebPage = location.pathname === topupBrebPath;
+  const isAddCardPage = location.pathname === addCardPath;
+  const isAutoTopupPage = location.pathname === autoTopupPath;
+  const isMeriendasDayPage = meriendasDayPattern.test(location.pathname);
+  const isMeriendasPage = location.pathname === meriendasPath;
+  const isHistoryPage = location.pathname === historyPath;
+  const isLimitPage = location.pathname === limitPath;
+  const isGioIaPage = location.pathname === gioIaPath;
   const buildWalletRechargeUrl = (studentId = '') => {
     const params = new URLSearchParams();
     if (studentId) {
       params.set('studentId', String(studentId));
     }
     const query = params.toString();
-    return query ? `/parent/recargas?${query}` : '/parent/recargas';
+    return query ? `${topupsPath}?${query}` : topupsPath;
   };
 
   const menuCategoryId = useMemo(() => {
-    const prefix = '/parent/menu/';
+    const prefix = `${menuPath}/`;
     if (!location.pathname.startsWith(prefix)) {
       return '';
     }
     return decodeURIComponent(location.pathname.slice(prefix.length));
-  }, [location.pathname]);
+  }, [location.pathname, menuPath]);
   const isMenuPage = isMenuRoute && !menuCategoryId;
   const isMenuProductsPage = Boolean(menuCategoryId);
 
@@ -485,8 +585,7 @@ function ParentPortal() {
   );
   const canContinueNequiRecharge = Boolean(
     Number.isFinite(nequiAmountNumber) &&
-    nequiAmountNumber >= minimumBoldRecharge &&
-    nequiDocumentDigits.length >= 5
+    nequiAmountNumber >= minimumBoldRecharge
   );
   const boldTopupCardDigits = String(boldTopupCardNumber || '').replace(/\D/g, '');
   const boldTopupExpiryDigits = String(boldTopupCardExpiry || '').replace(/\D/g, '');
@@ -555,7 +654,7 @@ function ParentPortal() {
     autoTopupRechargeAmount >= 20000
   );
   const pullRefreshThreshold = 88;
-  const canUsePullRefresh = Capacitor.isNativePlatform();
+  const canUsePullRefresh = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
 
   const getPortalScrollTop = () => {
     if (typeof window === 'undefined') {
@@ -764,6 +863,15 @@ function ParentPortal() {
     resetPullRefreshState();
   };
 
+  const pullRefreshTouchHandlers = canUsePullRefresh
+    ? {
+        onTouchCancel: onPortalTouchCancel,
+        onTouchEnd: onPortalTouchEnd,
+        onTouchMove: onPortalTouchMove,
+        onTouchStart: onPortalTouchStart,
+      }
+    : {};
+
   useEffect(() => {
     if (!autoDebitMenuOpen) {
       return undefined;
@@ -786,18 +894,18 @@ function ParentPortal() {
           return;
         }
 
-        navigate('/parent/recargas/metodos/epayco', { replace: true });
-      }, [isTopupMethodsPage, navigate]);
+        navigate(topupEpaycoPath, { replace: true });
+      }, [isTopupMethodsPage, navigate, topupEpaycoPath]);
 
   useEffect(() => {
     setAutoDebitMenuOpen(false);
   }, [location.pathname, selectedStudent?._id]);
 
   useEffect(() => {
-    if (location.pathname !== '/parent' && location.pathname !== '/parent/recargas') {
+    if (location.pathname !== normalizedBasePath && location.pathname !== topupsPath) {
       setWalletReturnNotice(null);
     }
-  }, [location.pathname]);
+  }, [location.pathname, normalizedBasePath, topupsPath]);
 
   const meriendaSubscription = meriendasData?.subscription || null;
   const isMeriendasSubscribed = Boolean(meriendaSubscription?.active);
@@ -821,7 +929,7 @@ function ParentPortal() {
       return null;
     }
 
-    const matched = location.pathname.match(/\/parent\/meriendas\/dia\/(\d+)$/);
+    const matched = location.pathname.match(new RegExp(`${escapedBasePath}\\/meriendas\\/dia\\/(\\d+)$`));
     if (!matched) {
       return null;
     }
@@ -832,7 +940,7 @@ function ParentPortal() {
     }
 
     return dayNumber;
-  }, [isMeriendasDayPage, location.pathname]);
+  }, [escapedBasePath, isMeriendasDayPage, location.pathname]);
   const meriendaCalendarCells = useMemo(() => {
     const { year, month } = parsedMeriendasMonth;
     const startDay = new Date(year, month - 1, 1).getDay();
@@ -932,13 +1040,7 @@ function ParentPortal() {
   }, []);
 
   useEffect(() => {
-    return () => {
-      void clearEpaycoBrowserListener();
-    };
-  }, []);
-
-  useEffect(() => {
-    if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
+    if ((location.pathname !== normalizedBasePath && location.pathname !== topupsPath) || loading || error) {
       return;
     }
 
@@ -956,10 +1058,10 @@ function ParentPortal() {
 
     setSelectedStudentId(queryStudentId);
     loadOverview(queryStudentId);
-  }, [location.pathname, location.search, loading, error, selectedStudent?._id, selectedStudentId]);
+  }, [location.pathname, location.search, loading, error, normalizedBasePath, topupsPath, selectedStudent?._id, selectedStudentId]);
 
   useEffect(() => {
-    if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
+    if ((location.pathname !== normalizedBasePath && location.pathname !== topupsPath) || loading || error) {
       return;
     }
 
@@ -988,7 +1090,7 @@ function ParentPortal() {
         nextParams.set('studentId', queryStudentId);
       }
       const query = nextParams.toString();
-      return query ? `/parent/recargas?${query}` : '/parent/recargas';
+      return query ? `${topupsPath}?${query}` : topupsPath;
     };
 
     const finishReturn = (notice) => {
@@ -1073,10 +1175,10 @@ function ParentPortal() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, location.search, loading, error, navigate]);
+  }, [location.pathname, location.search, loading, error, navigate, normalizedBasePath, topupsPath]);
 
   useEffect(() => {
-    if ((location.pathname !== '/parent' && location.pathname !== '/parent/recargas') || loading || error) {
+    if ((location.pathname !== normalizedBasePath && location.pathname !== topupsPath) || loading || error) {
       return;
     }
 
@@ -1105,7 +1207,7 @@ function ParentPortal() {
         nextParams.set('studentId', queryStudentId);
       }
       const query = nextParams.toString();
-      return query ? `/parent/recargas?${query}` : '/parent/recargas';
+      return query ? `${topupsPath}?${query}` : topupsPath;
     };
 
     const finishReturn = (notice) => {
@@ -1176,7 +1278,7 @@ function ParentPortal() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, location.search, loading, error, navigate]);
+  }, [location.pathname, location.search, loading, error, navigate, normalizedBasePath, topupsPath]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1384,8 +1486,8 @@ function ParentPortal() {
       return;
     }
 
-    navigate('/parent/recargas', { replace: true });
-  }, [isAutoTopupPage, navigate]);
+    navigate(topupsPath, { replace: true });
+  }, [isAutoTopupPage, navigate, topupsPath]);
 
   useEffect(() => {
     if (!verifiedSavedCards.length) {
@@ -1454,7 +1556,7 @@ function ParentPortal() {
         setAutoTopupSubmitSuccess('Recarga automática activada correctamente.');
         setAutoTopupCongratsStudentName(String(selectedStudent?.name || selectedStudentFirstName || 'tu hijo'));
         setShowAutoTopupCongratsModal(true);
-        navigate('/parent/recargas/automatica', { replace: true });
+        navigate(autoTopupPath, { replace: true });
       } catch (requestError) {
         setAutoTopupSubmitError(
           requestError?.response?.data?.message || requestError?.message || 'No se pudo activar la recarga automática de ePayco.'
@@ -1480,7 +1582,7 @@ function ParentPortal() {
 
   const onLogout = () => {
     logout();
-    navigate('/login');
+    redirectToLoginPage();
   };
 
   useEffect(() => () => {
@@ -1539,11 +1641,15 @@ function ParentPortal() {
     setDeleteAccountError('');
 
     try {
-      await deleteAccount({ password: trimmedPassword });
+      const response = await deleteAccount({ password: trimmedPassword });
       setDeleteAccountSuccess('Tu cuenta fue eliminada correctamente. Redirigiendo...');
       deleteAccountRedirectTimeoutRef.current = window.setTimeout(() => {
+        saveDeletedAccountFeedbackContext({
+          feedbackToken: response?.data?.feedbackToken,
+          deletedDisplayName: response?.data?.deletedDisplayName,
+        });
         logout();
-        navigate('/login', { replace: true });
+        redirectToAccountDeletedPage();
       }, 900);
     } catch (requestError) {
       setDeleteAccountError(
@@ -1612,37 +1718,37 @@ function ParentPortal() {
     setProfileMenuOpen(false);
 
     if (label === 'Inicio') {
-      navigate('/parent');
+      navigate(normalizedBasePath);
       return;
     }
 
     if (label === 'Menu - bloquear products') {
-      navigate('/parent/menu');
+      navigate(menuPath);
       return;
     }
 
     if (label === 'Recargas') {
-      navigate('/parent/recargas');
+      navigate(topupsPath);
       return;
     }
 
     if (label === 'Historial de órdenes') {
-      navigate('/parent/historial-ordenes');
+      navigate(historyPath);
       return;
     }
 
     if (label === 'Limitar consumo') {
-      navigate('/parent/limitar-consumo');
+      navigate(limitPath);
       return;
     }
 
     if (label === 'Meriendas') {
-      navigate('/parent/meriendas');
+      navigate(meriendasPath);
       return;
     }
 
     if (label === 'GIO - IA') {
-      navigate('/parent/gio-ia');
+      navigate(gioIaPath);
     }
   };
 
@@ -2063,7 +2169,7 @@ function ParentPortal() {
     if (reference) {
       params.set('paymentReference', reference);
     }
-    navigate(`/parent/recargas?${params.toString()}`);
+    navigate(`${topupsPath}?${params.toString()}`);
   };
 
   const startBoldRedirectTopup = async ({ amount, paymentMethodName, bankCode, bankName }) => {
@@ -2824,12 +2930,9 @@ function ParentPortal() {
 
   return (
     <div
-      className={`parent-mobile-page${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshReloading ? ' parent-mobile-page-refreshing' : ''}`}
+      className={`parent-mobile-page${embedded ? ' parent-mobile-page-embedded' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshReloading ? ' parent-mobile-page-refreshing' : ''}`}
       ref={portalRootRef}
-      onTouchCancel={onPortalTouchCancel}
-      onTouchEnd={onPortalTouchEnd}
-      onTouchMove={onPortalTouchMove}
-      onTouchStart={onPortalTouchStart}
+      {...pullRefreshTouchHandlers}
     >
       <div
         aria-hidden="true"
@@ -2839,6 +2942,7 @@ function ParentPortal() {
         <span className="parent-pull-refresh-spinner" />
         <span>{pullRefreshReloading ? 'Actualizando...' : pullRefreshActive ? 'Suelta para actualizar' : 'Desliza para actualizar'}</span>
       </div>
+      {!embedded ? (
       <header className="parent-topbar">
         <button aria-label="Abrir menu" className="parent-icon-btn" onClick={() => setDrawerOpen(true)} type="button">
           <span />
@@ -2877,8 +2981,9 @@ function ParentPortal() {
           ) : null}
         </div>
       </header>
+      ) : null}
 
-      <section className="parent-student-switcher">
+      <section className={`parent-student-switcher${childrenOpen ? ' is-open' : ''}`} ref={studentSwitcherRef}>
         <div className="parent-student-toggle-card">
           <button className="parent-student-toggle" onClick={() => setChildrenOpen((prev) => !prev)} type="button">
             <div className="parent-student-toggle-copy">
@@ -2917,8 +3022,7 @@ function ParentPortal() {
         {studentPhotoError ? <p className="parent-student-upload-feedback is-error">{studentPhotoError}</p> : null}
         {!studentPhotoError && studentPhotoSuccess ? <p className="parent-student-upload-feedback">{studentPhotoSuccess}</p> : null}
 
-        {childrenOpen ? (
-          <div className="parent-student-options">
+        <ParentStudentOptionsPortal anchorRef={studentSwitcherRef} isOpen={childrenOpen}>
             {(overview?.children || []).map((child) => (
               <button key={child._id} onClick={() => onSelectChild(child._id)} type="button">
                 {renderStudentAvatar(child, 'is-small')}
@@ -2931,8 +3035,7 @@ function ParentPortal() {
               </button>
             ))}
             {(overview?.children || []).length === 0 ? <p className="empty">No hay alumnos vinculados.</p> : null}
-          </div>
-        ) : null}
+        </ParentStudentOptionsPortal>
       </section>
 
       <main className="parent-mobile-content" style={{ transform: `translateY(${pullRefreshReloading ? pullRefreshThreshold * 0.4 : pullRefreshDistance}px)` }}>
@@ -2959,11 +3062,11 @@ function ParentPortal() {
                   <article
                     className="parent-category-card"
                     key={category._id}
-                    onClick={() => navigate(`/parent/menu/${encodeURIComponent(String(category._id))}`)}
+                    onClick={() => navigate(`${menuPath}/${encodeURIComponent(String(category._id))}`)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        navigate(`/parent/menu/${encodeURIComponent(String(category._id))}`);
+                        navigate(`${menuPath}/${encodeURIComponent(String(category._id))}`);
                       }
                     }}
                     role="button"
@@ -3007,7 +3110,7 @@ function ParentPortal() {
               <button
                 aria-label="Volver a categorías"
                 className="parent-back-btn"
-                onClick={() => navigate('/parent/menu')}
+                onClick={() => navigate(menuPath)}
                 type="button"
               >
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3156,7 +3259,7 @@ function ParentPortal() {
             </div>
 
             <div className="parent-topups-actions parent-topups-actions-single">
-              <button onClick={() => navigate('/parent/recargas/metodos/epayco')} type="button">
+              <button onClick={() => navigate(topupEpaycoPath)} type="button">
                 <span className="parent-topups-action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z" fill="currentColor"/>
@@ -3192,7 +3295,7 @@ function ParentPortal() {
 
         {!loading && !error && isMeriendasPage ? (
           <section className="parent-meriendas-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(normalizedBasePath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3284,7 +3387,7 @@ function ParentPortal() {
                           <button
                             key={cell.key}
                             className={`parent-meriendas-calendar-day${cell.isToday ? ' is-today' : ''}`}
-                            onClick={() => navigate(`/parent/meriendas/dia/${cell.day}`)}
+                            onClick={() => navigate(`${meriendasPath}/dia/${cell.day}`)}
                             type="button"
                             role="listitem"
                             aria-label={`Ver detalle de merienda del dia ${cell.day}`}
@@ -3452,7 +3555,7 @@ function ParentPortal() {
 
         {!loading && !error && isMeriendasDayPage ? (
           <section className="parent-meriendas-day-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/meriendas')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(meriendasPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3521,7 +3624,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupDaviPlataPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3685,7 +3788,7 @@ function ParentPortal() {
 
         {isBoldResultPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3697,7 +3800,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupEpaycoPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3759,7 +3862,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupNequiPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3821,7 +3924,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupPsePage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3899,7 +4002,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupBancolombiaPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -3957,7 +4060,7 @@ function ParentPortal() {
 
         {!loading && !error && isTopupBrebPage ? (
           <section className="parent-topup-davi-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas/metodos')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -4011,7 +4114,7 @@ function ParentPortal() {
 
         {!loading && !error && isAddCardPage ? (
           <section className="parent-add-card-page">
-            <button className="parent-topup-back-btn" onClick={() => navigate('/parent/recargas')} type="button">
+            <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M14.7 5.3a1 1 0 0 1 0 1.4L10.4 11H20a1 1 0 1 1 0 2h-9.6l4.3 4.3a1 1 0 0 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0Z" fill="currentColor"/>
               </svg>
@@ -4614,7 +4717,7 @@ function ParentPortal() {
         </div>
       ) : null}
 
-      {drawerOpen ? (
+      {!embedded && drawerOpen ? (
         <div
           className="parent-drawer-backdrop"
           onClick={() => setDrawerOpen(false)}
@@ -4625,7 +4728,7 @@ function ParentPortal() {
           tabIndex={0}
         />
       ) : null}
-      {profileMenuOpen ? (
+      {!embedded && profileMenuOpen ? (
         <div
           className="parent-profile-backdrop"
           onClick={() => setProfileMenuOpen(false)}
@@ -4712,6 +4815,7 @@ function ParentPortal() {
         </div>
       ) : null}
 
+      {!embedded ? (
       <aside className={`parent-drawer ${drawerOpen ? 'open' : ''}`}>
         <h3>Hola, {drawerHeaderName}</h3>
         <p className="parent-drawer-subtitle">¿Qué quieres hacer hoy?</p>
@@ -4724,20 +4828,23 @@ function ParentPortal() {
           ))}
         </nav>
 
-        <button className="parent-delete-account-btn" onClick={onOpenDeleteAccountConfirm} type="button">
-          <span className="icon" aria-hidden="true">{renderProfileIcon('trash')}</span>
-          <span>Eliminar cuenta</span>
-        </button>
+        <div className="parent-drawer-actions">
+          <button className="parent-delete-account-btn" onClick={onOpenDeleteAccountConfirm} type="button">
+            <span className="icon" aria-hidden="true">{renderProfileIcon('trash')}</span>
+            <span>Eliminar cuenta</span>
+          </button>
 
-        <button className="parent-logout-btn" onClick={onLogout} type="button">
-          <span className="icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
-            </svg>
-          </span>
-          <span>Cerrar sesión</span>
-        </button>
+          <button className="parent-logout-btn" onClick={onLogout} type="button">
+            <span className="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+              </svg>
+            </span>
+            <span>Cerrar sesión</span>
+          </button>
+        </div>
       </aside>
+      ) : null}
     </div>
   );
 }

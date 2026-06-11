@@ -5,13 +5,14 @@ const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim();
 const fallbackApiUrl = import.meta.env.PROD
   ? 'https://smartlunch-backend-3uqr.onrender.com'
   : 'http://localhost:4000';
+const apiBaseUrl = configuredApiUrl || fallbackApiUrl;
 const configuredTimeout = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000);
 const requestTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
   ? configuredTimeout
   : 15000;
 
 const api = axios.create({
-  baseURL: configuredApiUrl || fallbackApiUrl,
+  baseURL: apiBaseUrl,
   timeout: requestTimeoutMs,
 });
 
@@ -33,6 +34,44 @@ async function refreshSession() {
   return response.data?.token;
 }
 
+export function resolveApiAssetUrl(value) {
+  const rawUrl = String(value || '').trim();
+  if (!rawUrl) {
+    return '';
+  }
+
+  if (/^(?:https?:|blob:|data:)/i.test(rawUrl)) {
+    return rawUrl;
+  }
+
+  if (rawUrl.startsWith('/assets/') || rawUrl.startsWith('/uploads/')) {
+    if (typeof window !== 'undefined' && import.meta.env.DEV) {
+      return rawUrl;
+    }
+
+    let assetBaseUrl = apiBaseUrl;
+
+    if (typeof window !== 'undefined') {
+      try {
+        const parsedApiUrl = new URL(apiBaseUrl);
+        const currentHostname = window.location.hostname;
+        const apiHostname = parsedApiUrl.hostname;
+
+        if (['localhost', '127.0.0.1'].includes(apiHostname) && currentHostname && !['localhost', '127.0.0.1'].includes(currentHostname)) {
+          parsedApiUrl.hostname = currentHostname;
+          assetBaseUrl = parsedApiUrl.toString().replace(/\/+$/, '');
+        }
+      } catch (_error) {
+        assetBaseUrl = apiBaseUrl;
+      }
+    }
+
+    return `${assetBaseUrl.replace(/\/+$/, '')}${rawUrl}`;
+  }
+
+  return rawUrl;
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -44,6 +83,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const status = error?.response?.status;
+    const method = String(error?.config?.method || 'GET').toUpperCase();
+    const url = error?.config?.url || '';
+    const message = error?.response?.data?.message || error?.message || 'unknown';
+
+    if (status) {
+      console.warn('[API_ERROR]', method, url, status, message);
+    }
+
     if (String(error?.code || '').toUpperCase() === 'ECONNABORTED') {
       error.message = 'La conexion con el servidor tardo demasiado. Intenta de nuevo.';
     }

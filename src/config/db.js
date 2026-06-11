@@ -298,9 +298,59 @@ async function findOneAcrossTenantSchoolDbs(executor) {
   return null;
 }
 
+async function deleteSchoolTenant(schoolId) {
+  await connectDB();
+
+  const normalizedSchoolId = normalizeSchoolId(schoolId);
+  if (!normalizedSchoolId) {
+    throw new Error('schoolId is required');
+  }
+
+  const tenantContexts = await listTenantSchoolContexts();
+  const tenantContext = tenantContexts.find((context) => context.schoolId === normalizedSchoolId);
+  if (!tenantContext) {
+    const error = new Error('Colegio no encontrado');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (shouldUseControlDbForSchool(normalizedSchoolId)) {
+    ensureRegisteredModelsForConnection(ensureRootConnection());
+    const modelNames = getRegisteredModelNames();
+    const purgedCollections = [];
+
+    for (const modelName of modelNames) {
+      const model = resolveRegisteredModel(modelName);
+      const result = await model.deleteMany({ schoolId: normalizedSchoolId });
+      if (result.deletedCount > 0) {
+        purgedCollections.push({ collectionName: model.collection.collectionName, deletedCount: result.deletedCount });
+      }
+    }
+
+    return {
+      mode: 'control_db_purge',
+      schoolId: normalizedSchoolId,
+      dbName: getControlDbName() || ensureRootConnection().name,
+      purgedCollections,
+    };
+  }
+
+  const dbName = resolveSchoolDbName(normalizedSchoolId);
+  const connection = getSchoolConnection(normalizedSchoolId);
+  await connection.db.dropDatabase();
+  schoolConnectionCache.delete(dbName);
+
+  return {
+    mode: 'database_drop',
+    schoolId: normalizedSchoolId,
+    dbName,
+  };
+}
+
 module.exports = {
   connectDB,
   createModelProxy,
+  deleteSchoolTenant,
   extractSchoolIdFromRequest,
   findOneAcrossTenantSchoolDbs,
   getControlDbName,

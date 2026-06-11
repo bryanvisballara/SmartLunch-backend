@@ -1,5 +1,7 @@
 import api from '../lib/api';
 
+export const getSchoolOptions = () => api.get('/auth/schools');
+
 export const login = (data) => {
 	const usernameOrEmail = String(data?.username || data?.email || '').trim().toLowerCase();
 	return api.post('/auth/login', {
@@ -17,6 +19,7 @@ export const verifyForgotPasswordCode = (data) => api.post('/auth/password/forgo
 export const resetForgotPassword = (data) => api.post('/auth/password/forgot/reset', data);
 export const me = () => api.get('/auth/me');
 export const deleteAccount = (data) => api.delete('/auth/account', { data });
+export const submitDeletionFeedback = (data) => api.post('/auth/account/deletion-feedback', data);
 export const getBiometricRegistrationOptions = () => api.post('/auth/biometric/register/options');
 export const verifyBiometricRegistration = (data) => api.post('/auth/biometric/register/verify', data);
 export const getBiometricLoginOptions = (data) => api.post('/auth/biometric/login/options', data);

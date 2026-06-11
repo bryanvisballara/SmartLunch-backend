@@ -7,6 +7,7 @@ import FirebaseMessaging
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
+    private let appShellBackgroundColor = UIColor(red: 245.0 / 255.0, green: 247.0 / 255.0, blue: 251.0 / 255.0, alpha: 1.0)
 
     override init() {
         super.init()
@@ -18,6 +19,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         NSLog("[Comergio][AppDelegate] didFinishLaunching start firebaseConfigured=\(FirebaseApp.app() != nil)")
         configureFirebaseIfNeeded()
+        applyAppShellAppearance()
         NSLog("[Comergio][AppDelegate] didFinishLaunching end firebaseConfigured=\(FirebaseApp.app() != nil)")
         return true
     }
@@ -38,6 +40,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        applyAppShellAppearance()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -87,5 +90,57 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         NSLog("[Comergio][Firebase] plist not found in bundle, falling back to default configure")
         FirebaseApp.configure()
         NSLog("[Comergio][Firebase] configured from default lookup")
+    }
+
+    private func applyAppShellAppearance() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            self.window?.backgroundColor = self.appShellBackgroundColor
+            self.window?.rootViewController?.view.backgroundColor = self.appShellBackgroundColor
+
+            guard let bridgeViewController = self.findBridgeViewController(from: self.window?.rootViewController) else {
+                return
+            }
+
+            bridgeViewController.view.backgroundColor = self.appShellBackgroundColor
+
+            guard let webView = bridgeViewController.webView else {
+                return
+            }
+
+            webView.isOpaque = false
+            webView.backgroundColor = self.appShellBackgroundColor
+            webView.scrollView.backgroundColor = self.appShellBackgroundColor
+            webView.scrollView.bounces = false
+            webView.scrollView.alwaysBounceVertical = false
+
+            if #available(iOS 15.0, *) {
+                webView.underPageBackgroundColor = self.appShellBackgroundColor
+            }
+        }
+    }
+
+    private func findBridgeViewController(from viewController: UIViewController?) -> CAPBridgeViewController? {
+        guard let viewController = viewController else {
+            return nil
+        }
+
+        if let bridgeViewController = viewController as? CAPBridgeViewController {
+            return bridgeViewController
+        }
+
+        for child in viewController.children {
+            if let bridgeViewController = findBridgeViewController(from: child) {
+                return bridgeViewController
+            }
+        }
+
+        if let presented = viewController.presentedViewController,
+           let bridgeViewController = findBridgeViewController(from: presented) {
+            return bridgeViewController
+        }
+
+        return nil
     }
 }

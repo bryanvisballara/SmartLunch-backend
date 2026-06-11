@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { sendRegisterEmailCode, verifyRegisterEmailCode } from '../services/auth.service';
+import { getSchoolOptions, sendRegisterEmailCode, verifyRegisterEmailCode } from '../services/auth.service';
 import DismissibleNotice from '../components/DismissibleNotice';
-import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS } from '../lib/schools';
+import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS, normalizeSchoolOptions, rememberSchoolOptions } from '../lib/schools';
 import smartLogo from '../assets/comergio.png';
 
 function normalizeEmail(value) {
@@ -15,6 +15,7 @@ function isValidEmail(value) {
 
 function Register() {
   const navigate = useNavigate();
+  const [schoolOptions, setSchoolOptions] = useState(() => normalizeSchoolOptions(SCHOOL_OPTIONS));
   const [schoolId, setSchoolId] = useState(() => localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -28,6 +29,37 @@ function Register() {
   const [resendCountdown, setResendCountdown] = useState(0);
   const [info, setInfo] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getSchoolOptions()
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        const fetchedSchoolOptions = normalizeSchoolOptions(response.data?.schools || []);
+        const nextSchoolOptions = rememberSchoolOptions(fetchedSchoolOptions.length ? fetchedSchoolOptions : SCHOOL_OPTIONS);
+        setSchoolOptions(nextSchoolOptions);
+        setSchoolId((currentSchoolId) => {
+          if (currentSchoolId && nextSchoolOptions.some((school) => school.id === currentSchoolId)) {
+            return currentSchoolId;
+          }
+
+          return localStorage.getItem('selectedSchoolId') || nextSchoolOptions[0]?.id || '';
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSchoolOptions(normalizeSchoolOptions(SCHOOL_OPTIONS));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (resendCountdown <= 0) {
@@ -152,7 +184,7 @@ function Register() {
           Colegio
           <select value={schoolId} onChange={(e) => setSchoolId(e.target.value)}>
             <option value="">Selecciona tu colegio</option>
-            {SCHOOL_OPTIONS.map((school) => (
+            {schoolOptions.map((school) => (
               <option key={school.id} value={school.id}>
                 {school.label}
               </option>

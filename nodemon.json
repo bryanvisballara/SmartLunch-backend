@@ -1,0 +1,12 @@
+{
+  "watch": ["src"],
+  "ext": "js,mjs,cjs,json",
+  "ignore": [
+    "comergio-frontend/dist/**",
+    "comergio-frontend/dist-deploy/**",
+    "comergio-frontend/node_modules/**",
+    "comergio-frontend/dist-deploy.zip",
+    "dist-deploy/**",
+    "dist-deploy.zip"
+  ]
+}

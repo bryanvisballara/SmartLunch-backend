@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import smartLogo from '../assets/comergio.png';
+import { redirectToLoginPage } from '../lib/authNavigation';
 
 const menuItems = [
   { key: 'Inicio', label: 'Inicio', icon: 'home' },
@@ -103,7 +104,7 @@ function ParentShellHeader({ title, hideSubtitle = false }) {
 
   const onLogout = () => {
     logout();
-    navigate('/login');
+    redirectToLoginPage();
   };
 
   return (

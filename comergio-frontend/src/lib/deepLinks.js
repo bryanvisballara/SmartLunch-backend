@@ -14,7 +14,14 @@ export function buildEpaycoParentRedirect(search) {
   const incoming = new URLSearchParams(search || '');
   const outgoing = new URLSearchParams();
   const studentId = String(incoming.get('studentId') || '').trim();
-  const paymentReference = String(incoming.get('paymentReference') || incoming.get('ref_payco') || '').trim();
+  const paymentReference = String(
+    incoming.get('paymentReference')
+    || incoming.get('x_id_invoice')
+    || incoming.get('x_invoice')
+    || incoming.get('invoice')
+    || incoming.get('reference')
+    || ''
+  ).trim();
   const paymentStatus = String(incoming.get('paymentStatus') || '').trim().toLowerCase();
 
   if (studentId) {
@@ -30,14 +37,25 @@ export function buildEpaycoParentRedirect(search) {
   }
 
   outgoing.set('paymentSource', 'epayco');
+  outgoing.set('returnSource', 'epayco-button');
 
   const query = outgoing.toString();
-  return query ? `/parent?${query}` : '/parent';
+  return query ? `/parent/recargas?${query}` : '/parent/recargas';
 }
 
 export function buildComergioDeepLink(path) {
+  const normalized = String(path || '').trim();
   const deepLink = new URL(`${COMERGIO_APP_SCHEME}://app`);
-  deepLink.pathname = normalizePath(path);
+
+  try {
+    const parsedPath = new URL(normalized, 'https://comergio.app');
+    deepLink.pathname = normalizePath(parsedPath.pathname);
+    deepLink.search = parsedPath.search;
+    deepLink.hash = parsedPath.hash;
+  } catch {
+    deepLink.pathname = normalizePath(normalized);
+  }
+
   return deepLink.toString();
 }
 
@@ -61,12 +79,33 @@ export function resolveComergioAppUrl(rawUrl) {
     const host = parsed.host.toLowerCase();
 
     if (protocol === `${COMERGIO_APP_SCHEME}:`) {
-      const pathFromCustomScheme = parsed.pathname && parsed.pathname !== '/'
+      let pathFromCustomScheme = parsed.pathname && parsed.pathname !== '/'
         ? parsed.pathname
         : host && host !== 'app'
           ? `/${host}`
           : '/';
-      return `${normalizePath(pathFromCustomScheme)}${parsed.search}${parsed.hash}`;
+      let searchFromCustomScheme = parsed.search;
+      let hashFromCustomScheme = parsed.hash;
+
+      // Backward compatibility for previously malformed deep links where
+      // the query string was percent-encoded into the pathname.
+      if (!searchFromCustomScheme && pathFromCustomScheme.includes('%3F')) {
+        const decodedPath = decodeURIComponent(pathFromCustomScheme);
+        const questionMarkIndex = decodedPath.indexOf('?');
+
+        if (questionMarkIndex >= 0) {
+          pathFromCustomScheme = decodedPath.slice(0, questionMarkIndex) || '/';
+          searchFromCustomScheme = decodedPath.slice(questionMarkIndex);
+        }
+      }
+
+      if (!searchFromCustomScheme && pathFromCustomScheme.includes('?')) {
+        const questionMarkIndex = pathFromCustomScheme.indexOf('?');
+        searchFromCustomScheme = pathFromCustomScheme.slice(questionMarkIndex);
+        pathFromCustomScheme = pathFromCustomScheme.slice(0, questionMarkIndex) || '/';
+      }
+
+      return `${normalizePath(pathFromCustomScheme)}${searchFromCustomScheme}${hashFromCustomScheme}`;
     }
 
     if ((protocol === 'https:' || protocol === 'http:') && COMERGIO_WEB_HOST_PATTERN.test(host)) {

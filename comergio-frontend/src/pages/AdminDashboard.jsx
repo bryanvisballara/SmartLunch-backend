@@ -29,6 +29,9 @@ import {
   updateAdminSupplier,
   saveAdminAccountingFees,
   deleteAdminSupplier,
+  getAcademicGradePromotionRequests,
+  approveAcademicGradePromotionRequest,
+  rejectAcademicGradePromotionRequest,
   getParentStudentLinks,
   getMeriendaSubscriptions,
   getMeriendaWaitlist,
@@ -138,6 +141,47 @@ const pushTypeLabel = {
   low_balance_lt10: 'Saldo bajo < 10k',
   auto_debit_recharge: 'Recarga automática',
   tutor_comment: 'Comentario tutor',
+};
+
+const USER_ROLE_OPTIONS = [
+  { value: 'parent', label: 'Acudiente' },
+  { value: 'vendor', label: 'Vendedor' },
+  { value: 'admin', label: 'Administrador' },
+  { value: 'rectoria', label: 'Rectoría' },
+  { value: 'direccion', label: 'Dirección' },
+  { value: 'merienda_operator', label: 'Tutor de alimentación' },
+  { value: 'academic_secretary', label: 'Secretaría académica' },
+  { value: 'admissions', label: 'Admisiones' },
+  { value: 'billing', label: 'Cartera' },
+  { value: 'human_resources', label: 'Recursos y gestion de compras' },
+  { value: 'coordination', label: 'Coordinación' },
+  { value: 'teacher', label: 'Docente' },
+  { value: 'nursing', label: 'Enfermería' },
+  { value: 'psychology', label: 'Psicología' },
+  { value: 'school_route', label: 'Ruta escolar' },
+];
+
+const getUserRoleLabel = (role) => USER_ROLE_OPTIONS.find((option) => option.value === role)?.label || role || 'N/A';
+
+const parseSubjectsInput = (value) => Array.from(new Set(
+  String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+));
+
+const formatUserAcademicProfile = (user) => {
+  if (user?.role === 'coordination') {
+    return user?.coordinationScope ? `Coordina ${user.coordinationScope}` : 'Coordinación sin alcance';
+  }
+
+  if (user?.role === 'teacher') {
+    return Array.isArray(user?.assignedSubjects) && user.assignedSubjects.length > 0
+      ? user.assignedSubjects.join(', ')
+      : 'Sin asignaturas';
+  }
+
+  return 'No aplica';
 };
 
 const escapeHtml = (value) =>
@@ -467,6 +511,7 @@ function AdminDashboard() {
   const [pendingInventory, setPendingInventory] = useState([]);
   const [pendingCancellations, setPendingCancellations] = useState([]);
   const [pendingTopups, setPendingTopups] = useState([]);
+  const [pendingGradePromotions, setPendingGradePromotions] = useState([]);
   const [approvalHistory, setApprovalHistory] = useState([]);
   const [selectedApprovalHistoryId, setSelectedApprovalHistoryId] = useState('');
   const [approvalModule, setApprovalModule] = useState('in');
@@ -571,6 +616,8 @@ function AdminDashboard() {
     password: '',
     role: 'parent',
     assignedStoreId: '',
+    coordinationScope: '',
+    assignedSubjectsText: '',
   });
   const [studentForm, setStudentForm] = useState({ name: '', grade: '', parentId: '' });
 
@@ -740,6 +787,8 @@ function AdminDashboard() {
     phone: '',
     role: 'parent',
     assignedStoreId: '',
+    coordinationScope: '',
+    assignedSubjectsText: '',
     status: 'active',
     password: '',
   });
@@ -778,7 +827,17 @@ function AdminDashboard() {
     editEntity === 'parent' ||
     editEntity === 'vendor' ||
     editEntity === 'admin' ||
-    editEntity === 'merienda_operator';
+    editEntity === 'rectoria' ||
+    editEntity === 'direccion' ||
+    editEntity === 'merienda_operator' ||
+    editEntity === 'academic_secretary' ||
+    editEntity === 'billing' ||
+    editEntity === 'human_resources' ||
+    editEntity === 'coordination' ||
+    editEntity === 'teacher' ||
+    editEntity === 'nursing' ||
+    editEntity === 'psychology' ||
+    editEntity === 'school_route';
 
   const productProfit = useMemo(() => {
     const price = Number(productForm.price || 0);
@@ -828,6 +887,36 @@ function AdminDashboard() {
     }
     if (editEntity === 'merienda_operator') {
       return users.filter((user) => user.role === 'merienda_operator');
+    }
+    if (editEntity === 'rectoria') {
+      return users.filter((user) => user.role === 'rectoria');
+    }
+    if (editEntity === 'direccion') {
+      return users.filter((user) => user.role === 'direccion');
+    }
+    if (editEntity === 'academic_secretary') {
+      return users.filter((user) => user.role === 'academic_secretary');
+    }
+    if (editEntity === 'billing') {
+      return users.filter((user) => user.role === 'billing');
+    }
+    if (editEntity === 'human_resources') {
+      return users.filter((user) => user.role === 'human_resources');
+    }
+    if (editEntity === 'coordination') {
+      return users.filter((user) => user.role === 'coordination');
+    }
+    if (editEntity === 'teacher') {
+      return users.filter((user) => user.role === 'teacher');
+    }
+    if (editEntity === 'nursing') {
+      return users.filter((user) => user.role === 'nursing');
+    }
+    if (editEntity === 'psychology') {
+      return users.filter((user) => user.role === 'psychology');
+    }
+    if (editEntity === 'school_route') {
+      return users.filter((user) => user.role === 'school_route');
     }
     if (editEntity === 'user') {
       return users;
@@ -938,8 +1027,9 @@ function AdminDashboard() {
       { id: 'transfer', label: 'Traslados', count: pendingTransferGroups.length },
       { id: 'topups', label: 'Recargas', count: pendingTopups.length },
       { id: 'cancellations', label: 'Anulaciones', count: pendingCancellations.length },
+      { id: 'grade-promotions', label: 'Subir grado', count: pendingGradePromotions.length },
     ],
-    [pendingInGroups.length, pendingOutGroups.length, pendingTransferGroups.length, pendingTopups.length, pendingCancellations.length]
+    [pendingInGroups.length, pendingOutGroups.length, pendingTransferGroups.length, pendingTopups.length, pendingCancellations.length, pendingGradePromotions.length]
   );
 
   const pendingApprovalsCount = useMemo(
@@ -1852,6 +1942,9 @@ function AdminDashboard() {
       topupRes,
       topupApprovedRes,
       topupRejectedRes,
+      gradePromotionPendingRes,
+      gradePromotionApprovedRes,
+      gradePromotionRejectedRes,
     ] = await Promise.all([
       getInventoryRequests({ status: 'pending' }),
       getInventoryRequests({ status: 'approved' }),
@@ -1862,11 +1955,15 @@ function AdminDashboard() {
       getTopupRequests({ status: 'pending' }),
       getTopupRequests({ status: 'approved' }),
       getTopupRequests({ status: 'rejected' }),
+      getAcademicGradePromotionRequests({ status: 'pending' }),
+      getAcademicGradePromotionRequests({ status: 'approved' }),
+      getAcademicGradePromotionRequests({ status: 'rejected' }),
     ]);
 
     setPendingInventory(inventoryRes.data || []);
     setPendingCancellations(cancelRes.data || []);
     setPendingTopups(topupRes.data || []);
+    setPendingGradePromotions(gradePromotionPendingRes.data || []);
 
     const inventoryHistory = [...(inventoryApprovedRes.data || []), ...(inventoryRejectedRes.data || [])].map((item) => {
       const decision = item.status === 'approved' ? 'approved' : 'rejected';
@@ -1922,7 +2019,23 @@ function AdminDashboard() {
       };
     });
 
-    const history = [...inventoryHistory, ...cancellationHistory, ...topupHistory]
+    const gradePromotionHistory = [...(gradePromotionApprovedRes.data || []), ...(gradePromotionRejectedRes.data || [])].map((item) => {
+      const decision = item.status === 'approved' ? 'approved' : 'rejected';
+      return {
+        id: `grade-promotion:${item._id}`,
+        domain: 'grade-promotion',
+        decision,
+        decidedAt: item.reviewedAt || item.updatedAt || item.createdAt,
+        createdAt: item.requestedAt || item.createdAt,
+        title: 'Subir un grado a todos',
+        summary: `${item.promotableStudents || 0} alumnos promocionables`,
+        decidedBy: item.reviewedByName || 'N/A',
+        statusLabel: decision === 'approved' ? 'Aprobada' : 'Rechazada',
+        detail: item,
+      };
+    });
+
+    const history = [...inventoryHistory, ...cancellationHistory, ...topupHistory, ...gradePromotionHistory]
       .sort((a, b) => new Date(b.decidedAt || b.createdAt) - new Date(a.decidedAt || a.createdAt))
       .slice(0, 300);
 
@@ -2512,6 +2625,8 @@ function AdminDashboard() {
           phone: user.phone || '',
           role: user.role || 'parent',
           assignedStoreId: String(user.assignedStoreId || ''),
+          coordinationScope: user.coordinationScope || '',
+          assignedSubjectsText: Array.isArray(user.assignedSubjects) ? user.assignedSubjects.join(', ') : '',
           status: user.status || 'active',
           password: '',
         });
@@ -2930,6 +3045,11 @@ function AdminDashboard() {
       return;
     }
 
+    if (userForm.role === 'coordination' && !userForm.coordinationScope) {
+      setError('Debes definir el alcance de la coordinación.');
+      return;
+    }
+
     const payload = {
       name: userForm.name,
       username: userForm.username,
@@ -2940,6 +3060,8 @@ function AdminDashboard() {
       password: userForm.password,
       role: userForm.role,
       assignedStoreId: userForm.role === 'vendor' ? userForm.assignedStoreId : undefined,
+      coordinationScope: userForm.role === 'coordination' ? userForm.coordinationScope : undefined,
+      assignedSubjects: userForm.role === 'teacher' ? parseSubjectsInput(userForm.assignedSubjectsText) : undefined,
     };
 
     runAction(() => createAdminUser(payload), 'Usuario creado.', async () => {
@@ -2955,6 +3077,8 @@ function AdminDashboard() {
         password: '',
         role: 'parent',
         assignedStoreId: '',
+        coordinationScope: '',
+        assignedSubjectsText: '',
       });
     });
   };
@@ -3106,6 +3230,12 @@ function AdminDashboard() {
   const onApproveTopup = (id) => runAction(() => approveTopupRequest(id), 'Recarga aprobada.', loadApprovals);
 
   const onRejectTopup = (id) => runAction(() => rejectTopupRequest(id), 'Recarga rechazada.', loadApprovals);
+
+  const onApproveGradePromotion = (id) =>
+    runAction(() => approveAcademicGradePromotionRequest(id), 'Promoción general aprobada.', loadApprovals);
+
+  const onRejectGradePromotion = (id) =>
+    runAction(() => rejectAcademicGradePromotionRequest(id), 'Promoción general rechazada.', loadApprovals);
 
   const onCancelSaleFromHistory = (orderId) => {
     const confirmed = window.confirm('Esta accion anulara la venta, repondra inventario y devolvera saldo si aplica. Deseas continuar?');
@@ -3496,13 +3626,7 @@ function AdminDashboard() {
 
   const getEditExportPayload = () => {
     const statusLabel = (status) => (status === 'inactive' ? 'Inactivo' : 'Activo');
-    const roleLabel = (role) => {
-      if (role === 'parent') return 'Acudiente';
-      if (role === 'vendor') return 'Vendedor';
-      if (role === 'admin') return 'Administrador';
-      if (role === 'merienda_operator') return 'Tutor de alimentación';
-      return role || 'N/A';
-    };
+    const roleLabel = (role) => getUserRoleLabel(role);
 
     const parentNameById = parentUsers.reduce((acc, parent) => {
       acc[String(parent._id)] = parent.name || parent.username || 'N/A';
@@ -3871,6 +3995,8 @@ function AdminDashboard() {
         phone: item.phone || '',
         role: item.role || 'parent',
         assignedStoreId: String(item.assignedStoreId || ''),
+        coordinationScope: item.coordinationScope || '',
+        assignedSubjectsText: Array.isArray(item.assignedSubjects) ? item.assignedSubjects.join(', ') : '',
         status: item.status || 'active',
         password: '',
       };
@@ -4070,6 +4196,11 @@ function AdminDashboard() {
         return;
       }
 
+      if (targetRole === 'coordination' && !draft.coordinationScope) {
+        setError('Debes definir el alcance de la coordinación.');
+        return;
+      }
+
       runAction(
         () =>
           updateAdminUser(itemId, {
@@ -4078,6 +4209,8 @@ function AdminDashboard() {
             phone: draft.phone,
             role: targetRole,
             assignedStoreId: targetRole === 'vendor' ? draft.assignedStoreId || undefined : null,
+            coordinationScope: targetRole === 'coordination' ? draft.coordinationScope : undefined,
+            assignedSubjects: targetRole === 'teacher' ? parseSubjectsInput(draft.assignedSubjectsText) : undefined,
             status: draft.status,
             password: draft.password || undefined,
           }),
@@ -4251,6 +4384,8 @@ function AdminDashboard() {
       phone: '',
       role: 'parent',
       assignedStoreId: '',
+      coordinationScope: '',
+      assignedSubjectsText: '',
       status: 'active',
       password: '',
     });
@@ -4343,6 +4478,11 @@ function AdminDashboard() {
         return;
       }
 
+      if (targetRole === 'coordination' && !editUserForm.coordinationScope) {
+        setError('Debes definir el alcance de la coordinación.');
+        return;
+      }
+
       runAction(
         () =>
           updateAdminUser(editItemId, {
@@ -4353,6 +4493,8 @@ function AdminDashboard() {
             assignedStoreId: targetRole === 'vendor'
               ? editUserForm.assignedStoreId || undefined
               : null,
+            coordinationScope: targetRole === 'coordination' ? editUserForm.coordinationScope : undefined,
+            assignedSubjects: targetRole === 'teacher' ? parseSubjectsInput(editUserForm.assignedSubjectsText) : undefined,
             status: editUserForm.status,
             password: editUserForm.password || undefined,
           }),
@@ -4575,9 +4717,38 @@ function AdminDashboard() {
               <h4>Ventas del mes</h4>
               <p>{formatCurrency(homeData?.salesMonth)}</p>
             </div>
+            <div className="card admin-kpi-card">
+              <h4>Usuarios institucionales</h4>
+              <p>{Object.values(homeData?.academicUsersByRole || {}).reduce((sum, count) => sum + Number(count || 0), 0)}</p>
+            </div>
+            <div className="card admin-kpi-card">
+              <h4>Alumnos sin curso</h4>
+              <p>{Number(homeData?.studentsWithoutCourseCount || 0)}</p>
+            </div>
           </div>
 
           <div className="cards admin-list-cards">
+            <div className="card">
+              <h4>Equipo institucional por rol</h4>
+              {USER_ROLE_OPTIONS
+                .filter((option) => ['rectoria', 'direccion', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'].includes(option.value))
+                .map((option) => (
+                  <p key={option.value}>
+                    {option.label}: {Number(homeData?.academicUsersByRole?.[option.value] || 0)}
+                  </p>
+                ))}
+            </div>
+            <div className="card">
+              <h4>Alumnos pendientes por curso</h4>
+              {(homeData?.studentsWithoutCourse || []).length === 0 ? <p>No hay alumnos pendientes de asignación.</p> : null}
+              {(homeData?.studentsWithoutCourse || []).map((student) => (
+                <p key={String(student._id)}>
+                  {student.name || 'Alumno'}
+                  {student.schoolCode ? ` (${student.schoolCode})` : ''}
+                  {student.grade ? ` - grado ${student.grade}` : ' - sin grado'}
+                </p>
+              ))}
+            </div>
             <div className="card">
               <h4>Alumnos con mayor consumo (promedio diario)</h4>
               {(homeData?.topStudents || []).map((item) => (
@@ -6266,7 +6437,7 @@ function AdminDashboard() {
             </form>
 
             <form className="card" onSubmit={onCreateUser}>
-              <h4>Crear usuario (acudiente, vendedor, admin, Tutor de alimentación)</h4>
+              <h4>Crear usuario institucional</h4>
               <label>
                 Nombre
                 <input value={userForm.name} onChange={(event) => setUserForm((prev) => ({ ...prev, name: event.target.value }))} required />
@@ -6329,13 +6500,14 @@ function AdminDashboard() {
                       ...prev,
                       role: event.target.value,
                       assignedStoreId: event.target.value === 'vendor' ? prev.assignedStoreId : '',
+                      coordinationScope: event.target.value === 'coordination' ? prev.coordinationScope : '',
+                      assignedSubjectsText: event.target.value === 'teacher' ? prev.assignedSubjectsText : '',
                     }))
                   }
                 >
-                  <option value="parent">Acudiente</option>
-                  <option value="vendor">Vendedor</option>
-                  <option value="admin">Admin</option>
-                  <option value="merienda_operator">Tutor de alimentación</option>
+                  {USER_ROLE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               {userForm.role === 'vendor' ? (
@@ -6353,6 +6525,27 @@ function AdminDashboard() {
                         <option key={store._id} value={store._id}>{store.name}</option>
                       ))}
                   </select>
+                </label>
+              ) : null}
+              {userForm.role === 'coordination' ? (
+                <label>
+                  Alcance de coordinación
+                  <input
+                    value={userForm.coordinationScope}
+                    onChange={(event) => setUserForm((prev) => ({ ...prev, coordinationScope: event.target.value }))}
+                    placeholder="Nivel educativo, por ejemplo Elementary"
+                    required
+                  />
+                </label>
+              ) : null}
+              {userForm.role === 'teacher' ? (
+                <label>
+                  Asignaturas
+                  <input
+                    placeholder="Ej: Matemáticas, Ciencias, Inglés"
+                    value={userForm.assignedSubjectsText}
+                    onChange={(event) => setUserForm((prev) => ({ ...prev, assignedSubjectsText: event.target.value }))}
+                  />
                 </label>
               ) : null}
               <button className="btn btn-primary admin-create-btn" type="submit">Crear</button>
@@ -6401,7 +6594,17 @@ function AdminDashboard() {
                 <option value="parent">Acudientes</option>
                 <option value="vendor">Vendedores</option>
                 <option value="admin">Administradores</option>
+                <option value="rectoria">Rectoría</option>
+                <option value="direccion">Dirección</option>
                 <option value="merienda_operator">Tutores de alimentación</option>
+                <option value="academic_secretary">Secretaría académica</option>
+                <option value="billing">Cartera</option>
+                <option value="human_resources">Recursos y gestion de compras</option>
+                <option value="coordination">Coordinación</option>
+                <option value="teacher">Docentes</option>
+                <option value="nursing">Enfermería</option>
+                <option value="psychology">Psicología</option>
+                <option value="school_route">Ruta escolar</option>
               </select>
             </label>
             {(activeModule === 'edit' || activeModule === 'modify') && editEntity === 'product' ? (
@@ -6538,6 +6741,7 @@ function AdminDashboard() {
                     <th>Teléfono</th>
                     <th>Rol</th>
                     <th>Tienda asignada</th>
+                    <th>Perfil académico</th>
                     <th>Estado</th>
                     <th>Nueva password</th>
                     {activeModule === 'modify' ? <th>Acciones</th> : null}
@@ -6749,17 +6953,7 @@ function AdminDashboard() {
                           </td>
                           <td>
                             <input
-                              value={
-                                draft.role === 'parent'
-                                  ? 'Acudiente'
-                                  : draft.role === 'vendor'
-                                    ? 'Vendedor'
-                                    : draft.role === 'admin'
-                                      ? 'Administrador'
-                                      : draft.role === 'merienda_operator'
-                                        ? 'Tutor de alimentación'
-                                      : draft.role
-                              }
+                              value={getUserRoleLabel(draft.role)}
                               readOnly
                             />
                           </td>
@@ -6778,6 +6972,23 @@ function AdminDashboard() {
                               </select>
                             ) : (
                               <input value="No aplica" readOnly />
+                            )}
+                          </td>
+                          <td>
+                            {draft.role === 'coordination' ? (
+                              <input
+                                value={draft.coordinationScope || ''}
+                                onChange={(event) => onEditTableDraftChange(item, 'coordinationScope', event.target.value)}
+                                placeholder="Nivel educativo"
+                              />
+                            ) : draft.role === 'teacher' ? (
+                              <input
+                                value={draft.assignedSubjectsText || ''}
+                                placeholder="Asignaturas separadas por coma"
+                                onChange={(event) => onEditTableDraftChange(item, 'assignedSubjectsText', event.target.value)}
+                              />
+                            ) : (
+                              <input value={formatUserAcademicProfile(draft)} readOnly />
                             )}
                           </td>
                           <td>
@@ -7790,6 +8001,7 @@ function AdminDashboard() {
           {approvalModule === 'transfer' ? <h4>Solicitudes de traslados</h4> : null}
           {approvalModule === 'topups' ? <h4>Solicitudes de recargas</h4> : null}
           {approvalModule === 'cancellations' ? <h4>Solicitudes de anulacion de venta</h4> : null}
+          {approvalModule === 'grade-promotions' ? <h4>Solicitudes para subir un grado</h4> : null}
 
           {(approvalModule === 'in' ? pendingInGroups : approvalModule === 'out' ? pendingOutGroups : approvalModule === 'transfer' ? pendingTransferGroups : []).map((group) => (
             <div className="card" key={group.key}>
@@ -7849,11 +8061,35 @@ function AdminDashboard() {
               ))
             : null}
 
+          {approvalModule === 'grade-promotions'
+            ? pendingGradePromotions.map((request) => (
+                <div className="card" key={request._id}>
+                  <p>Solicitado por: {request.requestedByName || 'Secretaría académica'}</p>
+                  <p>Fecha: {formatDateTime(request.requestedAt)}</p>
+                  <p>Total alumnos: {request.totalStudents || 0}</p>
+                  <p>Promocionables: {request.promotableStudents || 0}</p>
+                  <p>Omitidos: {request.skippedStudents || 0}</p>
+                  <div className="row gap" style={{ flexWrap: 'wrap' }}>
+                    {(request.preview || []).map((item, index) => (
+                      <span className="badge" key={`${item.fromGrade || 'grade'}-${index}`}>
+                        {item.fromGrade} → {item.toGrade} ({item.count})
+                      </span>
+                    ))}
+                  </div>
+                  <div className="row gap">
+                    <button className="btn btn-primary" onClick={() => onApproveGradePromotion(request._id)} type="button">Aprobar</button>
+                    <button className="btn" onClick={() => onRejectGradePromotion(request._id)} type="button">Rechazar</button>
+                  </div>
+                </div>
+              ))
+            : null}
+
           {approvalModule !== 'topups' && approvalModule === 'in' && pendingInGroups.length === 0 ? <p>No hay ingresos pendientes.</p> : null}
           {approvalModule !== 'topups' && approvalModule === 'out' && pendingOutGroups.length === 0 ? <p>No hay egresos pendientes.</p> : null}
           {approvalModule !== 'topups' && approvalModule === 'transfer' && pendingTransferGroups.length === 0 ? <p>No hay traslados pendientes.</p> : null}
           {approvalModule === 'topups' && pendingTopups.length === 0 ? <p>No hay recargas pendientes.</p> : null}
           {approvalModule === 'cancellations' && pendingCancellations.length === 0 ? <p>No hay anulaciones pendientes.</p> : null}
+          {approvalModule === 'grade-promotions' && pendingGradePromotions.length === 0 ? <p>No hay promociones generales pendientes.</p> : null}
 
           <div className="card">
             <h4>Historial de autorizaciones</h4>
@@ -7926,6 +8162,41 @@ function AdminDashboard() {
 
                           return rows;
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {approvalModule === 'grade-promotions' ? (
+              <>
+                {approvalHistory.filter((item) => item.domain === 'grade-promotion').length === 0 ? <p>No hay promociones generales resueltas.</p> : null}
+
+                {approvalHistory.filter((item) => item.domain === 'grade-promotion').length > 0 ? (
+                  <div className="approval-history-scroll approval-history-table-scroll">
+                    <table className="simple-table">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Estado</th>
+                          <th>Solicitó</th>
+                          <th>Promocionables</th>
+                          <th>Aplicados</th>
+                          <th>Resuelto por</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {approvalHistory.filter((item) => item.domain === 'grade-promotion').map((item) => (
+                          <tr key={item.id}>
+                            <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
+                            <td>{item.statusLabel}</td>
+                            <td>{item.detail?.requestedByName || 'Secretaría académica'}</td>
+                            <td>{item.detail?.promotableStudents || 0}</td>
+                            <td>{item.detail?.appliedStudents || 0}</td>
+                            <td>{item.decidedBy || 'N/A'}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>

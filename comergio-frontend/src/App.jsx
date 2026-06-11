@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import Navbar from './components/Navbar';
@@ -9,10 +9,14 @@ import { resolveComergioAppUrl } from './lib/deepLinks';
 import { savePostLoginRedirect } from './lib/postLoginRedirect';
 import { ensurePortalPushNotifications } from './lib/pushNotifications';
 import Login from './pages/Login';
+import LandingPage from './pages/LandingPage';
 import POS from './pages/POS';
 import Wallet from './pages/Wallet';
 import Orders from './pages/Orders';
 import AdminDashboard from './pages/AdminDashboard';
+import AcademicSecretaryDashboard from './pages/AcademicSecretaryDashboard';
+import AdmissionsDashboard from './pages/AdmissionsDashboard';
+import RectoriaDashboard from './pages/RectoriaDashboard';
 import DailyClosure from './pages/DailyClosure';
 import InventoryRequestPage from './pages/InventoryRequestPage';
 import CancelSale from './pages/CancelSale';
@@ -20,11 +24,24 @@ import Topups from './pages/Topups';
 import BoldReturnBridge from './pages/BoldReturnBridge';
 import EpaycoReturnBridge from './pages/EpaycoReturnBridge';
 import MeriendasOperator from './pages/MeriendasOperator';
-import ParentPortal from './pages/ParentPortal';
 import Privacy from './pages/Privacy';
 import Contact from './pages/Contact';
+import AccountDeletionRequest from './pages/AccountDeletionRequest';
 import Register from './pages/Register';
 import RegisterVerifiedNext from './pages/RegisterVerifiedNext';
+import SchoolCreationWizard from './pages/SchoolCreationWizard';
+import AccountDeleted from './pages/AccountDeleted';
+import NursingPortal from './pages/NursingPortal';
+import PsychologyPortal from './pages/PsychologyPortal';
+import HumanResourcesPortal from './pages/HumanResourcesPortal';
+import SuperAdminPortal from './pages/SuperAdminPortal';
+import CampusApp from './campus/CampusApp';
+import ParentCampusHome from './campus/pages/ParentCampusHome';
+import TeacherCampusHome from './campus/pages/TeacherCampusHome';
+import CampusUnavailable from './campus/pages/CampusUnavailable';
+
+const campusPreviewEnabled = String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
+const INSTITUTIONAL_PLACEHOLDER_ROLES = [];
 
 function getDefaultRouteByRole(role) {
   if (role === 'vendor') {
@@ -43,12 +60,60 @@ function getDefaultRouteByRole(role) {
     return '/admin';
   }
 
+  if (role === 'super_admin') {
+    return '/super-admin';
+  }
+
+  if (role === 'rectoria') {
+    return '/rectoria';
+  }
+
+  if (role === 'coordination') {
+    return '/coordinacion';
+  }
+
+  if (role === 'direccion') {
+    return '/direccion';
+  }
+
+  if (role === 'academic_secretary' || role === 'billing') {
+    return role === 'billing' ? '/cartera' : '/academic-secretary';
+  }
+
+  if (role === 'admissions') {
+    return '/academic-secretary/admissions';
+  }
+
+  if (role === 'teacher') {
+    return '/campus/teacher';
+  }
+
+  if (role === 'school_route') {
+    return '/campus/route';
+  }
+
+  if (role === 'nursing') {
+    return '/enfermeria';
+  }
+
+  if (role === 'psychology') {
+    return '/psicologia';
+  }
+
+  if (role === 'human_resources') {
+    return '/recursos-humanos';
+  }
+
+  if (INSTITUTIONAL_PLACEHOLDER_ROLES.includes(role)) {
+    return '/portal-institucional';
+  }
+
   return '/pos';
 }
 
-function RequireAuth({ isAuthenticated, children }) {
+function RequireAuth({ isAuthenticated, loginPath = '/login', children }) {
   if (!isAuthenticated) {
-    return <Navigate replace to="/login" />;
+    return <Navigate replace to={loginPath} />;
   }
 
   return children;
@@ -76,26 +141,94 @@ function PublicOnly({ isAuthenticated, userRole, children }) {
 
 function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { token, user } = useAuthStore();
+  const normalizedPathname = location.pathname !== '/'
+    ? location.pathname.replace(/\/+$/, '')
+    : '/';
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
+  const isLandingRoute = normalizedPathname === '/';
+  const isLoginRoute = normalizedPathname === '/login';
   const pushAttemptKeyRef = useRef('');
-  const isAdminRoute = location.pathname.startsWith('/admin');
+  const lastHandledAppUrlRef = useRef({ rawUrl: '', internalPath: '', handledAt: 0 });
+  const isSuperAdminRoute = normalizedPathname === '/super-admin' || normalizedPathname.startsWith('/super-admin/');
+  const isAdminRoute = normalizedPathname.startsWith('/admin') || normalizedPathname.startsWith('/rectoria') || normalizedPathname.startsWith('/direccion') || normalizedPathname.startsWith('/coordinacion');
+  const isAdmissionsRoute = normalizedPathname === '/academic-secretary/admissions' || normalizedPathname.startsWith('/academic-secretary/admissions/');
+  const isAcademicSecretaryRoute = normalizedPathname === '/academic-secretary' || normalizedPathname.startsWith('/academic-secretary/');
+  const isBillingRoute = normalizedPathname === '/cartera' || normalizedPathname.startsWith('/cartera/');
+  const isNursingRoute = normalizedPathname === '/enfermeria' || normalizedPathname.startsWith('/enfermeria/');
+  const isPsychologyRoute = normalizedPathname === '/psicologia' || normalizedPathname.startsWith('/psicologia/');
+  const isHumanResourcesRoute = normalizedPathname === '/recursos-humanos' || normalizedPathname.startsWith('/recursos-humanos/');
+  const isFullWidthRoute = isSuperAdminRoute || isAdminRoute || isAcademicSecretaryRoute || isBillingRoute || isNursingRoute || isPsychologyRoute || isHumanResourcesRoute;
+  const isCampusRoute = normalizedPathname === '/campus' || normalizedPathname.startsWith('/campus/');
+  const isCampusPreviewRoute = normalizedPathname === '/campus-preview' || normalizedPathname.startsWith('/campus-preview/');
+  const isParentRoute = normalizedPathname === '/parent' || normalizedPathname.startsWith('/parent/');
+  const isSchoolCreationRoute = normalizedPathname === '/schoolcreation';
+  const isCampusLikeRoute = isCampusRoute || isCampusPreviewRoute;
+  const campusLoginPath = import.meta.env.DEV && normalizedPathname.startsWith('/campus/teacher')
+    ? '/login/laura-medina'
+    : '/login';
+  const isEpaycoReturnRoute = normalizedPathname === '/epayco-resultado';
+  const isNativeAndroid = Capacitor.getPlatform() === 'android' && Capacitor.isNativePlatform();
+  const isAndroidRootRoute = [
+    '/parent',
+    '/admin',
+    '/super-admin',
+    '/rectoria',
+    '/coordinacion',
+    '/direccion',
+    '/portal-institucional',
+    '/cartera',
+    '/enfermeria',
+    '/psicologia',
+    '/recursos-humanos',
+    '/academic-secretary/admissions',
+    '/campus',
+    '/daily-closure',
+    '/meriendas/operator',
+    '/pos',
+  ].includes(normalizedPathname);
   const showNavbar =
-    location.pathname !== '/login' &&
-    location.pathname !== '/register' &&
-    location.pathname !== '/register/next-step' &&
-    location.pathname !== '/bold-resultado' &&
-    !location.pathname.startsWith('/parent') &&
-    !['/privacy', '/contact'].includes(location.pathname);
+    !isLandingRoute &&
+    normalizedPathname !== '/login' &&
+    normalizedPathname !== '/cuenta-eliminada' &&
+    normalizedPathname !== '/register' &&
+    normalizedPathname !== '/register/next-step' &&
+    !isSchoolCreationRoute &&
+    normalizedPathname !== '/bold-resultado' &&
+    !isEpaycoReturnRoute &&
+    !isAdmissionsRoute &&
+    !isSuperAdminRoute &&
+    !isCampusLikeRoute &&
+    !normalizedPathname.startsWith('/parent') &&
+    !['/privacy', '/contact'].includes(normalizedPathname);
   const hideFooter =
-    location.pathname === '/login' ||
-    location.pathname === '/register' ||
-    location.pathname === '/register/next-step' ||
-    location.pathname === '/bold-resultado';
+    isLandingRoute ||
+    normalizedPathname === '/login' ||
+    normalizedPathname === '/cuenta-eliminada' ||
+    normalizedPathname === '/register' ||
+    normalizedPathname === '/register/next-step' ||
+    isSchoolCreationRoute ||
+    normalizedPathname === '/bold-resultado' ||
+    isAdmissionsRoute ||
+    isSuperAdminRoute ||
+    isCampusLikeRoute ||
+    isParentRoute ||
+    isEpaycoReturnRoute;
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || !isAuthenticated) {
+    document.documentElement.classList.toggle('admissions-route-active', isAdmissionsRoute);
+    document.body.classList.toggle('admissions-route-active', isAdmissionsRoute);
+
+    return () => {
+      document.documentElement.classList.remove('admissions-route-active');
+      document.body.classList.remove('admissions-route-active');
+    };
+  }, [isAdmissionsRoute]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !isAuthenticated || (isNativeAndroid && isLoginRoute)) {
       return;
     }
 
@@ -106,16 +239,42 @@ function App() {
 
     pushAttemptKeyRef.current = attemptKey;
 
-    ensurePortalPushNotifications()
-      .then((result) => {
-        if (!result?.enabled) {
-          console.warn('[PUSH_SETUP_DISABLED]', result?.reason || 'unknown');
-        }
-      })
-      .catch((error) => {
-        console.error('[PUSH_SETUP_ERROR]', error?.message || 'unknown');
-      });
-  }, [isAuthenticated, token, userRole]);
+    let cancelled = false;
+    let timerId = null;
+
+    const runPushSetup = () => {
+      ensurePortalPushNotifications()
+        .then((result) => {
+          if (cancelled) {
+            return;
+          }
+
+          if (!result?.enabled) {
+            console.warn('[PUSH_SETUP_DISABLED]', result?.reason || 'unknown');
+          }
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+
+          console.error('[PUSH_SETUP_ERROR]', error?.message || 'unknown');
+        });
+    };
+
+    if (isNativeAndroid) {
+      timerId = window.setTimeout(runPushSetup, 900);
+    } else {
+      runPushSetup();
+    }
+
+    return () => {
+      cancelled = true;
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [isAuthenticated, isLoginRoute, isNativeAndroid, token, userRole]);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
@@ -130,9 +289,23 @@ function App() {
         return;
       }
 
+      const now = Date.now();
+      const lastHandled = lastHandledAppUrlRef.current;
+      if (
+        lastHandled.internalPath === internalPath
+        && now - Number(lastHandled.handledAt || 0) < 8000
+      ) {
+        return;
+      }
+
+      lastHandledAppUrlRef.current = {
+        rawUrl: String(rawUrl || '').trim(),
+        internalPath,
+        handledAt: now,
+      };
+
       savePostLoginRedirect(internalPath);
-      window.history.replaceState({}, '', internalPath);
-      window.dispatchEvent(new PopStateEvent('popstate'));
+      navigate(internalPath, { replace: true });
     };
 
     CapacitorApp.getLaunchUrl()
@@ -154,14 +327,54 @@ function App() {
     return () => {
       listenerHandle?.remove();
     };
-  }, []);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!isNativeAndroid) {
+      return undefined;
+    }
+
+    let listenerHandle = null;
+
+    CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (isAndroidRootRoute) {
+        if (typeof CapacitorApp.minimizeApp === 'function') {
+          CapacitorApp.minimizeApp();
+          return;
+        }
+
+        CapacitorApp.exitApp();
+        return;
+      }
+
+      if (canGoBack) {
+        window.history.back();
+        return;
+      }
+
+      if (typeof CapacitorApp.minimizeApp === 'function') {
+        CapacitorApp.minimizeApp();
+        return;
+      }
+
+      CapacitorApp.exitApp();
+    })
+      .then((handle) => {
+        listenerHandle = handle;
+      })
+      .catch(() => {});
+
+    return () => {
+      listenerHandle?.remove();
+    };
+  }, [isAndroidRootRoute, isNativeAndroid]);
 
   return (
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={`container ${isAdminRoute ? 'container-full' : ''}`}>
+      <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
-          <Route element={<Navigate replace to="/login" />} path="/" />
+          <Route element={<LandingPage />} path="/" />
           <Route
             element={(
               <PublicOnly isAuthenticated={isAuthenticated} userRole={userRole}>
@@ -170,8 +383,20 @@ function App() {
             )}
             path="/login"
           />
+          {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
+          {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}
+          <Route
+            element={(
+              <RequireRole allowedRoles={['teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <TeacherCampusHome />
+              </RequireRole>
+            )}
+            path="/campus/teacher"
+          />
+          <Route element={<AccountDeleted />} path="/cuenta-eliminada" />
           <Route element={<Register />} path="/register" />
           <Route element={<RegisterVerifiedNext />} path="/register/next-step" />
+          <Route element={<SchoolCreationWizard />} path="/schoolcreation" />
           <Route element={<BoldReturnBridge />} path="/bold-resultado" />
           <Route element={<EpaycoReturnBridge />} path="/epayco-resultado" />
           <Route
@@ -276,11 +501,114 @@ function App() {
           />
           <Route
             element={(
-              <RequireRole allowedRoles={['admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
+              <RequireRole allowedRoles={['super_admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <SuperAdminPortal />
+              </RequireRole>
+            )}
+            path="/super-admin"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['admin', 'rectoria']} isAuthenticated={isAuthenticated} userRole={userRole}>
                 <AdminDashboard />
               </RequireRole>
             )}
             path="/admin"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['rectoria', 'admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <RectoriaDashboard />
+              </RequireRole>
+            )}
+            path="/rectoria"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['coordination', 'rectoria', 'admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <RectoriaDashboard />
+              </RequireRole>
+            )}
+            path="/coordinacion"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['direccion', 'rectoria', 'admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <RectoriaDashboard />
+              </RequireRole>
+            )}
+            path="/direccion"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['academic_secretary', 'admin', 'rectoria']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <AcademicSecretaryDashboard />
+              </RequireRole>
+            )}
+            path="/academic-secretary"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['academic_secretary', 'admissions', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <AdmissionsDashboard />
+              </RequireRole>
+            )}
+            path="/academic-secretary/admissions"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['academic_secretary', 'admissions', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <AdmissionsDashboard />
+              </RequireRole>
+            )}
+            path="/academic-secretary/admissions/stage/:stageKey"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['billing', 'admin', 'rectoria']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <AcademicSecretaryDashboard portalMode="billing" />
+              </RequireRole>
+            )}
+            path="/cartera"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['nursing', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <NursingPortal />
+              </RequireRole>
+            )}
+            path="/enfermeria"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['psychology', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <PsychologyPortal />
+              </RequireRole>
+            )}
+            path="/psicologia"
+          />
+          <Route
+            element={(
+              <RequireRole allowedRoles={['human_resources', 'teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
+                <HumanResourcesPortal />
+              </RequireRole>
+            )}
+            path="/recursos-humanos"
+          />
+          <Route
+            element={(
+              <RequireRole
+                allowedRoles={INSTITUTIONAL_PLACEHOLDER_ROLES}
+                isAuthenticated={isAuthenticated}
+                userRole={userRole}
+              >
+                <CampusUnavailable
+                  campusContext={{ reason: 'feature_not_enabled' }}
+                  errorMessage="Este portal institucional se esta construyendo desde rectoria. Por ahora el usuario ya puede ser creado y administrado."
+                />
+              </RequireRole>
+            )}
+            path="/portal-institucional"
           />
           <Route
             element={(
@@ -296,19 +624,29 @@ function App() {
           />
           <Route
             element={(
+              <RequireAuth isAuthenticated={isAuthenticated} loginPath={campusLoginPath}>
+                <CampusApp />
+              </RequireAuth>
+            )}
+            path="/campus/*"
+          />
+          {campusPreviewEnabled ? <Route element={<CampusApp />} path="/campus-preview/*" /> : null}
+          <Route
+            element={(
               <RequireRole
                 allowedRoles={['parent', 'admin']}
                 isAuthenticated={isAuthenticated}
                 userRole={userRole}
               >
-                <ParentPortal />
+                <ParentCampusHome embedPortal routeBase="/parent" />
               </RequireRole>
             )}
             path="/parent/*"
           />
           <Route element={<Privacy />} path="/privacy" />
+          <Route element={<AccountDeletionRequest />} path="/account-deletion" />
           <Route element={<Contact />} path="/contact" />
-          <Route element={<Navigate replace to="/login" />} path="*" />
+          <Route element={<Navigate replace to={campusPreviewEnabled ? "/campus-preview/parent" : "/login"} />} path="*" />
         </Routes>
       </main>
       {!hideFooter ? <AppFooter /> : null}

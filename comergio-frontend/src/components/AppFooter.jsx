@@ -6,6 +6,8 @@ function AppFooter() {
       <div className="app-footer-links">
         <NavLink to="/privacy">Privacy Policy</NavLink>
         <span aria-hidden="true">·</span>
+        <NavLink to="/account-deletion">Delete Account</NavLink>
+        <span aria-hidden="true">·</span>
         <NavLink to="/contact">Contact</NavLink>
       </div>
     </footer>

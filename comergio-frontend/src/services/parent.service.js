@@ -1,6 +1,15 @@
 import api from '../lib/api';
 
 export const getParentPortalOverview = (params = {}) => api.get('/parent/portal/overview', { params });
+export const getParentAcademicFeed = (params = {}) => api.get('/parent/portal/academic-feed', { params });
+export const toggleParentAcademicFeedLike = (communicationId) => api.post(`/parent/portal/academic-feed/${communicationId}/like`);
+export const createParentAcademicFeedComment = (communicationId, data) => api.post(`/parent/portal/academic-feed/${communicationId}/comments`, data);
+export const deleteParentAcademicFeedComment = (communicationId, commentId) => api.delete(`/parent/portal/academic-feed/${communicationId}/comments/${commentId}`);
+export const toggleParentAcademicFeedCommentLike = (communicationId, commentId) => api.post(`/parent/portal/academic-feed/${communicationId}/comments/${commentId}/like`);
+export const getParentAcademicCalendar = (params = {}) => api.get('/parent/portal/academic-calendar', { params });
+export const getParentAcademicAttendance = (params = {}) => api.get('/parent/portal/academic-attendance', { params });
+export const getParentAcademicBilling = (params = {}) => api.get('/parent/portal/academic-billing', { params });
+export const payParentAcademicCharge = (chargeId, data = {}) => api.post(`/parent/portal/academic-billing/charges/${chargeId}/pay`, data);
 export const getParentPortalCategories = () => api.get('/parent/portal/categories');
 export const getParentPortalOrdersHistory = (params = {}) => api.get('/parent/portal/orders-history', { params });
 export const getParentCardPaymentMethods = (params = {}) => api.get('/parent/portal/payment-methods/cards', { params });

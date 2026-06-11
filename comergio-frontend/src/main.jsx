@@ -1,13 +1,19 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import App from './App.jsx';
 
 const queryClient = new QueryClient();
+const platform = Capacitor?.getPlatform?.() || 'web';
+const shouldPreventZoomGestures = platform === 'ios';
 
 let lastTouchEndAt = 0;
+
+document.documentElement.classList.add(`platform-${platform}`);
+document.body.classList.add(`platform-${platform}`);
 
 const preventGestureZoom = (event) => {
   event.preventDefault();
@@ -27,11 +33,13 @@ const preventDoubleTapZoom = (event) => {
   lastTouchEndAt = now;
 };
 
-document.addEventListener('gesturestart', preventGestureZoom, { passive: false });
-document.addEventListener('gesturechange', preventGestureZoom, { passive: false });
-document.addEventListener('gestureend', preventGestureZoom, { passive: false });
-document.addEventListener('touchstart', preventPinchZoom, { passive: false });
-document.addEventListener('touchend', preventDoubleTapZoom, { passive: false });
+if (shouldPreventZoomGestures) {
+  document.addEventListener('gesturestart', preventGestureZoom, { passive: false });
+  document.addEventListener('gesturechange', preventGestureZoom, { passive: false });
+  document.addEventListener('gestureend', preventGestureZoom, { passive: false });
+  document.addEventListener('touchstart', preventPinchZoom, { passive: false });
+  document.addEventListener('touchend', preventDoubleTapZoom, { passive: false });
+}
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

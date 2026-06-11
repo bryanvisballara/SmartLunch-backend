@@ -4,6 +4,13 @@ import legacy from '@vitejs/plugin-legacy'
 
 // https://vite.dev/config/
 export default defineConfig({
+  appType: 'spa',
+  server: {
+    proxy: {
+      '/assets': 'http://localhost:4000',
+      '/uploads': 'http://localhost:4000',
+    },
+  },
   plugins: [
     react(),
     legacy({

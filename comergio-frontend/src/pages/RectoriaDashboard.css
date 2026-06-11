@@ -1,0 +1,3629 @@
+.rectoria-shell {
+  display: grid;
+  gap: 20px;
+}
+
+.rectoria-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+  padding: 28px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(0, 161, 154, 0.16), transparent 34%),
+    linear-gradient(135deg, #14213d 0%, #1f3b57 100%);
+  color: #f8fafc;
+}
+
+.rectoria-hero h1 {
+  margin: 6px 0 10px;
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  line-height: 1.05;
+}
+
+.rectoria-hero p {
+  max-width: 760px;
+  margin: 0;
+  color: rgba(248, 250, 252, 0.84);
+}
+
+.rectoria-kicker {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rectoria-tabs {
+  display: grid;
+  gap: 8px;
+}
+
+.rectoria-sidebar-section {
+  display: grid;
+  gap: 8px;
+}
+
+.rectoria-portal-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.rectoria-sidebar {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.rectoria-sidebar-eyebrow {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rectoria-content {
+  min-width: 0;
+}
+
+.rectoria-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rectoria-subtab {
+  border: 1px solid #d0d7e2;
+  background: #f8fafc;
+  color: #1f2937;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 700;
+}
+
+.rectoria-subtab.is-active {
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+  color: #fff;
+  border-color: #0f766e;
+}
+
+.rectoria-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #d0d7e2;
+  background: #f8fafc;
+  color: #1f2937;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-weight: 700;
+  text-align: left;
+  width: 100%;
+}
+
+.rectoria-tab.is-active {
+  background: #14213d;
+  color: #fff;
+  border-color: #14213d;
+}
+
+.rectoria-sidebar-subnav {
+  display: grid;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #dbe3ef;
+}
+
+.rectoria-sidebar-subitem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #475569;
+  font-weight: 750;
+  text-align: left;
+}
+
+.rectoria-sidebar-subitem strong {
+  display: inline-flex;
+  min-width: 24px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 0.78rem;
+}
+
+.rectoria-sidebar-subitem.is-active {
+  border-color: #99f6e4;
+  background: #ecfdf5;
+  color: #0f766e;
+}
+
+.rectoria-sidebar-subitem.is-active strong {
+  background: #0f766e;
+  color: #fff;
+}
+
+.rectoria-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.rectoria-kpis {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rectoria-stack--overview {
+  gap: 20px;
+}
+
+.rectoria-overview-command-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.rectoria-overview-kpi {
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 20px;
+  min-height: 158px;
+  display: grid;
+  align-content: space-between;
+  gap: 12px;
+}
+
+.rectoria-overview-kpi--billing {
+  grid-column: span 2;
+  border-color: #bfdbfe;
+}
+
+.rectoria-overview-kpi span,
+.rectoria-overview-level-summary span,
+.rectoria-overview-mini-grid span,
+.rectoria-overview-level-card-head span,
+.rectoria-role-card small,
+.rectoria-overview-kpi small {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.rectoria-overview-kpi strong {
+  display: block;
+  color: #0f172a;
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.rectoria-overview-kpi p,
+.rectoria-overview-kpi small {
+  margin: 0;
+}
+
+.rectoria-overview-kpi-strip,
+.rectoria-overview-level-summary,
+.rectoria-overview-mini-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-overview-kpi-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rectoria-overview-kpi-strip div,
+.rectoria-overview-level-summary div,
+.rectoria-overview-mini-grid div {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+}
+
+.rectoria-overview-kpi-strip strong,
+.rectoria-overview-level-summary strong,
+.rectoria-overview-mini-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 1.2rem;
+}
+
+.rectoria-overview-levels-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.rectoria-overview-levels-total {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: #0f766e;
+  color: #fff;
+  font-size: 2rem;
+}
+
+.rectoria-overview-level-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.rectoria-overview-level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.rectoria-overview-level-card {
+  border: 1px solid #ccfbf1;
+  border-radius: 16px;
+  background: #f8fffd;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-overview-level-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rectoria-overview-level-card-head strong {
+  color: #0f172a;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.rectoria-overview-mini-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rectoria-overview-attention-list,
+.rectoria-overview-academic-alerts article {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-overview-attention-list p,
+.rectoria-overview-academic-alerts p,
+.rectoria-overview-empty-note {
+  margin: 0;
+}
+
+.rectoria-overview-attention-list p,
+.rectoria-overview-academic-alerts p {
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  padding: 10px 12px;
+}
+
+.rectoria-overview-attention-list strong,
+.rectoria-overview-academic-alerts strong,
+.rectoria-overview-attention-list span,
+.rectoria-overview-academic-alerts span {
+  display: block;
+}
+
+.rectoria-overview-attention-list span,
+.rectoria-overview-academic-alerts span,
+.rectoria-overview-empty-note {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.rectoria-overview-academic-alerts {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rectoria-overview-academic-alerts article {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  padding: 16px;
+}
+
+.rectoria-overview-academic-alerts h4 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.rectoria-card,
+.rectoria-role-card,
+.rectoria-grade-card {
+  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 18px;
+}
+
+.rectoria-card span,
+.rectoria-role-card span,
+.rectoria-signal-grid span {
+  display: block;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.rectoria-card strong,
+.rectoria-role-card strong,
+.rectoria-signal-grid strong,
+.rectoria-grade-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.8rem;
+  color: #0f172a;
+}
+
+.rectoria-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.rectoria-grid--overview {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.rectoria-grid--team {
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+}
+
+.rectoria-stack--team {
+  grid-template-columns: 1fr;
+}
+
+.rectoria-panel {
+  border-radius: 24px;
+  border: 1px solid #e5e7eb;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-panel h3 {
+  margin-top: 0;
+}
+
+.rectoria-role-grid,
+.rectoria-grade-grid,
+.rectoria-signal-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.rectoria-signal-grid--priority strong {
+  color: #0f172a;
+}
+
+.rectoria-simple-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-simple-list p,
+.rectoria-grade-card p,
+.rectoria-user-card p {
+  margin: 0;
+}
+
+.rectoria-form,
+.rectoria-fee-card,
+.rectoria-user-list,
+.rectoria-student-table-wrap {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-form {
+  overflow-x: auto;
+}
+
+.rectoria-form-title {
+  margin: 0 0 14px;
+}
+
+.rectoria-form-row {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.rectoria-form label,
+.rectoria-fee-grid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-form-field {
+  flex: 0 0 auto;
+}
+
+.rectoria-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.rectoria-form-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.rectoria-form-field input,
+.rectoria-form-field textarea,
+.rectoria-form-field select {
+  width: 100%;
+  border: 1px solid #d6deea;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #f8fafc;
+  font: inherit;
+}
+
+.rectoria-action-button {
+  border: 1px solid #d6deea;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: #fff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.rectoria-action-button.is-primary {
+  border-color: #0b6aa7;
+  background: #0b6aa7;
+  color: #fff;
+}
+
+.academic-assignments__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.academic-assignments__chips button {
+  border: 1px solid #d6deea;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: #fff;
+  color: #334155;
+  font-weight: 700;
+}
+
+.academic-assignments__chips button.is-active {
+  border-color: #0ea5e9;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.academic-assignments__actions,
+.academic-assignments__error {
+  grid-column: 1 / -1;
+}
+
+.academic-assignments__error {
+  margin: 0;
+  color: #b42318;
+  font-weight: 700;
+}
+
+.rectoria-form-field--title {
+  width: 110px;
+}
+
+.rectoria-form-field--name {
+  width: 180px;
+}
+
+.rectoria-form-field--email {
+  width: 220px;
+}
+
+.rectoria-form-field--phone {
+  width: 150px;
+}
+
+.rectoria-form-field--password {
+  width: 150px;
+}
+
+.rectoria-form-field--role,
+.rectoria-form-field--scope {
+  width: 170px;
+}
+
+.rectoria-form-field--subjects {
+  width: 240px;
+}
+
+.rectoria-form-submit {
+  align-self: end;
+  white-space: nowrap;
+}
+
+.rectoria-form input,
+.rectoria-form select,
+.rectoria-search,
+.rectoria-fee-actions input,
+.rectoria-fee-actions select,
+.rectoria-fee-grid input,
+.rectoria-benefit-row input,
+.rectoria-benefit-row select,
+.rectoria-table input,
+.rectoria-table select,
+.rectoria-billing-form input,
+.rectoria-billing-form select,
+.rectoria-billing-form textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #fff;
+}
+
+.rectoria-billing-form,
+.rectoria-bucket-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-selection-group {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-selection-hint {
+  margin: 0;
+  color: #475569;
+  font-size: 0.95rem;
+}
+
+.rectoria-billing-intro {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 164, 0.14), transparent 30%),
+    linear-gradient(135deg, #fffaf0 0%, #ffffff 45%, #f8fafc 100%);
+}
+
+.rectoria-billing-eyebrow {
+  display: inline-flex;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #8a5a00;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rectoria-billing-intro h3,
+.rectoria-billing-intro p {
+  margin: 0;
+}
+
+.rectoria-billing-intro p {
+  margin-top: 8px;
+  max-width: 760px;
+}
+
+.rectoria-billing-intro-metrics {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  min-width: min(100%, 360px);
+}
+
+.rectoria-billing-intro-metrics div {
+  border-radius: 20px;
+  border: 1px solid #ede9d8;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 18px;
+}
+
+.rectoria-billing-intro-metrics span {
+  display: block;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.rectoria-billing-intro-metrics strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.8rem;
+  color: #111827;
+}
+
+.rectoria-billing-form label,
+.rectoria-billing-grid label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-billing-form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.rectoria-billing-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rectoria-billing-grid--headline {
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(160px, 0.8fr));
+}
+
+.rectoria-selection-label {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.rectoria-option-list {
+  display: grid;
+  gap: 0;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.rectoria-option-item {
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+  color: #0f172a;
+  padding: 12px 14px;
+  text-align: left;
+  font-size: 0.98rem;
+}
+
+.rectoria-option-item:first-child {
+  border-top: 0;
+}
+
+.rectoria-option-item:hover {
+  background: #eff6ff;
+}
+
+.rectoria-option-list-empty {
+  margin: 0;
+  padding: 12px 14px;
+  color: #64748b;
+}
+
+.rectoria-selected-list,
+.rectoria-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rectoria-selected-chip,
+.rectoria-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.rectoria-selected-chip {
+  cursor: pointer;
+}
+
+.rectoria-selected-chip span {
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.rectoria-billing-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rectoria-table--overdue td:nth-child(5),
+.rectoria-table--overdue td:nth-child(6),
+.rectoria-table--overdue th:nth-child(5),
+.rectoria-table--overdue th:nth-child(6) {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.rectoria-table--overdue td:nth-child(7),
+.rectoria-table--overdue th:nth-child(7) {
+  text-align: right;
+}
+
+.rectoria-table--overdue td:nth-child(4),
+.rectoria-table--overdue th:nth-child(4) {
+  white-space: nowrap;
+}
+
+.rectoria-billing-create-panel {
+  border: 1px solid #d6e4f0;
+  background:
+    radial-gradient(circle at bottom left, rgba(14, 165, 164, 0.08), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.rectoria-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rectoria-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}
+
+.rectoria-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rectoria-icon-button--whatsapp {
+  color: #15803d;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.rectoria-icon-button--note {
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.rectoria-followup-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.rectoria-followup-badge--push_email {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.rectoria-followup-badge--whatsapp {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.rectoria-followup-badge--manual_note {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.rectoria-communications-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.rectoria-panel-kicker {
+  display: inline-flex;
+  margin-bottom: 6px;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rectoria-communications-list,
+.rectoria-engagement-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-communication-card,
+.rectoria-engagement-list article {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background: #f8fbff;
+}
+
+.rectoria-communication-card h4,
+.rectoria-communication-card p,
+.rectoria-engagement-list p,
+.rectoria-engagement-list strong {
+  margin: 0;
+}
+
+.rectoria-communication-card span,
+.rectoria-engagement-list span {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.rectoria-communication-card h4 {
+  color: #0f172a;
+  font-size: 1.08rem;
+}
+
+.rectoria-communication-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rectoria-communication-form {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-communication-form label {
+  display: grid;
+  gap: 7px;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.rectoria-communication-form input,
+.rectoria-communication-form select,
+.rectoria-communication-form textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.rectoria-communication-form select[multiple] {
+  min-height: 9rem;
+}
+
+.rectoria-communication-form textarea {
+  min-height: 10rem;
+  resize: vertical;
+}
+
+.rectoria-communication-author-box {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  padding: 14px;
+  background: #f8fbff;
+}
+
+.rectoria-communication-author-box p,
+.rectoria-form-error {
+  margin: 0;
+}
+
+.rectoria-communication-author-box p,
+.rectoria-author-preview small {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.rectoria-author-creator,
+.rectoria-author-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.rectoria-author-creator {
+  border-top: 1px solid #dbeafe;
+  padding-top: 12px;
+}
+
+.rectoria-author-creator label {
+  min-width: min(100%, 180px);
+  flex: 1 1 180px;
+}
+
+.rectoria-author-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 900;
+}
+
+.rectoria-author-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rectoria-form-error {
+  color: #b42318;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.rectoria-approval-editor {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+
+.rectoria-communication-original {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 14px;
+  background: #f8fafc;
+}
+
+.rectoria-communication-original h4,
+.rectoria-communication-form h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.94rem;
+  font-weight: 900;
+}
+
+.rectoria-communication-original label {
+  display: grid;
+  gap: 7px;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.rectoria-communication-original input,
+.rectoria-communication-original textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.rectoria-communication-original textarea {
+  min-height: 10rem;
+  resize: vertical;
+}
+
+.rectoria-communication-media-strip {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-communication-media-card {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  padding: 9px;
+  background: #fff;
+}
+
+.rectoria-communication-media-thumb {
+  display: grid;
+  place-items: center;
+  width: 74px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.rectoria-communication-media-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rectoria-communication-media-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.rectoria-communication-media-copy span,
+.rectoria-communication-media-empty {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.rectoria-communication-media-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rectoria-communication-media-card a {
+  color: #2563eb;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.rectoria-communication-form-grid,
+.rectoria-approval-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.rectoria-approval-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.rectoria-approval-list button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  padding: 13px;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rectoria-approval-list button.is-active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.rectoria-approval-list span,
+.rectoria-communication-count {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.rectoria-communication-actions button,
+.rectoria-danger-chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.rectoria-communication-actions button {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.rectoria-danger-chip {
+  justify-self: start;
+  background: #fee2e2;
+  color: #b42318;
+}
+
+.rectoria-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.rectoria-modal-card {
+  width: min(100%, 720px);
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  padding: 24px;
+}
+
+.rectoria-modal-card--success {
+  background:
+    radial-gradient(circle at top right, rgba(22, 163, 74, 0.14), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f6fff8 100%);
+}
+
+.rectoria-modal-head,
+.rectoria-modal-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rectoria-modal-head h3,
+.rectoria-modal-head p {
+  margin: 0;
+}
+
+.rectoria-modal-head p {
+  margin-top: 6px;
+  color: #64748b;
+}
+
+.rectoria-modal-eyebrow {
+  display: inline-flex;
+  margin-bottom: 8px;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rectoria-modal-eyebrow--success {
+  color: #15803d;
+}
+
+.rectoria-modal-close {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  font-weight: 700;
+}
+
+.rectoria-modal-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.rectoria-modal-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.rectoria-modal-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-modal-form input,
+.rectoria-modal-form select,
+.rectoria-modal-form textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 12px;
+  background: #fff;
+}
+
+.rectoria-modal-form textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.rectoria-success-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rectoria-success-summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #d8efe0;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.rectoria-success-summary-card span {
+  color: #64748b;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.rectoria-success-summary-card strong {
+  color: #0f172a;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.rectoria-bucket-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.rectoria-bucket-card {
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 18px;
+}
+
+.rectoria-bucket-head,
+.rectoria-bucket-entry {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rectoria-bucket-head {
+  margin-bottom: 14px;
+}
+
+.rectoria-bucket-head strong,
+.rectoria-bucket-entry strong {
+  display: block;
+  color: #0f172a;
+}
+
+.rectoria-bucket-head span,
+.rectoria-bucket-entry span,
+.rectoria-bucket-metrics span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.rectoria-bucket-scroll {
+  display: grid;
+  gap: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.rectoria-bucket-entry {
+  padding-top: 12px;
+  border-top: 1px solid #edf2f7;
+}
+
+.rectoria-bucket-entry:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.rectoria-bucket-empty {
+  margin: 0;
+  color: #64748b;
+}
+
+.rectoria-bucket-metrics {
+  text-align: right;
+}
+
+.rectoria-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.rectoria-status--pending {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.rectoria-status--overdue {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.rectoria-status--paid {
+  background: #ecfdf3;
+  color: #047857;
+}
+
+.rectoria-user-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.rectoria-user-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #dbe4ef;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+}
+
+.rectoria-user-card__body {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-user-card strong {
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.rectoria-user-card__header {
+  display: grid;
+  gap: 6px;
+}
+
+.rectoria-user-card__header > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rectoria-user-card__header span,
+.rectoria-user-card__email {
+  color: #475569;
+  font-size: 0.86rem;
+}
+
+.rectoria-user-card__email {
+  overflow-wrap: anywhere;
+}
+
+.rectoria-user-card__teaching-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.rectoria-user-card__section {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.rectoria-user-card__section > span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rectoria-user-card__section p {
+  color: #0f172a;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.rectoria-user-card__section--headroom {
+  background: #ecfeff;
+  border-color: #bae6fd;
+}
+
+.rectoria-user-card__chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rectoria-user-card__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.rectoria-user-card__chip--headroom {
+  background: #cffafe;
+  color: #155e75;
+}
+
+.rectoria-role-accordion-list {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 10px;
+  overflow: visible;
+  padding-bottom: 0;
+}
+
+.rectoria-role-accordion {
+  display: grid;
+  flex: 1 1 0;
+  align-content: start;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.rectoria-role-accordion[open] {
+  width: 100%;
+}
+
+.rectoria-role-accordion-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 14px;
+  cursor: pointer;
+  border: 1px solid #d0d7e2;
+  border-radius: 999px;
+  background: #f8fafc;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.rectoria-role-accordion[open] .rectoria-role-accordion-summary {
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+  border-color: #0f766e;
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.2);
+}
+
+.rectoria-role-accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rectoria-role-accordion-summary span {
+  display: block;
+  color: #1f2937;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.rectoria-role-accordion[open] .rectoria-role-accordion-summary span,
+.rectoria-role-accordion[open] .rectoria-role-accordion-summary strong,
+.rectoria-role-accordion[open] .rectoria-role-accordion-summary small {
+  color: #fff;
+}
+
+.rectoria-role-accordion-summary strong {
+  display: block;
+  margin-top: 2px;
+  color: #0f172a;
+  font-size: 0.58rem;
+  line-height: 1.1;
+}
+
+.rectoria-role-accordion-summary small {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.56rem;
+  white-space: nowrap;
+}
+
+.rectoria-role-accordion .rectoria-user-list {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid #dbe4f0;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
+}
+
+.rectoria-team-role-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rectoria-team-role-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid #d0d7e2;
+  background: #f8fafc;
+  color: #1f2937;
+  font-weight: 700;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.rectoria-team-role-pill strong {
+  display: inline-flex;
+  min-width: 28px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: inherit;
+  font-size: 0.84rem;
+}
+
+.rectoria-team-role-pill.is-active {
+  border-color: #0f766e;
+  background: linear-gradient(135deg, #0f766e 0%, #155e75 100%);
+  color: #fff;
+  box-shadow: 0 14px 30px rgba(15, 118, 110, 0.2);
+}
+
+.rectoria-team-role-pill.is-active strong {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.rectoria-team-role-surface {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid #dbe4f0;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.rectoria-team-role-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.rectoria-team-role-header h4,
+.rectoria-team-role-header p,
+.rectoria-team-role-count,
+.rectoria-team-stat-card p,
+.rectoria-team-stat-card span,
+.rectoria-team-level-head span,
+.rectoria-team-level-kpi-list span,
+.rectoria-team-assignment-card p,
+.rectoria-team-course-preview p,
+.rectoria-team-level-kpi-summary,
+.rectoria-team-level-kpi-eyebrow {
+  margin: 0;
+}
+
+.rectoria-team-role-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #115e59;
+  font-weight: 700;
+}
+
+.rectoria-team-stat-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rectoria-team-level-kpi-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.rectoria-team-stat-card,
+.rectoria-team-level-kpi-card,
+.rectoria-team-detail-card,
+.rectoria-team-level-card,
+.rectoria-team-assignment-card {
+  border: 1px solid #dbe4ef;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.05);
+}
+
+.rectoria-team-stat-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+}
+
+.rectoria-team-stat-card span,
+.rectoria-team-level-kpi-list span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.rectoria-team-stat-card strong,
+.rectoria-team-level-kpi-list strong {
+  color: #0f172a;
+  font-size: 1.28rem;
+}
+
+.rectoria-team-detail-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.rectoria-team-detail-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  align-content: start;
+}
+
+.rectoria-team-detail-card--wide {
+  grid-column: 1 / -1;
+}
+
+.rectoria-team-level-grid,
+.rectoria-team-assignment-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-team-level-card,
+.rectoria-team-assignment-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+button.rectoria-team-assignment-card {
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+button.rectoria-team-assignment-card.is-active {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.rectoria-team-level-card--coordination {
+  gap: 16px;
+  padding: 20px;
+  background:
+    radial-gradient(circle at top right, rgba(14, 116, 144, 0.14), transparent 34%),
+    linear-gradient(180deg, #f7fbff 0%, #ffffff 100%);
+}
+
+.rectoria-team-level-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rectoria-team-level-head strong {
+  color: #0f172a;
+}
+
+.rectoria-team-level-top {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-team-level-title-block {
+  display: grid;
+  gap: 6px;
+}
+
+.rectoria-team-level-eyebrow {
+  margin: 0;
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rectoria-team-level-title-block strong {
+  color: #0f172a;
+  font-size: 1.5rem;
+  line-height: 1.05;
+}
+
+.rectoria-team-level-count-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.12);
+  color: #155e75;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.rectoria-team-level-summary {
+  margin: 0;
+  color: #475569;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.rectoria-team-level-current {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dbe7f3;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.rectoria-team-level-current-label {
+  color: #64748b;
+  font-size: 0.83rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rectoria-team-level-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.rectoria-team-level-control {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbe7f3;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(255, 255, 255, 0.95) 100%);
+}
+
+.rectoria-team-level-control label {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.rectoria-team-level-control .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.rectoria-team-level-actions,
+.rectoria-team-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rectoria-team-level-actions select {
+  flex: 1 1 auto;
+}
+
+.rectoria-team-badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rectoria-team-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.1);
+  color: #155e75;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.rectoria-team-level-kpi-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 36%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  align-content: start;
+}
+
+.rectoria-team-level-kpi-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rectoria-team-level-kpi-list div {
+  display: grid;
+  gap: 4px;
+}
+
+.rectoria-team-level-kpi-top {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-team-level-kpi-title-block {
+  display: grid;
+  gap: 6px;
+}
+
+.rectoria-team-level-kpi-eyebrow {
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rectoria-team-level-kpi-title-block strong {
+  color: #0f172a;
+  font-size: 1.6rem;
+  line-height: 1.05;
+}
+
+.rectoria-team-level-kpi-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #115e59;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.rectoria-team-level-kpi-summary {
+  color: #475569;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.rectoria-team-level-kpi-metric {
+  padding: 14px;
+  border: 1px solid #d9e4f2;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.rectoria-team-level-kpi-metric span {
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.25;
+}
+
+.rectoria-team-level-kpi-metric strong {
+  color: #0f172a;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.rectoria-team-link-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rectoria-team-link-form--three {
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.rectoria-team-link-form label {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.rectoria-team-course-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-team-teacher-current-load,
+.rectoria-team-selected-teacher-summary {
+  padding: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.rectoria-team-selected-teacher-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.rectoria-team-selected-teacher-summary strong {
+  color: #0f172a;
+}
+
+.rectoria-team-selected-teacher-summary span {
+  color: #475569;
+  line-height: 1.35;
+}
+
+.rectoria-team-course-preview strong {
+  color: #0f172a;
+}
+
+@media (max-width: 760px) {
+  .rectoria-team-link-form--three {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rectoria-grade-accordion-list {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-grade-accordion {
+  border: 1px solid #dbe4f0;
+  border-radius: 20px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.rectoria-grade-accordion[open] {
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
+}
+
+.rectoria-grade-accordion-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  cursor: pointer;
+  background: linear-gradient(135deg, #fffaf0 0%, #fff 48%, #eef6ff 100%);
+}
+
+.rectoria-grade-accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rectoria-grade-accordion-summary span {
+  display: block;
+  margin-top: 6px;
+  color: #475569;
+  font-size: 1.12rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.rectoria-grade-accordion-summary strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rectoria-grade-accordion-summary p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.rectoria-grade-accordion-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rectoria-grade-accordion-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.rectoria-grade-course-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-grade-course-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-grade-course-card--interactive {
+  cursor: pointer;
+}
+
+.rectoria-grade-course-card--interactive:hover {
+  border-color: #c7d7eb;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.rectoria-grade-course-card--interactive:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.24);
+  outline-offset: 2px;
+}
+
+.rectoria-grade-course-card strong {
+  display: block;
+  color: #0f172a;
+}
+
+.rectoria-grade-course-card p {
+  margin: 4px 0 0;
+  color: #64748b;
+}
+
+.rectoria-inline-form--grade-course {
+  margin-top: 2px;
+}
+
+.rectoria-course-students-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.rectoria-course-student-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-course-student-row strong {
+  display: block;
+  color: #0f172a;
+}
+
+.rectoria-course-student-row p {
+  margin: 4px 0 0;
+  color: #64748b;
+}
+
+.rectoria-course-student-meta {
+  color: #475569;
+  font-weight: 600;
+}
+
+.rectoria-role-empty {
+  margin: 0;
+  padding: 8px 2px;
+  color: #64748b;
+}
+
+.rectoria-user-actions,
+.rectoria-fee-actions,
+.rectoria-benefits-header,
+.rectoria-section-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rectoria-section-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.rectoria-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  font-weight: 700;
+}
+
+.rectoria-database-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.rectoria-database-filters label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-kpis--database {
+  margin-bottom: 16px;
+}
+
+.rectoria-database-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.rectoria-database-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #0f8a43;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: #0f8a43;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(15, 138, 67, 0.18);
+}
+
+.rectoria-database-button.is-secondary {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #1f2937;
+  box-shadow: none;
+}
+
+.rectoria-database-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rectoria-student-table-wrap {
+  overflow: auto;
+}
+
+.rectoria-student-table-wrap--database {
+  max-height: 2500px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+}
+
+.rectoria-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
+}
+
+.rectoria-table--database {
+  min-width: 1900px;
+}
+
+.rectoria-table th,
+.rectoria-table td {
+  padding: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.rectoria-table th {
+  color: #475569;
+  font-size: 0.84rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rectoria-table--database th,
+.rectoria-table--database td {
+  white-space: nowrap;
+}
+
+.rectoria-database-grade-head {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-promote-button,
+.rectoria-database-icon-button {
+  border: 0;
+  border-radius: 12px;
+  background: #e0f2fe;
+  color: #075985;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rectoria-promote-button {
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+
+.rectoria-database-row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rectoria-database-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+}
+
+.rectoria-database-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rectoria-database-icon-button.is-primary {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.rectoria-database-icon-button:disabled,
+.rectoria-promote-button:disabled,
+.rectoria-database-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rectoria-fee-list {
+  display: grid;
+  gap: 16px;
+}
+
+.rectoria-fee-layout {
+  display: grid;
+  gap: 18px;
+}
+
+.rectoria-fee-card-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.rectoria-fee-grade-card {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  border: 1px solid #dbe4ef;
+  border-radius: 18px;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.rectoria-fee-grade-card:hover {
+  border-color: #0f766e;
+  transform: translateY(-1px);
+}
+
+.rectoria-fee-grade-card.is-active {
+  border-color: #0f766e;
+  box-shadow: 0 14px 30px rgba(15, 118, 110, 0.14);
+  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
+}
+
+.rectoria-fee-grade-card strong {
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.rectoria-fee-grade-card small {
+  color: #64748b;
+}
+
+.rectoria-fee-grade-label {
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.rectoria-fee-card--detail {
+  gap: 18px;
+}
+
+.rectoria-fee-detail-header h4 {
+  margin: 6px 0 4px;
+  color: #0f172a;
+  font-size: 1.28rem;
+}
+
+.rectoria-fee-detail-header p {
+  margin: 0;
+  color: #64748b;
+}
+
+.rectoria-academic-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.rectoria-grade-builder {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-grade-builder-header strong {
+  display: block;
+  margin: 0;
+  font-size: 1.1rem;
+  color: #0f172a;
+}
+
+.rectoria-grade-builder-header p,
+.rectoria-inline-help {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.rectoria-inline-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rectoria-inline-form input,
+.rectoria-inline-form select {
+  flex: 1 1 220px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #fff;
+}
+
+.rectoria-inline-form label {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 220px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-inline-form--tight input {
+  flex-basis: 180px;
+}
+
+.rectoria-inline-form--time-range {
+  flex-wrap: nowrap;
+}
+
+.rectoria-inline-form--time-range input {
+  flex: 1 1 120px;
+}
+
+.rectoria-inline-form--time-range select {
+  flex: 0 0 90px;
+}
+
+.rectoria-grade-level-label {
+  display: inline-block;
+  margin-top: 8px;
+  color: #8a5a00;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rectoria-level-grade-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-subject-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-subject-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.rectoria-level-assign-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rectoria-level-assign-row select {
+  flex: 1 1 260px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: #fff;
+}
+
+.rectoria-level-grade-meta {
+  color: #475569;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rectoria-subject-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.84rem;
+}
+
+.rectoria-subject-badge--principal {
+  background: rgba(14, 116, 144, 0.12);
+  color: #155e75;
+}
+
+.rectoria-subject-badge--secundaria {
+  background: rgba(217, 119, 6, 0.14);
+  color: #9a3412;
+}
+
+.rectoria-subject-grade-chip-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rectoria-subject-grade-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-subject-grade-chip span {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.rectoria-select {
+  min-width: 180px;
+}
+
+.rectoria-period-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-section-header--compact {
+  margin-bottom: 12px;
+}
+
+.rectoria-period-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(100px, 0.6fr) minmax(160px, 1fr) minmax(160px, 1fr) auto;
+}
+
+.rectoria-grading-scale-list {
+  margin: 12px 0 16px;
+}
+
+.rectoria-grading-scale-list .rectoria-period-row {
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
+.rectoria-grading-scale-list label {
+  display: grid;
+  gap: 6px;
+  color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.rectoria-grading-level-selector {
+  min-width: min(280px, 100%);
+}
+
+.rectoria-grading-levels-head {
+  align-items: center;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding-top: 14px;
+}
+
+.rectoria-grading-levels-head strong,
+.rectoria-grading-levels-head span {
+  display: block;
+}
+
+.rectoria-grading-levels-head span {
+  color: #64748b;
+  font-size: 0.88rem;
+  margin-top: 2px;
+}
+
+.rectoria-grading-level-row {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(110px, 0.5fr)) minmax(190px, 0.75fr) auto;
+}
+
+.rectoria-grading-color-cell {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(96px, 1fr) auto;
+}
+
+.rectoria-grading-color-control {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.rectoria-grading-color-swatch {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.72);
+  height: 30px;
+  width: 30px;
+}
+
+.rectoria-grading-color-control input[type="color"] {
+  border: 1px solid #dbe4ee;
+  border-radius: 10px;
+  cursor: pointer;
+  height: 34px;
+  padding: 3px;
+  width: 52px;
+}
+
+.rectoria-period-row--schedule {
+  grid-template-columns: minmax(140px, 1fr) minmax(170px, 1fr) minmax(140px, 1fr) minmax(140px, 1fr) auto;
+}
+
+.rectoria-period-row--schedule-start {
+  grid-template-columns: minmax(180px, 220px) minmax(220px, 1fr);
+  align-items: center;
+}
+
+.rectoria-period-row--schedule-range {
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.rectoria-period-row--schedule-range label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-fee-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.rectoria-benefits {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.rectoria-benefits-help {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.rectoria-benefit-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(90px, 0.7fr)) auto auto;
+}
+
+.rectoria-benefit-field {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.rectoria-benefit-field input {
+  width: 100%;
+}
+
+.rectoria-benefit-fixed-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.rectoria-benefit-fixed-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(130px, 1fr) minmax(130px, 1fr);
+  color: #475569;
+  font-size: 0.88rem;
+}
+
+.rectoria-benefit-fixed-row--header {
+  color: #334155;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.rectoria-benefit-fixed-row span,
+.rectoria-benefit-fixed-row strong {
+  min-width: 0;
+}
+
+.rectoria-fee-preview {
+  margin: 0;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.rectoria-fee-proration {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-fee-proration-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.rectoria-fee-proration-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #dbe4ef;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.rectoria-fee-proration-card span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.rectoria-fee-grid select {
+  width: 100%;
+}
+
+.rectoria-schedule-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 16px;
+}
+
+.rectoria-schedule-day-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.rectoria-schedule-day-card {
+  border: 1px solid #dbe4ef;
+  border-radius: 20px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.rectoria-schedule-day-card h4,
+.rectoria-schedule-day-card p {
+  margin: 0;
+}
+
+.rectoria-schedule-day-card p {
+  margin-top: 4px;
+  color: #64748b;
+}
+
+.rectoria-schedule-summary-card {
+  border-radius: 18px;
+  border: 1px solid #dbe4ef;
+  background: #fff;
+  padding: 14px 16px;
+}
+
+.rectoria-schedule-summary-card strong {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.rectoria-schedule-summary-card p {
+  margin: 0;
+  color: #475569;
+}
+
+.rectoria-schedule-config-hidden {
+  display: none;
+}
+
+.rectoria-schedule-grid-wrap {
+  overflow-x: auto;
+}
+
+.rectoria-panel--school-schedule {
+  --school-accent: #0f766e;
+  --school-text: #111827;
+  --school-text-soft: #475569;
+  --school-border: #dbe3ef;
+  background: #ffffff;
+  border-color: #e5e7eb;
+  border-radius: 18px;
+  color: #111827;
+  font-family: 'Poppins', 'Trebuchet MS', 'Segoe UI', sans-serif;
+  overflow: visible;
+  padding: 16px;
+}
+
+.rectoria-schedule-wizard-surface {
+  width: 100%;
+  margin: 0;
+}
+
+.rectoria-schedule-builder-shell.school-creation-level-box {
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+  gap: 0.85rem;
+  box-shadow: none;
+}
+
+.rectoria-schedule-jornada-setup {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.rectoria-schedule-jornada-card-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.rectoria-schedule-jornada-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.rectoria-schedule-jornada-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.rectoria-schedule-jornada-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.rectoria-schedule-jornada-card summary > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rectoria-schedule-jornada-card strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.rectoria-schedule-jornada-card span {
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.rectoria-schedule-jornada-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 14px;
+  border-top: 1px solid #edf2f7;
+}
+
+.rectoria-schedule-empty-subjects {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  color: var(--school-text-soft);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.rectoria-schedule-calendar-board-wrap {
+  overflow-x: auto;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-toolbar {
+  grid-template-columns: minmax(280px, 420px) 1fr;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-board-wrap {
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-board {
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-time-header {
+  height: 34px;
+  background: #f1f5f9;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-day-header {
+  min-height: 34px;
+  padding: 0.55rem 0.65rem;
+  background: #f1f5f9;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-times,
+.rectoria-panel--school-schedule .school-creation-calendar-day-header,
+.rectoria-panel--school-schedule .school-creation-calendar-day-grid {
+  border-color: #dbe3ef;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-times,
+.rectoria-panel--school-schedule .school-creation-calendar-day-grid {
+  background: #d1d5db;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-cell.is-hour {
+  border-top-color: rgba(100, 116, 139, 0.42);
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-cell.is-half-hour {
+  border-top-color: rgba(100, 116, 139, 0.24);
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-time-row {
+  padding: 0 0.45rem;
+  color: #475569;
+  font-size: 0.68rem;
+}
+
+.rectoria-panel--school-schedule .school-creation-step-grid label {
+  color: #111827;
+}
+
+.rectoria-panel--school-schedule .school-creation-step-grid input,
+.rectoria-panel--school-schedule .school-creation-step-grid select,
+.rectoria-panel--school-schedule .school-creation-step-grid textarea {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #111827;
+}
+
+.rectoria-panel--school-schedule .school-creation-chip {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #111827;
+}
+
+.rectoria-panel--school-schedule .school-creation-chip.is-active {
+  border-color: #0f766e;
+  background: #ccfbf1;
+  color: #0f172a;
+}
+
+.rectoria-schedule-block-chip.school-creation-chip {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  font-weight: 800;
+}
+
+.rectoria-schedule-other-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(360px, 100%);
+}
+
+.rectoria-schedule-other-form input {
+  min-height: 32px;
+  min-width: 180px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 0 12px;
+  color: #111827;
+}
+
+.rectoria-schedule-other-form .btn {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.rectoria-schedule-empty-slot {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  border: 1px dashed transparent;
+  border-radius: 10px;
+  z-index: 2;
+}
+
+.rectoria-schedule-enabled-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border-top: 1px solid rgba(219, 227, 239, 0.9);
+  border-bottom: 1px solid rgba(219, 227, 239, 0.6);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.rectoria-schedule-empty-slot:hover,
+.rectoria-schedule-empty-slot:focus-within {
+  border-color: #0f766e;
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.rectoria-schedule-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid #dbe4ef;
+}
+
+.rectoria-schedule-save-bar span {
+  color: #475569;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.rectoria-schedule-drop-preview {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  border: 2px solid #0f766e;
+  border-radius: 10px;
+  background: rgba(15, 118, 110, 0.12);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-break {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.12rem;
+  pointer-events: auto;
+  justify-content: flex-start;
+  padding: 0.32rem 1.55rem 0.38rem 0.45rem;
+  color: #7c3d00;
+  z-index: 3;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-subject-slot.is-selected,
+.rectoria-panel--school-schedule .school-creation-calendar-class-space.is-selected,
+.rectoria-panel--school-schedule .school-creation-calendar-break.is-selected {
+  box-shadow: 0 0 0 2px #0f766e, 0 8px 18px rgba(15, 23, 42, 0.2);
+}
+
+.rectoria-schedule-resize-handle {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 8px;
+  border: 0;
+  background: transparent;
+  cursor: ns-resize;
+  z-index: 5;
+}
+
+.rectoria-schedule-resize-handle--top {
+  top: -3px;
+}
+
+.rectoria-schedule-resize-handle--bottom {
+  bottom: -3px;
+}
+
+.rectoria-schedule-resize-handle:hover {
+  background: rgba(15, 118, 110, 0.28);
+  border-radius: 999px;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-break span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-break small {
+  color: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-break .school-creation-planner-entry-remove {
+  pointer-events: auto;
+  right: 4px;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-class-space,
+.rectoria-panel--school-schedule .school-creation-calendar-subject-slot {
+  left: 5px;
+  right: 5px;
+  border-radius: 8px;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-subject-slot,
+.rectoria-panel--school-schedule .school-creation-calendar-class-space {
+  gap: 0.12rem;
+  padding: 0.32rem 1.55rem 0.38rem 0.45rem;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-subject-slot-head strong {
+  font-size: 0.78rem;
+  line-height: 1.12;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-subject-slot small,
+.rectoria-panel--school-schedule .school-creation-calendar-class-space small {
+  font-size: 0.68rem;
+  line-height: 1.15;
+}
+
+.rectoria-panel--school-schedule .school-creation-planner-entry-remove {
+  right: 3px;
+}
+
+.rectoria-break-grade-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+
+.rectoria-break-grade-chip {
+  border: 1px solid #d0d7e2;
+  background: #fff;
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-weight: 700;
+}
+
+.rectoria-break-grade-chip.is-selected {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
+.rectoria-break-list {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-break-section-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.rectoria-break-summary-grid {
+  margin-bottom: 0;
+}
+
+.rectoria-break-summary-card {
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #f8fcfb 100%);
+}
+
+.rectoria-break-accordion-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rectoria-break-day-list {
+  gap: 14px;
+}
+
+.rectoria-break-accordion {
+  border: 1px solid #dbe4ef;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  overflow: hidden;
+}
+
+.rectoria-break-accordion[open] {
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.06);
+}
+
+.rectoria-break-accordion-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  cursor: pointer;
+  background:
+    linear-gradient(135deg, rgba(240, 253, 250, 0.9) 0%, rgba(255, 255, 255, 0.98) 45%, rgba(239, 246, 255, 0.92) 100%);
+}
+
+.rectoria-break-accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rectoria-break-accordion-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.rectoria-break-accordion-copy strong {
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.rectoria-break-accordion-copy span {
+  color: #0f766e;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rectoria-break-accordion-copy p {
+  margin: 0;
+  color: #64748b;
+}
+
+.rectoria-break-accordion-meta {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.rectoria-break-accordion-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: #115e59;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.rectoria-break-accordion-meta small {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rectoria-break-accordion-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 18px;
+}
+
+.rectoria-break-day-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+}
+
+.rectoria-break-day-summary {
+  align-items: flex-start;
+}
+
+.rectoria-break-day-body {
+  padding-top: 0;
+}
+
+.rectoria-break-day-table {
+  display: grid;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.rectoria-break-day-table-head {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.rectoria-break-day-table-body {
+  display: grid;
+}
+
+.rectoria-break-day-table-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(140px, 0.9fr) minmax(220px, 1.5fr) minmax(240px, 1.2fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px 16px;
+}
+
+.rectoria-break-day-table-row--head {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.rectoria-break-day-table-row--head span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.rectoria-break-day-table-body .rectoria-break-day-table-row + .rectoria-break-day-table-row {
+  border-top: 1px solid #eef2f7;
+}
+
+.rectoria-break-day-table-cell {
+  min-width: 0;
+}
+
+.rectoria-break-day-table-cell strong {
+  color: #0f172a;
+}
+
+.rectoria-break-day-table-cell span {
+  color: #475569;
+}
+
+.rectoria-break-day-grade-list {
+  margin: 0;
+}
+
+.rectoria-break-day-actions {
+  justify-content: flex-start;
+}
+
+.rectoria-break-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dbe4ef;
+  border-radius: 20px;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-break-card p {
+  margin: 6px 0 0;
+  color: #475569;
+}
+
+.rectoria-break-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rectoria-schedule-cell--break {
+  border-radius: 14px;
+  border: 1px dashed #f59e0b;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.18) 0%, rgba(254, 243, 199, 0.7) 100%);
+  padding: 10px;
+}
+
+.rectoria-schedule-cell--unavailable {
+  border-radius: 14px;
+  border: 1px dashed #cbd5e1;
+  background: linear-gradient(180deg, rgba(241, 245, 249, 0.9) 0%, rgba(248, 250, 252, 1) 100%);
+  padding: 10px;
+}
+
+.rectoria-schedule-cell--unavailable strong {
+  color: #475569;
+}
+
+.rectoria-schedule-cell--break strong {
+  margin: 0;
+  display: block;
+  font-size: 0.95rem;
+  color: #92400e;
+}
+
+.rectoria-schedule-grid {
+  min-width: 980px;
+}
+
+.rectoria-schedule-cell {
+  display: grid;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.rectoria-schedule-cell small {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 980px) {
+  .rectoria-portal-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .rectoria-sidebar {
+    position: static;
+  }
+
+  .rectoria-grid--team {
+    grid-template-columns: 1fr;
+  }
+
+  .rectoria-hero {
+    flex-direction: column;
+  }
+
+  .rectoria-billing-intro {
+    flex-direction: column;
+  }
+
+  .rectoria-overview-kpi--billing {
+    grid-column: span 1;
+  }
+
+  .rectoria-subtabs {
+    width: 100%;
+  }
+
+  .rectoria-approval-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .rectoria-benefit-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .rectoria-benefit-fixed-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rectoria-inline-form,
+  .rectoria-period-row,
+  .rectoria-grading-scale-list .rectoria-period-row,
+  .rectoria-grading-level-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rectoria-grading-levels-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rectoria-form-row {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .rectoria-form-field,
+  .rectoria-form-field--title,
+  .rectoria-form-field--name,
+  .rectoria-form-field--email,
+  .rectoria-form-field--phone,
+  .rectoria-form-field--password,
+  .rectoria-form-field--role,
+  .rectoria-form-field--scope,
+  .rectoria-form-field--subjects {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .rectoria-role-accordion-summary,
+  .rectoria-user-card,
+  .rectoria-user-actions,
+  .rectoria-team-level-actions,
+  .rectoria-billing-intro,
+  .rectoria-fee-actions,
+  .rectoria-modal-head,
+  .rectoria-modal-actions,
+  .rectoria-bucket-head,
+  .rectoria-bucket-entry,
+  .rectoria-benefits-header,
+  .rectoria-section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rectoria-billing-intro-metrics,
+  .rectoria-billing-grid--headline,
+  .rectoria-overview-kpi-strip,
+  .rectoria-overview-level-summary,
+  .rectoria-overview-mini-grid,
+  .rectoria-overview-academic-alerts {
+    grid-template-columns: 1fr;
+  }
+
+  .rectoria-overview-kpi strong {
+    font-size: 2.25rem;
+  }
+
+  .rectoria-overview-levels-total {
+    width: 56px;
+    height: 56px;
+  }
+
+  .rectoria-billing-actions {
+    justify-content: stretch;
+  }
+
+  .rectoria-row-actions {
+    justify-content: flex-start;
+  }
+
+  .rectoria-communication-media-card {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .rectoria-communication-media-thumb {
+    width: 58px;
+  }
+
+  .rectoria-communication-media-card a {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .rectoria-schedule-grid {
+    min-width: 760px;
+  }
+
+  .rectoria-schedule-cell {
+    min-width: 130px;
+  }
+
+  .rectoria-break-card-actions,
+  .rectoria-break-grade-picker,
+  .rectoria-break-accordion-summary,
+  .rectoria-break-day-table-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rectoria-break-day-table-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .rectoria-break-day-table-row--head {
+    display: none;
+  }
+
+  .rectoria-break-accordion-meta {
+    justify-items: start;
+  }
+}
