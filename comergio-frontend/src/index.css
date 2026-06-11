@@ -448,6 +448,17 @@
     min-width: 0;
     text-align: left;
   }
+
+  .super-admin-detail-action-buttons {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .super-admin-detail-action-buttons button {
+    width: 100%;
+  }
 }
 
 .hr-portal__form {

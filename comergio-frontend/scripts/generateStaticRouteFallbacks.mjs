@@ -6,6 +6,7 @@ const DIST_DEPLOY_DIR = path.resolve(process.cwd(), 'dist-deploy');
 
 // Fallback directories for hosting providers where SPA rewrites are ignored.
 const ROUTE_FALLBACKS = [
+  'super-admin',
   'admin',
   'academic-secretary/admissions',
   'academic-secretary/admissions/stage/interesados',
