@@ -42,6 +42,7 @@ function getDefaultFeatures(features = {}) {
 
 function buildDraftFromSchool(school = {}) {
   return {
+    schoolName: school.schoolName || '',
     subscriptionStatus: school.settings?.subscriptionStatus || 'subscribed',
     pricePerStudent: String(Number(school.settings?.pricePerStudent || 0)),
     notes: school.settings?.notes || '',
@@ -290,11 +291,18 @@ function SuperAdminPortal() {
       return;
     }
 
+    const normalizedSchoolName = String(selectedDraft.schoolName || '').trim();
+    if (normalizedSchoolName.length < 3) {
+      setMessage('El nombre del colegio debe tener al menos 3 caracteres.');
+      return;
+    }
+
     setSavingSchoolId(selectedSchool.schoolId);
     setMessage('');
     try {
       const response = await updateSuperAdminSchoolSettings(selectedSchool.schoolId, {
         ...selectedDraft,
+        schoolName: normalizedSchoolName,
         pricePerStudent: Number(selectedDraft.pricePerStudent || 0),
       });
       const updatedSchool = response.data?.school;
@@ -438,6 +446,15 @@ function SuperAdminPortal() {
             </div>
 
             <div className="super-admin-form-grid">
+              <label className="is-wide">
+                Nombre del colegio
+                <input
+                  onChange={(event) => updateDraft(selectedSchool.schoolId, { schoolName: event.target.value })}
+                  placeholder="Nombre visible en login y toda la app"
+                  type="text"
+                  value={selectedDraft.schoolName}
+                />
+              </label>
               <label>
                 Estado comercial
                 <select

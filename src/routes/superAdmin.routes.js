@@ -6,9 +6,8 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const { deleteSchoolTenant, listTenantSchoolContexts, runWithSchoolContext } = require('../config/db');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
-const AcademicStructure = require('../models/academicStructure.model');
-const SchoolCreationSnapshot = require('../models/schoolCreationSnapshot.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
+const { getSchoolDisplayName, updateSchoolDisplayName } = require('../utils/schoolDisplayName');
 
 const router = express.Router();
 
@@ -57,22 +56,6 @@ function serializeSettings(settings = {}) {
     notes: normalizeText(settings.notes),
     updatedAt: settings.updatedAt || null,
   };
-}
-
-function humanizeSchoolId(value) {
-  return normalizeText(value)
-    .replace(/[_-][a-z0-9]{5}$/i, '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-async function getSchoolDisplayName(schoolId) {
-  const [snapshot, academicStructure] = await Promise.all([
-    SchoolCreationSnapshot.findOne({ schoolId }).sort({ completedAt: -1, updatedAt: -1 }).select('schoolName').lean(),
-    AcademicStructure.findOne({ schoolId }).select('schoolName').lean(),
-  ]);
-
-  return normalizeText(snapshot?.schoolName || academicStructure?.schoolName) || humanizeSchoolId(schoolId) || schoolId;
 }
 
 function serializeRectoriaUser(user) {
@@ -171,18 +154,27 @@ router.patch('/schools/:schoolId/settings', async (req, res) => {
       updatedBy: normalizeText(req.user?.username || req.user?.name),
     };
 
+    const nextSchoolName = req.body?.schoolName !== undefined
+      ? normalizeText(req.body.schoolName)
+      : null;
+
     await runWithSchoolContext(targetSchoolId, async () => {
       await SuperAdminSchoolSettings.findOneAndUpdate(
         { schoolId: targetSchoolId },
         { $set: updates },
         { new: true, upsert: true, setDefaultsOnInsert: true }
       );
+
+      if (nextSchoolName !== null) {
+        await updateSchoolDisplayName(targetSchoolId, nextSchoolName);
+      }
     });
 
     const school = await getSchoolSummary(tenantContext);
     return res.status(200).json({ school });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 

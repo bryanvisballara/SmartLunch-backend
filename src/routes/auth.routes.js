@@ -15,8 +15,7 @@ const User = require('../models/user.model');
 const Student = require('../models/student.model');
 const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
-const AcademicStructure = require('../models/academicStructure.model');
-const SchoolCreationSnapshot = require('../models/schoolCreationSnapshot.model');
+const { getSchoolDisplayName, humanizeSchoolId, normalizeText } = require('../utils/schoolDisplayName');
 const EmailVerification = require('../models/emailVerification.model');
 const PasswordResetCode = require('../models/passwordResetCode.model');
 const DeviceToken = require('../models/deviceToken.model');
@@ -84,14 +83,6 @@ function compareSchoolOptions(left, right) {
   return String(left?.label || left?.id || '').localeCompare(String(right?.label || right?.id || ''), 'es', { sensitivity: 'base' });
 }
 
-function humanizeSchoolId(value) {
-  const normalizedValue = normalizeSchoolId(value)
-    .replace(/[_-][a-z0-9]{5}$/i, '')
-    .replace(/[_-]+/g, ' ');
-
-  return normalizedValue.replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 function normalizeSchoolLabelKey(value) {
   return String(value || '')
     .normalize('NFD')
@@ -99,15 +90,6 @@ function normalizeSchoolLabelKey(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
-}
-
-function buildSchoolOptionLabel(rawLabel, schoolId) {
-  const label = normalizeSchoolId(rawLabel);
-  if (label && label !== schoolId) {
-    return label;
-  }
-
-  return humanizeSchoolId(schoolId);
 }
 
 function isSuperAdminLogin(identifier, password) {
@@ -191,22 +173,13 @@ router.get('/schools', async (_req, res) => {
 
     for (const tenantContext of tenantContexts) {
       const school = await runWithSchoolContext(tenantContext.schoolId, async () => {
-        const snapshot = await SchoolCreationSnapshot.findOne({ schoolId: tenantContext.schoolId })
-          .sort({ completedAt: -1, updatedAt: -1 })
-          .select('schoolId schoolName updatedAt completedAt')
-          .lean();
-        const academicStructure = snapshot?.schoolName
-          ? null
-          : await AcademicStructure.findOne({ schoolId: tenantContext.schoolId })
-            .select('schoolId schoolName updatedAt')
-            .lean();
-        const rawLabel = snapshot?.schoolName || academicStructure?.schoolName || tenantContext.schoolId;
+        const label = await getSchoolDisplayName(tenantContext.schoolId);
 
         return {
           id: tenantContext.schoolId,
-          label: buildSchoolOptionLabel(rawLabel, tenantContext.schoolId),
+          label,
           country: 'CO',
-          hasExplicitLabel: Boolean(snapshot?.schoolName || academicStructure?.schoolName),
+          hasExplicitLabel: label !== humanizeSchoolId(tenantContext.schoolId),
         };
       });
 
@@ -749,7 +722,7 @@ function pruneAuthSessions(sessions) {
     .slice(-MAX_AUTH_SESSIONS_PER_USER);
 }
 
-function buildAuthResponse(user, refreshToken) {
+function buildAuthResponse(user, refreshToken, schoolName = '') {
   const token = signAccessToken(user);
   const assignedStoreSource = user?.assignedStoreId && typeof user.assignedStoreId === 'object' && user.assignedStoreId.name
     ? user.assignedStoreId
@@ -768,6 +741,7 @@ function buildAuthResponse(user, refreshToken) {
     user: {
       id: user._id,
       schoolId: user.schoolId,
+      schoolName: schoolName || humanizeSchoolId(user.schoolId) || user.schoolId,
       name: user.name,
       username: user.username,
       role: user.role,
@@ -793,7 +767,8 @@ async function issueAuthResponse(user) {
     .slice(-MAX_AUTH_SESSIONS_PER_USER);
   await user.save();
 
-  return buildAuthResponse(user, refreshToken);
+  const schoolName = await getSchoolDisplayName(user.schoolId);
+  return buildAuthResponse(user, refreshToken, schoolName);
 }
 
 function ensureParent(user, res) {
@@ -954,7 +929,8 @@ router.post('/refresh', async (req, res) => {
     ].slice(-MAX_AUTH_SESSIONS_PER_USER);
     await user.save();
 
-    return res.status(200).json(buildAuthResponse(user, rotatedRefreshToken));
+    const schoolName = await getSchoolDisplayName(user.schoolId);
+    return res.status(200).json(buildAuthResponse(user, rotatedRefreshToken, schoolName));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -1355,8 +1331,11 @@ router.get('/me', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    const schoolName = await getSchoolDisplayName(user.schoolId);
+
     return res.status(200).json({
       ...user.toObject(),
+      schoolName,
       assignedStore: user.assignedStoreId
         ? {
           _id: user.assignedStoreId._id,
