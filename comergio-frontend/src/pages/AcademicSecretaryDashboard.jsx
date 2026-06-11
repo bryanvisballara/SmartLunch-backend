@@ -757,6 +757,18 @@ function buildCostProjectionPrintHtml({ schoolName, gradeLabel, generatedAtLabel
         font-size: 13px;
         line-height: 1.5;
       }
+      .disclaimer {
+        margin-top: 14px;
+        padding: 12px 16px;
+        border: 1px solid #f0d9a8;
+        border-radius: 14px;
+        background: #fff8eb;
+        color: #7a5b1a;
+        font-size: 13px;
+        font-weight: 700;
+        line-height: 1.45;
+        text-align: center;
+      }
       .footer {
         display: flex;
         justify-content: space-between;
@@ -809,6 +821,7 @@ function buildCostProjectionPrintHtml({ schoolName, gradeLabel, generatedAtLabel
         <section class="summary-grid">${summaryMarkup}</section>
         <h2 class="section-title">Opciones seleccionadas</h2>
         <section class="options">${optionMarkup}</section>
+        <div class="disclaimer">Costos son sujetos a año escolar vigente</div>
       </section>
       <section class="sheet-spacer print-page print-page--values">
         <h2 class="section-title">Valores normales y beneficios disponibles</h2>
@@ -1435,6 +1448,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [selectedCostGrade, setSelectedCostGrade] = useState('');
   const [costSimulationDraft, setCostSimulationDraft] = useState({
     entryDate: '',
+    costQuoteValidity: '',
     enrollmentSimulationRuleKey: 'manual',
     enrollmentBonusInstallments: 1,
     annualTuitionInstallments: 1,
@@ -1952,6 +1966,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       ],
       optionRows: [
         { label: 'Fecha de ingreso', value: costSimulationDraft.entryDate ? formatDate(costSimulationDraft.entryDate) : 'No definida' },
+        { label: 'Vigencia de cotización para costos', value: costSimulationDraft.costQuoteValidity?.trim() || 'No definida' },
         { label: 'Escenario matrícula', value: selectedCostSimulationEnrollmentOption?.label || 'Fecha manual' },
         { label: 'Financiación matrícula', value: `${Math.max(1, Number(costSimulationDraft.annualTuitionInstallments || 1))} ${Number(costSimulationDraft.annualTuitionInstallments || 1) === 1 ? 'mes' : 'meses'}` },
         { label: 'Forma de pago del bono', value: costSimulationIncludesBonusInMonthlyProjection ? `${costSimulationBonusInstallments} meses` : 'De contado' },
@@ -3652,6 +3667,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   </div>
                   <div className="academic-secretary__form-grid">
                     <label>Fecha de ingreso<input type="date" value={costSimulationDraft.entryDate} onChange={(event) => setCostSimulationDraft((previous) => ({ ...previous, entryDate: event.target.value, enrollmentSimulationRuleKey: 'manual' }))} /></label>
+                    <label>Vigencia de cotización para costos<input value={costSimulationDraft.costQuoteValidity} onChange={(event) => setCostSimulationDraft((previous) => ({ ...previous, costQuoteValidity: event.target.value }))} placeholder="Ej: 2025-2026" /></label>
                     <label>Financiar bono en<select value={costSimulationDraft.enrollmentBonusInstallments} onChange={(event) => setCostSimulationDraft((previous) => ({ ...previous, enrollmentBonusInstallments: event.target.value }))}>{ACADEMIC_FINANCING_INSTALLMENT_OPTIONS.map((option) => <option key={`cost-bonus-${option}`} value={option}>{option} {option === 1 ? 'mes' : 'meses'}</option>)}</select></label>
                     <label>Financiar matrícula en<select value={costSimulationDraft.annualTuitionInstallments} onChange={(event) => setCostSimulationDraft((previous) => ({ ...previous, annualTuitionInstallments: event.target.value }))}>{ACADEMIC_FINANCING_INSTALLMENT_OPTIONS.map((option) => <option key={`cost-tuition-${option}`} value={option}>{option} {option === 1 ? 'mes' : 'meses'}</option>)}</select></label>
                     <label>Descuento adicional matrícula (%)<input type="number" min="0" max="100" value={costSimulationDraft.annualTuitionAdditionalDiscountPercent} onChange={(event) => setCostSimulationDraft((previous) => ({ ...previous, annualTuitionAdditionalDiscountPercent: event.target.value }))} placeholder="0" /></label>
