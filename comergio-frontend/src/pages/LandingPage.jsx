@@ -23,6 +23,8 @@ const SCROLL_PHYSICS = {
   maxFrameDelta: 0.032,
 };
 
+let landingFramesCache = null;
+
 function clamp(value, min = 0, max = 1) {
   return Math.min(Math.max(value, min), max);
 }
@@ -234,9 +236,12 @@ function LandingPage() {
   }, []);
 
   const applyProgressRef = useRef(applyProgress);
-  applyProgressRef.current = applyProgress;
   const syncMediaSizeRef = useRef(syncMediaSize);
-  syncMediaSizeRef.current = syncMediaSize;
+
+  useLayoutEffect(() => {
+    applyProgressRef.current = applyProgress;
+    syncMediaSizeRef.current = syncMediaSize;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -245,10 +250,35 @@ function LandingPage() {
       return undefined;
     }
 
-    setLoading(true);
-    setLoadProgress(0);
     velocityRef.current = 0;
     progressRef.current = 0;
+
+    const finishBootstrap = (frames, width, height) => {
+      mediaSizeRef.current = { width, height };
+      framesRef.current = frames;
+
+      if (canvasRef.current) {
+        canvasRef.current.width = width;
+        canvasRef.current.height = height;
+        const ctx = canvasRef.current.getContext('2d');
+        ctx.drawImage(frames[0], 0, 0, NATIVE_WIDTH, NATIVE_HEIGHT);
+        lastFrameIndexRef.current = 0;
+      }
+
+      applyProgressRef.current(0);
+      syncMediaSizeRef.current();
+      setLoadProgress(1);
+      setLoading(false);
+    };
+
+    if (landingFramesCache) {
+      finishBootstrap(
+        landingFramesCache.frames,
+        landingFramesCache.size.width,
+        landingFramesCache.size.height,
+      );
+      return undefined;
+    }
 
     const waitForEvent = (eventName) => new Promise((resolve, reject) => {
       const onSuccess = () => {
@@ -313,34 +343,23 @@ function LandingPage() {
         throw new Error('No video frames extracted');
       }
 
-      mediaSizeRef.current = { width, height };
-      framesRef.current = frames;
+      landingFramesCache = {
+        frames,
+        size: { width, height },
+      };
 
-      if (canvasRef.current) {
-        canvasRef.current.width = width;
-        canvasRef.current.height = height;
-        const ctx = canvasRef.current.getContext('2d');
-        ctx.drawImage(frames[0], 0, 0, NATIVE_WIDTH, NATIVE_HEIGHT);
-        lastFrameIndexRef.current = 0;
-      }
-
-      applyProgressRef.current(0);
-      syncMediaSizeRef.current();
-      setLoadProgress(1);
-      setLoading(false);
+      finishBootstrap(frames, width, height);
     };
 
     bootstrap().catch(() => {
       if (!cancelled) {
         framesRef.current = [];
         setLoadProgress(0);
-        setLoading(true);
       }
     });
 
     return () => {
       cancelled = true;
-      framesRef.current.forEach((bitmap) => bitmap.close());
       framesRef.current = [];
       lastFrameIndexRef.current = -1;
     };
