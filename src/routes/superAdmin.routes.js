@@ -230,18 +230,12 @@ router.post('/schools/:schoolId/rectoria', async (req, res) => {
       return res.status(400).json({ message: 'El nombre de usuario es obligatorio.' });
     }
 
-    if (!password || password.length < 8) {
-      return res.status(400).json({ message: 'La contraseña debe tener al menos 8 caracteres.' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-
     const result = await runWithSchoolContext(targetSchoolId, async () => {
       const existingRectoria = await User.findOne({
         schoolId: targetSchoolId,
         role: 'rectoria',
         deletedAt: null,
-      }).select('_id username name email phone role status schoolId');
+      }).select('_id username name email phone role status schoolId passwordHash');
 
       const usernameOwner = await User.findOne({
         username: normalizedUsername,
@@ -261,8 +255,16 @@ router.post('/schools/:schoolId/rectoria', async (req, res) => {
       }
 
       if (existingRectoria) {
+        if (password && password.length < 8) {
+          const validationError = new Error('La contraseña debe tener al menos 8 caracteres.');
+          validationError.statusCode = 400;
+          throw validationError;
+        }
+
         existingRectoria.username = normalizedUsername;
-        existingRectoria.passwordHash = passwordHash;
+        if (password) {
+          existingRectoria.passwordHash = await bcrypt.hash(password, 10);
+        }
         existingRectoria.name = name || existingRectoria.name;
         existingRectoria.email = email || existingRectoria.email || '';
         existingRectoria.status = 'active';
@@ -270,6 +272,14 @@ router.post('/schools/:schoolId/rectoria', async (req, res) => {
         await existingRectoria.save();
         return { user: existingRectoria, isUpdate: true };
       }
+
+      if (!password || password.length < 8) {
+        const validationError = new Error('La contraseña debe tener al menos 8 caracteres.');
+        validationError.statusCode = 400;
+        throw validationError;
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10);
 
       const createdUser = await User.create({
         schoolId: targetSchoolId,

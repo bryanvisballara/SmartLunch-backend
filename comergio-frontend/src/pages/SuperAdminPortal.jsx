@@ -79,7 +79,8 @@ function SuperAdminPortal() {
   const [rectoriaDraft, setRectoriaDraft] = useState(buildRectoriaDraft());
   const [loadingRectoria, setLoadingRectoria] = useState(false);
   const [savingRectoria, setSavingRectoria] = useState(false);
-  const [rectoriaMessage, setRectoriaMessage] = useState('');
+  const [rectoriaFeedback, setRectoriaFeedback] = useState(null);
+  const [rectoriaFeedbackFading, setRectoriaFeedbackFading] = useState(false);
 
   const selectedSchool = useMemo(
     () => summary.schools.find((school) => school.schoolId === selectedSchoolId) || summary.schools[0] || null,
@@ -119,16 +120,69 @@ function SuperAdminPortal() {
   }, []);
 
   useEffect(() => {
+    if (!rectoriaFeedback || rectoriaFeedback.type !== 'success') {
+      setRectoriaFeedbackFading(false);
+      return undefined;
+    }
+
+    setRectoriaFeedbackFading(false);
+
+    const fadeTimer = setTimeout(() => {
+      setRectoriaFeedbackFading(true);
+    }, 2700);
+
+    const closeTimer = setTimeout(() => {
+      setRectoriaFeedback(null);
+      setRectoriaFeedbackFading(false);
+    }, 3000);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(closeTimer);
+    };
+  }, [rectoriaFeedback]);
+
+  const showRectoriaFeedback = (type, message) => {
+    setRectoriaFeedback({ type, message });
+  };
+
+  const loadRectoriaUser = async (schoolId, { showLoading = true, clearFeedback = true } = {}) => {
+    if (showLoading) {
+      setLoadingRectoria(true);
+    }
+    if (clearFeedback) {
+      setRectoriaFeedback(null);
+    }
+
+    try {
+      const response = await getSuperAdminRectoriaUser(schoolId);
+      const nextUser = response.data?.user || null;
+      setRectoriaUser(nextUser);
+      setRectoriaDraft(buildRectoriaDraft(nextUser));
+      return nextUser;
+    } catch (error) {
+      setRectoriaUser(null);
+      setRectoriaDraft(buildRectoriaDraft());
+      showRectoriaFeedback('error', error?.response?.data?.message || error?.message || 'No se pudo cargar el usuario de rectoría.');
+      return null;
+    } finally {
+      if (showLoading) {
+        setLoadingRectoria(false);
+      }
+    }
+  };
+
+  useEffect(() => {
     if (!selectedSchool?.schoolId) {
       setRectoriaUser(null);
       setRectoriaDraft(buildRectoriaDraft());
-      setRectoriaMessage('');
+      setRectoriaFeedback(null);
       return undefined;
     }
 
     let cancelled = false;
     setLoadingRectoria(true);
-    setRectoriaMessage('');
+    setRectoriaFeedback(null);
 
     getSuperAdminRectoriaUser(selectedSchool.schoolId)
       .then((response) => {
@@ -147,7 +201,7 @@ function SuperAdminPortal() {
 
         setRectoriaUser(null);
         setRectoriaDraft(buildRectoriaDraft());
-        setRectoriaMessage(error?.response?.data?.message || error?.message || 'No se pudo cargar el usuario de rectoría.');
+        showRectoriaFeedback('error', error?.response?.data?.message || error?.message || 'No se pudo cargar el usuario de rectoría.');
       })
       .finally(() => {
         if (!cancelled) {
@@ -168,38 +222,47 @@ function SuperAdminPortal() {
     const normalizedUsername = String(rectoriaDraft.username || '').trim().toLowerCase();
     const password = String(rectoriaDraft.password || '');
     const confirmPassword = String(rectoriaDraft.confirmPassword || '');
+    const isUpdate = Boolean(rectoriaUser);
 
     if (!normalizedUsername) {
-      setRectoriaMessage('El nombre de usuario es obligatorio.');
+      showRectoriaFeedback('error', 'El nombre de usuario es obligatorio.');
       return;
     }
 
-    if (!password || password.length < 8) {
-      setRectoriaMessage('La contraseña debe tener al menos 8 caracteres.');
+    if (!isUpdate && (!password || password.length < 8)) {
+      showRectoriaFeedback('error', 'La contraseña debe tener al menos 8 caracteres.');
       return;
     }
 
-    if (password !== confirmPassword) {
-      setRectoriaMessage('Las contraseñas no coinciden.');
+    if (password && password.length < 8) {
+      showRectoriaFeedback('error', 'La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (password && password !== confirmPassword) {
+      showRectoriaFeedback('error', 'Las contraseñas no coinciden.');
       return;
     }
 
     setSavingRectoria(true);
-    setRectoriaMessage('');
+    setRectoriaFeedback(null);
 
     try {
-      const response = await saveSuperAdminRectoriaUser(selectedSchool.schoolId, {
+      const payload = {
         username: normalizedUsername,
-        password,
         name: String(rectoriaDraft.name || '').trim(),
         email: String(rectoriaDraft.email || '').trim(),
-      });
-      const nextUser = response.data?.user || null;
-      setRectoriaUser(nextUser);
-      setRectoriaDraft(buildRectoriaDraft(nextUser));
-      setRectoriaMessage(response.data?.message || 'Usuario de rectoría guardado.');
+      };
+
+      if (password) {
+        payload.password = password;
+      }
+
+      const response = await saveSuperAdminRectoriaUser(selectedSchool.schoolId, payload);
+      await loadRectoriaUser(selectedSchool.schoolId, { showLoading: false, clearFeedback: false });
+      showRectoriaFeedback('success', response.data?.message || 'Usuario de rectoría guardado.');
     } catch (error) {
-      setRectoriaMessage(error?.response?.data?.message || error?.message || 'No se pudo guardar el usuario de rectoría.');
+      showRectoriaFeedback('error', error?.response?.data?.message || error?.message || 'No se pudo guardar el usuario de rectoría.');
     } finally {
       setSavingRectoria(false);
     }
@@ -440,7 +503,9 @@ function SuperAdminPortal() {
               </div>
 
               {loadingRectoria ? <p className="super-admin-muted">Cargando usuario de rectoría...</p> : null}
-              {rectoriaMessage ? <p className="super-admin-message">{rectoriaMessage}</p> : null}
+              {rectoriaFeedback?.type === 'error' ? (
+                <p className="super-admin-message super-admin-message--error" role="alert">{rectoriaFeedback.message}</p>
+              ) : null}
 
               {rectoriaUser ? (
                 <p className="super-admin-muted">
@@ -479,19 +544,21 @@ function SuperAdminPortal() {
                   />
                 </label>
                 <label>
-                  Contraseña
+                  {rectoriaUser ? 'Nueva contraseña (opcional)' : 'Contraseña'}
                   <input
                     autoComplete="new-password"
                     onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, password: event.target.value }))}
+                    placeholder={rectoriaUser ? 'Dejar vacío para mantener la actual' : ''}
                     type="password"
                     value={rectoriaDraft.password}
                   />
                 </label>
                 <label>
-                  Confirmar contraseña
+                  {rectoriaUser ? 'Confirmar nueva contraseña' : 'Confirmar contraseña'}
                   <input
                     autoComplete="new-password"
                     onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, confirmPassword: event.target.value }))}
+                    placeholder={rectoriaUser ? 'Solo si cambia la contraseña' : ''}
                     type="password"
                     value={rectoriaDraft.confirmPassword}
                   />
@@ -536,6 +603,20 @@ function SuperAdminPortal() {
           <section className="super-admin-detail"><p className="super-admin-muted">No hay colegios disponibles.</p></section>
         )}
       </div>
+
+      {rectoriaFeedback?.type === 'success' ? (
+        <div
+          className={`snack-save-toast admin-confirm-toast${rectoriaFeedbackFading ? ' is-fading' : ''}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="snack-save-toast-icon" aria-hidden="true">✓</div>
+          <div className="snack-save-toast-text">
+            <h4>Usuario de rectoría</h4>
+            <p>{rectoriaFeedback.message}</p>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -222,6 +222,12 @@
   font-weight: 750;
 }
 
+.super-admin-message--error {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+}
+
 .super-admin-kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
