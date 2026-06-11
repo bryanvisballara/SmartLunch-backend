@@ -217,9 +217,8 @@ function extractAcademicGradeLevel(value) {
     return '';
   }
 
-  const numericMatch = normalized.match(/(\d{1,2})/);
-  if (numericMatch) {
-    return numericMatch[1];
+  if (/^\d{1,2}$/.test(normalized)) {
+    return normalized;
   }
 
   const normalizedLetters = normalized
@@ -231,7 +230,16 @@ function extractAcademicGradeLevel(value) {
   if (normalizedLetters.includes('jardin')) return 'Jardin';
   if (normalizedLetters.includes('transicion')) return 'Transicion';
 
-  return normalized;
+  if (/[a-z]/i.test(normalized)) {
+    return slugifyAcademicStructureKey(normalized);
+  }
+
+  const leadingNumericMatch = normalized.match(/^(\d{1,2})/);
+  if (leadingNumericMatch) {
+    return leadingNumericMatch[1];
+  }
+
+  return slugifyAcademicStructureKey(normalized) || normalized;
 }
 
 function getAcademicCourseSectionFromKey(courseKey = '') {
@@ -5557,6 +5565,7 @@ router.post('/academic-management/grades', async (req, res) => {
         return {
           ...grade,
           label: rawGradeLabel,
+          levelKey,
         };
       });
 

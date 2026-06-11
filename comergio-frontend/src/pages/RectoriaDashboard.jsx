@@ -495,9 +495,8 @@ function normalizeAcademicGradeKey(value) {
     return '';
   }
 
-  const numericMatch = normalized.match(/^(\d{1,2})/);
-  if (numericMatch) {
-    return numericMatch[1];
+  if (/^\d{1,2}$/.test(normalized)) {
+    return normalized;
   }
 
   const normalizedLetters = normalized
@@ -508,7 +507,17 @@ function normalizeAcademicGradeKey(value) {
   if (normalizedLetters.includes('prejardin')) return 'Prejardin';
   if (normalizedLetters.includes('jardin')) return 'Jardin';
   if (normalizedLetters.includes('transicion')) return 'Transicion';
-  return normalized;
+
+  if (/[a-z]/i.test(normalized)) {
+    return normalizeEducationalLevelKey(normalized);
+  }
+
+  const leadingNumericMatch = normalized.match(/^(\d{1,2})/);
+  if (leadingNumericMatch) {
+    return leadingNumericMatch[1];
+  }
+
+  return normalizeEducationalLevelKey(normalized) || normalized;
 }
 
 function normalizeAcademicScheduleSlotKey(weekday, block) {
