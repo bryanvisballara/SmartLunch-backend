@@ -1,4 +1,5 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -72,6 +73,30 @@ async function getSchoolDisplayName(schoolId) {
   ]);
 
   return normalizeText(snapshot?.schoolName || academicStructure?.schoolName) || humanizeSchoolId(schoolId) || schoolId;
+}
+
+function serializeRectoriaUser(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    _id: user._id,
+    schoolId: user.schoolId,
+    name: user.name,
+    username: user.username,
+    email: user.email || '',
+    phone: user.phone || '',
+    role: user.role,
+    status: user.status,
+    createdAt: user.createdAt || null,
+    updatedAt: user.updatedAt || null,
+  };
+}
+
+async function findTenantContext(schoolId) {
+  const tenantContexts = await listTenantSchoolContexts();
+  return tenantContexts.find((context) => context.schoolId === schoolId) || null;
 }
 
 async function getSchoolSummary(tenantContext) {
@@ -158,6 +183,115 @@ router.patch('/schools/:schoolId/settings', async (req, res) => {
     return res.status(200).json({ school });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/schools/:schoolId/rectoria', async (req, res) => {
+  try {
+    const targetSchoolId = normalizeText(req.params.schoolId);
+    const tenantContext = await findTenantContext(targetSchoolId);
+
+    if (!tenantContext) {
+      return res.status(404).json({ message: 'Colegio no encontrado' });
+    }
+
+    const user = await runWithSchoolContext(targetSchoolId, async () => (
+      User.findOne({
+        schoolId: targetSchoolId,
+        role: 'rectoria',
+        deletedAt: null,
+      })
+        .select('_id schoolId name username email phone role status createdAt updatedAt')
+        .sort({ createdAt: 1 })
+        .lean()
+    ));
+
+    return res.status(200).json({ user: serializeRectoriaUser(user) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/schools/:schoolId/rectoria', async (req, res) => {
+  try {
+    const targetSchoolId = normalizeText(req.params.schoolId);
+    const tenantContext = await findTenantContext(targetSchoolId);
+
+    if (!tenantContext) {
+      return res.status(404).json({ message: 'Colegio no encontrado' });
+    }
+
+    const normalizedUsername = normalizeText(req.body?.username).toLowerCase();
+    const password = String(req.body?.password || '');
+    const name = normalizeText(req.body?.name);
+    const email = normalizeText(req.body?.email).toLowerCase();
+
+    if (!normalizedUsername) {
+      return res.status(400).json({ message: 'El nombre de usuario es obligatorio.' });
+    }
+
+    if (!password || password.length < 8) {
+      return res.status(400).json({ message: 'La contraseña debe tener al menos 8 caracteres.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const result = await runWithSchoolContext(targetSchoolId, async () => {
+      const existingRectoria = await User.findOne({
+        schoolId: targetSchoolId,
+        role: 'rectoria',
+        deletedAt: null,
+      }).select('_id username name email phone role status schoolId');
+
+      const usernameOwner = await User.findOne({
+        username: normalizedUsername,
+        deletedAt: null,
+      }).select('_id schoolId role username');
+
+      if (usernameOwner) {
+        const isSameRectoria = existingRectoria && String(usernameOwner._id) === String(existingRectoria._id);
+        const isSameSchoolDifferentRole = String(usernameOwner.schoolId) === targetSchoolId && usernameOwner.role !== 'rectoria';
+        const isDifferentSchool = String(usernameOwner.schoolId) !== targetSchoolId;
+
+        if (isDifferentSchool || isSameSchoolDifferentRole || (existingRectoria && !isSameRectoria)) {
+          const conflictError = new Error('El nombre de usuario ya está registrado.');
+          conflictError.statusCode = 409;
+          throw conflictError;
+        }
+      }
+
+      if (existingRectoria) {
+        existingRectoria.username = normalizedUsername;
+        existingRectoria.passwordHash = passwordHash;
+        existingRectoria.name = name || existingRectoria.name;
+        existingRectoria.email = email || existingRectoria.email || '';
+        existingRectoria.status = 'active';
+        existingRectoria.deletedAt = null;
+        await existingRectoria.save();
+        return { user: existingRectoria, isUpdate: true };
+      }
+
+      const createdUser = await User.create({
+        schoolId: targetSchoolId,
+        name: name || 'Usuario de rectoría',
+        username: normalizedUsername,
+        email,
+        passwordHash,
+        role: 'rectoria',
+        status: 'active',
+        deletedAt: null,
+      });
+
+      return { user: createdUser, isUpdate: false };
+    });
+
+    return res.status(result.isUpdate ? 200 : 201).json({
+      message: result.isUpdate ? 'Usuario de rectoría actualizado.' : 'Usuario de rectoría creado.',
+      user: serializeRectoriaUser(result.user),
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 

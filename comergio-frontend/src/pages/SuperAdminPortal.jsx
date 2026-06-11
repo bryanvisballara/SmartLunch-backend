@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
-import { deleteSuperAdminSchool, getSuperAdminSummary, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
+import { deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
 
 const featureOptions = [
   { key: 'home', label: 'Inicio' },
@@ -49,6 +49,21 @@ function buildDraftFromSchool(school = {}) {
   };
 }
 
+function buildRectoriaDraft(existingUser = null) {
+  return {
+    username: existingUser?.username || '',
+    password: '',
+    confirmPassword: '',
+    name: existingUser?.name || '',
+    email: existingUser?.email || '',
+  };
+}
+
+function generateRectoriaPassword() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$';
+  return Array.from({ length: 12 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+}
+
 function SuperAdminPortal() {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
@@ -60,6 +75,11 @@ function SuperAdminPortal() {
   const [savingSchoolId, setSavingSchoolId] = useState('');
   const [deletingSchoolId, setDeletingSchoolId] = useState('');
   const [message, setMessage] = useState('');
+  const [rectoriaUser, setRectoriaUser] = useState(null);
+  const [rectoriaDraft, setRectoriaDraft] = useState(buildRectoriaDraft());
+  const [loadingRectoria, setLoadingRectoria] = useState(false);
+  const [savingRectoria, setSavingRectoria] = useState(false);
+  const [rectoriaMessage, setRectoriaMessage] = useState('');
 
   const selectedSchool = useMemo(
     () => summary.schools.find((school) => school.schoolId === selectedSchoolId) || summary.schools[0] || null,
@@ -97,6 +117,102 @@ function SuperAdminPortal() {
   useEffect(() => {
     loadSummary();
   }, []);
+
+  useEffect(() => {
+    if (!selectedSchool?.schoolId) {
+      setRectoriaUser(null);
+      setRectoriaDraft(buildRectoriaDraft());
+      setRectoriaMessage('');
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLoadingRectoria(true);
+    setRectoriaMessage('');
+
+    getSuperAdminRectoriaUser(selectedSchool.schoolId)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+
+        const nextUser = response.data?.user || null;
+        setRectoriaUser(nextUser);
+        setRectoriaDraft(buildRectoriaDraft(nextUser));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setRectoriaUser(null);
+        setRectoriaDraft(buildRectoriaDraft());
+        setRectoriaMessage(error?.response?.data?.message || error?.message || 'No se pudo cargar el usuario de rectoría.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingRectoria(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSchool?.schoolId]);
+
+  const saveRectoriaUser = async () => {
+    if (!selectedSchool) {
+      return;
+    }
+
+    const normalizedUsername = String(rectoriaDraft.username || '').trim().toLowerCase();
+    const password = String(rectoriaDraft.password || '');
+    const confirmPassword = String(rectoriaDraft.confirmPassword || '');
+
+    if (!normalizedUsername) {
+      setRectoriaMessage('El nombre de usuario es obligatorio.');
+      return;
+    }
+
+    if (!password || password.length < 8) {
+      setRectoriaMessage('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setRectoriaMessage('Las contraseñas no coinciden.');
+      return;
+    }
+
+    setSavingRectoria(true);
+    setRectoriaMessage('');
+
+    try {
+      const response = await saveSuperAdminRectoriaUser(selectedSchool.schoolId, {
+        username: normalizedUsername,
+        password,
+        name: String(rectoriaDraft.name || '').trim(),
+        email: String(rectoriaDraft.email || '').trim(),
+      });
+      const nextUser = response.data?.user || null;
+      setRectoriaUser(nextUser);
+      setRectoriaDraft(buildRectoriaDraft(nextUser));
+      setRectoriaMessage(response.data?.message || 'Usuario de rectoría guardado.');
+    } catch (error) {
+      setRectoriaMessage(error?.response?.data?.message || error?.message || 'No se pudo guardar el usuario de rectoría.');
+    } finally {
+      setSavingRectoria(false);
+    }
+  };
+
+  const generatePassword = () => {
+    const nextPassword = generateRectoriaPassword();
+    setRectoriaDraft((currentDraft) => ({
+      ...currentDraft,
+      password: nextPassword,
+      confirmPassword: nextPassword,
+    }));
+  };
 
   const updateDraft = (schoolId, updater) => {
     setDraftsBySchool((currentDrafts) => {
@@ -312,6 +428,87 @@ function SuperAdminPortal() {
                     <span>{feature.label}</span>
                   </label>
                 ))}
+              </div>
+            </section>
+
+            <section className="super-admin-feature-panel">
+              <div className="super-admin-panel-head">
+                <div>
+                  <h3>Usuario de rectoría</h3>
+                  <p>Crea o actualiza las credenciales para que el rector ingrese al portal del colegio.</p>
+                </div>
+              </div>
+
+              {loadingRectoria ? <p className="super-admin-muted">Cargando usuario de rectoría...</p> : null}
+              {rectoriaMessage ? <p className="super-admin-message">{rectoriaMessage}</p> : null}
+
+              {rectoriaUser ? (
+                <p className="super-admin-muted">
+                  Usuario activo: <strong>{rectoriaUser.username}</strong>
+                  {rectoriaUser.name ? ` · ${rectoriaUser.name}` : ''}
+                </p>
+              ) : (
+                <p className="super-admin-muted">Este colegio aún no tiene un usuario de rectoría.</p>
+              )}
+
+              <div className="super-admin-form-grid">
+                <label>
+                  Nombre de usuario
+                  <input
+                    autoComplete="username"
+                    onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, username: event.target.value }))}
+                    type="text"
+                    value={rectoriaDraft.username}
+                  />
+                </label>
+                <label>
+                  Nombre (opcional)
+                  <input
+                    onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, name: event.target.value }))}
+                    type="text"
+                    value={rectoriaDraft.name}
+                  />
+                </label>
+                <label>
+                  Correo (opcional)
+                  <input
+                    autoComplete="email"
+                    onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, email: event.target.value }))}
+                    type="email"
+                    value={rectoriaDraft.email}
+                  />
+                </label>
+                <label>
+                  Contraseña
+                  <input
+                    autoComplete="new-password"
+                    onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, password: event.target.value }))}
+                    type="password"
+                    value={rectoriaDraft.password}
+                  />
+                </label>
+                <label>
+                  Confirmar contraseña
+                  <input
+                    autoComplete="new-password"
+                    onChange={(event) => setRectoriaDraft((currentDraft) => ({ ...currentDraft, confirmPassword: event.target.value }))}
+                    type="password"
+                    value={rectoriaDraft.confirmPassword}
+                  />
+                </label>
+              </div>
+
+              <div className="super-admin-rectoria-actions">
+                <button disabled={loadingRectoria || savingRectoria} onClick={generatePassword} type="button">
+                  Generar contraseña
+                </button>
+                <button disabled={loadingRectoria || savingRectoria} onClick={saveRectoriaUser} type="button">
+                  {savingRectoria
+                    ? 'Guardando...'
+                    : rectoriaUser
+                      ? 'Actualizar usuario de rectoría'
+                      : 'Crear usuario de rectoría'}
+                </button>
               </div>
             </section>
 
