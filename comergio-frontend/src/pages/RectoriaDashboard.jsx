@@ -3,6 +3,8 @@ import * as XLSX from 'xlsx';
 import './SchoolCreationWizard.css';
 import './RectoriaDashboard.css';
 import { buildAcademicEnrollmentProrationTable } from '../lib/academicEnrollment';
+import { findMatchingFeeSetting, getFeeGradeAliases } from '../lib/feeGradeMatching';
+import { resolveGradeCourses } from '../lib/academicGradeCourses';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
@@ -1222,28 +1224,10 @@ function calculateBenefitTuitionAmount(monthlyTuition, rule = {}, grade = '') {
   return Math.max(0, Math.round(baseAmount * (1 - (discountPercent / 100))));
 }
 
-function getFeeGradeAliases(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return [];
-  const aliases = new Set([normalized]);
-  const [, suffix] = normalized.split(':');
-  if (suffix) aliases.add(suffix.trim());
-  return [...aliases].filter(Boolean);
-}
-
 function hasFeeSettingAmounts(setting) {
   return Number(setting?.enrollmentBonus || 0) > 0
     || Number(setting?.enrollmentFee || 0) > 0
     || Number(setting?.monthlyTuition || 0) > 0;
-}
-
-function findMatchingFeeSetting(normalizedSettings, grade) {
-  const gradeAliases = new Set([
-    ...getFeeGradeAliases(grade?.key),
-    ...getFeeGradeAliases(grade?.label),
-  ]);
-  const candidates = normalizedSettings.filter((setting) => getFeeGradeAliases(setting.grade).some((alias) => gradeAliases.has(alias)));
-  return candidates.find(hasFeeSettingAmounts) || candidates[0] || null;
 }
 
 function formatDateInputValue(value) {
@@ -1435,21 +1419,29 @@ function normalizeAcademicStructureDraft(raw) {
       }))
       .filter((subject) => subject.key),
     grades: grades
-      .map((grade, gradeIndex) => ({
-        key: String(grade?.key || grade?.label || '').trim(),
-        label: String(grade?.label || grade?.key || '').trim(),
-        levelKey: String(grade?.levelKey || '').trim(),
-        order: Number(grade?.order || (gradeIndex + 1) * 10),
-        courses: (Array.isArray(grade?.courses) ? grade.courses : [])
-          .map((course, courseIndex) => ({
-            key: String(course?.key || course?.label || '').trim(),
-            label: String(course?.label || course?.key || '').trim(),
-            section: String(course?.section || '').trim(),
-            headroomTeacherUserId: String(course?.headroomTeacherUserId || '').trim(),
-            order: Number(course?.order || (courseIndex + 1) * 10),
-          }))
-          .filter((course) => course.key),
-      }))
+      .map((grade, gradeIndex) => {
+        const normalizedGrade = {
+          key: String(grade?.key || grade?.label || '').trim(),
+          label: String(grade?.label || grade?.key || '').trim(),
+          levelKey: String(grade?.levelKey || '').trim(),
+          order: Number(grade?.order || (gradeIndex + 1) * 10),
+          courses: (Array.isArray(grade?.courses) ? grade.courses : [])
+            .map((course, courseIndex) => ({
+              key: String(course?.key || course?.label || '').trim(),
+              label: String(course?.label || course?.key || '').trim(),
+              section: String(course?.section || '').trim(),
+              headroomTeacherUserId: String(course?.headroomTeacherUserId || '').trim(),
+              order: Number(course?.order || (courseIndex + 1) * 10),
+              status: String(course?.status || 'active').trim(),
+            }))
+            .filter((course) => course.key),
+        };
+
+        return {
+          ...normalizedGrade,
+          courses: resolveGradeCourses(normalizedGrade),
+        };
+      })
       .filter((grade) => grade.key),
     scheduleSettings,
     scheduleBreaks: scheduleBreaks
@@ -1719,10 +1711,34 @@ const TEAM_ROLE_PANEL_COPY = {
 function createEmptyTeamTeacherAssignment() {
   return {
     teacherUserId: '',
-    subjectKey: '',
+    subjectKeys: [],
     gradeKeys: [],
     weeklyHours: 0,
   };
+}
+
+function getTeamTeacherAssignmentSubjectKeys(assignment = {}) {
+  if (Array.isArray(assignment.subjectKeys) && assignment.subjectKeys.length > 0) {
+    return assignment.subjectKeys.map((subjectKey) => String(subjectKey || '').trim()).filter(Boolean);
+  }
+
+  const legacySubjectKey = String(assignment.subjectKey || '').trim();
+  return legacySubjectKey ? [legacySubjectKey] : [];
+}
+
+function resolveSubjectAssignmentGradeKeys(subject = {}, selectedGradeKeys = []) {
+  const normalizedSelectedGradeKeys = Array.from(new Set(
+    (Array.isArray(selectedGradeKeys) ? selectedGradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean),
+  ));
+  const linkedGradeKeys = Array.isArray(subject.gradeKeys)
+    ? subject.gradeKeys.map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)
+    : [];
+
+  if (linkedGradeKeys.length === 0) {
+    return normalizedSelectedGradeKeys;
+  }
+
+  return normalizedSelectedGradeKeys.filter((gradeKey) => linkedGradeKeys.includes(gradeKey));
 }
 
 function createEmptyHeadroomTeacherAssignment() {
@@ -1932,7 +1948,7 @@ function RectoriaDashboard() {
   const [newEducationalLevelName, setNewEducationalLevelName] = useState('');
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectKind, setNewSubjectKind] = useState('principal');
-  const [subjectGradeSelections, setSubjectGradeSelections] = useState({});
+  const [subjectGradeDrafts, setSubjectGradeDrafts] = useState({});
   const [selectedLevelKeyForGrade, setSelectedLevelKeyForGrade] = useState('');
   const [levelGradeSelections, setLevelGradeSelections] = useState({});
   const [newGradeName, setNewGradeName] = useState('');
@@ -2569,9 +2585,9 @@ function RectoriaDashboard() {
   }, [academicStructureDraft.grades, billingBootstrap.grades]);
 
   const courseOptions = useMemo(() => {
-    const structureCourses = academicStructureDraft.grades.flatMap((grade) => grade.courses.map((course) => ({
+    const structureCourses = academicStructureDraft.grades.flatMap((grade) => resolveGradeCourses(grade).map((course) => ({
       value: course.key,
-      label: buildRectoriaCourseOptionLabel(grade, course, grade.courses),
+      label: buildRectoriaCourseOptionLabel(grade, course, resolveGradeCourses(grade)),
     })));
     const fallbackCourses = Array.isArray(billingBootstrap.courses) ? billingBootstrap.courses : [];
     const sourceCourses = structureCourses.length > 0
@@ -2622,9 +2638,10 @@ function RectoriaDashboard() {
 
   const courseOptionsByGrade = useMemo(
     () => academicStructureDraft.grades.reduce((accumulator, grade) => {
-      accumulator[grade.key] = grade.courses.map((course) => ({
+      accumulator[grade.key] = resolveGradeCourses(grade).map((course) => ({
         value: course.key,
-        label: buildRectoriaCourseOptionLabel(grade, course, grade.courses),
+        label: buildRectoriaCourseOptionLabel(grade, course, resolveGradeCourses(grade)),
+        isImplicit: Boolean(course.isImplicit),
       }));
       return accumulator;
     }, {}),
@@ -2660,8 +2677,8 @@ function RectoriaDashboard() {
 
   const configuredCourseLabels = useMemo(
     () => academicStructureDraft.grades.reduce((accumulator, grade) => {
-      grade.courses.forEach((course) => {
-        accumulator[course.key] = buildRectoriaCourseOptionLabel(grade, course, grade.courses);
+      resolveGradeCourses(grade).forEach((course) => {
+        accumulator[course.key] = buildRectoriaCourseOptionLabel(grade, course, resolveGradeCourses(grade));
       });
       return accumulator;
     }, {}),
@@ -2854,8 +2871,13 @@ function RectoriaDashboard() {
   );
   const selectedFeeSetting = selectedFeeSettingIndex >= 0 ? feeSettingsDraft.gradeSettings[selectedFeeSettingIndex] : null;
   const selectedFeeProrationPreview = useMemo(
-    () => buildAcademicEnrollmentProrationTable(selectedFeeSetting?.enrollmentFee || 0, feeSettingsDraft, selectedFeeSetting?.grade || ''),
-    [feeSettingsDraft, selectedFeeSetting?.enrollmentFee, selectedFeeSetting?.grade]
+    () => buildAcademicEnrollmentProrationTable(
+      selectedFeeSetting?.enrollmentFee || 0,
+      feeSettingsDraft,
+      selectedFeeSetting?.grade || '',
+      { academicGrades: academicStructureDraft.grades || [] },
+    ),
+    [academicStructureDraft.grades, feeSettingsDraft, selectedFeeSetting?.enrollmentFee, selectedFeeSetting?.grade]
   );
   const selectedFeeBenefitRules = useMemo(() => {
     const gradeBenefitRules = normalizeFeeBenefitRules(selectedFeeSetting?.benefitRules || []);
@@ -2917,7 +2939,7 @@ function RectoriaDashboard() {
     value: `${grade.value}::${course.value}`,
     gradeKey: grade.value,
     courseKey: course.value,
-    label: `${course.label} · ${grade.label}`,
+    label: course.isImplicit ? grade.label : `${course.label} · ${grade.label}`,
   }))), [courseOptionsByGrade, gradeOptionsForSchedule]);
 
   const selectedScheduleCourseOptionValue = selectedScheduleGradeKey && selectedScheduleCourseKey ? `${selectedScheduleGradeKey}::${selectedScheduleCourseKey}` : '';
@@ -3081,15 +3103,6 @@ function RectoriaDashboard() {
       order: matchedAvailability.order,
     });
   }, [academicTeachingAvailability, selectedTeachingAvailabilityKey]);
-
-  const assignableGradesBySubject = useMemo(
-    () => academicStructureDraft.subjects.reduce((accumulator, subject) => {
-      const assignedGradeKeys = new Set((Array.isArray(subject.gradeKeys) ? subject.gradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()));
-      accumulator[subject.key] = gradeOptionsForSubjects.filter((grade) => !assignedGradeKeys.has(grade.value));
-      return accumulator;
-    }, {}),
-    [academicStructureDraft.subjects, gradeOptionsForSubjects]
-  );
 
   const teacherUsers = useMemo(
     () => users
@@ -3578,6 +3591,13 @@ function RectoriaDashboard() {
     return levels;
   }, [academicStructureDraft.grades, academicStructureDraft.levels]);
 
+  const subjectMapLevelOptions = useMemo(
+    () => groupedEducationalLevels
+      .filter((level) => (level.grades || []).length > 0)
+      .map((level) => ({ value: level.key, label: level.label || level.key, gradeCount: level.grades.length })),
+    [groupedEducationalLevels]
+  );
+
   const assignableGradesByLevel = useMemo(
     () => groupedEducationalLevels.reduce((accumulator, level) => {
       if (level.key === '__without_level__') {
@@ -3888,14 +3908,26 @@ function RectoriaDashboard() {
     return cards;
   }, [academicSubjectLoadTemplates, educationalLevelSummaries.length, selectedTeamGroup, selectedTeamRole]);
 
-  const teamTeacherAssignmentCoursePreview = useMemo(
-    () => Array.from(new Map(
-      teamTeacherAssignment.gradeKeys.flatMap((gradeKey) => (
-        (courseOptionsByGrade[gradeKey] || []).map((course) => [`${gradeKey}::${course.value}`, `${getGradeLabel(gradeKey)} · ${course.label}`])
-      ))
-    ).entries()).map(([value, label]) => ({ value, label })),
-    [courseOptionsByGrade, getGradeLabel, teamTeacherAssignment.gradeKeys]
-  );
+  const teamTeacherAssignmentCoursePreview = useMemo(() => {
+    const subjectKeys = getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment);
+    const selectedGradeKeys = teamTeacherAssignment.gradeKeys || [];
+    if (!subjectKeys.length || !selectedGradeKeys.length) {
+      return [];
+    }
+
+    return Array.from(new Map(
+      subjectKeys.flatMap((subjectKey) => {
+        const subject = academicStructureDraft.subjects.find((item) => item.key === subjectKey);
+        const gradeKeysForSubject = resolveSubjectAssignmentGradeKeys(subject, selectedGradeKeys);
+        return gradeKeysForSubject.flatMap((gradeKey) => (
+          (courseOptionsByGrade[gradeKey] || []).map((course) => [
+            `${subjectKey}::${gradeKey}::${course.value}`,
+            `${subject?.label || subjectKey} · ${getGradeLabel(gradeKey)} · ${course.label}`,
+          ])
+        ));
+      }),
+    ).entries()).map(([value, label]) => ({ value, label }));
+  }, [academicStructureDraft.subjects, courseOptionsByGrade, getGradeLabel, teamTeacherAssignment]);
 
   const teamTeacherAssignmentRows = useMemo(
     () => academicSubjectLoadTemplates
@@ -3928,7 +3960,7 @@ function RectoriaDashboard() {
   }, [teamTeacherAssignment.teacherUserId, teamTeacherAssignmentRows]);
 
   const headroomCourseOptions = useMemo(() => (
-    academicStructureDraft.grades.flatMap((grade) => (grade.courses || []).map((course) => ({
+    academicStructureDraft.grades.flatMap((grade) => resolveGradeCourses(grade).map((course) => ({
       value: course.key,
       label: `${grade.label || grade.key} · ${course.label || course.section || course.key}`,
       gradeKey: grade.key,
@@ -4289,6 +4321,25 @@ function RectoriaDashboard() {
   };
 
   const onTeamTeacherAssignmentChange = (field, value) => {
+    if (field === 'teacherUserId') {
+      const teacherUserId = String(value || '').trim();
+      const existingAssignments = academicSubjectLoadTemplates.filter(
+        (item) => String(item.teacherUserId || '').trim() === teacherUserId,
+      );
+      const subjectKeys = Array.from(new Set(existingAssignments.map((item) => String(item.subjectKey || '').trim()).filter(Boolean)));
+      const gradeKeys = Array.from(new Set(existingAssignments.flatMap((item) => (
+        Array.isArray(item.gradeKeys) ? item.gradeKeys : []
+      )).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
+
+      setTeamTeacherAssignment({
+        ...createEmptyTeamTeacherAssignment(),
+        teacherUserId: value,
+        subjectKeys,
+        gradeKeys,
+      });
+      return;
+    }
+
     setTeamTeacherAssignment((prev) => ({
       ...prev,
       [field]: field === 'weeklyHours' ? Math.max(0, Number(value || 0)) : value,
@@ -4302,6 +4353,23 @@ function RectoriaDashboard() {
         ? prev.gradeKeys.filter((item) => item !== gradeKey)
         : [...prev.gradeKeys, gradeKey],
     }));
+  };
+
+  const onToggleTeamTeacherAssignmentSubject = (subjectKey) => {
+    setTeamTeacherAssignment((prev) => {
+      const currentSubjectKeys = getTeamTeacherAssignmentSubjectKeys(prev);
+      const normalizedSubjectKey = String(subjectKey || '').trim();
+      if (!normalizedSubjectKey) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        subjectKeys: currentSubjectKeys.includes(normalizedSubjectKey)
+          ? currentSubjectKeys.filter((item) => item !== normalizedSubjectKey)
+          : [...currentSubjectKeys, normalizedSubjectKey],
+      };
+    });
   };
 
   const onTeamCoordinatorSelectionChange = (levelKey, coordinatorId) => {
@@ -4342,7 +4410,7 @@ function RectoriaDashboard() {
 
   const onSaveTeamTeacherAssignment = async () => {
     const normalizedTeacherUserId = String(teamTeacherAssignment.teacherUserId || '').trim();
-    const normalizedSubjectKey = String(teamTeacherAssignment.subjectKey || '').trim();
+    const normalizedSubjectKeys = getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment);
     const normalizedGradeKeys = Array.from(new Set((teamTeacherAssignment.gradeKeys || []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
 
     if (!normalizedTeacherUserId) {
@@ -4350,8 +4418,8 @@ function RectoriaDashboard() {
       return;
     }
 
-    if (!normalizedSubjectKey) {
-      setError('Selecciona una asignatura ya creada.');
+    if (normalizedSubjectKeys.length === 0) {
+      setError('Selecciona al menos una asignatura.');
       return;
     }
 
@@ -4360,40 +4428,72 @@ function RectoriaDashboard() {
       return;
     }
 
-    const existingAssignment = academicSubjectLoadTemplates.find((item) => (
-      String(item.teacherUserId || '').trim() === normalizedTeacherUserId
-      && String(item.subjectKey || '').trim() === normalizedSubjectKey
-    ));
+    const assignmentsToSave = [];
 
-    const subject = academicStructureDraft.subjects.find((item) => String(item.key || '').trim() === normalizedSubjectKey);
-    const currentSubjectGradeKeys = Array.isArray(subject?.gradeKeys)
-      ? subject.gradeKeys.map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)
-      : [];
-    const nextSubjectGradeKeys = Array.from(new Set([...currentSubjectGradeKeys, ...normalizedGradeKeys]));
+    for (const normalizedSubjectKey of normalizedSubjectKeys) {
+      const subject = academicStructureDraft.subjects.find((item) => String(item.key || '').trim() === normalizedSubjectKey);
+      const gradeKeysForSubject = resolveSubjectAssignmentGradeKeys(subject, normalizedGradeKeys);
 
-    if (nextSubjectGradeKeys.length !== currentSubjectGradeKeys.length) {
-      const saved = await onSaveSubjectGradeKeys(normalizedSubjectKey, nextSubjectGradeKeys);
-      if (!saved) {
+      if (gradeKeysForSubject.length === 0) {
+        setError(`La asignatura ${subject?.label || normalizedSubjectKey} no tiene grados en común con tu selección. Revísala en el mapa de asignaturas.`);
         return;
       }
+
+      const currentSubjectGradeKeys = Array.isArray(subject?.gradeKeys)
+        ? subject.gradeKeys.map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)
+        : [];
+      const nextSubjectGradeKeys = Array.from(new Set([...currentSubjectGradeKeys, ...gradeKeysForSubject]));
+
+      if (nextSubjectGradeKeys.length !== currentSubjectGradeKeys.length) {
+        const saved = await onSaveSubjectGradeKeys(normalizedSubjectKey, nextSubjectGradeKeys);
+        if (!saved) {
+          return;
+        }
+      }
+
+      const existingAssignment = academicSubjectLoadTemplates.find((item) => (
+        String(item.teacherUserId || '').trim() === normalizedTeacherUserId
+        && String(item.subjectKey || '').trim() === normalizedSubjectKey
+      ));
+
+      assignmentsToSave.push({
+        key: existingAssignment?.key || `subject_load_template_${normalizedSubjectKey}_${Date.now()}`,
+        subjectKey: normalizedSubjectKey,
+        teacherUserId: normalizedTeacherUserId,
+        weeklyHours: Math.max(Number(existingAssignment?.weeklyHours || 0), 0),
+        gradeKeys: Array.from(new Set([...(existingAssignment?.gradeKeys || []), ...gradeKeysForSubject])),
+        order: Number(existingAssignment?.order || (academicSubjectLoadTemplates.length + assignmentsToSave.length + 1) * 10),
+      });
     }
 
-    const nextAssignment = {
-      key: existingAssignment?.key || `subject_load_template_${Date.now()}`,
-      subjectKey: normalizedSubjectKey,
-      teacherUserId: normalizedTeacherUserId,
-      weeklyHours: Math.max(Number(existingAssignment?.weeklyHours || 0), 0),
-      gradeKeys: Array.from(new Set([...(existingAssignment?.gradeKeys || []), ...normalizedGradeKeys])),
-      order: Number(existingAssignment?.order || (academicSubjectLoadTemplates.length + 1) * 10),
-    };
+    const assignmentKeysToReplace = new Set(
+      assignmentsToSave.map((assignment) => `${assignment.teacherUserId}::${assignment.subjectKey}`),
+    );
 
     const nextTemplates = normalizeAcademicSubjectLoadTemplates([
-      ...academicSubjectLoadTemplates.filter((item) => item.key !== existingAssignment?.key),
-      nextAssignment,
+      ...academicSubjectLoadTemplates.filter((item) => (
+        !assignmentKeysToReplace.has(`${String(item.teacherUserId || '').trim()}::${String(item.subjectKey || '').trim()}`)
+      )),
+      ...assignmentsToSave,
     ]);
 
-    await persistAcademicSubjectLoadTemplates(nextTemplates, 'Vinculación docente guardada.');
-    setTeamTeacherAssignment(createEmptyTeamTeacherAssignment());
+    const saved = await persistAcademicSubjectLoadTemplates(
+      nextTemplates,
+      normalizedSubjectKeys.length > 1
+        ? `Vinculación guardada para ${normalizedSubjectKeys.length} asignaturas.`
+        : 'Vinculación docente guardada.',
+    );
+
+    if (!saved) {
+      return;
+    }
+
+    setTeamTeacherAssignment((prev) => ({
+      ...createEmptyTeamTeacherAssignment(),
+      teacherUserId: prev.teacherUserId,
+      subjectKeys: normalizedSubjectKeys,
+      gradeKeys: normalizedGradeKeys,
+    }));
   };
 
   const onSaveHeadroomTeacherAssignment = async () => {
@@ -4706,8 +4806,10 @@ function RectoriaDashboard() {
       const response = await saveAcademicManagementSubjectLoadTemplates({ subjectLoadTemplates: nextTemplates });
       syncAcademicStructureState(response?.data?.academicStructure || {});
       setSuccess(successMessage);
+      return true;
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo guardar la carga académica compartida.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -5680,11 +5782,87 @@ function RectoriaDashboard() {
     }
   };
 
-  const onSubjectGradeSelectionChange = (subjectKey, gradeKey) => {
-    setSubjectGradeSelections((prev) => ({
-      ...prev,
-      [subjectKey]: gradeKey,
-    }));
+  const onSubjectGradeDraftOpen = (subjectKey, gradeKeys = []) => {
+    setSubjectGradeDrafts((prev) => {
+      if (Array.isArray(prev[subjectKey])) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [subjectKey]: Array.from(new Set((Array.isArray(gradeKeys) ? gradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean))),
+      };
+    });
+  };
+
+  const getSubjectGradeDraft = (subjectKey, savedGradeKeys = []) => {
+    const draft = subjectGradeDrafts[subjectKey];
+    if (Array.isArray(draft)) {
+      return draft;
+    }
+    return Array.from(new Set((Array.isArray(savedGradeKeys) ? savedGradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
+  };
+
+  const hasSubjectGradeDraftChanges = (subjectKey, savedGradeKeys = []) => {
+    const draft = getSubjectGradeDraft(subjectKey, savedGradeKeys);
+    const saved = Array.from(new Set((Array.isArray(savedGradeKeys) ? savedGradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
+    if (draft.length !== saved.length) {
+      return true;
+    }
+    return draft.some((gradeKey) => !saved.includes(gradeKey));
+  };
+
+  const onToggleSubjectGradeDraft = (subjectKey, gradeKey, savedGradeKeys = []) => {
+    const normalizedGradeKey = String(gradeKey || '').trim();
+    if (!normalizedGradeKey) {
+      return;
+    }
+
+    setSubjectGradeDrafts((prev) => {
+      const currentKeys = Array.isArray(prev[subjectKey])
+        ? prev[subjectKey]
+        : Array.from(new Set((Array.isArray(savedGradeKeys) ? savedGradeKeys : []).map((item) => String(item || '').trim()).filter(Boolean)));
+      const current = new Set(currentKeys);
+      if (current.has(normalizedGradeKey)) {
+        current.delete(normalizedGradeKey);
+      } else {
+        current.add(normalizedGradeKey);
+      }
+      return { ...prev, [subjectKey]: Array.from(current) };
+    });
+  };
+
+  const onToggleSubjectLevelDraft = (subjectKey, levelKey, savedGradeKeys = []) => {
+    const level = groupedEducationalLevels.find((item) => item.key === levelKey);
+    const levelGradeKeys = (level?.grades || []).map((grade) => grade.key).filter(Boolean);
+    if (!levelGradeKeys.length) {
+      return;
+    }
+
+    setSubjectGradeDrafts((prev) => {
+      const currentKeys = Array.isArray(prev[subjectKey])
+        ? prev[subjectKey]
+        : Array.from(new Set((Array.isArray(savedGradeKeys) ? savedGradeKeys : []).map((item) => String(item || '').trim()).filter(Boolean)));
+      const current = new Set(currentKeys);
+      const allSelected = levelGradeKeys.every((gradeKey) => current.has(gradeKey));
+      levelGradeKeys.forEach((gradeKey) => {
+        if (allSelected) {
+          current.delete(gradeKey);
+        } else {
+          current.add(gradeKey);
+        }
+      });
+      return { ...prev, [subjectKey]: Array.from(current) };
+    });
+  };
+
+  const isSubjectLevelFullySelected = (subjectKey, levelKey, savedGradeKeys = []) => {
+    const level = groupedEducationalLevels.find((item) => item.key === levelKey);
+    const levelGradeKeys = (level?.grades || []).map((grade) => grade.key).filter(Boolean);
+    if (!levelGradeKeys.length) {
+      return false;
+    }
+    const draft = new Set(getSubjectGradeDraft(subjectKey, savedGradeKeys));
+    return levelGradeKeys.every((gradeKey) => draft.has(gradeKey));
   };
 
   const onSaveSubjectGradeKeys = async (subjectKey, nextGradeKeys) => {
@@ -5693,6 +5871,10 @@ function RectoriaDashboard() {
     try {
       const response = await updateAcademicManagementSubjectGrades(subjectKey, { gradeKeys: nextGradeKeys });
       syncAcademicStructureState(response?.data?.academicStructure || {});
+      setSubjectGradeDrafts((prev) => ({
+        ...prev,
+        [subjectKey]: Array.from(new Set((Array.isArray(nextGradeKeys) ? nextGradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean))),
+      }));
       return true;
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo guardar el mapa de asignaturas.');
@@ -5702,30 +5884,12 @@ function RectoriaDashboard() {
     }
   };
 
-  const onAssignGradeToSubject = async (subjectKey) => {
-    const selectedGradeKey = String(subjectGradeSelections[subjectKey] || '').trim();
-    if (!selectedGradeKey) {
-      setError('Selecciona un grado para enlazarlo con la asignatura.');
-      return;
-    }
-
-    const subject = academicStructureDraft.subjects.find((item) => item.key === subjectKey);
-    const currentGradeKeys = Array.isArray(subject?.gradeKeys) ? subject.gradeKeys : [];
-    const nextGradeKeys = Array.from(new Set([...currentGradeKeys, selectedGradeKey]));
+  const onSaveSubjectGradeDraft = async (subjectKey, savedGradeKeys = []) => {
+    const nextGradeKeys = getSubjectGradeDraft(subjectKey, savedGradeKeys);
     const saved = await onSaveSubjectGradeKeys(subjectKey, nextGradeKeys);
     if (saved) {
-      setSubjectGradeSelections((prev) => ({ ...prev, [subjectKey]: '' }));
-      setSuccess(`${getGradeLabel(selectedGradeKey)} enlazado a la asignatura.`);
-    }
-  };
-
-  const onRemoveGradeFromSubject = async (subjectKey, gradeKeyToRemove) => {
-    const subject = academicStructureDraft.subjects.find((item) => item.key === subjectKey);
-    const currentGradeKeys = Array.isArray(subject?.gradeKeys) ? subject.gradeKeys : [];
-    const nextGradeKeys = currentGradeKeys.filter((gradeKey) => gradeKey !== gradeKeyToRemove);
-    const saved = await onSaveSubjectGradeKeys(subjectKey, nextGradeKeys);
-    if (saved) {
-      setSuccess(`${getGradeLabel(gradeKeyToRemove)} retirado de la asignatura.`);
+      const subject = academicStructureDraft.subjects.find((item) => item.key === subjectKey);
+      setSuccess(`Mapa actualizado para ${subject?.label || 'la asignatura'} (${nextGradeKeys.length} grado(s)).`);
     }
   };
 
@@ -6134,7 +6298,7 @@ function RectoriaDashboard() {
     try {
       const response = await deleteAcademicManagementSubject(subjectKey, { password: deleteSubjectModal.password });
       syncAcademicStructureState(response?.data?.academicStructure || {});
-      setSubjectGradeSelections((prev) => {
+      setSubjectGradeDrafts((prev) => {
         const next = { ...prev };
         delete next[subjectKey];
         return next;
@@ -7237,7 +7401,7 @@ function RectoriaDashboard() {
                       <div className="rectoria-section-header rectoria-section-header--compact">
                         <div>
                           <h4>Vinculación docente a asignaturas</h4>
-                          <p>Selecciona el docente, la asignatura existente y los grados cuyos cursos atenderá este profesor.</p>
+                          <p>Selecciona el docente, una o más asignaturas y los grados que dictará en cada una.</p>
                         </div>
                       </div>
 
@@ -7251,16 +7415,23 @@ function RectoriaDashboard() {
                             ))}
                           </select>
                         </label>
+                      </div>
 
-                        <label>
-                          Asignatura
-                          <select value={teamTeacherAssignment.subjectKey} onChange={(event) => onTeamTeacherAssignmentChange('subjectKey', event.target.value)}>
-                            <option value="">Selecciona asignatura</option>
-                            {subjectOptionsForSchedule.map((subject) => (
-                              <option key={subject.value} value={subject.value}>{subject.label}</option>
-                            ))}
-                          </select>
-                        </label>
+                      <div className="rectoria-inline-help">Asignaturas</div>
+                      <div className="rectoria-break-grade-picker">
+                        {subjectOptionsForSchedule.length === 0 ? (
+                          <p className="rectoria-role-empty">Primero crea asignaturas en Gestión académica.</p>
+                        ) : subjectOptionsForSchedule.map((subject) => (
+                          <button
+                            key={`team-teacher-subject-${subject.value}`}
+                            className={`rectoria-break-grade-chip${getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment).includes(subject.value) ? ' is-selected' : ''}`}
+                            disabled={busy}
+                            onClick={() => onToggleTeamTeacherAssignmentSubject(subject.value)}
+                            type="button"
+                          >
+                            {subject.label}
+                          </button>
+                        ))}
                       </div>
 
                       <ClickableOptionPicker
@@ -8059,8 +8230,18 @@ function RectoriaDashboard() {
                 <div className="rectoria-grade-accordion-list">
                   {academicStructureDraft.subjects.length === 0 ? <p className="rectoria-role-empty">Primero crea una asignatura para mapear sus grados.</p> : academicStructureDraft.subjects.map((subject) => {
                     const mappedGradeKeys = Array.isArray(subject.gradeKeys) ? subject.gradeKeys : [];
+                    const draftGradeKeys = getSubjectGradeDraft(subject.key, mappedGradeKeys);
+                    const hasDraftChanges = hasSubjectGradeDraftChanges(subject.key, mappedGradeKeys);
                     return (
-                      <details className="rectoria-grade-accordion" key={`subject-map-${subject.key}`}>
+                      <details
+                        className="rectoria-grade-accordion"
+                        key={`subject-map-${subject.key}`}
+                        onToggle={(event) => {
+                          if (event.currentTarget.open) {
+                            onSubjectGradeDraftOpen(subject.key, mappedGradeKeys);
+                          }
+                        }}
+                      >
                         <summary className="rectoria-grade-accordion-summary">
                           <div>
                             <strong>{subject.label}</strong>
@@ -8069,34 +8250,60 @@ function RectoriaDashboard() {
                           </div>
                         </summary>
 
-                        <div className="rectoria-grade-accordion-body">
-                          <div className="rectoria-level-assign-row">
-                            <select
-                              value={subjectGradeSelections[subject.key] || ''}
-                              onChange={(event) => onSubjectGradeSelectionChange(subject.key, event.target.value)}
-                              disabled={busy || (assignableGradesBySubject[subject.key] || []).length === 0}
-                            >
-                              <option value="">Agregar grado al mapa</option>
-                              {(assignableGradesBySubject[subject.key] || []).map((gradeOption) => (
-                                <option key={gradeOption.value} value={gradeOption.value}>{gradeOption.label}</option>
-                              ))}
-                            </select>
-                            <button className="btn" type="button" onClick={() => onAssignGradeToSubject(subject.key)} disabled={busy || !String(subjectGradeSelections[subject.key] || '').trim()}>
-                              Agregar grado
-                            </button>
-                          </div>
-                          {(assignableGradesBySubject[subject.key] || []).length === 0 ? <p className="rectoria-inline-help">Todos los grados creados ya están enlazados con esta asignatura.</p> : null}
+                        <div className="rectoria-grade-accordion-body rectoria-subject-map-body">
+                          {gradeOptionsForSubjects.length === 0 ? (
+                            <p className="rectoria-role-empty">Primero crea grados en la estructura académica para enlazarlos aquí.</p>
+                          ) : (
+                            <>
+                              {subjectMapLevelOptions.length > 0 ? (
+                                <>
+                                  <div className="rectoria-inline-help">Niveles académicos</div>
+                                  <div className="rectoria-break-grade-picker">
+                                    {subjectMapLevelOptions.map((level) => (
+                                      <button
+                                        key={`subject-map-level-${subject.key}-${level.value}`}
+                                        className={`rectoria-break-grade-chip${isSubjectLevelFullySelected(subject.key, level.value, mappedGradeKeys) ? ' is-selected' : ''}`}
+                                        disabled={busy}
+                                        onClick={() => onToggleSubjectLevelDraft(subject.key, level.value, mappedGradeKeys)}
+                                        type="button"
+                                      >
+                                        {level.label} · {level.gradeCount}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : null}
 
-                          <div className="rectoria-subject-grade-chip-list">
-                            {mappedGradeKeys.length === 0 ? <p className="rectoria-role-empty">Todavía no hay grados enlazados a esta asignatura.</p> : mappedGradeKeys.map((gradeKey) => (
-                              <div className="rectoria-subject-grade-chip" key={`${subject.key}-${gradeKey}`}>
-                                <span>{getGradeLabel(gradeKey)}</span>
-                                <button className="btn btn-danger" type="button" onClick={() => onRemoveGradeFromSubject(subject.key, gradeKey)} disabled={busy}>
-                                  Quitar
+                              <div className="rectoria-inline-help">Grados</div>
+                              <div className="rectoria-break-grade-picker">
+                                {gradeOptionsForSubjects.map((gradeOption) => (
+                                  <button
+                                    key={`subject-map-grade-${subject.key}-${gradeOption.value}`}
+                                    className={`rectoria-break-grade-chip${draftGradeKeys.includes(gradeOption.value) ? ' is-selected' : ''}`}
+                                    disabled={busy}
+                                    onClick={() => onToggleSubjectGradeDraft(subject.key, gradeOption.value, mappedGradeKeys)}
+                                    type="button"
+                                  >
+                                    {gradeOption.label}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <div className="rectoria-subject-map-actions">
+                                <span className="rectoria-inline-help">
+                                  {draftGradeKeys.length} grado(s) seleccionado(s){hasDraftChanges ? ' · cambios sin guardar' : ''}
+                                </span>
+                                <button
+                                  className="btn btn-primary"
+                                  disabled={busy || !hasDraftChanges}
+                                  onClick={() => onSaveSubjectGradeDraft(subject.key, mappedGradeKeys)}
+                                  type="button"
+                                >
+                                  Guardar mapa
                                 </button>
                               </div>
-                            ))}
-                          </div>
+                            </>
+                          )}
                         </div>
                       </details>
                     );

@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const { getFeeGradeAliases, findGradeFeeSetting } = require('../utils/feeGradeMatching');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -791,32 +792,6 @@ function normalizeBenefitFixedAmountsByGrade(rawAmounts = {}) {
   }, {});
 }
 
-function getFeeGradeAliases(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return [];
-  const aliases = new Set([normalized]);
-
-  normalized.split(':').map((part) => String(part || '').trim().toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
-
-  const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*[a-z]$/i);
-  if (sectionMatch) {
-    aliases.add(sectionMatch[1]);
-  }
-
-  const numericMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:\s*[-_/ ]?\s*[a-z])?(?:$|[^\d])/i);
-  if (numericMatch) {
-    aliases.add(numericMatch[1]);
-  }
-
-  return [...aliases].filter(Boolean);
-}
-
-function findGradeFeeSetting(configuration, grade) {
-  const aliases = new Set(getFeeGradeAliases(grade));
-  const candidates = (configuration?.gradeSettings || []).filter((item) => getFeeGradeAliases(item?.grade).some((alias) => aliases.has(alias)));
-  return candidates.find((item) => Number(item?.enrollmentFee || 0) > 0 || Number(item?.monthlyTuition || 0) > 0 || Number(item?.enrollmentBonus || 0) > 0) || candidates[0] || null;
-}
-
 function doesEnrollmentBenefitRuleApplyToGrade(rule = {}, grade = '') {
   const aliases = new Set(getFeeGradeAliases(grade));
   const targetGradeKeys = Array.isArray(rule?.targetGradeKeys) ? rule.targetGradeKeys.flatMap(getFeeGradeAliases) : [];
@@ -893,6 +868,24 @@ function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = ne
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (String(charge?.category || '') === 'monthly_statement') {
+    const { recalculateConsolidatedStatementPricing } = require('../services/academicConsolidatedBilling.service');
+    const repriced = billingProfile && String(charge?.status || '') !== 'paid'
+      ? recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate)
+      : {
+        amount: Math.max(0, Number(charge?.amount || baseAmount || 0)),
+        originalAmount: Math.max(0, Number(charge?.originalAmount || baseAmount || 0)),
+        benefitLabel: '',
+      };
+    const effectiveAmount = Math.max(0, Number(repriced.amount || 0));
+    return {
+      baseAmount: Math.max(0, Number(repriced.originalAmount || effectiveAmount || 0)),
+      effectiveAmount,
+      discountPercent: 0,
+      fixedDiscountAmount: Math.max(0, Number(repriced.originalAmount || 0) - effectiveAmount),
+      benefitLabel: repriced.benefitLabel || '',
+    };
+  }
   if (String(charge?.category || '') === 'annual_tuition') {
     const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
     return {
@@ -1253,7 +1246,7 @@ function sortAcademicChargesForDisplay(charges = []) {
 
 function getAcademicChargeMonthsOverdue(charges = [], referenceDate = new Date()) {
   const overdueMonthKeys = new Set((charges || [])
-    .filter((charge) => String(charge.category || '') === 'monthly_tuition')
+    .filter((charge) => ['monthly_statement', 'monthly_tuition'].includes(String(charge.category || '')))
     .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()))
     .filter((charge) => new Date(charge.dueDate) < startOfDayLocal(referenceDate))
     .map((charge) => normalizeText(charge.monthKey) || buildMonthKey(charge.dueDate))
@@ -1279,38 +1272,44 @@ function buildParentAcademicBillingSummaryByStudent({ charges = [], referenceDat
   }
 
   return [...grouped.entries()].map(([studentId, studentCharges]) => {
-    const pendingCharges = studentCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
-    const overdueMonths = getAcademicChargeMonthsOverdue(studentCharges, referenceDate);
+    const statementCharges = studentCharges.filter((charge) => String(charge.category || '') === 'monthly_statement');
+    const pendingCharges = statementCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
+    const overdueMonths = getAcademicChargeMonthsOverdue(statementCharges, referenceDate);
     const requiresDataSchoolContact = overdueMonths >= 3;
-    const concepts = pendingCharges.map((charge) => ({
-      _id: charge._id,
-      category: charge.category,
-      concept: charge.concept,
-      description: charge.description || '',
-      amount: Number(charge.amount || 0),
-      originalAmount: Number(charge.originalAmount || charge.amount || 0),
-      dueDate: charge.dueDate,
-      status: charge.status,
-      monthKey: charge.monthKey || '',
+    const currentCharge = pendingCharges.sort((left, right) => new Date(left.dueDate || 0) - new Date(right.dueDate || 0))[0] || null;
+    const breakdownItems = Array.isArray(currentCharge?.breakdownItems) ? currentCharge.breakdownItems : [];
+    const concepts = breakdownItems.map((item) => ({
+      _id: `${currentCharge?._id || 'statement'}-${item.key || item.label}`,
+      category: item.key || 'item',
+      concept: item.label || 'Concepto',
+      description: item.benefitLabel || '',
+      amount: Number(item.amount || 0),
+      originalAmount: Number(item.originalAmount || item.amount || 0),
+      dueDate: currentCharge?.dueDate || null,
+      status: currentCharge?.status || 'pending',
+      monthKey: currentCharge?.monthKey || '',
     }));
-    const totalAmount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
-    const nextPayableConcept = concepts[0] || null;
-    const amount = requiresDataSchoolContact ? totalAmount : Number(nextPayableConcept?.amount || 0);
-    const studentName = normalizeText(pendingCharges[0]?.studentName || studentCharges[0]?.studentName) || 'Estudiante';
+    const amount = requiresDataSchoolContact
+      ? pendingCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0)
+      : Number(currentCharge?.amount || 0);
+    const totalAmount = Number(currentCharge?.chargeOriginalAmount || currentCharge?.chargeAmount || currentCharge?.amount || amount || 0);
+    const studentName = normalizeText(currentCharge?.studentName || statementCharges[0]?.studentName) || 'Estudiante';
 
     return {
       studentId,
       studentName,
       amount,
       totalAmount,
-      nextChargeAmount: Number(nextPayableConcept?.amount || 0),
-      nextChargeId: nextPayableConcept?._id || null,
-      pendingCount: concepts.length,
+      nextChargeAmount: amount,
+      nextChargeId: currentCharge?._id || null,
+      pendingCount: currentCharge ? 1 : 0,
       overdueMonths,
       requiresDataSchoolContact,
-      dataSchoolWhatsappUrl: requiresDataSchoolContact ? buildDataSchoolWhatsappUrl({ studentName, amount: totalAmount, overdueMonths }) : '',
-      payableChargeIds: requiresDataSchoolContact || !nextPayableConcept?._id ? [] : [nextPayableConcept._id],
+      dataSchoolWhatsappUrl: requiresDataSchoolContact ? buildDataSchoolWhatsappUrl({ studentName, amount, overdueMonths }) : '',
+      payableChargeIds: requiresDataSchoolContact || !currentCharge?._id ? [] : [currentCharge._id],
       concepts,
+      breakdownItems,
+      currentCharge,
     };
   });
 }
@@ -3555,58 +3554,60 @@ router.get('/portal/academic-billing', async (req, res) => {
     if (!linkedStudentIds.length) {
       return res.status(200).json({
         summary: { pendingAmount: 0, pendingCount: 0 },
+        currentCharges: [],
+        studentSummaries: [],
         charges: [],
         payments: [],
+        paymentHistory: [],
       });
     }
 
-    let [charges, payments, billingProfiles, feeConfiguration] = await Promise.all([
-      AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds } })
+    const {
+      ensureConsolidatedMonthlyCharge,
+      serializeConsolidatedChargeForParent,
+    } = require('../services/academicConsolidatedBilling.service');
+
+    const now = new Date();
+    let [billingProfiles, feeConfiguration, academicStructure] = await Promise.all([
+      StudentBillingProfile.find({ schoolId, active: true, studentId: { $in: linkedStudentIds } }).lean(),
+      AcademicFeeConfiguration.findOne({ schoolId }).lean(),
+      AcademicStructure.findOne({ schoolId }).lean(),
+    ]);
+
+    const academicGrades = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+      .filter((grade) => normalizeText(grade?.status || 'active') !== 'archived')
+      .map((grade) => ({ key: normalizeText(grade.key), levelKey: normalizeText(grade.levelKey) }));
+
+    for (const profile of billingProfiles) {
+      await ensureConsolidatedMonthlyCharge({
+        schoolId,
+        studentId: profile.studentId,
+        billingProfile: profile,
+        feeConfiguration,
+        academicGrades,
+        createdByUserId: parentUserId,
+        createdByRole: role,
+        parentId: parentUserId,
+        referenceDate: now,
+        sendNotification: false,
+      });
+    }
+
+    const [statementCharges, payments] = await Promise.all([
+      AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds }, category: 'monthly_statement' })
         .populate('studentId', 'name grade course')
-        .sort({ dueDate: 1, createdAt: -1 })
+        .sort({ dueDate: -1, createdAt: -1 })
         .lean(),
       AcademicChargePayment.find({ schoolId, studentId: { $in: linkedStudentIds } })
         .populate('studentId', 'name grade course')
+        .populate('chargeId', 'concept monthKey category amount')
         .sort({ paidAt: -1, createdAt: -1 })
-        .limit(20)
+        .limit(40)
         .lean(),
-      StudentBillingProfile.find({ schoolId, active: true }).lean(),
-      AcademicFeeConfiguration.findOne({ schoolId }).lean(),
     ]);
 
-    const now = new Date();
-    await ensureParentAcademicAnnualTuitionCharges({
-      schoolId,
-      parentUserId,
-      role,
-      studentIds: linkedStudentIds,
-      billingProfiles,
-      feeConfiguration,
-      referenceDate: now,
-    });
-    await syncParentAnnualTuitionDueDatesFromRectoria({
-      schoolId,
-      studentIds: linkedStudentIds,
-      billingProfiles,
-      feeConfiguration,
-      referenceDate: now,
-    });
-    await ensureParentAcademicMonthlyCharges({
-      schoolId,
-      parentUserId,
-      role,
-      studentIds: linkedStudentIds,
-      billingProfiles,
-      referenceDate: now,
-    });
-
-    charges = await AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds } })
-      .populate('studentId', 'name grade course')
-      .sort({ dueDate: 1, createdAt: -1 })
-      .lean();
-
-    const chargePayments = charges.length > 0
-      ? await AcademicChargePayment.find({ schoolId, chargeId: { $in: charges.map((charge) => charge._id) } }).select('chargeId amount').lean()
+    const chargePayments = statementCharges.length > 0
+      ? await AcademicChargePayment.find({ schoolId, chargeId: { $in: statementCharges.map((charge) => charge._id) } }).select('chargeId amount').lean()
       : [];
     const paymentTotalsByChargeId = new Map();
     chargePayments.forEach((payment) => {
@@ -3616,44 +3617,46 @@ router.get('/portal/academic-billing', async (req, res) => {
     });
 
     const billingProfileMap = new Map(billingProfiles.map((profile) => [String(profile._id), profile]));
-    const normalizedCharges = charges.map((charge) => {
-      const billingProfile = billingProfileMap.get(String(charge.billingProfileId || '')) || null;
-      const pricing = resolveAcademicChargeAmounts(charge, billingProfile, now);
-      const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0);
-      const settledPaidAmount = String(charge.status) === 'paid' && rawPaidAmount <= 0 ? pricing.effectiveAmount : rawPaidAmount;
-      const outstandingAmount = String(charge.status) === 'paid' ? 0 : Math.max(0, pricing.effectiveAmount - settledPaidAmount);
-      const dueDate = new Date(charge.dueDate);
-      const isOverdue = ['pending', 'overdue'].includes(String(charge.status)) && outstandingAmount > 0 && dueDate < now;
-      return {
-        ...charge,
-        status: outstandingAmount <= 0 ? 'paid' : (isOverdue ? 'overdue' : charge.status),
-        baseAmount: pricing.baseAmount,
-        amount: outstandingAmount,
-        chargeAmount: pricing.effectiveAmount,
-        paidAmount: Math.min(pricing.effectiveAmount, settledPaidAmount),
-        outstandingAmount,
-        discountPercent: pricing.discountPercent,
-        fixedDiscountAmount: pricing.fixedDiscountAmount,
-        benefitLabel: pricing.benefitLabel,
-        studentName: charge.studentId?.name || 'Familia',
-        studentGrade: charge.studentId?.grade || '',
-        studentCourse: charge.studentId?.course || '',
-      };
-    });
-    const sortedNormalizedCharges = sortAcademicChargesForDisplay(normalizedCharges);
-    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: sortedNormalizedCharges, referenceDate: now });
+    const normalizedCharges = statementCharges.map((charge) => serializeConsolidatedChargeForParent(
+      charge,
+      billingProfileMap.get(String(charge.billingProfileId || '')) || null,
+      paymentTotalsByChargeId,
+      now,
+    ));
+
+    const currentCharges = normalizedCharges
+      .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()))
+      .sort((left, right) => new Date(left.dueDate || 0) - new Date(right.dueDate || 0));
+
+    const paymentHistory = normalizedCharges
+      .filter((charge) => String(charge.status) === 'paid')
+      .map((charge) => ({
+        _id: charge._id,
+        concept: charge.concept,
+        amount: Number(charge.chargeAmount || charge.paidAmount || charge.amount || 0),
+        paidAt: charge.paidAt,
+        monthKey: charge.monthKey,
+        studentName: charge.studentName,
+        studentId: charge.studentId?._id || charge.studentId,
+        breakdownItems: charge.breakdownItems || [],
+      }));
+
+    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: normalizedCharges, referenceDate: now });
 
     return res.status(200).json({
       summary: {
         pendingAmount: studentSummaries.reduce((sum, item) => sum + Number(item.amount || 0), 0),
         pendingCount: studentSummaries.reduce((sum, item) => sum + Number(item.pendingCount || 0), 0),
       },
+      currentCharges,
       studentSummaries,
-      charges: sortedNormalizedCharges,
+      charges: currentCharges,
       payments: payments.map((payment) => ({
         ...payment,
         studentName: payment.studentId?.name || 'Familia',
+        concept: payment.chargeId?.concept || payment.concept || 'Pago académico',
       })),
+      paymentHistory,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -3695,6 +3698,7 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
     const studentOpenCharges = await AcademicCharge.find({
       schoolId,
       studentId: charge.studentId,
+      category: 'monthly_statement',
       status: { $in: ['pending', 'overdue'] },
     })
       .populate('studentId', 'name')

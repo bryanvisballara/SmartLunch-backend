@@ -1,0 +1,27 @@
+---
+description: Comergio data must persist in MongoDB (school-scoped tenant databases)
+alwaysApply: true
+---
+
+# MongoDB persistence in Comergio
+
+All data saved in Comergio MUST be persisted in MongoDB. Never assume in-memory, local files, or frontend-only state is the source of truth.
+
+## Multi-tenant storage
+
+Comergio uses school-scoped MongoDB databases via `src/config/db.js`:
+
+- Some schools (e.g. International Berckley School) live in the control DB (`MONGO_DB_NAME`).
+- Most schools (e.g. `comergio-demo`) live in a tenant DB named from the school slug (`comergio_demo`).
+
+When reading or debugging data:
+
+1. Always use school context: `runWithSchoolContext(schoolId, ...)` or authenticated API routes.
+2. Load models through the project registry (`require('./src/models/index')`) so scoped models resolve the correct database.
+3. Do not query `mongoose.connection.db.collection(...)` on the control DB only — tenant school data may be in a separate database.
+
+## Implementation rules
+
+- New features must read/write through Mongoose models and `save()` / `findOneAndUpdate()` — not ad-hoc caches.
+- After fixing data logic, verify persistence by querying the correct tenant DB for the target `schoolId`.
+- Scripts that repair or inspect school data must pass the correct `schoolId` and use school-scoped models.

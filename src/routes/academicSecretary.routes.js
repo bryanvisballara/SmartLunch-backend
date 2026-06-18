@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const express = require('express');
+const { resolveGradeCourses } = require('../utils/academicGradeCourses');
+const { getFeeGradeAliases, findGradeFeeSetting, canonicalizeGradeFeeSettingsForStructure } = require('../utils/feeGradeMatching');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -291,29 +293,23 @@ function buildTeacherCommunicationAuthorName(request = {}) {
 
 function buildAcademicStructureCourseOptions(serializedAcademicStructure = { grades: [] }) {
   return (Array.isArray(serializedAcademicStructure.grades) ? serializedAcademicStructure.grades : [])
-    .flatMap((grade) => {
-      const courses = Array.isArray(grade.courses) ? grade.courses : [];
-      if (courses.length === 0) {
-        return [];
-      }
+    .flatMap((grade) => resolveGradeCourses(grade).map((course) => {
+      const courses = resolveGradeCourses(grade);
+      const label = buildAcademicCourseDisplayLabel(grade, course, courses);
+      const aliases = [course.key, course.label, course.section, label]
+        .map(normalizeText)
+        .filter(Boolean);
 
-      return courses.map((course) => {
-        const label = buildAcademicCourseDisplayLabel(grade, course, courses);
-        const aliases = [course.key, course.label, course.section, label]
-          .map(normalizeText)
-          .filter(Boolean);
-
-        return {
-          value: normalizeText(course.key || label),
-          label,
-          gradeKey: normalizeText(grade.key),
-          gradeLabel: normalizeText(grade.label || grade.key),
-          section: normalizeText(course.section),
-          aliases: Array.from(new Set(aliases)),
-          source: 'academic-structure',
-        };
-      });
-    })
+      return {
+        value: normalizeText(course.key || label),
+        label,
+        gradeKey: normalizeText(grade.key),
+        gradeLabel: normalizeText(grade.label || grade.key),
+        section: normalizeText(course.section),
+        aliases: Array.from(new Set(aliases)),
+        source: 'academic-structure',
+      };
+    }))
     .filter((course) => course.value && course.label)
     .sort((left, right) => left.label.localeCompare(right.label, 'es', { numeric: true }));
 }
@@ -960,15 +956,49 @@ function filterAcademicFeeSettingsByGradeKeys(feeSettings = {}, gradeKeys = new 
   }
 
   const serializedFeeSettings = feeSettings.toObject ? feeSettings.toObject() : feeSettings;
+  const normalizedGradeKeys = new Set(
+    [...gradeKeys].flatMap((gradeKey) => getFeeGradeAliases(gradeKey)).filter(Boolean),
+  );
 
   return {
     ...serializedFeeSettings,
     benefitRules: normalizeBenefitRules(serializedFeeSettings.benefitRules || []),
     enrollmentBenefitRules: normalizeEnrollmentBenefitRules(serializedFeeSettings.enrollmentBenefitRules || []),
     gradeSettings: Array.isArray(serializedFeeSettings.gradeSettings)
-      ? serializedFeeSettings.gradeSettings.filter((setting) => gradeKeys.has(normalizeAcademicStructureGradeKey(setting?.grade)))
+      ? serializedFeeSettings.gradeSettings.filter((setting) => (
+        getFeeGradeAliases(setting?.grade).some((alias) => normalizedGradeKeys.has(alias))
+      ))
       : [],
   };
+}
+
+function serializeAcademicFeeConfigurationForStructure(configuration, structureGrades = [], options = {}) {
+  const serialized = configuration?.toObject ? configuration.toObject() : { ...(configuration || {}) };
+
+  return {
+    ...serialized,
+    benefitRules: normalizeBenefitRules(serialized.benefitRules || []),
+    enrollmentBenefitRules: normalizeEnrollmentBenefitRules(serialized.enrollmentBenefitRules || []),
+    gradeSettings: canonicalizeGradeFeeSettingsForStructure(serialized.gradeSettings || [], structureGrades, options),
+  };
+}
+
+function summarizeGradeFeeSettingsForComparison(gradeSettings = []) {
+  return (Array.isArray(gradeSettings) ? gradeSettings : [])
+    .map((setting) => ({
+      grade: normalizeText(setting?.grade),
+      enrollmentFee: normalizeFeeAmount(setting?.enrollmentFee),
+      monthlyTuition: normalizeFeeAmount(setting?.monthlyTuition),
+      enrollmentBonus: normalizeFeeAmount(setting?.enrollmentBonus),
+    }))
+    .filter((setting) => setting.grade)
+    .sort((left, right) => left.grade.localeCompare(right.grade, 'es'));
+}
+
+async function loadSnapshotCostsByGrade(schoolId) {
+  const snapshot = await SchoolCreationSnapshot.findOne({ schoolId }).lean();
+  const costsByGrade = snapshot?.payload?.financialCostsByGrade;
+  return costsByGrade && typeof costsByGrade === 'object' ? costsByGrade : {};
 }
 
 function normalizeAcademicStructureSubjectKind(value) {
@@ -2292,23 +2322,24 @@ function serializeAcademicStructureConfiguration(configuration) {
 
   const grades = (Array.isArray(configuration?.grades) ? configuration.grades : [])
     .filter((grade) => normalizeText(grade?.status || 'active') !== 'archived')
-    .map((grade, gradeIndex) => ({
-      key: normalizeAcademicStructureGradeKey(grade?.key || grade?.label),
-      label: normalizeText(grade?.label || grade?.key),
-      levelKey: normalizeAcademicStructureLevelKey(grade?.levelKey),
-      order: Number(grade?.order || (gradeIndex + 1) * 10),
-      courses: (Array.isArray(grade?.courses) ? grade.courses : [])
-        .filter((course) => normalizeText(course?.status || 'active') !== 'archived')
-        .map((course, courseIndex) => ({
-          key: normalizeText(course?.key).toUpperCase(),
-          label: normalizeText(course?.label || course?.key),
-          section: normalizeText(course?.section).toUpperCase(),
-          headroomTeacherUserId: normalizeText(course?.headroomTeacherUserId),
-          order: Number(course?.order || (courseIndex + 1) * 10),
-        }))
-        .filter((course) => course.key)
-        .sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || compareAcademicLabels(left.label, right.label)),
-    }))
+    .map((grade, gradeIndex) => {
+      const normalizedGrade = {
+        key: normalizeAcademicStructureGradeKey(grade?.key || grade?.label),
+        label: normalizeText(grade?.label || grade?.key),
+        levelKey: normalizeAcademicStructureLevelKey(grade?.levelKey),
+        order: Number(grade?.order || (gradeIndex + 1) * 10),
+        courses: Array.isArray(grade?.courses) ? grade.courses : [],
+      };
+
+      return {
+        key: normalizedGrade.key,
+        label: normalizedGrade.label,
+        levelKey: normalizedGrade.levelKey,
+        order: normalizedGrade.order,
+        courses: resolveGradeCourses(normalizedGrade)
+          .sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || compareAcademicLabels(left.label, right.label)),
+      };
+    })
     .filter((grade) => grade.key)
     .sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || compareAcademicLabels(left.label, right.label));
 
@@ -2808,9 +2839,9 @@ function getMaxBenefitFixedAmount(rule = {}) {
       return null;
     }
 
-    const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (isoMatch) {
-      return new Date(Date.UTC(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3])));
+    const isoDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+    if (isoDateMatch) {
+      return new Date(Date.UTC(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3])));
     }
 
     const parsed = new Date(normalized);
@@ -2852,16 +2883,33 @@ function getMaxBenefitFixedAmount(rule = {}) {
     return ['percent', 'fixed'].includes(normalized) ? normalized : 'none';
   }
 
-  function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '') {
+  function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '', options = {}) {
+    const { academicGrades = [] } = options;
     const aliases = new Set(getFeeGradeAliases(grade));
-    return (Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : []).find((levelSetting) => {
+    const schoolYearLevels = Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : [];
+
+    const byGradeKeys = schoolYearLevels.find((levelSetting) => {
       const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
       return gradeKeys.some((gradeKey) => getFeeGradeAliases(gradeKey).some((alias) => aliases.has(alias)));
-    }) || null;
+    });
+    if (byGradeKeys) {
+      return byGradeKeys;
+    }
+
+    const matchedGrade = (Array.isArray(academicGrades) ? academicGrades : []).find((gradeItem) => {
+      const gradeAliases = getFeeGradeAliases(gradeItem?.key || gradeItem?.grade);
+      return gradeAliases.some((alias) => aliases.has(alias));
+    });
+    const levelKey = normalizeText(matchedGrade?.levelKey).toLowerCase();
+    if (!levelKey) {
+      return null;
+    }
+
+    return schoolYearLevels.find((levelSetting) => normalizeText(levelSetting?.levelKey).toLowerCase() === levelKey) || null;
   }
 
-  function normalizeAcademicSchoolYearConfiguration(configuration = {}, grade = '') {
-    const levelSetting = resolveAcademicSchoolYearLevelSetting(configuration, grade);
+  function normalizeAcademicSchoolYearConfiguration(configuration = {}, grade = '', options = {}) {
+    const levelSetting = resolveAcademicSchoolYearLevelSetting(configuration, grade, options);
     const sourceConfiguration = levelSetting || configuration || {};
     const currentYear = new Date().getUTCFullYear();
     const fallbackStartDate = new Date(Date.UTC(currentYear, 0, 1));
@@ -3481,36 +3529,6 @@ async function ensureAcademicFeeConfiguration(schoolId, grades = []) {
   return configuration;
 }
 
-function findGradeFeeSetting(configuration, grade) {
-  const aliases = new Set(getFeeGradeAliases(grade));
-  const candidates = (configuration?.gradeSettings || []).filter((item) => getFeeGradeAliases(item?.grade).some((alias) => aliases.has(alias)));
-  return candidates.find((item) => hasAnyFeeAmount([item])) || candidates[0] || null;
-}
-
-function getFeeGradeAliases(value) {
-  const normalized = normalizeText(value).toLowerCase();
-  if (!normalized) return [];
-  const aliases = new Set([normalized]);
-  const academicGradeLevel = normalizeText(extractAcademicGradeLevel(normalized)).toLowerCase();
-  if (academicGradeLevel) {
-    aliases.add(academicGradeLevel);
-  }
-
-  normalized.split(':').map((part) => normalizeText(part).toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
-
-  const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*[a-z]$/i);
-  if (sectionMatch) {
-    aliases.add(sectionMatch[1]);
-  }
-
-  const numericMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:\s*[-_/ ]?\s*[a-z])?(?:$|[^\d])/i);
-  if (numericMatch) {
-    aliases.add(numericMatch[1]);
-  }
-
-  return [...aliases].filter(Boolean);
-}
-
 function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date()) {
   const currentDay = new Date(referenceDate).getUTCDate();
   return (benefitRules || []).find((rule) => currentDay >= Number(rule.startDay || 0) && currentDay <= Number(rule.endDay || 0)) || null;
@@ -3609,6 +3627,18 @@ function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (charge?.category === 'monthly_statement') {
+    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
+    return {
+      baseAmount,
+      effectiveAmount,
+      discountPercent: 0,
+      fixedDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
+      benefitLabel: '',
+      benefitWindowLabel: '',
+      category: charge?.category || '',
+    };
+  }
   if (charge?.category === 'annual_tuition') {
     const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
     return {
@@ -5403,9 +5433,9 @@ router.get('/bootstrap', async (req, res) => {
     const courseOptions = Array.from(courseOptionMap.values())
       .sort((left, right) => left.label.localeCompare(right.label, 'es', { numeric: true }));
     const courseKeys = courseOptions.map((course) => course.value);
-    const feeSettings = filterAcademicFeeSettingsByGradeKeys(
+    const feeSettings = serializeAcademicFeeConfigurationForStructure(
       await ensureAcademicFeeConfiguration(schoolId, feeSettingGrades),
-      isCoordinationUser ? coordinationScope.gradeKeys : new Set(feeSettingGrades)
+      visibleAcademicStructure.grades,
     );
 
     return res.status(200).json({
@@ -6768,7 +6798,33 @@ router.get('/fee-settings', async (req, res) => {
     const serializedAcademicStructure = serializeAcademicStructureConfiguration(academicStructure);
     const grades = serializedAcademicStructure.grades.map((grade) => grade.key).filter(Boolean);
     const configuration = await ensureAcademicFeeConfiguration(schoolId, grades);
-    return res.status(200).json(configuration);
+    const snapshotCostsByGrade = await loadSnapshotCostsByGrade(schoolId);
+    const repairedGradeSettings = canonicalizeGradeFeeSettingsForStructure(
+      configuration.gradeSettings || [],
+      serializedAcademicStructure.grades,
+      { snapshotCostsByGrade },
+    );
+    const currentSummary = JSON.stringify(summarizeGradeFeeSettingsForComparison(configuration.gradeSettings || []));
+    const repairedSummary = JSON.stringify(summarizeGradeFeeSettingsForComparison(repairedGradeSettings));
+
+    let billingSync = null;
+    if (currentSummary !== repairedSummary) {
+      configuration.gradeSettings = repairedGradeSettings;
+      await configuration.save();
+      const { syncSchoolBillingProfilesFromFeeConfiguration } = require('../services/academicConsolidatedBilling.service');
+      billingSync = await syncSchoolBillingProfilesFromFeeConfiguration({
+        schoolId,
+        feeConfiguration: configuration.toObject ? configuration.toObject() : configuration,
+      }).catch((syncError) => {
+        console.warn(`[FEE_SETTINGS_REPAIR] school=${schoolId} error=${syncError.message}`);
+        return { updatedProfiles: 0, refreshedCharges: 0, error: syncError.message };
+      });
+    }
+
+    return res.status(200).json({
+      ...serializeAcademicFeeConfigurationForStructure(configuration, serializedAcademicStructure.grades, { snapshotCostsByGrade }),
+      billingSync,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -6778,7 +6834,15 @@ router.put('/fee-settings', async (req, res) => {
   try {
     const { schoolId } = req.user;
     const payload = req.body || {};
+    const academicStructure = await ensureAcademicStructureConfiguration(schoolId);
+    const serializedAcademicStructure = serializeAcademicStructureConfiguration(academicStructure);
     const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(payload);
+    const snapshotCostsByGrade = await loadSnapshotCostsByGrade(schoolId);
+    const canonicalGradeSettings = canonicalizeGradeFeeSettingsForStructure(
+      normalizeGradeFeeSettings(payload.gradeSettings),
+      serializedAcademicStructure.grades,
+      { snapshotCostsByGrade },
+    );
     const saved = await AcademicFeeConfiguration.findOneAndUpdate(
       { schoolId },
       {
@@ -6791,11 +6855,24 @@ router.put('/fee-settings', async (req, res) => {
         schoolYearLevels: normalizeAcademicSchoolYearLevelSettings(payload.schoolYearLevels),
         benefitRules: normalizeBenefitRules(payload.benefitRules),
         enrollmentBenefitRules: normalizeEnrollmentBenefitRules(payload.enrollmentBenefitRules),
-        gradeSettings: normalizeGradeFeeSettings(payload.gradeSettings),
+        gradeSettings: canonicalGradeSettings,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-    return res.status(200).json(saved);
+
+    const { syncSchoolBillingProfilesFromFeeConfiguration } = require('../services/academicConsolidatedBilling.service');
+    const billingSync = await syncSchoolBillingProfilesFromFeeConfiguration({
+      schoolId,
+      feeConfiguration: saved.toObject ? saved.toObject() : saved,
+    }).catch((syncError) => {
+      console.warn(`[FEE_SETTINGS_SYNC] school=${schoolId} error=${syncError.message}`);
+      return { updatedProfiles: 0, refreshedCharges: 0, error: syncError.message };
+    });
+
+    return res.status(200).json({
+      ...serializeAcademicFeeConfigurationForStructure(saved, serializedAcademicStructure.grades, { snapshotCostsByGrade }),
+      billingSync,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -7926,84 +8003,32 @@ router.post('/enrollments', async (req, res) => {
         );
       }
 
-      const dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_DAY;
-      const currentMonthDueDate = new Date(chargeReferenceDate);
-      currentMonthDueDate.setDate(dueDay);
-      currentMonthDueDate.setHours(0, 0, 0, 0);
-      const monthlyTuitionPricing = resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: Number(gradeFeeSetting?.monthlyTuition || 0), originalAmount: Number(gradeFeeSetting?.monthlyTuition || 0) }, billingProfile, chargeReferenceDate);
       const existingEnrollmentChargeCount = hadExistingStudent || hadBillingProfile
-        ? await AcademicCharge.countDocuments({ schoolId, studentId: student._id, audienceType: 'enrollment', status: { $ne: 'cancelled' } })
+        ? await AcademicCharge.countDocuments({ schoolId, studentId: student._id, category: 'monthly_statement', status: { $ne: 'cancelled' } })
         : 0;
       const shouldCreateEnrollmentCharges = existingEnrollmentChargeCount === 0;
 
       if (resolvedPrimaryParent && shouldCreateEnrollmentCharges) {
-        if (Number(gradeFeeSetting?.enrollmentBonus || 0) > 0) {
-          const installmentAmounts = splitAcademicAmountIntoInstallments(gradeFeeSetting.enrollmentBonus, enrollmentBonusInstallments);
-          for (const [installmentIndex, installmentAmount] of installmentAmounts.entries()) {
-            await createCharge({
-              schoolId,
-              createdByUserId: userId,
-              createdByRole: role,
-              parentId: resolvedPrimaryParent.user._id,
-              studentId: student._id,
-              billingProfileId: billingProfile._id,
-              category: 'enrollment_bonus',
-              concept: installmentAmounts.length > 1 ? `Bono de ingreso · cuota ${installmentIndex + 1}/${installmentAmounts.length}` : 'Bono de ingreso',
-              description: installmentAmounts.length > 1 ? `Plan de financiamiento del bono a ${installmentAmounts.length} meses.` : '',
-              amount: installmentAmount,
-              originalAmount: installmentAmount,
-              dueDate: buildAcademicInstallmentDueDate(chargeReferenceDate, installmentIndex),
-              audienceType: 'enrollment',
-              targetGrade: student.grade,
-              targetCourse: student.course,
-            });
-          }
-        }
+        const { ensureConsolidatedMonthlyCharge } = require('../services/academicConsolidatedBilling.service');
+        const academicStructure = await ensureAcademicStructureConfiguration(schoolId);
+        const academicGrades = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+          .filter((gradeItem) => normalizeText(gradeItem?.status || 'active') !== 'archived')
+          .map((gradeItem) => ({ key: normalizeText(gradeItem.key), levelKey: normalizeText(gradeItem.levelKey) }));
 
-        if (proratedAnnualTuitionAmount > 0) {
-          const baseInstallmentAmounts = splitAcademicAmountIntoInstallments(proratedAnnualTuitionAmount, annualTuitionInstallments);
-          const installmentAmounts = splitAcademicAmountIntoInstallments(discountedAnnualTuitionAmount, annualTuitionInstallments);
-          for (const [installmentIndex, installmentAmount] of installmentAmounts.entries()) {
-            await createCharge({
-              schoolId,
-              createdByUserId: userId,
-              createdByRole: role,
-              parentId: resolvedPrimaryParent.user._id,
-              studentId: student._id,
-              billingProfileId: billingProfile._id,
-              category: 'annual_tuition',
-              concept: installmentAmounts.length > 1 ? `Matrícula anual ${new Date().getFullYear()} · cuota ${installmentIndex + 1}/${installmentAmounts.length}` : `Matrícula anual ${new Date().getFullYear()}`,
-              amount: installmentAmount,
-              originalAmount: baseInstallmentAmounts[installmentIndex] || installmentAmount,
-              dueDate: buildAcademicAnnualTuitionInstallmentDueDate(annualTuitionDueDate, installmentIndex),
-              audienceType: 'enrollment',
-              targetGrade: student.grade,
-              targetCourse: student.course,
-              description: `${entryDate && !Number.isNaN(entryDate.getTime()) ? `Matrícula prorrateada por ingreso en ${entryDate.toLocaleString('es-CO', { month: 'long', timeZone: 'UTC' })}. ` : ''}${enrollmentPricing.lateEnrollmentSurchargeAmount > 0 ? `Incluye recargo por matrícula tardía de ${enrollmentPricing.lateEnrollmentSurchargeAmount}. ` : ''}${enrollmentPricing.enrollmentBenefitDiscountAmount > 0 ? `Aplica beneficio ${enrollmentPricing.enrollmentBenefitLabel || 'matrícula'} por ${enrollmentPricing.enrollmentBenefitDiscountAmount}. ` : ''}${annualTuitionAdditionalDiscountAmount > 0 ? `Aplica descuento adicional de matrícula ${annualTuitionAdditionalDiscountPercent}%${annualTuitionAdditionalDiscountLabel ? ` (${annualTuitionAdditionalDiscountLabel})` : ''}. ` : ''}${installmentAmounts.length > 1 ? `Plan de financiamiento de la matrícula a ${installmentAmounts.length} meses.` : ''}`.trim(),
-            });
-          }
-        }
-
-        if (Number(gradeFeeSetting?.monthlyTuition || 0) > 0) {
-          await createCharge({
-            schoolId,
-            createdByUserId: userId,
-            createdByRole: role,
-            parentId: resolvedPrimaryParent.user._id,
-            studentId: student._id,
-            billingProfileId: billingProfile._id,
-            category: 'monthly_tuition',
-            concept: `Pensión ${formatDateLabel(currentMonthDueDate)}`,
-            amount: monthlyTuitionPricing.effectiveAmount,
-            originalAmount: monthlyTuitionPricing.baseAmount,
-            dueDate: currentMonthDueDate,
-            audienceType: 'enrollment',
-            targetGrade: student.grade,
-            targetCourse: student.course,
-            monthKey: buildMonthKey(currentMonthDueDate),
-            description: formatAcademicDiscountDescription(monthlyTuitionPricing),
-          });
-        }
+        await ensureConsolidatedMonthlyCharge({
+          schoolId,
+          studentId: student._id,
+          billingProfile: billingProfile.toObject ? billingProfile.toObject() : billingProfile,
+          feeConfiguration: feeConfiguration.toObject ? feeConfiguration.toObject() : feeConfiguration,
+          academicGrades,
+          createdByUserId: userId,
+          createdByRole: role,
+          parentId: resolvedPrimaryParent.user._id,
+          referenceDate: chargeReferenceDate,
+          sendNotification: true,
+          schoolName,
+          audienceType: 'enrollment',
+        });
       }
 
       const studentIdKey = String(student._id);
@@ -8037,7 +8062,7 @@ router.post('/enrollments', async (req, res) => {
           studentName: charge.studentId?.name || 'Alumno',
         })),
         pushTitle: 'Matrícula registrada',
-        pushBody: 'Ya puedes revisar los cargos académicos iniciales en la app.',
+        pushBody: 'Ya puedes pagar el cobro mensual consolidado en la app.',
         payload: { type: 'academic.billing.enrollment', url: '/parent/pagos' },
       });
     }

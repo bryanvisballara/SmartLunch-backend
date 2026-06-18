@@ -6,7 +6,25 @@ import {
   downloadAcademicEnrollmentContractPdf,
   isAcademicParentDraftComplete,
   isAcademicStudentDraftComplete,
+  normalizeAcademicSchoolYearConfiguration,
 } from '../lib/academicEnrollment';
+import { findMatchingFeeSetting, getFeeGradeAliases } from '../lib/feeGradeMatching';
+import MillenniumEnrollmentSignatureBlock from '../components/MillenniumEnrollmentSignatureBlock';
+import MillenniumPagareDebtorsTable from '../components/MillenniumPagareDebtorsTable';
+import {
+  buildMillenniumEnrollmentContractContext,
+  canPreviewMillenniumEnrollmentContracts,
+  downloadMillenniumEnrollmentContractPdf,
+  downloadMillenniumPagareContractPdf,
+  getPagareDebtorColumns,
+  isMillenniumSchool,
+  millenniumSchoolCrest,
+  parseEnrollmentContractSections,
+  parsePagareDocumentSections,
+  renderMillenniumEnrollmentContract,
+  renderMillenniumPagareContract,
+  splitContractParagraphs,
+} from '../lib/millenniumEnrollmentContracts';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
@@ -89,31 +107,10 @@ function formatCurrency(value) {
   }).format(Number(value || 0));
 }
 
-function getFeeGradeAliases(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return [];
-  const aliases = new Set([normalized]);
-  const normalizedLetters = normalized
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, '');
-  if (normalizedLetters.includes('prejardin')) aliases.add('prejardin');
-  else if (normalizedLetters.includes('jardin')) aliases.add('jardin');
-  if (normalizedLetters.includes('transicion')) aliases.add('transicion');
-
-  normalized.split(':').map((part) => String(part || '').trim().toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
-
-  const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*[a-z]$/i);
-  if (sectionMatch) {
-    aliases.add(sectionMatch[1]);
-  }
-
-  const numericMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:\s*[-_/ ]?\s*[a-z])?(?:$|[^\d])/i);
-  if (numericMatch) {
-    aliases.add(numericMatch[1]);
-  }
-
-  return [...aliases].filter(Boolean);
+function hasFeeSettingAmounts(setting) {
+  return Number(setting?.enrollmentBonus || 0) > 0
+    || Number(setting?.enrollmentFee || 0) > 0
+    || Number(setting?.monthlyTuition || 0) > 0;
 }
 
 function getAcademicBaseGradeFromCourseValue(value) {
@@ -141,22 +138,6 @@ function resolveEnrollmentGradeValueForSelector(item = {}, gradeOptions = []) {
   }
 
   return candidates[2] || candidates[3] || candidates[0] || '';
-}
-
-function hasFeeSettingAmounts(setting) {
-  return Number(setting?.enrollmentBonus || 0) > 0
-    || Number(setting?.enrollmentFee || 0) > 0
-    || Number(setting?.monthlyTuition || 0) > 0;
-}
-
-function findMatchingFeeSetting(gradeSettings, grade) {
-  const gradeAliases = new Set([
-    ...getFeeGradeAliases(grade?.value || grade),
-    ...getFeeGradeAliases(grade?.label),
-  ]);
-  const candidates = (Array.isArray(gradeSettings) ? gradeSettings : [])
-    .filter((setting) => getFeeGradeAliases(setting?.grade).some((alias) => gradeAliases.has(alias)));
-  return candidates.find(hasFeeSettingAmounts) || candidates[0] || null;
 }
 
 function formatDate(value) {
@@ -328,9 +309,9 @@ function parseAcademicSimulationDate(value) {
   const normalized = String(value || '').trim();
   if (!normalized) return null;
 
-  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) {
-    return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  const isoDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoDateMatch) {
+    return new Date(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3]));
   }
 
   const parsed = new Date(normalized);
@@ -339,14 +320,6 @@ function parseAcademicSimulationDate(value) {
   }
 
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-}
-
-function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '') {
-  const aliases = new Set(getFeeGradeAliases(grade));
-  return (Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : []).find((levelSetting) => {
-    const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
-    return gradeKeys.some((gradeKey) => getFeeGradeAliases(gradeKey).some((alias) => aliases.has(alias)));
-  }) || null;
 }
 
 function startOfAcademicSimulationMonth(date) {
@@ -383,6 +356,7 @@ function splitAcademicSimulationAmount(baseAmount, installmentCount) {
 function buildAcademicMonthlyPaymentSchedule({
   feeSettings,
   grade,
+  academicGrades = [],
   schoolYearStartDate,
   schoolYearEndDate,
   academicYear,
@@ -401,9 +375,16 @@ function buildAcademicMonthlyPaymentSchedule({
   const normalizedAcademicYear = Number.parseInt(String(academicYear || currentYear), 10) || currentYear;
   const parsedEntryDate = parseAcademicSimulationDate(entryDate);
   const fallbackYear = parsedEntryDate?.getFullYear?.() || normalizedAcademicYear;
-  const levelSchoolYearSetting = resolveAcademicSchoolYearLevelSetting(feeSettings, grade);
-  const parsedSchoolYearStartDate = parseAcademicSimulationDate(levelSchoolYearSetting?.schoolYearStartDate || schoolYearStartDate) || new Date(fallbackYear, 0, 1);
-  const parsedSchoolYearEndDate = parseAcademicSimulationDate(levelSchoolYearSetting?.schoolYearEndDate || schoolYearEndDate) || new Date(fallbackYear, 11, 31);
+  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(
+    feeSettings || {
+      schoolYearStartDate,
+      schoolYearEndDate,
+    },
+    grade,
+    { academicGrades },
+  );
+  const parsedSchoolYearStartDate = schoolYearConfiguration.startDate || new Date(fallbackYear, 0, 1);
+  const parsedSchoolYearEndDate = schoolYearConfiguration.endDate || new Date(fallbackYear, 11, 31);
 
   const schoolYearStartMonth = startOfAcademicSimulationMonth(parsedSchoolYearStartDate);
   const schoolYearEndMonth = startOfAcademicSimulationMonth(parsedSchoolYearEndDate);
@@ -1498,16 +1479,16 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   }, [error, success]);
 
   const resolveFeeSettingsForBootstrap = async (payload = {}) => {
-    if (hasCompleteAcademicFeeSettings(payload.feeSettings)) {
-      return payload.feeSettings;
-    }
-
     try {
       const feeSettingsResponse = await getAcademicSecretaryFeeSettings();
-      return feeSettingsResponse.data || payload.feeSettings || null;
+      if (feeSettingsResponse?.data) {
+        return feeSettingsResponse.data;
+      }
     } catch {
-      return payload.feeSettings || null;
+      // Fall back to bootstrap payload when the dedicated endpoint is unavailable.
     }
+
+    return payload.feeSettings || null;
   };
 
   const loadBootstrap = async () => {
@@ -1747,6 +1728,11 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       return { value, label: value };
     }).filter((grade) => grade.value);
   }, [bootstrap.academicStructure, bootstrap.grades]);
+  const academicStructureGrades = useMemo(
+    () => (Array.isArray(bootstrap.academicStructure?.grades) ? bootstrap.academicStructure.grades : []),
+    [bootstrap.academicStructure?.grades],
+  );
+  const schoolYearCalendarOptions = useMemo(() => ({ academicGrades: academicStructureGrades }), [academicStructureGrades]);
   const gradeLabelByValue = useMemo(
     () => gradeCatalog.reduce((accumulator, grade) => {
       accumulator[grade.value] = grade.label;
@@ -1856,7 +1842,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           return null;
         }
 
-        const pricing = calculateAcademicProratedEnrollmentFee(selectedCostSetting?.enrollmentFee || 0, entryDate, bootstrap.feeSettings || {}, selectedCostSetting?.grade || '');
+        const pricing = calculateAcademicProratedEnrollmentFee(selectedCostSetting?.enrollmentFee || 0, entryDate, bootstrap.feeSettings || {}, selectedCostSetting?.grade || '', schoolYearCalendarOptions);
         return {
           value: `enrollment-benefit-${ruleIndex}`,
           label: rule?.label || `Beneficio matricula ${ruleIndex + 1}`,
@@ -1873,7 +1859,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const selectedCostSimulationEnrollmentOption = useMemo(() => {
     return costSimulationEnrollmentOptions.find((option) => option.value === costSimulationDraft.enrollmentSimulationRuleKey) || costSimulationEnrollmentOptions[0];
   }, [costSimulationDraft.enrollmentSimulationRuleKey, costSimulationEnrollmentOptions]);
-  const costSimulationProratedEnrollmentFee = useMemo(() => calculateAcademicProratedEnrollmentFee(selectedCostSetting?.enrollmentFee || 0, costSimulationDraft.entryDate, bootstrap.feeSettings || {}, selectedCostSetting?.grade || ''), [bootstrap.feeSettings, costSimulationDraft.entryDate, selectedCostSetting?.enrollmentFee, selectedCostSetting?.grade]);
+  const costSimulationProratedEnrollmentFee = useMemo(() => calculateAcademicProratedEnrollmentFee(selectedCostSetting?.enrollmentFee || 0, costSimulationDraft.entryDate, bootstrap.feeSettings || {}, selectedCostSetting?.grade || '', schoolYearCalendarOptions), [bootstrap.feeSettings, costSimulationDraft.entryDate, selectedCostSetting?.enrollmentFee, selectedCostSetting?.grade, schoolYearCalendarOptions]);
   const costSimulationAnnualTuitionAdditionalDiscountPercent = Math.min(100, Math.max(0, Number(costSimulationDraft.annualTuitionAdditionalDiscountPercent || 0)));
   const costSimulationAdditionalDiscountPercent = Math.min(100, Math.max(0, Number(costSimulationDraft.monthlyTuitionAdditionalDiscountPercent || 0)));
   const costSimulationEstimatedMonthlyTuition = calculateMonthlyTuitionScenarioAmount(selectedCostSetting?.monthlyTuition || 0, selectedCostSimulationPaymentOption, costSimulationAdditionalDiscountPercent);
@@ -1885,6 +1871,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     return buildAcademicMonthlyPaymentSchedule({
       feeSettings: bootstrap.feeSettings || {},
       grade: selectedCostSetting?.grade || '',
+      academicGrades: academicStructureGrades,
       schoolYearStartDate: bootstrap.feeSettings?.schoolYearStartDate,
       schoolYearEndDate: bootstrap.feeSettings?.schoolYearEndDate,
       academicYear: bootstrap.feeSettings?.academicYear,
@@ -1899,7 +1886,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       generalFixedDiscountAmount: Number(selectedCostSimulationPaymentOption?.generalFixedDiscountAmount || 0),
       additionalDiscountPercent: costSimulationAdditionalDiscountPercent,
     });
-  }, [bootstrap.feeSettings, costSimulationAdditionalDiscountPercent, costSimulationAnnualTuitionAdditionalDiscountPercent, costSimulationDraft.annualTuitionInstallments, costSimulationDraft.enrollmentBonusInstallments, costSimulationDraft.entryDate, costSimulationProratedEnrollmentFee.amount, selectedCostSetting, selectedCostSimulationPaymentOption]);
+  }, [academicStructureGrades, bootstrap.feeSettings, costSimulationAdditionalDiscountPercent, costSimulationAnnualTuitionAdditionalDiscountPercent, costSimulationDraft.annualTuitionInstallments, costSimulationDraft.enrollmentBonusInstallments, costSimulationDraft.entryDate, costSimulationProratedEnrollmentFee.amount, selectedCostSetting, selectedCostSimulationPaymentOption]);
   const costSimulationExternalBonusAmount = Math.max(0, Number(selectedCostSetting?.enrollmentBonus || 0));
   const costSimulationBonusInstallments = Math.max(1, Number(costSimulationDraft.enrollmentBonusInstallments || 1));
   const costSimulationIncludesBonusInMonthlyProjection = costSimulationBonusInstallments > 1;
@@ -3765,7 +3752,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 const annualTuitionInstallments = Math.max(1, Number(student.annualTuitionInstallments || 1));
                 const additionalEnrollmentDiscountPercent = Math.min(100, Math.max(0, Number(student.annualTuitionAdditionalDiscountPercent || 0)));
                 const additionalPensionDiscountPercent = Math.min(100, Math.max(0, Number(student.monthlyTuitionAdditionalDiscountPercent || 0)));
-                const proratedEnrollmentFee = calculateAcademicProratedEnrollmentFee(selectedFeeSettingForStudent?.enrollmentFee || 0, student.entryDate, bootstrap.feeSettings || {}, selectedFeeSettingForStudent?.grade || student.grade || '');
+                const proratedEnrollmentFee = calculateAcademicProratedEnrollmentFee(selectedFeeSettingForStudent?.enrollmentFee || 0, student.entryDate, bootstrap.feeSettings || {}, selectedFeeSettingForStudent?.grade || student.grade || '', schoolYearCalendarOptions);
                 const estimatedMonthlyTuition = calculateDiscountedAmount(selectedFeeSettingForStudent?.monthlyTuition || 0, additionalPensionDiscountPercent);
                 const paymentSimulationOptions = [{ value: 'full', label: 'Precio full', generalDiscountPercent: 0, generalFixedDiscountAmount: 0 }].concat(
                   generalBenefitRules.map((rule, ruleIndex) => ({
@@ -3781,6 +3768,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 const monthlyPaymentSchedule = buildAcademicMonthlyPaymentSchedule({
                   feeSettings: bootstrap.feeSettings || {},
                   grade: selectedFeeSettingForStudent?.grade || student.grade || '',
+                  academicGrades: academicStructureGrades,
                   schoolYearStartDate: bootstrap.feeSettings?.schoolYearStartDate,
                   schoolYearEndDate: bootstrap.feeSettings?.schoolYearEndDate,
                   academicYear: bootstrap.feeSettings?.academicYear,
@@ -3798,6 +3786,34 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 const hasCompleteParentData = isAcademicParentDraftComplete(enrollmentForm.father) || isAcademicParentDraftComplete(enrollmentForm.mother);
                 const isStudentReadyForContract = isAcademicStudentDraftComplete(student) && Boolean(selectedFeeSettingForStudent);
                 const canGenerateContract = hasCompleteParentData && isStudentReadyForContract;
+                const millenniumContractPricing = {
+                  enrollmentBonusAmount: Number(selectedFeeSettingForStudent?.enrollmentBonus || 0),
+                  enrollmentBonusInstallments,
+                  proratedAnnualTuitionAmount: proratedEnrollmentFee.amount,
+                  proratedAnnualTuitionBaseAmount: proratedEnrollmentFee.baseAmount,
+                  lateEnrollmentSurchargeAmount: proratedEnrollmentFee.lateEnrollmentSurchargeAmount,
+                  enrollmentBenefitDiscountAmount: proratedEnrollmentFee.enrollmentBenefitDiscountAmount,
+                  enrollmentBenefitLabel: proratedEnrollmentFee.enrollmentBenefitLabel,
+                  annualTuitionInstallments,
+                  annualTuitionAdditionalDiscountPercent: additionalEnrollmentDiscountPercent,
+                  annualTuitionAdditionalDiscountLabel: student.annualTuitionAdditionalDiscountLabel,
+                  monthlyTuitionAmount: estimatedMonthlyTuition,
+                  monthlyTuitionAdditionalDiscountPercent: additionalPensionDiscountPercent,
+                  monthlyTuitionAdditionalDiscountLabel: student.monthlyTuitionAdditionalDiscountLabel,
+                };
+                const millenniumContractParams = {
+                  father: enrollmentForm.father,
+                  mother: enrollmentForm.mother,
+                  primaryGuardian: enrollmentForm.primaryGuardian,
+                  student,
+                  gradeLabel: formatGradeLabel(student.grade),
+                  pricing: millenniumContractPricing,
+                };
+                const showMillenniumContracts = isMillenniumSchool(schoolName)
+                  && canPreviewMillenniumEnrollmentContracts(millenniumContractParams);
+                const millenniumContractContext = showMillenniumContracts
+                  ? buildMillenniumEnrollmentContractContext(millenniumContractParams)
+                  : null;
                 const medicalProfile = student.medicalProfile || createEmptyStudentDraft().medicalProfile;
                 const medicationAuthorization = medicalProfile.medicationAuthorization || {};
 
@@ -3818,9 +3834,106 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                       <label>Grado<select value={student.grade} onChange={(event) => updateEnrollmentStudent(index, { grade: event.target.value })}><option value="">Selecciona un grado</option>{gradeCatalog.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label>
                       <label>Fecha de ingreso<input type="date" value={student.entryDate} onChange={(event) => updateEnrollmentStudent(index, { entryDate: event.target.value })} /></label>
                       <div className="academic-secretary__field-with-action">
-                        {canGenerateContract ? <button className="btn btn-primary" type="button" onClick={() => downloadAcademicEnrollmentContractPdf({ schoolName, father: enrollmentForm.father, mother: enrollmentForm.mother, student, gradeLabel: formatGradeLabel(student.grade), pricing: { enrollmentBonusAmount: Number(selectedFeeSettingForStudent?.enrollmentBonus || 0), enrollmentBonusInstallments, proratedAnnualTuitionAmount: proratedEnrollmentFee.amount, proratedAnnualTuitionBaseAmount: proratedEnrollmentFee.baseAmount, lateEnrollmentSurchargeAmount: proratedEnrollmentFee.lateEnrollmentSurchargeAmount, enrollmentBenefitDiscountAmount: proratedEnrollmentFee.enrollmentBenefitDiscountAmount, enrollmentBenefitLabel: proratedEnrollmentFee.enrollmentBenefitLabel, annualTuitionInstallments, annualTuitionAdditionalDiscountPercent: additionalEnrollmentDiscountPercent, annualTuitionAdditionalDiscountLabel: student.annualTuitionAdditionalDiscountLabel, monthlyTuitionAmount: Number(selectedFeeSettingForStudent?.monthlyTuition || 0), monthlyTuitionAdditionalDiscountPercent: additionalPensionDiscountPercent, monthlyTuitionAdditionalDiscountLabel: student.monthlyTuitionAdditionalDiscountLabel } })}>Generar contrato</button> : null}
+                        {showMillenniumContracts ? (
+                          <div className="academic-secretary__contract-actions">
+                            <button
+                              className="btn btn-primary"
+                              type="button"
+                              onClick={() => downloadMillenniumEnrollmentContractPdf(millenniumContractParams)}
+                            >
+                              Descargar contrato
+                            </button>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => downloadMillenniumPagareContractPdf(millenniumContractParams)}
+                            >
+                              Descargar pagaré
+                            </button>
+                          </div>
+                        ) : null}
+                        {!showMillenniumContracts && canGenerateContract ? (
+                          <button
+                            className="btn btn-primary"
+                            type="button"
+                            onClick={() => downloadAcademicEnrollmentContractPdf({
+                              schoolName,
+                              father: enrollmentForm.father,
+                              mother: enrollmentForm.mother,
+                              student,
+                              gradeLabel: formatGradeLabel(student.grade),
+                              pricing: millenniumContractPricing,
+                            })}
+                          >
+                            Generar contrato
+                          </button>
+                        ) : null}
                       </div>
                     </div>
+
+                    {showMillenniumContracts ? (
+                      <div className="academic-secretary__contracts-preview">
+                        <div className="academic-secretary__contracts-preview-head">
+                          <h4>Contratos Millennium School</h4>
+                          <p>
+                            Vista previa con los datos del alumno y el acudiente principal (
+                            {enrollmentForm.primaryGuardian === 'father' ? 'padre' : 'madre'}
+                            ) como responsable financiero.
+                          </p>
+                        </div>
+                        <div className="academic-secretary__contracts-preview-grid">
+                          <article className="academic-secretary__contract-card">
+                            <div className="academic-secretary__contract-document">
+                              <header className="academic-secretary__contract-header academic-secretary__contract-header--left">
+                                <img alt="Millennium School" src={millenniumSchoolCrest} />
+                                <h5>Contrato de matrícula 2026-2027</h5>
+                              </header>
+                              <div className="academic-secretary__contract-preview">
+                                {parseEnrollmentContractSections(renderMillenniumEnrollmentContract(millenniumContractContext)).flatMap((section, sectionIndex) => {
+                                  if (section.type === 'signature-block') {
+                                    return [
+                                      <MillenniumEnrollmentSignatureBlock
+                                        context={millenniumContractContext}
+                                        key={`contract-signature-${sectionIndex}`}
+                                      />,
+                                    ];
+                                  }
+
+                                  return splitContractParagraphs(section.content).map((paragraph, paragraphIndex) => (
+                                    <p key={`contract-${sectionIndex}-${paragraphIndex}`}>{paragraph}</p>
+                                  ));
+                                })}
+                              </div>
+                            </div>
+                          </article>
+                          <article className="academic-secretary__contract-card">
+                            <div className="academic-secretary__contract-document">
+                              <div className="academic-secretary__contract-preview">
+                                {parsePagareDocumentSections(renderMillenniumPagareContract(millenniumContractContext)).flatMap((section, sectionIndex) => {
+                                  if (section.type === 'debtors-table') {
+                                    const debtorColumns = getPagareDebtorColumns({
+                                      father: enrollmentForm.father,
+                                      mother: enrollmentForm.mother,
+                                    });
+                                    return [
+                                      <MillenniumPagareDebtorsTable
+                                        debtorOne={debtorColumns.debtorOne}
+                                        debtorTwo={debtorColumns.debtorTwo}
+                                        key={`pagare-table-${sectionIndex}`}
+                                      />,
+                                    ];
+                                  }
+
+                                  return splitContractParagraphs(section.content).map((paragraph, paragraphIndex) => (
+                                    <p key={`pagare-${sectionIndex}-${paragraphIndex}`}>{paragraph}</p>
+                                  ));
+                                })}
+                              </div>
+                            </div>
+                          </article>
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="academic-secretary__subform academic-secretary__subform--soft academic-secretary__medical-profile-form">
                       <h4>Ficha médica y autorización de medicamentos</h4>
