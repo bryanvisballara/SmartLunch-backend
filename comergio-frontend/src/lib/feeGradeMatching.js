@@ -17,8 +17,10 @@ export function isEducationalLevelKey(value) {
 function addEducationalLevelAliases(aliases, levelName, number = '') {
   const level = normalizeFeeGradeText(levelName).toLowerCase();
   if (!level) return;
-  aliases.add(level);
-  if (!number) return;
+  if (!number) {
+    aliases.add(level);
+    return;
+  }
   aliases.add(`${level}_${number}`);
   aliases.add(`${level}-${number}`);
   aliases.add(`${level} ${number}`);
@@ -131,4 +133,30 @@ export function findMatchingFeeSetting(gradeSettings, grade) {
     .sort((left, right) => right.score - left.score);
 
   return ranked[0]?.item || null;
+}
+
+export function studentMatchesGradeKey(studentGrade = '', gradeKey = '') {
+  const normalizedStudentGrade = normalizeFeeGradeText(studentGrade).toLowerCase();
+  const normalizedGradeKey = normalizeFeeGradeText(gradeKey).toLowerCase();
+  if (normalizedStudentGrade && normalizedGradeKey && normalizedStudentGrade === normalizedGradeKey) {
+    return true;
+  }
+
+  const studentAliases = new Set(getFeeGradeAliases(studentGrade));
+  const gradeAliases = getFeeGradeAliases(gradeKey);
+  return gradeAliases.some((alias) => studentAliases.has(alias));
+}
+
+export function studentMatchesAnyGradeKey(studentGrade = '', gradeKeys = []) {
+  return (Array.isArray(gradeKeys) ? gradeKeys : []).some((gradeKey) => (
+    studentMatchesGradeKey(studentGrade, gradeKey)
+  ));
+}
+
+export function resolveStructureGradeKeyForStudent(studentGrade = '', structureGrades = []) {
+  const match = (Array.isArray(structureGrades) ? structureGrades : []).find((grade) => (
+    studentMatchesGradeKey(studentGrade, grade?.key)
+    || studentMatchesGradeKey(studentGrade, grade?.label)
+  ));
+  return normalizeFeeGradeText(match?.key || '');
 }

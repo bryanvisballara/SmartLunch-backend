@@ -224,6 +224,101 @@ function buildParentCourseKeyValues(gradeValues = [], courseValues = []) {
   ].map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
 }
 
+function buildGradeAliasSet(gradeValues = []) {
+  return new Set(
+    (Array.isArray(gradeValues) ? gradeValues : [])
+      .flatMap((value) => getFeeGradeAliases(value))
+      .map((item) => normalizeText(item).toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function buildParentScheduleCourseValueSet(gradeValues = [], courseValues = [], courseTitleValues = []) {
+  const values = new Set([
+    ...(Array.isArray(courseValues) ? courseValues : []),
+    ...(Array.isArray(courseTitleValues) ? courseTitleValues : []),
+    ...(Array.isArray(gradeValues) ? gradeValues : []),
+  ]);
+  const result = new Set();
+
+  values.forEach((value) => {
+    getFeeGradeAliases(value).forEach((alias) => {
+      const normalized = normalizeText(alias).toLowerCase();
+      if (!normalized) return;
+      result.add(normalized);
+      result.add(normalized.replace(/\s+/g, ''));
+      result.add(normalized.replace(/\s+/g, '_'));
+      result.add(normalized.replace(/\s+/g, '_').toUpperCase());
+    });
+  });
+
+  return result;
+}
+
+function scheduleMatchesGradeKey(scheduleGradeKey = '', gradeAliasSet = new Set()) {
+  return getFeeGradeAliases(scheduleGradeKey)
+    .map((item) => normalizeText(item).toLowerCase())
+    .some((alias) => gradeAliasSet.has(alias));
+}
+
+function scheduleCourseKeyMatches(courseKey = '', courseValueSet = new Set()) {
+  const normalized = normalizeText(courseKey).toLowerCase();
+  if (!normalized) return false;
+  if (courseValueSet.has(normalized)) return true;
+
+  const variants = [
+    normalized,
+    normalized.replace(/\s+/g, ''),
+    normalized.replace(/\s+/g, '_'),
+    normalized.replace(/\s+/g, '_').toUpperCase(),
+  ];
+
+  if (variants.some((variant) => courseValueSet.has(variant))) {
+    return true;
+  }
+
+  return getFeeGradeAliases(courseKey).some((alias) => {
+    const aliasNormalized = normalizeText(alias).toLowerCase();
+    return courseValueSet.has(aliasNormalized)
+      || courseValueSet.has(aliasNormalized.replace(/\s+/g, ''))
+      || courseValueSet.has(aliasNormalized.replace(/\s+/g, '_'))
+      || courseValueSet.has(aliasNormalized.replace(/\s+/g, '_').toUpperCase());
+  });
+}
+
+function pickBestParentGradeSchedule(gradeSchedules = [], courseValueSet = new Set()) {
+  const populatedSchedules = gradeSchedules.filter((schedule) => (
+    Array.isArray(schedule?.weeklySchedule)
+    && schedule.weeklySchedule.some((entry) => (
+      Number(entry?.weekday || 0) >= 1
+      && normalizeText(entry?.startTime)
+      && normalizeText(entry?.endTime)
+    ))
+  ));
+
+  if (populatedSchedules.length === 1) {
+    return populatedSchedules[0];
+  }
+
+  if (populatedSchedules.length > 1) {
+    const courseMatch = populatedSchedules.find((schedule) => (
+      scheduleCourseKeyMatches(schedule?.courseKey, courseValueSet)
+    ));
+    if (courseMatch) {
+      return courseMatch;
+    }
+
+    const gradeLevelSchedule = populatedSchedules.find((schedule) => !normalizeText(schedule?.courseKey));
+    if (gradeLevelSchedule) {
+      return gradeLevelSchedule;
+    }
+
+    return populatedSchedules[0];
+  }
+
+  return gradeSchedules.find((schedule) => !normalizeText(schedule?.courseKey)) || gradeSchedules[0] || null;
+}
+
 function buildParentAcademicStructurePeriods(academicStructure) {
   const periods = Array.isArray(academicStructure?.academicPeriods) ? academicStructure.academicPeriods : [];
   return periods.length
@@ -1536,14 +1631,13 @@ function formatScheduleMinutes(minutes) {
 }
 
 function buildAcademicScheduleBlockSlots(academicStructure, { gradeValues = [], entries = [] } = {}) {
-  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
-    .map((item) => normalizeText(item).toLowerCase())
-    .filter(Boolean));
+  const normalizedGradeValues = buildGradeAliasSet(gradeValues);
   const groups = Array.isArray(academicStructure?.scheduleSettings?.groups) ? academicStructure.scheduleSettings.groups : [];
   const dayRanges = new Map();
 
   groups.forEach((group) => {
     const groupGradeKeys = new Set((Array.isArray(group?.gradeKeys) ? group.gradeKeys : [])
+      .flatMap((item) => getFeeGradeAliases(item))
       .map((item) => normalizeText(item).toLowerCase())
       .filter(Boolean));
     const appliesToGrade = !groupGradeKeys.size || [...normalizedGradeValues].some((gradeKey) => groupGradeKeys.has(gradeKey));
@@ -1622,29 +1716,22 @@ function buildAcademicScheduleBlockSlots(academicStructure, { gradeValues = [], 
 }
 
 function findParentAcademicStructureSchedule(academicStructure, { gradeValues = [], courseValues = [], courseTitleValues = [] } = {}) {
-  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : []).map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
-  const normalizedCourseValues = new Set([
-    ...(Array.isArray(courseValues) ? courseValues : []),
-    ...(Array.isArray(courseTitleValues) ? courseTitleValues : []),
-  ].map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
+  const normalizedGradeValues = buildGradeAliasSet(gradeValues);
+  const normalizedCourseValues = buildParentScheduleCourseValueSet(gradeValues, courseValues, courseTitleValues);
 
   if (!academicStructure || !normalizedGradeValues.size) {
     return null;
   }
 
   const schedules = Array.isArray(academicStructure.gradeSchedules) ? academicStructure.gradeSchedules : [];
-  const gradeSchedules = schedules.filter((schedule) => normalizedGradeValues.has(normalizeText(schedule?.gradeKey).toLowerCase()));
-  const courseSchedule = gradeSchedules.find((schedule) => {
-    const courseKey = normalizeText(schedule?.courseKey).toLowerCase();
-    return courseKey && normalizedCourseValues.has(courseKey);
-  });
+  const gradeSchedules = schedules.filter((schedule) => scheduleMatchesGradeKey(schedule?.gradeKey, normalizedGradeValues));
+  const courseSchedule = gradeSchedules.find((schedule) => (
+    scheduleCourseKeyMatches(schedule?.courseKey, normalizedCourseValues)
+  ));
 
   if (courseSchedule) {
     return courseSchedule;
   }
-
-  const gradeMap = new Map((Array.isArray(academicStructure.grades) ? academicStructure.grades : [])
-    .map((grade) => [normalizeText(grade?.key).toLowerCase(), grade]));
 
   for (const schedule of gradeSchedules) {
     const courseKey = normalizeText(schedule?.courseKey);
@@ -1652,15 +1739,20 @@ function findParentAcademicStructureSchedule(academicStructure, { gradeValues = 
       continue;
     }
 
-    const grade = gradeMap.get(normalizeText(schedule?.gradeKey).toLowerCase()) || null;
-    const course = (Array.isArray(grade?.courses) ? grade.courses : []).find((item) => normalizeText(item?.key).toLowerCase() === courseKey.toLowerCase());
-    const courseLabels = [course?.label, course?.section].map((item) => normalizeText(item).toLowerCase()).filter(Boolean);
+    const grade = (Array.isArray(academicStructure.grades) ? academicStructure.grades : [])
+      .find((item) => scheduleMatchesGradeKey(item?.key, normalizedGradeValues)) || null;
+    const course = (Array.isArray(grade?.courses) ? grade.courses : []).find((item) => (
+      scheduleCourseKeyMatches(item?.key, normalizedCourseValues)
+      || scheduleCourseKeyMatches(item?.label, normalizedCourseValues)
+      || scheduleCourseKeyMatches(item?.section, normalizedCourseValues)
+    ));
+    const courseLabels = [course?.label, course?.section, course?.key].map((item) => normalizeText(item).toLowerCase()).filter(Boolean);
     if (courseLabels.some((label) => normalizedCourseValues.has(label))) {
       return schedule;
     }
   }
 
-  return gradeSchedules.find((schedule) => !normalizeText(schedule?.courseKey)) || null;
+  return pickBestParentGradeSchedule(gradeSchedules, normalizedCourseValues);
 }
 
 async function buildParentAcademicScheduleFromStructure({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [] }) {
@@ -1669,7 +1761,7 @@ async function buildParentAcademicScheduleFromStructure({ academicStructure, gra
   const blockSlots = buildAcademicScheduleBlockSlots(academicStructure, { gradeValues, entries });
 
   if (!entries.length && !blockSlots.length) {
-    return [];
+    return { courses: [], slots: [] };
   }
 
   const subjectLabelByKey = buildLookupMap(academicStructure?.subjects || []);
@@ -2824,10 +2916,12 @@ router.get('/portal/overview', async (req, res) => {
     const selectedStudentSection = selectedStudentGrade && selectedStudentCourseCompact.toLowerCase().startsWith(selectedStudentGrade.replace(/\s+/g, '').toLowerCase())
       ? selectedStudentCourseCompact.slice(selectedStudentGrade.replace(/\s+/g, '').length)
       : '';
-    const selectedStudentGradeValues = Array.from(new Set([
-      selectedStudentGrade,
-      selectedStudentGradeKeyFromCourse,
-    ].map((item) => String(item || '').trim()).filter(Boolean)));
+    const selectedStudentGradeValues = Array.from(new Set(
+      [selectedStudentGrade, selectedStudentGradeKeyFromCourse]
+        .flatMap((item) => getFeeGradeAliases(item))
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    ));
     const selectedStudentCourseValues = Array.from(new Set([
       selectedStudentCourse,
       selectedStudentCourseCompact,

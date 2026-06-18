@@ -1600,6 +1600,37 @@ function applyAcademicScheduleBreaksToConfiguration(configuration) {
   });
 }
 
+function academicGradeScheduleHasEntries(schedule) {
+  return Array.isArray(schedule?.weeklySchedule)
+    && schedule.weeklySchedule.some((entry) => (
+      Number(entry?.weekday || 0) >= 1
+      && normalizeText(entry?.startTime)
+      && normalizeText(entry?.endTime)
+    ));
+}
+
+function pruneEmptyDuplicateGradeSchedules(configuration) {
+  if (!Array.isArray(configuration?.gradeSchedules)) {
+    return;
+  }
+
+  const populatedGrades = new Set(
+    configuration.gradeSchedules
+      .filter((schedule) => academicGradeScheduleHasEntries(schedule))
+      .map((schedule) => normalizeAcademicStructureGradeKey(schedule?.gradeKey))
+      .filter(Boolean)
+  );
+
+  configuration.gradeSchedules = configuration.gradeSchedules.filter((schedule) => {
+    const gradeKey = normalizeAcademicStructureGradeKey(schedule?.gradeKey);
+    if (!gradeKey || !populatedGrades.has(gradeKey)) {
+      return true;
+    }
+
+    return academicGradeScheduleHasEntries(schedule);
+  });
+}
+
 function ensureAcademicGradeSchedule(configuration, gradeKey, { courseKey = '' } = {}) {
   const normalizedGradeKey = normalizeAcademicStructureGradeKey(gradeKey);
   const normalizedCourseKey = normalizeText(courseKey);
@@ -6642,6 +6673,7 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
 
     gradeSchedule.weeklySchedule = normalizedWeeklySchedule.weeklySchedule;
     applyAcademicScheduleBreaksToConfiguration(configuration);
+    pruneEmptyDuplicateGradeSchedules(configuration);
     gradeSchedule.updatedAt = new Date();
     await configuration.save();
 

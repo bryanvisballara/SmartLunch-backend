@@ -2624,7 +2624,7 @@ function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpe
   );
 }
 
-function ParentAcademicContent({ activeView, selectedChild }) {
+function ParentAcademicContent({ activeView, selectedChild, academicSchedule = null }) {
   const academicWorkspace = useMemo(() => (
     selectedChild?.isRealParentChild
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
@@ -2633,11 +2633,14 @@ function ParentAcademicContent({ activeView, selectedChild }) {
   const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance'].includes(activeView)
     ? 'academic-performance'
     : activeView;
-  const weeklyClassSchedule = useMemo(() => (
-    selectedChild?.isRealParentChild
-      ? selectedChild.classSchedule || { weekdays: PARENT_CLASS_SCHEDULE_WEEKDAYS, slots: [], entries: {} }
-      : buildWeeklyClassSchedule(selectedChild)
-  ), [selectedChild]);
+  const weeklyClassSchedule = useMemo(() => {
+    if (!selectedChild?.isRealParentChild) {
+      return buildWeeklyClassSchedule(selectedChild);
+    }
+
+    const scheduleSource = academicSchedule || selectedChild.classSchedule || {};
+    return buildParentClassSchedule(scheduleSource);
+  }, [academicSchedule, selectedChild]);
   const [selectedGradeSubjectId, setSelectedGradeSubjectId] = useState('');
   const [selectedAttendanceSubjectKey, setSelectedAttendanceSubjectKey] = useState('');
   const [expandedGradeComponentId, setExpandedGradeComponentId] = useState('');
@@ -4000,7 +4003,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const [activeCafeteriaView, setActiveCafeteriaView] = useState('cafeteria-overview');
   const [showCareMenu, setShowCareMenu] = useState(false);
   const [academicFeed, setAcademicFeed] = useState([]);
-  const [academicBilling, setAcademicBilling] = useState({ summary: { pendingAmount: 0, pendingCount: 0 }, charges: [], payments: [] });
+  const [academicBilling, setAcademicBilling] = useState({ summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
   const [nursingRecords, setNursingRecords] = useState([]);
   const [psychologyCases, setPsychologyCases] = useState([]);
   const [expandedNursingRecordId, setExpandedNursingRecordId] = useState('');
@@ -4067,6 +4070,19 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
         avatar: 'TD',
       }
     : selectedChild;
+  const resolvedAcademicSchedule = useMemo(() => {
+    if (!selectedChild?.isRealParentChild || !parentOverview) {
+      return null;
+    }
+
+    const overviewStudentId = String(parentOverview.selectedStudentId || parentOverview.selectedStudent?._id || '');
+    const selectedId = String(selectedChild.id || selectedChild._id || '');
+
+    return overviewStudentId && overviewStudentId === selectedId
+      ? parentOverview.academicSchedule || null
+      : null;
+  }, [parentOverview, selectedChild]);
+
   const selectedChildTransport = selectedChild?.transport || {};
   const hasAssignedTransportRoute = Boolean(
     String(selectedChildTransport.routeName || '').trim()
@@ -4166,7 +4182,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
         }
 
         if (billingResult.status === 'fulfilled') {
-          setAcademicBilling(billingResult.value.data || { summary: { pendingAmount: 0, pendingCount: 0 }, charges: [], payments: [] });
+          setAcademicBilling(billingResult.value.data || { summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
         }
       })
       .catch(() => {
@@ -4247,11 +4263,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
     const childId = String(selectedChild._id || selectedChild.id || '');
     const childNameKey = normalizeLookupKey(selectedChild.name);
-    return (academicBilling.charges || []).filter((charge) => {
+    const pendingCharges = Array.isArray(academicBilling.currentCharges) && academicBilling.currentCharges.length
+      ? academicBilling.currentCharges
+      : (academicBilling.charges || []);
+    return pendingCharges.filter((charge) => {
       const chargeStudentId = String(charge.studentId?._id || charge.studentId || '');
       return (childId && chargeStudentId === childId) || (childNameKey && normalizeLookupKey(charge.studentName) === childNameKey);
     });
-  }, [academicBilling.charges, selectedChild]);
+  }, [academicBilling.charges, academicBilling.currentCharges, selectedChild]);
 
   const financePayments = useMemo(() => {
     if (!selectedChild) {
@@ -4260,11 +4279,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
     const childId = String(selectedChild._id || selectedChild.id || '');
     const childNameKey = normalizeLookupKey(selectedChild.name);
-    return (academicBilling.payments || []).filter((payment) => {
+    const history = (Array.isArray(academicBilling.paymentHistory) && academicBilling.paymentHistory.length
+      ? academicBilling.paymentHistory
+      : (academicBilling.payments || []));
+    return history.filter((payment) => {
       const paymentStudentId = String(payment.studentId?._id || payment.studentId || '');
       return (childId && paymentStudentId === childId) || (childNameKey && normalizeLookupKey(payment.studentName) === childNameKey);
     });
-  }, [academicBilling.payments, selectedChild]);
+  }, [academicBilling.paymentHistory, academicBilling.payments, selectedChild]);
 
   const selectedFinanceSummary = useMemo(() => {
     if (!selectedChild) {
@@ -4315,11 +4337,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
   const primaryPendingCharge = financeCharges.find((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
-  const selectedFinanceAmount = Number(primaryPendingCharge?.amount || selectedFinanceConcepts[0]?.amount || selectedFinanceSummary?.amount || 0);
+  const selectedFinanceAmount = Number(
+    primaryPendingCharge?.amount
+    || selectedFinanceSummary?.amount
+    || selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0)
+    || 0,
+  );
   const selectedFinanceTotalAmount = Number(selectedFinanceSummary?.totalAmount || selectedFinanceSummary?.amount || selectedFinanceAmount || 0);
   const selectedFinanceFullAmount = selectedFinanceSummary?.requiresDataSchoolContact ? 0 : (
-    Number(primaryPendingCharge?.originalAmount || primaryPendingCharge?.chargeAmount || primaryPendingCharge?.amount || 0)
-    || Number(selectedFinanceConcepts[0]?.originalAmount || selectedFinanceConcepts[0]?.chargeAmount || selectedFinanceConcepts[0]?.amount || 0)
+    Number(primaryPendingCharge?.chargeOriginalAmount || primaryPendingCharge?.originalAmount || primaryPendingCharge?.chargeAmount || primaryPendingCharge?.amount || 0)
+    || Number(selectedFinanceSummary?.totalAmount || selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.originalAmount || 0), 0) || 0)
   );
   const selectedFinanceHasDiscount = selectedFinanceFullAmount > selectedFinanceAmount;
 
@@ -4615,9 +4642,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     try {
       await payParentAcademicCharge(payableChargeIds[0], { method: 'parent_portal' });
       const billingResponse = await getParentAcademicBilling();
-      setAcademicBilling(billingResponse.data || { summary: { pendingAmount: 0, pendingCount: 0 }, charges: [], payments: [] });
+      setAcademicBilling(billingResponse.data || { summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
       setShowFinanceConceptsSheet(false);
-      setAcademicPaymentMessage('Pago académico registrado correctamente.');
+      setAcademicPaymentMessage('Pago registrado. Estás al día.');
     } catch (error) {
       const whatsappUrl = error?.response?.data?.dataSchoolWhatsappUrl;
       if (whatsappUrl) {
@@ -4841,46 +4868,58 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
           <>
             <article className="campus-parent-mobile__hero-card is-finance">
               <div className="campus-parent-mobile__hero-card-head">
-                <span className="campus-parent-mobile__eyebrow">{selectedFinanceSummary?.pendingCount ? `${selectedFinanceSummary.pendingCount} concepto${selectedFinanceSummary.pendingCount === 1 ? '' : 's'} pendiente${selectedFinanceSummary.pendingCount === 1 ? '' : 's'}` : 'Pagos académicos'}</span>
-                <button
-                  className="campus-parent-mobile__finance-pay-button"
-                  disabled={(!selectedFinanceSummary?.requiresDataSchoolContact && !primaryPendingCharge) || Boolean(payingChargeId)}
-                  onClick={onPayAcademicCharge}
-                  type="button"
-                >
-                  {payingChargeId ? 'Procesando...' : selectedFinanceSummary?.requiresDataSchoolContact ? 'WhatsApp DataSchool' : 'Pagar'}
-                </button>
+                <span className="campus-parent-mobile__eyebrow">
+                  {selectedFinanceSummary?.pendingCount
+                    ? 'Cobro mensual pendiente'
+                    : 'Pagos académicos'}
+                </span>
+                {primaryPendingCharge ? (
+                  <button
+                    className="campus-parent-mobile__finance-pay-button"
+                    disabled={(!selectedFinanceSummary?.requiresDataSchoolContact && !primaryPendingCharge) || Boolean(payingChargeId)}
+                    onClick={onPayAcademicCharge}
+                    type="button"
+                  >
+                    {payingChargeId ? 'Procesando...' : selectedFinanceSummary?.requiresDataSchoolContact ? 'WhatsApp DataSchool' : 'Pagar'}
+                  </button>
+                ) : null}
               </div>
               <div className="campus-parent-mobile__finance-price-meta">
                 {selectedFinanceSummary?.requiresDataSchoolContact ? <span className="campus-parent-mobile__finance-status-label">Gestión especial</span> : null}
                 {selectedFinanceHasDiscount ? <span className="campus-parent-mobile__finance-original-amount">{formatCurrency(selectedFinanceFullAmount)}</span> : null}
-                <span className="campus-parent-mobile__finance-discount-tag">Cartera sincronizada</span>
+                {!primaryPendingCharge ? <span className="campus-parent-mobile__finance-discount-tag">Estás al día</span> : null}
               </div>
-              <h2>{selectedFinanceSummary?.requiresDataSchoolContact ? 'Contacta DataSchool' : formatCurrency(selectedFinanceAmount)}</h2>
+              <h2>
+                {selectedFinanceSummary?.requiresDataSchoolContact
+                  ? 'Contacta DataSchool'
+                  : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0))}
+              </h2>
               <span className="campus-parent-mobile__finance-current-note">
                 {selectedFinanceSummary?.requiresDataSchoolContact
                   ? `Tienes ${selectedFinanceSummary.overdueMonths} mensualidades vencidas.`
-                  : formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })
-                    ? `Próximo vencimiento ${formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })}`
-                  : 'Sin cargos pendientes en línea'}
+                  : primaryPendingCharge
+                    ? (formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })
+                      ? `Vence ${formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })}`
+                      : 'Tienes un cobro mensual pendiente')
+                    : 'No tienes pagos pendientes este mes'}
               </span>
               {selectedFinanceConcepts.length ? (
                 <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">
-                  Ver conceptos
+                  Ver detalle
                 </button>
               ) : null}
             </article>
             {academicPaymentMessage ? <p className="campus-parent-mobile__empty-note">{academicPaymentMessage}</p> : null}
             {academicLoading ? <p className="campus-parent-mobile__empty-note">Actualizando cartera académica...</p> : null}
             <section className="campus-parent-mobile__finance-group">
-              <h3>Últimos pagos realizados</h3>
+              <h3>Historial de pagos</h3>
               <div className="campus-parent-mobile__card-stack campus-parent-mobile__card-stack--finance">
                 {financePayments.length ? financePayments.map((payment) => (
                   <article className="campus-parent-mobile__list-card campus-parent-mobile__finance-entry-card" key={payment.id || payment._id}>
                     <div>
                       <strong>{payment.concept || 'Pago académico'}</strong>
                       <span>
-                        {formatParentFinanceDate(payment.paidAt, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) || 'Registrado'}
+                        {formatParentFinanceDate(payment.paidAt, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) || 'Registrado'}
                       </span>
                     </div>
                     <div className="campus-parent-mobile__finance-entry-meta">
@@ -4888,23 +4927,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
                       <span>{payment.channel || payment.method || 'Portal'}</span>
                     </div>
                   </article>
-                )) : <p className="campus-parent-mobile__empty-note">No hay pagos académicos registrados para este alumno.</p>}
-              </div>
-            </section>
-            <section className="campus-parent-mobile__finance-group">
-              <h3>Pagos programados</h3>
-              <div className="campus-parent-mobile__card-stack campus-parent-mobile__card-stack--finance">
-              {financeCharges.length ? financeCharges.map((item) => (
-                  <article className={`campus-parent-mobile__list-card campus-parent-mobile__finance-entry-card is-${item.accent || (String(item.status || '').toLowerCase() === 'overdue' ? 'warn' : 'neutral')}`} key={item.id || item._id}>
-                    <div>
-                      <strong>{item.concept}</strong>
-                      <span>{item.status}</span>
-                    </div>
-                    <div className="campus-parent-mobile__finance-entry-meta">
-                      <strong>{formatCurrency(item.amount)}</strong>
-                    </div>
-                  </article>
-              )) : <p className="campus-parent-mobile__empty-note">No hay pagos pendientes para este alumno.</p>}
+                )) : <p className="campus-parent-mobile__empty-note">Aún no hay pagos académicos registrados para este alumno.</p>}
               </div>
             </section>
           </>
@@ -4912,7 +4935,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
         {activeSection === 'academic' ? (
           <>
-            <ParentAcademicContent activeView={activeAcademicView} selectedChild={selectedChild} />
+            <ParentAcademicContent
+              academicSchedule={resolvedAcademicSchedule}
+              activeView={activeAcademicView}
+              selectedChild={selectedChild}
+            />
           </>
         ) : null}
 
@@ -5195,18 +5222,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       {feedActionMessage ? <p className="campus-parent-mobile__feed-error">{feedActionMessage}</p> : null}
 
       {showFinanceConceptsSheet ? (
-        <ParentFeedBottomSheet onClose={() => setShowFinanceConceptsSheet(false)} title="Conceptos de cobro">
+        <ParentFeedBottomSheet onClose={() => setShowFinanceConceptsSheet(false)} title="Detalle del cobro">
           <div className="campus-parent-mobile__finance-concepts-list">
             {selectedFinanceConcepts.length ? selectedFinanceConcepts.map((concept) => (
               <article className="campus-parent-mobile__finance-concept-row" key={concept._id || `${concept.concept}-${concept.dueDate}`}>
                 <div>
                   <strong>{concept.concept || 'Concepto académico'}</strong>
-                  <span>{formatParentFinanceDate(concept.dueDate, { day: '2-digit', month: 'long', year: 'numeric' }) || concept.status || 'Pendiente'}</span>
                   {concept.description ? <small>{concept.description}</small> : null}
                 </div>
                 <strong>{formatCurrency(concept.amount || 0)}</strong>
               </article>
-            )) : <p className="campus-parent-mobile__sheet-empty">No hay conceptos pendientes para este alumno.</p>}
+            )) : <p className="campus-parent-mobile__sheet-empty">No hay detalle disponible para este cobro.</p>}
           </div>
           <div className="campus-parent-mobile__finance-concepts-total">
             <span>Total</span>

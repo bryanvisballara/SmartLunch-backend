@@ -17,8 +17,10 @@ function isEducationalLevelKey(value) {
 function addEducationalLevelAliases(aliases, levelName, number = '') {
   const level = normalizeText(levelName).toLowerCase();
   if (!level) return;
-  aliases.add(level);
-  if (!number) return;
+  if (!number) {
+    aliases.add(level);
+    return;
+  }
   aliases.add(`${level}_${number}`);
   aliases.add(`${level}-${number}`);
   aliases.add(`${level} ${number}`);
