@@ -16,6 +16,10 @@ const CLOUDINARY_FOLDER = String(process.env.CLOUDINARY_UPLOAD_FOLDER || 'comerg
 const storage = multer.memoryStorage();
 
 function isCloudinaryEnabled() {
+  if (String(process.env.CLOUDINARY_URL || '').trim()) {
+    return true;
+  }
+
   return (
     Boolean(String(process.env.CLOUDINARY_CLOUD_NAME || '').trim()) &&
     Boolean(String(process.env.CLOUDINARY_API_KEY || '').trim()) &&
@@ -24,12 +28,23 @@ function isCloudinaryEnabled() {
 }
 
 function configureCloudinary() {
-  cloudinary.config({
-    cloud_name: String(process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
-    api_key: String(process.env.CLOUDINARY_API_KEY || '').trim(),
-    api_secret: String(process.env.CLOUDINARY_API_SECRET || '').trim(),
-    secure: true,
-  });
+  const cloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+  const apiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
+  const apiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
+
+  if (cloudName && apiKey && apiSecret) {
+    cloudinary.config({
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true,
+    });
+    return;
+  }
+
+  if (String(process.env.CLOUDINARY_URL || '').trim()) {
+    cloudinary.config({ secure: true });
+  }
 }
 
 function uploadBufferToCloudinary(buffer, { publicId }) {
@@ -259,4 +274,6 @@ module.exports = {
   deriveThumbUrlFromImageUrl,
   validateIncomingImageUrl,
   getUploadsRootPath,
+  isCloudinaryEnabled,
+  configureCloudinary,
 };

@@ -2910,10 +2910,15 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         const mediaKind = payload.kind === 'video' ? 'video' : 'image';
         const mediaUrl = payload.url || payload.imageUrl || payload.videoUrl || '';
         const thumbUrl = payload.thumbUrl || (mediaKind === 'image' ? mediaUrl : '');
+        const storage = String(payload.storage || '').trim().toLowerCase();
         if (!mediaUrl) {
           throw new Error('No se recibió URL pública para uno de los archivos.');
         }
+        if (import.meta.env.PROD && storage !== 'cloudinary' && !/res\.cloudinary\.com\//i.test(mediaUrl)) {
+          throw new Error('La imagen no quedó en Cloudinary. Revisa CLOUDINARY_* en Render y vuelve a intentar.');
+        }
 
+        releaseCommunicationPreview(previewItem);
         setCommunicationForm((previous) => ({
           ...previous,
           media: (previous.media || []).map((item) => (
@@ -2923,6 +2928,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 kind: mediaKind,
                 src: mediaUrl,
                 thumbUrl,
+                previewSrc: '',
                 alt: communicationForm.title || file.name || 'Comunicado académico',
                 uploading: false,
               }
@@ -3472,7 +3478,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 <div className="academic-secretary__media-strip">
                   {(communicationForm.media || []).length === 0 ? <p className="academic-secretary__media-empty">Este comunicado aún no tiene contenido visual.</p> : (communicationForm.media || []).map((item, index) => {
                     const mediaId = item.localId || `${item.kind}-${item.src}-${index}`;
-                    const previewSrc = item.previewSrc || item.thumbUrl || item.src;
+                    const previewSrc = resolveApiAssetUrl(item.thumbUrl || item.src);
                     return (
                       <article
                         className={`academic-secretary__media-card${draggingCommunicationMediaId === mediaId ? ' is-dragging' : ''}${item.uploadError ? ' has-error' : ''}`}

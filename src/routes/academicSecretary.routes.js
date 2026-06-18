@@ -333,7 +333,7 @@ function normalizeCommunicationMedia(mediaItems) {
     return [];
   }
 
-  return mediaItems
+  const normalizedMedia = mediaItems
     .map((item) => {
       const kind = normalizeText(item?.kind).toLowerCase() === 'video' ? 'video' : 'image';
       const src = kind === 'image'
@@ -356,6 +356,28 @@ function normalizeCommunicationMedia(mediaItems) {
     })
     .filter(Boolean)
     .slice(0, 8);
+
+  assertProductionCommunicationMediaUsesCloudinary(normalizedMedia);
+  return normalizedMedia;
+}
+
+function assertProductionCommunicationMediaUsesCloudinary(mediaItems = []) {
+  if (process.env.NODE_ENV !== 'production') {
+    return;
+  }
+
+  for (const item of mediaItems) {
+    const src = normalizeText(item?.src);
+    if (!src) {
+      continue;
+    }
+
+    if (/^https?:\/\//i.test(src) && !/\/assets\//i.test(src) && !/\/uploads\//i.test(src)) {
+      continue;
+    }
+
+    throw new Error('Las imagenes del feed deben subirse por Cloudinary antes de publicar. Quita el visual, vuelve a subirlo y guarda de nuevo.');
+  }
 }
 
 function buildAcademicSecretaryAiFallback({ kind, sourceTitle, sourceBody }) {

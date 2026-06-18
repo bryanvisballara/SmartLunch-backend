@@ -12,6 +12,7 @@ require('./models');
 const AdmissionMarketingAsset = require('./models/admissionMarketingAsset.model');
 const AcademicCommunicationAsset = require('./models/academicCommunicationAsset.model');
 const { findOneAcrossTenantSchoolDbs } = require('./config/db');
+const { isCloudinaryEnabled } = require('./utils/imageUpload');
 
 const authRoutes = require('./routes/auth.routes');
 const studentRoutes = require('./routes/students.routes');
@@ -307,6 +308,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     service: 'comergio-api',
     time: new Date(),
+    cloudinaryEnabled: isCloudinaryEnabled(),
   });
 });
 

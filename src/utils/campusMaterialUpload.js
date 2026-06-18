@@ -5,7 +5,11 @@ const multer = require('multer');
 const sharp = require('sharp');
 const { v2: cloudinary } = require('cloudinary');
 const AcademicCommunicationAsset = require('../models/academicCommunicationAsset.model');
-const { processAndStoreUploadedImage } = require('./imageUpload');
+const {
+  configureCloudinary,
+  isCloudinaryEnabled,
+  processAndStoreUploadedImage,
+} = require('./imageUpload');
 
 const MAX_CAMPUS_MATERIAL_FILE_BYTES = Number(process.env.CAMPUS_MATERIAL_MAX_FILE_BYTES || 100 * 1024 * 1024);
 const MAX_CAMPUS_MATERIAL_FILES = Number(process.env.CAMPUS_MATERIAL_MAX_FILES || 6);
@@ -24,23 +28,6 @@ const allowedMimeTypes = new Set([
   'application/x-zip-compressed',
   'text/plain',
 ]);
-
-function isCloudinaryEnabled() {
-  return (
-    Boolean(String(process.env.CLOUDINARY_CLOUD_NAME || '').trim()) &&
-    Boolean(String(process.env.CLOUDINARY_API_KEY || '').trim()) &&
-    Boolean(String(process.env.CLOUDINARY_API_SECRET || '').trim())
-  );
-}
-
-function configureCloudinary() {
-  cloudinary.config({
-    cloud_name: String(process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
-    api_key: String(process.env.CLOUDINARY_API_KEY || '').trim(),
-    api_secret: String(process.env.CLOUDINARY_API_SECRET || '').trim(),
-    secure: true,
-  });
-}
 
 function getUploadsRootPath() {
   const configured = String(process.env.UPLOADS_ROOT_PATH || '').trim();
