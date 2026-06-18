@@ -45,10 +45,6 @@ export function resolveApiAssetUrl(value) {
   }
 
   if (rawUrl.startsWith('/assets/') || rawUrl.startsWith('/uploads/')) {
-    if (typeof window !== 'undefined' && import.meta.env.DEV) {
-      return rawUrl;
-    }
-
     let assetBaseUrl = apiBaseUrl;
 
     if (typeof window !== 'undefined') {

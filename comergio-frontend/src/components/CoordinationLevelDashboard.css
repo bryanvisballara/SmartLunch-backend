@@ -1,0 +1,544 @@
+.coordination-dashboard {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.coordination-dashboard-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.coordination-dashboard-kicker,
+.coordination-section-eyebrow {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  color: #5b6b86;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coordination-dashboard-hero h2,
+.coordination-section-header h3 {
+  margin: 0;
+}
+
+.coordination-dashboard-hero p,
+.coordination-section-header p,
+.coordination-empty-note {
+  margin: 0.45rem 0 0;
+  color: #5f6f89;
+}
+
+.coordination-summary-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.coordination-summary-card {
+  padding: 1rem 1.1rem;
+  border: 1px solid #dbe4f2;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+}
+
+.coordination-summary-card span {
+  display: block;
+  color: #607089;
+  font-size: 0.82rem;
+}
+
+.coordination-summary-card strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.55rem;
+  line-height: 1.1;
+}
+
+.coordination-summary-card p {
+  margin: 0.35rem 0 0;
+  color: #708099;
+  font-size: 0.82rem;
+}
+
+.coordination-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.coordination-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.coordination-section-metric strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: #edf3ff;
+  color: #244272;
+  font-size: 0.92rem;
+}
+
+.coordination-grade-grid,
+.coordination-split-grid,
+.coordination-triple-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.coordination-grade-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.coordination-split-grid,
+.coordination-triple-grid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.coordination-grade-card,
+.coordination-subpanel {
+  padding: 1rem;
+  border: 1px solid #e2e9f5;
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.coordination-grade-card-head,
+.coordination-subblock h5 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.coordination-grade-card-head h4,
+.coordination-subpanel h4 {
+  margin: 0;
+}
+
+.coordination-grade-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0.85rem 0;
+}
+
+.coordination-grade-stats div {
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  background: #f2f6fc;
+}
+
+.coordination-grade-stats span {
+  display: block;
+  color: #6a7b95;
+  font-size: 0.76rem;
+}
+
+.coordination-grade-stats strong {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.coordination-subblock {
+  margin-top: 0.85rem;
+}
+
+.coordination-subblock h5 {
+  margin: 0 0 0.55rem;
+  font-size: 0.92rem;
+}
+
+.coordination-list,
+.coordination-rank-list,
+.coordination-case-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coordination-list li,
+.coordination-rank-list li,
+.coordination-case-list li {
+  padding: 0.7rem 0;
+  border-top: 1px solid #e8eef7;
+}
+
+.coordination-list li:first-child,
+.coordination-rank-list li:first-child,
+.coordination-case-list li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.coordination-list strong,
+.coordination-rank-list strong,
+.coordination-case-list strong {
+  display: block;
+}
+
+.coordination-list span,
+.coordination-rank-list span,
+.coordination-case-list span,
+.coordination-case-list small {
+  display: block;
+  margin-top: 0.15rem;
+  color: #6a7b95;
+  font-size: 0.84rem;
+}
+
+.coordination-case-list p {
+  margin: 0.35rem 0 0;
+  color: #425268;
+  font-size: 0.9rem;
+}
+
+.coordination-rank-list li {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.coordination-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #244272;
+  font-size: 0.82rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.coordination-rank--alert {
+  background: #ffe9e5;
+  color: #9f341f;
+}
+
+.coordination-table-wrap {
+  overflow: auto;
+}
+
+.coordination-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.coordination-table th,
+.coordination-table td {
+  padding: 0.7rem 0.55rem;
+  border-bottom: 1px solid #e8eef7;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.coordination-table th {
+  color: #607089;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.coordination-list--compact li {
+  padding: 0.45rem 0;
+}
+
+.coordination-grade-grid--scores {
+  margin-bottom: 0.25rem;
+}
+
+.coordination-grade-card--summary {
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
+}
+
+/* Sección 1: grid compacto de grados */
+.coordination-grade-card-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.coordination-grade-compact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  min-height: 132px;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid #e2e9f5;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.coordination-grade-compact-card:hover {
+  border-color: #c9d8f0;
+  box-shadow: 0 6px 18px rgba(36, 66, 114, 0.06);
+}
+
+.coordination-grade-compact-card.has-pending {
+  border-color: #ffd8cf;
+  background: linear-gradient(180deg, #fffaf9 0%, #fff4f1 100%);
+}
+
+.coordination-grade-compact-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.coordination-grade-compact-card-head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.25;
+  color: #244272;
+}
+
+.coordination-grade-compact-count {
+  align-self: flex-start;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: #edf3ff;
+  color: #4a6286;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.coordination-grade-compact-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: auto;
+}
+
+.coordination-grade-compact-stat {
+  padding: 0.45rem 0.35rem;
+  border-radius: 10px;
+  background: #f2f6fc;
+  border: 1px solid #e6edf8;
+  text-align: center;
+}
+
+.coordination-grade-compact-stat.is-alert {
+  background: #ffe9e5;
+  border-color: #ffd0c7;
+}
+
+.coordination-grade-compact-stat.is-alert strong {
+  color: #b4532a;
+}
+
+.coordination-grade-compact-stat span {
+  display: block;
+  color: #6a7b95;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+}
+
+.coordination-grade-compact-stat strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.92rem;
+  line-height: 1.1;
+}
+
+@media (max-width: 1280px) {
+  .coordination-grade-card-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .coordination-grade-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .coordination-grade-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Sección 3: tabla de calificaciones */
+.coordination-table-wrap--scores {
+  border: 1px solid #e2e9f5;
+  border-radius: 16px;
+  background: #fbfdff;
+}
+
+.coordination-table--scores {
+  min-width: 640px;
+}
+
+.coordination-table--scores thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f8ff;
+  border-bottom: 1px solid #dbe4f2;
+}
+
+.coordination-table--scores tbody tr:nth-child(even) {
+  background: #f8fbff;
+}
+
+.coordination-table--accordion tbody tr.coordination-grade-summary-row:nth-child(even) {
+  background: #f8fbff;
+}
+
+.coordination-table--accordion tbody tr.coordination-grade-detail-row {
+  background: #f4f8ff;
+}
+
+.coordination-table--scores tbody tr.coordination-grade-summary-row:hover {
+  background: #eef4ff;
+}
+
+.coordination-table-col-toggle {
+  width: 2.5rem;
+  padding-left: 0.85rem !important;
+  padding-right: 0 !important;
+}
+
+.coordination-grade-summary-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.coordination-grade-summary-row.is-expanded {
+  background: #eef4ff !important;
+  border-bottom: 1px solid #dbe4f2;
+}
+
+.coordination-grade-summary-row:focus-visible {
+  outline: 2px solid #5b8def;
+  outline-offset: -2px;
+}
+
+.coordination-grade-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #244272;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.coordination-grade-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.coordination-grade-detail-row > td {
+  padding: 0 !important;
+  border-bottom: 1px solid #dbe4f2;
+}
+
+.coordination-grade-detail-empty {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  color: #6a7b95;
+  font-size: 0.9rem;
+}
+
+.coordination-table--nested {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+}
+
+.coordination-table--nested thead th {
+  background: #f8fbff;
+  font-size: 0.74rem;
+}
+
+.coordination-table--nested td,
+.coordination-table--nested th {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid #e8eef7;
+}
+
+.coordination-table--nested tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.coordination-table--scores tbody tr.is-muted {
+  opacity: 0.72;
+}
+
+.coordination-table-grade {
+  font-weight: 600;
+  color: #244272;
+}
+
+.coordination-table-muted {
+  color: #8a97ab;
+  font-style: italic;
+}
+
+.coordination-score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.5rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.coordination-score-badge--neutral {
+  background: #eef2f7;
+  color: #6a7b95;
+}
+
+.coordination-score-badge--excellent {
+  background: #e3f5ea;
+  color: #166534;
+}
+
+.coordination-score-badge--good {
+  background: #e8f3dc;
+  color: #3f6212;
+}
+
+.coordination-score-badge--ok {
+  background: #fff6db;
+  color: #92400e;
+}
+
+.coordination-score-badge--risk {
+  background: #ffe9e5;
+  color: #9f341f;
+}
+
+@media (max-width: 768px) {
+  .coordination-dashboard-hero,
+  .coordination-section-header {
+    flex-direction: column;
+  }
+
+  .coordination-grade-mini-stats,
+  .coordination-grade-stats {
+    grid-template-columns: 1fr;
+  }
+}

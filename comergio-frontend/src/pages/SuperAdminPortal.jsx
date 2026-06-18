@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
-import { deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
+import { createSuperAdminSchool, deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
 
 const featureOptions = [
   { key: 'home', label: 'Inicio' },
@@ -82,6 +82,13 @@ function SuperAdminPortal() {
   const [savingRectoria, setSavingRectoria] = useState(false);
   const [rectoriaFeedback, setRectoriaFeedback] = useState(null);
   const [rectoriaFeedbackFading, setRectoriaFeedbackFading] = useState(false);
+  const [showCreateSchoolModal, setShowCreateSchoolModal] = useState(false);
+  const [creatingSchool, setCreatingSchool] = useState(false);
+  const [createSchoolDraft, setCreateSchoolDraft] = useState({
+    schoolName: '',
+    subscriptionStatus: 'subscribed',
+    pricePerStudent: '0',
+  });
 
   const selectedSchool = useMemo(
     () => summary.schools.find((school) => school.schoolId === selectedSchoolId) || summary.schools[0] || null,
@@ -286,6 +293,21 @@ function SuperAdminPortal() {
     });
   };
 
+  const recomputeSummaryTotals = (schools = []) => schools.reduce((accumulator, school) => {
+    accumulator.totalSchools += 1;
+    accumulator.subscribedSchools += school.settings?.subscriptionStatus === 'subscribed' ? 1 : 0;
+    accumulator.activeStudents += Number(school.activeStudents || 0);
+    accumulator.parentUsers += Number(school.parentUsers || 0);
+    accumulator.projectedMonthlyBilling += Number(school.monthlyCharge || 0);
+    return accumulator;
+  }, {
+    totalSchools: 0,
+    subscribedSchools: 0,
+    activeStudents: 0,
+    parentUsers: 0,
+    projectedMonthlyBilling: 0,
+  });
+
   const saveSelectedSchool = async () => {
     if (!selectedSchool || !selectedDraft) {
       return;
@@ -307,16 +329,16 @@ function SuperAdminPortal() {
       });
       const updatedSchool = response.data?.school;
       if (updatedSchool) {
-        setSummary((currentSummary) => ({
-          ...currentSummary,
-          schools: currentSummary.schools.map((school) => (school.schoolId === updatedSchool.schoolId ? updatedSchool : school)),
-          totals: {
-            ...currentSummary.totals,
-            subscribedSchools: currentSummary.schools.map((school) => (school.schoolId === updatedSchool.schoolId ? updatedSchool : school)).filter((school) => school.settings?.subscriptionStatus === 'subscribed').length,
-            activeStudents: currentSummary.schools.map((school) => (school.schoolId === updatedSchool.schoolId ? updatedSchool : school)).reduce((sum, school) => sum + Number(school.activeStudents || 0), 0),
-            projectedMonthlyBilling: currentSummary.schools.map((school) => (school.schoolId === updatedSchool.schoolId ? updatedSchool : school)).reduce((sum, school) => sum + Number(school.monthlyCharge || 0), 0),
-          },
-        }));
+        setSummary((currentSummary) => {
+          const nextSchools = currentSummary.schools.map((school) => (
+            school.schoolId === updatedSchool.schoolId ? updatedSchool : school
+          ));
+          return {
+            ...currentSummary,
+            schools: nextSchools,
+            totals: recomputeSummaryTotals(nextSchools),
+          };
+        });
         setDraftsBySchool((currentDrafts) => ({ ...currentDrafts, [updatedSchool.schoolId]: buildDraftFromSchool(updatedSchool) }));
       }
       setMessage('Configuración guardada.');
@@ -324,6 +346,63 @@ function SuperAdminPortal() {
       setMessage(error?.response?.data?.message || error?.message || 'No se pudo guardar.');
     } finally {
       setSavingSchoolId('');
+    }
+  };
+
+  const openCreateSchoolModal = () => {
+    setCreateSchoolDraft({
+      schoolName: '',
+      subscriptionStatus: 'subscribed',
+      pricePerStudent: '0',
+    });
+    setShowCreateSchoolModal(true);
+  };
+
+  const closeCreateSchoolModal = () => {
+    if (creatingSchool) {
+      return;
+    }
+    setShowCreateSchoolModal(false);
+  };
+
+  const createSchool = async () => {
+    const normalizedSchoolName = String(createSchoolDraft.schoolName || '').trim();
+    if (normalizedSchoolName.length < 3) {
+      setMessage('El nombre del colegio debe tener al menos 3 caracteres.');
+      return;
+    }
+
+    setCreatingSchool(true);
+    setMessage('');
+    try {
+      const response = await createSuperAdminSchool({
+        schoolName: normalizedSchoolName,
+        subscriptionStatus: createSchoolDraft.subscriptionStatus,
+        pricePerStudent: Number(createSchoolDraft.pricePerStudent || 0),
+      });
+      const createdSchool = response.data?.school;
+      if (createdSchool) {
+        setSummary((currentSummary) => {
+          const nextSchools = [...currentSummary.schools, createdSchool]
+            .sort((left, right) => left.schoolName.localeCompare(right.schoolName, 'es', { sensitivity: 'base' }));
+          return {
+            ...currentSummary,
+            schools: nextSchools,
+            totals: recomputeSummaryTotals(nextSchools),
+          };
+        });
+        setDraftsBySchool((currentDrafts) => ({
+          ...currentDrafts,
+          [createdSchool.schoolId]: buildDraftFromSchool(createdSchool),
+        }));
+        setSelectedSchoolId(createdSchool.schoolId);
+      }
+      setShowCreateSchoolModal(false);
+      setMessage(response.data?.message || 'Colegio creado correctamente.');
+    } catch (error) {
+      setMessage(error?.response?.data?.message || error?.message || 'No se pudo crear el colegio.');
+    } finally {
+      setCreatingSchool(false);
     }
   };
 
@@ -351,20 +430,7 @@ function SuperAdminPortal() {
         const nextSchools = currentSummary.schools.filter((school) => school.schoolId !== selectedSchool.schoolId);
         return {
           schools: nextSchools,
-          totals: nextSchools.reduce((accumulator, school) => {
-            accumulator.totalSchools += 1;
-            accumulator.subscribedSchools += school.settings?.subscriptionStatus === 'subscribed' ? 1 : 0;
-            accumulator.activeStudents += Number(school.activeStudents || 0);
-            accumulator.parentUsers += Number(school.parentUsers || 0);
-            accumulator.projectedMonthlyBilling += Number(school.monthlyCharge || 0);
-            return accumulator;
-          }, {
-            totalSchools: 0,
-            subscribedSchools: 0,
-            activeStudents: 0,
-            parentUsers: 0,
-            projectedMonthlyBilling: 0,
-          }),
+          totals: recomputeSummaryTotals(nextSchools),
         };
       });
       setDraftsBySchool((currentDrafts) => {
@@ -412,7 +478,10 @@ function SuperAdminPortal() {
         <aside className="super-admin-school-list" aria-label="Colegios">
           <div className="super-admin-panel-head">
             <h2>Colegios</h2>
-            <button onClick={loadSummary} type="button">Actualizar</button>
+            <div className="super-admin-panel-actions">
+              <button className="is-secondary" disabled={loading || creatingSchool} onClick={loadSummary} type="button">Actualizar</button>
+              <button disabled={loading || creatingSchool} onClick={openCreateSchoolModal} type="button">Crear colegio</button>
+            </div>
           </div>
           {loading ? <p className="super-admin-muted">Cargando colegios...</p> : null}
           {summary.schools.map((school) => (
@@ -632,6 +701,65 @@ function SuperAdminPortal() {
             <h4>Usuario de rectoría</h4>
             <p>{rectoriaFeedback.message}</p>
           </div>
+        </div>
+      ) : null}
+
+      {showCreateSchoolModal ? (
+        <div className="super-admin-modal-overlay" onClick={closeCreateSchoolModal} role="presentation">
+          <section
+            aria-labelledby="super-admin-create-school-title"
+            className="super-admin-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="super-admin-modal-head">
+              <div>
+                <span className="super-admin-kicker">Nuevo colegio</span>
+                <h3 id="super-admin-create-school-title">Crear colegio</h3>
+                <p>Se creará el espacio del colegio para configurar rectoría, costos y usuarios.</p>
+              </div>
+              <button aria-label="Cerrar" className="super-admin-modal-close" disabled={creatingSchool} onClick={closeCreateSchoolModal} type="button">×</button>
+            </div>
+
+            <div className="super-admin-form-grid">
+              <label className="is-wide">
+                Nombre del colegio
+                <input
+                  autoFocus
+                  onChange={(event) => setCreateSchoolDraft((currentDraft) => ({ ...currentDraft, schoolName: event.target.value }))}
+                  placeholder="Ej: Colegio Nuevo"
+                  type="text"
+                  value={createSchoolDraft.schoolName}
+                />
+              </label>
+              <label>
+                Estado comercial
+                <select
+                  onChange={(event) => setCreateSchoolDraft((currentDraft) => ({ ...currentDraft, subscriptionStatus: event.target.value }))}
+                  value={createSchoolDraft.subscriptionStatus}
+                >
+                  {statusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label>
+                Precio mensual por alumno
+                <input
+                  min="0"
+                  onChange={(event) => setCreateSchoolDraft((currentDraft) => ({ ...currentDraft, pricePerStudent: event.target.value }))}
+                  step="1000"
+                  type="number"
+                  value={createSchoolDraft.pricePerStudent}
+                />
+              </label>
+            </div>
+
+            <footer className="super-admin-modal-actions">
+              <button className="is-secondary" disabled={creatingSchool} onClick={closeCreateSchoolModal} type="button">Cancelar</button>
+              <button disabled={creatingSchool} onClick={createSchool} type="button">
+                {creatingSchool ? 'Creando...' : 'Crear colegio'}
+              </button>
+            </footer>
+          </section>
         </div>
       ) : null}
     </section>

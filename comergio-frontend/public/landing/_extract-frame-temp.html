@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html><body>
+<video id="v" muted playsinline></video>
+<canvas id="c" width="1024" height="576"></canvas>
+<script>
+(async () => {
+  const v = document.getElementById('v');
+  const c = document.getElementById('c');
+  const ctx = c.getContext('2d');
+  v.src = "/landing/hero-scroll-section4.mp4";
+  await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = rej; });
+  v.currentTime = Math.max(0, v.duration - 0.04);
+  await new Promise((res) => { v.onseeked = res; });
+  ctx.drawImage(v, 0, 0, 1024, 576);
+  window.__DATA__ = c.toDataURL('image/png');
+})();
+</script>
+</body></html>

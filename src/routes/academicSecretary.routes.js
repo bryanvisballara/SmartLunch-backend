@@ -129,6 +129,57 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function persistAcademicCommunicationImageUpload(req, res, { folder = 'communications-feed' } = {}) {
+  uploadAcademicCommunicationImage(req, res, async (error) => {
+    if (error) {
+      return res.status(400).json({ message: error.message || 'No se pudo cargar la imagen del comunicado.' });
+    }
+
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ message: 'No se recibio ningun archivo.' });
+      }
+
+      const preferredName = normalizeText(req.body?.preferredName) || normalizeText(req.file?.originalname) || 'comunicado';
+      const saved = await processAndStoreUploadedImage({
+        file: req.file,
+        folder,
+        preferredName,
+        requireCloudinary: isCloudinaryEnabled(),
+      });
+
+      if (isCloudinaryEnabled() && (saved.storage !== 'cloudinary' || !/^https?:\/\//i.test(saved.url || ''))) {
+        return res.status(503).json({ message: 'No se pudo guardar la imagen. Intenta de nuevo en unos segundos.' });
+      }
+
+      if (!/^https?:\/\//i.test(saved.url || '') && !String(saved.url || '').startsWith('/assets/')) {
+        return res.status(503).json({ message: 'No se pudo guardar la imagen. Intenta de nuevo en unos segundos.' });
+      }
+
+      const thumbUrl = /^https?:\/\//i.test(saved.thumbUrl || '') ? saved.thumbUrl : saved.url;
+
+      return res.status(201).json({
+        kind: 'image',
+        url: saved.url,
+        imageUrl: saved.url,
+        videoUrl: '',
+        thumbUrl,
+        storage: saved.storage || 'local',
+      });
+    } catch (requestError) {
+      return res.status(400).json({ message: requestError.message || 'No se pudo guardar la imagen del comunicado.' });
+    }
+  });
+}
+
+router.post('/communications/feed-image', (req, res) => {
+  return persistAcademicCommunicationImageUpload(req, res, { folder: 'communications-feed' });
+});
+
+router.post('/communications/uploads/image', (req, res) => {
+  return persistAcademicCommunicationImageUpload(req, res, { folder: 'academic-communications' });
+});
+
 function normalizeAcademicStudentMedicalProfile(value = {}) {
   const rawProfile = value && typeof value === 'object' ? value : {};
   const rawAuthorization = rawProfile.medicationAuthorization && typeof rawProfile.medicationAuthorization === 'object'
@@ -369,7 +420,7 @@ function assertCommunicationMediaUrls(mediaItems = []) {
       continue;
     }
 
-    if (src.startsWith('/assets/') || src.startsWith('/uploads/')) {
+    if (isCloudinaryEnabled() && (src.startsWith('/assets/') || src.startsWith('/uploads/'))) {
       throw new Error('Vuelve a subir las imagenes del comunicado antes de publicar.');
     }
 
@@ -7345,80 +7396,6 @@ router.get('/communication-requests', async (req, res) => {
   }
 });
 
-router.post('/communications/feed-image', (req, res) => {
-  uploadAcademicCommunicationImage(req, res, async (error) => {
-    if (error) {
-      return res.status(400).json({ message: error.message || 'No se pudo cargar la imagen del comunicado.' });
-    }
-
-    try {
-      if (!req.file?.buffer) {
-        return res.status(400).json({ message: 'No se recibio ningun archivo.' });
-      }
-
-      const preferredName = normalizeText(req.body?.preferredName) || normalizeText(req.file?.originalname) || 'comunicado';
-      const saved = await processAndStoreUploadedImage({
-        file: req.file,
-        folder: 'communications-feed',
-        preferredName,
-        requireCloudinary: isCloudinaryEnabled(),
-      });
-
-      if (isCloudinaryEnabled() && (saved.storage !== 'cloudinary' || !/^https?:\/\//i.test(saved.url || ''))) {
-        return res.status(503).json({ message: 'No se pudo guardar la imagen. Intenta de nuevo en unos segundos.' });
-      }
-
-      if (!/^https?:\/\//i.test(saved.url || '') && !String(saved.url || '').startsWith('/assets/')) {
-        return res.status(503).json({ message: 'No se pudo guardar la imagen. Intenta de nuevo en unos segundos.' });
-      }
-
-      const thumbUrl = /^https?:\/\//i.test(saved.thumbUrl || '') ? saved.thumbUrl : saved.url;
-
-      return res.status(201).json({
-        kind: 'image',
-        url: saved.url,
-        imageUrl: saved.url,
-        videoUrl: '',
-        thumbUrl,
-        storage: saved.storage || 'local',
-      });
-    } catch (requestError) {
-      return res.status(400).json({ message: requestError.message || 'No se pudo guardar la imagen del comunicado.' });
-    }
-  });
-});
-
-router.post('/communications/uploads/image', (req, res) => {
-  uploadAcademicCommunicationImage(req, res, async (error) => {
-    if (error) {
-      return res.status(400).json({ message: error.message || 'No se pudo cargar la imagen del comunicado.' });
-    }
-
-    try {
-      const saved = await processAndStoreUploadedImage({
-        file: req.file,
-        folder: 'academic-communications',
-        preferredName: normalizeText(req.body?.preferredName) || 'academic-communication',
-        requireCloudinary: true,
-      });
-
-      if (saved.storage !== 'cloudinary') {
-        return res.status(503).json({
-          message: 'La foto del comunicado solo se puede guardar en Cloudinary.',
-        });
-      }
-
-      return res.status(201).json({
-        imageUrl: saved.url,
-        thumbUrl: saved.thumbUrl || saved.url,
-        storage: saved.storage || 'local',
-      });
-    } catch (requestError) {
-      return res.status(400).json({ message: requestError.message || 'No se pudo guardar la imagen del comunicado.' });
-    }
-  });
-});
-
 router.post('/communications/uploads/media', (req, res) => {
   uploadAcademicCommunicationMedia(req, res, async (error) => {
     if (error) {
@@ -7718,7 +7695,13 @@ router.post('/communications', async (req, res) => {
 
     return res.status(201).json({ communication, deliverySummary: { status: 'queued' } });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    const statusCode = Number(error?.statusCode || 0);
+    const message = error?.message || 'No se pudo publicar el comunicado.';
+    const isValidationError = statusCode === 400
+      || message.includes('Vuelve a subir')
+      || message.includes('are required')
+      || message.includes('No se encontraron acudientes');
+    return res.status(isValidationError ? 400 : 500).json({ message });
   }
 });
 

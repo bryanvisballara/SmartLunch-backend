@@ -37,9 +37,9 @@ function parseAcademicDateValue(value) {
     return null;
   }
 
-  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) {
-    return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  const isoDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
+  if (isoDateMatch) {
+    return new Date(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3]));
   }
 
   const parsed = new Date(normalized);
@@ -106,20 +106,37 @@ function getAcademicGradeAliases(value) {
   return [...aliases].filter(Boolean);
 }
 
-function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '') {
+function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '', options = {}) {
+  const { academicGrades = [] } = options;
   const aliases = new Set(getAcademicGradeAliases(grade));
-  return (Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : []).find((levelSetting) => {
+  const schoolYearLevels = Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : [];
+
+  const byGradeKeys = schoolYearLevels.find((levelSetting) => {
     const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
     return gradeKeys.some((gradeKey) => getAcademicGradeAliases(gradeKey).some((alias) => aliases.has(alias)));
-  }) || null;
+  });
+  if (byGradeKeys) {
+    return byGradeKeys;
+  }
+
+  const matchedGrade = (Array.isArray(academicGrades) ? academicGrades : []).find((gradeItem) => {
+    const gradeAliases = getAcademicGradeAliases(gradeItem?.key || gradeItem?.grade);
+    return gradeAliases.some((alias) => aliases.has(alias));
+  });
+  const levelKey = normalizeText(matchedGrade?.levelKey).toLowerCase();
+  if (!levelKey) {
+    return null;
+  }
+
+  return schoolYearLevels.find((levelSetting) => normalizeText(levelSetting?.levelKey).toLowerCase() === levelKey) || null;
 }
 
 function formatAcademicMonthLabel(date) {
   return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' }).format(date);
 }
 
-function normalizeAcademicSchoolYearConfiguration(configuration = {}, grade = '') {
-  const levelSetting = resolveAcademicSchoolYearLevelSetting(configuration, grade);
+export function normalizeAcademicSchoolYearConfiguration(configuration = {}, grade = '', options = {}) {
+  const levelSetting = resolveAcademicSchoolYearLevelSetting(configuration, grade, options);
   const sourceConfiguration = levelSetting || configuration || {};
   const currentYear = new Date().getFullYear();
   const fallbackStartDate = new Date(currentYear, 0, 1);
@@ -263,9 +280,9 @@ function resolveAcademicLateEnrollmentSurchargeAmount(baseAmount, elapsedMonths,
   return 0;
 }
 
-export function calculateAcademicProratedEnrollmentFee(annualAmount, entryDateValue, configuration = {}, grade = '') {
+export function calculateAcademicProratedEnrollmentFee(annualAmount, entryDateValue, configuration = {}, grade = '', options = {}) {
   const safeAnnualAmount = Math.max(0, Number(annualAmount || 0));
-  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration, grade);
+  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration, grade, options);
   const parsedDate = parseAcademicDateValue(entryDateValue);
   if (!parsedDate) {
     return {
@@ -329,8 +346,8 @@ export function calculateAcademicProratedEnrollmentFee(annualAmount, entryDateVa
   };
 }
 
-export function buildAcademicEnrollmentProrationTable(annualAmount, configuration = {}, grade = '') {
-  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration, grade);
+export function buildAcademicEnrollmentProrationTable(annualAmount, configuration = {}, grade = '', options = {}) {
+  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(configuration, grade, options);
   const startMonth = startOfAcademicMonth(schoolYearConfiguration.startDate);
 
   return Array.from({ length: schoolYearConfiguration.totalMonths }, (_, index) => {

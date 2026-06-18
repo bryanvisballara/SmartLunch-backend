@@ -139,6 +139,14 @@ function PublicOnly({ isAuthenticated, userRole, children }) {
   return children;
 }
 
+function AppHomeEntry({ isAuthenticated, userRole }) {
+  if (Capacitor.isNativePlatform()) {
+    return <Navigate replace to={isAuthenticated ? getDefaultRouteByRole(userRole) : '/login'} />;
+  }
+
+  return <LandingPage />;
+}
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -386,7 +394,7 @@ function App() {
       {showNavbar ? <Navbar /> : null}
       <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
-          <Route element={<LandingPage />} path="/" />
+          <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<Login />} path="/login" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}

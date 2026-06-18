@@ -1,0 +1,38 @@
+CARTA DE INSTRUCCIONES PARA SUSCRIBIR EL PAGARE A FAVOR DEL MILLENNIUM SCHOOL CON NIT: 901.495.429-8
+
+
+
+
+Señora
+LUISA FERNANDA BENEDETTI LARA 
+Representante Legal 
+MILLENNIUM SCHOOL
+
+Nosotros, {{DEBTOR_ONE_NAME}} Y {{DEBTOR_TWO_NAME}} los suscritos, identificados conforme se detalla al pie de nuestras firmas, actuando en nombre propio, mediante el presente documento y con fundamento en lo dispuesto en el artículo 622 del Código de Comercio, otorgamos de manera irrevocable al MILLENNIUM SCHOOL , identificada con NIT 901.495.429-8, la facultad para diligenciar sin previo aviso el pagaré identificado con el número 000003, suscrito a su favor, con los datos relativos a su cuantía, intereses y fecha de vencimiento, bajo las siguientes condiciones:
+
+Ocasión para el diligenciamiento: El título valor podrá ser diligenciado en el momento en que incurramos en mora respecto de cualquier suma adeudada, ya sea por concepto de capital o intereses.
+Cuantía: La cuantía a diligenciar será equivalente al monto total de las obligaciones pendientes de pago, derivadas de los conceptos indicados en el numeral anterior.
+Intereses de mora: Se aplicará la tasa máxima permitida por las autoridades competentes para operaciones de crédito ordinario, conforme a la legislación vigente al momento del diligenciamiento.
+Fecha de vencimiento: La fecha de vencimiento corresponderá al día en que el título valor sea diligenciado.
+
+Adicionalmente, declaramos que el pagaré diligenciado será plenamente exigible y constituirá mérito ejecutivo, conforme a lo establecido en la normativa aplicable, sin necesidad de requerimiento judicial o extrajudicial previo, a los cuales renunciamos expresamente.
+
+En constancia de lo anterior, firmamos el presente documento en la ciudad de Barranquilla, a los {{CONTRACT_DAY}} días del mes de {{CONTRACT_MONTH}} del año {{CONTRACT_YEAR}}.
+
+Atentamente, 
+
+DEUDORES
+
+[[DEBTORS_TABLE]]
+
+Este PAGARE es parte integral del contrato de Prestación de Servicios Educativos suscrito entre las partes y se hará efectivo únicamente en caso de incumplimiento con las obligaciones adquiridas en las condiciones y términos establecidos.
+
+PAGARE No:  000003 Que es parte integral del contrato de prestación de servicios educativos, restaurante y transporte.
+
+Yo / Nosotros: {{DEBTOR_ONE_NAME}} y {{DEBTOR_TWO_NAME}}, identificados conforme consta al pie de nuestras firmas y domiciliados en los lugares allí señalados, en adelante denominados como LOS DEUDORES, nos obligamos solidaria e incondicionalmente a pagar en efectivo y a la orden del MILLENNIUM SCHOOL, identificada con NIT 901.495.429-8 o a quien represente sus derechos, en adelante EL ACREEDOR, la suma de {{TOTAL_AMOUNT_WORDS}} PESOS MONEDA CORRIENTE (${{TOTAL_AMOUNT}}), conforme a los términos y condiciones que se detallan a continuación: FORMA DE PAGO: El monto total adeudado será pagado en {{INSTALLMENT_COUNT_WORDS}} ({{INSTALLMENT_COUNT}}) cuotas mensuales, cada una por valor de {{INSTALLMENT_AMOUNT_WORDS}} PESOS MONEDA CORRIENTE (${{INSTALLMENT_AMOUNT}} M/CTE), a ser canceladas dentro de los primeros (10) días de cada mes, hasta cubrir la totalidad de la deuda. LUGAR DE CUMPLIMIENTO El cumplimiento de todas las obligaciones derivadas de este pagaré tendrá lugar en la ciudad de Barranquilla, salvo que EL ACREEDOR determine otro lugar, lo cual será debidamente notificado a LOS DEUDORES. INTERESES ORDINARIOS Mientras la obligación permanezca vigente, LOS DEUDORES se obligan a pagar intereses a la tasa máxima permitida por la ley vigente. INTERESES MORATORIOS: En caso de mora, LOS DEUDORES reconocerán y pagarán intereses moratorios calculados sobre el saldo de capital, a la tasa máxima autorizada por la legislación aplicable. COSTOS DE RECAUDO: LOS DEUDORES asumen los costos asociados al cobro judicial o extrajudicial de la obligación, incluyendo honorarios de abogados y demás gastos de cobranza. CAPITALIZACIÓN DE INTERESES: Autorizamos a EL ACREEDOR para que, en los términos del artículo 886 del Código de Comercio y del artículo 121 del Estatuto del Sistema Financiero, proceda con la capitalización de los intereses devengados. GASTOS E IMPUESTOS: LOS DEUDORES se comprometen a asumir todos los gastos e impuestos derivados de la ejecución y otorgamiento de este pagaré. CLÁUSULA ACELERATORIA: EL ACREEDOR podrá declarar vencido el plazo y exigir el pago total de la obligación, en los siguientes eventos: a) Mora o incumplimiento en el pago de una o más cuotas de capital o intereses. b) Incumplimiento de cualquier obligación relacionada con pensiones, transporte, alimentación o servicios complementarios. c) Giro de cheques sin provisión de fondos o incumplimiento en el pago de títulos valores aceptados por EL ACREEDOR. d) Muerte del deudor, disolución de una persona jurídica deudora, o sometimiento a procesos de insolvencia, reestructuración o liquidación obligatoria. AUTORIZACIÓN DE CONSULTA Y REPORTE DE DATOS: LOS DEUDORES autorizan expresamente a EL ACREEDOR para consultar, reportar, procesar y divulgar información financiera y comercial relacionada con este pagaré a DataSchool y otras entidades que manejen bases de datos con fines similares, conforme a las leyes aplicables. MÉRITO EJECUTIVO: El presente pagaré constituye título valor conforme a los artículos 619 y siguientes del Código de Comercio y presta mérito ejecutivo sin necesidad de requerimiento judicial o extrajudicial previo, renunciando expresamente LOS DEUDORES a cualquier notificación previa en relación con su ejecución.
+
+En constancia de aceptación y mutuo consentimiento, se firma el presente documento en la ciudad de Barranquilla, a los {{CONTRACT_DAY}} días del mes de {{CONTRACT_MONTH}} del año {{CONTRACT_YEAR}}.
+
+FIRMA DE LOS DEUDORES
+
+[[DEBTORS_TABLE]]

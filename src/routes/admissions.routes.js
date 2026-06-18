@@ -291,13 +291,16 @@ function buildDefaultStages(currentStageKey = 'interesados', existingStages = []
 
   return admissionStageTemplates.map((template, index) => {
     const existing = existingByKey.get(template.key) || {};
+    const isConfirmed = index < currentIndex
+      || (currentStageKey === 'matriculados' && index === currentIndex);
+
     return {
       key: template.key,
       label: template.label,
-      confirmed: Boolean(existing.confirmed || index < currentIndex),
+      confirmed: isConfirmed,
       inProgress: Boolean(index === currentIndex && currentStageKey !== 'matriculados'),
       updatedAt: existing.updatedAt || new Date(),
-      confirmedAt: existing.confirmedAt || (index < currentIndex ? new Date() : null),
+      confirmedAt: isConfirmed ? (existing.confirmedAt || new Date()) : null,
     };
   });
 }
@@ -307,8 +310,8 @@ function normalizeStatus(value, stageKey = 'interesados') {
   if (['withdrawn', 'desistido', 'desistida', 'desistidos', 'desistidas'].includes(rawStatus)) {
     return 'withdrawn';
   }
-  if (['enrolled', 'matriculado', 'matriculada'].includes(rawStatus) || stageKey === 'matriculados') {
-    return 'enrolled';
+  if (stageKey === 'matriculados') {
+    return ['enrolled', 'matriculado', 'matriculada'].includes(rawStatus) ? 'enrolled' : 'in_process';
   }
   if (stageKey === 'interesados') {
     return 'interested';
@@ -322,12 +325,17 @@ function getStudentName(applicant = {}) {
 
 function serializeApplicant(applicant) {
   const plain = typeof applicant?.toObject === 'function' ? applicant.toObject() : applicant;
+  const currentStageKey = normalizeStageKey(plain?.currentStageKey);
+  const status = normalizeStatus(plain?.status, currentStageKey);
+
   return {
     ...plain,
     id: String(plain?._id || plain?.id || ''),
     studentName: getStudentName(plain),
-    currentStage: getStageTemplate(plain?.currentStageKey),
-    admissionStages: buildDefaultStages(plain?.currentStageKey, plain?.admissionStages),
+    currentStageKey,
+    status,
+    currentStage: getStageTemplate(currentStageKey),
+    admissionStages: buildDefaultStages(currentStageKey, plain?.admissionStages),
   };
 }
 

@@ -1,6 +1,6 @@
 {
-  "name": "Comergio App",
-  "short_name": "Comergio App",
+  "name": "Comergio",
+  "short_name": "Comergio",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -8,14 +8,15 @@
   "theme_color": "#102739",
   "icons": [
     {
-      "src": "/iconocomergio.jpg",
-      "sizes": "192x192",
-      "type": "image/jpeg"
+      "src": "/logonuevo.png",
+      "sizes": "942x640",
+      "type": "image/png"
     },
     {
-      "src": "/iconocomergio.jpg",
+      "src": "/logonuevo.png",
       "sizes": "512x512",
-      "type": "image/jpeg"
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

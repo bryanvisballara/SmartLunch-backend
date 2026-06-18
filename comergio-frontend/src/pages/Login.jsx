@@ -34,6 +34,12 @@ const DEV_DIRECT_LOGIN_PROFILES = {
     password: 'Millennium2026!',
     redirectPath: '/rectoria',
   },
+  'coordinacion-preescolar': {
+    schoolId: 'comergio_demo_kns8p',
+    username: 'coordinacion.preescolar',
+    password: 'Comergio2026!',
+    redirectPath: '/coordinacion',
+  },
 };
 
 const INSTITUTIONAL_PLACEHOLDER_ROLES = ['coordination', 'nursing', 'psychology', 'human_resources'];
@@ -436,7 +442,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   };
 
   useEffect(() => {
-    if (!token) {
+    if (!token || (!directLoginProfile && !postLoginPath)) {
       return;
     }
 
@@ -483,7 +489,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     return () => {
       cancelled = true;
     };
-  }, [isNativeAndroid, token, user?.role, navigateByRole, postLoginPath, setUser]);
+  }, [directLoginProfile, isNativeAndroid, postLoginPath, token, user?.role, navigateByRole, setUser]);
 
   useEffect(() => {
     if (!directLoginProfile || token || loading || directLoginAttemptedRef.current) {

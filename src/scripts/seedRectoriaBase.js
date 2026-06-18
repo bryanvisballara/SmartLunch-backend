@@ -14,6 +14,7 @@ const STAFF_FIXTURES = [
   { name: 'Secretaría Académica', username: 'secretaria.academica', role: 'academic_secretary', phone: '3000000002' },
   { name: 'Responsable de Cartera', username: 'cartera', role: 'billing', phone: '3000000003' },
   { name: 'Coordinación Primaria', username: 'coordinacion.primaria', role: 'coordination', phone: '3000000004', coordinationScope: 'primaria' },
+  { name: 'Coordinación Preescolar', username: 'coordinacion.preescolar', role: 'coordination', phone: '3000000009', coordinationScope: 'preescolar' },
   { name: 'Docente Demo', username: 'docente.demo', role: 'teacher', phone: '3000000005', assignedSubjects: ['Matematicas', 'Ciencias'] },
   { name: 'Enfermería Demo', username: 'enfermeria.demo', role: 'nursing', phone: '3000000006' },
   { name: 'Psicología Demo', username: 'psicologia.demo', role: 'psychology', phone: '3000000007' },

@@ -1,19 +1,59 @@
-import ParentShellHeader from '../components/ParentShellHeader';
+import { Link } from 'react-router-dom';
+import './Contact.css';
 
 function Contact() {
   return (
-    <div className="legal-with-parent-header">
-      <ParentShellHeader hideSubtitle />
+    <div className="contact-page">
+      <div className="contact-page__grid" aria-hidden="true" />
+      <div className="contact-page__glow contact-page__glow--left" aria-hidden="true" />
+      <div className="contact-page__glow contact-page__glow--right" aria-hidden="true" />
 
-      <div className="page-grid single legal-page">
-        <section className="panel legal-panel">
-          <h2>Contact</h2>
-          <p>Si necesitas ayuda con Comergio, contáctanos por cualquiera de estos canales:</p>
-          <p><strong>Email:</strong> contacto@comergio.com</p>
-          <p><strong>WhatsApp:</strong> +57 3007265868</p>
-          <p><strong>Horario:</strong> Lunes a viernes, 7:00 a.m. - 5:00 p.m.</p>
+      <header className="contact-page__header">
+        <Link className="contact-page__logo" to="/">
+          <img alt="Comergio" src="/logonuevo.png" />
+        </Link>
+
+        <nav aria-label="Acciones principales" className="contact-page__nav">
+          <Link className="contact-page__button contact-page__button--primary" to="/login">
+            Iniciar sesión
+          </Link>
+          <Link className="contact-page__button" to="/">
+            Inicio
+          </Link>
+        </nav>
+      </header>
+
+      <main className="contact-page__main">
+        <section aria-labelledby="contact-title" className="contact-page__card">
+          <span className="contact-page__eyebrow">Soporte</span>
+          <h1 id="contact-title">Contacto</h1>
+          <p className="contact-page__lead">
+            Si necesitas ayuda con Comergio, contáctanos por cualquiera de estos canales:
+          </p>
+
+          <div className="contact-page__channels">
+            <a className="contact-page__channel" href="mailto:contacto@comergio.com">
+              <span className="contact-page__channel-label">Email</span>
+              <span className="contact-page__channel-value">contacto@comergio.com</span>
+            </a>
+
+            <a
+              className="contact-page__channel"
+              href="https://wa.me/573016214860"
+              rel="noreferrer"
+              target="_blank"
+            >
+              <span className="contact-page__channel-label">WhatsApp</span>
+              <span className="contact-page__channel-value">+57 301 621 4860</span>
+            </a>
+
+            <div className="contact-page__channel contact-page__channel--static">
+              <span className="contact-page__channel-label">Horario</span>
+              <span className="contact-page__channel-value">Lunes a viernes, 7:00 a.m. - 5:00 p.m.</span>
+            </div>
+          </div>
         </section>
-      </div>
+      </main>
     </div>
   );
 }

@@ -7,6 +7,7 @@ const campusGradingSubcomponentSchema = new mongoose.Schema(
     weight: { type: Number, required: true, min: 0, max: 100 },
     date: { type: String, trim: true, default: '' },
     topic: { type: String, trim: true, default: '' },
+    description: { type: String, trim: true, default: '' },
     order: { type: Number, default: 0 },
   },
   { _id: false }

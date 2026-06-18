@@ -765,7 +765,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   };
 
   const currentStageIndex = stageTemplates.findIndex((stage) => stage.key === activeStageKey);
-  const isFinalStage = activeStageKey === 'matriculados' || selectedApplicant?.status === 'enrolled';
+  const isFinalStage = activeStageKey === 'matriculados' && selectedApplicant?.status === 'enrolled';
   const isWithdrawn = selectedApplicant?.status === 'withdrawn';
   const showApplicantDetail = Boolean(selectedApplicant);
   const canCreateApplicant = !showApplicantDetail && ['dashboard', 'aspirantes'].includes(currentView);
@@ -1248,7 +1248,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                 <h2>Timeline de etapas</h2>
                 <div className="admissions-detail-timeline-grid">
                   {stageTemplates.map((stage, index) => {
-                    const isCompleted = index < currentStageIndex || isFinalStage;
+                    const isCompleted = isFinalStage ? index <= currentStageIndex : index < currentStageIndex;
                     const isCurrent = stage.key === activeStageKey && !isFinalStage;
                     return (
                       <button key={stage.key} className={`admissions-detail-timeline-item ${isCompleted ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''} ${!isCompleted && !isCurrent ? 'is-pending' : ''}`} type="button" onClick={() => jumpToStage(stage.key)}>

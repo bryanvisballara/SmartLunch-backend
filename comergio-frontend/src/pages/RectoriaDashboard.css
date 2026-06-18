@@ -2558,6 +2558,20 @@ button.rectoria-team-assignment-card.is-active {
   color: #9a3412;
 }
 
+.rectoria-subject-map-body {
+  display: grid;
+  gap: 8px;
+}
+
+.rectoria-subject-map-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .rectoria-subject-grade-chip-list {
   display: grid;
   gap: 10px;

@@ -56,7 +56,6 @@ import {
   updateAcademicSecretaryCommunication,
   updateAcademicSecretarySchoolRouteStop,
   uploadAcademicSecretaryCommunicationImage,
-  uploadAcademicSecretaryCommunicationFeedImage,
   uploadAcademicSecretaryCommunicationMedia,
 } from '../services/academicSecretary.service';
 import { getAdmissionMarketingHistory, getAdmissions, sendAdmissionMarketingCampaign, uploadAdmissionMarketingImage } from '../services/admissions.service';
@@ -2909,7 +2908,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           ? await uploadAcademicSecretaryCommunicationMedia(file, {
             preferredName: `${communicationForm.title || 'comunicado'}-${index + 1}`,
           })
-          : await uploadAcademicSecretaryCommunicationFeedImage(file, {
+          : await uploadAcademicSecretaryCommunicationImage(file, {
             preferredName: `${communicationForm.title || 'comunicado'}-${index + 1}`,
           });
         const payload = response?.data || {};

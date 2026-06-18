@@ -1030,6 +1030,7 @@ function normalizeGradingComponents(rawComponents) {
         weight,
         date: normalizeText(subcomponent?.date),
         topic: normalizeText(subcomponent?.topic),
+        description: normalizeText(subcomponent?.description),
         order: Number.isFinite(Number(subcomponent?.order)) ? Number(subcomponent.order) : (index + 1),
       };
     }).filter((subcomponent) => Boolean(subcomponent.name));
@@ -1250,7 +1251,9 @@ function buildPostGradebookAssignmentUpdate(rawAssignment, course, postTitle, de
   }
 
   const existingKeys = new Set(existingSubcomponents.map((subcomponent) => slugifyComponentKey(subcomponent.key)).filter(Boolean));
-  const baseKey = slugifyComponentKey(assignment.subcomponentKey || postTitle || `asignacion_${existingSubcomponents.length + 1}`) || `asignacion_${existingSubcomponents.length + 1}`;
+  const subcomponentName = normalizeText(assignment.subcomponentName || postTitle || `Asignacion ${existingSubcomponents.length + 1}`);
+  const subcomponentDescription = normalizeText(assignment.subcomponentDescription);
+  const baseKey = slugifyComponentKey(assignment.subcomponentKey || subcomponentName || `asignacion_${existingSubcomponents.length + 1}`) || `asignacion_${existingSubcomponents.length + 1}`;
   let nextKey = baseKey;
   let keySuffix = 2;
   while (existingKeys.has(nextKey)) {
@@ -1271,10 +1274,11 @@ function buildPostGradebookAssignmentUpdate(rawAssignment, course, postTitle, de
             ...existingSubcomponents,
             {
               key: nextKey,
-              name: normalizeText(postTitle) || `Asignacion ${existingSubcomponents.length + 1}`,
+              name: subcomponentName,
               weight,
               date: normalizeDateString(assignment.date) || deliveryDateValue,
               topic: normalizeText(assignment.topic || course.subject || course.title),
+              description: subcomponentDescription,
               order: existingSubcomponents.length + 1,
             },
           ],
@@ -1429,6 +1433,7 @@ function serializeCourse(course, options = {}) {
               weight: Number(subcomponent.weight || 0),
               date: normalizeText(subcomponent.date),
               topic: normalizeText(subcomponent.topic),
+              description: normalizeText(subcomponent.description),
               order: Number(subcomponent.order || 0),
             }))
             : [],
@@ -1449,6 +1454,7 @@ function serializeCourse(course, options = {}) {
             weight: Number(subcomponent.weight || 0),
             date: normalizeText(subcomponent.date),
             topic: normalizeText(subcomponent.topic),
+            description: normalizeText(subcomponent.description),
             order: Number(subcomponent.order || 0),
           }))
           : [],
@@ -2135,6 +2141,7 @@ async function buildTeacherCourseDetail({ schoolId, teacherUserId, course, gradi
             weight: Number(subcomponent.weight || 0),
             date: normalizeText(subcomponent.date),
             topic: normalizeText(subcomponent.topic),
+            description: normalizeText(subcomponent.description),
             score: entry ? Number(entry.score) : null,
             feedback: normalizeText(entry?.feedback),
             gradedAt: entry?.gradedAt || null,

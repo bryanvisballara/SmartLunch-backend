@@ -3,8 +3,8 @@ import * as XLSX from 'xlsx';
 import './SchoolCreationWizard.css';
 import './RectoriaDashboard.css';
 import { buildAcademicEnrollmentProrationTable } from '../lib/academicEnrollment';
-import { findMatchingFeeSetting, getFeeGradeAliases } from '../lib/feeGradeMatching';
-import { resolveGradeCourses } from '../lib/academicGradeCourses';
+import { findMatchingFeeSetting, getFeeGradeAliases, resolveStructureGradeKeyForStudent, studentMatchesAnyGradeKey } from '../lib/feeGradeMatching';
+import { resolveGradeCourses, resolveStudentCourseKey, studentHasAssignedCourseInGrade } from '../lib/academicGradeCourses';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
@@ -63,7 +63,9 @@ import {
   uploadAcademicSecretaryCommunicationImage,
 } from '../services/academicSecretary.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
-import { getCampusCoordinationCourses, getCampusCoordinationTeachers, getCampusDisciplineObservations } from '../campus/services/campus.service';
+import CoordinationLevelDashboard from '../components/CoordinationLevelDashboard';
+import CoordinationSchedulePanel from '../components/CoordinationSchedulePanel';
+import { getCampusCoordinationCourses, getCampusCoordinationDashboard, getCampusCoordinationTeachers, getCampusDisciplineObservations } from '../campus/services/campus.service';
 import {
   approveHrSupplyRequest,
   consolidateHrPlannerRequests,
@@ -876,8 +878,9 @@ function filterStudentsByGradeKeys(students = [], gradeKeys = new Set()) {
     return students;
   }
 
+  const scopedGradeKeys = [...gradeKeys];
   return (Array.isArray(students) ? students : [])
-    .filter((student) => gradeKeys.has(normalizeAcademicGradeKey(student?.grade)));
+    .filter((student) => studentMatchesAnyGradeKey(student?.grade, scopedGradeKeys));
 }
 
 function filterBillingBootstrapByGradeKeys(bootstrap = {}, gradeKeys = new Set()) {
@@ -885,7 +888,8 @@ function filterBillingBootstrapByGradeKeys(bootstrap = {}, gradeKeys = new Set()
     return bootstrap;
   }
 
-  const gradeMatches = (value) => gradeKeys.has(normalizeAcademicGradeKey(value));
+  const scopedGradeKeys = [...gradeKeys];
+  const gradeMatches = (value) => studentMatchesAnyGradeKey(value, scopedGradeKeys);
   const courseKeySet = new Set((Array.isArray(bootstrap.courseOptions) ? bootstrap.courseOptions : [])
     .filter((course) => gradeMatches(course?.gradeKey || course?.gradeLabel))
     .map((course) => String(course?.value || '').trim())
@@ -1876,6 +1880,7 @@ function RectoriaDashboard() {
   const [activeAcademicManagementSection, setActiveAcademicManagementSection] = useState('grades_courses');
   const [homeData, setHomeData] = useState(null);
   const [disciplineObservations, setDisciplineObservations] = useState([]);
+  const [coordinationDashboard, setCoordinationDashboard] = useState(null);
   const [resourceDashboard, setResourceDashboard] = useState(null);
   const [resourceItems, setResourceItems] = useState([]);
   const [resourcePlannerCycles, setResourcePlannerCycles] = useState([]);
@@ -1982,7 +1987,12 @@ function RectoriaDashboard() {
   const sectionOptions = useMemo(
     () => {
       if (isCoordinationPortal) {
-        return BASE_SECTION_OPTIONS.filter((option) => ['overview', 'communications', 'resources', 'students'].includes(option.key));
+        return [
+          { key: 'overview', label: 'Tablero de nivel' },
+          { key: 'communications', label: 'Comunicados' },
+          { key: 'resources', label: 'Recursos y compras' },
+          { key: 'schedule', label: 'Horario académico' },
+        ];
       }
 
       return BASE_SECTION_OPTIONS.flatMap((option) => (
@@ -2316,6 +2326,7 @@ function RectoriaDashboard() {
         getAcademicSecretaryBootstrap(),
         getCampusCoordinationCourses(),
         getCampusDisciplineObservations({ limit: 30 }),
+        isCoordinationPortal ? getCampusCoordinationDashboard() : Promise.resolve(null),
         isCoordinationPortal ? Promise.resolve({ data: null }) : getHrDashboard(),
         getHrSupplyItems({ status: 'active' }),
         getHrPlannerCycles({ status: 'active' }),
@@ -2331,6 +2342,7 @@ function RectoriaDashboard() {
         billingBootstrapResult,
         campusCoursesResult,
         disciplineObservationsResult,
+        coordinationDashboardResult,
         resourceDashboardResult,
         resourceItemsResult,
         resourcePlannerCyclesResult,
@@ -2346,6 +2358,15 @@ function RectoriaDashboard() {
       if (!isCoordinationPortal && billingBootstrapResult?.status === 'rejected') failedSections.push('cartera');
       if (campusCoursesResult.status === 'rejected') failedSections.push('contenido académico');
       if (disciplineObservationsResult.status === 'rejected') failedSections.push('convivencia escolar');
+      if (isCoordinationPortal && coordinationDashboardResult.status === 'rejected') {
+        const dashboardStatus = coordinationDashboardResult.reason?.response?.status;
+        if (dashboardStatus === 404) {
+          failedSections.push('tablero de coordinación (reinicia el backend local para cargar la ruta nueva)');
+        } else {
+          const dashboardMessage = coordinationDashboardResult.reason?.response?.data?.message;
+          failedSections.push(dashboardMessage ? `tablero de coordinación (${dashboardMessage})` : 'tablero de coordinación');
+        }
+      }
       if (!isCoordinationPortal && resourceDashboardResult.status === 'rejected') failedSections.push('resumen de recursos');
       if (resourceItemsResult.status === 'rejected' || resourcePlannerCyclesResult.status === 'rejected' || resourcePlannerRequestsResult.status === 'rejected' || resourceRequestsResult.status === 'rejected') failedSections.push('recursos y compras');
 
@@ -2414,6 +2435,13 @@ function RectoriaDashboard() {
 
       setHomeData(nextHomeData);
       setDisciplineObservations(disciplineObservationsResult.status === 'fulfilled' ? (disciplineObservationsResult.value?.observations || []) : disciplineObservations);
+      if (isCoordinationPortal) {
+        setCoordinationDashboard(
+          coordinationDashboardResult.status === 'fulfilled'
+            ? (coordinationDashboardResult.value || null)
+            : coordinationDashboard
+        );
+      }
       setResourceDashboard(resourceDashboardResult.status === 'fulfilled' ? (resourceDashboardResult.value?.data || null) : resourceDashboard);
       setResourceItems(resourceItemsResult.status === 'fulfilled' ? (resourceItemsResult.value?.data?.items || []) : resourceItems);
       setResourcePlannerCycles(resourcePlannerCyclesResult.status === 'fulfilled' ? (resourcePlannerCyclesResult.value?.data?.cycles || []) : resourcePlannerCycles);
@@ -3478,7 +3506,19 @@ function RectoriaDashboard() {
 
   const pendingCourseStudents = useMemo(
     () => students
-      .filter((student) => normalizeText(student.grade) && !normalizeText(student.course))
+      .filter((student) => {
+        if (!normalizeText(student.grade)) {
+          return false;
+        }
+
+        const gradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades);
+        const grade = academicStructureDraft.grades.find((entry) => entry.key === gradeKey);
+        if (!grade) {
+          return !normalizeText(student.course);
+        }
+
+        return !studentHasAssignedCourseInGrade(student, grade);
+      })
       .sort((left, right) => {
         const gradeComparison = String(left.grade || '').localeCompare(String(right.grade || ''), 'es', { numeric: true });
         if (gradeComparison !== 0) {
@@ -3486,12 +3526,16 @@ function RectoriaDashboard() {
         }
         return String(left.name || '').localeCompare(String(right.name || ''), 'es', { sensitivity: 'base' });
       }),
-    [students]
+    [students, academicStructureDraft.grades]
   );
 
   const studentCountsByCourse = useMemo(
     () => students.reduce((accumulator, student) => {
-      const courseKey = normalizeText(student.course);
+      const gradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades);
+      const grade = academicStructureDraft.grades.find((entry) => entry.key === gradeKey);
+      const courseKey = grade
+        ? resolveStudentCourseKey(student, grade)
+        : normalizeText(student.course);
       if (!courseKey) {
         return accumulator;
       }
@@ -3499,12 +3543,16 @@ function RectoriaDashboard() {
       accumulator[courseKey] = Number(accumulator[courseKey] || 0) + 1;
       return accumulator;
     }, {}),
-    [students]
+    [students, academicStructureDraft.grades]
   );
 
   const studentsByCourse = useMemo(
     () => students.reduce((accumulator, student) => {
-      const courseKey = normalizeText(student.course);
+      const gradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades);
+      const grade = academicStructureDraft.grades.find((entry) => entry.key === gradeKey);
+      const courseKey = grade
+        ? resolveStudentCourseKey(student, grade)
+        : normalizeText(student.course);
       if (!courseKey) {
         return accumulator;
       }
@@ -3516,7 +3564,7 @@ function RectoriaDashboard() {
       accumulator[courseKey].push(student);
       return accumulator;
     }, {}),
-    [students]
+    [students, academicStructureDraft.grades]
   );
 
   const selectedCourseStudents = useMemo(() => {
@@ -3545,7 +3593,7 @@ function RectoriaDashboard() {
 
   const assignedStudentCountsByGrade = useMemo(
     () => academicStructureDraft.grades.reduce((accumulator, grade) => {
-      accumulator[grade.key] = grade.courses.reduce(
+      accumulator[grade.key] = resolveGradeCourses(grade).reduce(
         (sum, course) => sum + Number(studentCountsByCourse[course.key] || 0),
         0
       );
@@ -3556,7 +3604,8 @@ function RectoriaDashboard() {
 
   const pendingStudentCountsByGrade = useMemo(
     () => pendingCourseStudents.reduce((accumulator, student) => {
-      const gradeKey = normalizeAcademicGradeKey(student.grade);
+      const gradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades)
+        || normalizeAcademicGradeKey(student.grade);
       if (!gradeKey) {
         return accumulator;
       }
@@ -3564,7 +3613,7 @@ function RectoriaDashboard() {
       accumulator[gradeKey] = Number(accumulator[gradeKey] || 0) + 1;
       return accumulator;
     }, {}),
-    [pendingCourseStudents]
+    [pendingCourseStudents, academicStructureDraft.grades]
   );
 
   const educationalLevelOptions = useMemo(
@@ -6833,7 +6882,7 @@ function RectoriaDashboard() {
           <h1>{isCoordinationPortal ? `Coordinación ${coordinationScope || schoolName}` : (isDireccionPortal ? `Dirección institucional de ${schoolName}` : `Rectoría ${schoolName}`)}</h1>
           <p>
             {isCoordinationPortal
-              ? 'Consulta el resumen institucional y gestiona la operación académica del nivel asignado.'
+              ? 'Tablero operativo del nivel, comunicados, recursos y horarios académicos del nivel asignado.'
               : 'Controla el equipo académico, el mapa de alumnos por curso, los costos por grado y los puntos críticos de la operación institucional.'}
           </p>
         </div>
@@ -6911,7 +6960,25 @@ function RectoriaDashboard() {
         <AdmissionsDashboard activeView={activeAdmissionsView} embedded />
       ) : null}
 
+      {activeSection === 'schedule' && isCoordinationPortal ? (
+        <section className="panel rectoria-panel rectoria-panel--school-schedule">
+          <CoordinationSchedulePanel
+            academicStructure={academicStructureDraft}
+            gradeLabels={configuredGradeLabels}
+            teacherLabels={teacherLabelById}
+            scopeLabel={coordinationDashboard?.scope?.label || coordinationScope || schoolName}
+          />
+        </section>
+      ) : null}
+
       {activeSection === 'overview' ? (
+        isCoordinationPortal ? (
+          <CoordinationLevelDashboard
+            dashboard={coordinationDashboard}
+            loading={loading || (refreshing && !coordinationDashboard)}
+            onRefresh={() => loadPortal({ silent: true })}
+          />
+        ) : (
         <div className="rectoria-stack rectoria-stack--overview">
           <div className="rectoria-overview-command-grid">
             {!isCoordinationPortal ? <article className="rectoria-overview-kpi rectoria-overview-kpi--billing">
@@ -7042,6 +7109,7 @@ function RectoriaDashboard() {
             </article>
           </div>
         </div>
+        )
       ) : null}
 
       {activeSection === 'communications' ? (
@@ -7890,7 +7958,8 @@ function RectoriaDashboard() {
                 <tbody>
                   {filteredPendingStudents.map((student) => {
                     const draft = studentDrafts[String(student._id)] || { grade: student.grade || '', course: student.course || '' };
-                    const studentGrade = normalizeAcademicGradeKey(student.grade);
+                    const studentGrade = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades)
+                      || normalizeAcademicGradeKey(student.grade);
                     const availableCourses = courseOptionsByGrade[studentGrade] || [];
                     return (
                       <tr key={student._id}>
@@ -7928,7 +7997,6 @@ function RectoriaDashboard() {
             </div>
           </section>
 
-          {!isCoordinationPortal ? (
             <section className="panel rectoria-panel">
               <div className="rectoria-section-header">
                 <div>
@@ -8033,9 +8101,7 @@ function RectoriaDashboard() {
                 })}
               </div>
             </section>
-          ) : null}
 
-          {!isCoordinationPortal ? (
             <section className="panel rectoria-panel">
               <div className="rectoria-section-header">
                 <div>
@@ -8166,8 +8232,6 @@ function RectoriaDashboard() {
                 ))}
               </div>
             </section>
-          ) : null}
-
             </>
           ) : null}
 

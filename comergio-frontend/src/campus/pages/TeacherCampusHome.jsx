@@ -23,6 +23,8 @@ import {
   updateCampusTeacherPost,
 } from '../services/campus.service';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { isEducationalLevelKey } from '../../lib/feeGradeMatching';
+import { resolveEducationalGradeLabel } from '../../lib/educationalGradeLabels';
 import { mockTeacherWorkspace } from '../mockCampusContext';
 import '../campus.css';
 
@@ -178,6 +180,8 @@ function createPostDraft(courseId = '') {
     gradebookComponentKey: '',
     gradebookWeight: '',
     gradebookTopic: '',
+    gradebookSubcomponentTitle: '',
+    gradebookSubcomponentDescription: '',
   };
 }
 
@@ -212,6 +216,7 @@ function createSubcomponentDraft(index = 1) {
     name: '',
     date: '',
     topic: '',
+    description: '',
     order: index,
   };
 }
@@ -1019,11 +1024,32 @@ function extractGradeNumberLabel(value) {
 }
 
 function getCourseGradeLabel(course) {
+  const educationalLabel = resolveEducationalGradeLabel(course);
+  if (educationalLabel) {
+    return educationalLabel;
+  }
+
   const gradeNumber = [course?.gradeLevel, course?.studentGradeKey, course?.title]
     .map(extractGradeNumberLabel)
     .find(Boolean);
+  const gradeKeySources = [course?.studentGradeKey, course?.gradeLevel].filter(Boolean);
+
+  if (gradeNumber && gradeKeySources.some((key) => isEducationalLevelKey(key) || /^kinder/i.test(String(key)))) {
+    return `Kinder ${gradeNumber}`;
+  }
 
   return gradeNumber || normalizeCourseDisplayText(course?.gradeLevel || course?.studentGradeKey || getCourseGroupLabel(course));
+}
+
+function getCourseGradeGroupLabel(course) {
+  const educationalLabel = resolveEducationalGradeLabel(course);
+  if (educationalLabel) {
+    return educationalLabel;
+  }
+
+  const subjectLabel = normalizeCourseDisplayText(course?.subject);
+  const gradeLabel = getCourseGradeLabel(course);
+  return [subjectLabel, gradeLabel].filter(Boolean).join(' · ') || getCourseDisplayTitle(course);
 }
 
 function buildGradeAliasSet(course, groupLabel) {
@@ -1056,6 +1082,11 @@ function buildGradeAliasSet(course, groupLabel) {
 }
 
 function getCourseGroupLabel(course) {
+  const educationalLabel = resolveEducationalGradeLabel(course);
+  if (educationalLabel) {
+    return educationalLabel;
+  }
+
   const sourceCourseKeyGroup = extractCourseGroupFromKey(course?.sourceCourseKey);
   const studentGradeKeyGroup = extractCourseGroupFromKey(course?.studentGradeKey);
   const sectionGroup = extractCourseGroupFromKey(course?.section);
@@ -1116,12 +1147,6 @@ function getCourseDisplaySubtitle(course) {
   const parts = [subjectLabel, groupLabel].filter((part) => part && !title.includes(normalizeCourseDisplayKey(part)));
 
   return parts.join(' · ');
-}
-
-function getCourseGradeGroupLabel(course) {
-  const subjectLabel = normalizeCourseDisplayText(course?.subject);
-  const gradeLabel = getCourseGradeLabel(course);
-  return [subjectLabel, gradeLabel].filter(Boolean).join(' · ') || getCourseDisplayTitle(course);
 }
 
 function getCourseGradeGroupKey(course) {
@@ -1408,6 +1433,7 @@ function buildStudentPeriods(student, courseAcademicPeriods) {
           weight: Number(subcomponent.weight || 0),
           date: subcomponent.date || '',
           topic: subcomponent.topic || '',
+          description: subcomponent.description || '',
           score: existingSubcomponentScore?.score ?? null,
           feedback: existingSubcomponentScore?.feedback || '',
           gradedAt: existingSubcomponentScore?.gradedAt || null,
@@ -1805,6 +1831,46 @@ function TeacherCampusHome({ forcePreview = false }) {
           },
         }));
       };
+
+      const onSaveComponent = async (periodIdx, compIdx) => {
+        const component = academicPeriodDrafts[periodIdx]?.gradingComponents?.[compIdx];
+        if (!component) {
+          return;
+        }
+
+        const nextName = String(component.name || '').trim();
+        const nextWeight = Number(component.weight);
+
+        if (!nextName) {
+          setNotice({ type: 'error', text: 'El componente necesita al menos un nombre.' });
+          return;
+        }
+
+        if (!Number.isFinite(nextWeight) || nextWeight <= 0) {
+          setNotice({ type: 'error', text: 'El componente necesita un porcentaje mayor que cero.' });
+          return;
+        }
+
+        const nextAcademicPeriodDrafts = academicPeriodDrafts.map((period, pIdx) => (
+          pIdx !== periodIdx
+            ? period
+            : {
+              ...period,
+              gradingComponents: (period.gradingComponents || []).map((comp, cIdx) => (
+                cIdx !== compIdx
+                  ? comp
+                  : {
+                    ...comp,
+                    name: nextName,
+                    key: comp.key || slugifyComponentKey(nextName),
+                  }
+              )),
+            }
+        ));
+
+        setAcademicPeriodDrafts(nextAcademicPeriodDrafts);
+        await onSaveGradingScheme(nextAcademicPeriodDrafts, 'Componente guardado en la estructura academica.');
+      };
     // Estados para filtro y acordeón del libro de notas
     const [gradebookSearch, setGradebookSearch] = useState('');
     const [gradebookMode, setGradebookMode] = useState('student');
@@ -2164,6 +2230,7 @@ function TeacherCampusHome({ forcePreview = false }) {
           weight: Number(subcomponent.weight || 0),
           date: String(subcomponent.date || '').trim(),
           topic: String(subcomponent.topic || '').trim(),
+          description: String(subcomponent.description || '').trim(),
           order: Number(subcomponent.order ?? (subcomponentIndex + 1)),
         })),
       })),
@@ -2759,6 +2826,11 @@ function TeacherCampusHome({ forcePreview = false }) {
         return;
       }
 
+      if (!String(postDraft.gradebookSubcomponentTitle || postDraft.title || '').trim()) {
+        setNotice({ type: 'error', text: 'Escribe el titulo del subcomponente para el libro de notas.' });
+        return;
+      }
+
       if (gradebookWeight > selectedPostGradebookComponentWeightAvailable + 0.001) {
         setNotice({ type: 'error', text: `Ese componente solo tiene ${selectedPostGradebookComponentWeightAvailable}% disponible.` });
         return;
@@ -2796,6 +2868,8 @@ function TeacherCampusHome({ forcePreview = false }) {
             componentKey: selectedPostGradebookComponent.key,
             weight: gradebookWeight,
             topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
+            subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
+            subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
           }));
         }
 
@@ -3263,6 +3337,7 @@ function TeacherCampusHome({ forcePreview = false }) {
           weight: Number(subcomponent.weight),
           date: String(subcomponent.date || '').trim(),
           topic: String(subcomponent.topic || '').trim(),
+          description: String(subcomponent.description || '').trim(),
           order: Number(subcomponent.order ?? (subcomponentIndex + 1)),
         })).filter((subcomponent) => Boolean(subcomponent.name)),
       })),
@@ -4486,11 +4561,32 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                           <label className="campus-teacher__form-grid--full">
                             Título
-                            <input value={postDraft.title} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, title: event.target.value }))} />
+                            <input
+                              value={postDraft.title}
+                              onChange={(event) => {
+                                const nextTitle = event.target.value;
+                                setPostDraft((currentDraft) => ({
+                                  ...currentDraft,
+                                  title: nextTitle,
+                                  ...(currentDraft.addToGradebook ? { gradebookSubcomponentTitle: nextTitle } : {}),
+                                }));
+                              }}
+                            />
                           </label>
                           <label className="campus-teacher__form-grid--full">
                             Descripción o instrucciones
-                            <textarea rows={5} value={postDraft.body} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, body: event.target.value }))} />
+                            <textarea
+                              rows={5}
+                              value={postDraft.body}
+                              onChange={(event) => {
+                                const nextBody = event.target.value;
+                                setPostDraft((currentDraft) => ({
+                                  ...currentDraft,
+                                  body: nextBody,
+                                  ...(currentDraft.addToGradebook ? { gradebookSubcomponentDescription: nextBody } : {}),
+                                }));
+                              }}
+                            />
                           </label>
                           <div className="campus-teacher__form-grid--full campus-teacher__materials-panel campus-teacher__materials-panel--portal">
                             <p className="campus-panel__meta">Puedes adjuntar PDF, video, audio, foto, enlaces web u otros archivos de apoyo. Máximo {maxMaterialFileCount} archivos de {Math.round(maxMaterialFileBytes / (1024 * 1024))} MB cada uno.</p>
@@ -4538,6 +4634,8 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   addToGradebook: event.target.checked,
                                   gradebookPeriodKey: event.target.checked ? (currentDraft.gradebookPeriodKey || selectedPostGradebookPeriod?.key || '') : currentDraft.gradebookPeriodKey,
                                   gradebookComponentKey: event.target.checked ? (currentDraft.gradebookComponentKey || selectedPostGradebookComponent?.key || '') : currentDraft.gradebookComponentKey,
+                                  gradebookSubcomponentTitle: event.target.checked ? (currentDraft.gradebookSubcomponentTitle || currentDraft.title || '') : currentDraft.gradebookSubcomponentTitle,
+                                  gradebookSubcomponentDescription: event.target.checked ? (currentDraft.gradebookSubcomponentDescription || currentDraft.body || '') : currentDraft.gradebookSubcomponentDescription,
                                 }))}
                                 type="checkbox"
                               />
@@ -4578,6 +4676,23 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookWeight: event.target.value }))}
                                   />
                                 </label>
+                                <label className="campus-teacher__form-grid--full">
+                                  Titulo del subcomponente
+                                  <input
+                                    placeholder="Se rellena con el titulo de la asignacion"
+                                    value={postDraft.gradebookSubcomponentTitle}
+                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookSubcomponentTitle: event.target.value }))}
+                                  />
+                                </label>
+                                <label className="campus-teacher__form-grid--full">
+                                  Descripcion del subcomponente
+                                  <textarea
+                                    placeholder="Se rellena con la descripcion de la asignacion"
+                                    rows={3}
+                                    value={postDraft.gradebookSubcomponentDescription}
+                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookSubcomponentDescription: event.target.value }))}
+                                  />
+                                </label>
                                 <label>
                                   Tematica
                                   <input
@@ -4587,7 +4702,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   />
                                 </label>
                                 <p className="campus-panel__meta campus-teacher__form-grid--full">
-                                  Se creara un subcomponente con el titulo de esta asignacion. El componente seleccionado tiene {selectedPostGradebookComponentWeightAvailable}% disponible.
+                                  Se creara un subcomponente con el titulo y la descripcion indicados. El componente seleccionado tiene {selectedPostGradebookComponentWeightAvailable}% disponible.
                                 </p>
                               </div>
                             ) : null}
@@ -4676,6 +4791,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       </label>
                                     </div>
                                     <div className="campus-teacher__grading-component-actions">
+                                      <button
+                                        className="campus-teacher__action-btn"
+                                        disabled={isBusy}
+                                        onClick={() => onSaveComponent(periodIndex, componentIndex)}
+                                        type="button"
+                                      >
+                                        {updateGradingSchemeMutation.isPending ? 'Guardando...' : 'Guardar componente'}
+                                      </button>
                                       <button className="campus-teacher__ghost-btn" onClick={() => onRemovePeriodComponent(periodIndex, componentIndex)} type="button">
                                         Quitar
                                       </button>

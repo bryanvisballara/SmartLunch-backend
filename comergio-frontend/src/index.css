@@ -192,7 +192,8 @@
 
 .super-admin-logout,
 .super-admin-panel-head button,
-.super-admin-detail-actions button {
+.super-admin-detail-actions button,
+.super-admin-modal-actions button {
   min-height: 40px;
   border: 0;
   border-radius: 8px;
@@ -201,6 +202,75 @@
   color: #ffffff;
   font-weight: 800;
   cursor: pointer;
+}
+
+.super-admin-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.super-admin-panel-head button.is-secondary,
+.super-admin-modal-actions button.is-secondary {
+  background: #e8eef5;
+  color: #172033;
+}
+
+.super-admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(23, 32, 51, 0.45);
+}
+
+.super-admin-modal {
+  width: min(560px, 100%);
+  border: 1px solid #dbe5ef;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 22px;
+  box-shadow: 0 18px 48px rgba(23, 32, 51, 0.18);
+}
+
+.super-admin-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.super-admin-modal-head h3 {
+  margin: 0;
+  color: #172033;
+}
+
+.super-admin-modal-head p {
+  margin: 6px 0 0;
+  color: #667085;
+}
+
+.super-admin-modal-close {
+  min-width: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: #e8eef5;
+  color: #172033;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.super-admin-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .super-admin-logout {

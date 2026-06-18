@@ -31,6 +31,10 @@ export function getCampusCoordinationCourses() {
   return api.get('/campus/coordination/courses').then((response) => response.data);
 }
 
+export function getCampusCoordinationDashboard() {
+  return api.get('/campus/coordination/dashboard').then((response) => response.data);
+}
+
 export function updateCampusCoordinationCourse(courseId, payload) {
   return api.patch(`/campus/coordination/courses/${courseId}`, payload).then((response) => response.data);
 }

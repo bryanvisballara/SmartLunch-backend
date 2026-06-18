@@ -705,7 +705,42 @@ function formatDateLabelEs(dateValue) {
   }).format(dateValue);
 }
 
-function normalizeAcademicFeedMedia(mediaItems = []) {
+function getPublicBackendBaseUrl(req) {
+  const explicit = String(process.env.BACKEND_PUBLIC_URL || process.env.PUBLIC_BACKEND_URL || process.env.API_PUBLIC_URL || '').trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, '');
+  }
+
+  const forwardedHost = normalizeText(req?.get?.('x-forwarded-host')).split(',')[0];
+  const requestHost = forwardedHost || normalizeText(req?.get?.('host'));
+  const forwardedProto = normalizeText(req?.get?.('x-forwarded-proto')).split(',')[0];
+  const protocol = forwardedProto || req?.protocol || 'http';
+
+  if (requestHost) {
+    return `${protocol}://${requestHost}`.replace(/\/+$/, '');
+  }
+
+  return 'http://localhost:4000';
+}
+
+function resolvePublicMediaUrl(req, value) {
+  const normalized = normalizeStoredImageUrl(value);
+  if (!normalized) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  if (normalized.startsWith('/')) {
+    return `${getPublicBackendBaseUrl(req)}${normalized}`;
+  }
+
+  return normalized;
+}
+
+function normalizeAcademicFeedMedia(mediaItems = [], req = null) {
   if (!Array.isArray(mediaItems)) {
     return [];
   }
@@ -713,23 +748,23 @@ function normalizeAcademicFeedMedia(mediaItems = []) {
   return mediaItems
     .map((item, index) => {
       const kind = String(item?.kind || '').trim().toLowerCase() === 'video' ? 'video' : 'image';
-      const src = kind === 'image'
+      const rawSrc = kind === 'image'
         ? normalizeStoredImageUrl(item?.src)
         : String(item?.src || '').trim();
+      const src = resolvePublicMediaUrl(req, rawSrc);
 
       if (!src) {
         return null;
       }
 
-      if (kind === 'image' && (src.startsWith('/assets/') || src.startsWith('/uploads/'))) {
-        return null;
-      }
+      const rawThumbUrl = normalizeStoredImageUrl(item?.thumbUrl) || (kind === 'image' ? deriveThumbUrlFromImageUrl(rawSrc) : '');
+      const thumbUrl = resolvePublicMediaUrl(req, rawThumbUrl) || (kind === 'image' ? src : '');
 
       return {
         id: `${String(item?._id || 'media')}-${index + 1}`,
         kind,
         src,
-        thumbUrl: normalizeStoredImageUrl(item?.thumbUrl) || (kind === 'image' ? deriveThumbUrlFromImageUrl(src) : ''),
+        thumbUrl,
         alt: String(item?.alt || '').trim(),
       };
     })
@@ -833,7 +868,7 @@ function buildAcademicFeedAuthorName(item = {}) {
   return subjectLabel ? `${teacherName} - ${subjectLabel.split(' - ')[0].trim()}` : teacherName;
 }
 
-function serializeAcademicFeedItem(item = {}, currentUserId = '') {
+function serializeAcademicFeedItem(item = {}, currentUserId = '', req = null) {
   const likes = normalizeUniqueAcademicFeedLikes(item.likes);
   const comments = Array.isArray(item.comments)
     ? item.comments.map((comment) => serializeAcademicFeedComment(comment, currentUserId)).filter((comment) => comment.id && comment.body)
@@ -842,7 +877,9 @@ function serializeAcademicFeedItem(item = {}, currentUserId = '') {
   return {
     ...item,
     authorName: buildAcademicFeedAuthorName(item),
-    media: normalizeAcademicFeedMedia(item.media),
+    authorPhotoUrl: resolvePublicMediaUrl(req, item.authorPhotoUrl),
+    authorThumbUrl: resolvePublicMediaUrl(req, item.authorThumbUrl || item.authorPhotoUrl),
+    media: normalizeAcademicFeedMedia(item.media, req),
     publishedAtLabel: item.sentAt ? formatDateLabelEs(item.sentAt) : formatDateLabelEs(item.createdAt),
     likedByMe: likes.some((like) => sameObjectId(like.userId, currentUserId)),
     likesCount: likes.length,
@@ -3213,7 +3250,7 @@ router.get('/portal/academic-feed', async (req, res) => {
       .limit(50)
       .lean();
 
-    return res.status(200).json(feed.map((item) => serializeAcademicFeedItem(item, parentUserId)));
+    return res.status(200).json(feed.map((item) => serializeAcademicFeedItem(item, parentUserId, req)));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3249,7 +3286,7 @@ router.post('/portal/academic-feed/:communicationId/like', async (req, res) => {
       return res.status(404).json({ message: 'Comunicado no encontrado.' });
     }
 
-    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId));
+    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3285,7 +3322,7 @@ router.post('/portal/academic-feed/:communicationId/comments', async (req, res) 
     });
 
     await communication.save();
-    return res.status(201).json(serializeAcademicFeedItem(communication.toObject(), parentUserId));
+    return res.status(201).json(serializeAcademicFeedItem(communication.toObject(), parentUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3316,7 +3353,7 @@ router.delete('/portal/academic-feed/:communicationId/comments/:commentId', asyn
 
     comment.deleteOne();
     await communication.save();
-    return res.status(200).json(serializeAcademicFeedItem(communication.toObject(), parentUserId));
+    return res.status(200).json(serializeAcademicFeedItem(communication.toObject(), parentUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3373,7 +3410,7 @@ router.post('/portal/academic-feed/:communicationId/comments/:commentId/like', a
       return res.status(404).json({ message: 'Comunicado no encontrado.' });
     }
 
-    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId));
+    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

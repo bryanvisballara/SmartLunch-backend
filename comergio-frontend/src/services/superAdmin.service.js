@@ -2,6 +2,8 @@ import api from '../lib/api';
 
 export const getSuperAdminSummary = () => api.get('/super-admin/summary');
 
+export const createSuperAdminSchool = (data) => api.post('/super-admin/schools', data);
+
 export const updateSuperAdminSchoolSettings = (schoolId, data) => (
   api.patch(`/super-admin/schools/${encodeURIComponent(schoolId)}/settings`, data)
 );

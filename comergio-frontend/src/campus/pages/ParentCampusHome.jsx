@@ -2220,6 +2220,10 @@ function resolveIosCompatibleImageUrl(value) {
     return resolvedUrl;
   }
 
+  if (/\.webp(?:[?#]|$)/i.test(resolvedUrl)) {
+    return resolvedUrl;
+  }
+
   if (!/\/assets\//i.test(resolvedUrl) && !/\/uploads\//i.test(resolvedUrl)) {
     return resolvedUrl;
   }
@@ -2242,8 +2246,8 @@ function addImageRetryParam(value) {
 }
 
 function ParentAnnouncementImage({ mediaItem, fallbackAlt }) {
-  const primarySrc = mediaItem.thumbUrl || mediaItem.src;
-  const secondarySrc = mediaItem.thumbUrl && mediaItem.thumbUrl !== mediaItem.src ? mediaItem.src : '';
+  const primarySrc = mediaItem.src || mediaItem.thumbUrl;
+  const secondarySrc = mediaItem.thumbUrl && mediaItem.thumbUrl !== mediaItem.src ? mediaItem.thumbUrl : '';
   const [imageSrc, setImageSrc] = useState(primarySrc);
   const [failed, setFailed] = useState(false);
 
@@ -2305,14 +2309,7 @@ function ParentAnnouncementMedia({ announcement, onLike }) {
   }, [announcement.id, mediaItems.length]);
 
   if (!mediaItems.length) {
-    return (
-      <div className="campus-parent-mobile__post-media">
-        <div className="campus-parent-mobile__post-media-copy">
-          <div className="campus-parent-mobile__post-badge">{announcement.category}</div>
-          <h3>{announcement.imageLabel}</h3>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   const onScroll = (event) => {

@@ -3,7 +3,10 @@ const bcrypt = require('bcryptjs');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
-const { deleteSchoolTenant, listTenantSchoolContexts, runWithSchoolContext } = require('../config/db');
+const { deleteSchoolTenant, listTenantSchoolContexts, runWithSchoolContext, slugifySchoolId } = require('../config/db');
+const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
+const AcademicStructure = require('../models/academicStructure.model');
+const SchoolCreationSnapshot = require('../models/schoolCreationSnapshot.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
@@ -46,6 +49,81 @@ function normalizePricePerStudent(value) {
   }
 
   return Math.round(numericValue);
+}
+
+function buildUniqueSchoolId(schoolName, existingSchoolIds = new Set()) {
+  const baseId = slugifySchoolId(schoolName);
+  let candidate = `${baseId}_${Date.now().toString(36).slice(-5)}`;
+  let attempt = 0;
+
+  while (existingSchoolIds.has(candidate) && attempt < 20) {
+    attempt += 1;
+    candidate = `${baseId}_${Date.now().toString(36).slice(-5)}${attempt}`;
+  }
+
+  return candidate;
+}
+
+async function bootstrapSchoolTenant({
+  schoolId,
+  schoolName,
+  subscriptionStatus = 'subscribed',
+  pricePerStudent = 0,
+  updatedBy = '',
+}) {
+  await SchoolCreationSnapshot.findOneAndUpdate(
+    { schoolId },
+    {
+      schoolId,
+      schoolName,
+      payload: { createdBy: 'super_admin' },
+      completedAt: new Date(),
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  await AcademicStructure.findOneAndUpdate(
+    { schoolId },
+    {
+      schoolId,
+      schoolName,
+      academicYear: String(new Date().getFullYear()),
+      levels: [],
+      subjects: [],
+      grades: [],
+      teachingAvailability: [],
+      subjectLoadTemplates: [],
+      gradeSchedules: [],
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  await AcademicFeeConfiguration.findOneAndUpdate(
+    { schoolId },
+    {
+      schoolId,
+      academicYear: String(new Date().getFullYear()),
+      benefitRules: [],
+      enrollmentBenefitRules: [],
+      gradeSettings: [],
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  await SuperAdminSchoolSettings.findOneAndUpdate(
+    { schoolId },
+    {
+      $set: {
+        schoolId,
+        subscriptionStatus: SUBSCRIPTION_STATUSES.has(subscriptionStatus) ? subscriptionStatus : 'subscribed',
+        pricePerStudent: normalizePricePerStudent(pricePerStudent),
+        parentFeatures: normalizeParentFeatures({}),
+        notes: '',
+        updatedBy: normalizeText(updatedBy),
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 
 function serializeSettings(settings = {}) {
@@ -129,6 +207,44 @@ router.get('/summary', async (_req, res) => {
     return res.status(200).json({ totals, schools: sortedSchools });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/schools', async (req, res) => {
+  try {
+    const schoolName = normalizeText(req.body?.schoolName);
+    if (schoolName.length < 3) {
+      return res.status(400).json({ message: 'El nombre del colegio debe tener al menos 3 caracteres.' });
+    }
+
+    const subscriptionStatus = SUBSCRIPTION_STATUSES.has(req.body?.subscriptionStatus)
+      ? req.body.subscriptionStatus
+      : 'subscribed';
+    const pricePerStudent = normalizePricePerStudent(req.body?.pricePerStudent);
+    const tenantContexts = await listTenantSchoolContexts();
+    const existingSchoolIds = new Set(tenantContexts.map((context) => context.schoolId));
+    const schoolId = buildUniqueSchoolId(schoolName, existingSchoolIds);
+
+    await runWithSchoolContext(schoolId, async () => {
+      await bootstrapSchoolTenant({
+        schoolId,
+        schoolName,
+        subscriptionStatus,
+        pricePerStudent,
+        updatedBy: normalizeText(req.user?.username || req.user?.name),
+      });
+    });
+
+    const tenantContext = { schoolId, dbName: slugifySchoolId(schoolId) };
+    const school = await getSchoolSummary(tenantContext);
+
+    return res.status(201).json({
+      message: 'Colegio creado correctamente.',
+      school,
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 

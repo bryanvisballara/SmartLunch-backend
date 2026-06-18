@@ -259,6 +259,7 @@ async function listTenantSchoolContexts() {
   const databases = await admin.listDatabases();
   const controlDbName = getControlDbName();
   const tenantContexts = [];
+  const seenSchoolIds = new Set();
 
   for (const database of databases.databases || []) {
     const dbName = normalizeSchoolId(database?.name);
@@ -267,16 +268,29 @@ async function listTenantSchoolContexts() {
     }
 
     const db = mongoose.connection.client.db(dbName);
-    const schoolIds = await db.collection('users').distinct('schoolId', {
-      schoolId: { $type: 'string', $ne: '' },
-    });
+    const [userSchoolIds, snapshotSchoolIds] = await Promise.all([
+      db.collection('users').distinct('schoolId', {
+        schoolId: { $type: 'string', $ne: '' },
+      }),
+      db.collection('schoolcreationsnapshots').distinct('schoolId', {
+        schoolId: { $type: 'string', $ne: '' },
+      }).catch(() => []),
+    ]);
 
-    const schoolId = normalizeSchoolId(schoolIds[0]);
-    if (!schoolId) {
-      continue;
+    const schoolIds = [...new Set(
+      [...userSchoolIds, ...snapshotSchoolIds]
+        .map(normalizeSchoolId)
+        .filter(Boolean),
+    )];
+
+    for (const schoolId of schoolIds) {
+      if (seenSchoolIds.has(schoolId)) {
+        continue;
+      }
+
+      seenSchoolIds.add(schoolId);
+      tenantContexts.push({ schoolId, dbName });
     }
-
-    tenantContexts.push({ schoolId, dbName });
   }
 
   return tenantContexts.sort((left, right) => left.schoolId.localeCompare(right.schoolId));
