@@ -28,6 +28,7 @@ const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
+const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   normalizeStoredImageUrl,
@@ -4349,7 +4350,7 @@ async function dispatchCommunication({ schoolId, schoolName, communication, pare
       payload: {
         type: 'academic.communication',
         communicationId: communication._id,
-        url: '/parent',
+        url: buildParentPushUrl('academic.communication'),
       },
     })
     : { notificationsCreated: 0, tokensFound: 0 };
@@ -4451,7 +4452,7 @@ async function dispatchAcademicCalendarAssignmentNotification({ schoolId, assign
       assignmentId: String(assignment._id || ''),
       assignmentType,
       scheduledAt: assignment.scheduledAt,
-      url: '/parent/academic',
+      url: buildParentPushUrl('academic.calendar_assignment'),
     },
   });
 }
@@ -6800,7 +6801,8 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
             courseKey: selectedCourse.key,
             courseLabel,
             gradeKey: grade.key,
-            url: '/parent/academic',
+            studentId: String(student._id),
+            url: buildParentPushUrl('academic.course_assigned', { studentId: student._id }),
           },
         });
       } catch (notificationError) {
@@ -8095,7 +8097,7 @@ router.post('/enrollments', async (req, res) => {
         })),
         pushTitle: 'Matrícula registrada',
         pushBody: 'Ya puedes pagar el cobro mensual consolidado en la app.',
-        payload: { type: 'academic.billing.enrollment', url: '/parent/pagos' },
+        payload: { type: 'academic.billing.enrollment', url: buildParentPushUrl('academic.billing.enrollment') },
       });
     }
 
@@ -8233,7 +8235,7 @@ router.post('/billing/charges', async (req, res) => {
         }),
         pushTitle: 'Nuevo cobro académico',
         pushBody: `${normalizeText(concept)} por ${formatCurrency(amount)} ya está disponible en tu sección de pagos.`,
-        payload: { type: 'academic.billing.charge_created', url: '/parent/pagos' },
+        payload: { type: 'academic.billing.charge_created', url: buildParentPushUrl('academic.billing.charge_created') },
       });
     }
 
@@ -8329,7 +8331,7 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
         chargeId: String(charge._id),
         paymentId: String(payment._id),
         amount: payment.amount,
-        url: '/parent/pagos',
+        url: buildParentPushUrl('academic.billing.payment_registered', { studentId: charge.studentId }),
       },
     }).catch((error) => console.warn(`[ACADEMIC_PAYMENT_NOTIFY_WARNING] payment=${payment._id} error=${error.message}`));
 
@@ -8379,7 +8381,7 @@ router.post('/billing/reminders', async (req, res) => {
       })),
       pushTitle: 'Tienes pagos académicos pendientes',
       pushBody: 'Revisa tu cartera académica y ponte al día desde la app.',
-      payload: { type: 'academic.billing.reminder', url: '/parent/pagos' },
+      payload: { type: 'academic.billing.reminder', url: buildParentPushUrl('academic.billing.reminder') },
     });
 
     return res.status(200).json({ delivery, parentsNotified: parents.length });
@@ -8439,7 +8441,7 @@ router.post('/billing/follow-ups', async (req, res) => {
         parentIds: [parent._id],
         title: safeTitle,
         body: safeBody,
-        payload: { type: 'academic.billing.follow_up', url: '/parent/pagos' },
+        payload: { type: 'academic.billing.follow_up', url: buildParentPushUrl('academic.billing.follow_up') },
       });
       pushDelivered = Number(pushResult?.directDelivery?.delivered || 0);
       pushTokensFound = Number(pushResult?.tokensFound || 0);

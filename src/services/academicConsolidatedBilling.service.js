@@ -4,6 +4,7 @@ const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('./notification.service');
+const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { findGradeFeeSetting, getFeeGradeAliases } = require('../utils/feeGradeMatching');
 
 const DEFAULT_ACADEMIC_MONTHLY_DUE_DAY = 10;
@@ -358,7 +359,12 @@ async function ensureConsolidatedMonthlyCharge({
         parentIds: [resolvedParentId],
         title: 'Nuevo cobro mensual',
         body: `Ya puedes pagar ${formatCurrency(statement.amount)} por ${student?.name || 'tu hijo'} (${formatAcademicMonthLabel(statement.monthDate)}).`,
-        payload: { type: 'academic.billing.monthly_statement', url: '/parent/pagos', chargeId: String(charge._id) },
+        payload: {
+          type: 'academic.billing.monthly_statement',
+          url: buildParentPushUrl('academic.billing.monthly_statement', { studentId }),
+          chargeId: String(charge._id),
+          studentId: String(studentId),
+        },
       }).catch((error) => console.warn(`[CONSOLIDATED_BILLING_NOTIFY] charge=${charge._id} error=${error.message}`));
     }
   }

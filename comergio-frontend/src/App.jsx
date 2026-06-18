@@ -7,7 +7,7 @@ import AppFooter from './components/AppFooter';
 import useAuthStore from './store/auth.store';
 import { resolveComergioAppUrl } from './lib/deepLinks';
 import { savePostLoginRedirect } from './lib/postLoginRedirect';
-import { ensurePortalPushNotifications } from './lib/pushNotifications';
+import { ensurePortalPushNotifications, registerPushNotificationNavigation } from './lib/pushNotifications';
 import Login from './pages/Login';
 import LandingPage from './pages/LandingPage';
 import POS from './pages/POS';
@@ -166,9 +166,7 @@ function App() {
   const isParentRoute = normalizedPathname === '/parent' || normalizedPathname.startsWith('/parent/');
   const isSchoolCreationRoute = normalizedPathname === '/schoolcreation';
   const isCampusLikeRoute = isCampusRoute || isCampusPreviewRoute;
-  const campusLoginPath = import.meta.env.DEV && normalizedPathname.startsWith('/campus/teacher')
-    ? '/login/laura-medina'
-    : '/login';
+  const campusLoginPath = '/login';
   const isEpaycoReturnRoute = normalizedPathname === '/epayco-resultado';
   const isNativeAndroid = Capacitor.getPlatform() === 'android' && Capacitor.isNativePlatform();
   const isAndroidRootRoute = [
@@ -228,7 +226,21 @@ function App() {
   }, [isAdmissionsRoute]);
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || !isAuthenticated || (isNativeAndroid && isLoginRoute)) {
+    if (!isAuthenticated || isLoginRoute) {
+      return undefined;
+    }
+
+    registerPushNotificationNavigation((path) => {
+      navigate(path);
+    });
+
+    return () => {
+      registerPushNotificationNavigation(null);
+    };
+  }, [isAuthenticated, isLoginRoute, navigate]);
+
+  useEffect(() => {
+    if (!isAuthenticated || isLoginRoute) {
       return;
     }
 
@@ -262,7 +274,7 @@ function App() {
         });
     };
 
-    if (isNativeAndroid) {
+    if (Capacitor.isNativePlatform() && isNativeAndroid) {
       timerId = window.setTimeout(runPushSetup, 900);
     } else {
       runPushSetup();
@@ -375,16 +387,10 @@ function App() {
       <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<LandingPage />} path="/" />
-          <Route
-            element={(
-              <PublicOnly isAuthenticated={isAuthenticated} userRole={userRole}>
-                <Login />
-              </PublicOnly>
-            )}
-            path="/login"
-          />
+          <Route element={<Login />} path="/login" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}
+          {import.meta.env.DEV ? <Route element={<Login devDirectProfile="coordinacion-preescolar" postLoginPath="/coordinacion" />} path="/login/coordinacion-preescolar" /> : null}
           <Route
             element={(
               <RequireRole allowedRoles={['teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>

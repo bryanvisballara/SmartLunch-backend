@@ -8,6 +8,7 @@ const NursingVisit = require('../models/nursingVisit.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
+const { buildParentPushUrl } = require('../utils/parentPushTargets');
 
 const router = express.Router();
 
@@ -386,7 +387,7 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
             type: 'nursing.visit',
             nursingVisitId: String(visit._id),
             studentId: String(studentId),
-            url: '/parent/enfermeria',
+            url: buildParentPushUrl('nursing.visit', { studentId }),
             disposition,
           },
         });

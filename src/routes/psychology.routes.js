@@ -8,6 +8,7 @@ const PsychologyCase = require('../models/psychologyCase.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
+const { buildParentPushUrl } = require('../utils/parentPushTargets');
 
 const router = express.Router();
 
@@ -232,7 +233,9 @@ async function notifyCaseAudiences({ schoolId, student, psychologyCase, note, au
     psychologyCaseId: String(psychologyCase._id),
     studentId: String(student._id),
     visibility: note.visibility,
-    url: audiences.includes('parents') ? '/parent' : '/psicologia',
+    url: audiences.includes('parents')
+      ? buildParentPushUrl('psychology.case_note', { studentId: student._id })
+      : '/psicologia',
   };
 
   if (audiences.includes('parents')) {

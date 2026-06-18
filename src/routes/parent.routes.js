@@ -48,6 +48,7 @@ const {
   processAndStoreUploadedImage,
 } = require('../utils/imageUpload');
 const { queueNotificationsForParents } = require('../services/notification.service');
+const { buildParentPushUrl } = require('../utils/parentPushTargets');
 
 const router = express.Router();
 const uploadParentStudentPhoto = uploadImageMiddleware.single('image');
@@ -1226,6 +1227,29 @@ function buildAcademicCycleMonthlyDueDates(profile = {}, referenceDate = new Dat
   return dueDates;
 }
 
+async function notifyParentAcademicChargeCreated({ schoolId, parentUserId, studentId, charge }) {
+  if (!parentUserId || !charge?._id) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('name').lean();
+  const childName = String(student?.name || 'Tu hijo').trim().split(/\s+/)[0] || 'Tu hijo';
+
+  return queueNotificationsForParents({
+    schoolId,
+    parentIds: [parentUserId],
+    studentId,
+    title: 'Nuevo cobro académico',
+    body: `${childName} tiene un nuevo cobro: ${charge.concept} por $${Number(charge.amount || 0).toLocaleString('es-CO')}.`,
+    payload: {
+      type: 'academic.billing.charge_created',
+      chargeId: String(charge._id),
+      studentId: String(studentId),
+      url: buildParentPushUrl('academic.billing.charge_created', { studentId }),
+    },
+  });
+}
+
 async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role, studentIds = [], billingProfiles = [], referenceDate = new Date() }) {
   const linkedStudentIdSet = new Set(studentIds.map((item) => String(item)));
   const profiles = (billingProfiles || []).filter((profile) => linkedStudentIdSet.has(String(profile.studentId)) && Number(profile.monthlyTuitionAmount || 0) > 0);
@@ -1254,7 +1278,7 @@ async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role
         continue;
       }
 
-      await AcademicCharge.create({
+      const charge = await AcademicCharge.create({
         schoolId,
         createdByUserId: parentUserId,
         createdByRole: role,
@@ -1271,6 +1295,13 @@ async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role
         audienceType: 'individual',
         targetGrade: profile.grade,
       });
+
+      notifyParentAcademicChargeCreated({
+        schoolId,
+        parentUserId,
+        studentId: profile.studentId,
+        charge,
+      }).catch((error) => console.warn(`[PARENT_CHARGE_PUSH_WARNING] charge=${charge._id} error=${error.message}`));
     }
   }
 }
@@ -1303,7 +1334,7 @@ async function ensureParentAcademicAnnualTuitionCharges({ schoolId, parentUserId
 
     for (const [installmentIndex, installmentAmount] of installmentAmounts.entries()) {
       const dueDate = buildAcademicAnnualTuitionInstallmentDueDate(firstDueDate, installmentIndex);
-      await AcademicCharge.create({
+      const charge = await AcademicCharge.create({
         schoolId,
         createdByUserId: parentUserId,
         createdByRole: role,
@@ -1319,6 +1350,13 @@ async function ensureParentAcademicAnnualTuitionCharges({ schoolId, parentUserId
         audienceType: 'individual',
         targetGrade: profile.grade,
       });
+
+      notifyParentAcademicChargeCreated({
+        schoolId,
+        parentUserId,
+        studentId: profile.studentId,
+        charge,
+      }).catch((error) => console.warn(`[PARENT_CHARGE_PUSH_WARNING] charge=${charge._id} error=${error.message}`));
     }
   }
 }
@@ -3851,7 +3889,7 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
         chargeId: String(charge._id),
         paymentId: String(payment._id),
         amount: payment.amount,
-        url: '/parent/pagos',
+        url: buildParentPushUrl('academic.billing.payment_registered', { studentId: charge.studentId }),
       },
     }).catch((error) => console.warn(`[ACADEMIC_PAYMENT_NOTIFY_WARNING] payment=${payment._id} error=${error.message}`));
 

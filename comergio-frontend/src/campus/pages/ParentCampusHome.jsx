@@ -23,6 +23,7 @@ import { getParentNursingRecords } from '../../services/nursing.service';
 import { getParentPsychologyRecords } from '../../services/psychology.service';
 import { getSchoolDisplayName } from '../../lib/schools';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { readParentNotificationLaunchParams } from '../../lib/parentNotificationNavigation';
 
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
@@ -4032,6 +4033,29 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const activeSection = usesRoutedSections
     ? resolveRoutedSection(location.pathname, normalizedRouteBase)
     : localActiveSection;
+
+  useEffect(() => {
+    const launchParams = readParentNotificationLaunchParams(location.search);
+    const validAcademicViews = new Set(academicMenuItems.map((item) => item.id));
+
+    if (launchParams.studentId) {
+      setSelectedChildId(launchParams.studentId);
+    }
+
+    if (launchParams.academicView && validAcademicViews.has(launchParams.academicView)) {
+      setActiveAcademicView(launchParams.academicView);
+      setShowAcademicMenu(false);
+
+      if (usesRoutedSections) {
+        const academicPath = buildRoutedSectionPath(normalizedRouteBase, 'academic');
+        if (location.pathname !== academicPath) {
+          navigate(`${academicPath}${location.search}`, { replace: true });
+        }
+      } else {
+        setLocalActiveSection('academic');
+      }
+    }
+  }, [location.search, location.pathname, navigate, normalizedRouteBase, usesRoutedSections]);
   const cafeteriaBasePath = usesRoutedSections ? buildRoutedSectionPath(normalizedRouteBase, 'cafeteria') : '';
   const shouldUsePortalHeader = activeSection === 'cafeteria';
   const visibleParentAppSections = useMemo(

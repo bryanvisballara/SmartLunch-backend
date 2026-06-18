@@ -3,12 +3,35 @@ import { FirebaseMessaging } from '@capacitor-firebase/messaging';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { registerDeviceToken } from '../services/notifications.service';
+import { resolveParentNotificationPath } from './parentNotificationNavigation';
 
 const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
 const ANDROID_PUSH_CHANNEL_ID = 'comergio_alerts_v1';
 let nativePushSetupPromise = null;
 let nativeForegroundListenerPromise = null;
+let nativeTapListenerPromise = null;
+let pushNavigationHandler = null;
 let foregroundNotificationId = Math.floor(Date.now() % 100000);
+
+export function registerPushNotificationNavigation(handler) {
+  pushNavigationHandler = typeof handler === 'function' ? handler : null;
+}
+
+function openPushTarget(rawPayload = {}) {
+  const path = resolveParentNotificationPath(rawPayload);
+  if (!path) {
+    return;
+  }
+
+  if (pushNavigationHandler) {
+    pushNavigationHandler(path);
+    return;
+  }
+
+  if (typeof window !== 'undefined') {
+    window.location.assign(path);
+  }
+}
 
 async function ensureAndroidPushChannel() {
   try {
@@ -117,6 +140,29 @@ async function ensureNativeForegroundPresentation() {
   return nativeForegroundListenerPromise;
 }
 
+async function ensureNativeNotificationTapHandling() {
+  if (nativeTapListenerPromise) {
+    return nativeTapListenerPromise;
+  }
+
+  nativeTapListenerPromise = (async () => {
+    if (!Capacitor.isNativePlatform()) {
+      return;
+    }
+
+    await FirebaseMessaging.addListener('notificationActionPerformed', (event) => {
+      const data = event?.notification?.data || event?.data || {};
+      openPushTarget(data);
+    });
+
+    await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+      openPushTarget(event?.notification?.extra || {});
+    });
+  })();
+
+  return nativeTapListenerPromise;
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -164,6 +210,7 @@ async function ensureNativePushNotifications() {
 
     try {
       await ensureNativeForegroundPresentation();
+      await ensureNativeNotificationTapHandling();
     } catch (error) {
       console.warn('[FOREGROUND_PUSH_SETUP_FAILED]', error);
     }
@@ -252,6 +299,14 @@ async function ensureWebPushNotifications() {
     token: tokenPayload,
   });
   localStorage.setItem(PUSH_TOKEN_STORAGE_KEY, tokenPayload);
+
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event?.data?.type === 'PUSH_NOTIFICATION_NAVIGATE') {
+        openPushTarget(event.data.payload || {});
+      }
+    });
+  }
 
   return { enabled: true };
 }
