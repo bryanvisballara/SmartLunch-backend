@@ -109,6 +109,14 @@ export function findMatchingFeeSetting(gradeSettings, grade) {
   const gradeKey = typeof grade === 'object' ? (grade?.key || grade?.value || '') : grade;
   const gradeLabel = typeof grade === 'object' ? (grade?.label || '') : '';
   const settings = Array.isArray(gradeSettings) ? gradeSettings : [];
+  const normalizedGradeKey = normalizeFeeGradeText(gradeKey).toLowerCase();
+
+  if (normalizedGradeKey) {
+    const exactMatch = settings.find((setting) => (
+      normalizeFeeGradeText(setting?.grade).toLowerCase() === normalizedGradeKey
+    ));
+    if (exactMatch) return exactMatch;
+  }
 
   const ranked = settings
     .flatMap((item) => {

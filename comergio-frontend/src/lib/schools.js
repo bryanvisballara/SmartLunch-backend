@@ -1,7 +1,7 @@
 export const SCHOOL_OPTIONS = [
   {
-    id: 'discovery_t355i',
-    label: 'Discovery',
+    id: 'comergio_demo_kns8p',
+    label: 'Comergio Demo',
     country: 'CO',
   },
   {
@@ -16,7 +16,7 @@ export const SCHOOL_OPTIONS = [
   },
 ];
 
-export const DEFAULT_SCHOOL_ID = SCHOOL_OPTIONS[0]?.id || '';
+export const DEFAULT_SCHOOL_ID = 'comergio_demo_kns8p';
 export const DEFAULT_SCHOOL_COUNTRY = 'CO';
 const KNOWN_SCHOOL_OPTIONS_STORAGE_KEY = 'knownSchoolOptions';
 

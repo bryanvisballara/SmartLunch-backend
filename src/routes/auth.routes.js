@@ -59,6 +59,21 @@ function ensureStoreModelForSchool(schoolId = '') {
   resolveRegisteredModel('Store', schoolId);
 }
 
+function resolveLoginSchoolIdCandidates(schoolId = '') {
+  const normalizedSchoolId = normalizeSchoolId(schoolId);
+  if (!normalizedSchoolId) {
+    return [];
+  }
+
+  const aliasMap = {
+    'comergio-demo': ['comergio_demo_kns8p', 'comergio-demo'],
+    comergio_demo: ['comergio_demo_kns8p', 'comergio_demo'],
+  };
+
+  const aliases = aliasMap[normalizedSchoolId.toLowerCase()] || [normalizedSchoolId];
+  return [...new Set(aliases.map(normalizeSchoolId).filter(Boolean))];
+}
+
 function hashVerificationCode(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
@@ -846,12 +861,19 @@ router.post('/login', async (req, res) => {
     let user = null;
 
     if (normalizedSchoolId) {
-      ensureStoreModelForSchool(normalizedSchoolId);
-      user = await User.findOne({
-        ...identifierFilter,
-        schoolId: normalizedSchoolId,
-      })
-        .populate('assignedStoreId', 'name status');
+      const schoolIdCandidates = resolveLoginSchoolIdCandidates(normalizedSchoolId);
+      for (const candidateSchoolId of schoolIdCandidates) {
+        user = await runWithSchoolContext(candidateSchoolId, async () => {
+          ensureStoreModelForSchool(candidateSchoolId);
+          return User.findOne({
+            ...identifierFilter,
+            schoolId: candidateSchoolId,
+          }).populate('assignedStoreId', 'name status');
+        });
+        if (user) {
+          break;
+        }
+      }
     } else {
       ensureStoreModelForSchool('');
       const matches = await User.find(identifierFilter)
