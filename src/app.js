@@ -308,6 +308,8 @@ app.get('/health', (req, res) => {
     status: 'ok',
     service: 'comergio-api',
     time: new Date(),
+    nodeEnv: process.env.NODE_ENV || '',
+    render: String(process.env.RENDER || '').trim() === 'true',
     cloudinaryEnabled: isCloudinaryEnabled(),
   });
 });

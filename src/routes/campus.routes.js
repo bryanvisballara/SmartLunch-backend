@@ -24,7 +24,6 @@ const {
   MAX_CAMPUS_MATERIAL_FILES,
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
-  processAcademicCommunicationMediaFile,
 } = require('../utils/campusMaterialUpload');
 const { buildCoordinationDashboard } = require('../services/coordinationDashboard.service');
 const {
@@ -3077,13 +3076,43 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
 
     const uploadedFiles = [];
     for (const file of incomingFiles) {
-      const saved = await processAcademicCommunicationMediaFile(file, {
-        preferredName: normalizeText(req.body?.preferredName) || normalizeText(file.originalname) || 'publicacion-docente',
+      const mimeType = normalizeText(file?.mimetype).toLowerCase();
+      const preferredName = normalizeText(req.body?.preferredName) || normalizeText(file.originalname) || 'publicacion-docente';
+
+      if (mimeType.startsWith('video/')) {
+        const [saved] = await processStoredCampusMaterialFiles([file], {
+          folder: 'academic-communications',
+          requireCloudinary: true,
+        });
+
+        if (!saved || saved.kind !== 'video' || !/^https?:\/\//i.test(saved.url || '')) {
+          throw new Error('No se pudo guardar el video.');
+        }
+
+        uploadedFiles.push({
+          kind: 'video',
+          url: saved.url,
+          thumbUrl: '',
+          title: String(file.originalname || '').trim(),
+        });
+        continue;
+      }
+
+      const saved = await processAndStoreUploadedImage({
+        file,
+        folder: 'academic-communications',
+        preferredName,
+        requireCloudinary: true,
       });
+
+      if (saved.storage !== 'cloudinary' || !/^https?:\/\//i.test(saved.url || '')) {
+        throw new Error('No se pudo guardar la imagen.');
+      }
+
       uploadedFiles.push({
-        kind: saved.kind,
+        kind: 'image',
         url: saved.url,
-        thumbUrl: saved.thumbUrl || (saved.kind === 'image' ? saved.url : ''),
+        thumbUrl: saved.thumbUrl || saved.url,
         title: String(file.originalname || '').trim(),
       });
     }

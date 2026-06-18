@@ -2915,7 +2915,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           throw new Error('No se recibió URL pública para uno de los archivos.');
         }
         if (import.meta.env.PROD && storage !== 'cloudinary' && !/res\.cloudinary\.com\//i.test(mediaUrl)) {
-          throw new Error('La imagen no quedó en Cloudinary. Revisa CLOUDINARY_* en Render y vuelve a intentar.');
+          throw new Error('No se pudo procesar la imagen. Quita el archivo e inténtalo de nuevo.');
         }
 
         releaseCommunicationPreview(previewItem);
@@ -3454,7 +3454,6 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               </div>
               <div className="academic-secretary__subform">
                 <h4>Contenido visual</h4>
-                <p>Sube imágenes o videos para el carrusel de la app de padres. El contenido se guarda en Cloudinary cuando está configurado.</p>
                 <div className="academic-secretary__form-grid">
                   <label>
                     Archivos del carrusel

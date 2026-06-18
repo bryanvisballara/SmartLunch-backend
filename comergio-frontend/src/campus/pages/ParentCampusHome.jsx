@@ -2216,13 +2216,8 @@ function getAnnouncementMediaItems(announcement) {
 
 function resolveIosCompatibleImageUrl(value) {
   const resolvedUrl = resolveApiAssetUrl(value);
-  if (/res\.cloudinary\.com\//i.test(resolvedUrl) && /\/upload\//i.test(resolvedUrl)) {
-    const jpegUrl = resolvedUrl.replace(/(^|[,/])f_(?:auto|webp|avif|heic|png)(?=$|[,/])/gi, '$1f_jpg');
-    if (/(^|[,/])f_jpg(?=$|[,/])/i.test(jpegUrl.split(/\/upload\//i)[1] || '')) {
-      return jpegUrl;
-    }
-
-    return jpegUrl.replace(/\/upload\//i, '/upload/f_jpg,q_auto/');
+  if (/res\.cloudinary\.com\//i.test(resolvedUrl)) {
+    return resolvedUrl;
   }
 
   if (!/\/assets\//i.test(resolvedUrl) && !/\/uploads\//i.test(resolvedUrl)) {
