@@ -7345,6 +7345,49 @@ router.get('/communication-requests', async (req, res) => {
   }
 });
 
+router.post('/communications/feed-image', (req, res) => {
+  uploadAcademicCommunicationImage(req, res, async (error) => {
+    if (error) {
+      return res.status(400).json({ message: error.message || 'No se pudo cargar la imagen del comunicado.' });
+    }
+
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ message: 'No se recibio ningun archivo.' });
+      }
+
+      const preferredName = normalizeText(req.body?.preferredName) || normalizeText(req.file?.originalname) || 'comunicado';
+      const saved = await processAndStoreUploadedImage({
+        file: req.file,
+        folder: 'communications-feed',
+        preferredName,
+        requireCloudinary: isCloudinaryEnabled(),
+      });
+
+      if (isCloudinaryEnabled() && (saved.storage !== 'cloudinary' || !/^https?:\/\//i.test(saved.url || ''))) {
+        return res.status(503).json({ message: 'No se pudo guardar la imagen. Intenta de nuevo en unos segundos.' });
+      }
+
+      if (!/^https?:\/\//i.test(saved.url || '') && !String(saved.url || '').startsWith('/assets/')) {
+        return res.status(503).json({ message: 'No se pudo guardar la imagen. Intenta de nuevo en unos segundos.' });
+      }
+
+      const thumbUrl = /^https?:\/\//i.test(saved.thumbUrl || '') ? saved.thumbUrl : saved.url;
+
+      return res.status(201).json({
+        kind: 'image',
+        url: saved.url,
+        imageUrl: saved.url,
+        videoUrl: '',
+        thumbUrl,
+        storage: saved.storage || 'local',
+      });
+    } catch (requestError) {
+      return res.status(400).json({ message: requestError.message || 'No se pudo guardar la imagen del comunicado.' });
+    }
+  });
+});
+
 router.post('/communications/uploads/image', (req, res) => {
   uploadAcademicCommunicationImage(req, res, async (error) => {
     if (error) {
