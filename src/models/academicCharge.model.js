@@ -10,9 +10,23 @@ const academicChargeSchema = new mongoose.Schema(
     createdByRole: { type: String, trim: true, default: '' },
     category: {
       type: String,
-      enum: ['enrollment_bonus', 'annual_tuition', 'monthly_tuition', 'additional'],
+      enum: ['enrollment_bonus', 'annual_tuition', 'monthly_tuition', 'monthly_statement', 'additional'],
       required: true,
       index: true,
+    },
+    breakdownItems: {
+      type: [
+        {
+          key: { type: String, trim: true, default: '' },
+          label: { type: String, trim: true, default: '' },
+          amount: { type: Number, min: 0, default: 0 },
+          originalAmount: { type: Number, min: 0, default: 0 },
+          benefitLabel: { type: String, trim: true, default: '' },
+          installmentIndex: { type: Number, min: 0, default: 0 },
+          installmentTotal: { type: Number, min: 0, default: 0 },
+        },
+      ],
+      default: [],
     },
     concept: { type: String, required: true, trim: true },
     description: { type: String, trim: true, default: '' },
