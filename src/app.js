@@ -10,6 +10,7 @@ const sharp = require('sharp');
 
 require('./models');
 const AdmissionMarketingAsset = require('./models/admissionMarketingAsset.model');
+const AcademicCommunicationAsset = require('./models/academicCommunicationAsset.model');
 const { findOneAcrossTenantSchoolDbs } = require('./config/db');
 
 const authRoutes = require('./routes/auth.routes');
@@ -186,6 +187,41 @@ app.use(['/assets/admissions-marketing/:fileName', '/uploads/admissions-marketin
     let asset = await AdmissionMarketingAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec();
     if (!asset) {
       const tenantAsset = await findOneAcrossTenantSchoolDbs(() => AdmissionMarketingAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec());
+      asset = tenantAsset?.doc || null;
+    }
+    if (!asset?.data) {
+      return next();
+    }
+
+    const imageBuffer = Buffer.from(asset.data);
+    res.setHeader('Content-Type', asset.mimeType || 'image/jpeg');
+    res.setHeader('Content-Length', String(imageBuffer.length));
+    setStaticAssetHeaders(res);
+
+    if (method === 'HEAD') {
+      return res.end();
+    }
+
+    return res.send(imageBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+app.use(['/assets/academic-communications/:fileName', '/uploads/academic-communications/:fileName'], async (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  if (!['GET', 'HEAD'].includes(method)) {
+    return next();
+  }
+
+  const fileName = String(req.params?.fileName || '').trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(fileName)) {
+    return res.status(400).json({ message: 'Invalid asset path' });
+  }
+
+  try {
+    let asset = await AcademicCommunicationAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec();
+    if (!asset) {
+      const tenantAsset = await findOneAcrossTenantSchoolDbs(() => AcademicCommunicationAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec());
       asset = tenantAsset?.doc || null;
     }
     if (!asset?.data) {

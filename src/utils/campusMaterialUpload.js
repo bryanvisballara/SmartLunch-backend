@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const sharp = require('sharp');
 const { v2: cloudinary } = require('cloudinary');
+const AcademicCommunicationAsset = require('../models/academicCommunicationAsset.model');
 
 const MAX_CAMPUS_MATERIAL_FILE_BYTES = Number(process.env.CAMPUS_MATERIAL_MAX_FILE_BYTES || 100 * 1024 * 1024);
 const MAX_CAMPUS_MATERIAL_FILES = Number(process.env.CAMPUS_MATERIAL_MAX_FILES || 6);
@@ -179,7 +180,55 @@ const uploadCampusMaterialsMiddleware = multer({
   },
 });
 
-async function processStoredCampusMaterialFiles(files, { folder = 'campus-materials', requireCloudinary = false } = {}) {
+function shouldPersistAcademicCommunicationAssetsToDatabase({ folder, useDatabaseInProduction }) {
+  if (!useDatabaseInProduction || process.env.NODE_ENV !== 'production' || isCloudinaryEnabled()) {
+    return false;
+  }
+
+  return sanitizeFolder(folder) === 'academic-communications';
+}
+
+async function persistAcademicCommunicationAsset({
+  schoolId,
+  createdByUserId,
+  fileName,
+  originalName,
+  mimeType,
+  sizeBytes,
+  width,
+  height,
+  buffer,
+}) {
+  const normalizedSchoolId = String(schoolId || '').trim();
+  if (!normalizedSchoolId) {
+    throw new Error('No se pudo identificar el colegio para guardar el archivo del comunicado.');
+  }
+
+  const assetPayload = {
+    schoolId: normalizedSchoolId,
+    fileName,
+    originalName: String(originalName || '').trim(),
+    mimeType: String(mimeType || 'application/octet-stream').trim() || 'application/octet-stream',
+    sizeBytes: Math.max(0, Number(sizeBytes || 0)),
+    width: Math.max(0, Number(width || 0)),
+    height: Math.max(0, Number(height || 0)),
+    data: buffer,
+  };
+
+  if (createdByUserId) {
+    assetPayload.createdByUserId = createdByUserId;
+  }
+
+  await AcademicCommunicationAsset.create(assetPayload);
+}
+
+async function processStoredCampusMaterialFiles(files, {
+  folder = 'campus-materials',
+  requireCloudinary = false,
+  useDatabaseInProduction = false,
+  schoolId = '',
+  createdByUserId = null,
+} = {}) {
   const normalizedFiles = Array.isArray(files) ? files.filter(Boolean) : [];
   if (normalizedFiles.length === 0) {
     return [];
@@ -190,9 +239,12 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
   }
 
   const safeFolder = sanitizeFolder(folder);
+  const persistToDatabase = shouldPersistAcademicCommunicationAssetsToDatabase({ folder, useDatabaseInProduction });
   const uploadsRootPath = getUploadsRootPath();
   const targetFolderPath = path.join(uploadsRootPath, safeFolder);
-  await fs.mkdir(targetFolderPath, { recursive: true });
+  if (!persistToDatabase) {
+    await fs.mkdir(targetFolderPath, { recursive: true });
+  }
 
   if (isCloudinaryEnabled()) {
     configureCloudinary();
@@ -200,6 +252,7 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
 
   const processedFiles = [];
   for (const file of normalizedFiles) {
+    const materialKind = detectMaterialKind(file);
     const normalizedImage = await normalizeCampusImageFile(file);
     const originalExtension = normalizedImage?.extension || sanitizeExtension(path.extname(String(file.originalname || '')).replace(/^\./, '')) || 'bin';
     const filenameBase = `${slugifyFilename(path.parse(file.originalname || '').name) || 'campus-file'}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
@@ -207,12 +260,25 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
     const outputBuffer = normalizedImage?.buffer || file.buffer;
     const outputMimeType = normalizedImage?.mimeType || String(file.mimetype || '').trim();
     const outputSizeBytes = normalizedImage?.sizeBytes || Number(file.size || 0);
+    let imageWidth = 0;
+    let imageHeight = 0;
+
+    if (materialKind === 'image') {
+      try {
+        const metadata = await sharp(outputBuffer).metadata();
+        imageWidth = Number(metadata?.width || 0);
+        imageHeight = Number(metadata?.height || 0);
+      } catch (_error) {
+        imageWidth = 0;
+        imageHeight = 0;
+      }
+    }
 
     if (isCloudinaryEnabled()) {
       const uploadResult = await uploadBufferToCloudinary(outputBuffer, { publicId: filenameBase, extension: originalExtension });
       processedFiles.push({
         sourceType: 'file',
-        kind: detectMaterialKind(file),
+        kind: materialKind,
         title: String(file.originalname || '').trim(),
         url: String(uploadResult?.secure_url || '').trim(),
         fileName: filename,
@@ -224,12 +290,43 @@ async function processStoredCampusMaterialFiles(files, { folder = 'campus-materi
       continue;
     }
 
+    if (persistToDatabase) {
+      if (materialKind === 'video') {
+        throw new Error('Los videos del feed requieren Cloudinary en produccion.');
+      }
+
+      await persistAcademicCommunicationAsset({
+        schoolId,
+        createdByUserId,
+        fileName: filename,
+        originalName: file.originalname,
+        mimeType: outputMimeType,
+        sizeBytes: outputSizeBytes,
+        width: imageWidth,
+        height: imageHeight,
+        buffer: outputBuffer,
+      });
+
+      processedFiles.push({
+        sourceType: 'file',
+        kind: materialKind,
+        title: String(file.originalname || '').trim(),
+        url: buildPublicUrl(safeFolder, filename),
+        fileName: filename,
+        mimeType: outputMimeType,
+        sizeBytes: outputSizeBytes,
+        extension: originalExtension,
+        storage: 'mongodb',
+      });
+      continue;
+    }
+
     const outputPath = path.join(targetFolderPath, filename);
     await fs.writeFile(outputPath, outputBuffer);
 
     processedFiles.push({
       sourceType: 'file',
-      kind: detectMaterialKind(file),
+      kind: materialKind,
       title: String(file.originalname || '').trim(),
       url: buildPublicUrl(safeFolder, filename),
       fileName: filename,

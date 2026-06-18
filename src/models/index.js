@@ -35,6 +35,7 @@ require('./hrSupplyItem.model');
 require('./hrPlannerCycle.model');
 require('./hrSupplyRequest.model');
 require('./academicCommunication.model');
+require('./academicCommunicationAsset.model');
 require('./academicCommunicationRequest.model');
 require('./academicCalendarAssignment.model');
 require('./academicGradePromotionRequest.model');

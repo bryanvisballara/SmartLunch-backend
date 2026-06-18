@@ -7356,6 +7356,9 @@ router.post('/communications/uploads/media', (req, res) => {
     try {
       const [saved] = await processStoredCampusMaterialFiles(req.file ? [req.file] : [], {
         folder: 'academic-communications',
+        useDatabaseInProduction: true,
+        schoolId: req.user?.schoolId,
+        createdByUserId: req.user?.userId,
       });
 
       if (!saved || !['image', 'video'].includes(saved.kind)) {
