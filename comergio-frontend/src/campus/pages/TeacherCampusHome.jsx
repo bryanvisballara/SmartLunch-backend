@@ -1778,12 +1778,27 @@ function TeacherCampusHome({ forcePreview = false }) {
         );
 
         setAcademicPeriodDrafts(nextAcademicPeriodDrafts);
-        const wasSaved = await onSaveGradingScheme(nextAcademicPeriodDrafts, 'Subcomponente guardado en la estructura academica.');
+        const saveResult = await onSaveGradingScheme(
+          nextAcademicPeriodDrafts,
+          'Subcomponente guardado en la estructura academica.',
+          { strictTotals: false },
+        );
 
-        if (!wasSaved) {
+        if (!saveResult.ok) {
           setAcademicPeriodDrafts(academicPeriodDrafts);
+          setGradebookSaveModal({
+            type: 'error',
+            title: 'No se guardó el subcomponente',
+            message: saveResult.error || 'Revisa los datos del subcomponente.',
+          });
           return;
         }
+
+        setGradebookSaveModal({
+          type: 'success',
+          title: 'Subcomponente guardado',
+          message: 'El subcomponente quedó registrado en la estructura académica.',
+        });
 
         setSubcomponentDrafts((currentDrafts) => ({
           ...currentDrafts,
@@ -1851,6 +1866,7 @@ function TeacherCampusHome({ forcePreview = false }) {
           return;
         }
 
+        const previousDrafts = academicPeriodDrafts;
         const nextAcademicPeriodDrafts = academicPeriodDrafts.map((period, pIdx) => (
           pIdx !== periodIdx
             ? period
@@ -1869,7 +1885,27 @@ function TeacherCampusHome({ forcePreview = false }) {
         ));
 
         setAcademicPeriodDrafts(nextAcademicPeriodDrafts);
-        await onSaveGradingScheme(nextAcademicPeriodDrafts, 'Componente guardado en la estructura academica.');
+        const saveResult = await onSaveGradingScheme(
+          nextAcademicPeriodDrafts,
+          'Componente guardado en la estructura academica.',
+          { strictTotals: false },
+        );
+
+        if (!saveResult.ok) {
+          setAcademicPeriodDrafts(previousDrafts);
+          setGradebookSaveModal({
+            type: 'error',
+            title: 'No se guardó el componente',
+            message: saveResult.error || 'Revisa los datos del componente.',
+          });
+          return;
+        }
+
+        setGradebookSaveModal({
+          type: 'success',
+          title: 'Componente guardado',
+          message: 'El componente quedó registrado en la estructura académica.',
+        });
       };
     // Estados para filtro y acordeón del libro de notas
     const [gradebookSearch, setGradebookSearch] = useState('');
@@ -3312,10 +3348,16 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
   };
 
-  const onSaveGradingScheme = async (draftsOverride = null, successMessage = 'Períodos y esquema de calificación actualizados.') => {
+  const onSaveGradingScheme = async (
+    draftsOverride = null,
+    successMessage = 'Períodos y esquema de calificación actualizados.',
+    options = {},
+  ) => {
+    const { strictTotals = true } = options;
     if (!selectedCourse) {
-      setNotice({ type: 'error', text: 'Selecciona un curso asignado.' });
-      return false;
+      const error = 'Selecciona un curso asignado.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     const sourceDrafts = Array.isArray(draftsOverride) ? draftsOverride : academicPeriodDrafts;
@@ -3344,74 +3386,88 @@ function TeacherCampusHome({ forcePreview = false }) {
     }));
 
     if (normalizedPeriods.length === 0) {
-      setNotice({ type: 'error', text: 'Agrega al menos un período académico.' });
-      return false;
+      const error = 'Agrega al menos un período académico.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => !period.name || !period.key)) {
-      setNotice({ type: 'error', text: 'Cada periodo necesita nombre y clave valida.' });
-      return false;
+      const error = 'Cada periodo necesita nombre y clave valida.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (new Set(normalizedPeriods.map((period) => period.key)).size !== normalizedPeriods.length) {
-      setNotice({ type: 'error', text: 'Las claves de los periodos no pueden repetirse.' });
-      return false;
+      const error = 'Las claves de los periodos no pueden repetirse.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => !Number.isFinite(period.weight) || period.weight <= 0)) {
-      setNotice({ type: 'error', text: 'Cada periodo debe tener un porcentaje mayor que cero.' });
-      return false;
+      const error = 'Cada periodo debe tener un porcentaje mayor que cero.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     const weightTotal = normalizedPeriods.reduce((total, period) => total + period.weight, 0);
-    if (Math.abs(weightTotal - 100) > 0.001) {
-      setNotice({ type: 'error', text: 'La ponderacion de los periodos debe sumar 100%.' });
-      return false;
+    if (strictTotals && Math.abs(weightTotal - 100) > 0.001) {
+      const error = 'La ponderacion de los periodos debe sumar 100%.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).length === 0)) {
-      setNotice({ type: 'error', text: 'Cada periodo debe tener al menos un componente de evaluacion.' });
-      return false;
+      const error = 'Cada periodo debe tener al menos un componente de evaluacion.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => !component.name || !component.key))) {
-      setNotice({ type: 'error', text: 'Cada componente necesita nombre y clave valida.' });
-      return false;
+      const error = 'Cada componente necesita nombre y clave valida.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => new Set((period.gradingComponents || []).map((component) => component.key)).size !== (period.gradingComponents || []).length)) {
-      setNotice({ type: 'error', text: 'Dentro de cada periodo las claves de los componentes no pueden repetirse.' });
-      return false;
+      const error = 'Dentro de cada periodo las claves de los componentes no pueden repetirse.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => !Number.isFinite(component.weight) || component.weight <= 0))) {
-      setNotice({ type: 'error', text: 'Cada componente debe tener un porcentaje mayor que cero.' });
-      return false;
+      const error = 'Cada componente debe tener un porcentaje mayor que cero.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => (component.subcomponents || []).some((subcomponent) => !subcomponent.name || !subcomponent.key)))) {
-      setNotice({ type: 'error', text: 'Cada subcomponente necesita nombre y clave valida.' });
-      return false;
+      const error = 'Cada subcomponente necesita nombre y clave valida.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => new Set((component.subcomponents || []).map((subcomponent) => subcomponent.key)).size !== (component.subcomponents || []).length))) {
-      setNotice({ type: 'error', text: 'Dentro de cada componente las claves de los subcomponentes no pueden repetirse.' });
-      return false;
+      const error = 'Dentro de cada componente las claves de los subcomponentes no pueden repetirse.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => (component.subcomponents || []).some((subcomponent) => !Number.isFinite(subcomponent.weight) || subcomponent.weight <= 0)))) {
-      setNotice({ type: 'error', text: 'Cada subcomponente debe tener un porcentaje mayor que cero.' });
-      return false;
+      const error = 'Cada subcomponente debe tener un porcentaje mayor que cero.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => (component.subcomponents || []).reduce((total, subcomponent) => total + subcomponent.weight, 0) > 100.001))) {
-      setNotice({ type: 'error', text: 'Dentro de cada componente los subcomponentes no pueden superar 100%.' });
-      return false;
+      const error = 'Dentro de cada componente los subcomponentes no pueden superar 100%.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
-    if (normalizedPeriods.some((period) => Math.abs((period.gradingComponents || []).reduce((total, component) => total + component.weight, 0) - 100) > 0.001)) {
-      setNotice({ type: 'error', text: 'Dentro de cada periodo los componentes deben sumar 100%.' });
-      return false;
+    if (strictTotals && normalizedPeriods.some((period) => Math.abs((period.gradingComponents || []).reduce((total, component) => total + component.weight, 0) - 100) > 0.001)) {
+      const error = 'Dentro de cada periodo los componentes deben sumar 100%.';
+      setNotice({ type: 'error', text: error });
+      return { ok: false, error };
     }
 
     try {
@@ -3499,14 +3555,21 @@ function TeacherCampusHome({ forcePreview = false }) {
           };
         });
       } else {
-        await updateGradingSchemeMutation.mutateAsync({ courseId: selectedCourse.id, payload: { academicPeriods: normalizedPeriods } });
+        await updateGradingSchemeMutation.mutateAsync({
+          courseId: selectedCourse.id,
+          payload: {
+            academicPeriods: normalizedPeriods,
+            allowIncompleteWeights: !strictTotals,
+          },
+        });
       }
 
       setNotice({ type: 'success', text: successMessage });
-      return true;
+      return { ok: true };
     } catch (error) {
-      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar la estructura academica.' });
-      return false;
+      const errorText = error?.response?.data?.message || error?.message || 'No se pudo guardar la estructura academica.';
+      setNotice({ type: 'error', text: errorText });
+      return { ok: false, error: errorText };
     }
   };
 

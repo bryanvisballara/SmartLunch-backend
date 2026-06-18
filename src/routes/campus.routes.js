@@ -1002,7 +1002,8 @@ function serializeArray(items, serializer) {
   return Array.isArray(items) ? items.map(serializer) : [];
 }
 
-function normalizeGradingComponents(rawComponents) {
+function normalizeGradingComponents(rawComponents, options = {}) {
+  const allowIncompleteWeights = options.allowIncompleteWeights === true;
   const normalizedInput = Array.isArray(rawComponents) ? rawComponents : [];
   if (normalizedInput.length === 0) {
     return { ok: false, message: 'gradingComponents is required' };
@@ -1103,7 +1104,7 @@ function normalizeGradingComponents(rawComponents) {
     usedKeys.add(component.key);
   }
 
-  if (Math.abs(totalWeight - 100) > 0.001) {
+  if (!allowIncompleteWeights && Math.abs(totalWeight - 100) > 0.001) {
     return { ok: false, message: 'The grading scheme must sum 100%' };
   }
 
@@ -1122,6 +1123,7 @@ function normalizeGradingComponents(rawComponents) {
 }
 
 function normalizeAcademicPeriods(rawAcademicPeriods, options = {}) {
+  const allowIncompleteWeights = options.allowIncompleteWeights === true;
   const parsedInput = parseMaybeJson(rawAcademicPeriods, rawAcademicPeriods);
   let academicPeriods = Array.isArray(parsedInput) ? parsedInput : [];
 
@@ -1154,7 +1156,7 @@ function normalizeAcademicPeriods(rawAcademicPeriods, options = {}) {
     const key = slugifyComponentKey(period?.key || fallbackKey || `period_${index + 1}`);
     const weight = Number(period?.weight);
     const order = Number.isFinite(Number(period?.order)) ? Number(period.order) : (index + 1) * 10;
-    const gradingResult = normalizeGradingComponents(period?.gradingComponents);
+    const gradingResult = normalizeGradingComponents(period?.gradingComponents, { allowIncompleteWeights });
 
     totalWeight += weight;
 
@@ -1193,7 +1195,7 @@ function normalizeAcademicPeriods(rawAcademicPeriods, options = {}) {
     usedKeys.add(period.key);
   }
 
-  if (Math.abs(totalWeight - 100) > 0.001) {
+  if (!allowIncompleteWeights && Math.abs(totalWeight - 100) > 0.001) {
     return { ok: false, message: 'La ponderacion de los periodos debe sumar 100%' };
   }
 
@@ -2720,8 +2722,10 @@ router.patch('/teacher/courses/:id/grading-scheme', requireCampusTeacherAccess, 
       return res.status(404).json({ message: 'Course not found' });
     }
 
+    const allowIncompleteWeights = req.body.allowIncompleteWeights === true;
     const academicPeriodsResult = normalizeAcademicPeriods(req.body.academicPeriods, {
       fallbackGradingComponents: req.body.gradingComponents,
+      allowIncompleteWeights,
     });
     if (!academicPeriodsResult.ok) {
       return res.status(400).json({ message: academicPeriodsResult.message });
