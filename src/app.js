@@ -33,6 +33,7 @@ const nursingRoutes = require('./routes/nursing.routes');
 const psychologyRoutes = require('./routes/psychology.routes');
 const hrRoutes = require('./routes/hr.routes');
 const academicSecretaryRoutes = require('./routes/academicSecretary.routes');
+const communicationFeedUploadRoutes = require('./routes/communicationFeedUpload.routes');
 const admissionsRoutes = require('./routes/admissions.routes');
 const schoolCreationRoutes = require('./routes/schoolCreation.routes');
 const superAdminRoutes = require('./routes/superAdmin.routes');
@@ -311,6 +312,7 @@ app.get('/health', (req, res) => {
     nodeEnv: process.env.NODE_ENV || '',
     render: String(process.env.RENDER || '').trim() === 'true',
     cloudinaryEnabled: isCloudinaryEnabled(),
+    feedUploadVersion: 2,
   });
 });
 
@@ -334,6 +336,7 @@ app.use('/nursing', nursingRoutes);
 app.use('/psychology', psychologyRoutes);
 app.use('/hr', hrRoutes);
 app.use('/academic-secretary/admissions', admissionsRoutes);
+app.use('/academic-secretary/communications', communicationFeedUploadRoutes);
 app.use('/academic-secretary', academicSecretaryRoutes);
 app.use('/school-creation', limiter, schoolCreationRoutes);
 app.use('/super-admin', superAdminRoutes);

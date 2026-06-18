@@ -48,6 +48,20 @@ export const uploadAcademicSecretaryCommunicationImage = (file, { preferredName 
 		timeout: DASHBOARD_HEAVY_REQUEST_TIMEOUT_MS,
 	});
 };
+export const uploadAcademicSecretaryCommunicationFeedImage = (file, { preferredName = '' } = {}) => {
+	const formData = new FormData();
+	formData.append('image', file);
+	if (preferredName) {
+		formData.append('preferredName', preferredName);
+	}
+
+	return api.post('/academic-secretary/communications/feed-image', formData, {
+		headers: {
+			'Content-Type': 'multipart/form-data',
+		},
+		timeout: DASHBOARD_HEAVY_REQUEST_TIMEOUT_MS,
+	});
+};
 export const uploadAcademicSecretaryCommunicationMedia = (file, { preferredName = '' } = {}) => {
 	const formData = new FormData();
 	formData.append('file', file);

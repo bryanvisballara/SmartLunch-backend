@@ -362,15 +362,7 @@ function normalizeCommunicationMedia(mediaItems) {
   return normalizedMedia;
 }
 
-function isManagedDeployRuntime() {
-  return process.env.NODE_ENV === 'production' || String(process.env.RENDER || '').trim() === 'true';
-}
-
 function assertCommunicationMediaUrls(mediaItems = []) {
-  if (!isManagedDeployRuntime()) {
-    return;
-  }
-
   for (const item of mediaItems) {
     const src = normalizeText(item?.src);
     if (!src) {

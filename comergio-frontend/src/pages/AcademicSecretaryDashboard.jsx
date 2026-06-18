@@ -56,6 +56,7 @@ import {
   updateAcademicSecretaryCommunication,
   updateAcademicSecretarySchoolRouteStop,
   uploadAcademicSecretaryCommunicationImage,
+  uploadAcademicSecretaryCommunicationFeedImage,
   uploadAcademicSecretaryCommunicationMedia,
 } from '../services/academicSecretary.service';
 import { getAdmissionMarketingHistory, getAdmissions, sendAdmissionMarketingCampaign, uploadAdmissionMarketingImage } from '../services/admissions.service';
@@ -2903,9 +2904,14 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     try {
       for (const [index, file] of filesToUpload.entries()) {
         const previewItem = previewItems[index];
-        const response = await uploadAcademicSecretaryCommunicationMedia(file, {
-          preferredName: `${communicationForm.title || 'comunicado'}-${index + 1}`,
-        });
+        const isVideo = String(file.type || '').toLowerCase().startsWith('video/');
+        const response = isVideo
+          ? await uploadAcademicSecretaryCommunicationMedia(file, {
+            preferredName: `${communicationForm.title || 'comunicado'}-${index + 1}`,
+          })
+          : await uploadAcademicSecretaryCommunicationFeedImage(file, {
+            preferredName: `${communicationForm.title || 'comunicado'}-${index + 1}`,
+          });
         const payload = response?.data || {};
         const mediaKind = payload.kind === 'video' ? 'video' : 'image';
         const mediaUrl = payload.url || payload.imageUrl || payload.videoUrl || '';

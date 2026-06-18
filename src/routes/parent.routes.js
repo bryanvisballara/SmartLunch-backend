@@ -721,6 +721,10 @@ function normalizeAcademicFeedMedia(mediaItems = []) {
         return null;
       }
 
+      if (kind === 'image' && (src.startsWith('/assets/') || src.startsWith('/uploads/'))) {
+        return null;
+      }
+
       return {
         id: `${String(item?._id || 'media')}-${index + 1}`,
         kind,
