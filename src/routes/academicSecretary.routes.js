@@ -38,7 +38,7 @@ const {
 } = require('../utils/imageUpload');
 const {
   uploadCampusMaterialsMiddleware,
-  processStoredCampusMaterialFiles,
+  processAcademicCommunicationMediaFile,
 } = require('../utils/campusMaterialUpload');
 
 const router = express.Router();
@@ -7334,7 +7334,14 @@ router.post('/communications/uploads/image', (req, res) => {
         file: req.file,
         folder: 'academic-communications',
         preferredName: normalizeText(req.body?.preferredName) || 'academic-communication',
+        requireCloudinary: true,
       });
+
+      if (saved.storage !== 'cloudinary') {
+        return res.status(503).json({
+          message: 'La foto del comunicado solo se puede guardar en Cloudinary.',
+        });
+      }
 
       return res.status(201).json({
         imageUrl: saved.url,
@@ -7354,24 +7361,17 @@ router.post('/communications/uploads/media', (req, res) => {
     }
 
     try {
-      const [saved] = await processStoredCampusMaterialFiles(req.file ? [req.file] : [], {
-        folder: 'academic-communications',
-        useDatabaseInProduction: true,
-        schoolId: req.user?.schoolId,
-        createdByUserId: req.user?.userId,
+      const saved = await processAcademicCommunicationMediaFile(req.file, {
+        preferredName: normalizeText(req.body?.preferredName) || 'academic-communication',
       });
-
-      if (!saved || !['image', 'video'].includes(saved.kind)) {
-        return res.status(400).json({ message: 'Solo se permiten imagenes o videos para el feed.' });
-      }
 
       return res.status(201).json({
         kind: saved.kind,
         url: saved.url,
         imageUrl: saved.kind === 'image' ? saved.url : '',
         videoUrl: saved.kind === 'video' ? saved.url : '',
-        thumbUrl: saved.kind === 'image' ? saved.url : '',
-        storage: saved.storage || 'local',
+        thumbUrl: saved.thumbUrl || (saved.kind === 'image' ? saved.url : ''),
+        storage: saved.storage || 'cloudinary',
       });
     } catch (requestError) {
       return res.status(400).json({ message: requestError.message || 'No se pudo guardar el archivo del comunicado.' });

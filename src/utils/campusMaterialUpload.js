@@ -5,6 +5,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const { v2: cloudinary } = require('cloudinary');
 const AcademicCommunicationAsset = require('../models/academicCommunicationAsset.model');
+const { processAndStoreUploadedImage } = require('./imageUpload');
 
 const MAX_CAMPUS_MATERIAL_FILE_BYTES = Number(process.env.CAMPUS_MATERIAL_MAX_FILE_BYTES || 100 * 1024 * 1024);
 const MAX_CAMPUS_MATERIAL_FILES = Number(process.env.CAMPUS_MATERIAL_MAX_FILES || 6);
@@ -340,9 +341,72 @@ async function processStoredCampusMaterialFiles(files, {
   return processedFiles;
 }
 
+function detectAcademicCommunicationMediaKind(file) {
+  const mimeType = String(file?.mimetype || '').toLowerCase();
+  if (mimeType.startsWith('video/')) {
+    return 'video';
+  }
+  if (mimeType.startsWith('image/')) {
+    return 'image';
+  }
+  return 'file';
+}
+
+async function processAcademicCommunicationMediaFile(file, { preferredName = '' } = {}) {
+  if (!file?.buffer) {
+    throw new Error('No se recibio ningun archivo.');
+  }
+
+  const kind = detectAcademicCommunicationMediaKind(file);
+  if (kind === 'image') {
+    const saved = await processAndStoreUploadedImage({
+      file,
+      folder: 'academic-communications',
+      preferredName,
+      requireCloudinary: true,
+    });
+
+    if (saved.storage !== 'cloudinary') {
+      throw new Error('Las imagenes del feed solo se pueden guardar en Cloudinary.');
+    }
+
+    return {
+      kind: 'image',
+      url: saved.url,
+      thumbUrl: saved.thumbUrl || saved.url,
+      storage: saved.storage,
+    };
+  }
+
+  if (kind === 'video') {
+    const [saved] = await processStoredCampusMaterialFiles([file], {
+      folder: 'academic-communications',
+      requireCloudinary: true,
+    });
+
+    if (!saved || saved.kind !== 'video') {
+      throw new Error('Solo se permiten imagenes o videos para el feed.');
+    }
+
+    if (saved.storage !== 'cloudinary') {
+      throw new Error('Los videos del feed solo se pueden guardar en Cloudinary.');
+    }
+
+    return {
+      kind: 'video',
+      url: saved.url,
+      thumbUrl: '',
+      storage: saved.storage,
+    };
+  }
+
+  throw new Error('Solo se permiten imagenes o videos para el feed.');
+}
+
 module.exports = {
   MAX_CAMPUS_MATERIAL_FILE_BYTES,
   MAX_CAMPUS_MATERIAL_FILES,
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
+  processAcademicCommunicationMediaFile,
 };

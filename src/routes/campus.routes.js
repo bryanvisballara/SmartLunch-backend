@@ -22,8 +22,9 @@ const { getCampusAccessContext } = require('../utils/campusAccess');
 const {
   MAX_CAMPUS_MATERIAL_FILE_BYTES,
   MAX_CAMPUS_MATERIAL_FILES,
-  processStoredCampusMaterialFiles,
   uploadCampusMaterialsMiddleware,
+  processStoredCampusMaterialFiles,
+  processAcademicCommunicationMediaFile,
 } = require('../utils/campusMaterialUpload');
 const { buildCoordinationDashboard } = require('../services/coordinationDashboard.service');
 const {
@@ -3074,7 +3075,19 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
       return res.status(400).json({ message: 'Solo se pueden subir fotos o videos para publicaciones.' });
     }
 
-    const uploadedFiles = await processStoredCampusMaterialFiles(req.files, { folder: 'academic-communications' });
+    const uploadedFiles = [];
+    for (const file of incomingFiles) {
+      const saved = await processAcademicCommunicationMediaFile(file, {
+        preferredName: normalizeText(req.body?.preferredName) || normalizeText(file.originalname) || 'publicacion-docente',
+      });
+      uploadedFiles.push({
+        kind: saved.kind,
+        url: saved.url,
+        thumbUrl: saved.thumbUrl || (saved.kind === 'image' ? saved.url : ''),
+        title: String(file.originalname || '').trim(),
+      });
+    }
+
     const media = uploadedFiles
       .filter((file) => ['image', 'video'].includes(file.kind))
       .map((file) => ({
