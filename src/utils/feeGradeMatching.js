@@ -160,6 +160,26 @@ function resolveAcademicStructureGradeKey(rawGrade, structureGrades = []) {
   return normalizeText(ranked[0]?.grade?.key) || normalizedRaw;
 }
 
+function findAcademicStructureGradeForStudent(rawGrade, structureGrades = []) {
+  const grades = Array.isArray(structureGrades) ? structureGrades : [];
+  if (!grades.length) {
+    return null;
+  }
+
+  const resolvedKey = resolveAcademicStructureGradeKey(rawGrade, grades);
+  const directMatch = grades.find((grade) => normalizeText(grade?.key) === resolvedKey);
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const ranked = grades
+    .map((grade) => ({ grade, score: scoreStructureGradeMatch(rawGrade, grade) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((left, right) => right.score - left.score);
+
+  return ranked[0]?.grade || null;
+}
+
 function buildAcademicStructureGradeMetadataIndex(structureGrades = [], levelLabels = {}) {
   return (Array.isArray(structureGrades) ? structureGrades : []).reduce((accumulator, grade) => {
     const gradeKey = normalizeText(grade?.key);
@@ -327,6 +347,7 @@ module.exports = {
   applySnapshotCostsToSetting,
   buildAcademicStructureGradeMetadataIndex,
   canonicalizeGradeFeeSettingsForStructure,
+  findAcademicStructureGradeForStudent,
   findGradeFeeSetting,
   getFeeGradeAliases,
   gradesMatchForFilter,

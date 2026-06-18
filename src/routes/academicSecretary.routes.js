@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const express = require('express');
-const { resolveGradeCourses } = require('../utils/academicGradeCourses');
-const { getFeeGradeAliases, findGradeFeeSetting, canonicalizeGradeFeeSettingsForStructure, resolveAcademicStructureGradeKey } = require('../utils/feeGradeMatching');
+const { resolveGradeCourses, gradeHasCourse, normalizeGradeCourseKey } = require('../utils/academicGradeCourses');
+const { getFeeGradeAliases, findGradeFeeSetting, canonicalizeGradeFeeSettingsForStructure, resolveAcademicStructureGradeKey, findAcademicStructureGradeForStudent } = require('../utils/feeGradeMatching');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -6838,7 +6838,7 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
 
     const configuration = await ensureAcademicStructureConfiguration(schoolId);
     const serialized = serializeAcademicStructureConfiguration(configuration);
-    const grade = serialized.grades.find((item) => item.key === studentGradeLevel);
+    const grade = findAcademicStructureGradeForStudent(student.grade, serialized.grades);
 
     if (!grade) {
       return res.status(400).json({ message: 'El grado del alumno todavía no existe en la estructura académica.' });
@@ -6851,7 +6851,12 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
       }
     }
 
-    const selectedCourse = grade.courses.find((course) => course.key === courseKey);
+    const normalizedCourseKey = normalizeGradeCourseKey(courseKey);
+    if (!gradeHasCourse(grade, normalizedCourseKey)) {
+      return res.status(400).json({ message: 'El curso seleccionado no pertenece al grado del alumno.' });
+    }
+
+    const selectedCourse = resolveGradeCourses(grade).find((course) => normalizeGradeCourseKey(course.key) === normalizedCourseKey);
     if (!selectedCourse) {
       return res.status(400).json({ message: 'El curso seleccionado no pertenece al grado del alumno.' });
     }
