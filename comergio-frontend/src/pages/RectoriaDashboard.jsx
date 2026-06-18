@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import './SchoolCreationWizard.css';
 import './RectoriaDashboard.css';
 import { buildAcademicEnrollmentProrationTable } from '../lib/academicEnrollment';
-import { findMatchingFeeSetting, getFeeGradeAliases, resolveStructureGradeKeyForStudent, studentMatchesAnyGradeKey } from '../lib/feeGradeMatching';
+import { findMatchingFeeSetting, getFeeGradeAliases, resolveStructureGradeKeyForStudent, studentMatchesAnyGradeKey, buildAcademicStructureGradeMetadataIndex, gradesMatchForFilter } from '../lib/feeGradeMatching';
 import { resolveGradeCourses, resolveStudentCourseKey, studentHasAssignedCourseInGrade } from '../lib/academicGradeCourses';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import useAuthStore from '../store/auth.store';
@@ -2723,21 +2723,28 @@ function RectoriaDashboard() {
     () => getAcademicGradingScaleForLevel(academicStructureDraft, selectedAcademicGradingLevelKey),
     [academicStructureDraft, selectedAcademicGradingLevelKey]
   );
+  const academicDatabaseGradeMetadata = useMemo(
+    () => buildAcademicStructureGradeMetadataIndex(academicStructureDraft.grades, configuredLevelLabels),
+    [academicStructureDraft.grades, configuredLevelLabels]
+  );
   const academicDatabaseRowMetaById = useMemo(
     () => (billingBootstrap.academicDatabase || []).reduce((accumulator, item) => {
       const rowId = String(item?._id || '').trim();
-      const gradeKey = String(item?.grade || '').trim();
-      const matchedGrade = academicStructureDraft.grades.find((grade) => grade.key === gradeKey || grade.label === gradeKey) || null;
-      const levelKey = String(matchedGrade?.levelKey || '').trim();
+      const resolvedGradeKey = resolveStructureGradeKeyForStudent(item?.grade, academicStructureDraft.grades);
+      const metadata = academicDatabaseGradeMetadata[String(item?.grade || '').trim()]
+        || academicDatabaseGradeMetadata[resolvedGradeKey]
+        || null;
+      const levelKey = String(metadata?.levelKey || '').trim();
       accumulator[rowId] = {
         levelKey,
-        levelLabel: levelKey ? getLevelLabel(levelKey) : 'Sin nivel',
-        gradeLabel: matchedGrade?.label || getGradeLabel(gradeKey) || gradeKey || 'Sin grado',
+        levelLabel: levelKey ? getLevelLabel(levelKey) : (metadata?.levelLabel || 'Sin nivel'),
+        gradeLabel: metadata?.gradeLabel || getGradeLabel(resolvedGradeKey || item?.grade) || 'Sin grado',
         courseLabel: String(item?.course || '').trim() ? getCourseLabel(String(item?.course || '').trim()) : 'Sin curso',
+        resolvedGradeKey: resolvedGradeKey || String(item?.grade || '').trim(),
       };
       return accumulator;
     }, {}),
-    [billingBootstrap.academicDatabase, academicStructureDraft.grades, configuredCourseLabels, configuredGradeLabels, configuredLevelLabels]
+    [billingBootstrap.academicDatabase, academicDatabaseGradeMetadata, academicStructureDraft.grades, configuredCourseLabels, configuredGradeLabels, configuredLevelLabels]
   );
   const academicDatabaseLevelOptions = useMemo(() => {
     const options = academicStructureDraft.levels.map((level) => ({ value: level.key, label: level.label || level.key })).filter((option) => option.value);
@@ -2824,14 +2831,19 @@ function RectoriaDashboard() {
       const motherValue = String(item?.motherName || '').toLowerCase();
 
       if (levelFilter && rowMeta.levelKey !== levelFilter && rowMeta.levelLabel !== levelFilter) return false;
-      if (gradeFilter && String(item?.grade || '').trim() !== gradeFilter) return false;
+      if (gradeFilter) {
+        const resolvedStudentGrade = rowMeta.resolvedGradeKey || resolveStructureGradeKeyForStudent(item?.grade, academicStructureDraft.grades);
+        if (!gradesMatchForFilter(resolvedStudentGrade, gradeFilter) && !gradesMatchForFilter(item?.grade, gradeFilter)) {
+          return false;
+        }
+      }
       if (courseFilter && courseValue !== courseFilter) return false;
       if (studentQuery && !studentValue.includes(studentQuery)) return false;
       if (fatherQuery && !fatherValue.includes(fatherQuery)) return false;
       if (motherQuery && !motherValue.includes(motherQuery)) return false;
       return true;
     });
-  }, [billingBootstrap.academicDatabase, academicDatabaseFilters, academicDatabaseRowMetaById]);
+  }, [billingBootstrap.academicDatabase, academicDatabaseFilters, academicDatabaseRowMetaById, academicStructureDraft.grades]);
   const academicDatabaseLevelCounts = useMemo(() => {
     const countsByLevel = (billingBootstrap.academicDatabase || []).reduce((accumulator, item) => {
       const levelLabel = academicDatabaseRowMetaById[String(item?._id || '')]?.levelLabel || 'Sin nivel';

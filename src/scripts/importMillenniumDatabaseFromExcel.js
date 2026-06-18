@@ -15,11 +15,13 @@ const {
 require('../models');
 
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
+const AcademicStructure = require('../models/academicStructure.model');
 const CampusMembership = require('../models/campusMembership.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
+const { resolveAcademicStructureGradeKey } = require('../utils/feeGradeMatching');
 
 const DEFAULT_SCHOOL_ID = 'Millennium School';
 const DEFAULT_FILE_PATH = '/Users/usuario/Downloads/plantilla-migracion-base-datos-2026-06-18.xlsx';
@@ -456,7 +458,13 @@ function findGradeFeeSetting(configuration, grade) {
 }
 
 async function importRows({ rows, schoolId, parentPassword, dryRun = false }) {
-  const distinctGrades = Array.from(new Set(rows.map((row) => normalizeText(row.grade)).filter(Boolean)));
+  const structure = await AcademicStructure.findOne({ schoolId }).lean();
+  const structureGrades = Array.isArray(structure?.grades) ? structure.grades : [];
+  const resolvedRows = rows.map((row) => ({
+    ...row,
+    grade: resolveAcademicStructureGradeKey(row.grade, structureGrades),
+  }));
+  const distinctGrades = Array.from(new Set(resolvedRows.map((row) => normalizeText(row.grade)).filter(Boolean)));
   const existingSnapshot = {
     students: await Student.countDocuments({ schoolId, deletedAt: null }),
     parents: await User.countDocuments({ schoolId, role: 'parent', deletedAt: null }),
@@ -484,7 +492,7 @@ async function importRows({ rows, schoolId, parentPassword, dryRun = false }) {
 
   if (dryRun) {
     const parentKeys = new Set();
-    for (const row of rows) {
+    for (const row of resolvedRows) {
       if (!row.grade || !row.firstName || !row.lastName) {
         summary.skippedRows += 1;
         continue;
@@ -512,7 +520,7 @@ async function importRows({ rows, schoolId, parentPassword, dryRun = false }) {
   const updatedParentIds = new Set();
   const membershipParentIds = new Set();
 
-  for (const row of rows) {
+  for (const row of resolvedRows) {
     try {
       if (!row.grade || !row.firstName || !row.lastName) {
         summary.skippedRows += 1;

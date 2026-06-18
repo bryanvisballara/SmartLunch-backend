@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const { resolveGradeCourses } = require('../utils/academicGradeCourses');
-const { getFeeGradeAliases, findGradeFeeSetting, canonicalizeGradeFeeSettingsForStructure } = require('../utils/feeGradeMatching');
+const { getFeeGradeAliases, findGradeFeeSetting, canonicalizeGradeFeeSettingsForStructure, resolveAcademicStructureGradeKey } = require('../utils/feeGradeMatching');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -7208,7 +7208,14 @@ router.post('/database/import', (req, res) => {
         return res.status(400).json({ message: 'La plantilla supera el limite permitido de 5000 filas por carga.' });
       }
 
-      const distinctGrades = Array.from(new Set(parsedRows.map((row) => normalizeText(row.grade)).filter(Boolean)));
+      const academicStructure = await ensureAcademicStructureConfiguration(schoolId);
+      const structureGrades = Array.isArray(academicStructure?.grades) ? academicStructure.grades : [];
+      const resolvedRows = parsedRows.map((row) => ({
+        ...row,
+        grade: resolveAcademicStructureGradeKey(row.grade, structureGrades),
+      }));
+
+      const distinctGrades = Array.from(new Set(resolvedRows.map((row) => normalizeText(row.grade)).filter(Boolean)));
       const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, distinctGrades);
       const summary = {
         totalRows: parsedRows.length,
@@ -7228,7 +7235,7 @@ router.post('/database/import', (req, res) => {
       const createdParentIds = new Set();
       const updatedParentIds = new Set();
 
-      for (const row of parsedRows) {
+      for (const row of resolvedRows) {
         try {
           if (!row.grade || !row.firstName || !row.lastName) {
             summary.skippedRows += 1;
@@ -8013,6 +8020,8 @@ router.post('/enrollments', async (req, res) => {
 
     const distinctGrades = Array.from(new Set(students.map((student) => normalizeText(student?.grade)).filter(Boolean)));
     const feeConfiguration = await ensureAcademicFeeConfiguration(schoolId, distinctGrades);
+    const academicStructure = await ensureAcademicStructureConfiguration(schoolId);
+    const structureGrades = Array.isArray(academicStructure?.grades) ? academicStructure.grades : [];
 
     const primaryRelationship = ['father', 'mother'].includes(normalizeText(primaryGuardian).toLowerCase())
       ? normalizeText(primaryGuardian).toLowerCase()
@@ -8034,7 +8043,7 @@ router.post('/enrollments', async (req, res) => {
         return res.status(400).json({ message: medicalProfileErrors[0], errors: medicalProfileErrors });
       }
 
-      const grade = normalizeText(rawStudent?.grade);
+      const grade = resolveAcademicStructureGradeKey(rawStudent?.grade, structureGrades);
       const entryDate = parseAcademicCalendarDate(rawStudent?.entryDate);
       const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, grade);
       const benefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);

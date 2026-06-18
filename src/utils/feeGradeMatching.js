@@ -43,7 +43,10 @@ function getFeeGradeAliases(value) {
     const numberMatch = normalized.match(/(\d{1,2})/);
     addEducationalLevelAliases(aliases, 'jardin', numberMatch?.[1] || '');
   }
-  if (normalizedLetters.includes('transicion')) aliases.add('transicion');
+  if (normalizedLetters.includes('transicion')) {
+    aliases.add('transicion');
+    aliases.add('prep');
+  }
 
   normalized
     .split(':')
@@ -56,10 +59,17 @@ function getFeeGradeAliases(value) {
 
   if (/^maternal$/i.test(normalized)) aliases.add('maternal');
   if (/^prep$/i.test(normalized)) aliases.add('prep');
-  if (/^infants$/i.test(normalized)) aliases.add('infants');
+  if (/^infants$/i.test(normalized)) {
+    aliases.add('infants');
+    aliases.add('maternal');
+  }
   if (/^toddlers$/i.test(normalized)) aliases.add('toddlers');
   if (/^nursery$/i.test(normalized)) aliases.add('nursery');
   if (/^k-grade$/i.test(normalized) || /^kgrade$/i.test(normalized)) aliases.add('k-grade');
+  if (normalizedLetters.includes('transicion')) {
+    aliases.add('transicion');
+    aliases.add('prep');
+  }
 
   const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*([a-z])$/i);
   if (sectionMatch) {
@@ -72,7 +82,130 @@ function getFeeGradeAliases(value) {
     aliases.add(normalized);
   }
 
+  const degreeMatch = normalized.match(/^(\d{1,2})[°º]?$/);
+  if (degreeMatch) {
+    aliases.add(degreeMatch[1]);
+  }
+
   return [...aliases].filter(Boolean);
+}
+
+function normalizeGradeComparisonKey(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[°º.]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreStructureGradeMatch(rawGrade, structureGrade) {
+  const gradeKey = normalizeText(structureGrade?.key);
+  const gradeLabel = normalizeText(structureGrade?.label);
+  if (!gradeKey) {
+    return -1;
+  }
+
+  const normalizedRaw = normalizeText(rawGrade);
+  if (!normalizedRaw) {
+    return -1;
+  }
+
+  if (normalizedRaw === gradeKey || normalizedRaw === gradeLabel) {
+    return 1000;
+  }
+
+  const rawComparison = normalizeGradeComparisonKey(normalizedRaw);
+  if (rawComparison === normalizeGradeComparisonKey(gradeKey)) {
+    return 900;
+  }
+  if (rawComparison === normalizeGradeComparisonKey(gradeLabel)) {
+    return 900;
+  }
+
+  const rawAliases = new Set(getFeeGradeAliases(normalizedRaw));
+  const targetAliases = new Set([
+    ...getFeeGradeAliases(gradeKey),
+    ...getFeeGradeAliases(gradeLabel),
+  ]);
+  const overlap = [...rawAliases].filter((alias) => targetAliases.has(alias)).length;
+  if (overlap <= 0) {
+    return -1;
+  }
+
+  let score = overlap * 10;
+  if (targetAliases.has(normalizedRaw.toLowerCase())) {
+    score += 50;
+  }
+  return score;
+}
+
+function resolveAcademicStructureGradeKey(rawGrade, structureGrades = []) {
+  const normalizedRaw = normalizeText(rawGrade);
+  if (!normalizedRaw) {
+    return '';
+  }
+
+  const grades = Array.isArray(structureGrades) ? structureGrades : [];
+  if (!grades.length) {
+    return normalizedRaw;
+  }
+
+  const ranked = grades
+    .map((grade) => ({ grade, score: scoreStructureGradeMatch(normalizedRaw, grade) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((left, right) => right.score - left.score);
+
+  return normalizeText(ranked[0]?.grade?.key) || normalizedRaw;
+}
+
+function buildAcademicStructureGradeMetadataIndex(structureGrades = [], levelLabels = {}) {
+  return (Array.isArray(structureGrades) ? structureGrades : []).reduce((accumulator, grade) => {
+    const gradeKey = normalizeText(grade?.key);
+    const gradeLabel = normalizeText(grade?.label || gradeKey);
+    const levelKey = normalizeText(grade?.levelKey);
+    const levelLabel = normalizeText(levelLabels[levelKey] || levelKey) || 'Sin nivel';
+    const metadata = {
+      gradeKey,
+      gradeLabel: gradeLabel || gradeKey,
+      levelKey,
+      levelLabel: levelLabel || 'Sin nivel',
+    };
+
+    [gradeKey, gradeLabel, ...getFeeGradeAliases(gradeKey), ...getFeeGradeAliases(gradeLabel)]
+      .filter(Boolean)
+      .forEach((alias) => {
+        accumulator[normalizeText(alias)] = metadata;
+      });
+
+    return accumulator;
+  }, {});
+}
+
+function gradesMatchForFilter(studentGrade, filterGrade) {
+  const normalizedStudent = normalizeText(studentGrade);
+  const normalizedFilter = normalizeText(filterGrade);
+  if (!normalizedFilter) {
+    return true;
+  }
+  if (!normalizedStudent) {
+    return false;
+  }
+  if (normalizedStudent === normalizedFilter) {
+    return true;
+  }
+
+  const studentAliases = new Set(getFeeGradeAliases(normalizedStudent));
+  const filterAliases = new Set(getFeeGradeAliases(normalizedFilter));
+  if (studentAliases.has(normalizedFilter.toLowerCase())) {
+    return true;
+  }
+  if (filterAliases.has(normalizedStudent.toLowerCase())) {
+    return true;
+  }
+
+  return [...studentAliases].some((alias) => filterAliases.has(alias));
 }
 
 function hasAnyFeeAmount(setting) {
@@ -192,13 +325,18 @@ function findGradeFeeSetting(configuration, grade) {
 
 module.exports = {
   applySnapshotCostsToSetting,
+  buildAcademicStructureGradeMetadataIndex,
   canonicalizeGradeFeeSettingsForStructure,
   findGradeFeeSetting,
   getFeeGradeAliases,
+  gradesMatchForFilter,
   hasAnyFeeAmount,
   isContaminatedNumericGrade,
   isEducationalLevelKey,
   isNumericGradeKey,
   normalizeFeeAmount,
+  normalizeGradeComparisonKey,
   normalizeText,
+  resolveAcademicStructureGradeKey,
+  scoreStructureGradeMatch,
 };

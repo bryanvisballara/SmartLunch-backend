@@ -8,7 +8,7 @@ import {
   isAcademicStudentDraftComplete,
   normalizeAcademicSchoolYearConfiguration,
 } from '../lib/academicEnrollment';
-import { findMatchingFeeSetting, getFeeGradeAliases } from '../lib/feeGradeMatching';
+import { findMatchingFeeSetting, getFeeGradeAliases, buildAcademicStructureGradeMetadataIndex, resolveStructureGradeKeyForStudent, gradesMatchForFilter } from '../lib/feeGradeMatching';
 import MillenniumEnrollmentSignatureBlock from '../components/MillenniumEnrollmentSignatureBlock';
 import MillenniumPagareDebtorsTable from '../components/MillenniumPagareDebtorsTable';
 import {
@@ -1983,40 +1983,29 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     [bootstrap.academicStructure]
   );
   const academicDatabaseGradeMetadata = useMemo(
-    () => (Array.isArray(bootstrap.academicStructure?.grades) ? bootstrap.academicStructure.grades : []).reduce((accumulator, grade) => {
-      const gradeKey = String(grade?.key || '').trim();
-      const gradeLabel = String(grade?.label || grade?.key || '').trim();
-      const levelKey = String(grade?.levelKey || '').trim();
-      const levelLabel = academicDatabaseLevelLabels[levelKey] || levelKey;
-      const metadata = {
-        gradeLabel: gradeLabel || gradeKey,
-        levelKey,
-        levelLabel: levelLabel || 'Sin nivel',
-      };
-
-      if (gradeKey) {
-        accumulator[gradeKey] = metadata;
-      }
-      if (gradeLabel) {
-        accumulator[gradeLabel] = metadata;
-      }
-      return accumulator;
-    }, {}),
+    () => buildAcademicStructureGradeMetadataIndex(
+      Array.isArray(bootstrap.academicStructure?.grades) ? bootstrap.academicStructure.grades : [],
+      academicDatabaseLevelLabels,
+    ),
     [bootstrap.academicStructure, academicDatabaseLevelLabels]
   );
   const academicDatabaseRowMetaById = useMemo(
     () => (bootstrap.academicDatabase || []).reduce((accumulator, item) => {
       const rowId = String(item?._id || '').trim();
-      const metadata = academicDatabaseGradeMetadata[String(item?.grade || '').trim()] || null;
+      const resolvedGradeKey = resolveStructureGradeKeyForStudent(item?.grade, academicStructureGrades);
+      const metadata = academicDatabaseGradeMetadata[String(item?.grade || '').trim()]
+        || academicDatabaseGradeMetadata[resolvedGradeKey]
+        || null;
       accumulator[rowId] = {
         levelKey: metadata?.levelKey || '',
         levelLabel: metadata?.levelLabel || 'Sin nivel',
-        gradeLabel: metadata?.gradeLabel || formatGradeLabel(item?.grade),
+        gradeLabel: metadata?.gradeLabel || formatGradeLabel(resolvedGradeKey || item?.grade),
         courseLabel: String(item?.course || '').trim() || 'Sin curso',
+        resolvedGradeKey: resolvedGradeKey || String(item?.grade || '').trim(),
       };
       return accumulator;
     }, {}),
-    [academicDatabaseGradeMetadata, bootstrap.academicDatabase, gradeLabelByValue]
+    [academicDatabaseGradeMetadata, bootstrap.academicDatabase, academicStructureGrades, gradeLabelByValue]
   );
   const academicDatabaseLevelOptions = useMemo(() => {
     const options = (Array.isArray(bootstrap.academicStructure?.levels) ? bootstrap.academicStructure.levels : []).map((level) => ({
@@ -2107,8 +2096,11 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         return false;
       }
 
-      if (gradeFilter && String(item?.grade || '').trim() !== gradeFilter) {
-        return false;
+      if (gradeFilter) {
+        const resolvedStudentGrade = rowMeta.resolvedGradeKey || resolveStructureGradeKeyForStudent(item?.grade, academicStructureGrades);
+        if (!gradesMatchForFilter(resolvedStudentGrade, gradeFilter) && !gradesMatchForFilter(item?.grade, gradeFilter)) {
+          return false;
+        }
       }
 
       if (courseFilter && courseValue !== courseFilter) {
@@ -2129,7 +2121,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
       return true;
     });
-  }, [bootstrap.academicDatabase, academicDatabaseFilters, academicDatabaseRowMetaById]);
+  }, [bootstrap.academicDatabase, academicDatabaseFilters, academicDatabaseRowMetaById, academicStructureGrades]);
   const academicDatabaseLevelCounts = useMemo(() => {
     const countsByLevel = (bootstrap.academicDatabase || []).reduce((accumulator, item) => {
       const levelLabel = academicDatabaseRowMetaById[String(item?._id || '')]?.levelLabel || 'Sin nivel';

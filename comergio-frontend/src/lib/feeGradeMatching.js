@@ -43,7 +43,10 @@ export function getFeeGradeAliases(value) {
     const numberMatch = normalized.match(/(\d{1,2})/);
     addEducationalLevelAliases(aliases, 'jardin', numberMatch?.[1] || '');
   }
-  if (normalizedLetters.includes('transicion')) aliases.add('transicion');
+  if (normalizedLetters.includes('transicion')) {
+    aliases.add('transicion');
+    aliases.add('prep');
+  }
 
   normalized
     .split(':')
@@ -56,10 +59,17 @@ export function getFeeGradeAliases(value) {
 
   if (/^maternal$/i.test(normalized)) aliases.add('maternal');
   if (/^prep$/i.test(normalized)) aliases.add('prep');
-  if (/^infants$/i.test(normalized)) aliases.add('infants');
+  if (/^infants$/i.test(normalized)) {
+    aliases.add('infants');
+    aliases.add('maternal');
+  }
   if (/^toddlers$/i.test(normalized)) aliases.add('toddlers');
   if (/^nursery$/i.test(normalized)) aliases.add('nursery');
   if (/^k-grade$/i.test(normalized) || /^kgrade$/i.test(normalized)) aliases.add('k-grade');
+  if (normalizedLetters.includes('transicion')) {
+    aliases.add('transicion');
+    aliases.add('prep');
+  }
 
   const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*([a-z])$/i);
   if (sectionMatch) {
@@ -70,6 +80,11 @@ export function getFeeGradeAliases(value) {
 
   if (isNumericGradeKey(normalized)) {
     aliases.add(normalized);
+  }
+
+  const degreeMatch = normalized.match(/^(\d{1,2})[°º]?$/);
+  if (degreeMatch) {
+    aliases.add(degreeMatch[1]);
   }
 
   return [...aliases].filter(Boolean);
@@ -154,9 +169,54 @@ export function studentMatchesAnyGradeKey(studentGrade = '', gradeKeys = []) {
 }
 
 export function resolveStructureGradeKeyForStudent(studentGrade = '', structureGrades = []) {
-  const match = (Array.isArray(structureGrades) ? structureGrades : []).find((grade) => (
-    studentMatchesGradeKey(studentGrade, grade?.key)
-    || studentMatchesGradeKey(studentGrade, grade?.label)
-  ));
-  return normalizeFeeGradeText(match?.key || '');
+  const normalizedStudentGrade = normalizeFeeGradeText(studentGrade);
+  if (!normalizedStudentGrade) {
+    return '';
+  }
+
+  const grades = Array.isArray(structureGrades) ? structureGrades : [];
+  if (!grades.length) {
+    return normalizedStudentGrade;
+  }
+
+  const ranked = grades
+    .map((grade) => {
+      const keyScore = studentMatchesGradeKey(normalizedStudentGrade, grade?.key) ? 100 : -1;
+      const labelScore = studentMatchesGradeKey(normalizedStudentGrade, grade?.label) ? 100 : -1;
+      return { grade, score: Math.max(keyScore, labelScore) };
+    })
+    .filter((entry) => entry.score >= 0);
+
+  if (ranked.length > 0) {
+    return normalizeFeeGradeText(ranked[0]?.grade?.key || '');
+  }
+
+  return normalizedStudentGrade;
+}
+
+export function buildAcademicStructureGradeMetadataIndex(structureGrades = [], levelLabels = {}) {
+  return (Array.isArray(structureGrades) ? structureGrades : []).reduce((accumulator, grade) => {
+    const gradeKey = normalizeFeeGradeText(grade?.key);
+    const gradeLabel = normalizeFeeGradeText(grade?.label || gradeKey);
+    const levelKey = normalizeFeeGradeText(grade?.levelKey);
+    const levelLabel = normalizeFeeGradeText(levelLabels[levelKey] || levelKey) || 'Sin nivel';
+    const metadata = {
+      gradeKey,
+      gradeLabel: gradeLabel || gradeKey,
+      levelKey,
+      levelLabel: levelLabel || 'Sin nivel',
+    };
+
+    [gradeKey, gradeLabel, ...getFeeGradeAliases(gradeKey), ...getFeeGradeAliases(gradeLabel)]
+      .filter(Boolean)
+      .forEach((alias) => {
+        accumulator[normalizeFeeGradeText(alias)] = metadata;
+      });
+
+    return accumulator;
+  }, {});
+}
+
+export function gradesMatchForFilter(studentGrade, filterGrade) {
+  return studentMatchesGradeKey(studentGrade, filterGrade);
 }
