@@ -212,9 +212,67 @@ const parentGradePerformancePalette = [
   { min: 0, max: 59, color: '#ef4444' },
 ];
 
+function normalizePerformanceHexColor(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const withHash = raw.startsWith('#') ? raw : `#${raw}`;
+  if (/^#[0-9a-f]{6}$/i.test(withHash)) {
+    return withHash.toLowerCase();
+  }
+
+  if (/^#[0-9a-f]{3}$/i.test(withHash)) {
+    const hex = withHash.slice(1);
+    return `#${hex.split('').map((channel) => channel + channel).join('')}`.toLowerCase();
+  }
+
+  return '';
+}
+
+function resolvePerformanceLevelForAverage(average, gradingScale = null) {
+  if (average === null || average === undefined || average === '') {
+    return null;
+  }
+
+  const numericAverage = Number(average);
+  if (!Number.isFinite(numericAverage)) {
+    return null;
+  }
+
+  return (Array.isArray(gradingScale?.performanceLevels) ? gradingScale.performanceLevels : [])
+    .find((level) => numericAverage >= Number(level.minScore) && numericAverage <= Number(level.maxScore)) || null;
+}
+
+function resolveAcademicPerformanceLevel(selectedChild, average) {
+  const fromOverview = selectedChild?.academicPerformanceLevel || null;
+  const overviewColor = normalizePerformanceHexColor(fromOverview?.color);
+  if (overviewColor) {
+    return { ...fromOverview, color: overviewColor };
+  }
+
+  const fromScale = resolvePerformanceLevelForAverage(average, selectedChild?.academicGradingScale);
+  if (fromScale) {
+    return {
+      key: fromScale.key,
+      label: fromScale.label,
+      color: normalizePerformanceHexColor(fromScale.color) || fromScale.color,
+      minScore: fromScale.minScore,
+      maxScore: fromScale.maxScore,
+    };
+  }
+
+  if (fromOverview?.label || fromOverview?.key) {
+    return fromOverview;
+  }
+
+  return null;
+}
+
 function getParentSubjectCardColor(subject = {}) {
-  const explicitColor = String(subject.color || subject.performanceLevel?.color || '').trim();
-  if (/^#[0-9a-f]{6}$/i.test(explicitColor)) {
+  const explicitColor = normalizePerformanceHexColor(subject.color || subject.performanceLevel?.color);
+  if (explicitColor) {
     return explicitColor;
   }
 
@@ -676,6 +734,7 @@ function buildParentChildFromOverview(child = {}, overview = {}) {
     academicGrades: selectedOverviewChildId === childId && Array.isArray(overview.academicGrades) ? overview.academicGrades : [],
     academicRanking: selectedOverviewChildId === childId ? overview.academicRanking || null : null,
     academicPerformanceLevel: selectedOverviewChildId === childId ? overview.academicPerformanceLevel || null : null,
+    academicGradingScale: selectedOverviewChildId === childId ? overview.academicGradingScale || null : null,
     academicUpcomingAssignments: selectedOverviewChildId === childId && Array.isArray(overview.academicUpcomingAssignments)
       ? overview.academicUpcomingAssignments
       : [],
@@ -797,19 +856,38 @@ function darkenPerformanceHeroColor(hexColor, amount = 0.22) {
   return `#${toHex(channel(0))}${toHex(channel(2))}${toHex(channel(4))}`;
 }
 
-function resolvePerformanceHeroColor(performanceLevel = null, average = null) {
-  const explicitColor = String(performanceLevel?.color || '').trim();
-  if (/^#[0-9a-f]{6}$/i.test(explicitColor)) {
+function resolvePerformanceHeroColor(performanceLevel = null, average = null, gradingScale = null) {
+  const explicitColor = normalizePerformanceHexColor(performanceLevel?.color);
+  if (explicitColor) {
     return explicitColor;
   }
 
+  const scaledLevel = resolvePerformanceLevelForAverage(average, gradingScale);
+  const scaledColor = normalizePerformanceHexColor(scaledLevel?.color);
+  if (scaledColor) {
+    return scaledColor;
+  }
+
   const fallbackColor = getParentSubjectCardColor({ finalAverage: average });
-  return /^#[0-9a-f]{6}$/i.test(fallbackColor) ? fallbackColor : '';
+  return normalizePerformanceHexColor(fallbackColor);
 }
 
+const parentPerformanceHeroClassKeys = new Set([
+  'deficiente',
+  'insuficiente',
+  'aceptable',
+  'bueno',
+  'sobresaliente',
+  'excelente',
+]);
+
 function resolvePerformanceHeroClassName(performanceLevel = null, average = null) {
+  if (normalizePerformanceHexColor(performanceLevel?.color)) {
+    return '';
+  }
+
   const levelKey = String(performanceLevel?.key || '').trim().toLowerCase();
-  if (levelKey) {
+  if (levelKey && parentPerformanceHeroClassKeys.has(levelKey)) {
     return `is-performance-${levelKey}`;
   }
 
@@ -826,8 +904,8 @@ function resolvePerformanceHeroClassName(performanceLevel = null, average = null
   return 'is-performance-deficiente';
 }
 
-function buildPerformanceHeroStyle(performanceLevel = null, average = null) {
-  const heroColor = resolvePerformanceHeroColor(performanceLevel, average);
+function buildPerformanceHeroStyle(performanceLevel = null, average = null, gradingScale = null) {
+  const heroColor = resolvePerformanceHeroColor(performanceLevel, average, gradingScale);
   if (!heroColor) {
     return undefined;
   }
@@ -2920,8 +2998,12 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
     )
     : null;
   const academicPerformanceAverage = overallGradeAverage ?? (selectedChild?.isRealParentChild ? null : Math.round(Number(selectedChild.averageScore || 0) * 20));
-  const academicPerformanceLevel = selectedChild?.academicPerformanceLevel || null;
-  const performanceHeroStyle = buildPerformanceHeroStyle(academicPerformanceLevel, academicPerformanceAverage);
+  const academicPerformanceLevel = resolveAcademicPerformanceLevel(selectedChild, academicPerformanceAverage);
+  const performanceHeroStyle = buildPerformanceHeroStyle(
+    academicPerformanceLevel,
+    academicPerformanceAverage,
+    selectedChild?.academicGradingScale,
+  );
   const performanceHeroClassName = resolvePerformanceHeroClassName(academicPerformanceLevel, academicPerformanceAverage);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);

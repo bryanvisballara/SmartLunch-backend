@@ -552,13 +552,39 @@ function resolveParentGradingScaleForGrade(academicStructure, gradeValues = []) 
   const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
     .map((value) => normalizeText(value).toLowerCase())
     .filter(Boolean));
+  const matchesGradeValues = (candidateValues = []) => candidateValues
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean)
+    .some((candidate) => normalizedGradeValues.has(candidate));
   const matchedGrade = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
-    .find((grade) => normalizedGradeValues.has(normalizeText(grade?.key).toLowerCase()) || normalizedGradeValues.has(normalizeText(grade?.label).toLowerCase()));
+    .find((grade) => matchesGradeValues([
+      grade?.key,
+      grade?.label,
+      ...getFeeGradeAliases(grade?.key),
+      ...getFeeGradeAliases(grade?.label),
+    ]));
   const levelKey = normalizeText(matchedGrade?.levelKey);
   const levelScale = (Array.isArray(academicStructure?.gradingScalesByLevel) ? academicStructure.gradingScalesByLevel : [])
     .find((scale) => normalizeText(scale?.levelKey) === levelKey);
 
   return levelScale ? normalizeParentGradingScale(levelScale) : defaultScale;
+}
+
+function serializeParentGradingScale(gradingScale = {}) {
+  const normalizedScale = normalizeParentGradingScale(gradingScale);
+  return {
+    minScore: normalizedScale.minScore,
+    maxScore: normalizedScale.maxScore,
+    passingScore: normalizedScale.passingScore,
+    performanceLevels: (Array.isArray(normalizedScale.performanceLevels) ? normalizedScale.performanceLevels : []).map((level) => ({
+      key: level.key,
+      label: level.label,
+      minScore: level.minScore,
+      maxScore: level.maxScore,
+      color: level.color,
+      order: level.order,
+    })),
+  };
 }
 
 function resolveParentPerformanceLevel(score, gradingScale = {}) {
@@ -3391,6 +3417,7 @@ router.get('/portal/overview', async (req, res) => {
         minScore: academicPerformanceLevel.minScore,
         maxScore: academicPerformanceLevel.maxScore,
       } : null,
+      academicGradingScale: serializeParentGradingScale(parentGradingScale),
       academicUpcomingAssignments,
       academicSchedule: {
         gradeKey: selectedStudentGrade,
