@@ -784,18 +784,60 @@ function getGradeTextLabel(value, performanceLevel = null) {
   return 'BAJO';
 }
 
-function buildPerformanceHeroStyle(performanceLevel = null, average = null) {
+function darkenPerformanceHeroColor(hexColor, amount = 0.22) {
+  const normalized = String(hexColor || '').replace('#', '').trim();
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) {
+    return '';
+  }
+
+  const channel = (startIndex) => Number.parseInt(normalized.slice(startIndex, startIndex + 2), 16);
+  const factor = 1 - amount;
+  const toHex = (value) => Math.max(0, Math.min(255, Math.round(value * factor))).toString(16).padStart(2, '0');
+
+  return `#${toHex(channel(0))}${toHex(channel(2))}${toHex(channel(4))}`;
+}
+
+function resolvePerformanceHeroColor(performanceLevel = null, average = null) {
   const explicitColor = String(performanceLevel?.color || '').trim();
   if (/^#[0-9a-f]{6}$/i.test(explicitColor)) {
-    return { background: `linear-gradient(135deg, ${explicitColor} 0%, #102c42 100%)` };
+    return explicitColor;
   }
 
   const fallbackColor = getParentSubjectCardColor({ finalAverage: average });
-  if (/^#[0-9a-f]{6}$/i.test(fallbackColor)) {
-    return { background: `linear-gradient(135deg, ${fallbackColor} 0%, #102c42 100%)` };
+  return /^#[0-9a-f]{6}$/i.test(fallbackColor) ? fallbackColor : '';
+}
+
+function resolvePerformanceHeroClassName(performanceLevel = null, average = null) {
+  const levelKey = String(performanceLevel?.key || '').trim().toLowerCase();
+  if (levelKey) {
+    return `is-performance-${levelKey}`;
   }
 
-  return undefined;
+  const numericAverage = Number(average);
+  if (!Number.isFinite(numericAverage)) {
+    return '';
+  }
+
+  if (numericAverage >= 96) return 'is-performance-excelente';
+  if (numericAverage >= 90) return 'is-performance-sobresaliente';
+  if (numericAverage >= 80) return 'is-performance-bueno';
+  if (numericAverage >= 70) return 'is-performance-aceptable';
+  if (numericAverage >= 60) return 'is-performance-insuficiente';
+  return 'is-performance-deficiente';
+}
+
+function buildPerformanceHeroStyle(performanceLevel = null, average = null) {
+  const heroColor = resolvePerformanceHeroColor(performanceLevel, average);
+  if (!heroColor) {
+    return undefined;
+  }
+
+  const heroEndColor = darkenPerformanceHeroColor(heroColor) || heroColor;
+  return {
+    '--performance-hero-start': heroColor,
+    '--performance-hero-end': heroEndColor,
+    background: `linear-gradient(145deg, ${heroColor} 0%, ${heroEndColor} 100%)`,
+  };
 }
 
 function mapParentUpcomingAssignmentRow(item) {
@@ -2880,6 +2922,7 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
   const academicPerformanceAverage = overallGradeAverage ?? (selectedChild?.isRealParentChild ? null : Math.round(Number(selectedChild.averageScore || 0) * 20));
   const academicPerformanceLevel = selectedChild?.academicPerformanceLevel || null;
   const performanceHeroStyle = buildPerformanceHeroStyle(academicPerformanceLevel, academicPerformanceAverage);
+  const performanceHeroClassName = resolvePerformanceHeroClassName(academicPerformanceLevel, academicPerformanceAverage);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const upcomingAssignments = selectedChild?.isRealParentChild
@@ -2933,7 +2976,10 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
   if (effectiveActiveView === 'academic-performance') {
     return (
       <section className="campus-parent-mobile__academic-page">
-        <article className="campus-parent-mobile__performance-hero" style={performanceHeroStyle}>
+        <article
+          className={`campus-parent-mobile__performance-hero${performanceHeroClassName ? ` ${performanceHeroClassName}` : ''}`}
+          style={performanceHeroStyle}
+        >
           <div>
             <span className="campus-parent-mobile__eyebrow">Desempeño</span>
             <h2>{academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota'}</h2>

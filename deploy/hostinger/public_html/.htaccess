@@ -29,6 +29,12 @@
 </IfModule>
 
 <IfModule mod_headers.c>
+  <FilesMatch "\.(html|webmanifest)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
   <FilesMatch "\.(webp|png|jpe?g|gif|avif)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
