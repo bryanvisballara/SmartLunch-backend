@@ -970,7 +970,9 @@ router.post('/login', async (req, res) => {
         filter: identifierFilter,
         populateAssignedStore: true,
       });
-    } else {
+    }
+
+    if (!user) {
       const matches = await findLoginMatchesWithoutSchoolId(identifierFilter, true);
 
       if (matches.length > 1) {
@@ -984,7 +986,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const match = await bcrypt.compare(password, user.passwordHash);
+    const match = await bcrypt.compare(String(password).trim(), user.passwordHash);
     if (!match) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }

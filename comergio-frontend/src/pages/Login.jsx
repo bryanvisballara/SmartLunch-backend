@@ -19,7 +19,14 @@ import useAuthStore from '../store/auth.store';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
 import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
-import { SCHOOL_OPTIONS, DEFAULT_SCHOOL_ID, getSchoolOptionsByCountry, normalizeSchoolOptions, rememberSchoolOptions } from '../lib/schools';
+import {
+  SCHOOL_OPTIONS,
+  DEFAULT_SCHOOL_ID,
+  getSchoolOptionsByCountry,
+  normalizeSchoolOptions,
+  rememberSchoolOptions,
+  resolveStoredSchoolId,
+} from '../lib/schools';
 
 const DEV_DIRECT_LOGIN_PROFILES = {
   'laura-medina': {
@@ -122,7 +129,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const [schoolOptions, setSchoolOptions] = useState(() => normalizeSchoolOptions(SCHOOL_OPTIONS));
   const [selectedCountry, setSelectedCountry] = useState(() => localStorage.getItem('selectedCountry') || COUNTRY_OPTIONS[0].id);
   const [selectedSchoolId, setSelectedSchoolId] = useState(() => (
-    localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID
+    resolveStoredSchoolId(localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS)
   ));
   const [schoolSearch, setSchoolSearch] = useState('');
   const [isCountryPickerOpen, setIsCountryPickerOpen] = useState(false);
@@ -233,13 +240,9 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
         const fetchedSchoolOptions = normalizeSchoolOptions(response.data?.schools || []);
         const nextSchoolOptions = rememberSchoolOptions(fetchedSchoolOptions.length ? fetchedSchoolOptions : SCHOOL_OPTIONS);
         setSchoolOptions(nextSchoolOptions);
-        setSelectedSchoolId((currentSchoolId) => {
-          if (currentSchoolId && nextSchoolOptions.some((school) => school.id === currentSchoolId)) {
-            return currentSchoolId;
-          }
-
-          return '';
-        });
+        setSelectedSchoolId((currentSchoolId) => (
+          resolveStoredSchoolId(currentSchoolId || localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID, nextSchoolOptions)
+        ));
       })
       .catch(() => {
         if (!cancelled) {
@@ -249,26 +252,6 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const clearIfUntouched = () => {
-      if (hasUserTypedRef.current) {
-        return;
-      }
-
-      setUsername('');
-      setPassword('');
-    };
-
-    clearIfUntouched();
-    const immediateClearTimer = setTimeout(clearIfUntouched, 120);
-    const delayedClearTimer = setTimeout(clearIfUntouched, 900);
-
-    return () => {
-      clearTimeout(immediateClearTimer);
-      clearTimeout(delayedClearTimer);
     };
   }, []);
 
@@ -287,9 +270,15 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const selectCountryOption = (countryId) => {
     if (countryId !== selectedCountry) {
       setSelectedCountry(countryId);
-      setSelectedSchoolId('');
-      setSchoolSearch('');
-      localStorage.removeItem('selectedSchoolId');
+      const nextCountrySchools = getSchoolOptionsByCountry(schoolOptions, countryId);
+      const nextSchoolId = resolveStoredSchoolId(localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID, nextCountrySchools);
+      setSelectedSchoolId(nextSchoolId);
+      setSchoolSearch(nextCountrySchools.find((school) => school.id === nextSchoolId)?.label || '');
+      if (nextSchoolId) {
+        localStorage.setItem('selectedSchoolId', nextSchoolId);
+      } else {
+        localStorage.removeItem('selectedSchoolId');
+      }
     }
 
     setIsCountryPickerOpen(false);
@@ -556,10 +545,11 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
       const normalizedUsername = normalizeUsername(username);
       await finalizeAuth(authResponse, normalizedUsername, postLoginPath, resolvedSchoolId);
     } catch (requestError) {
+      const backendMessage = requestError?.response?.data?.message || requestError?.message || '';
       setError(
-        requestError?.response?.data?.message ||
-          requestError?.message ||
-          'No se pudo iniciar sesión. Revisa backend o credenciales.'
+        backendMessage === 'Invalid credentials'
+          ? 'Correo, contraseña o colegio incorrectos. Para docentes de Comergio Demo usa el colegio "Comergio Demo".'
+          : backendMessage || 'No se pudo iniciar sesión. Revisa backend o credenciales.'
       );
     } finally {
       setLoading(false);
@@ -888,7 +878,10 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
               spellCheck={false}
               value={username}
               onFocus={markUserInteraction}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                markUserInteraction();
+                setUsername(e.target.value);
+              }}
             />
           </div>
         </label>
@@ -906,7 +899,10 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
               placeholder="Tu contraseña"
               value={password}
               onFocus={markUserInteraction}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                markUserInteraction();
+                setPassword(e.target.value);
+              }}
             />
             <button
               aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}

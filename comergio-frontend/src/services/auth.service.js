@@ -4,10 +4,12 @@ export const getSchoolOptions = () => api.get('/auth/schools');
 
 export const login = (data) => {
 	const usernameOrEmail = String(data?.username || data?.email || '').trim().toLowerCase();
+	const password = String(data?.password || '');
 	return api.post('/auth/login', {
 		...data,
 		username: usernameOrEmail,
 		email: usernameOrEmail,
+		password,
 	});
 };
 export const register = (data) => api.post('/auth/register', data);

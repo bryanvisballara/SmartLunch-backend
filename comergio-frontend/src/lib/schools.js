@@ -20,6 +20,44 @@ export const DEFAULT_SCHOOL_ID = 'comergio_demo_kns8p';
 export const DEFAULT_SCHOOL_COUNTRY = 'CO';
 const KNOWN_SCHOOL_OPTIONS_STORAGE_KEY = 'knownSchoolOptions';
 
+const STORED_SCHOOL_ID_ALIASES = {
+  'comergio-demo': DEFAULT_SCHOOL_ID,
+  comergio_demo: DEFAULT_SCHOOL_ID,
+};
+
+export function resolveStoredSchoolId(storedSchoolId = '', options = SCHOOL_OPTIONS) {
+  const normalizedOptions = normalizeSchoolOptions(options);
+  const rawStoredId = String(storedSchoolId || '').trim();
+
+  if (!rawStoredId) {
+    return normalizedOptions.some((school) => school.id === DEFAULT_SCHOOL_ID)
+      ? DEFAULT_SCHOOL_ID
+      : (normalizedOptions[0]?.id || '');
+  }
+
+  const aliasTarget = STORED_SCHOOL_ID_ALIASES[rawStoredId.toLowerCase()];
+  if (aliasTarget && normalizedOptions.some((school) => school.id === aliasTarget)) {
+    return aliasTarget;
+  }
+
+  if (normalizedOptions.some((school) => school.id === rawStoredId)) {
+    return rawStoredId;
+  }
+
+  const storedLabelKey = normalizeSchoolLabelKey(rawStoredId);
+  const labelMatch = normalizedOptions.find((school) => (
+    normalizeSchoolLabelKey(school.label) === storedLabelKey
+    || normalizeSchoolLabelKey(school.id) === storedLabelKey
+  ));
+  if (labelMatch?.id) {
+    return labelMatch.id;
+  }
+
+  return normalizedOptions.some((school) => school.id === DEFAULT_SCHOOL_ID)
+    ? DEFAULT_SCHOOL_ID
+    : (normalizedOptions[0]?.id || '');
+}
+
 function humanizeSchoolId(value) {
   const normalizedValue = String(value || '')
     .trim()
