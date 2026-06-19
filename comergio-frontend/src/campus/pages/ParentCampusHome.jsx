@@ -456,6 +456,7 @@ function buildEmptyParentCafeteria(child = {}, overview = {}) {
 
 const PARENT_CLASS_SCHEDULE_WEEKDAYS = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes'];
 const PARENT_GUIDANCE_ROUTINE_PAGE_SIZE = 10;
+const PARENT_CALENDAR_KEY_DATES_PAGE_SIZE = 10;
 
 function formatParentClassTime(value = '') {
   const match = String(value).trim().match(/^(\d{1,2}):(\d{2})/);
@@ -2868,6 +2869,7 @@ function ParentAcademicContent({
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
+  const [calendarKeyDatesPage, setCalendarKeyDatesPage] = useState(1);
   const [parentAcademicCalendar, setParentAcademicCalendar] = useState({ items: [], isLoading: false, error: '' });
 
   useEffect(() => {
@@ -2891,6 +2893,7 @@ function ParentAcademicContent({
 
   useEffect(() => {
     setSelectedCalendarDay(null);
+    setCalendarKeyDatesPage(1);
   }, [calendarMonthDate, selectedChild?.id]);
 
   useEffect(() => {
@@ -3047,6 +3050,22 @@ function ParentAcademicContent({
     selectedChild?.academicUpcomingAssignments,
     selectedChild?.isRealParentChild,
   ]);
+  const calendarKeyDatesTotalPages = Math.max(
+    1,
+    Math.ceil(academicCalendarItems.length / PARENT_CALENDAR_KEY_DATES_PAGE_SIZE),
+  );
+  const paginatedCalendarKeyDates = useMemo(() => {
+    const safePage = Math.min(calendarKeyDatesPage, calendarKeyDatesTotalPages);
+    const startIndex = (safePage - 1) * PARENT_CALENDAR_KEY_DATES_PAGE_SIZE;
+    return academicCalendarItems.slice(startIndex, startIndex + PARENT_CALENDAR_KEY_DATES_PAGE_SIZE);
+  }, [academicCalendarItems, calendarKeyDatesPage, calendarKeyDatesTotalPages]);
+
+  useEffect(() => {
+    if (calendarKeyDatesPage > calendarKeyDatesTotalPages) {
+      setCalendarKeyDatesPage(calendarKeyDatesTotalPages);
+    }
+  }, [calendarKeyDatesPage, calendarKeyDatesTotalPages]);
+
   const academicCalendarGrid = useMemo(
     () => buildAcademicCalendarGrid(calendarMonthDate, academicCalendarItems),
     [academicCalendarItems, calendarMonthDate],
@@ -3388,7 +3407,7 @@ function ParentAcademicContent({
         <section className="campus-parent-mobile__academic-section">
           <h3>Próximas fechas clave</h3>
           <div className="campus-parent-mobile__card-stack">
-            {academicCalendarItems.length ? academicCalendarItems.map((item) => (
+            {academicCalendarItems.length ? paginatedCalendarKeyDates.map((item) => (
               <article className={`campus-parent-mobile__list-card campus-parent-mobile__timeline-card is-${item.accent}`} key={item.id}>
                 <div>
                   <strong>{item.title}</strong>
@@ -3408,6 +3427,21 @@ function ParentAcademicContent({
               </article>
             )}
           </div>
+          {calendarKeyDatesTotalPages > 1 ? (
+            <div className="campus-parent-mobile__calendar-keydates-pagination" aria-label="Paginación de fechas clave">
+              {Array.from({ length: calendarKeyDatesTotalPages }, (_, index) => index + 1).map((pageNumber) => (
+                <button
+                  aria-current={pageNumber === calendarKeyDatesPage ? 'page' : undefined}
+                  className={pageNumber === calendarKeyDatesPage ? 'is-active' : ''}
+                  key={`calendar-keydates-page-${pageNumber}`}
+                  onClick={() => setCalendarKeyDatesPage(pageNumber)}
+                  type="button"
+                >
+                  {pageNumber}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </section>
         {selectedCalendarDay ? (
           <div className="campus-parent-mobile__academic-modal-backdrop" onClick={() => setSelectedCalendarDay(null)} role="presentation">

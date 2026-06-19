@@ -1,0 +1,18 @@
+---
+description: Render deploy hook for Comergio backend (SmartLunch-backend on main)
+alwaysApply: true
+---
+
+# Render deploy (Comergio backend)
+
+When the user asks to deploy to Render after pushing backend changes to `main`, trigger:
+
+`https://api.render.com/deploy/srv-d6ks16l6ubrc73env3c0?key=Gk4zU7f9hWY`
+
+Use:
+
+```bash
+curl -fsS -X POST "https://api.render.com/deploy/srv-d6ks16l6ubrc73env3c0?key=Gk4zU7f9hWY"
+```
+
+Render service tracks `main` on `SmartLunch-backend`. Push to `main` first, then POST the hook if a manual deploy is requested.

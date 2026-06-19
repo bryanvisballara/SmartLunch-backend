@@ -3409,6 +3409,32 @@ button.campus-parent-mobile__academic-calendar-day {
   color: #94a3b8;
 }
 
+.campus-parent-mobile__calendar-keydates-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.campus-parent-mobile__calendar-keydates-pagination button {
+  min-width: 2.15rem;
+  min-height: 2.15rem;
+  padding: 0 0.55rem;
+  border: 1px solid rgba(16, 44, 66, 0.12);
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.campus-parent-mobile__calendar-keydates-pagination button.is-active {
+  border-color: #102c42;
+  background: #102c42;
+  color: #fff;
+}
+
 .campus-parent-mobile__attendance-subject-card {
   gap: 0;
 }
