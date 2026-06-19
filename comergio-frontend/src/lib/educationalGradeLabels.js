@@ -77,3 +77,20 @@ export function resolveEducationalGradeLabel(course = {}) {
 export function isEducationalGradeLabel(value) {
   return Boolean(formatEducationalGradeLabel(value));
 }
+
+export function isRawInternalGradeToken(value) {
+  const token = String(value || '').trim();
+  if (!token || /\s/.test(token)) {
+    return false;
+  }
+
+  if (/^[a-z0-9]+:[a-z0-9]+(?::.+)?$/i.test(token)) {
+    return true;
+  }
+
+  if (/^[a-z]+_\d+$/i.test(token)) {
+    return true;
+  }
+
+  return token === token.toUpperCase() && token.includes('_');
+}

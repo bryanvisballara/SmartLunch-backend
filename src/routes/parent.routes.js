@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const { getFeeGradeAliases, findGradeFeeSetting } = require('../utils/feeGradeMatching');
+const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -1863,6 +1864,57 @@ function buildSectionLabelFromCourseToken(grade, courseToken) {
   return normalizedToken;
 }
 
+function buildParentStudentAcademicMatchValues(student = {}) {
+  const grade = normalizeText(student.grade);
+  const course = normalizeText(student.course);
+  const courseCompact = course.replace(/\s+/g, '');
+  const courseParts = course.split(':').map((part) => part.trim()).filter(Boolean);
+  const gradeKeyFromCourse = courseParts.length >= 2 ? `${courseParts[0].toLowerCase()}:${courseParts[1]}` : '';
+  const courseToken = courseParts.length >= 3
+    ? courseParts.slice(2).join(':')
+    : (courseParts.length === 2 ? courseParts[1] : '');
+  const courseLabel = buildSectionLabelFromCourseToken(grade, courseToken);
+  const section = grade && courseCompact.toLowerCase().startsWith(grade.replace(/\s+/g, '').toLowerCase())
+    ? courseCompact.slice(grade.replace(/\s+/g, '').length)
+    : '';
+  const gradeValues = Array.from(new Set(
+    [grade, gradeKeyFromCourse, courseToken, courseLabel, course]
+      .flatMap((item) => getFeeGradeAliases(item))
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  ));
+  const courseValues = Array.from(new Set([
+    course,
+    courseCompact,
+    section,
+    courseLabel,
+    courseToken,
+    ...(courseParts.length >= 2 ? [courseParts.slice(1).join(':'), courseParts.slice(1).join('')] : []),
+  ].map((item) => String(item || '').trim()).filter(Boolean)));
+  const gradeCompact = grade.replace(/\s+/g, '');
+  const courseTitleValues = Array.from(new Set([
+    course.includes(':') ? '' : course,
+    course.includes(':') ? '' : courseCompact,
+    section && gradeCompact ? `${gradeCompact}${section}` : '',
+    courseLabel,
+    courseToken,
+    courseParts.length >= 2 ? `${gradeCompact}${courseParts.slice(1).join('')}` : '',
+    courseParts.length >= 2 ? courseParts.slice(1).join('').toUpperCase() : '',
+  ].map((item) => String(item || '').trim()).filter((item) => item.length > 1)));
+  const courseTitleMatchers = courseTitleValues
+    .map((value) => buildFlexibleCompactRegExp(value))
+    .filter(Boolean);
+
+  return {
+    grade,
+    course,
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+    courseTitleMatchers,
+  };
+}
+
 function buildLookupMap(items = [], { keyField = 'key', labelField = 'label' } = {}) {
   const map = new Map();
 
@@ -3174,40 +3226,14 @@ router.get('/portal/overview', async (req, res) => {
 
     const selectedStudent = children.find((child) => String(child._id) === selectedStudentId) || null;
 
-    const selectedStudentGrade = String(selectedStudent?.grade || '').trim();
-    const selectedStudentCourse = String(selectedStudent?.course || '').trim();
-    const selectedStudentCourseCompact = selectedStudentCourse.replace(/\s+/g, '');
-    const selectedStudentCourseParts = selectedStudentCourse.split(':').map((part) => part.trim()).filter(Boolean);
-    const selectedStudentGradeKeyFromCourse = selectedStudentCourseParts.length >= 2
-      ? `${selectedStudentCourseParts[0].toLowerCase()}:${selectedStudentCourseParts[1]}`
-      : '';
-    const selectedStudentCourseToken = selectedStudentCourseParts.length >= 3 ? selectedStudentCourseParts.slice(2).join(':') : '';
-    const selectedStudentCourseLabel = buildSectionLabelFromCourseToken(selectedStudentGrade, selectedStudentCourseToken);
-    const selectedStudentSection = selectedStudentGrade && selectedStudentCourseCompact.toLowerCase().startsWith(selectedStudentGrade.replace(/\s+/g, '').toLowerCase())
-      ? selectedStudentCourseCompact.slice(selectedStudentGrade.replace(/\s+/g, '').length)
-      : '';
-    const selectedStudentGradeValues = Array.from(new Set(
-      [selectedStudentGrade, selectedStudentGradeKeyFromCourse]
-        .flatMap((item) => getFeeGradeAliases(item))
-        .map((item) => String(item || '').trim())
-        .filter(Boolean)
-    ));
-    const selectedStudentCourseValues = Array.from(new Set([
-      selectedStudentCourse,
-      selectedStudentCourseCompact,
-      selectedStudentSection,
-      selectedStudentCourseLabel,
-    ].map((item) => String(item || '').trim()).filter(Boolean)));
-    const selectedStudentGradeCompact = selectedStudentGrade.replace(/\s+/g, '');
-    const selectedStudentCourseTitleValues = Array.from(new Set([
-      selectedStudentCourse.includes(':') ? '' : selectedStudentCourse,
-      selectedStudentCourse.includes(':') ? '' : selectedStudentCourseCompact,
-      selectedStudentSection && selectedStudentGradeCompact ? `${selectedStudentGradeCompact}${selectedStudentSection}` : '',
-      selectedStudentCourseLabel,
-    ].map((item) => String(item || '').trim()).filter((item) => item.length > 1)));
-    const selectedStudentCourseTitleMatchers = selectedStudentCourseTitleValues
-      .map((value) => buildFlexibleCompactRegExp(value))
-      .filter(Boolean);
+    const {
+      grade: selectedStudentGrade,
+      course: selectedStudentCourse,
+      gradeValues: selectedStudentGradeValues,
+      courseValues: selectedStudentCourseValues,
+      courseTitleValues: selectedStudentCourseTitleValues,
+      courseTitleMatchers: selectedStudentCourseTitleMatchers,
+    } = buildParentStudentAcademicMatchValues(selectedStudent || {});
 
     const [day, week, month, recentTopups, recentOrders, academicContentCourses, academicGradeCourses, academicGradeEntryRefs, academicStructure] = await Promise.all([
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfToday() }),
@@ -3302,6 +3328,11 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleValues: selectedStudentCourseTitleValues,
     });
     const parentGradingScale = resolveParentGradingScaleForGrade(academicStructure, selectedStudentGradeValues);
+    const childrenWithDisplayGrade = children.map((child) => ({
+      ...child,
+      displayGrade: resolveStudentDisplayGrade(child, academicStructure),
+    }));
+    const selectedStudentWithDisplayGrade = childrenWithDisplayGrade.find((child) => String(child._id) === selectedStudentId) || null;
     const academicGrades = await buildParentAcademicGradebook({
       schoolId,
       studentId: selectedStudentObjectId,
@@ -3339,11 +3370,11 @@ router.get('/portal/overview', async (req, res) => {
         name: parentName,
         username: parentUsername,
       },
-      children,
+      children: childrenWithDisplayGrade,
       psychologyCases: psychologyCases.map(serializeParentPsychologyCase),
       coexistenceObservations: coexistenceObservations.map(serializeParentCoexistenceObservation),
       selectedStudentId,
-      selectedStudent,
+      selectedStudent: selectedStudentWithDisplayGrade,
       spending: {
         day,
         week,
@@ -3655,42 +3686,11 @@ router.get('/portal/academic-calendar', async (req, res) => {
     }
 
     const { monthStart, monthEnd, monthKey } = getMonthRange(req.query.month);
-    const grade = normalizeText(student.grade);
-    const course = normalizeText(student.course);
-    const courseCompact = course.replace(/\s+/g, '');
-    const courseParts = course.split(':').map((part) => part.trim()).filter(Boolean);
-    const gradeKeyFromCourse = courseParts.length >= 2 ? `${courseParts[0].toLowerCase()}:${courseParts[1]}` : '';
-    const courseToken = courseParts.length >= 3 ? courseParts.slice(2).join(':') : '';
-    const courseLabel = buildSectionLabelFromCourseToken(grade, courseToken);
-    const section = grade && courseCompact.toLowerCase().startsWith(grade.replace(/\s+/g, '').toLowerCase())
-      ? courseCompact.slice(grade.replace(/\s+/g, '').length)
-      : '';
-    const gradeValues = Array.from(new Set([grade, gradeKeyFromCourse].map((item) => normalizeText(item)).filter(Boolean)));
-    const courseValues = Array.from(new Set([course, courseCompact, section, courseLabel].map((item) => normalizeText(item)).filter(Boolean)));
-    const gradeCompact = grade.replace(/\s+/g, '');
-    const courseTitleValues = Array.from(new Set([
-      course.includes(':') ? '' : course,
-      course.includes(':') ? '' : courseCompact,
-      section && gradeCompact ? `${gradeCompact}${section}` : '',
-      courseLabel,
-    ].map((item) => normalizeText(item)).filter((item) => item.length > 1)));
-    const courseTitleMatchers = courseTitleValues.map((value) => buildFlexibleCompactRegExp(value)).filter(Boolean);
-    const courseQuery = {
-      schoolId,
-      status: 'active',
-      ...(gradeValues.length ? { studentGradeKey: { $in: gradeValues } } : {}),
-      ...(courseValues.length || courseTitleMatchers.length ? {
-        $or: [
-          ...(courseValues.length ? [{ section: { $in: courseValues } }] : []),
-          ...courseTitleMatchers.map((matcher) => ({ title: matcher })),
-        ],
-      } : {}),
-    };
-
-    const courses = await CampusCourse.find(courseQuery)
-      .select('title subject section studentGradeKey')
-      .lean();
-    const courseIds = courses.map((item) => item._id).filter(Boolean);
+    const {
+      gradeValues,
+      courseValues,
+      courseTitleValues,
+    } = buildParentStudentAcademicMatchValues(student);
     const assignmentQuery = {
       schoolId,
       status: 'published',
@@ -3700,6 +3700,36 @@ router.get('/portal/academic-calendar', async (req, res) => {
         ...(gradeValues.length ? [{ scope: 'grades', targetGradeKeys: { $in: gradeValues } }] : []),
       ],
     };
+
+    const [academicStructure, academicGradeCourses] = await Promise.all([
+      AcademicStructure.findOne({ schoolId }).lean(),
+      gradeValues.length
+        ? CampusCourse.find({
+          schoolId,
+          status: 'active',
+          studentGradeKey: { $in: gradeValues },
+        })
+          .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+          .sort({ title: 1 })
+          .lean()
+        : Promise.resolve([]),
+    ]);
+
+    const parentGradebookCourses = buildParentGradebookCoursesFromStructure({
+      academicStructure,
+      gradeValues,
+      courseValues,
+      courseTitleValues,
+      courses: academicGradeCourses,
+      gradeEntryCourseIds: new Set(),
+    });
+    const courseIds = await resolveParentUpcomingAssignmentCourseIds({
+      schoolId,
+      courses: parentGradebookCourses,
+      gradeValues,
+      courseValues,
+      courseTitleValues,
+    });
 
     if (!courseIds.length) {
       const assignments = await AcademicCalendarAssignment.find(assignmentQuery)
@@ -3736,7 +3766,9 @@ router.get('/portal/academic-calendar', async (req, res) => {
       student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
       month: monthKey,
       items: [
-        ...posts.map(serializeParentAcademicCalendarPost),
+        ...posts
+          .filter((post) => isParentEvaluativePostType(post.type))
+          .map(serializeParentAcademicCalendarPost),
         ...assignments.map(serializeParentAcademicCalendarAssignment),
       ].filter((item) => item.id && item.date).sort((left, right) => new Date(left.date) - new Date(right.date)),
     });

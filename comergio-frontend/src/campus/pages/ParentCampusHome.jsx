@@ -31,6 +31,7 @@ import { getParentNursingRecords } from '../../services/nursing.service';
 import { getParentPsychologyRecords } from '../../services/psychology.service';
 import { getSchoolDisplayName } from '../../lib/schools';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { formatEducationalGradeLabel, isRawInternalGradeToken } from '../../lib/educationalGradeLabels';
 import { readParentNotificationLaunchParams } from '../../lib/parentNotificationNavigation';
 
 const parentAppSections = [
@@ -282,6 +283,10 @@ function getParentSubjectCardColor(subject = {}) {
   const explicitColor = normalizePerformanceHexColor(subject.color || subject.performanceLevel?.color);
   if (explicitColor) {
     return explicitColor;
+  }
+
+  if (subject.finalAverage === null || subject.finalAverage === undefined || subject.finalAverage === '') {
+    return '';
   }
 
   const score = Number(subject.finalAverage);
@@ -661,13 +666,33 @@ function buildParentSectionLabelFromCourseToken(grade, courseToken) {
   return normalizedToken;
 }
 
+function humanizeGradeToken(value) {
+  const token = String(value || '').trim();
+  if (!token || token.includes(':')) {
+    return '';
+  }
+
+  return token
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/(^|\s)\S/g, (match) => match.toUpperCase());
+}
+
 function buildParentStudentDisplayGrade(child = {}) {
   const grade = String(child.grade || '').trim();
   const course = String(child.course || '').trim();
   const fallback = grade || 'Sin grado';
 
+  for (const candidate of [course, grade]) {
+    const formatted = formatEducationalGradeLabel(candidate);
+    if (formatted) {
+      return formatted;
+    }
+  }
+
   if (!course) {
-    return fallback;
+    return humanizeGradeToken(grade) || fallback;
   }
 
   const courseParts = course.split(':').map((part) => part.trim()).filter(Boolean);
@@ -680,10 +705,28 @@ function buildParentStudentDisplayGrade(child = {}) {
   }
 
   if (course.includes(':')) {
-    return fallback;
+    return humanizeGradeToken(grade) || fallback;
   }
 
-  return course;
+  return humanizeGradeToken(course) || course;
+}
+
+function getParentStudentGradeLabel(child = {}) {
+  const grade = String(child?.grade || '').trim();
+  const course = String(child?.course || '').trim();
+  const computed = buildParentStudentDisplayGrade({ ...child, grade, course });
+  const fromApi = String(child?.displayGrade || '').trim();
+
+  if (
+    fromApi
+    && !isRawInternalGradeToken(fromApi)
+    && fromApi !== grade
+    && fromApi !== course
+  ) {
+    return fromApi;
+  }
+
+  return computed || grade || 'Sin grado';
 }
 
 function buildParentChildFromOverview(child = {}, overview = {}) {
@@ -703,7 +746,7 @@ function buildParentChildFromOverview(child = {}, overview = {}) {
     name,
     grade,
     course,
-    displayGrade: buildParentStudentDisplayGrade({ ...child, grade, course }),
+    displayGrade: getParentStudentGradeLabel({ ...child, grade, course }),
     imageUrl: String(child.imageUrl || '').trim(),
     thumbUrl: String(child.thumbUrl || '').trim(),
     relationship: 'Alumno vinculado',
@@ -897,6 +940,10 @@ function resolvePerformanceHeroClassName(performanceLevel = null, average = null
   const levelKey = String(performanceLevel?.key || '').trim().toLowerCase();
   if (levelKey && parentPerformanceHeroClassKeys.has(levelKey)) {
     return `is-performance-${levelKey}`;
+  }
+
+  if (average === null || average === undefined || average === '') {
+    return '';
   }
 
   const numericAverage = Number(average);
@@ -2094,7 +2141,7 @@ function ParentCafeteriaContent({
             <div className="parent-student-toggle-copy">
               <p className="meta">Alumno seleccionado</p>
               <h3>{selectedChild.name}</h3>
-              <p>{selectedChild.displayGrade || selectedChild.grade}</p>
+              <p>{getParentStudentGradeLabel(selectedChild)}</p>
             </div>
             <span className={`chevron ${showChildOptions ? 'open' : ''}`}>⌄</span>
           </button>
@@ -2110,7 +2157,7 @@ function ParentCafeteriaContent({
                 {renderStudentAvatar(child, 'is-small')}
                 <span className="parent-student-option-copy">
                   <strong>{child.name}</strong>
-                  <span>{child.displayGrade || child.grade}</span>
+                  <span>{getParentStudentGradeLabel(child)}</span>
                 </span>
               </button>
             ))}
@@ -2698,7 +2745,7 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
           <div className="parent-student-toggle-copy">
             <p className="meta">Alumno seleccionado</p>
             <h3>{selectedChild.name}</h3>
-            <p>{selectedChild.displayGrade || selectedChild.grade}</p>
+            <p>{getParentStudentGradeLabel(selectedChild)}</p>
           </div>
           <span className={`chevron ${isOpen ? 'open' : ''}`}>⌄</span>
         </button>
@@ -2714,7 +2761,7 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
               {renderStudentAvatar(child, 'is-small')}
               <span className="parent-student-option-copy">
                 <strong>{child.name}</strong>
-                <span>{child.displayGrade || child.grade}</span>
+                <span>{getParentStudentGradeLabel(child)}</span>
               </span>
             </button>
           ))}
@@ -2780,7 +2827,13 @@ function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpe
   );
 }
 
-function ParentAcademicContent({ activeView, selectedChild, academicSchedule = null, refreshKey = 0 }) {
+function ParentAcademicContent({
+  activeView,
+  selectedChild,
+  academicSchedule = null,
+  refreshKey = 0,
+  isPerformanceLoading = false,
+}) {
   const academicWorkspace = useMemo(() => (
     selectedChild?.isRealParentChild
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
@@ -2967,7 +3020,33 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
     };
   }, [guidanceRoutineLog.isOpen, guidanceRoutineLog.page, selectedChild?.id, selectedChild?.isRealParentChild]);
 
-  const academicCalendarItems = selectedChild?.isRealParentChild ? parentAcademicCalendar.items : academicWorkspace.calendar;
+  const academicCalendarItems = useMemo(() => {
+    if (!selectedChild?.isRealParentChild) {
+      return academicWorkspace.calendar;
+    }
+
+    const mergedById = new Map();
+    [...(parentAcademicCalendar.items || []), ...(selectedChild.academicUpcomingAssignments || [])].forEach((item) => {
+      const itemId = String(item?.id || '').trim();
+      if (!itemId) {
+        return;
+      }
+
+      mergedById.set(itemId, {
+        ...item,
+        dateLabel: item.dateLabel || formatAcademicCalendarDate(item.date || item.dueAt || item.scheduledClassDate),
+      });
+    });
+
+    return Array.from(mergedById.values()).sort(
+      (left, right) => new Date(left.date || left.dueAt || 0) - new Date(right.date || right.dueAt || 0),
+    );
+  }, [
+    academicWorkspace.calendar,
+    parentAcademicCalendar.items,
+    selectedChild?.academicUpcomingAssignments,
+    selectedChild?.isRealParentChild,
+  ]);
   const academicCalendarGrid = useMemo(
     () => buildAcademicCalendarGrid(calendarMonthDate, academicCalendarItems),
     [academicCalendarItems, calendarMonthDate],
@@ -3007,12 +3086,19 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
     : null;
   const academicPerformanceAverage = overallGradeAverage ?? (selectedChild?.isRealParentChild ? null : Math.round(Number(selectedChild.averageScore || 0) * 20));
   const academicPerformanceLevel = resolveAcademicPerformanceLevel(selectedChild, academicPerformanceAverage);
-  const performanceHeroStyle = buildPerformanceHeroStyle(
-    academicPerformanceLevel,
-    academicPerformanceAverage,
-    selectedChild?.academicGradingScale,
-  );
-  const performanceHeroClassName = resolvePerformanceHeroClassName(academicPerformanceLevel, academicPerformanceAverage);
+  const resolvedPerformanceLevel = academicPerformanceAverage !== null && academicPerformanceAverage !== undefined
+    ? academicPerformanceLevel
+    : null;
+  const performanceHeroStyle = isPerformanceLoading
+    ? undefined
+    : buildPerformanceHeroStyle(
+      resolvedPerformanceLevel,
+      academicPerformanceAverage,
+      selectedChild?.academicGradingScale,
+    );
+  const performanceHeroClassName = isPerformanceLoading
+    ? ''
+    : resolvePerformanceHeroClassName(resolvedPerformanceLevel, academicPerformanceAverage);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const upcomingAssignments = selectedChild?.isRealParentChild
@@ -3072,12 +3158,24 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
         >
           <div>
             <span className="campus-parent-mobile__eyebrow">Desempeño</span>
-            <h2>{academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota'}</h2>
-            <p>{getGradeTextLabel(academicPerformanceAverage, academicPerformanceLevel)}</p>
+            <h2>
+              {isPerformanceLoading
+                ? 'Cargando promedio y ranking del curso'
+                : (academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota')}
+            </h2>
+            <p>
+              {isPerformanceLoading
+                ? 'CONSULTANDO CALIFICACIONES'
+                : getGradeTextLabel(academicPerformanceAverage, resolvedPerformanceLevel)}
+            </p>
           </div>
           <div className="campus-parent-mobile__performance-rank">
             <span>Ranking del curso</span>
-            <strong>{formatAcademicRankingLabel(academicWorkspace.ranking, sortedGradebookSubjects)}</strong>
+            <strong>
+              {isPerformanceLoading
+                ? 'Cargando...'
+                : formatAcademicRankingLabel(academicWorkspace.ranking, sortedGradebookSubjects)}
+            </strong>
           </div>
         </article>
         <section className="campus-parent-mobile__performance-kpi-grid" aria-label="Indicadores académicos del alumno">
@@ -3516,7 +3614,7 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
             <article className="campus-parent-mobile__empty-state">
               <span className="campus-parent-mobile__eyebrow">{selectedChild.name}</span>
               <h3>Sin horario publicado</h3>
-              <p>Cuando el colegio asigne clases al curso {selectedChild.displayGrade || selectedChild.course || selectedChild.grade}, apareceran aqui.</p>
+              <p>Cuando el colegio asigne clases al curso {getParentStudentGradeLabel(selectedChild)}, apareceran aqui.</p>
             </article>
           )}
         </section>
@@ -5012,7 +5110,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
           >
             <div className="campus-parent-mobile__academic-drawer-head">
               <strong>Académico</strong>
-              <span>{selectedChild.name} · {selectedChild.displayGrade || selectedChild.grade}</span>
+              <span>{selectedChild.name} · {getParentStudentGradeLabel(selectedChild)}</span>
             </div>
             <nav className="campus-parent-mobile__academic-drawer-nav">
               {academicMenuItems.map((item) => (
@@ -5164,6 +5262,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             <ParentAcademicContent
               academicSchedule={resolvedAcademicSchedule}
               activeView={activeAcademicView}
+              isPerformanceLoading={parentOverviewLoading}
               refreshKey={academicRefreshCount}
               selectedChild={selectedChild}
             />

@@ -1107,7 +1107,7 @@ button.campus-coordination__selected-item.is-selected {
 }
 
 .campus-parent-mobile-app.has-parent-portal-header .campus-parent-mobile__content.is-home {
-  margin-top: 2.5rem;
+  margin-top: 0;
 }
 
 .campus-parent-mobile-app.has-parent-portal-header .campus-parent-mobile__content.is-nursing {
@@ -1117,7 +1117,7 @@ button.campus-coordination__selected-item.is-selected {
 .campus-parent-mobile-app.has-parent-portal-header .campus-parent-mobile__content.is-home .campus-parent-mobile__feed > .campus-parent-mobile__post:first-child .campus-parent-mobile__post-head {
   position: relative;
   z-index: 5;
-  padding-top: 0.4rem;
+  padding-top: 0.15rem;
   padding-bottom: 0.5rem;
 }
 
@@ -1149,7 +1149,7 @@ button.campus-coordination__selected-item.is-selected {
 }
 
 .campus-parent-mobile__portal-shell .parent-student-switcher {
-  margin-bottom: 0.85rem;
+  margin-bottom: 0;
 }
 
 .campus-parent-mobile-app.is-cafeteria-section .campus-parent-mobile__content > .parent-mobile-page {
