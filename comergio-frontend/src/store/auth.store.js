@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { resetQueryCache } from '../lib/queryClient.js';
 
 function safeParse(rawValue, fallback = null) {
   if (!rawValue) {
@@ -21,6 +22,12 @@ const useAuthStore = create((set) => ({
   user: safeParse(savedUserRaw, null),
   currentStore: safeParse(savedStoreRaw, null),
   setAuth: ({ token, refreshToken, user }) => {
+    const previousUserId = String(useAuthStore.getState().user?.id || '');
+    const nextUserId = String(user?.id || '');
+    if (previousUserId !== nextUserId) {
+      resetQueryCache();
+    }
+
     const assignedStore = user?.role === 'vendor' ? user?.assignedStore || null : null;
     localStorage.setItem('token', token);
     localStorage.setItem('refreshToken', String(refreshToken || ''));
@@ -44,6 +51,7 @@ const useAuthStore = create((set) => ({
     set({ currentStore: store || null });
   },
   logout: () => {
+    resetQueryCache();
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');

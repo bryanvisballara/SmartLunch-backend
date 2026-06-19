@@ -1493,6 +1493,171 @@ function getParentCalendarPostDate(post = {}) {
   return value || post.dueAt || post.scheduledClassDate || post.publishedAt || post.createdAt || null;
 }
 
+function isParentEvaluativePostType(value = '') {
+  const normalizedType = normalizeText(value).toLowerCase();
+  return Boolean(normalizedType) && !['aviso', 'announcement', 'material'].includes(normalizedType);
+}
+
+function buildParentSectionMatchValues(gradeValues = [], courseValues = [], courseTitleValues = []) {
+  const values = new Set();
+  const addValue = (value) => {
+    const normalized = normalizeText(value);
+    if (!normalized) {
+      return;
+    }
+
+    values.add(normalized);
+    values.add(normalized.replace(/\s+/g, ''));
+    values.add(normalized.replace(/^:/, ''));
+    values.add(normalized.replace(/^:/, '').toUpperCase());
+  };
+
+  [...courseValues, ...courseTitleValues].forEach(addValue);
+
+  const primaryGrade = normalizeText((Array.isArray(gradeValues) ? gradeValues : [])[0]).replace(/\s+/g, '');
+  [...courseValues, ...courseTitleValues].forEach((value) => {
+    const compact = normalizeText(value).replace(/\s+/g, '');
+    if (!compact.includes(':') || !primaryGrade) {
+      return;
+    }
+
+    const parts = compact.split(':').map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2 && parts[0].toLowerCase() === primaryGrade.toLowerCase()) {
+      addValue(parts.slice(1).join(''));
+    }
+  });
+
+  return Array.from(values).filter(Boolean);
+}
+
+async function resolveParentUpcomingAssignmentCourseIds({
+  schoolId,
+  courses = [],
+  gradeValues = [],
+  courseValues = [],
+  courseTitleValues = [],
+}) {
+  const courseIdMap = new Map();
+
+  (Array.isArray(courses) ? courses : []).forEach((course) => {
+    const objectId = toObjectId(course?._id || course?.id);
+    if (objectId) {
+      courseIdMap.set(String(objectId), objectId);
+    }
+  });
+
+  const gradeAliasSet = buildGradeAliasSet(gradeValues);
+  if (!gradeAliasSet.size) {
+    return Array.from(courseIdMap.values());
+  }
+
+  const sectionValues = buildParentSectionMatchValues(gradeValues, courseValues, courseTitleValues);
+  const titleMatchers = [...sectionValues, ...(Array.isArray(courseTitleValues) ? courseTitleValues : [])]
+    .map((value) => buildFlexibleCompactRegExp(value))
+    .filter(Boolean);
+  const filters = [];
+
+  if (sectionValues.length) {
+    filters.push({ section: { $in: sectionValues } });
+  }
+
+  titleMatchers.forEach((matcher) => {
+    filters.push({ title: matcher });
+  });
+
+  const matchedCourses = await CampusCourse.find({
+    schoolId,
+    status: 'active',
+    studentGradeKey: { $in: Array.from(gradeAliasSet) },
+    ...(filters.length ? { $or: filters } : {}),
+  })
+    .select('_id')
+    .lean();
+
+  matchedCourses.forEach((course) => {
+    const objectId = toObjectId(course?._id);
+    if (objectId) {
+      courseIdMap.set(String(objectId), objectId);
+    }
+  });
+
+  return Array.from(courseIdMap.values());
+}
+
+async function buildParentUpcomingAssignments({
+  schoolId,
+  courses = [],
+  gradebook = [],
+  gradeValues = [],
+  courseValues = [],
+  courseTitleValues = [],
+}) {
+  const courseIds = await resolveParentUpcomingAssignmentCourseIds({
+    schoolId,
+    courses,
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+  });
+
+  if (!courseIds.length) {
+    return [];
+  }
+
+  const todayStart = startOfDayLocal(new Date());
+  const gradedKeys = new Set();
+
+  (Array.isArray(gradebook) ? gradebook : []).forEach((subject) => {
+    const subjectName = normalizeText(subject?.name).toLowerCase();
+    (subject?.periods || []).forEach((period) => {
+      (period?.components || []).forEach((component) => {
+        (component?.evaluations || []).forEach((evaluation) => {
+          if (evaluation?.score !== null && evaluation?.score !== undefined) {
+            gradedKeys.add(`${subjectName}::${normalizeText(evaluation?.title).toLowerCase()}`);
+          }
+        });
+      });
+    });
+  });
+
+  const posts = await CampusPost.find({
+    schoolId,
+    courseId: { $in: courseIds },
+    status: 'published',
+  })
+    .populate('courseId', 'title subject section studentGradeKey')
+    .sort({ scheduledClassDate: 1, dueAt: 1, publishedAt: -1, createdAt: -1 })
+    .lean();
+
+  return posts
+    .filter((post) => isParentEvaluativePostType(post.type))
+    .map((post) => serializeParentAcademicCalendarPost(post))
+    .filter((item) => item.id)
+    .filter((item) => {
+      const subjectName = normalizeText(item.subject).toLowerCase();
+      const titleKey = normalizeText(item.title).toLowerCase();
+      const isGraded = gradedKeys.has(`${subjectName}::${titleKey}`);
+      const itemDate = item.date ? startOfDayLocal(new Date(item.date)) : null;
+      const hasValidDate = itemDate && !Number.isNaN(itemDate.getTime());
+
+      if (!hasValidDate) {
+        return !isGraded;
+      }
+
+      if (itemDate.getTime() >= todayStart.getTime()) {
+        return true;
+      }
+
+      return !isGraded;
+    })
+    .sort((left, right) => {
+      const leftTime = left.date ? new Date(left.date).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightTime = right.date ? new Date(right.date).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftTime - rightTime;
+    })
+    .slice(0, 12);
+}
+
 function getParentCalendarAccent(type = '') {
   const normalizedType = normalizeText(type).toLowerCase();
   if (/quiz|examen|evaluaci/.test(normalizedType)) return 'warn';
@@ -3130,6 +3295,15 @@ router.get('/portal/overview', async (req, res) => {
       currentAverage: academicAverage,
       gradingScale: parentGradingScale,
     });
+    const academicPerformanceLevel = resolveParentPerformanceLevel(academicAverage, parentGradingScale);
+    const academicUpcomingAssignments = await buildParentUpcomingAssignments({
+      schoolId,
+      courses: parentGradebookCourses,
+      gradebook: academicGrades,
+      gradeValues: selectedStudentGradeValues,
+      courseValues: selectedStudentCourseValues,
+      courseTitleValues: selectedStudentCourseTitleValues,
+    });
     const academicStructureScheduleCourses = Array.isArray(academicStructureSchedule?.courses) ? academicStructureSchedule.courses : [];
     const academicStructureScheduleSlots = Array.isArray(academicStructureSchedule?.slots) ? academicStructureSchedule.slots : [];
 
@@ -3210,6 +3384,14 @@ router.get('/portal/overview', async (req, res) => {
       })).filter((course) => course.periods.some((period) => period.topics.length > 0)),
       academicGrades,
       academicRanking,
+      academicPerformanceLevel: academicPerformanceLevel ? {
+        key: academicPerformanceLevel.key,
+        label: academicPerformanceLevel.label,
+        color: academicPerformanceLevel.color,
+        minScore: academicPerformanceLevel.minScore,
+        maxScore: academicPerformanceLevel.maxScore,
+      } : null,
+      academicUpcomingAssignments,
       academicSchedule: {
         gradeKey: selectedStudentGrade,
         section: selectedStudentCourse,

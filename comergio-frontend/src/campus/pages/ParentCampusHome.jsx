@@ -675,6 +675,10 @@ function buildParentChildFromOverview(child = {}, overview = {}) {
     academicContent: selectedOverviewChildId === childId ? overview.academicContent || [] : [],
     academicGrades: selectedOverviewChildId === childId && Array.isArray(overview.academicGrades) ? overview.academicGrades : [],
     academicRanking: selectedOverviewChildId === childId ? overview.academicRanking || null : null,
+    academicPerformanceLevel: selectedOverviewChildId === childId ? overview.academicPerformanceLevel || null : null,
+    academicUpcomingAssignments: selectedOverviewChildId === childId && Array.isArray(overview.academicUpcomingAssignments)
+      ? overview.academicUpcomingAssignments
+      : [],
     isRealParentChild: true,
   };
 }
@@ -763,7 +767,11 @@ function getParentAttendanceCardColor(rate) {
   return '#b42318';
 }
 
-function getGradeTextLabel(value) {
+function getGradeTextLabel(value, performanceLevel = null) {
+  if (performanceLevel?.label) {
+    return String(performanceLevel.label).toUpperCase();
+  }
+
   if (value === null || value === undefined || value === '') {
     return 'SIN NOTA';
   }
@@ -774,6 +782,33 @@ function getGradeTextLabel(value) {
   if (numericValue >= 80) return 'ALTO';
   if (numericValue >= 70) return 'BÁSICO';
   return 'BAJO';
+}
+
+function buildPerformanceHeroStyle(performanceLevel = null, average = null) {
+  const explicitColor = String(performanceLevel?.color || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(explicitColor)) {
+    return { background: `linear-gradient(135deg, ${explicitColor} 0%, #102c42 100%)` };
+  }
+
+  const fallbackColor = getParentSubjectCardColor({ finalAverage: average });
+  if (/^#[0-9a-f]{6}$/i.test(fallbackColor)) {
+    return { background: `linear-gradient(135deg, ${fallbackColor} 0%, #102c42 100%)` };
+  }
+
+  return undefined;
+}
+
+function mapParentUpcomingAssignmentRow(item) {
+  const normalizedType = normalizeLookupKey(item.type || item.title);
+  return {
+    id: item.id,
+    title: item.title,
+    subtitle: item.subject || item.courseTitle || 'Actividad académica',
+    meta: item.dateLabel || formatAcademicCalendarDate(item.date || item.dueAt),
+    detail: item.detail || 'Actividad publicada por el docente.',
+    type: item.type || 'Asignación',
+    tone: /quiz|examen|evaluaci/.test(normalizedType) ? 'high' : 'medium',
+  };
 }
 
 function formatAcademicRankingLabel(ranking, gradebook = []) {
@@ -2843,38 +2878,35 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
     )
     : null;
   const academicPerformanceAverage = overallGradeAverage ?? (selectedChild?.isRealParentChild ? null : Math.round(Number(selectedChild.averageScore || 0) * 20));
+  const academicPerformanceLevel = selectedChild?.academicPerformanceLevel || null;
+  const performanceHeroStyle = buildPerformanceHeroStyle(academicPerformanceLevel, academicPerformanceAverage);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const weeklyAssignedActivities = [
-    ...selectedChild.tasks.map((task) => ({
-      id: task.id,
-      title: task.title,
-      subtitle: task.course,
-      meta: task.dueLabel,
-      detail: task.meta,
-      type: /quiz/i.test(task.title) ? 'Quiz' : /taller/i.test(task.title) ? 'Taller' : 'Tarea',
-      tone: task.urgency,
-    })),
-    ...academicCalendarItems
-      .filter((item) => {
-        const itemDate = new Date(item.date || item.dueAt || item.scheduledAt || '');
-        const normalizedType = normalizeLookupKey(item.type || item.title);
-        return !Number.isNaN(itemDate.getTime())
-          && itemDate >= todayStart
-          && /tarea|quiz|taller|examen|evaluacion|evaluaci|proyecto|entrega|actividad/.test(normalizedType);
-      })
-      .sort((left, right) => new Date(left.date || left.dueAt || 0) - new Date(right.date || right.dueAt || 0))
-      .slice(0, 5)
-      .map((item) => ({
-        id: `calendar-${item.id}`,
-        title: item.title,
-        subtitle: item.subject || item.courseTitle || 'Actividad académica',
-        meta: item.dateLabel || formatAcademicCalendarDate(item.date || item.dueAt),
-        detail: item.detail || 'Actividad académica programada.',
-        type: item.type,
-        tone: /quiz|examen|evaluaci/.test(normalizeLookupKey(item.type || item.title)) ? 'high' : 'medium',
+  const upcomingAssignments = selectedChild?.isRealParentChild
+    ? (selectedChild.academicUpcomingAssignments || []).map(mapParentUpcomingAssignmentRow)
+    : [
+      ...selectedChild.tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        subtitle: task.course,
+        meta: task.dueLabel,
+        detail: task.meta,
+        type: /quiz/i.test(task.title) ? 'Quiz' : /taller/i.test(task.title) ? 'Taller' : 'Tarea',
+        tone: task.urgency,
       })),
-  ];
+      ...academicCalendarItems
+        .filter((item) => {
+          const itemDate = new Date(item.date || item.dueAt || item.scheduledAt || '');
+          const normalizedType = normalizeLookupKey(item.type || item.title);
+          return !Number.isNaN(itemDate.getTime())
+            && itemDate >= todayStart
+            && /tarea|quiz|taller|examen|evaluacion|evaluaci|proyecto|entrega|actividad/.test(normalizedType);
+        })
+        .sort((left, right) => new Date(left.date || left.dueAt || 0) - new Date(right.date || right.dueAt || 0))
+        .slice(0, 5)
+        .map(mapParentUpcomingAssignmentRow),
+    ];
+  const weeklyAssignedActivities = upcomingAssignments;
   const recentGradeEntries = sortedGradebookSubjects
     .flatMap((subject) => (subject.periods || []).flatMap((period) => (period.components || []).flatMap((component) => (component.evaluations || [])
       .filter((evaluation) => evaluation.score !== null && evaluation.score !== undefined)
@@ -2901,11 +2933,11 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
   if (effectiveActiveView === 'academic-performance') {
     return (
       <section className="campus-parent-mobile__academic-page">
-        <article className="campus-parent-mobile__performance-hero">
+        <article className="campus-parent-mobile__performance-hero" style={performanceHeroStyle}>
           <div>
             <span className="campus-parent-mobile__eyebrow">Desempeño</span>
             <h2>{academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota'}</h2>
-            <p>{getGradeTextLabel(academicPerformanceAverage)}</p>
+            <p>{getGradeTextLabel(academicPerformanceAverage, academicPerformanceLevel)}</p>
           </div>
           <div className="campus-parent-mobile__performance-rank">
             <span>Ranking del curso</span>
@@ -2926,7 +2958,7 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
           <article className="campus-parent-mobile__performance-kpi-card is-sky">
             <span>Próximas asignaciones</span>
             <strong>{weeklyAssignedActivities.length}</strong>
-            <small>{parentAcademicCalendar.isLoading ? 'Actualizando...' : 'Calendario académico'}</small>
+            <small>Publicadas por docentes</small>
           </article>
           <article className="campus-parent-mobile__performance-kpi-card is-good">
             <span>Asistencia</span>
