@@ -19,7 +19,7 @@ import useAuthStore from '../store/auth.store';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
 import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
-import { SCHOOL_OPTIONS, getSchoolOptionsByCountry, normalizeSchoolOptions, rememberSchoolOptions } from '../lib/schools';
+import { SCHOOL_OPTIONS, DEFAULT_SCHOOL_ID, getSchoolOptionsByCountry, normalizeSchoolOptions, rememberSchoolOptions } from '../lib/schools';
 
 const DEV_DIRECT_LOGIN_PROFILES = {
   'laura-medina': {
@@ -121,7 +121,9 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const { token, user, setAuth, setUser } = useAuthStore();
   const [schoolOptions, setSchoolOptions] = useState(() => normalizeSchoolOptions(SCHOOL_OPTIONS));
   const [selectedCountry, setSelectedCountry] = useState(() => localStorage.getItem('selectedCountry') || COUNTRY_OPTIONS[0].id);
-  const [selectedSchoolId, setSelectedSchoolId] = useState('');
+  const [selectedSchoolId, setSelectedSchoolId] = useState(() => (
+    localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID
+  ));
   const [schoolSearch, setSchoolSearch] = useState('');
   const [isCountryPickerOpen, setIsCountryPickerOpen] = useState(false);
   const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState(false);

@@ -1211,7 +1211,7 @@ router.post('/users', async (req, res) => {
     }
 
     const normalizedUsername = String(username).toLowerCase().trim();
-    const normalizedEmail = normalizeEmail(email);
+    const normalizedEmail = normalizeEmail(email) || (isValidEmail(normalizedUsername) ? normalizedUsername : '');
     const normalizedDocumentType = normalizeDocumentType(documentType);
     const normalizedDocumentNumber = normalizeDocumentNumber(documentNumber);
 

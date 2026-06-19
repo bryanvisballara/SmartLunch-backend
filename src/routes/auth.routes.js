@@ -68,10 +68,96 @@ function resolveLoginSchoolIdCandidates(schoolId = '') {
   const aliasMap = {
     'comergio-demo': ['comergio_demo_kns8p', 'comergio-demo'],
     comergio_demo: ['comergio_demo_kns8p', 'comergio_demo'],
+    comergio_demo_kns8p: ['comergio_demo_kns8p', 'comergio-demo', 'comergio_demo'],
   };
 
   const aliases = aliasMap[normalizedSchoolId.toLowerCase()] || [normalizedSchoolId];
   return [...new Set(aliases.map(normalizeSchoolId).filter(Boolean))];
+}
+
+async function findUserWithSchoolCandidates({ schoolId, filter, populateAssignedStore = false }) {
+  const schoolIdCandidates = resolveLoginSchoolIdCandidates(schoolId);
+
+  for (const candidateSchoolId of schoolIdCandidates) {
+    const user = await runWithSchoolContext(candidateSchoolId, async () => {
+      ensureStoreModelForSchool(candidateSchoolId);
+      let query = User.findOne({
+        ...filter,
+        schoolId: candidateSchoolId,
+      });
+
+      if (populateAssignedStore) {
+        query = query.populate('assignedStoreId', 'name status');
+      }
+
+      return query;
+    });
+
+    if (user) {
+      return user;
+    }
+  }
+
+  return null;
+}
+
+async function findLoginMatchesWithoutSchoolId(identifierFilter, populateAssignedStore = false) {
+  const matches = [];
+  const seenUserIds = new Set();
+
+  const rememberMatch = (user) => {
+    if (!user) {
+      return;
+    }
+
+    const userId = String(user._id);
+    if (seenUserIds.has(userId)) {
+      return;
+    }
+
+    seenUserIds.add(userId);
+    matches.push(user);
+  };
+
+  ensureStoreModelForSchool('');
+  let controlQuery = User.find(identifierFilter);
+  if (populateAssignedStore) {
+    controlQuery = controlQuery.populate('assignedStoreId', 'name status');
+  }
+
+  (await controlQuery.limit(10)).forEach(rememberMatch);
+
+  const tenantContexts = await listTenantSchoolContexts();
+  for (const tenantContext of tenantContexts) {
+    const user = await runWithSchoolContext(tenantContext.schoolId, async () => {
+      ensureStoreModelForSchool(tenantContext.schoolId);
+      let query = User.findOne(identifierFilter);
+      if (populateAssignedStore) {
+        query = query.populate('assignedStoreId', 'name status');
+      }
+      return query;
+    });
+    rememberMatch(user);
+  }
+
+  return matches;
+}
+
+async function findPasswordResetCodeWithSchoolCandidates({ schoolId, filter, sort = { createdAt: -1 } }) {
+  for (const candidateSchoolId of resolveLoginSchoolIdCandidates(schoolId)) {
+    const resetDoc = await runWithSchoolContext(candidateSchoolId, () => (
+      PasswordResetCode.findOne({
+        ...filter,
+        schoolId: candidateSchoolId,
+      }).sort(sort)
+    ));
+
+    if (resetDoc) {
+      return { resetDoc, resolvedSchoolId: candidateSchoolId };
+    }
+  }
+
+  return { resetDoc: null, resolvedSchoolId: '' };
 }
 
 function hashVerificationCode(code) {
@@ -238,11 +324,13 @@ router.post('/password/forgot/send-code', async (req, res) => {
       return res.status(400).json({ message: 'Debes ingresar un correo valido.' });
     }
 
-    const user = await User.findOne({
+    const user = await findUserWithSchoolCandidates({
       schoolId: normalizedSchoolId,
-      status: 'active',
-      deletedAt: null,
-      $or: [{ username: normalizedEmail }, { email: normalizedEmail }],
+      filter: {
+        status: 'active',
+        deletedAt: null,
+        $or: [{ username: normalizedEmail }, { email: normalizedEmail }],
+      },
     });
 
     if (!user) {
@@ -254,28 +342,32 @@ router.post('/password/forgot/send-code', async (req, res) => {
       return res.status(200).json({ success: true, message: safePasswordResetSuccessMessage() });
     }
 
-    await PasswordResetCode.updateMany(
-      { schoolId: normalizedSchoolId, userId: user._id, status: 'pending' },
-      { $set: { status: 'consumed' } }
-    );
+    const resolvedSchoolId = normalizeSchoolId(user.schoolId);
 
-    const code = generateVerificationCode();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    await runWithSchoolContext(resolvedSchoolId, async () => {
+      await PasswordResetCode.updateMany(
+        { schoolId: resolvedSchoolId, userId: user._id, status: 'pending' },
+        { $set: { status: 'consumed' } }
+      );
 
-    await PasswordResetCode.create({
-      schoolId: normalizedSchoolId,
-      userId: user._id,
-      email: targetEmail,
-      codeHash: hashVerificationCode(code),
-      expiresAt,
-      attempts: 0,
-      status: 'pending',
-    });
+      const code = generateVerificationCode();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    await sendPasswordResetCodeEmail({
-      toEmail: targetEmail,
-      toName: user.name || user.username,
-      code,
+      await PasswordResetCode.create({
+        schoolId: resolvedSchoolId,
+        userId: user._id,
+        email: targetEmail,
+        codeHash: hashVerificationCode(code),
+        expiresAt,
+        attempts: 0,
+        status: 'pending',
+      });
+
+      await sendPasswordResetCodeEmail({
+        toEmail: targetEmail,
+        toName: user.name || user.username,
+        code,
+      });
     });
 
     return res.status(200).json({ success: true, message: safePasswordResetSuccessMessage() });
@@ -300,11 +392,13 @@ router.post('/password/forgot/verify-code', async (req, res) => {
       return res.status(400).json({ message: 'El codigo debe tener 6 digitos.' });
     }
 
-    const resetDoc = await PasswordResetCode.findOne({
+    const { resetDoc, resolvedSchoolId: resetSchoolId } = await findPasswordResetCodeWithSchoolCandidates({
       schoolId: normalizedSchoolId,
-      email: normalizedEmail,
-      status: 'pending',
-    }).sort({ createdAt: -1 });
+      filter: {
+        email: normalizedEmail,
+        status: 'pending',
+      },
+    });
 
     if (!resetDoc) {
       return res.status(400).json({ message: 'No se encontro una recuperacion pendiente para este correo.' });
@@ -312,13 +406,13 @@ router.post('/password/forgot/verify-code', async (req, res) => {
 
     if (resetDoc.expiresAt.getTime() < Date.now()) {
       resetDoc.status = 'failed';
-      await resetDoc.save();
+      await runWithSchoolContext(resetSchoolId, () => resetDoc.save());
       return res.status(400).json({ message: 'El codigo vencio. Solicita uno nuevo.' });
     }
 
     if (Number(resetDoc.attempts || 0) >= 5) {
       resetDoc.status = 'failed';
-      await resetDoc.save();
+      await runWithSchoolContext(resetSchoolId, () => resetDoc.save());
       return res.status(400).json({ message: 'Superaste el numero de intentos. Solicita un nuevo codigo.' });
     }
 
@@ -327,7 +421,7 @@ router.post('/password/forgot/verify-code', async (req, res) => {
       if (resetDoc.attempts >= 5) {
         resetDoc.status = 'failed';
       }
-      await resetDoc.save();
+      await runWithSchoolContext(resetSchoolId, () => resetDoc.save());
       return res.status(400).json({ message: 'El codigo no coincide. Intenta nuevamente.' });
     }
 
@@ -335,7 +429,7 @@ router.post('/password/forgot/verify-code', async (req, res) => {
     resetDoc.status = 'verified';
     resetDoc.verifiedAt = new Date();
     resetDoc.resetTokenHash = hashResetToken(resetToken);
-    await resetDoc.save();
+    await runWithSchoolContext(resetSchoolId, () => resetDoc.save());
 
     return res.status(200).json({ success: true, resetToken });
   } catch (error) {
@@ -358,11 +452,13 @@ router.post('/password/forgot/reset', async (req, res) => {
     const normalizedSchoolId = normalizeSchoolId(schoolId);
     const normalizedEmail = normalizeEmail(email);
 
-    const resetDoc = await PasswordResetCode.findOne({
+    const { resetDoc, resolvedSchoolId: resetSchoolId } = await findPasswordResetCodeWithSchoolCandidates({
       schoolId: normalizedSchoolId,
-      email: normalizedEmail,
-      status: 'verified',
-    }).sort({ createdAt: -1 });
+      filter: {
+        email: normalizedEmail,
+        status: 'verified',
+      },
+    });
 
     if (!resetDoc) {
       return res.status(400).json({ message: 'No se encontro una verificacion valida para este correo.' });
@@ -370,7 +466,7 @@ router.post('/password/forgot/reset', async (req, res) => {
 
     if (resetDoc.expiresAt.getTime() < Date.now()) {
       resetDoc.status = 'failed';
-      await resetDoc.save();
+      await runWithSchoolContext(resetSchoolId, () => resetDoc.save());
       return res.status(400).json({ message: 'La sesion de recuperacion vencio. Solicita un nuevo codigo.' });
     }
 
@@ -378,23 +474,31 @@ router.post('/password/forgot/reset', async (req, res) => {
       return res.status(400).json({ message: 'Token de recuperacion invalido.' });
     }
 
-    const user = await User.findOne({
-      _id: resetDoc.userId,
-      schoolId: normalizedSchoolId,
-      status: 'active',
-      deletedAt: null,
+    const updatedUser = await runWithSchoolContext(resetSchoolId, async () => {
+      const user = await User.findOne({
+        _id: resetDoc.userId,
+        schoolId: resetSchoolId,
+        status: 'active',
+        deletedAt: null,
+      });
+
+      if (!user) {
+        return null;
+      }
+
+      user.passwordHash = await bcrypt.hash(String(newPassword), 10);
+      await user.save();
+
+      resetDoc.status = 'consumed';
+      resetDoc.consumedAt = new Date();
+      await resetDoc.save();
+
+      return user;
     });
 
-    if (!user) {
+    if (!updatedUser) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
-
-    user.passwordHash = await bcrypt.hash(String(newPassword), 10);
-    await user.save();
-
-    resetDoc.status = 'consumed';
-    resetDoc.consumedAt = new Date();
-    await resetDoc.save();
 
     return res.status(200).json({ success: true, message: 'Contrasena actualizada correctamente.' });
   } catch (error) {
@@ -861,24 +965,13 @@ router.post('/login', async (req, res) => {
     let user = null;
 
     if (normalizedSchoolId) {
-      const schoolIdCandidates = resolveLoginSchoolIdCandidates(normalizedSchoolId);
-      for (const candidateSchoolId of schoolIdCandidates) {
-        user = await runWithSchoolContext(candidateSchoolId, async () => {
-          ensureStoreModelForSchool(candidateSchoolId);
-          return User.findOne({
-            ...identifierFilter,
-            schoolId: candidateSchoolId,
-          }).populate('assignedStoreId', 'name status');
-        });
-        if (user) {
-          break;
-        }
-      }
+      user = await findUserWithSchoolCandidates({
+        schoolId: normalizedSchoolId,
+        filter: identifierFilter,
+        populateAssignedStore: true,
+      });
     } else {
-      ensureStoreModelForSchool('');
-      const matches = await User.find(identifierFilter)
-        .populate('assignedStoreId', 'name status')
-        .limit(2);
+      const matches = await findLoginMatchesWithoutSchoolId(identifierFilter, true);
 
       if (matches.length > 1) {
         return res.status(400).json({ message: 'schoolId is required when identifier exists in multiple schools' });
