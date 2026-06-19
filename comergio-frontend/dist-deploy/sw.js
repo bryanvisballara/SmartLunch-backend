@@ -34,12 +34,17 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetPath = event.notification?.data?.url || '/parent';
+  const data = event.notification?.data || {};
+  const targetPath = data.url || (data.type === 'nursing.visit' ? `/parent/enfermeria${data.studentId ? `?studentId=${encodeURIComponent(data.studentId)}` : ''}` : '/parent');
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
+          client.postMessage({
+            type: 'PUSH_NOTIFICATION_NAVIGATE',
+            payload: data,
+          });
           client.navigate(targetPath);
           return client.focus();
         }

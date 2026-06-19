@@ -6,6 +6,7 @@ import { registerDeviceToken } from '../services/notifications.service';
 import { resolveParentNotificationPath } from './parentNotificationNavigation';
 
 const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
+const PENDING_PUSH_NAVIGATION_KEY = 'comergioPendingPushNavigation';
 const ANDROID_PUSH_CHANNEL_ID = 'comergio_alerts_v1';
 let nativePushSetupPromise = null;
 let nativeForegroundListenerPromise = null;
@@ -13,8 +14,47 @@ let nativeTapListenerPromise = null;
 let pushNavigationHandler = null;
 let foregroundNotificationId = Math.floor(Date.now() % 100000);
 
+function storePendingPushNavigation(path) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    sessionStorage.setItem(PENDING_PUSH_NAVIGATION_KEY, path);
+  } catch (error) {
+    console.warn('[PUSH_NAV_PENDING_STORE_FAILED]', error);
+  }
+}
+
+export function consumePendingPushNavigation() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  try {
+    const pendingPath = String(sessionStorage.getItem(PENDING_PUSH_NAVIGATION_KEY) || '').trim();
+    if (pendingPath) {
+      sessionStorage.removeItem(PENDING_PUSH_NAVIGATION_KEY);
+      return pendingPath;
+    }
+  } catch (error) {
+    console.warn('[PUSH_NAV_PENDING_CONSUME_FAILED]', error);
+  }
+
+  return '';
+}
+
 export function registerPushNotificationNavigation(handler) {
   pushNavigationHandler = typeof handler === 'function' ? handler : null;
+
+  if (!pushNavigationHandler) {
+    return;
+  }
+
+  const pendingPath = consumePendingPushNavigation();
+  if (pendingPath) {
+    pushNavigationHandler(pendingPath);
+  }
 }
 
 function openPushTarget(rawPayload = {}) {
@@ -28,9 +68,7 @@ function openPushTarget(rawPayload = {}) {
     return;
   }
 
-  if (typeof window !== 'undefined') {
-    window.location.assign(path);
-  }
+  storePendingPushNavigation(path);
 }
 
 async function ensureAndroidPushChannel() {
@@ -153,6 +191,10 @@ async function ensureNativeNotificationTapHandling() {
     await FirebaseMessaging.addListener('notificationActionPerformed', (event) => {
       const data = event?.notification?.data || event?.data || {};
       openPushTarget(data);
+    });
+
+    await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+      openPushTarget(event?.notification?.data || {});
     });
 
     await LocalNotifications.addListener('localNotificationActionPerformed', (event) => {

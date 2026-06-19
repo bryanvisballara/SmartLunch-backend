@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import comergioLogo from '../../assets/comergio.png';
 import femImage from '../../assets/fem.png';
 import informesImage from '../../assets/informes.png';
 import spellingImage from '../../assets/spelling.png';
+import ParentPullToRefreshIndicator from '../../components/ParentPullToRefreshIndicator';
+import { useParentPullToRefresh } from '../../hooks/useParentPullToRefresh';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
 import {
@@ -2772,7 +2774,7 @@ function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpe
   );
 }
 
-function ParentAcademicContent({ activeView, selectedChild, academicSchedule = null }) {
+function ParentAcademicContent({ activeView, selectedChild, academicSchedule = null, refreshKey = 0 }) {
   const academicWorkspace = useMemo(() => (
     selectedChild?.isRealParentChild
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
@@ -2871,7 +2873,7 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
     return () => {
       isMounted = false;
     };
-  }, [effectiveActiveView, calendarMonthDate, selectedChild?.id, selectedChild?.isRealParentChild]);
+  }, [effectiveActiveView, calendarMonthDate, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey]);
 
   useEffect(() => {
     if (!selectedChild?.isRealParentChild || !['academic-performance', 'academic-attendance'].includes(effectiveActiveView)) {
@@ -2904,7 +2906,7 @@ function ParentAcademicContent({ activeView, selectedChild, academicSchedule = n
     return () => {
       isMounted = false;
     };
-  }, [effectiveActiveView, selectedChild?.id, selectedChild?.isRealParentChild]);
+  }, [effectiveActiveView, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey]);
 
   useEffect(() => {
     if (!guidanceRoutineLog.isOpen || !selectedChild?.isRealParentChild || !selectedChild?.id) {
@@ -4173,13 +4175,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const [pendingFeedLikeIds, setPendingFeedLikeIds] = useState([]);
   const [pendingFeedCommentLikeKeys, setPendingFeedCommentLikeKeys] = useState([]);
   const [feedRefreshCount, setFeedRefreshCount] = useState(0);
-  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const [academicRefreshCount, setAcademicRefreshCount] = useState(0);
   const pendingFeedLikeIdsRef = useRef(new Set());
   const pendingFeedCommentLikeKeysRef = useRef(new Set());
-  const pullStartY = useRef(0);
-  const pullDeltaY = useRef(0);
   const userMenuRef = useRef(null);
-  const PULL_THRESHOLD = 65;
   const normalizedRouteBase = useMemo(() => normalizeRouteBase(routeBase), [routeBase]);
   const usesRoutedSections = Boolean(normalizedRouteBase);
   const activeSection = usesRoutedSections
@@ -4187,7 +4186,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     : localActiveSection;
 
   useEffect(() => {
-    const launchParams = readParentNotificationLaunchParams(location.search);
+    const launchParams = readParentNotificationLaunchParams(location.search, location.pathname);
     const validAcademicViews = new Set(academicMenuItems.map((item) => item.id));
 
     if (launchParams.studentId) {
@@ -4206,10 +4205,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       } else {
         setLocalActiveSection('academic');
       }
+      return;
+    }
+
+    if (!usesRoutedSections && launchParams.section && launchParams.section !== 'home') {
+      setLocalActiveSection(launchParams.section);
     }
   }, [location.search, location.pathname, navigate, normalizedRouteBase, usesRoutedSections]);
   const cafeteriaBasePath = usesRoutedSections ? buildRoutedSectionPath(normalizedRouteBase, 'cafeteria') : '';
   const shouldUsePortalHeader = activeSection === 'cafeteria';
+  const shouldUseEmbeddedCafeteriaPortal = activeSection === 'cafeteria' && embedPortal && cafeteriaBasePath;
+  const canUseCampusPullRefresh = !shouldUseEmbeddedCafeteriaPortal;
   const visibleParentAppSections = useMemo(
     () => parentAppSections.filter((section) => isParentSectionEnabled(section.key, parentAppFeatures)),
     [parentAppFeatures]
@@ -4371,7 +4377,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       .finally(() => {
         if (!cancelled) {
           setAcademicLoading(false);
-          setPullRefreshing(false);
         }
       });
 
@@ -4431,6 +4436,80 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       cancelled = true;
     };
   }, []);
+
+  const refreshParentSection = useCallback(async () => {
+    const overviewParams = selectedChildId && selectedChildId !== PARENT_FEED_ALL_CHILDREN_ID
+      ? { studentId: selectedChildId }
+      : {};
+    const refreshTasks = [
+      getParentPortalOverview(overviewParams)
+        .then((response) => {
+          setParentOverview(response.data || { children: [] });
+          setParentAppFeatures(normalizeParentAppFeatures(response.data?.parentAppFeatures || {}));
+        })
+        .catch(() => {
+          setParentOverview({ children: [] });
+          setParentAppFeatures(defaultParentAppFeatures);
+        }),
+    ];
+
+    if (['home', 'finance', 'academic'].includes(activeSection)) {
+      setAcademicLoading(true);
+      refreshTasks.push(
+        Promise.allSettled([getParentAcademicFeed(), getParentAcademicBilling()])
+          .then(([feedResult, billingResult]) => {
+            if (feedResult.status === 'fulfilled') {
+              setAcademicFeed(feedResult.value.data || []);
+            } else {
+              setFeedActionMessage(feedResult.reason?.response?.data?.message || 'No se pudo actualizar el feed.');
+            }
+
+            if (billingResult.status === 'fulfilled') {
+              setAcademicBilling(billingResult.value.data || { summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
+            }
+          })
+          .finally(() => setAcademicLoading(false))
+      );
+    }
+
+    if (activeSection === 'academic') {
+      setAcademicRefreshCount((currentValue) => currentValue + 1);
+    }
+
+    if (activeSection === 'nursing') {
+      setNursingLoading(true);
+      refreshTasks.push(
+        getParentNursingRecords()
+          .then((response) => setNursingRecords(response.data?.records || []))
+          .catch(() => setNursingRecords([]))
+          .finally(() => setNursingLoading(false))
+      );
+    }
+
+    if (activeSection === 'wellbeing') {
+      setPsychologyLoading(true);
+      refreshTasks.push(
+        getParentPsychologyRecords()
+          .then((response) => setPsychologyCases(response.data?.cases || []))
+          .catch(() => setPsychologyCases([]))
+          .finally(() => setPsychologyLoading(false))
+      );
+    }
+
+    await Promise.allSettled(refreshTasks);
+  }, [activeSection, selectedChildId]);
+
+  const {
+    contentOffset: pullRefreshContentOffset,
+    distance: pullRefreshDistance,
+    isReady: pullRefreshActive,
+    isRefreshing: pullRefreshing,
+    threshold: pullRefreshThreshold,
+    touchHandlers: pullRefreshTouchHandlers,
+  } = useParentPullToRefresh({
+    enabled: canUseCampusPullRefresh,
+    onRefresh: refreshParentSection,
+  });
 
   const financeCharges = useMemo(() => {
     if (!selectedChild) {
@@ -4832,30 +4911,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     }
   };
 
-  const onPullTouchStart = (event) => {
-    if (window.scrollY !== 0 || pullRefreshing) return;
-    pullStartY.current = event.touches[0].clientY;
-    pullDeltaY.current = 0;
-  };
-
-  const onPullTouchMove = (event) => {
-    if (window.scrollY !== 0 || pullRefreshing) return;
-    const delta = event.touches[0].clientY - pullStartY.current;
-    if (delta <= 0) return;
-    pullDeltaY.current = delta;
-  };
-
-  const onPullTouchEnd = () => {
-    if (pullRefreshing) return;
-    if (pullDeltaY.current >= PULL_THRESHOLD) {
-      setFeedActionMessage('');
-      setPullRefreshing(true);
-      setFeedRefreshCount((n) => n + 1);
-    }
-    pullStartY.current = 0;
-    pullDeltaY.current = 0;
-  };
-
   const onSelectSection = (sectionKey) => {
     if (sectionKey === 'nursing') {
       if (visibleParentCareMenuItems.length <= 1) {
@@ -4940,18 +4995,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}`}
-      onTouchEnd={activeSection === 'home' ? onPullTouchEnd : undefined}
-      onTouchMove={activeSection === 'home' ? onPullTouchMove : undefined}
-      onTouchStart={activeSection === 'home' ? onPullTouchStart : undefined}
+      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
+      {...pullRefreshTouchHandlers}
     >
-      {pullRefreshing ? (
-        <div aria-label="Actualizando feed" className="campus-parent-pull-refresh" role="status">
-          <svg fill="none" height="22" viewBox="0 0 24 24" width="22" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="12" cy="12" r="10" stroke="#1d3557" strokeDasharray="48" strokeDashoffset="16" strokeLinecap="round" strokeWidth="2.5" />
-          </svg>
-        </div>
-      ) : null}
+      <ParentPullToRefreshIndicator
+        distance={pullRefreshDistance}
+        isReady={pullRefreshActive}
+        isRefreshing={pullRefreshing}
+        threshold={pullRefreshThreshold}
+      />
       {parentSectionChrome}
 
       {activeSection === 'academic' && showAcademicMenu ? (
@@ -4989,7 +5041,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
         </div>
       ) : null}
 
-      <div className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}${activeSection === 'nursing' || activeSection === 'wellbeing' ? ' is-nursing' : ''}`}>
+      <div
+        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}${activeSection === 'nursing' || activeSection === 'wellbeing' ? ' is-nursing' : ''}`}
+        style={{ transform: canUseCampusPullRefresh ? `translateY(${pullRefreshContentOffset}px)` : undefined }}
+      >
         {activeSection === 'home' ? (
           <>
             <section className="campus-parent-mobile__feed">
@@ -5114,6 +5169,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             <ParentAcademicContent
               academicSchedule={resolvedAcademicSchedule}
               activeView={activeAcademicView}
+              refreshKey={academicRefreshCount}
               selectedChild={selectedChild}
             />
           </>

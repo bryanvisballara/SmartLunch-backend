@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { AppLauncher } from '@capacitor/app-launcher';
 import { Browser } from '@capacitor/browser';
 import { useLocation, useNavigate } from 'react-router-dom';
+import ParentPullToRefreshIndicator from '../components/ParentPullToRefreshIndicator';
+import { useParentPullToRefresh } from '../hooks/useParentPullToRefresh';
 import useAuthStore from '../store/auth.store';
 import { deleteAccount } from '../services/auth.service';
 import { redirectToAccountDeletedPage, redirectToLoginPage } from '../lib/authNavigation';
@@ -311,9 +313,6 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
   const studentSwitcherRef = useRef(null);
   const studentPhotoInputRef = useRef(null);
   const deleteAccountRedirectTimeoutRef = useRef(null);
-  const pullStartYRef = useRef(0);
-  const pullTrackingRef = useRef(false);
-  const pullTriggeredRef = useRef(false);
 
   const [overview, setOverview] = useState(null);
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -447,9 +446,6 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
   const [gioContext, setGioContext] = useState(null);
   const gioThreadEndRef = useRef(null);
   const processedPaymentReturnKeyRef = useRef('');
-  const [pullRefreshDistance, setPullRefreshDistance] = useState(0);
-  const [pullRefreshActive, setPullRefreshActive] = useState(false);
-  const [pullRefreshReloading, setPullRefreshReloading] = useState(false);
   const [showDeleteAccountConfirmModal, setShowDeleteAccountConfirmModal] = useState(false);
   const [showDeleteAccountPasswordModal, setShowDeleteAccountPasswordModal] = useState(false);
   const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
@@ -654,24 +650,6 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
     autoTopupRechargeAmount >= 20000
   );
   const pullRefreshThreshold = 88;
-  const canUsePullRefresh = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
-
-  const getPortalScrollTop = () => {
-    if (typeof window === 'undefined') {
-      return 0;
-    }
-
-    const scrollingElement = document.scrollingElement || document.documentElement;
-    return Number(scrollingElement?.scrollTop || window.scrollY || 0);
-  };
-
-  const resetPullRefreshState = () => {
-    pullTrackingRef.current = false;
-    pullTriggeredRef.current = false;
-    pullStartYRef.current = 0;
-    setPullRefreshDistance(0);
-    setPullRefreshActive(false);
-  };
 
   const resolvePortalRefreshStudentId = () => {
     const params = new URLSearchParams(location.search || '');
@@ -683,194 +661,6 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
       ''
     ).trim();
   };
-
-  const triggerPortalRefresh = async () => {
-    setPullRefreshReloading(true);
-    setPullRefreshDistance(pullRefreshThreshold);
-    setPullRefreshActive(true);
-
-    try {
-      const studentId = resolvePortalRefreshStudentId();
-      const refreshErrors = [];
-
-      const overviewRefresh = await loadOverview(studentId, { silent: true });
-      if (overviewRefresh?.error) {
-        refreshErrors.push(overviewRefresh.error);
-      }
-
-      if (isHistoryPage && studentId) {
-        await loadOrdersHistory(historyFilters);
-      }
-
-      if (isMenuRoute) {
-        try {
-          setCategoriesLoading(true);
-          setCategoriesError('');
-          const response = await getParentPortalCategories();
-          setCategories(Array.isArray(response.data) ? response.data : []);
-        } catch (requestError) {
-          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar las categorías.';
-          setCategoriesError(message);
-          setCategories([]);
-          refreshErrors.push(message);
-        } finally {
-          setCategoriesLoading(false);
-        }
-      }
-
-      if (isMenuProductsPage) {
-        try {
-          setMenuProductsLoading(true);
-          setMenuProductsError('');
-          const response = await getProducts({ categoryId: menuCategoryId });
-          setMenuProducts(dedupeParentMenuProducts(response.data));
-        } catch (requestError) {
-          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar los productos.';
-          setMenuProductsError(message);
-          setMenuProducts([]);
-          refreshErrors.push(message);
-        } finally {
-          setMenuProductsLoading(false);
-        }
-      }
-
-      if (isTopupsPage || isTopupMethodsPage || isTopupDaviPlataPage || isAutoTopupPage) {
-        try {
-          await loadSavedCards();
-        } catch (requestError) {
-          refreshErrors.push(requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar las tarjetas guardadas.');
-        }
-      }
-
-      if ((isMeriendasPage || isMeriendasDayPage) && studentId) {
-        try {
-          await loadMeriendasData();
-        } catch (requestError) {
-          refreshErrors.push(requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar la página de meriendas.');
-        }
-      }
-
-      if (isTopupPsePage) {
-        try {
-          setPseBanksLoading(true);
-          setPseSubmitError('');
-          const response = await getBoldPseBanks();
-          const banks = Array.isArray(response?.data?.banks) ? response.data.banks : [];
-          setPseBanks(banks);
-          setPseSelectedBankCode((current) => {
-            if (current && banks.some((bank) => String(bank.bankCode) === String(current))) {
-              return current;
-            }
-
-            return String(banks[0]?.bankCode || '');
-          });
-        } catch (requestError) {
-          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar la lista de bancos PSE.';
-          setPseBanks([]);
-          setPseSelectedBankCode('');
-          setPseSubmitError(message);
-          refreshErrors.push(message);
-        } finally {
-          setPseBanksLoading(false);
-        }
-      }
-
-      if (refreshErrors.length > 0) {
-        setWalletReturnNotice({
-          type: 'error',
-          message: refreshErrors[0],
-        });
-      }
-    } finally {
-      window.setTimeout(() => {
-        setPullRefreshReloading(false);
-        resetPullRefreshState();
-      }, 220);
-    }
-  };
-
-  const onPortalTouchStart = (event) => {
-    if (!canUsePullRefresh || pullRefreshReloading) {
-      return;
-    }
-
-    if (getPortalScrollTop() > 0) {
-      resetPullRefreshState();
-      return;
-    }
-
-    const touch = event.touches?.[0];
-    if (!touch) {
-      return;
-    }
-
-    pullStartYRef.current = touch.clientY;
-    pullTrackingRef.current = true;
-    pullTriggeredRef.current = false;
-    setPullRefreshDistance(0);
-    setPullRefreshActive(false);
-  };
-
-  const onPortalTouchMove = (event) => {
-    if (!canUsePullRefresh || !pullTrackingRef.current || pullRefreshReloading) {
-      return;
-    }
-
-    if (getPortalScrollTop() > 0) {
-      resetPullRefreshState();
-      return;
-    }
-
-    const touch = event.touches?.[0];
-    if (!touch) {
-      return;
-    }
-
-    const deltaY = touch.clientY - pullStartYRef.current;
-    if (deltaY <= 0) {
-      setPullRefreshDistance(0);
-      setPullRefreshActive(false);
-      return;
-    }
-
-    const nextDistance = Math.min(deltaY * 0.45, 120);
-    if (event.cancelable) {
-      event.preventDefault();
-    }
-    setPullRefreshDistance(nextDistance);
-    setPullRefreshActive(nextDistance >= pullRefreshThreshold);
-  };
-
-  const onPortalTouchEnd = () => {
-    if (!canUsePullRefresh || pullRefreshReloading) {
-      return;
-    }
-
-    if (pullRefreshActive && !pullTriggeredRef.current) {
-      pullTriggeredRef.current = true;
-      triggerPortalRefresh();
-      return;
-    }
-
-    resetPullRefreshState();
-  };
-
-  const onPortalTouchCancel = () => {
-    if (pullRefreshReloading) {
-      return;
-    }
-
-    resetPullRefreshState();
-  };
-
-  const pullRefreshTouchHandlers = canUsePullRefresh
-    ? {
-        onTouchCancel: onPortalTouchCancel,
-        onTouchEnd: onPortalTouchEnd,
-        onTouchMove: onPortalTouchMove,
-        onTouchStart: onPortalTouchStart,
-      }
-    : {};
 
   useEffect(() => {
     if (!autoDebitMenuOpen) {
@@ -1432,6 +1222,137 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
       setMeriendasLoading(false);
     }
   };
+
+  const triggerPortalRefresh = useCallback(async () => {
+    const refreshErrors = [];
+
+    try {
+      const studentId = resolvePortalRefreshStudentId();
+      const overviewRefresh = await loadOverview(studentId, { silent: true });
+      if (overviewRefresh?.error) {
+        refreshErrors.push(overviewRefresh.error);
+      }
+
+      if (isHistoryPage && studentId) {
+        await loadOrdersHistory(historyFilters);
+      }
+
+      if (isMenuRoute) {
+        try {
+          setCategoriesLoading(true);
+          setCategoriesError('');
+          const response = await getParentPortalCategories();
+          setCategories(Array.isArray(response.data) ? response.data : []);
+        } catch (requestError) {
+          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar las categorías.';
+          setCategoriesError(message);
+          setCategories([]);
+          refreshErrors.push(message);
+        } finally {
+          setCategoriesLoading(false);
+        }
+      }
+
+      if (isMenuProductsPage) {
+        try {
+          setMenuProductsLoading(true);
+          setMenuProductsError('');
+          const response = await getProducts({ categoryId: menuCategoryId });
+          setMenuProducts(dedupeParentMenuProducts(response.data));
+        } catch (requestError) {
+          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar los productos.';
+          setMenuProductsError(message);
+          setMenuProducts([]);
+          refreshErrors.push(message);
+        } finally {
+          setMenuProductsLoading(false);
+        }
+      }
+
+      if (isTopupsPage || isTopupMethodsPage || isTopupDaviPlataPage || isAutoTopupPage) {
+        try {
+          await loadSavedCards();
+        } catch (requestError) {
+          refreshErrors.push(requestError?.response?.data?.message || requestError?.message || 'No se pudieron cargar las tarjetas guardadas.');
+        }
+      }
+
+      if ((isMeriendasPage || isMeriendasDayPage) && studentId) {
+        try {
+          await loadMeriendasData();
+        } catch (requestError) {
+          refreshErrors.push(requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar la página de meriendas.');
+        }
+      }
+
+      if (isTopupPsePage) {
+        try {
+          setPseBanksLoading(true);
+          setPseSubmitError('');
+          const response = await getBoldPseBanks();
+          const banks = Array.isArray(response?.data?.banks) ? response.data.banks : [];
+          setPseBanks(banks);
+          setPseSelectedBankCode((current) => {
+            if (current && banks.some((bank) => String(bank.bankCode) === String(current))) {
+              return current;
+            }
+
+            return String(banks[0]?.bankCode || '');
+          });
+        } catch (requestError) {
+          const message = requestError?.response?.data?.message || requestError?.message || 'No se pudo cargar la lista de bancos PSE.';
+          setPseBanks([]);
+          setPseSelectedBankCode('');
+          setPseSubmitError(message);
+          refreshErrors.push(message);
+        } finally {
+          setPseBanksLoading(false);
+        }
+      }
+
+      if (refreshErrors.length > 0) {
+        setWalletReturnNotice({
+          type: 'error',
+          message: refreshErrors[0],
+        });
+      }
+    } catch (requestError) {
+      setWalletReturnNotice({
+        type: 'error',
+        message: requestError?.response?.data?.message || requestError?.message || 'No se pudo actualizar el portal.',
+      });
+    }
+  }, [
+    historyFilters,
+    isAutoTopupPage,
+    isHistoryPage,
+    isMenuProductsPage,
+    isMenuRoute,
+    isMeriendasDayPage,
+    isMeriendasPage,
+    isTopupDaviPlataPage,
+    isTopupMethodsPage,
+    isTopupPsePage,
+    isTopupsPage,
+    location.search,
+    menuCategoryId,
+    overview?.selectedStudentId,
+    selectedStudent?._id,
+    selectedStudentId,
+  ]);
+
+  const {
+    contentOffset: pullRefreshContentOffset,
+    distance: pullRefreshDistance,
+    isReady: pullRefreshActive,
+    isRefreshing: pullRefreshReloading,
+    threshold: pullRefreshThresholdValue,
+    touchHandlers: pullRefreshTouchHandlers,
+  } = useParentPullToRefresh({
+    enabled: true,
+    onRefresh: triggerPortalRefresh,
+    threshold: pullRefreshThreshold,
+  });
 
   useEffect(() => {
     if ((!isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isAutoTopupPage) || loading || error) {
@@ -2934,14 +2855,12 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
       ref={portalRootRef}
       {...pullRefreshTouchHandlers}
     >
-      <div
-        aria-hidden="true"
-        className={`parent-pull-refresh-indicator${pullRefreshActive ? ' is-ready' : ''}${pullRefreshReloading ? ' is-refreshing' : ''}`}
-        style={{ opacity: pullRefreshDistance > 0 || pullRefreshReloading ? 1 : 0, transform: `translate(-50%, ${Math.min(pullRefreshDistance, pullRefreshThreshold)}px)` }}
-      >
-        <span className="parent-pull-refresh-spinner" />
-        <span>{pullRefreshReloading ? 'Actualizando...' : pullRefreshActive ? 'Suelta para actualizar' : 'Desliza para actualizar'}</span>
-      </div>
+      <ParentPullToRefreshIndicator
+        distance={pullRefreshDistance}
+        isReady={pullRefreshActive}
+        isRefreshing={pullRefreshReloading}
+        threshold={pullRefreshThresholdValue}
+      />
       {!embedded ? (
       <header className="parent-topbar">
         <button aria-label="Abrir menu" className="parent-icon-btn" onClick={() => setDrawerOpen(true)} type="button">
@@ -3038,7 +2957,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
         </ParentStudentOptionsPortal>
       </section>
 
-      <main className="parent-mobile-content" style={{ transform: `translateY(${pullRefreshReloading ? pullRefreshThreshold * 0.4 : pullRefreshDistance}px)` }}>
+      <main className="parent-mobile-content" style={{ transform: `translateY(${pullRefreshContentOffset}px)` }}>
         {loading ? <div className="parent-loading">Cargando portal...</div> : null}
         {!loading && error ? <div className="parent-error">{error}</div> : null}
         {!loading && !error && walletReturnNotice?.message && walletReturnNotice?.type !== 'info' ? (

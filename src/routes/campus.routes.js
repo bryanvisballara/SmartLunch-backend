@@ -31,10 +31,16 @@ const {
   getCampusPostCategoryLabel,
 } = require('../utils/parentPushTargets');
 const {
+  isCloudinaryEnabled,
   normalizeStoredImageUrl,
   processAndStoreUploadedImage,
   uploadImageMiddleware,
 } = require('../utils/imageUpload');
+
+function isValidPublicMediaUrl(url) {
+  const normalized = String(url || '').trim();
+  return /^https?:\/\//i.test(normalized) || normalized.startsWith('/assets/');
+}
 
 const router = express.Router();
 const uploadTeacherProfilePhoto = uploadImageMiddleware.single('image');
@@ -3301,6 +3307,11 @@ router.get('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (r
 router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
   try {
     const incomingFiles = Array.isArray(req.files) ? req.files : [];
+
+    if (!incomingFiles.length) {
+      return res.status(400).json({ message: 'No se recibio ningun archivo.' });
+    }
+
     const hasUnsupportedFile = incomingFiles.some((file) => {
       const mimeType = normalizeText(file?.mimetype).toLowerCase();
       return !mimeType.startsWith('image/') && !mimeType.startsWith('video/');
@@ -3314,14 +3325,19 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
     for (const file of incomingFiles) {
       const mimeType = normalizeText(file?.mimetype).toLowerCase();
       const preferredName = normalizeText(req.body?.preferredName) || normalizeText(file.originalname) || 'publicacion-docente';
+      const requireCloudinary = isCloudinaryEnabled();
 
       if (mimeType.startsWith('video/')) {
         const [saved] = await processStoredCampusMaterialFiles([file], {
           folder: 'academic-communications',
-          requireCloudinary: true,
+          requireCloudinary,
         });
 
-        if (!saved || saved.kind !== 'video' || !/^https?:\/\//i.test(saved.url || '')) {
+        if (!saved || saved.kind !== 'video' || !isValidPublicMediaUrl(saved.url)) {
+          throw new Error('No se pudo guardar el video.');
+        }
+
+        if (requireCloudinary && saved.storage !== 'cloudinary') {
           throw new Error('No se pudo guardar el video.');
         }
 
@@ -3338,10 +3354,14 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
         file,
         folder: 'academic-communications',
         preferredName,
-        requireCloudinary: true,
+        requireCloudinary,
       });
 
-      if (saved.storage !== 'cloudinary' || !/^https?:\/\//i.test(saved.url || '')) {
+      if (requireCloudinary && (saved.storage !== 'cloudinary' || !/^https?:\/\//i.test(saved.url || ''))) {
+        throw new Error('No se pudo guardar la imagen.');
+      }
+
+      if (!isValidPublicMediaUrl(saved.url)) {
         throw new Error('No se pudo guardar la imagen.');
       }
 

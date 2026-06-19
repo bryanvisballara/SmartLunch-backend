@@ -64,10 +64,45 @@ export function resolveParentNotificationPath(payload = {}) {
   }
 }
 
-export function readParentNotificationLaunchParams(search = '') {
+export function resolveParentNotificationSection(path = '') {
+  const normalizedPath = normalizeText(path).toLowerCase();
+
+  if (normalizedPath.includes('/enfermeria') || normalizedPath.includes('/nursing')) {
+    return 'nursing';
+  }
+
+  if (normalizedPath.includes('/wellbeing')) {
+    return 'wellbeing';
+  }
+
+  if (normalizedPath.includes('/coexistence')) {
+    return 'coexistence';
+  }
+
+  if (normalizedPath.includes('/transport')) {
+    return 'transport';
+  }
+
+  if (normalizedPath.includes('/finance')) {
+    return 'finance';
+  }
+
+  if (normalizedPath.includes('/academic')) {
+    return 'academic';
+  }
+
+  if (normalizedPath.includes('/cafeteria')) {
+    return 'cafeteria';
+  }
+
+  return 'home';
+}
+
+export function readParentNotificationLaunchParams(search = '', pathname = '') {
   const params = new URLSearchParams(search);
   return {
     studentId: normalizeText(params.get('studentId')),
     academicView: normalizeText(params.get('academicView')),
+    section: resolveParentNotificationSection(pathname),
   };
 }
