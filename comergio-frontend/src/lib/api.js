@@ -121,7 +121,14 @@ api.interceptors.response.use(
       originalRequest.headers.Authorization = `Bearer ${nextAccessToken}`;
       return api(originalRequest);
     } catch (refreshError) {
-      useAuthStore.getState().logout();
+      const refreshStatus = Number(refreshError?.response?.status || 0);
+      const refreshCode = String(refreshError?.code || '').toUpperCase();
+      const isNetworkFailure = !refreshStatus && (refreshCode === 'ECONNABORTED' || refreshCode === 'ERR_NETWORK');
+      if (refreshStatus === 401 || refreshStatus === 403) {
+        useAuthStore.getState().logout();
+      } else if (isNetworkFailure) {
+        refreshError.message = 'No pudimos renovar la sesión por conexión. Intenta de nuevo.';
+      }
       return Promise.reject(refreshError);
     }
   }

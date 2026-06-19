@@ -7690,3 +7690,280 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
     min-width: 760px;
   }
 }
+
+@keyframes parent-portal-state-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes parent-portal-state-progress {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+@keyframes parent-portal-state-pulse {
+  0% { transform: scale(0.92); opacity: 0.55; }
+  70% { transform: scale(1.18); opacity: 0; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+.parent-portal-state {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(26, 188, 67, 0.12) 0, rgba(26, 188, 67, 0) 28%),
+    radial-gradient(circle at 88% 0%, rgba(11, 132, 238, 0.14) 0, rgba(11, 132, 238, 0) 34%),
+    linear-gradient(180deg, #edf4fb 0%, #f8fafc 42%, #eef6ff 100%);
+}
+
+.parent-portal-state__body {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 5.5rem);
+  padding: 1.2rem 1rem 2rem;
+}
+
+.parent-portal-state__card {
+  display: grid;
+  gap: 1rem;
+  width: min(100%, 26rem);
+  padding: 1.35rem;
+  border: 1px solid rgba(16, 44, 66, 0.08);
+  border-radius: 1.55rem;
+  background:
+    radial-gradient(circle at 88% 12%, rgba(26, 188, 67, 0.16) 0, rgba(26, 188, 67, 0) 34%),
+    linear-gradient(145deg, #ffffff 0%, #f5faff 58%, #eefcf3 100%);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12);
+}
+
+.parent-portal-state__card--feed-empty {
+  margin: 0.35rem 0 0;
+}
+
+.parent-portal-state__copy {
+  display: grid;
+  gap: 0.45rem;
+  text-align: center;
+}
+
+.parent-portal-state__eyebrow {
+  display: inline-flex;
+  align-self: center;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(11, 132, 238, 0.1);
+  color: #2166c2;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.parent-portal-state__copy h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 1.28rem;
+  line-height: 1.15;
+}
+
+.parent-portal-state__copy p,
+.parent-portal-state__hint {
+  margin: 0;
+  color: #667085;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.parent-portal-state__hint {
+  text-align: center;
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+.parent-portal-state__visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 6.5rem;
+  height: 6.5rem;
+  margin: 0.15rem auto 0;
+}
+
+.parent-portal-state__visual.is-boot {
+  border-radius: 1.45rem;
+  background: linear-gradient(145deg, #0b84ee 0%, #102c42 100%);
+  box-shadow: 0 22px 36px rgba(16, 44, 66, 0.24);
+}
+
+.parent-portal-state__logo-mark {
+  width: 4.6rem;
+  height: auto;
+  filter: brightness(0) invert(1);
+}
+
+.parent-portal-state__pulse {
+  position: absolute;
+  inset: -0.35rem;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 1.6rem;
+  animation: parent-portal-state-pulse 1.8s ease-out infinite;
+}
+
+.parent-portal-state__pulse.is-delayed {
+  animation-delay: 0.75s;
+}
+
+.parent-portal-state__visual.is-feed,
+.parent-portal-state__visual.is-students {
+  border-radius: 1.45rem;
+  background: linear-gradient(145deg, #0b84ee 0%, #102c42 100%);
+  box-shadow: 0 22px 36px rgba(16, 44, 66, 0.22);
+}
+
+.parent-portal-state__megaphone {
+  display: inline-flex;
+  width: 2.35rem;
+  height: 2.35rem;
+  color: #fff;
+}
+
+.parent-portal-state__megaphone svg {
+  width: 100%;
+  height: 100%;
+}
+
+.parent-portal-state__bubble {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.parent-portal-state__bubble.is-one {
+  top: 0.85rem;
+  left: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+}
+
+.parent-portal-state__bubble.is-two {
+  top: 1.2rem;
+  right: 0.9rem;
+  width: 0.72rem;
+  height: 0.72rem;
+}
+
+.parent-portal-state__bubble.is-three {
+  bottom: 1rem;
+  left: 1.35rem;
+  width: 0.55rem;
+  height: 0.55rem;
+}
+
+.parent-portal-state__avatar-ring,
+.parent-portal-state__avatar-core {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+}
+
+.parent-portal-state__avatar-ring {
+  width: 4.6rem;
+  height: 4.6rem;
+  border: 2px dashed rgba(255, 255, 255, 0.42);
+}
+
+.parent-portal-state__avatar-core {
+  position: absolute;
+  width: 2.5rem;
+  height: 2.5rem;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 900;
+}
+
+.parent-portal-state__skeleton-stack,
+.parent-portal-state__feed-skeleton-meta {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.parent-portal-state__skeleton-line,
+.parent-portal-state__skeleton-pill,
+.parent-portal-state__feed-skeleton-avatar,
+.parent-portal-state__feed-skeleton-media {
+  display: block;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.16) 0%, rgba(148, 163, 184, 0.34) 50%, rgba(148, 163, 184, 0.16) 100%);
+  background-size: 200% 100%;
+  animation: parent-portal-state-shimmer 1.35s linear infinite;
+}
+
+.parent-portal-state__skeleton-line {
+  height: 0.72rem;
+}
+
+.parent-portal-state__skeleton-line.is-wide {
+  width: 100%;
+}
+
+.parent-portal-state__skeleton-line.is-short,
+.parent-portal-state__skeleton-pill {
+  width: 42%;
+}
+
+.parent-portal-state__progress {
+  overflow: hidden;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(16, 44, 66, 0.08);
+}
+
+.parent-portal-state__progress-bar {
+  display: block;
+  width: 34%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0b84ee 0%, #1abc43 100%);
+  animation: parent-portal-state-progress 1.4s ease-in-out infinite;
+}
+
+.parent-portal-state__feed-skeleton-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.parent-portal-state__feed-skeleton-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem 0.2rem 1.1rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.parent-portal-state__feed-skeleton-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.parent-portal-state__feed-skeleton-avatar {
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 999px;
+}
+
+.parent-portal-state__feed-skeleton-media {
+  width: 100%;
+  height: 12rem;
+  border-radius: 1rem;
+}
+
+.parent-portal-state__feed-skeleton-actions {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.parent-portal-state__skeleton-pill.is-wide {
+  width: 58%;
+}

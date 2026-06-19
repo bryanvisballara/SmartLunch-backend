@@ -6,6 +6,12 @@ import femImage from '../../assets/fem.png';
 import informesImage from '../../assets/informes.png';
 import spellingImage from '../../assets/spelling.png';
 import ParentPullToRefreshIndicator from '../../components/ParentPullToRefreshIndicator';
+import {
+  ParentFeedEmptyState,
+  ParentFeedLoadingSkeleton,
+  ParentPortalBootScreen,
+  ParentPortalEmptyStudentsState,
+} from '../../components/ParentPortalExperienceStates';
 import { useParentPullToRefresh } from '../../hooks/useParentPullToRefresh';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
@@ -4938,30 +4944,21 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   };
 
   if (!selectedChild) {
-    return (
-      <section className="campus-page campus-parent-mobile-app">
-        <header className="campus-parent-mobile__app-header">
-          <div className="campus-parent-mobile__app-brand">
-            <img alt="Comergio" className="campus-parent-mobile__app-logo" src={comergioLogo} />
-          </div>
-          <div className="campus-parent-mobile__app-title-wrap">
-            <span className="campus-parent-mobile__app-school-name">{workspace.guardian.schoolName}</span>
-          </div>
-          <button className="campus-parent-mobile__app-logout-button" onClick={onLogout} type="button">
-            Salir
-          </button>
-        </header>
-        <div className="campus-parent-mobile__content">
-          <section className="campus-parent-mobile__empty-state">
-            <h3>{parentOverviewLoading ? 'Cargando alumnos vinculados...' : 'Sin alumnos vinculados'}</h3>
-            <p>
-              {parentOverviewLoading ? 'Estamos consultando la información real del acudiente.' : 'Este usuario padre no tiene alumnos activos vinculados en este colegio.'}
-            </p>
-          </section>
-        </div>
-      </section>
-    );
+    if (parentOverviewLoading) {
+      return (
+        <ParentPortalBootScreen
+          message="Estamos consultando la información real del acudiente y preparando tu experiencia."
+          onLogout={onLogout}
+          schoolName={workspace.guardian.schoolName}
+          title="Cargando alumnos vinculados"
+        />
+      );
+    }
+
+    return <ParentPortalEmptyStudentsState onLogout={onLogout} />;
   }
+
+  const isHomeFeedLoading = parentOverviewLoading || academicLoading;
 
   const parentSectionChrome = !shouldUsePortalHeader ? (
     <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}`}>
@@ -5048,7 +5045,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
         {activeSection === 'home' ? (
           <>
             <section className="campus-parent-mobile__feed">
-              {feedAnnouncements.length ? feedAnnouncements.map((announcement) => {
+              {isHomeFeedLoading ? (
+                <ParentFeedLoadingSkeleton count={2} />
+              ) : feedAnnouncements.length ? feedAnnouncements.map((announcement) => {
                 const isLikePending = pendingFeedLikeIds.includes(announcement.id);
                 return (
                   <article className={`campus-parent-mobile__post is-${announcement.tone}`} key={announcement.id}>
@@ -5085,11 +5084,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
                   </article>
                 );
               }) : (
-                <article className="campus-parent-mobile__empty-state">
-                  <span className="campus-parent-mobile__eyebrow">{selectedChild.name}</span>
-                  <h3>Sin comunicados publicados</h3>
-                  <p>Cuando el colegio publique información para este acudiente o alumno, aparecerá aquí.</p>
-                </article>
+                <ParentFeedEmptyState studentName={selectedChild.name} />
               )}
             </section>
           </>

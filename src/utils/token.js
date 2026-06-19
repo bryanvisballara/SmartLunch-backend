@@ -1,9 +1,9 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
-const DEFAULT_ACCESS_TOKEN_EXPIRES_IN = '3650d';
-const DEFAULT_REFRESH_TOKEN_EXPIRES_IN = '3650d';
-const MIN_AUTH_SESSION_MS = 3650 * 24 * 60 * 60 * 1000;
+const DEFAULT_ACCESS_TOKEN_EXPIRES_IN = '10y';
+const DEFAULT_REFRESH_TOKEN_EXPIRES_IN = '10y';
+const MIN_AUTH_SESSION_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 const DURATION_UNITS_MS = {
   s: 1000,
   m: 60 * 1000,

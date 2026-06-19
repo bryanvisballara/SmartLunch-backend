@@ -32,7 +32,7 @@ const {
 } = require('../utils/token');
 
 const router = express.Router();
-const MAX_AUTH_SESSIONS_PER_USER = 8;
+const MAX_AUTH_SESSIONS_PER_USER = 24;
 const rpName = process.env.WEBAUTHN_RP_NAME || 'Comergio';
 const rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
 const SUPER_ADMIN_USERNAME = normalizeEmail(process.env.SUPER_ADMIN_USERNAME || 'gerencia@comergio.com');
