@@ -453,6 +453,52 @@ function resolveParentFinanceHeroEyebrow(charge, concepts = []) {
   return 'Cobro pendiente';
 }
 
+const FINANCE_PAYMENTS_PAGE_SIZE = 5;
+
+function ParentFinancePaymentHistory({ onPageChange, page, pageSize, payments, totalPages }) {
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+
+  return (
+    <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-group--history">
+      <h3>Historial de pagos</h3>
+      <div className="campus-parent-mobile__card-stack campus-parent-mobile__card-stack--finance">
+        {payments.length ? payments.map((payment) => (
+          <article className="campus-parent-mobile__list-card campus-parent-mobile__finance-entry-card" key={payment.id || payment._id}>
+            <div>
+              <strong>{payment.concept || 'Pago académico'}</strong>
+              <span>
+                {formatParentFinanceDate(payment.paidAt, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) || 'Registrado'}
+              </span>
+            </div>
+            <div className="campus-parent-mobile__finance-entry-meta">
+              <strong>{formatCurrency(payment.amount)}</strong>
+              <span>{payment.channel || payment.method || 'Portal'}</span>
+            </div>
+          </article>
+        )) : <p className="campus-parent-mobile__empty-note">Aún no hay pagos académicos registrados para este alumno.</p>}
+      </div>
+      {totalPages > 1 ? (
+        <nav aria-label="Paginación del historial de pagos" className="campus-parent-mobile__finance-pagination">
+          {Array.from({ length: totalPages }, (_, index) => {
+            const pageNumber = index + 1;
+            return (
+              <button
+                aria-current={pageNumber === safePage ? 'page' : undefined}
+                className={pageNumber === safePage ? 'is-active' : ''}
+                key={`finance-payment-page-${pageNumber}`}
+                onClick={() => onPageChange(pageNumber)}
+                type="button"
+              >
+                {pageNumber}
+              </button>
+            );
+          })}
+        </nav>
+      ) : null}
+    </section>
+  );
+}
+
 function ParentFinancePricingGuide({ pricingGuide }) {
   if (!pricingGuide) {
     return null;
@@ -464,7 +510,7 @@ function ParentFinancePricingGuide({ pricingGuide }) {
     return null;
   }
 
-  const renderPricingRows = (section) => {
+  const renderPricingRows = (section, sectionTitle) => {
     const fullAmount = Number(section?.fullAmount || 0);
     if (fullAmount <= 0) {
       return null;
@@ -474,10 +520,10 @@ function ParentFinancePricingGuide({ pricingGuide }) {
 
     return (
       <div className="campus-parent-mobile__finance-pricing-block">
-        <h4>{section.fullLabel || 'Precio'}</h4>
+        <h4>{sectionTitle}</h4>
         <article className="campus-parent-mobile__finance-pricing-row is-full">
           <div>
-            <strong>{section.fullLabel || 'Precio ordinario'}</strong>
+            <strong>{section.fullLabel || 'Valor ordinario'}</strong>
           </div>
           <strong>{formatCurrency(fullAmount)}</strong>
         </article>
@@ -497,13 +543,10 @@ function ParentFinancePricingGuide({ pricingGuide }) {
 
   return (
     <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
-      <h3>Tarifas de matrícula y pensión</h3>
-      <p className="campus-parent-mobile__finance-pricing-intro">
-        Consulta el precio ordinario y los valores con beneficios configurados por rectoría para el grado de tu hijo.
-      </p>
+      <h3>Valores de matrícula y pensión</h3>
       <div className="campus-parent-mobile__finance-pricing-card">
-        {renderPricingRows(pricingGuide.enrollment)}
-        {renderPricingRows(pricingGuide.monthlyTuition)}
+        {renderPricingRows(pricingGuide.enrollment, 'Matrícula')}
+        {renderPricingRows(pricingGuide.monthlyTuition, 'Pensión')}
       </div>
     </section>
   );
@@ -4477,6 +4520,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const [academicPaymentMessage, setAcademicPaymentMessage] = useState('');
   const [payingChargeId, setPayingChargeId] = useState('');
   const [showFinanceConceptsSheet, setShowFinanceConceptsSheet] = useState(false);
+  const [financePaymentsPage, setFinancePaymentsPage] = useState(1);
   const [feedLikesSheetId, setFeedLikesSheetId] = useState('');
   const [feedCommentsSheetId, setFeedCommentsSheetId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
@@ -4846,11 +4890,36 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     const history = (Array.isArray(academicBilling.paymentHistory) && academicBilling.paymentHistory.length
       ? academicBilling.paymentHistory
       : (academicBilling.payments || []));
-    return history.filter((payment) => {
-      const paymentStudentId = String(payment.studentId?._id || payment.studentId || '');
-      return (childId && paymentStudentId === childId) || (childNameKey && normalizeLookupKey(payment.studentName) === childNameKey);
-    });
+    return history
+      .filter((payment) => {
+        const paymentStudentId = String(payment.studentId?._id || payment.studentId || '');
+        return (childId && paymentStudentId === childId) || (childNameKey && normalizeLookupKey(payment.studentName) === childNameKey);
+      })
+      .sort((left, right) => {
+        const leftTime = new Date(left.paidAt || left.createdAt || 0).getTime();
+        const rightTime = new Date(right.paidAt || right.createdAt || 0).getTime();
+        return rightTime - leftTime;
+      });
   }, [academicBilling.paymentHistory, academicBilling.payments, selectedChild]);
+
+  const financePaymentsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(financePayments.length / FINANCE_PAYMENTS_PAGE_SIZE)),
+    [financePayments.length],
+  );
+
+  const financePaymentsCurrentPage = useMemo(
+    () => Math.min(Math.max(financePaymentsPage, 1), financePaymentsTotalPages),
+    [financePaymentsPage, financePaymentsTotalPages],
+  );
+
+  const paginatedFinancePayments = useMemo(() => {
+    const startIndex = (financePaymentsCurrentPage - 1) * FINANCE_PAYMENTS_PAGE_SIZE;
+    return financePayments.slice(startIndex, startIndex + FINANCE_PAYMENTS_PAGE_SIZE);
+  }, [financePayments, financePaymentsCurrentPage]);
+
+  useEffect(() => {
+    setFinancePaymentsPage(1);
+  }, [selectedChildId]);
 
   const selectedFinanceSummary = useMemo(() => {
     if (!selectedChild) {
@@ -4926,6 +4995,44 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
           ? `Vence ${formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })} · ${primaryPendingCharge.concept || 'Cobro académico'}`
           : (primaryPendingCharge.concept || 'Tienes un cobro académico pendiente'))
         : 'No tienes pagos pendientes este mes';
+
+  const financeHeroCard = activeSection === 'finance' ? (
+    <article className="campus-parent-mobile__hero-card is-finance">
+      <div className="campus-parent-mobile__hero-card-head">
+        <span className="campus-parent-mobile__eyebrow">
+          {financeHeroEyebrow}
+        </span>
+        {primaryPendingCharge ? (
+          <button
+            className="campus-parent-mobile__finance-pay-button"
+            disabled={(!selectedFinanceSummary?.requiresDataSchoolContact && !primaryPendingCharge) || Boolean(payingChargeId)}
+            onClick={onPayAcademicCharge}
+            type="button"
+          >
+            {payingChargeId ? 'Procesando...' : financeHeroPayLabel}
+          </button>
+        ) : null}
+      </div>
+      <div className="campus-parent-mobile__finance-price-meta">
+        {selectedFinanceSummary?.requiresDataSchoolContact ? <span className="campus-parent-mobile__finance-status-label">Gestión especial</span> : null}
+        {selectedFinanceHasDiscount ? <span className="campus-parent-mobile__finance-original-amount">{formatCurrency(selectedFinanceFullAmount)}</span> : null}
+        {!primaryPendingCharge ? <span className="campus-parent-mobile__finance-discount-tag">Estás al día</span> : null}
+      </div>
+      <h2>
+        {selectedFinanceSummary?.requiresDataSchoolContact
+          ? 'Contacta DataSchool'
+          : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0))}
+      </h2>
+      <span className="campus-parent-mobile__finance-current-note">
+        {financeHeroNote}
+      </span>
+      {selectedFinanceConcepts.length ? (
+        <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">
+          Ver detalle
+        </button>
+      ) : null}
+    </article>
+  ) : null;
 
   const selectedChildNursingRecords = useMemo(() => {
     const childId = String(selectedChild?._id || selectedChild?.id || '');
@@ -5277,7 +5384,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const isHomeFeedLoading = parentOverviewLoading || academicLoading;
 
   const parentSectionChrome = !shouldUsePortalHeader ? (
-    <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}`}>
+    <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}`}>
           <ParentMobilePortalHeader
             canOpenMenu={activeSection === 'academic'}
             guardianName={workspace.guardian.name}
@@ -5303,12 +5410,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
             selectedChild={selectedChildForSwitcher}
           />
+          {financeHeroCard}
     </div>
   ) : null;
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
+      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
       {...pullRefreshTouchHandlers}
     >
       <ParentPullToRefreshIndicator
@@ -5408,63 +5516,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
         {activeSection === 'finance' ? (
           <>
-            <article className="campus-parent-mobile__hero-card is-finance">
-              <div className="campus-parent-mobile__hero-card-head">
-                <span className="campus-parent-mobile__eyebrow">
-                  {financeHeroEyebrow}
-                </span>
-                {primaryPendingCharge ? (
-                  <button
-                    className="campus-parent-mobile__finance-pay-button"
-                    disabled={(!selectedFinanceSummary?.requiresDataSchoolContact && !primaryPendingCharge) || Boolean(payingChargeId)}
-                    onClick={onPayAcademicCharge}
-                    type="button"
-                  >
-                    {payingChargeId ? 'Procesando...' : financeHeroPayLabel}
-                  </button>
-                ) : null}
-              </div>
-              <div className="campus-parent-mobile__finance-price-meta">
-                {selectedFinanceSummary?.requiresDataSchoolContact ? <span className="campus-parent-mobile__finance-status-label">Gestión especial</span> : null}
-                {selectedFinanceHasDiscount ? <span className="campus-parent-mobile__finance-original-amount">{formatCurrency(selectedFinanceFullAmount)}</span> : null}
-                {!primaryPendingCharge ? <span className="campus-parent-mobile__finance-discount-tag">Estás al día</span> : null}
-              </div>
-              <h2>
-                {selectedFinanceSummary?.requiresDataSchoolContact
-                  ? 'Contacta DataSchool'
-                  : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0))}
-              </h2>
-              <span className="campus-parent-mobile__finance-current-note">
-                {financeHeroNote}
-              </span>
-              {selectedFinanceConcepts.length ? (
-                <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">
-                  Ver detalle
-                </button>
-              ) : null}
-            </article>
             {academicPaymentMessage ? <p className="campus-parent-mobile__empty-note">{academicPaymentMessage}</p> : null}
             {academicLoading ? <p className="campus-parent-mobile__empty-note">Actualizando cartera académica...</p> : null}
+            <ParentFinancePaymentHistory
+              onPageChange={setFinancePaymentsPage}
+              page={financePaymentsCurrentPage}
+              pageSize={FINANCE_PAYMENTS_PAGE_SIZE}
+              payments={paginatedFinancePayments}
+              totalPages={financePaymentsTotalPages}
+            />
             <ParentFinancePricingGuide pricingGuide={selectedPricingGuide} />
-            <section className="campus-parent-mobile__finance-group">
-              <h3>Historial de pagos</h3>
-              <div className="campus-parent-mobile__card-stack campus-parent-mobile__card-stack--finance">
-                {financePayments.length ? financePayments.map((payment) => (
-                  <article className="campus-parent-mobile__list-card campus-parent-mobile__finance-entry-card" key={payment.id || payment._id}>
-                    <div>
-                      <strong>{payment.concept || 'Pago académico'}</strong>
-                      <span>
-                        {formatParentFinanceDate(payment.paidAt, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) || 'Registrado'}
-                      </span>
-                    </div>
-                    <div className="campus-parent-mobile__finance-entry-meta">
-                      <strong>{formatCurrency(payment.amount)}</strong>
-                      <span>{payment.channel || payment.method || 'Portal'}</span>
-                    </div>
-                  </article>
-                )) : <p className="campus-parent-mobile__empty-note">Aún no hay pagos académicos registrados para este alumno.</p>}
-              </div>
-            </section>
           </>
         ) : null}
 
