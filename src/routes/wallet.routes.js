@@ -12,6 +12,7 @@ const {
   queueAutoDebitRechargeNotification,
   queueApprovalPendingNotificationForAdmins,
 } = require('../services/notification.service');
+const { ensureStudentWallet } = require('../utils/studentWallet');
 
 const router = express.Router();
 
@@ -74,7 +75,7 @@ async function getStudentBalance(req, res) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  const wallet = await Wallet.findOne({ schoolId, studentId });
+  const wallet = await ensureStudentWallet({ schoolId, studentId });
   if (!wallet) {
     return res.status(404).json({ message: 'Wallet not found' });
   }
@@ -346,7 +347,11 @@ router.post('/topup-requests/:id/approve', roleMiddleware('admin'), async (req, 
       return res.status(404).json({ message: 'Pending topup request not found' });
     }
 
-    const wallet = await Wallet.findOne({ schoolId, studentId: topupRequest.studentId }).session(session);
+    const wallet = await ensureStudentWallet({
+      schoolId,
+      studentId: topupRequest.studentId,
+      session,
+    });
     if (!wallet) {
       await session.abortTransaction();
       return res.status(404).json({ message: 'Wallet not found' });
@@ -440,7 +445,7 @@ router.post('/topup', roleMiddleware('admin', 'parent'), async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const wallet = await Wallet.findOne({ schoolId, studentId });
+    const wallet = await ensureStudentWallet({ schoolId, studentId });
     if (!wallet) {
       return res.status(404).json({ message: 'Wallet not found' });
     }
@@ -489,7 +494,7 @@ router.post('/pay', roleMiddleware('admin', 'vendor'), async (req, res) => {
       return res.status(400).json({ message: 'studentId and positive amount are required' });
     }
 
-    const wallet = await Wallet.findOne({ schoolId, studentId });
+    const wallet = await ensureStudentWallet({ schoolId, studentId });
     if (!wallet) {
       return res.status(404).json({ message: 'Wallet not found' });
     }
@@ -554,7 +559,7 @@ router.get('/:studentId', async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const wallet = await Wallet.findOne({ schoolId, studentId });
+    const wallet = await ensureStudentWallet({ schoolId, studentId });
     if (!wallet) {
       return res.status(404).json({ message: 'Wallet not found' });
     }
@@ -579,7 +584,7 @@ router.post('/recharge', roleMiddleware('admin', 'parent'), async (req, res) => 
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const wallet = await Wallet.findOne({ schoolId, studentId });
+    const wallet = await ensureStudentWallet({ schoolId, studentId });
     if (!wallet) {
       return res.status(404).json({ message: 'Wallet not found' });
     }
@@ -627,7 +632,7 @@ router.post('/debit', roleMiddleware('admin', 'vendor'), async (req, res) => {
       return res.status(400).json({ message: 'studentId and positive amount are required' });
     }
 
-    const wallet = await Wallet.findOne({ schoolId, studentId });
+    const wallet = await ensureStudentWallet({ schoolId, studentId });
     if (!wallet) {
       return res.status(404).json({ message: 'Wallet not found' });
     }

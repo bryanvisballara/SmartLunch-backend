@@ -27,6 +27,7 @@ const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
+const { ensureStudentWallet } = require('../utils/studentWallet');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
@@ -7328,6 +7329,8 @@ router.post('/database/import', (req, res) => {
             summary.createdStudents += 1;
           }
 
+          await ensureStudentWallet({ schoolId, studentId: student._id });
+
           const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, row.grade);
           const existingBillingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
           const billingProfilePayload = {
@@ -8096,6 +8099,8 @@ router.post('/enrollments', async (req, res) => {
           status: 'active',
         });
       }
+
+      await ensureStudentWallet({ schoolId, studentId: student._id });
 
       let billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
       const hadBillingProfile = Boolean(billingProfile);
