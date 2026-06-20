@@ -3623,14 +3623,6 @@ async function ensureAcademicFeeConfiguration(schoolId, grades = []) {
 
   configuration = await backfillEmptyFeeConfigurationFromSchoolCreationSnapshot(configuration, schoolId, grades);
 
-  const { backfillEmptyFeeConfigurationFromSiblingTenant } = require('../utils/academicFeeConfigurationBackfill');
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('grades').lean();
-  configuration = await backfillEmptyFeeConfigurationFromSiblingTenant(
-    configuration,
-    schoolId,
-    academicStructure?.grades || [],
-  );
-
   if (normalizeBenefitRules(configuration?.benefitRules || []).length === 0) {
     const legacyBenefitSource = (configuration.gradeSettings || []).find((item) => normalizeBenefitRules(item?.benefitRules || []).length > 0) || null;
     const legacyBenefitRules = normalizeBenefitRules(legacyBenefitSource?.benefitRules || []);

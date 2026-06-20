@@ -5,8 +5,8 @@ require('../models');
 
 const AcademicStructure = require('../models/academicStructure.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
-const User = require('../models/user.model');
 const AcademicCharge = require('../models/academicCharge.model');
+const User = require('../models/user.model');
 const { ensureFeeConfigurationReadyForBilling } = require('../utils/academicFeeConfigurationBackfill');
 const { syncSchoolBillingProfilesFromFeeConfiguration } = require('../services/academicConsolidatedBilling.service');
 
@@ -34,25 +34,14 @@ async function run() {
       },
       { $set: { status: 'cancelled' } },
     );
-    const sampleProfile = await StudentBillingProfile.findOne({
-      schoolId: TARGET_SCHOOL_ID,
-      active: true,
-    }).lean();
-    const parentCount = await User.countDocuments({ schoolId: TARGET_SCHOOL_ID, role: 'parent', deletedAt: null });
-    const profileCount = await StudentBillingProfile.countDocuments({ schoolId: TARGET_SCHOOL_ID, active: true });
 
     return {
       schoolId: TARGET_SCHOOL_ID,
       billingSync,
       cancelledEarlyMonthlyCharges: cancelledEarlyMonthlyCharges.modifiedCount,
-      parentCount,
-      profileCount,
-      sampleProfile: sampleProfile ? {
-        grade: sampleProfile.grade,
-        annualTuitionAmount: sampleProfile.annualTuitionAmount,
-        monthlyTuitionAmount: sampleProfile.monthlyTuitionAmount,
-      } : null,
-      maternalFee: (feeConfiguration?.gradeSettings || []).find((item) => /maternal|infant/i.test(String(item.grade || ''))) || null,
+      parentCount: await User.countDocuments({ schoolId: TARGET_SCHOOL_ID, role: 'parent', deletedAt: null }),
+      profileCount: await StudentBillingProfile.countDocuments({ schoolId: TARGET_SCHOOL_ID, active: true }),
+      pendingCharges: await AcademicCharge.countDocuments({ schoolId: TARGET_SCHOOL_ID, status: { $in: ['pending', 'overdue'] } }),
     };
   });
 

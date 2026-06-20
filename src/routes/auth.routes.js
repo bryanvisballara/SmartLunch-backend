@@ -64,8 +64,8 @@ function isGeneratedSchoolSlugId(schoolId = '') {
 }
 
 const MILLENNIUM_SCHOOL_ID = 'Millennium School';
-const MILLENNIUM_SCHOOL_SLUG_ID = 'discovery_t3a0h';
-const MILLENNIUM_SCHOOL_ALIASES = [MILLENNIUM_SCHOOL_ID, MILLENNIUM_SCHOOL_SLUG_ID];
+const LEGACY_MILLENNIUM_SLUG_ID = 'discovery_t3a0h';
+const MILLENNIUM_SCHOOL_ALIASES = [MILLENNIUM_SCHOOL_ID, LEGACY_MILLENNIUM_SLUG_ID];
 
 function resolveLoginSchoolIdCandidates(schoolId = '') {
   const normalizedSchoolId = normalizeSchoolId(schoolId);
@@ -79,7 +79,7 @@ function resolveLoginSchoolIdCandidates(schoolId = '') {
     comergio_demo: ['comergio_demo_kns8p', 'comergio_demo'],
     comergio_demo_kns8p: ['comergio_demo_kns8p', 'comergio-demo', 'comergio_demo'],
     [MILLENNIUM_SCHOOL_ID.toLowerCase()]: MILLENNIUM_SCHOOL_ALIASES,
-    [MILLENNIUM_SCHOOL_SLUG_ID.toLowerCase()]: MILLENNIUM_SCHOOL_ALIASES,
+    [LEGACY_MILLENNIUM_SLUG_ID.toLowerCase()]: MILLENNIUM_SCHOOL_ALIASES,
     millennium: MILLENNIUM_SCHOOL_ALIASES,
   };
 

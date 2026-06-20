@@ -1,18 +1,6 @@
 const { runWithSchoolContext } = require('../config/db');
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
-const {
-  canonicalizeGradeFeeSettingsForStructure,
-  hasAnyFeeAmount,
-  normalizeText,
-} = require('./feeGradeMatching');
-
-const SIBLING_FEE_CONFIGURATION_SOURCES = {
-  'Millennium School': 'discovery_t3a0h',
-};
-
-function normalizeBenefitRules(rules = []) {
-  return Array.isArray(rules) ? rules.filter(Boolean) : [];
-}
+const { normalizeText } = require('./feeGradeMatching');
 
 function resolveSchoolYearDates(academicYear = '', fallbackYear = new Date().getFullYear()) {
   const normalizedYear = normalizeText(academicYear);
@@ -32,62 +20,9 @@ function resolveSchoolYearDates(academicYear = '', fallbackYear = new Date().get
   };
 }
 
-async function loadSiblingFeeConfiguration(sourceSchoolId = '') {
-  const normalizedSourceSchoolId = normalizeText(sourceSchoolId);
-  if (!normalizedSourceSchoolId) {
-    return null;
-  }
-
-  return runWithSchoolContext(normalizedSourceSchoolId, async () => (
-    AcademicFeeConfiguration.findOne({ schoolId: normalizedSourceSchoolId }).lean()
-  ));
-}
-
-async function backfillEmptyFeeConfigurationFromSiblingTenant(configuration, schoolId, structureGrades = []) {
-  if (!configuration || hasAnyFeeAmount(configuration.gradeSettings)) {
-    return configuration;
-  }
-
-  const sourceSchoolId = SIBLING_FEE_CONFIGURATION_SOURCES[normalizeText(schoolId)];
-  if (!sourceSchoolId) {
-    return configuration;
-  }
-
-  const sourceConfig = await loadSiblingFeeConfiguration(sourceSchoolId);
-  if (!sourceConfig || !hasAnyFeeAmount(sourceConfig.gradeSettings)) {
-    return configuration;
-  }
-
-  configuration.gradeSettings = canonicalizeGradeFeeSettingsForStructure(
-    sourceConfig.gradeSettings || [],
-    structureGrades,
-  );
-
-  if (normalizeBenefitRules(configuration.benefitRules).length === 0 && normalizeBenefitRules(sourceConfig.benefitRules).length > 0) {
-    configuration.benefitRules = sourceConfig.benefitRules;
-  }
-
-  if (normalizeBenefitRules(configuration.enrollmentBenefitRules).length === 0
-    && normalizeBenefitRules(sourceConfig.enrollmentBenefitRules).length > 0) {
-    configuration.enrollmentBenefitRules = sourceConfig.enrollmentBenefitRules;
-  }
-
-  if (!normalizeText(configuration.academicYear)) {
-    configuration.academicYear = normalizeText(sourceConfig.academicYear) || configuration.academicYear;
-  }
-
-  const schoolYearDates = resolveSchoolYearDates(
-    configuration.academicYear || sourceConfig.academicYear,
-    new Date().getFullYear(),
-  );
-  configuration.schoolYearStartDate = schoolYearDates.schoolYearStartDate;
-  configuration.schoolYearEndDate = schoolYearDates.schoolYearEndDate;
-
-  await configuration.save();
-  return configuration;
-}
-
 async function ensureFeeConfigurationReadyForBilling({ schoolId, structureGrades = [] }) {
+  void structureGrades;
+
   return runWithSchoolContext(schoolId, async () => {
     let configuration = await AcademicFeeConfiguration.findOne({ schoolId });
     if (!configuration) {
@@ -106,19 +41,23 @@ async function ensureFeeConfigurationReadyForBilling({ schoolId, structureGrades
       });
     }
 
-    configuration = await backfillEmptyFeeConfigurationFromSiblingTenant(
-      configuration,
-      schoolId,
-      structureGrades,
-    );
+    const schoolYearDates = resolveSchoolYearDates(configuration.academicYear || String(new Date().getFullYear()));
+    let changed = false;
+    if (!configuration.schoolYearStartDate || !configuration.schoolYearEndDate) {
+      configuration.schoolYearStartDate = schoolYearDates.schoolYearStartDate;
+      configuration.schoolYearEndDate = schoolYearDates.schoolYearEndDate;
+      changed = true;
+    }
+
+    if (changed) {
+      await configuration.save();
+    }
 
     return configuration.toObject ? configuration.toObject() : configuration;
   });
 }
 
 module.exports = {
-  SIBLING_FEE_CONFIGURATION_SOURCES,
-  backfillEmptyFeeConfigurationFromSiblingTenant,
   ensureFeeConfigurationReadyForBilling,
   resolveSchoolYearDates,
 };
