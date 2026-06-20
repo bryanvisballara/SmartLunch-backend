@@ -59,20 +59,56 @@ function ensureStoreModelForSchool(schoolId = '') {
   resolveRegisteredModel('Store', schoolId);
 }
 
+function isGeneratedSchoolSlugId(schoolId = '') {
+  return /_[a-z0-9]{5}$/i.test(normalizeSchoolId(schoolId));
+}
+
+const MILLENNIUM_SCHOOL_ID = 'Millennium School';
+const MILLENNIUM_SCHOOL_SLUG_ID = 'discovery_t3a0h';
+const MILLENNIUM_SCHOOL_ALIASES = [MILLENNIUM_SCHOOL_ID, MILLENNIUM_SCHOOL_SLUG_ID];
+
 function resolveLoginSchoolIdCandidates(schoolId = '') {
   const normalizedSchoolId = normalizeSchoolId(schoolId);
   if (!normalizedSchoolId) {
     return [];
   }
 
+  const normalizedKey = normalizedSchoolId.toLowerCase();
   const aliasMap = {
     'comergio-demo': ['comergio_demo_kns8p', 'comergio-demo'],
     comergio_demo: ['comergio_demo_kns8p', 'comergio_demo'],
     comergio_demo_kns8p: ['comergio_demo_kns8p', 'comergio-demo', 'comergio_demo'],
+    [MILLENNIUM_SCHOOL_ID.toLowerCase()]: MILLENNIUM_SCHOOL_ALIASES,
+    [MILLENNIUM_SCHOOL_SLUG_ID.toLowerCase()]: MILLENNIUM_SCHOOL_ALIASES,
+    millennium: MILLENNIUM_SCHOOL_ALIASES,
   };
 
-  const aliases = aliasMap[normalizedSchoolId.toLowerCase()] || [normalizedSchoolId];
+  const aliases = aliasMap[normalizedKey] || [normalizedSchoolId];
   return [...new Set(aliases.map(normalizeSchoolId).filter(Boolean))];
+}
+
+function shouldPreferSchoolOption(candidate, existing) {
+  const labelKey = normalizeSchoolLabelKey(candidate.label || candidate.id);
+  const candidateIdKey = normalizeSchoolLabelKey(candidate.id);
+  const existingIdKey = normalizeSchoolLabelKey(existing.id);
+  const candidateIdMatchesLabel = candidateIdKey === labelKey;
+  const existingIdMatchesLabel = existingIdKey === labelKey;
+
+  if (candidateIdMatchesLabel !== existingIdMatchesLabel) {
+    return candidateIdMatchesLabel;
+  }
+
+  const candidateIsSlug = isGeneratedSchoolSlugId(candidate.id);
+  const existingIsSlug = isGeneratedSchoolSlugId(existing.id);
+  if (candidateIsSlug !== existingIsSlug) {
+    return !candidateIsSlug;
+  }
+
+  if (candidate.hasExplicitLabel !== existing.hasExplicitLabel) {
+    return candidate.hasExplicitLabel;
+  }
+
+  return compareSchoolOptions(candidate, existing) < 0;
 }
 
 async function findUserWithSchoolCandidates({ schoolId, filter, populateAssignedStore = false }) {
@@ -294,7 +330,7 @@ router.get('/schools', async (_req, res) => {
       const labelKey = normalizeSchoolLabelKey(school.label || school.id);
       const existingSchool = schoolsByLabel.get(labelKey);
 
-      if (!existingSchool || (!existingSchool.hasExplicitLabel && school.hasExplicitLabel)) {
+      if (!existingSchool || shouldPreferSchoolOption(school, existingSchool)) {
         schoolsByLabel.set(labelKey, school);
       }
     });

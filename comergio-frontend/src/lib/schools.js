@@ -20,9 +20,14 @@ export const DEFAULT_SCHOOL_ID = 'comergio_demo_kns8p';
 export const DEFAULT_SCHOOL_COUNTRY = 'CO';
 const KNOWN_SCHOOL_OPTIONS_STORAGE_KEY = 'knownSchoolOptions';
 
+const MILLENNIUM_SCHOOL_ID = 'Millennium School';
+
 const STORED_SCHOOL_ID_ALIASES = {
   'comergio-demo': DEFAULT_SCHOOL_ID,
   comergio_demo: DEFAULT_SCHOOL_ID,
+  discovery_t3a0h: MILLENNIUM_SCHOOL_ID,
+  'millennium school': MILLENNIUM_SCHOOL_ID,
+  millennium: MILLENNIUM_SCHOOL_ID,
 };
 
 export function resolveStoredSchoolId(storedSchoolId = '', options = SCHOOL_OPTIONS) {
