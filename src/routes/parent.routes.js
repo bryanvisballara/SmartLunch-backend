@@ -1246,7 +1246,16 @@ async function syncParentAnnualTuitionDueDatesFromRectoria({ schoolId, studentId
   return modifiedCount;
 }
 
-function resolveAcademicCycleRange(profile = {}, referenceDate = new Date()) {
+function resolveAcademicCycleRange(profile = {}, referenceDate = new Date(), feeConfiguration = null) {
+  const configuredStart = feeConfiguration?.schoolYearStartDate ? startOfDayLocal(feeConfiguration.schoolYearStartDate) : null;
+  const configuredEnd = feeConfiguration?.schoolYearEndDate ? startOfDayLocal(feeConfiguration.schoolYearEndDate) : null;
+  if (configuredStart && configuredEnd && configuredEnd >= configuredStart) {
+    return {
+      start: configuredStart,
+      end: configuredEnd,
+    };
+  }
+
   const academicYear = normalizeText(profile.academicYear);
   const yearMatch = academicYear.match(/(20\d{2})\D+(20\d{2})/);
   if (yearMatch) {
@@ -1259,13 +1268,9 @@ function resolveAcademicCycleRange(profile = {}, referenceDate = new Date()) {
   const singleYearMatch = academicYear.match(/(20\d{2})/);
   if (singleYearMatch) {
     const year = Number(singleYearMatch[1]);
-    const safeReferenceDate = new Date(referenceDate);
-    const startYear = safeReferenceDate.getMonth() < ACADEMIC_CYCLE_START_MONTH && year === safeReferenceDate.getFullYear()
-      ? year - 1
-      : year;
     return {
-      start: new Date(startYear, ACADEMIC_CYCLE_START_MONTH, 1),
-      end: new Date(startYear + 1, ACADEMIC_CYCLE_END_MONTH, 31),
+      start: new Date(year, ACADEMIC_CYCLE_START_MONTH, 1),
+      end: new Date(year + 1, ACADEMIC_CYCLE_END_MONTH, 31),
     };
   }
 
@@ -1279,8 +1284,8 @@ function resolveAcademicCycleRange(profile = {}, referenceDate = new Date()) {
   };
 }
 
-function buildAcademicCycleMonthlyDueDates(profile = {}, referenceDate = new Date()) {
-  const { start, end } = resolveAcademicCycleRange(profile, referenceDate);
+function buildAcademicCycleMonthlyDueDates(profile = {}, referenceDate = new Date(), feeConfiguration = null) {
+  const { start, end } = resolveAcademicCycleRange(profile, referenceDate, feeConfiguration);
   const dueDay = Math.min(28, Math.max(1, Number(profile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY)));
   const entryDate = profile.entryDate ? startOfDayLocal(profile.entryDate) : null;
   const effectiveStart = entryDate && entryDate > start ? new Date(entryDate.getFullYear(), entryDate.getMonth(), 1) : start;
@@ -1318,12 +1323,12 @@ async function notifyParentAcademicChargeCreated({ schoolId, parentUserId, stude
   });
 }
 
-async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role, studentIds = [], billingProfiles = [], referenceDate = new Date() }) {
+async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role, studentIds = [], billingProfiles = [], feeConfiguration = null, referenceDate = new Date() }) {
   const linkedStudentIdSet = new Set(studentIds.map((item) => String(item)));
   const profiles = (billingProfiles || []).filter((profile) => linkedStudentIdSet.has(String(profile.studentId)) && Number(profile.monthlyTuitionAmount || 0) > 0);
 
   for (const profile of profiles) {
-    const dueDates = buildAcademicCycleMonthlyDueDates(profile, referenceDate);
+    const dueDates = buildAcademicCycleMonthlyDueDates(profile, referenceDate, feeConfiguration);
     for (const dueDate of dueDates) {
       const monthKey = buildMonthKey(dueDate);
       const existingCharge = await AcademicCharge.exists({
@@ -4198,18 +4203,32 @@ router.get('/portal/academic-billing', async (req, res) => {
       ensureConsolidatedMonthlyCharge,
       refreshPendingIndividualTuitionCharges,
       serializeConsolidatedChargeForParent,
+      syncSchoolBillingProfilesFromFeeConfiguration,
     } = require('../services/academicConsolidatedBilling.service');
+    const { ensureFeeConfigurationReadyForBilling } = require('../utils/academicFeeConfigurationBackfill');
 
     const now = new Date();
-    let [billingProfiles, feeConfiguration, academicStructure] = await Promise.all([
+    let [billingProfiles, academicStructure] = await Promise.all([
       StudentBillingProfile.find({ schoolId, active: true, studentId: { $in: linkedStudentIds } }).lean(),
-      AcademicFeeConfiguration.findOne({ schoolId }).lean(),
       AcademicStructure.findOne({ schoolId }).lean(),
     ]);
 
     const academicGrades = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
       .filter((grade) => normalizeText(grade?.status || 'active') !== 'archived')
       .map((grade) => ({ key: normalizeText(grade.key), levelKey: normalizeText(grade.levelKey) }));
+
+    let feeConfiguration = await ensureFeeConfigurationReadyForBilling({
+      schoolId,
+      structureGrades: academicStructure?.grades || [],
+    });
+
+    await syncSchoolBillingProfilesFromFeeConfiguration({
+      schoolId,
+      feeConfiguration,
+      referenceDate: now,
+    });
+
+    billingProfiles = await StudentBillingProfile.find({ schoolId, active: true, studentId: { $in: linkedStudentIds } }).lean();
 
     await syncParentAnnualTuitionDueDatesFromRectoria({
       schoolId,
@@ -4235,6 +4254,7 @@ router.get('/portal/academic-billing', async (req, res) => {
       role,
       studentIds: linkedStudentIds,
       billingProfiles,
+      feeConfiguration,
       referenceDate: now,
     });
 

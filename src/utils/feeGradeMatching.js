@@ -57,7 +57,10 @@ function getFeeGradeAliases(value) {
   const kinderMatch = normalized.match(/^kinder[\s_-]*(\d{1,2})?$/i);
   if (kinderMatch) addEducationalLevelAliases(aliases, 'kinder', kinderMatch[1] || '');
 
-  if (/^maternal$/i.test(normalized)) aliases.add('maternal');
+  if (/^maternal$/i.test(normalized)) {
+    aliases.add('maternal');
+    aliases.add('infants');
+  }
   if (/^prep$/i.test(normalized)) aliases.add('prep');
   if (/^infants$/i.test(normalized)) {
     aliases.add('infants');
@@ -228,11 +231,15 @@ function gradesMatchForFilter(studentGrade, filterGrade) {
   return [...studentAliases].some((alias) => filterAliases.has(alias));
 }
 
-function hasAnyFeeAmount(setting) {
-  if (!setting) return false;
-  return Number(setting?.enrollmentBonus || 0) > 0
-    || Number(setting?.enrollmentFee || 0) > 0
-    || Number(setting?.monthlyTuition || 0) > 0;
+function hasAnyFeeAmount(value) {
+  if (Array.isArray(value)) {
+    return value.some((setting) => hasAnyFeeAmount(setting));
+  }
+
+  if (!value) return false;
+  return Number(value?.enrollmentBonus || 0) > 0
+    || Number(value?.enrollmentFee || 0) > 0
+    || Number(value?.monthlyTuition || 0) > 0;
 }
 
 function normalizeFeeAmount(value) {
