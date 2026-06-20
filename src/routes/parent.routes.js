@@ -1672,10 +1672,16 @@ function buildParentAcademicBillingSummaryByStudent({ charges = [], referenceDat
         status: currentCharge?.status || 'pending',
         monthKey: currentCharge?.monthKey || '',
       }));
+      const conceptsTotalAmount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
+      const conceptsOriginalTotalAmount = concepts.reduce((sum, concept) => sum + Number(concept.originalAmount || concept.amount || 0), 0);
       const amount = requiresDataSchoolContact
         ? pendingCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0)
-        : Number(currentCharge?.amount || 0);
-      const totalAmount = Number(currentCharge?.chargeOriginalAmount || currentCharge?.chargeAmount || currentCharge?.amount || amount || 0);
+        : (conceptsTotalAmount > 0
+          ? conceptsTotalAmount
+          : Number(currentCharge?.amount || 0));
+      const totalAmount = conceptsOriginalTotalAmount > 0
+        ? conceptsOriginalTotalAmount
+        : Number(currentCharge?.chargeOriginalAmount || currentCharge?.chargeAmount || currentCharge?.amount || amount || 0);
 
       return {
         studentId,
@@ -1698,10 +1704,14 @@ function buildParentAcademicBillingSummaryByStudent({ charges = [], referenceDat
     const pendingIndividualCharges = individualCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
     const currentCharge = sortAcademicChargesForDisplay(pendingIndividualCharges)[0] || null;
     const concepts = buildParentIndividualChargeConcepts(pendingIndividualCharges);
+    const conceptsTotalAmount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
+    const conceptsOriginalTotalAmount = concepts.reduce((sum, concept) => sum + Number(concept.originalAmount || concept.amount || 0), 0);
     const amount = requiresDataSchoolContact
       ? pendingIndividualCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0)
-      : Number(currentCharge?.amount || 0);
-    const totalAmount = Number(currentCharge?.chargeOriginalAmount || currentCharge?.originalAmount || currentCharge?.amount || amount || 0);
+      : (conceptsTotalAmount > 0 ? conceptsTotalAmount : Number(currentCharge?.amount || 0));
+    const totalAmount = conceptsOriginalTotalAmount > 0
+      ? conceptsOriginalTotalAmount
+      : Number(currentCharge?.chargeOriginalAmount || currentCharge?.originalAmount || currentCharge?.amount || amount || 0);
 
     return {
       studentId,
@@ -4297,8 +4307,7 @@ router.get('/portal/academic-billing', async (req, res) => {
     const normalizedCharges = sortAcademicChargesForDisplay([...normalizedStatementCharges, ...normalizedIndividualCharges]);
 
     const currentCharges = normalizedCharges
-      .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()))
-      .sort((left, right) => new Date(left.dueDate || 0) - new Date(right.dueDate || 0));
+      .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
 
     const paymentHistory = [
       ...normalizedCharges
