@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/generateStaticRouteFallbacks.mjs",
-    "mobile:build": "npm run build && npx cap sync",
-    "cap:sync": "npx cap sync",
+    "mobile:build": "npm run build && npm run cap:sync",
+    "mobile:build:remote": "npm run build && npm run cap:sync",
+    "mobile:build:embedded": "CAPACITOR_USE_EMBEDDED=true npm run build && CAPACITOR_USE_EMBEDDED=true npm run cap:sync",
+    "cap:sync": "node scripts/runCapSync.mjs",
     "cap:android": "npx cap open android",
     "cap:ios": "npx cap open ios",
     "lint": "eslint .",

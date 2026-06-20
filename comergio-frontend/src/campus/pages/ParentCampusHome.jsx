@@ -499,15 +499,87 @@ function ParentFinancePaymentHistory({ onPageChange, page, pageSize, payments, t
   );
 }
 
-function ParentFinancePricingGuide({ pricingGuide }) {
-  if (!pricingGuide) {
+function resolveParentPricingGuide(pricingGuides, selectedChild, financeCharges = []) {
+  const guides = pricingGuides && typeof pricingGuides === 'object' ? pricingGuides : null;
+  const childId = String(selectedChild?._id || selectedChild?.id || '');
+
+  let guide = guides?.[childId] || null;
+  if (!guide && guides && childId) {
+    const matchedKey = Object.keys(guides).find((key) => String(key) === childId);
+    guide = matchedKey ? guides[matchedKey] : null;
+  }
+  if (!guide && guides && Object.keys(guides).length === 1) {
+    guide = guides[Object.keys(guides)[0]];
+  }
+
+  const enrollmentFullAmount = Number(guide?.enrollment?.fullAmount || 0);
+  const monthlyFullAmount = Number(guide?.monthlyTuition?.fullAmount || 0);
+  if (guide && (enrollmentFullAmount > 0 || monthlyFullAmount > 0)) {
+    return guide;
+  }
+
+  const pendingCharges = Array.isArray(financeCharges) ? financeCharges : [];
+  const enrollmentCharge = pendingCharges.find((charge) => String(charge?.category || '').toLowerCase() === 'annual_tuition');
+  const monthlyCharge = pendingCharges.find((charge) => String(charge?.category || '').toLowerCase() === 'monthly_tuition');
+  const fallbackEnrollmentAmount = Math.max(
+    0,
+    Number(enrollmentCharge?.originalAmount || enrollmentCharge?.fullAmount || enrollmentCharge?.amount || 0),
+  );
+  const fallbackMonthlyAmount = Math.max(
+    0,
+    Number(monthlyCharge?.originalAmount || monthlyCharge?.fullAmount || monthlyCharge?.amount || 0),
+  );
+
+  if (fallbackEnrollmentAmount <= 0 && fallbackMonthlyAmount <= 0) {
     return null;
+  }
+
+  return {
+    ...(guide || {}),
+    grade: guide?.grade || selectedChild?.grade || '',
+    enrollment: {
+      ...(guide?.enrollment || {}),
+      fullAmount: enrollmentFullAmount || fallbackEnrollmentAmount,
+      fullLabel: guide?.enrollment?.fullLabel || 'Matrícula ordinaria',
+      benefits: Array.isArray(guide?.enrollment?.benefits) ? guide.enrollment.benefits : [],
+    },
+    monthlyTuition: {
+      ...(guide?.monthlyTuition || {}),
+      fullAmount: monthlyFullAmount || fallbackMonthlyAmount,
+      fullLabel: guide?.monthlyTuition?.fullLabel || 'Pensión ordinaria (precio full)',
+      benefits: Array.isArray(guide?.monthlyTuition?.benefits) ? guide.monthlyTuition.benefits : [],
+    },
+  };
+}
+
+function ParentFinancePricingGuide({ isLoading = false, pricingGuide }) {
+  if (isLoading) {
+    return (
+      <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
+        <h3>Valores de matrícula y pensión</h3>
+        <p className="campus-parent-mobile__empty-note">Consultando tarifas del colegio...</p>
+      </section>
+    );
+  }
+
+  if (!pricingGuide) {
+    return (
+      <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
+        <h3>Valores de matrícula y pensión</h3>
+        <p className="campus-parent-mobile__empty-note">No hay tarifas configuradas para mostrar en este grado.</p>
+      </section>
+    );
   }
 
   const enrollmentFullAmount = Number(pricingGuide?.enrollment?.fullAmount || 0);
   const monthlyFullAmount = Number(pricingGuide?.monthlyTuition?.fullAmount || 0);
   if (enrollmentFullAmount <= 0 && monthlyFullAmount <= 0) {
-    return null;
+    return (
+      <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
+        <h3>Valores de matrícula y pensión</h3>
+        <p className="campus-parent-mobile__empty-note">No hay tarifas configuradas para mostrar en este grado.</p>
+      </section>
+    );
   }
 
   const renderPricingRows = (section, sectionTitle) => {
@@ -4510,7 +4582,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const [activeCafeteriaView, setActiveCafeteriaView] = useState('cafeteria-overview');
   const [showCareMenu, setShowCareMenu] = useState(false);
   const [academicFeed, setAcademicFeed] = useState([]);
-  const [academicBilling, setAcademicBilling] = useState({ summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
+  const [academicBilling, setAcademicBilling] = useState({
+    summary: { pendingAmount: 0, pendingCount: 0 },
+    currentCharges: [],
+    charges: [],
+    payments: [],
+    paymentHistory: [],
+    pricingGuides: {},
+  });
   const [nursingRecords, setNursingRecords] = useState([]);
   const [psychologyCases, setPsychologyCases] = useState([]);
   const [expandedNursingRecordId, setExpandedNursingRecordId] = useState('');
@@ -4717,7 +4796,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
         }
 
         if (billingResult.status === 'fulfilled') {
-          setAcademicBilling(billingResult.value.data || { summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
+          setAcademicBilling(billingResult.value.data || {
+            summary: { pendingAmount: 0, pendingCount: 0 },
+            currentCharges: [],
+            charges: [],
+            payments: [],
+            paymentHistory: [],
+            pricingGuides: {},
+          });
         }
       })
       .catch(() => {
@@ -4818,7 +4904,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             }
 
             if (billingResult.status === 'fulfilled') {
-              setAcademicBilling(billingResult.value.data || { summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
+              setAcademicBilling(billingResult.value.data || {
+            summary: { pendingAmount: 0, pendingCount: 0 },
+            currentCharges: [],
+            charges: [],
+            payments: [],
+            paymentHistory: [],
+            pricingGuides: {},
+          });
             }
           })
           .finally(() => setAcademicLoading(false))
@@ -4963,9 +5056,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       return null;
     }
 
-    const childId = String(selectedChild._id || selectedChild.id || '');
-    return academicBilling.pricingGuides?.[childId] || null;
-  }, [academicBilling.pricingGuides, selectedChild]);
+    return resolveParentPricingGuide(academicBilling.pricingGuides, selectedChild, financeCharges);
+  }, [academicBilling.pricingGuides, financeCharges, selectedChild]);
 
   const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
@@ -5326,7 +5418,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     try {
       await payParentAcademicCharge(payableChargeIds[0], { method: 'parent_portal' });
       const billingResponse = await getParentAcademicBilling();
-      setAcademicBilling(billingResponse.data || { summary: { pendingAmount: 0, pendingCount: 0 }, currentCharges: [], charges: [], payments: [], paymentHistory: [] });
+      setAcademicBilling(billingResponse.data || {
+        summary: { pendingAmount: 0, pendingCount: 0 },
+        currentCharges: [],
+        charges: [],
+        payments: [],
+        paymentHistory: [],
+        pricingGuides: {},
+      });
       setShowFinanceConceptsSheet(false);
       setAcademicPaymentMessage('Pago registrado. Estás al día.');
     } catch (error) {
@@ -5525,7 +5624,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
               payments={paginatedFinancePayments}
               totalPages={financePaymentsTotalPages}
             />
-            <ParentFinancePricingGuide pricingGuide={selectedPricingGuide} />
+            <ParentFinancePricingGuide isLoading={academicLoading} pricingGuide={selectedPricingGuide} />
           </>
         ) : null}
 
