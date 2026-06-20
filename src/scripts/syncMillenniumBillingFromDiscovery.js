@@ -6,6 +6,7 @@ require('../models');
 const AcademicStructure = require('../models/academicStructure.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
+const AcademicCharge = require('../models/academicCharge.model');
 const { ensureFeeConfigurationReadyForBilling } = require('../utils/academicFeeConfigurationBackfill');
 const { syncSchoolBillingProfilesFromFeeConfiguration } = require('../services/academicConsolidatedBilling.service');
 
@@ -24,6 +25,15 @@ async function run() {
       schoolId: TARGET_SCHOOL_ID,
       feeConfiguration,
     });
+    const cancelledEarlyMonthlyCharges = await AcademicCharge.updateMany(
+      {
+        schoolId: TARGET_SCHOOL_ID,
+        category: 'monthly_tuition',
+        status: { $in: ['pending', 'overdue'] },
+        dueDate: { $lt: feeConfiguration.schoolYearStartDate },
+      },
+      { $set: { status: 'cancelled' } },
+    );
     const sampleProfile = await StudentBillingProfile.findOne({
       schoolId: TARGET_SCHOOL_ID,
       active: true,
@@ -34,6 +44,7 @@ async function run() {
     return {
       schoolId: TARGET_SCHOOL_ID,
       billingSync,
+      cancelledEarlyMonthlyCharges: cancelledEarlyMonthlyCharges.modifiedCount,
       parentCount,
       profileCount,
       sampleProfile: sampleProfile ? {
