@@ -358,6 +358,71 @@ function sortParentFinanceCharges(charges = []) {
   });
 }
 
+function buildParentFinanceConceptFromCharge(charge = {}) {
+  return {
+    _id: charge._id,
+    chargeId: charge._id,
+    category: charge.category,
+    concept: charge.concept,
+    description: charge.benefitLabel || charge.description || '',
+    amount: Number(charge.amount || charge.outstandingAmount || 0),
+    originalAmount: Number(charge.chargeOriginalAmount || charge.originalAmount || charge.chargeAmount || charge.amount || 0),
+    dueDate: charge.dueDate,
+    status: charge.status,
+    monthKey: charge.monthKey || '',
+  };
+}
+
+function buildParentFinanceConceptsFromCharges(charges = []) {
+  const pendingCharges = sortParentFinanceCharges(charges).filter(
+    (charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()),
+  );
+
+  if (!pendingCharges.length) {
+    return [];
+  }
+
+  const individualCharges = pendingCharges.filter((charge) => (
+    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'].includes(String(charge.category || ''))
+  ));
+  if (individualCharges.length > 0) {
+    return individualCharges.map(buildParentFinanceConceptFromCharge);
+  }
+
+  const statementCharge = pendingCharges.find((charge) => String(charge.category || '') === 'monthly_statement') || null;
+  const breakdownItems = Array.isArray(statementCharge?.breakdownItems) ? statementCharge.breakdownItems : [];
+  if (statementCharge && breakdownItems.length > 0) {
+    return breakdownItems.map((item, index) => ({
+      _id: `${statementCharge._id || 'statement'}-${item.key || item.label || index}`,
+      chargeId: statementCharge._id,
+      category: item.key || 'item',
+      concept: item.label || 'Concepto',
+      description: item.benefitLabel || '',
+      amount: Number(item.amount || 0),
+      originalAmount: Number(item.originalAmount || item.amount || 0),
+      dueDate: statementCharge.dueDate || null,
+      status: statementCharge.status || 'pending',
+      monthKey: statementCharge.monthKey || '',
+    }));
+  }
+
+  return pendingCharges.map(buildParentFinanceConceptFromCharge);
+}
+
+function resolveParentPayableCharge(charges = []) {
+  const pendingCharges = sortParentFinanceCharges(charges).filter(
+    (charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()),
+  );
+  const individualCharge = pendingCharges.find((charge) => (
+    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'].includes(String(charge.category || ''))
+  ));
+  if (individualCharge) {
+    return individualCharge;
+  }
+
+  return pendingCharges[0] || null;
+}
+
 function resolveParentFinanceHeroEyebrow(charge, concepts = []) {
   const conceptCategories = new Set((concepts || []).map((item) => String(item.category || '').toLowerCase()).filter(Boolean));
   if (conceptCategories.has('annual_tuition') && conceptCategories.has('monthly_tuition')) {
@@ -4794,56 +4859,35 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
     const childId = String(selectedChild._id || selectedChild.id || '');
     const childNameKey = normalizeLookupKey(selectedChild.name);
-    const summary = (academicBilling.studentSummaries || []).find((item) => {
+    const concepts = buildParentFinanceConceptsFromCharges(financeCharges);
+    const apiSummary = (academicBilling.studentSummaries || []).find((item) => {
       const summaryStudentId = String(item.studentId || '');
       return (childId && summaryStudentId === childId) || (childNameKey && normalizeLookupKey(item.studentName) === childNameKey);
     });
+    const conceptsTotalAmount = concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
+    const conceptsOriginalTotalAmount = concepts.reduce(
+      (sum, concept) => sum + Number(concept.originalAmount || concept.amount || 0),
+      0,
+    );
 
-    if (summary) {
-      return summary;
-    }
-
-    const concepts = financeCharges
-      .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()))
-      .map((charge) => ({
-        _id: charge._id,
-        category: charge.category,
-        concept: charge.concept,
-        description: charge.description || '',
-        amount: Number(charge.amount || 0),
-        originalAmount: Number(charge.originalAmount || charge.amount || 0),
-        dueDate: charge.dueDate,
-        status: charge.status,
-        monthKey: charge.monthKey || '',
-      }));
-
-    if (!concepts.length) {
+    if (!concepts.length && !apiSummary) {
       return null;
     }
 
     return {
+      ...(apiSummary || {}),
       studentId: childId,
-      studentName: selectedChild.name,
-      amount: concepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0),
-      totalAmount: concepts.reduce((sum, concept) => sum + Number(concept.originalAmount || concept.amount || 0), 0),
-      pendingCount: concepts.length,
-      overdueMonths: 0,
-      requiresDataSchoolContact: false,
-      dataSchoolWhatsappUrl: '',
-      payableChargeIds: concepts.map((concept) => concept._id).filter(Boolean),
+      studentName: apiSummary?.studentName || selectedChild.name,
+      amount: conceptsTotalAmount || Number(apiSummary?.amount || 0),
+      totalAmount: conceptsOriginalTotalAmount || Number(apiSummary?.totalAmount || apiSummary?.amount || 0),
+      pendingCount: concepts.length || Number(apiSummary?.pendingCount || 0),
+      overdueMonths: Number(apiSummary?.overdueMonths || 0),
+      requiresDataSchoolContact: Boolean(apiSummary?.requiresDataSchoolContact),
+      dataSchoolWhatsappUrl: apiSummary?.dataSchoolWhatsappUrl || '',
+      payableChargeIds: concepts.map((concept) => concept.chargeId || concept._id).filter(Boolean),
       concepts,
     };
   }, [academicBilling.studentSummaries, financeCharges, selectedChild]);
-
-  const sortedFinanceCharges = useMemo(
-    () => sortParentFinanceCharges(financeCharges),
-    [financeCharges],
-  );
-
-  const pendingFinanceCharges = useMemo(
-    () => sortedFinanceCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase())),
-    [sortedFinanceCharges],
-  );
 
   const selectedPricingGuide = useMemo(() => {
     if (!selectedChild) {
@@ -4854,31 +4898,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     return academicBilling.pricingGuides?.[childId] || null;
   }, [academicBilling.pricingGuides, selectedChild]);
 
-  const primaryPendingCharge = pendingFinanceCharges[0] || null;
+  const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
   const selectedFinanceConceptsTotal = selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
   const selectedFinanceConceptsOriginalTotal = selectedFinanceConcepts.reduce(
     (sum, concept) => sum + Number(concept.originalAmount || concept.amount || 0),
     0,
   );
-  const selectedFinanceAmount = Number(
-    selectedFinanceConceptsTotal
-    || primaryPendingCharge?.amount
-    || selectedFinanceSummary?.amount
-    || 0,
-  );
-  const selectedFinanceTotalAmount = Number(
-    selectedFinanceConceptsOriginalTotal
-    || selectedFinanceSummary?.totalAmount
-    || selectedFinanceSummary?.amount
-    || selectedFinanceAmount
-    || 0,
-  );
-  const selectedFinanceFullAmount = selectedFinanceSummary?.requiresDataSchoolContact ? 0 : (
-    selectedFinanceConceptsOriginalTotal
-    || Number(primaryPendingCharge?.chargeOriginalAmount || primaryPendingCharge?.originalAmount || primaryPendingCharge?.chargeAmount || primaryPendingCharge?.amount || 0)
-    || Number(selectedFinanceSummary?.totalAmount || 0)
-  );
+  const selectedFinanceAmount = selectedFinanceConceptsTotal;
+  const selectedFinanceTotalAmount = selectedFinanceConceptsOriginalTotal;
+  const selectedFinanceFullAmount = selectedFinanceSummary?.requiresDataSchoolContact ? 0 : selectedFinanceConceptsOriginalTotal;
   const selectedFinanceHasDiscount = selectedFinanceFullAmount > selectedFinanceAmount;
   const financeHeroEyebrow = resolveParentFinanceHeroEyebrow(primaryPendingCharge, selectedFinanceConcepts);
   const financeHeroPayLabel = selectedFinanceSummary?.requiresDataSchoolContact
