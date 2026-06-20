@@ -338,6 +338,101 @@ function formatParentFinanceDate(value, options = {}) {
   }).format(date);
 }
 
+function getParentFinanceChargeSortWeight(charge = {}) {
+  const category = String(charge.category || '').toLowerCase();
+  if (category === 'annual_tuition') return 0;
+  if (category === 'enrollment_bonus') return 1;
+  if (category === 'monthly_tuition') return 2;
+  if (category === 'monthly_statement') return 3;
+  return 4;
+}
+
+function sortParentFinanceCharges(charges = []) {
+  return [...(charges || [])].sort((left, right) => {
+    const weightDiff = getParentFinanceChargeSortWeight(left) - getParentFinanceChargeSortWeight(right);
+    if (weightDiff !== 0) {
+      return weightDiff;
+    }
+
+    return new Date(left.dueDate || 0) - new Date(right.dueDate || 0);
+  });
+}
+
+function resolveParentFinanceHeroEyebrow(charge) {
+  if (!charge) {
+    return 'Pagos académicos';
+  }
+
+  const category = String(charge.category || '').toLowerCase();
+  if (category === 'annual_tuition') {
+    return 'Matrícula pendiente';
+  }
+  if (category === 'monthly_tuition') {
+    return 'Pensión pendiente';
+  }
+  if (category === 'enrollment_bonus') {
+    return 'Bono pendiente';
+  }
+
+  return 'Cobro pendiente';
+}
+
+function ParentFinancePricingGuide({ pricingGuide }) {
+  if (!pricingGuide) {
+    return null;
+  }
+
+  const enrollmentFullAmount = Number(pricingGuide?.enrollment?.fullAmount || 0);
+  const monthlyFullAmount = Number(pricingGuide?.monthlyTuition?.fullAmount || 0);
+  if (enrollmentFullAmount <= 0 && monthlyFullAmount <= 0) {
+    return null;
+  }
+
+  const renderPricingRows = (section) => {
+    const fullAmount = Number(section?.fullAmount || 0);
+    if (fullAmount <= 0) {
+      return null;
+    }
+
+    const benefits = Array.isArray(section?.benefits) ? section.benefits.filter((item) => Number(item?.amount || 0) > 0) : [];
+
+    return (
+      <div className="campus-parent-mobile__finance-pricing-block">
+        <h4>{section.fullLabel || 'Precio'}</h4>
+        <article className="campus-parent-mobile__finance-pricing-row is-full">
+          <div>
+            <strong>{section.fullLabel || 'Precio ordinario'}</strong>
+          </div>
+          <strong>{formatCurrency(fullAmount)}</strong>
+        </article>
+        {benefits.map((benefit) => (
+          <article className="campus-parent-mobile__finance-pricing-row" key={`${benefit.label}-${benefit.amount}`}>
+            <div>
+              <strong>{benefit.label || 'Beneficio'}</strong>
+              {benefit.windowLabel ? <small>{benefit.windowLabel}</small> : null}
+              {Number(benefit.discountPercent || 0) > 0 ? <small>{benefit.discountPercent}% de descuento</small> : null}
+            </div>
+            <strong>{formatCurrency(benefit.amount)}</strong>
+          </article>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
+      <h3>Tarifas de matrícula y pensión</h3>
+      <p className="campus-parent-mobile__finance-pricing-intro">
+        Consulta el precio ordinario y los valores con beneficios configurados por rectoría para el grado de tu hijo.
+      </p>
+      <div className="campus-parent-mobile__finance-pricing-card">
+        {renderPricingRows(pricingGuide.enrollment)}
+        {renderPricingRows(pricingGuide.monthlyTuition)}
+      </div>
+    </section>
+  );
+}
+
 function formatParentNursingDate(value) {
   if (!value) {
     return 'Fecha no disponible';
@@ -4728,7 +4823,26 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     };
   }, [academicBilling.studentSummaries, financeCharges, selectedChild]);
 
-  const primaryPendingCharge = financeCharges.find((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
+  const sortedFinanceCharges = useMemo(
+    () => sortParentFinanceCharges(financeCharges),
+    [financeCharges],
+  );
+
+  const pendingFinanceCharges = useMemo(
+    () => sortedFinanceCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase())),
+    [sortedFinanceCharges],
+  );
+
+  const selectedPricingGuide = useMemo(() => {
+    if (!selectedChild) {
+      return null;
+    }
+
+    const childId = String(selectedChild._id || selectedChild.id || '');
+    return academicBilling.pricingGuides?.[childId] || null;
+  }, [academicBilling.pricingGuides, selectedChild]);
+
+  const primaryPendingCharge = pendingFinanceCharges[0] || null;
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
   const selectedFinanceAmount = Number(
     primaryPendingCharge?.amount
@@ -4742,6 +4856,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     || Number(selectedFinanceSummary?.totalAmount || selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.originalAmount || 0), 0) || 0)
   );
   const selectedFinanceHasDiscount = selectedFinanceFullAmount > selectedFinanceAmount;
+  const financeHeroEyebrow = resolveParentFinanceHeroEyebrow(primaryPendingCharge);
+  const financeHeroNote = selectedFinanceSummary?.requiresDataSchoolContact
+    ? `Tienes ${selectedFinanceSummary.overdueMonths} mensualidades vencidas.`
+    : primaryPendingCharge
+      ? (formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })
+        ? `Vence ${formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })} · ${primaryPendingCharge.concept || 'Cobro académico'}`
+        : (primaryPendingCharge.concept || 'Tienes un cobro académico pendiente'))
+      : 'No tienes pagos pendientes este mes';
 
   const selectedChildNursingRecords = useMemo(() => {
     const childId = String(selectedChild?._id || selectedChild?.id || '');
@@ -5227,9 +5349,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             <article className="campus-parent-mobile__hero-card is-finance">
               <div className="campus-parent-mobile__hero-card-head">
                 <span className="campus-parent-mobile__eyebrow">
-                  {selectedFinanceSummary?.pendingCount
-                    ? 'Cobro mensual pendiente'
-                    : 'Pagos académicos'}
+                  {financeHeroEyebrow}
                 </span>
                 {primaryPendingCharge ? (
                   <button
@@ -5253,13 +5373,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
                   : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0))}
               </h2>
               <span className="campus-parent-mobile__finance-current-note">
-                {selectedFinanceSummary?.requiresDataSchoolContact
-                  ? `Tienes ${selectedFinanceSummary.overdueMonths} mensualidades vencidas.`
-                  : primaryPendingCharge
-                    ? (formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })
-                      ? `Vence ${formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })}`
-                      : 'Tienes un cobro mensual pendiente')
-                    : 'No tienes pagos pendientes este mes'}
+                {financeHeroNote}
               </span>
               {selectedFinanceConcepts.length ? (
                 <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">
@@ -5269,6 +5383,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             </article>
             {academicPaymentMessage ? <p className="campus-parent-mobile__empty-note">{academicPaymentMessage}</p> : null}
             {academicLoading ? <p className="campus-parent-mobile__empty-note">Actualizando cartera académica...</p> : null}
+            <ParentFinancePricingGuide pricingGuide={selectedPricingGuide} />
             <section className="campus-parent-mobile__finance-group">
               <h3>Historial de pagos</h3>
               <div className="campus-parent-mobile__card-stack campus-parent-mobile__card-stack--finance">

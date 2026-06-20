@@ -491,6 +491,61 @@ function resolveFeeBenefitRules(configuration, gradeFeeSetting = null) {
   return Array.isArray(gradeFeeSetting?.benefitRules) ? gradeFeeSetting.benefitRules : [];
 }
 
+function buildBillingProfileFeeSyncFields(profile = {}, gradeFeeSetting = null, feeConfiguration = {}) {
+  const benefitRules = resolveFeeBenefitRules(feeConfiguration, gradeFeeSetting);
+  const enrollmentFee = Math.max(0, Number(gradeFeeSetting?.enrollmentFee || 0));
+  const monthlyTuitionAmount = gradeFeeSetting && Object.prototype.hasOwnProperty.call(gradeFeeSetting, 'monthlyTuition')
+    ? Math.max(0, Number(gradeFeeSetting.monthlyTuition || 0))
+    : Math.max(0, Number(profile.monthlyTuitionAmount || 0));
+  const enrollmentBonusAmount = gradeFeeSetting && Object.prototype.hasOwnProperty.call(gradeFeeSetting, 'enrollmentBonus')
+    ? Math.max(0, Number(gradeFeeSetting.enrollmentBonus || 0))
+    : Math.max(0, Number(profile.enrollmentBonusAmount || 0));
+  const dueDay = Math.min(28, Math.max(1, Number(gradeFeeSetting?.dueDay || profile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY)));
+  const additionalDiscountPercent = normalizeAdditionalDiscountPercent(profile.annualTuitionAdditionalDiscountPercent);
+  const annualTuitionBaseAmount = enrollmentFee > 0
+    ? enrollmentFee
+    : Math.max(0, Number(profile.annualTuitionBaseAmount || profile.annualTuitionAmount || 0));
+  const annualTuitionAdditionalDiscountAmount = additionalDiscountPercent > 0
+    ? Math.max(0, Math.round(annualTuitionBaseAmount * (additionalDiscountPercent / 100)))
+    : Math.max(0, Number(profile.annualTuitionAdditionalDiscountAmount || 0));
+  const annualTuitionAmount = Math.max(0, annualTuitionBaseAmount - annualTuitionAdditionalDiscountAmount);
+
+  return {
+    benefitRules,
+    monthlyTuitionAmount,
+    enrollmentBonusAmount,
+    dueDay,
+    annualTuitionBaseAmount,
+    annualTuitionAmount,
+    annualTuitionAdditionalDiscountAmount,
+  };
+}
+
+async function loadBillingProfileForCharge({ schoolId, charge, profileCache }) {
+  const profileId = String(charge?.billingProfileId || '').trim();
+  const studentId = String(charge?.studentId || '').trim();
+  const cacheKey = profileId || studentId;
+  if (!cacheKey) {
+    return null;
+  }
+
+  if (profileCache.has(cacheKey)) {
+    return profileCache.get(cacheKey);
+  }
+
+  const StudentBillingProfile = require('../models/studentBillingProfile.model');
+  let profile = null;
+  if (profileId) {
+    profile = await StudentBillingProfile.findById(profileId).lean();
+  }
+  if (!profile && studentId) {
+    profile = await StudentBillingProfile.findOne({ schoolId, studentId, active: true }).lean();
+  }
+
+  profileCache.set(cacheKey, profile || null);
+  return profile;
+}
+
 async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate = new Date() }) {
   const StudentBillingProfile = require('../models/studentBillingProfile.model');
   const pendingCharges = await AcademicCharge.find({
@@ -533,6 +588,105 @@ async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate =
   return refreshedCharges;
 }
 
+async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate = new Date(), studentIds = [] }) {
+  const studentIdFilter = new Set(studentIds.map((item) => String(item)).filter(Boolean));
+  const profileCache = new Map();
+  let refreshedCharges = 0;
+
+  const pendingMonthlyQuery = {
+    schoolId,
+    category: 'monthly_tuition',
+    status: { $in: ['pending', 'overdue'] },
+  };
+  if (studentIdFilter.size > 0) {
+    pendingMonthlyQuery.studentId = { $in: Array.from(studentIdFilter) };
+  }
+
+  const pendingMonthlyCharges = await AcademicCharge.find(pendingMonthlyQuery).lean();
+  for (const charge of pendingMonthlyCharges) {
+    const profile = await loadBillingProfileForCharge({ schoolId, charge, profileCache });
+    if (!profile || Number(profile.monthlyTuitionAmount || 0) <= 0) {
+      continue;
+    }
+
+    const dueDate = parseAcademicCalendarDate(charge.dueDate) || referenceDate;
+    const pricing = resolveMonthlyTuitionAmount(profile, dueDate);
+    if (pricing.amount <= 0) {
+      continue;
+    }
+
+    const updateResult = await AcademicCharge.updateOne(
+      { _id: charge._id, status: { $in: ['pending', 'overdue'] } },
+      { $set: { amount: pricing.amount, originalAmount: pricing.originalAmount } },
+    );
+    if (updateResult.modifiedCount > 0) {
+      refreshedCharges += 1;
+    }
+  }
+
+  const pendingAnnualQuery = {
+    schoolId,
+    category: 'annual_tuition',
+    status: { $in: ['pending', 'overdue'] },
+  };
+  if (studentIdFilter.size > 0) {
+    pendingAnnualQuery.studentId = { $in: Array.from(studentIdFilter) };
+  }
+
+  const pendingAnnualCharges = await AcademicCharge.find(pendingAnnualQuery)
+    .sort({ studentId: 1, dueDate: 1, createdAt: 1 })
+    .lean();
+  const annualChargesByStudentId = new Map();
+  pendingAnnualCharges.forEach((charge) => {
+    const studentKey = String(charge.studentId || '');
+    if (!studentKey) {
+      return;
+    }
+    if (!annualChargesByStudentId.has(studentKey)) {
+      annualChargesByStudentId.set(studentKey, []);
+    }
+    annualChargesByStudentId.get(studentKey).push(charge);
+  });
+
+  for (const [studentKey, charges] of annualChargesByStudentId.entries()) {
+    const profile = await loadBillingProfileForCharge({
+      schoolId,
+      charge: { studentId: studentKey, billingProfileId: charges[0]?.billingProfileId },
+      profileCache,
+    });
+    if (!profile || Number(profile.annualTuitionAmount || 0) <= 0) {
+      continue;
+    }
+
+    const installmentCount = normalizeInstallmentCount(profile.annualTuitionInstallments, 1);
+    const installmentAmounts = splitAmountIntoInstallments(profile.annualTuitionAmount, installmentCount);
+    const baseInstallmentAmounts = splitAmountIntoInstallments(
+      Math.max(0, Number(profile.annualTuitionBaseAmount || profile.annualTuitionAmount || 0)),
+      installmentCount,
+    );
+
+    for (const [index, charge] of charges.entries()) {
+      const amount = installmentAmounts[index] ?? installmentAmounts[installmentAmounts.length - 1] ?? 0;
+      const originalAmount = baseInstallmentAmounts[index]
+        ?? baseInstallmentAmounts[baseInstallmentAmounts.length - 1]
+        ?? amount;
+      if (amount <= 0) {
+        continue;
+      }
+
+      const updateResult = await AcademicCharge.updateOne(
+        { _id: charge._id, status: { $in: ['pending', 'overdue'] } },
+        { $set: { amount, originalAmount } },
+      );
+      if (updateResult.modifiedCount > 0) {
+        refreshedCharges += 1;
+      }
+    }
+  }
+
+  return refreshedCharges;
+}
+
 async function syncSchoolBillingProfilesFromFeeConfiguration({
   schoolId,
   feeConfiguration,
@@ -544,25 +698,29 @@ async function syncSchoolBillingProfilesFromFeeConfiguration({
 
   for (const profile of profiles) {
     const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, profile.grade);
-    const benefitRules = resolveFeeBenefitRules(feeConfiguration, gradeFeeSetting);
-    const monthlyTuitionAmount = gradeFeeSetting && Object.prototype.hasOwnProperty.call(gradeFeeSetting, 'monthlyTuition')
-      ? Math.max(0, Number(gradeFeeSetting.monthlyTuition || 0))
-      : Math.max(0, Number(profile.monthlyTuitionAmount || 0));
+    const syncFields = buildBillingProfileFeeSyncFields(profile, gradeFeeSetting, feeConfiguration);
 
     await StudentBillingProfile.updateOne(
       { _id: profile._id },
-      { $set: { benefitRules, monthlyTuitionAmount } },
+      { $set: syncFields },
     );
     updatedProfiles += 1;
   }
 
-  const refreshedCharges = await refreshPendingMonthlyStatementCharges({ schoolId, referenceDate });
+  const refreshedStatementCharges = await refreshPendingMonthlyStatementCharges({ schoolId, referenceDate });
+  const refreshedIndividualCharges = await refreshPendingIndividualTuitionCharges({ schoolId, referenceDate });
 
-  return { updatedProfiles, refreshedCharges };
+  return {
+    updatedProfiles,
+    refreshedCharges: refreshedStatementCharges + refreshedIndividualCharges,
+    refreshedStatementCharges,
+    refreshedIndividualCharges,
+  };
 }
 
 module.exports = {
   DEFAULT_ACADEMIC_MONTHLY_DUE_DAY,
+  buildBillingProfileFeeSyncFields,
   buildConsolidatedMonthlyStatement,
   buildMonthKey,
   ensureConsolidatedMonthlyCharge,
@@ -571,6 +729,7 @@ module.exports = {
   formatCurrency,
   getStudentStatementCharges,
   recalculateConsolidatedStatementPricing,
+  refreshPendingIndividualTuitionCharges,
   refreshPendingMonthlyStatementCharges,
   serializeConsolidatedChargeForParent,
   syncSchoolBillingProfilesFromFeeConfiguration,

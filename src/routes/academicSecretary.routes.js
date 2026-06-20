@@ -7143,6 +7143,14 @@ router.patch('/database/:studentId', async (req, res) => {
     billingProfile.active = true;
     await billingProfile.save();
 
+    const { refreshPendingIndividualTuitionCharges } = require('../services/academicConsolidatedBilling.service');
+    await refreshPendingIndividualTuitionCharges({
+      schoolId,
+      studentIds: [student._id],
+    }).catch((syncError) => {
+      console.warn(`[ACADEMIC_DATABASE_BILLING_REFRESH] studentId=${student._id} error=${syncError.message}`);
+    });
+
     const rows = await buildAcademicDatabaseSummary(schoolId);
     const updatedRow = rows.find((item) => String(item._id) === String(student._id)) || null;
     return res.status(200).json({ message: 'Fila académica actualizada.', item: updatedRow });

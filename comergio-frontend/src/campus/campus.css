@@ -5014,6 +5014,78 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   opacity: 0.65;
 }
 
+.campus-parent-mobile__finance-pricing-guide {
+  margin-top: 0.35rem;
+}
+
+.campus-parent-mobile__finance-pricing-intro {
+  margin: 0 0 0.85rem;
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.campus-parent-mobile__finance-pricing-card {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.campus-parent-mobile__finance-pricing-block {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.campus-parent-mobile__finance-pricing-block h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.campus-parent-mobile__finance-pricing-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.campus-parent-mobile__finance-pricing-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.campus-parent-mobile__finance-pricing-row.is-full strong:last-child {
+  color: #0f172a;
+}
+
+.campus-parent-mobile__finance-pricing-row > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.campus-parent-mobile__finance-pricing-row strong {
+  color: #0f172a;
+  font-size: 0.88rem;
+  line-height: 1.3;
+}
+
+.campus-parent-mobile__finance-pricing-row small {
+  color: rgba(15, 23, 42, 0.62);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.campus-parent-mobile__finance-pricing-row > strong:last-child {
+  color: #047857;
+  white-space: nowrap;
+}
+
 .campus-parent-mobile__task-card {
   display: grid;
   gap: 0.45rem;
