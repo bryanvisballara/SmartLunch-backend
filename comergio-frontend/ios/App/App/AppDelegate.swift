@@ -10,7 +10,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private let appShellBackgroundColor = UIColor(red: 245.0 / 255.0, green: 247.0 / 255.0, blue: 251.0 / 255.0, alpha: 1.0)
     private let webCacheRevisionKey = "comergio.webCacheRevision"
-    private let requiredWebCacheRevision = "2025062301"
+    private let requiredWebCacheRevision = "2025062302"
 
     override init() {
         super.init()
@@ -90,16 +90,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let allTypes = WKWebsiteDataStore.allWebsiteDataTypes()
         let semaphore = DispatchSemaphore(value: 0)
 
-        dataStore.fetchDataRecords(ofTypes: allTypes) { records in
-            let comergioRecords = records.filter { record in
-                record.displayName.contains("comergio.com")
-            }
-
-            dataStore.removeData(ofTypes: allTypes, for: comergioRecords) {
-                UserDefaults.standard.set(self.requiredWebCacheRevision, forKey: self.webCacheRevisionKey)
-                NSLog("[Comergio][WebCache] cleared \(comergioRecords.count) comergio.com records")
-                semaphore.signal()
-            }
+        dataStore.removeData(ofTypes: allTypes, modifiedSince: Date(timeIntervalSince1970: 0)) {
+            UserDefaults.standard.set(self.requiredWebCacheRevision, forKey: self.webCacheRevisionKey)
+            NSLog("[Comergio][WebCache] cleared WKWebsiteDataStore revision=\(self.requiredWebCacheRevision)")
+            semaphore.signal()
         }
 
         _ = semaphore.wait(timeout: .now() + 5)

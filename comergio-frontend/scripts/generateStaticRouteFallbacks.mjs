@@ -4,6 +4,10 @@ import { execSync } from 'node:child_process';
 
 const DIST_DIR = path.resolve(process.cwd(), 'dist');
 const DIST_DEPLOY_DIR = path.resolve(process.cwd(), 'dist-deploy');
+const LEGACY_BROKEN_ENTRY_ALIASES = [
+  'index-DtEcVJMf.js',
+  'index-BgUrQoOJ.js',
+];
 
 // Fallback directories for hosting providers where SPA rewrites are ignored.
 const ROUTE_FALLBACKS = [
@@ -108,18 +112,43 @@ async function generateFallbacksForDir(targetDir) {
   }
 }
 
+async function getModernEntryFile(targetDir) {
+  const indexHtml = await fs.readFile(path.join(targetDir, 'index.html'), 'utf8');
+  const match = indexHtml.match(/src="\/assets\/(index-[^"]+\.js)"/);
+  return match?.[1] || '';
+}
+
+async function writeLegacyBrokenEntryAliases(targetDir) {
+  const modernEntryFile = await getModernEntryFile(targetDir);
+  if (!modernEntryFile) {
+    return;
+  }
+
+  const assetsDir = path.join(targetDir, 'assets');
+  const shim = `export * from './${modernEntryFile}';\nimport './${modernEntryFile}';\n`;
+
+  await Promise.all(
+    LEGACY_BROKEN_ENTRY_ALIASES
+      .filter((aliasFile) => aliasFile !== modernEntryFile)
+      .map((aliasFile) => fs.writeFile(path.join(assetsDir, aliasFile), shim, 'utf8'))
+  );
+}
+
 async function main() {
   await fs.rm(DIST_DEPLOY_DIR, { recursive: true, force: true });
   await fs.cp(DIST_DIR, DIST_DEPLOY_DIR, { recursive: true });
 
   await generateFallbacksForDir(DIST_DIR);
   await generateFallbacksForDir(DIST_DEPLOY_DIR);
+  await writeLegacyBrokenEntryAliases(DIST_DIR);
+  await writeLegacyBrokenEntryAliases(DIST_DEPLOY_DIR);
 
   const zipPath = path.join(process.cwd(), 'dist-deploy.zip');
   await fs.rm(zipPath, { force: true });
   execSync('zip -rq dist-deploy.zip dist-deploy', { cwd: process.cwd(), stdio: 'inherit' });
 
   console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);
+  console.log(`[route-fallbacks] aliased ${LEGACY_BROKEN_ENTRY_ALIASES.length} stale entry bundles to the current build`);
   console.log('[route-fallbacks] packaged dist-deploy.zip');
 }
 
