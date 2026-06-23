@@ -7,6 +7,19 @@ export { millenniumSchoolCrest };
 
 const MILLENNIUM_SCHOOL_IDS = new Set(['millennium school', 'millennium']);
 
+const OFFICIAL_ENROLLMENT_CONTRACT_SCHOOL_IDS = new Set([
+  'comergio-demo',
+  'comergio_demo',
+  'comergio_demo_kns8p',
+  'comergio demo',
+]);
+
+function applyPercentDiscount(amount, discountPercent) {
+  const safeAmount = Math.max(0, Number(amount || 0));
+  const safePercent = Math.min(100, Math.max(0, Number(discountPercent || 0)));
+  return Math.max(0, Math.round(safeAmount - (safeAmount * safePercent / 100)));
+}
+
 const MONTH_NAMES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
@@ -165,6 +178,66 @@ function getContractDateParts(date = new Date()) {
 export function isMillenniumSchool(schoolName = '') {
   const normalized = normalizeText(schoolName).toLowerCase();
   return MILLENNIUM_SCHOOL_IDS.has(normalized) || normalized.includes('millennium');
+}
+
+export function usesOfficialEnrollmentContractTemplate({ schoolId = '', schoolName = '' } = {}) {
+  if (isMillenniumSchool(schoolName)) {
+    return true;
+  }
+
+  const normalizedId = normalizeText(schoolId).toLowerCase();
+  const normalizedName = normalizeText(schoolName).toLowerCase();
+
+  if (OFFICIAL_ENROLLMENT_CONTRACT_SCHOOL_IDS.has(normalizedId)
+    || OFFICIAL_ENROLLMENT_CONTRACT_SCHOOL_IDS.has(normalizedName)) {
+    return true;
+  }
+
+  return normalizedId.includes('comergio_demo')
+    || normalizedId.includes('comergio-demo')
+    || normalizedName.includes('comergio demo');
+}
+
+export function normalizeOfficialEnrollmentContractParams(snapshot = {}) {
+  const pricing = snapshot.pricing || {};
+  const proratedAnnualTuitionAmount = Math.max(
+    0,
+    Math.round(Number(pricing.proratedAnnualTuitionAmount || snapshot.paidAmount || 0)),
+  );
+  const annualTuitionAdditionalDiscountPercent = Number(pricing.annualTuitionAdditionalDiscountPercent || 0);
+  const discountedAnnualTuitionAmount = applyPercentDiscount(
+    proratedAnnualTuitionAmount,
+    annualTuitionAdditionalDiscountPercent,
+  );
+
+  return {
+    schoolId: snapshot.schoolId || '',
+    schoolName: snapshot.schoolName || '',
+    father: snapshot.father || {},
+    mother: snapshot.mother || {},
+    primaryGuardian: snapshot.primaryGuardian || 'mother',
+    student: snapshot.student || {},
+    gradeLabel: normalizeText(snapshot.gradeLabel || snapshot.student?.grade),
+    pricing: {
+      ...pricing,
+      proratedAnnualTuitionAmount: discountedAnnualTuitionAmount || proratedAnnualTuitionAmount,
+      proratedAnnualTuitionBaseAmount: Math.max(
+        0,
+        Math.round(Number(pricing.proratedAnnualTuitionBaseAmount || proratedAnnualTuitionAmount || 0)),
+      ),
+      monthlyTuitionAmount: applyPercentDiscount(
+        pricing.monthlyTuitionAmount,
+        pricing.monthlyTuitionAdditionalDiscountPercent,
+      ),
+    },
+  };
+}
+
+export function canUseOfficialEnrollmentContract(params = {}) {
+  return usesOfficialEnrollmentContractTemplate({
+    schoolId: params.schoolId,
+    schoolName: params.schoolName,
+  }) && canPreviewMillenniumEnrollmentContracts(params);
 }
 
 export function canPreviewMillenniumEnrollmentContracts({
@@ -419,6 +492,7 @@ function drawEnrollmentSignatureBlockPdf(doc, {
   pageHeight,
   cursorY,
   context = {},
+  parentSignatureDataUrl = '',
 }) {
   const blockHeight = 130;
   let y = ensurePdfSpace(doc, {
@@ -449,6 +523,13 @@ function drawEnrollmentSignatureBlockPdf(doc, {
 
   doc.setLineWidth(0.8);
   doc.line(leftX, signatureLineY, leftX + columnWidth - 8, signatureLineY);
+  if (parentSignatureDataUrl) {
+    try {
+      doc.addImage(parentSignatureDataUrl, 'PNG', leftX + 8, signatureLineY - 52, columnWidth - 24, 44);
+    } catch (error) {
+      // Ignore invalid signature image payloads and keep the signature line visible.
+    }
+  }
   doc.setFontSize(7);
   doc.text('Firma responsable económico', leftX, signatureLineY + 12);
 
@@ -469,11 +550,11 @@ function drawEnrollmentSignatureBlockPdf(doc, {
   return signatureLineY + 28;
 }
 
-function downloadEnrollmentContractPdf({
+function buildEnrollmentContractPdfDoc({
   content,
-  fileName,
-  headerImage,
   context,
+  headerImage,
+  parentSignatureDataUrl = '',
 }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -498,6 +579,7 @@ function downloadEnrollmentContractPdf({
         pageHeight,
         cursorY: cursorY + 8,
         context,
+        parentSignatureDataUrl,
       });
       return;
     }
@@ -512,7 +594,120 @@ function downloadEnrollmentContractPdf({
     });
   });
 
+  return doc;
+}
+
+function downloadEnrollmentContractPdf({
+  content,
+  fileName,
+  headerImage,
+  context,
+  parentSignatureDataUrl = '',
+}) {
+  const doc = buildEnrollmentContractPdfDoc({
+    content,
+    context,
+    headerImage,
+    parentSignatureDataUrl,
+  });
   doc.save(fileName);
+}
+
+function buildPagarePdfDoc({
+  content,
+  debtorColumns,
+  primarySignatureDataUrl = '',
+}) {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  const maxWidth = pageWidth - (margin * 2);
+  const sections = parsePagareDocumentSections(content);
+  let cursorY = drawPdfHeader(doc, {
+    margin,
+    headerImage: null,
+    title: 'Pagaré y Carta de Instrucciones',
+  });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+
+  sections.forEach((section) => {
+    if (section.type === 'debtors-table') {
+      cursorY = drawPagareDebtorsTablePdf(doc, {
+        margin,
+        pageWidth,
+        pageHeight,
+        cursorY,
+        debtorOne: debtorColumns.debtorOne,
+        debtorTwo: debtorColumns.debtorTwo,
+        primarySignatureDataUrl,
+      });
+      return;
+    }
+
+    cursorY = writeParagraphsToPdf(doc, {
+      paragraphs: splitContractParagraphs(section.content),
+      margin,
+      maxWidth,
+      pageHeight,
+      cursorY,
+      justify: true,
+    });
+  });
+
+  return doc;
+}
+
+function downloadPagarePdf({ content, fileName, debtorColumns, primarySignatureDataUrl = '' }) {
+  const doc = buildPagarePdfDoc({
+    content,
+    debtorColumns,
+    primarySignatureDataUrl,
+  });
+  doc.save(fileName);
+}
+
+function pdfDocToBase64(doc) {
+  return String(doc.output('datauristring') || '').split(',')[1] || '';
+}
+
+export function generateSignedEnrollmentContractPdfBase64(params, signatureDataUrl = '') {
+  const contractParams = normalizeOfficialEnrollmentContractParams(params);
+  const context = buildMillenniumEnrollmentContractContext(contractParams);
+  const content = renderMillenniumEnrollmentContract(context);
+  const doc = buildEnrollmentContractPdfDoc({
+    content,
+    context,
+    headerImage: millenniumSchoolCrest,
+    parentSignatureDataUrl: signatureDataUrl,
+  });
+  return {
+    base64: pdfDocToBase64(doc),
+    context,
+    fileName: `contrato-matricula-${normalizeText(contractParams?.student?.lastName || 'alumno').toLowerCase()}.pdf`,
+  };
+}
+
+export function generateSignedPagarePdfBase64(params, signatureDataUrl = '') {
+  const contractParams = normalizeOfficialEnrollmentContractParams(params);
+  const context = buildMillenniumEnrollmentContractContext(contractParams);
+  const content = renderMillenniumPagareContract(context);
+  const debtorColumns = getPagareDebtorColumns({
+    father: contractParams?.father || {},
+    mother: contractParams?.mother || {},
+  });
+  const doc = buildPagarePdfDoc({
+    content,
+    debtorColumns,
+    primarySignatureDataUrl: signatureDataUrl,
+  });
+  return {
+    base64: pdfDocToBase64(doc),
+    context,
+    fileName: `pagare-carta-${normalizeText(contractParams?.student?.lastName || 'alumno').toLowerCase()}.pdf`,
+  };
 }
 
 const PAGARE_DEBTOR_FIELDS = [
@@ -530,6 +725,7 @@ function drawPagareDebtorColumnPdf(doc, {
   y,
   width,
   debtor = {},
+  signatureDataUrl = '',
 }) {
   const labelWidth = 78;
   const huellaWidth = 42;
@@ -569,6 +765,13 @@ function drawPagareDebtorColumnPdf(doc, {
   doc.rect(x + labelWidth, cursorY, width - labelWidth, signatureHeight, 'FD');
   doc.setTextColor(0, 0, 0);
   doc.text('Firma', x + 4, cursorY + 14);
+  if (signatureDataUrl) {
+    try {
+      doc.addImage(signatureDataUrl, 'PNG', x + labelWidth + 6, cursorY + 8, width - labelWidth - 12, signatureHeight - 16);
+    } catch (error) {
+      // Ignore invalid signature image payloads.
+    }
+  }
 
   return y + (rowHeight * PAGARE_DEBTOR_FIELDS.length) + signatureHeight;
 }
@@ -580,6 +783,7 @@ function drawPagareDebtorsTablePdf(doc, {
   cursorY,
   debtorOne,
   debtorTwo,
+  primarySignatureDataUrl = '',
 }) {
   const tableWidth = pageWidth - (margin * 2);
   const columnGap = 10;
@@ -596,6 +800,7 @@ function drawPagareDebtorsTablePdf(doc, {
     y: cursorY,
     width: columnWidth,
     debtor: debtorOne,
+    signatureDataUrl: primarySignatureDataUrl,
   });
   const rightBottom = drawPagareDebtorColumnPdf(doc, {
     x: margin + columnWidth + columnGap,
@@ -605,48 +810,6 @@ function drawPagareDebtorsTablePdf(doc, {
   });
 
   return Math.max(leftBottom, rightBottom) + 16;
-}
-
-function downloadPagarePdf({ content, fileName, debtorColumns }) {
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 48;
-  const maxWidth = pageWidth - (margin * 2);
-  const sections = parsePagareDocumentSections(content);
-  let cursorY = drawPdfHeader(doc, {
-    margin,
-    headerImage: null,
-    title: 'Pagaré y Carta de Instrucciones',
-  });
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-
-  sections.forEach((section) => {
-    if (section.type === 'debtors-table') {
-      cursorY = drawPagareDebtorsTablePdf(doc, {
-        margin,
-        pageWidth,
-        pageHeight,
-        cursorY,
-        debtorOne: debtorColumns.debtorOne,
-        debtorTwo: debtorColumns.debtorTwo,
-      });
-      return;
-    }
-
-    cursorY = writeParagraphsToPdf(doc, {
-      paragraphs: splitContractParagraphs(section.content),
-      margin,
-      maxWidth,
-      pageHeight,
-      cursorY,
-      justify: true,
-    });
-  });
-
-  doc.save(fileName);
 }
 
 function downloadTextAsPdf({
@@ -679,9 +842,10 @@ function downloadTextAsPdf({
 }
 
 export function downloadMillenniumEnrollmentContractPdf(params) {
-  const context = buildMillenniumEnrollmentContractContext(params);
+  const contractParams = normalizeOfficialEnrollmentContractParams(params);
+  const context = buildMillenniumEnrollmentContractContext(contractParams);
   const content = renderMillenniumEnrollmentContract(context);
-  const studentSlug = normalizeText(`${params?.student?.firstName}-${params?.student?.lastName}`)
+  const studentSlug = normalizeText(`${contractParams?.student?.firstName}-${contractParams?.student?.lastName}`)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'alumno';
@@ -695,13 +859,14 @@ export function downloadMillenniumEnrollmentContractPdf(params) {
 }
 
 export function downloadMillenniumPagareContractPdf(params) {
-  const context = buildMillenniumEnrollmentContractContext(params);
+  const contractParams = normalizeOfficialEnrollmentContractParams(params);
+  const context = buildMillenniumEnrollmentContractContext(contractParams);
   const content = renderMillenniumPagareContract(context);
   const debtorColumns = getPagareDebtorColumns({
-    father: params?.father || {},
-    mother: params?.mother || {},
+    father: contractParams?.father || {},
+    mother: contractParams?.mother || {},
   });
-  const studentSlug = normalizeText(`${params?.student?.firstName}-${params?.student?.lastName}`)
+  const studentSlug = normalizeText(`${contractParams?.student?.firstName}-${contractParams?.student?.lastName}`)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'alumno';

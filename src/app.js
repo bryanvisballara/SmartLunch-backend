@@ -36,6 +36,10 @@ const academicSecretaryRoutes = require('./routes/academicSecretary.routes');
 const admissionsRoutes = require('./routes/admissions.routes');
 const schoolCreationRoutes = require('./routes/schoolCreation.routes');
 const superAdminRoutes = require('./routes/superAdmin.routes');
+const {
+  parentEnrollmentMatriculaRouter,
+  rectoriaEnrollmentMatriculaRouter,
+} = require('./routes/enrollmentMatricula.routes');
 const schoolContextMiddleware = require('./middleware/schoolContextMiddleware');
 
 const app = express();
@@ -330,6 +334,8 @@ app.use('/admin', adminRoutes);
 app.use('/admin/meriendas', meriendasRoutes);
 app.use('/meriendas', meriendasRoutes);
 app.use('/parent', parentRoutes);
+app.use('/parent', parentEnrollmentMatriculaRouter);
+app.use('/enrollment-matricula', rectoriaEnrollmentMatriculaRouter);
 app.use('/campus', campusRoutes);
 app.use('/nursing', nursingRoutes);
 app.use('/psychology', psychologyRoutes);

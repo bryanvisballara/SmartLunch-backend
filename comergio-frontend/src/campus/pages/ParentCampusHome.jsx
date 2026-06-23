@@ -39,6 +39,14 @@ import {
   resolveParentSectionFromSearch,
   shouldUseParentQuerySectionRouting,
 } from '../../lib/parentSectionRouting';
+import {
+  MatriculaEnrollmentFlow,
+} from '../../components/enrollment-matricula';
+import {
+  getEnrollmentMatriculaPendingSignatures,
+  getEnrollmentMatriculaProcess,
+  getEnrollmentMatriculaPaymentStatus,
+} from '../../services/enrollmentMatricula.service';
 
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
@@ -4574,6 +4582,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+  const schoolDisplayName = getSchoolDisplayName(user, user?.schoolId || 'Colegio');
   const baseWorkspace = useMemo(() => buildParentPreviewWorkspace(user), [user]);
   const [parentOverview, setParentOverview] = useState(null);
   const [parentAppFeatures, setParentAppFeatures] = useState(defaultParentAppFeatures);
@@ -4604,6 +4613,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const [academicLoading, setAcademicLoading] = useState(false);
   const [academicPaymentMessage, setAcademicPaymentMessage] = useState('');
   const [payingChargeId, setPayingChargeId] = useState('');
+  const [matriculaFlowOpen, setMatriculaFlowOpen] = useState(false);
+  const [matriculaFlowPendingResume, setMatriculaFlowPendingResume] = useState(false);
+  const [matriculaProcess, setMatriculaProcess] = useState(null);
+  const [matriculaFlowCharge, setMatriculaFlowCharge] = useState(null);
+  const [matriculaPendingSignature, setMatriculaPendingSignature] = useState(null);
   const [showFinanceConceptsSheet, setShowFinanceConceptsSheet] = useState(false);
   const [financePaymentsPage, setFinancePaymentsPage] = useState(1);
   const [feedLikesSheetId, setFeedLikesSheetId] = useState('');
@@ -4908,6 +4922,99 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     };
   }, []);
 
+  const refreshMatriculaPendingSignatures = useCallback(async () => {
+    try {
+      const response = await getEnrollmentMatriculaPendingSignatures();
+      const items = response.data?.items || [];
+      setMatriculaPendingSignature(items[0] || null);
+    } catch (error) {
+      setMatriculaPendingSignature(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshMatriculaPendingSignatures();
+  }, [refreshMatriculaPendingSignatures]);
+
+  useEffect(() => {
+    if (!matriculaPendingSignature?._id) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const openPendingSignatureFlow = async () => {
+      try {
+        const response = await getEnrollmentMatriculaPaymentStatus(matriculaPendingSignature._id);
+        if (cancelled) return;
+
+        const nextProcess = response.data?.process;
+        if (!nextProcess?.requiresSignature) {
+          setMatriculaPendingSignature(null);
+          setMatriculaFlowOpen(false);
+          setMatriculaFlowPendingResume(false);
+          return;
+        }
+
+        setMatriculaProcess(nextProcess);
+        setMatriculaFlowCharge(nextProcess.charge || null);
+        setMatriculaFlowPendingResume(true);
+        setMatriculaFlowOpen(true);
+      } catch (error) {
+        if (cancelled) return;
+
+        if (matriculaPendingSignature.requiresSignature) {
+          setMatriculaProcess(matriculaPendingSignature);
+          setMatriculaFlowCharge(matriculaPendingSignature.charge || null);
+          setMatriculaFlowPendingResume(true);
+          setMatriculaFlowOpen(true);
+          return;
+        }
+
+        setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo abrir el proceso de firma.');
+      }
+    };
+
+    openPendingSignatureFlow();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matriculaPendingSignature]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || '');
+    const processId = String(params.get('matriculaProcessId') || '').trim();
+    const paymentPurpose = String(params.get('paymentPurpose') || '').trim();
+    if (!processId || paymentPurpose !== 'enrollment_matricula') {
+      return;
+    }
+
+    let cancelled = false;
+    const resumeMatriculaFlow = async () => {
+      try {
+        const response = await getEnrollmentMatriculaPaymentStatus(processId);
+        if (cancelled) return;
+        const nextProcess = response.data?.process;
+        if (!nextProcess) return;
+        setMatriculaProcess(nextProcess);
+        setMatriculaFlowCharge(nextProcess.charge || null);
+        setMatriculaFlowPendingResume(false);
+        setMatriculaFlowOpen(true);
+        setMatriculaPendingSignature(null);
+      } catch (error) {
+        if (!cancelled) {
+          refreshMatriculaPendingSignatures();
+        }
+      }
+    };
+
+    resumeMatriculaFlow();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.search, refreshMatriculaPendingSignatures]);
+
   const refreshParentSection = useCallback(async () => {
     const overviewParams = selectedChildId && selectedChildId !== PARENT_FEED_ALL_CHILDREN_ID
       ? { studentId: selectedChildId }
@@ -5092,6 +5199,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   }, [academicBilling.pricingGuides, financeCharges, selectedChild]);
 
   const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
+  const isBlockingMatriculaSignature = Boolean(
+    matriculaProcess?.requiresSignature && !matriculaProcess?.isCompleted,
+  );
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
   const selectedFinanceConceptsTotal = selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
   const selectedFinanceConceptsOriginalTotal = selectedFinanceConcepts.reduce(
@@ -5137,6 +5247,31 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     const payableChargeIds = primaryPendingCharge?._id ? [primaryPendingCharge._id] : [];
 
     if (!payableChargeIds.length) {
+      return;
+    }
+
+    const isAnnualTuition = String(primaryPendingCharge?.category || '').toLowerCase() === 'annual_tuition';
+
+    if (isAnnualTuition) {
+      setPayingChargeId(payableChargeIds[0]);
+      setAcademicPaymentMessage('');
+
+      try {
+        const response = await getEnrollmentMatriculaProcess(payableChargeIds[0]);
+        const nextProcess = response.data?.process;
+        if (!nextProcess) {
+          throw new Error('No se pudo iniciar el proceso de matricula.');
+        }
+        setMatriculaProcess(nextProcess);
+        setMatriculaFlowCharge(nextProcess.charge || primaryPendingCharge);
+        setMatriculaFlowPendingResume(false);
+        setMatriculaFlowOpen(true);
+        setShowFinanceConceptsSheet(false);
+      } catch (error) {
+        setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo iniciar el proceso de matricula.');
+      } finally {
+        setPayingChargeId('');
+      }
       return;
     }
 
@@ -6021,6 +6156,50 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
             <button disabled={!commentDraft.trim()} type="submit">Publicar</button>
           </form>
         </ParentFeedBottomSheet>
+      ) : null}
+
+      {matriculaFlowOpen && matriculaProcess ? (
+        <MatriculaEnrollmentFlow
+          charge={matriculaFlowCharge || primaryPendingCharge}
+          onClose={() => {
+            if (isBlockingMatriculaSignature) {
+              return;
+            }
+
+            setMatriculaFlowOpen(false);
+            setMatriculaFlowPendingResume(false);
+            refreshMatriculaPendingSignatures();
+            getParentAcademicBilling()
+              .then((billingResponse) => {
+                setAcademicBilling(billingResponse.data || {
+                  summary: { pendingAmount: 0, pendingCount: 0 },
+                  currentCharges: [],
+                  charges: [],
+                  payments: [],
+                  paymentHistory: [],
+                  pricingGuides: {},
+                });
+              })
+              .catch(() => {});
+          }}
+          onProcessUpdated={(nextProcess) => {
+            setMatriculaProcess(nextProcess);
+            if (nextProcess?.isCompleted) {
+              setMatriculaPendingSignature(null);
+              setMatriculaFlowPendingResume(false);
+              setMatriculaFlowOpen(false);
+            } else {
+              refreshMatriculaPendingSignatures();
+            }
+          }}
+          blocking={isBlockingMatriculaSignature}
+          open={matriculaFlowOpen}
+          pendingSignatureResume={matriculaFlowPendingResume}
+          process={matriculaProcess}
+          schoolId={user?.schoolId}
+          schoolName={schoolDisplayName}
+          startAtIntro={matriculaFlowPendingResume ? false : ['intro_pending', 'consent_pending'].includes(matriculaProcess.status)}
+        />
       ) : null}
 
       <nav aria-label="Navegacion principal del padre" className="campus-parent-mobile__bottom-nav">

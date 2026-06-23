@@ -7,6 +7,7 @@ import { findMatchingFeeSetting, getFeeGradeAliases, resolveStructureGradeKeyFor
 import { resolveGradeCourses, resolveStudentCourseKey, studentHasAssignedCourseInGrade } from '../lib/academicGradeCourses';
 import { formatEducationalGradeLabel } from '../lib/educationalGradeLabels';
 import AdmissionsDashboard from './AdmissionsDashboard';
+import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
@@ -105,6 +106,7 @@ const BASE_SECTION_OPTIONS = [
   { key: 'students', label: 'Gestión academica' },
   { key: 'database', label: 'Base de datos' },
   { key: 'fees', label: 'Costos' },
+  { key: 'enrollment_matricula', label: 'Matrículas digitales' },
 ];
 const ACADEMIC_MANAGEMENT_SECTION_OPTIONS = [
   { key: 'grades_courses', label: 'Grados y cursos' },
@@ -9791,6 +9793,20 @@ function RectoriaDashboard() {
                 </tbody>
               </table>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {!isCoordinationPortal && activeSection === 'enrollment_matricula' ? (
+        <div className="rectoria-stack">
+          <section className="panel rectoria-panel">
+            <div className="rectoria-section-header">
+              <div>
+                <h3>Matrículas digitales</h3>
+                <p>Consentimientos previos, pagos confirmados y documentos firmados por los acudientes.</p>
+              </div>
+            </div>
+            <EnrollmentMatriculaRectoriaPanel />
           </section>
         </div>
       ) : null}

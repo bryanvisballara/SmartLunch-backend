@@ -17,13 +17,13 @@ import {
   downloadMillenniumEnrollmentContractPdf,
   downloadMillenniumPagareContractPdf,
   getPagareDebtorColumns,
-  isMillenniumSchool,
   millenniumSchoolCrest,
   parseEnrollmentContractSections,
   parsePagareDocumentSections,
   renderMillenniumEnrollmentContract,
   renderMillenniumPagareContract,
   splitContractParagraphs,
+  usesOfficialEnrollmentContractTemplate,
 } from '../lib/millenniumEnrollmentContracts';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
@@ -3806,7 +3806,10 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   gradeLabel: formatGradeLabel(student.grade),
                   pricing: millenniumContractPricing,
                 };
-                const showMillenniumContracts = isMillenniumSchool(schoolName)
+                const showMillenniumContracts = usesOfficialEnrollmentContractTemplate({
+                  schoolId: user?.schoolId,
+                  schoolName,
+                })
                   && canPreviewMillenniumEnrollmentContracts(millenniumContractParams);
                 const millenniumContractContext = showMillenniumContracts
                   ? buildMillenniumEnrollmentContractContext(millenniumContractParams)

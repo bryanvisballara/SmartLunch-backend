@@ -1,4 +1,4 @@
-function MillenniumEnrollmentSignatureBlock({ context = {} }) {
+function MillenniumEnrollmentSignatureBlock({ context = {}, parentSignatureImage = '' }) {
   return (
     <div className="enrollment-signature-block">
       <div className="enrollment-signature-block__column">
@@ -13,6 +13,15 @@ function MillenniumEnrollmentSignatureBlock({ context = {} }) {
           {' '}
           {context.FINANCIAL_RESPONSIBLE_DOC_CITY || '____________'}
         </span>
+        <div className="enrollment-signature-block__signature-slot">
+          {parentSignatureImage ? (
+            <img
+              alt="Firma del responsable económico"
+              className="enrollment-signature-block__signature-image"
+              src={parentSignatureImage}
+            />
+          ) : null}
+        </div>
         <div aria-hidden="true" className="enrollment-signature-block__line" />
         <small>Firma responsable económico</small>
       </div>

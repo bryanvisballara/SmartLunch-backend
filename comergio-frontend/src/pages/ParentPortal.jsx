@@ -2861,46 +2861,61 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
         isRefreshing={pullRefreshReloading}
         threshold={pullRefreshThresholdValue}
       />
-      {!embedded ? (
-      <header className="parent-topbar">
-        <button aria-label="Abrir menu" className="parent-icon-btn" onClick={() => setDrawerOpen(true)} type="button">
-          <span />
-          <span />
-          <span />
-        </button>
-
-        <div className="parent-title-wrap">
-          <img className="parent-brand-logo" src={smartLogo} alt="Comergio" />
-          <h1>Hola, {headerName}!</h1>
-        </div>
-
-        <div className="parent-profile-wrap">
-          <button
-            aria-expanded={profileMenuOpen}
-            aria-haspopup="menu"
-            aria-label="Abrir opciones de perfil"
-            className="parent-avatar parent-avatar-btn"
-            onClick={() => setProfileMenuOpen((prev) => !prev)}
-            type="button"
-          >
-            {parentInitial}
+      {embedded ? (
+        <header className="parent-topbar parent-topbar--embedded-cafeteria">
+          <button aria-expanded={drawerOpen} aria-label="Abrir opciones de cafetería" className="parent-icon-btn" onClick={() => setDrawerOpen(true)} type="button">
+            <span />
+            <span />
+            <span />
           </button>
 
-          {profileMenuOpen ? (
-            <div className="parent-profile-menu" role="menu">
-              <button className="logout" onClick={onLogout} type="button">
-                <span className="icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>Cerrar sesión</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </header>
-      ) : null}
+          <div className="parent-title-wrap">
+            <img className="parent-brand-logo" src={smartLogo} alt="Comergio" />
+            <h1>Cafetería</h1>
+          </div>
+
+          <span aria-hidden="true" className="parent-icon-btn parent-icon-btn--placeholder" />
+        </header>
+      ) : (
+        <header className="parent-topbar">
+          <button aria-label="Abrir menu" className="parent-icon-btn" onClick={() => setDrawerOpen(true)} type="button">
+            <span />
+            <span />
+            <span />
+          </button>
+
+          <div className="parent-title-wrap">
+            <img className="parent-brand-logo" src={smartLogo} alt="Comergio" />
+            <h1>Hola, {headerName}!</h1>
+          </div>
+
+          <div className="parent-profile-wrap">
+            <button
+              aria-expanded={profileMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Abrir opciones de perfil"
+              className="parent-avatar parent-avatar-btn"
+              onClick={() => setProfileMenuOpen((prev) => !prev)}
+              type="button"
+            >
+              {parentInitial}
+            </button>
+
+            {profileMenuOpen ? (
+              <div className="parent-profile-menu" role="menu">
+                <button className="logout" onClick={onLogout} type="button">
+                  <span className="icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <span>Cerrar sesión</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </header>
+      )}
 
       <section className={`parent-student-switcher${childrenOpen ? ' is-open' : ''}`} ref={studentSwitcherRef}>
         <div className="parent-student-toggle-card">
@@ -4636,7 +4651,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
         </div>
       ) : null}
 
-      {!embedded && drawerOpen ? (
+      {drawerOpen ? (
         <div
           className="parent-drawer-backdrop"
           onClick={() => setDrawerOpen(false)}
@@ -4734,10 +4749,9 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
         </div>
       ) : null}
 
-      {!embedded ? (
-      <aside className={`parent-drawer ${drawerOpen ? 'open' : ''}`}>
-        <h3>Hola, {drawerHeaderName}</h3>
-        <p className="parent-drawer-subtitle">¿Qué quieres hacer hoy?</p>
+      <aside className={`parent-drawer${embedded ? ' parent-drawer--embedded-cafeteria' : ''} ${drawerOpen ? 'open' : ''}`}>
+        <h3>{embedded ? 'Cafetería' : `Hola, ${drawerHeaderName}`}</h3>
+        <p className="parent-drawer-subtitle">{embedded ? 'Opciones del portal de alimentación' : '¿Qué quieres hacer hoy?'}</p>
         <nav>
           {menuItems.map((item) => (
             <button key={item.key} onClick={() => onRunMenuAction(item.key)} type="button">
@@ -4747,6 +4761,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
           ))}
         </nav>
 
+        {!embedded ? (
         <div className="parent-drawer-actions">
           <button className="parent-delete-account-btn" onClick={onOpenDeleteAccountConfirm} type="button">
             <span className="icon" aria-hidden="true">{renderProfileIcon('trash')}</span>
@@ -4762,8 +4777,8 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
             <span>Cerrar sesión</span>
           </button>
         </div>
+        ) : null}
       </aside>
-      ) : null}
     </div>
   );
 }

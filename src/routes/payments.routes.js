@@ -908,7 +908,7 @@ async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { so
       };
     }
 
-    if (paymentRecord.walletTransactionId) {
+    if (paymentRecord.walletTransactionId || paymentRecord.academicChargePaymentId) {
       return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
     }
 
@@ -921,9 +921,21 @@ async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { so
       return { received: true, credited: false, status: 'failed', message: 'Payment transaction not found' };
     }
 
-    if (lockedPayment.walletTransactionId) {
+    if (lockedPayment.walletTransactionId || lockedPayment.academicChargePaymentId) {
       await session.commitTransaction();
       return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+    }
+
+    if (lockedPayment.purpose === 'academic_matricula') {
+      const { completeMatriculaGatewayPayment } = require('../services/enrollmentMatricula.service');
+      await completeMatriculaGatewayPayment(lockedPayment, providerPayload, session);
+      await session.commitTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        purpose: 'academic_matricula',
+      };
     }
 
     const wallet = await Wallet.findOne({
@@ -1300,7 +1312,7 @@ async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { sour
       };
     }
 
-    if (paymentRecord.walletTransactionId) {
+    if (paymentRecord.walletTransactionId || paymentRecord.academicChargePaymentId) {
       return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
     }
 
@@ -1313,9 +1325,21 @@ async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { sour
       return { received: true, credited: false, status: 'failed', message: 'Payment transaction not found' };
     }
 
-    if (lockedPayment.walletTransactionId) {
+    if (lockedPayment.walletTransactionId || lockedPayment.academicChargePaymentId) {
       await session.commitTransaction();
       return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+    }
+
+    if (lockedPayment.purpose === 'academic_matricula') {
+      const { completeMatriculaGatewayPayment } = require('../services/enrollmentMatricula.service');
+      await completeMatriculaGatewayPayment(lockedPayment, providerPayload, session);
+      await session.commitTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        purpose: 'academic_matricula',
+      };
     }
 
     const wallet = await Wallet.findOne({

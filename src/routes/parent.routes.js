@@ -4329,9 +4329,29 @@ router.get('/portal/academic-billing', async (req, res) => {
     const currentCharges = normalizedCharges
       .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
 
+    const paymentRecords = payments.map((payment) => ({
+      _id: payment._id,
+      concept: payment.chargeId?.concept || payment.concept || 'Pago académico',
+      amount: Number(payment.amount || 0),
+      paidAt: payment.paidAt || payment.createdAt,
+      monthKey: payment.chargeId?.monthKey || '',
+      studentName: payment.studentId?.name || 'Familia',
+      studentId: payment.studentId?._id || payment.studentId,
+      breakdownItems: [],
+      category: payment.chargeId?.category || '',
+      chargeId: payment.chargeId?._id || payment.chargeId || null,
+    }));
+
+    const paidChargeIdsWithPaymentRecord = new Set(
+      paymentRecords
+        .map((payment) => String(payment.chargeId || '').trim())
+        .filter(Boolean),
+    );
+
     const paymentHistory = [
       ...normalizedCharges
         .filter((charge) => String(charge.status) === 'paid')
+        .filter((charge) => !paidChargeIdsWithPaymentRecord.has(String(charge._id)))
         .map((charge) => ({
           _id: charge._id,
           concept: charge.concept,
@@ -4342,18 +4362,9 @@ router.get('/portal/academic-billing', async (req, res) => {
           studentId: charge.studentId?._id || charge.studentId,
           breakdownItems: charge.breakdownItems || [],
           category: charge.category,
+          chargeId: charge._id,
         })),
-      ...payments.map((payment) => ({
-        _id: payment._id,
-        concept: payment.chargeId?.concept || payment.concept || 'Pago académico',
-        amount: Number(payment.amount || 0),
-        paidAt: payment.paidAt || payment.createdAt,
-        monthKey: payment.chargeId?.monthKey || '',
-        studentName: payment.studentId?.name || 'Familia',
-        studentId: payment.studentId?._id || payment.studentId,
-        breakdownItems: [],
-        category: payment.chargeId?.category || '',
-      })),
+      ...paymentRecords,
     ].sort((left, right) => new Date(right.paidAt || 0) - new Date(left.paidAt || 0));
 
     const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: normalizedCharges, referenceDate: now });

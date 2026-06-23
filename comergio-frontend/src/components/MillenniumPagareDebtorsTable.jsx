@@ -8,7 +8,7 @@ const DEBTOR_FIELDS = [
   { key: 'email', label: 'Correo electrónico' },
 ];
 
-function DebtorColumn({ debtor = {} }) {
+function DebtorColumn({ debtor = {}, signatureImage = '' }) {
   return (
     <table className="pagare-debtor-column">
       <tbody>
@@ -23,19 +23,32 @@ function DebtorColumn({ debtor = {} }) {
         ))}
         <tr className="pagare-debtor-signature-row">
           <th scope="row">Firma</th>
-          <td colSpan={2} />
+          <td colSpan={2}>
+            {signatureImage ? (
+              <img
+                alt="Firma del deudor"
+                className="pagare-debtor-signature-image"
+                src={signatureImage}
+              />
+            ) : null}
+          </td>
         </tr>
       </tbody>
     </table>
   );
 }
 
-function MillenniumPagareDebtorsTable({ debtorOne = {}, debtorTwo = {}, heading = '' }) {
+function MillenniumPagareDebtorsTable({
+  debtorOne = {},
+  debtorTwo = {},
+  heading = '',
+  primarySignatureImage = '',
+}) {
   return (
     <div className="pagare-debtors-block">
       {heading ? <div className="pagare-debtors-heading">{heading}</div> : null}
       <div className="pagare-debtors-columns">
-        <DebtorColumn debtor={debtorOne} />
+        <DebtorColumn debtor={debtorOne} signatureImage={primarySignatureImage} />
         <DebtorColumn debtor={debtorTwo} />
       </div>
     </div>
