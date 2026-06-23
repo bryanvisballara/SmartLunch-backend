@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 
 const DIST_DIR = path.resolve(process.cwd(), 'dist');
 const DIST_DEPLOY_DIR = path.resolve(process.cwd(), 'dist-deploy');
@@ -114,7 +115,12 @@ async function main() {
   await generateFallbacksForDir(DIST_DIR);
   await generateFallbacksForDir(DIST_DEPLOY_DIR);
 
+  const zipPath = path.join(process.cwd(), 'dist-deploy.zip');
+  await fs.rm(zipPath, { force: true });
+  execSync('zip -rq dist-deploy.zip dist-deploy', { cwd: process.cwd(), stdio: 'inherit' });
+
   console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);
+  console.log('[route-fallbacks] packaged dist-deploy.zip');
 }
 
 main().catch((error) => {

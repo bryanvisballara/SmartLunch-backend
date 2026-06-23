@@ -33,6 +33,12 @@ import { getSchoolDisplayName } from '../../lib/schools';
 import { resolveApiAssetUrl } from '../../lib/api';
 import { formatEducationalGradeLabel, isRawInternalGradeToken } from '../../lib/educationalGradeLabels';
 import { readParentNotificationLaunchParams } from '../../lib/parentNotificationNavigation';
+import {
+  buildParentRoutedSectionPath,
+  buildParentSectionNavigateTarget,
+  resolveParentSectionFromSearch,
+  shouldUseParentQuerySectionRouting,
+} from '../../lib/parentSectionRouting';
 
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
@@ -4613,9 +4619,29 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const userMenuRef = useRef(null);
   const normalizedRouteBase = useMemo(() => normalizeRouteBase(routeBase), [routeBase]);
   const usesRoutedSections = Boolean(normalizedRouteBase);
-  const activeSection = usesRoutedSections
-    ? resolveRoutedSection(location.pathname, normalizedRouteBase)
-    : localActiveSection;
+  const useQuerySectionRouting = shouldUseParentQuerySectionRouting();
+  const activeSection = useMemo(() => {
+    if (!usesRoutedSections) {
+      return localActiveSection;
+    }
+
+    const sectionFromSearch = useQuerySectionRouting
+      ? resolveParentSectionFromSearch(location.search)
+      : '';
+    if (sectionFromSearch && isParentSectionEnabled(sectionFromSearch, parentAppFeatures)) {
+      return sectionFromSearch;
+    }
+
+    return resolveRoutedSection(location.pathname, normalizedRouteBase);
+  }, [
+    localActiveSection,
+    location.pathname,
+    location.search,
+    normalizedRouteBase,
+    parentAppFeatures,
+    useQuerySectionRouting,
+    usesRoutedSections,
+  ]);
 
   useEffect(() => {
     const launchParams = readParentNotificationLaunchParams(location.search, location.pathname);
@@ -4630,9 +4656,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       setShowAcademicMenu(false);
 
       if (usesRoutedSections) {
-        const academicPath = buildRoutedSectionPath(normalizedRouteBase, 'academic');
-        if (location.pathname !== academicPath) {
-          navigate(`${academicPath}${location.search}`, { replace: true });
+        const academicTarget = buildParentSectionNavigateTarget(normalizedRouteBase, 'academic');
+        const nextSearch = new URLSearchParams(location.search);
+        if (useQuerySectionRouting) {
+          nextSearch.set('section', 'academic');
+        }
+        const nextPath = nextSearch.toString() ? `${academicTarget.split('?')[0]}?${nextSearch.toString()}` : academicTarget;
+        const currentPath = `${location.pathname}${location.search || ''}`;
+        if (currentPath !== nextPath) {
+          navigate(nextPath, { replace: true });
         }
       } else {
         setLocalActiveSection('academic');
@@ -4643,7 +4675,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     if (!usesRoutedSections && launchParams.section && launchParams.section !== 'home') {
       setLocalActiveSection(launchParams.section);
     }
-  }, [location.search, location.pathname, navigate, normalizedRouteBase, usesRoutedSections]);
+  }, [location.search, location.pathname, navigate, normalizedRouteBase, useQuerySectionRouting, usesRoutedSections]);
   const cafeteriaBasePath = usesRoutedSections ? buildRoutedSectionPath(normalizedRouteBase, 'cafeteria') : '';
   const shouldUsePortalHeader = activeSection === 'cafeteria';
   const shouldUseEmbeddedCafeteriaPortal = activeSection === 'cafeteria' && embedPortal && cafeteriaBasePath;
@@ -5088,6 +5120,79 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
           : (primaryPendingCharge.concept || 'Tienes un cobro académico pendiente'))
         : 'No tienes pagos pendientes este mes';
 
+  const onLogout = () => {
+    setShowUserMenu(false);
+    logout();
+    navigate('/login', { replace: true });
+  };
+
+  const onPayAcademicCharge = async () => {
+    if (selectedFinanceSummary?.requiresDataSchoolContact) {
+      if (selectedFinanceSummary.dataSchoolWhatsappUrl) {
+        window.open(selectedFinanceSummary.dataSchoolWhatsappUrl, '_blank', 'noopener,noreferrer');
+      }
+      return;
+    }
+
+    const payableChargeIds = primaryPendingCharge?._id ? [primaryPendingCharge._id] : [];
+
+    if (!payableChargeIds.length) {
+      return;
+    }
+
+    setPayingChargeId(payableChargeIds[0]);
+    setAcademicPaymentMessage('');
+
+    try {
+      await payParentAcademicCharge(payableChargeIds[0], { method: 'parent_portal' });
+      const billingResponse = await getParentAcademicBilling();
+      setAcademicBilling(billingResponse.data || {
+        summary: { pendingAmount: 0, pendingCount: 0 },
+        currentCharges: [],
+        charges: [],
+        payments: [],
+        paymentHistory: [],
+        pricingGuides: {},
+      });
+      setShowFinanceConceptsSheet(false);
+      setAcademicPaymentMessage('Pago registrado. Estás al día.');
+    } catch (error) {
+      const whatsappUrl = error?.response?.data?.dataSchoolWhatsappUrl;
+      if (whatsappUrl) {
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      }
+      setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo registrar el pago.');
+    } finally {
+      setPayingChargeId('');
+    }
+  };
+
+  const onSelectSection = (sectionKey) => {
+    if (sectionKey === 'nursing') {
+      if (visibleParentCareMenuItems.length <= 1) {
+        const onlyCareSection = visibleParentCareMenuItems[0]?.id || 'nursing';
+        setShowCareMenu(false);
+        if (usesRoutedSections) {
+          navigate(buildParentSectionNavigateTarget(normalizedRouteBase, onlyCareSection));
+          return;
+        }
+        setLocalActiveSection(onlyCareSection);
+        return;
+      }
+      setShowCareMenu((currentValue) => !currentValue);
+      return;
+    }
+
+    setShowCareMenu(false);
+
+    if (usesRoutedSections) {
+      navigate(buildParentSectionNavigateTarget(normalizedRouteBase, sectionKey));
+      return;
+    }
+
+    setLocalActiveSection(sectionKey);
+  };
+
   const financeHeroCard = activeSection === 'finance' ? (
     <article className="campus-parent-mobile__hero-card is-finance">
       <div className="campus-parent-mobile__hero-card-head">
@@ -5322,7 +5427,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     setShowCareMenu(false);
 
     if (usesRoutedSections) {
-      navigate(buildRoutedSectionPath(normalizedRouteBase, fallbackSection), { replace: true });
+      navigate(buildParentSectionNavigateTarget(normalizedRouteBase, fallbackSection), { replace: true });
       return;
     }
 
@@ -5391,79 +5496,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       document.removeEventListener('keydown', onEscape);
     };
   }, [showAcademicMenu]);
-
-  const onLogout = () => {
-    setShowUserMenu(false);
-    logout();
-    navigate('/login', { replace: true });
-  };
-
-  const onPayAcademicCharge = async () => {
-    if (selectedFinanceSummary?.requiresDataSchoolContact) {
-      if (selectedFinanceSummary.dataSchoolWhatsappUrl) {
-        window.open(selectedFinanceSummary.dataSchoolWhatsappUrl, '_blank', 'noopener,noreferrer');
-      }
-      return;
-    }
-
-    const payableChargeIds = primaryPendingCharge?._id ? [primaryPendingCharge._id] : [];
-
-    if (!payableChargeIds.length) {
-      return;
-    }
-
-    setPayingChargeId(payableChargeIds[0]);
-    setAcademicPaymentMessage('');
-
-    try {
-      await payParentAcademicCharge(payableChargeIds[0], { method: 'parent_portal' });
-      const billingResponse = await getParentAcademicBilling();
-      setAcademicBilling(billingResponse.data || {
-        summary: { pendingAmount: 0, pendingCount: 0 },
-        currentCharges: [],
-        charges: [],
-        payments: [],
-        paymentHistory: [],
-        pricingGuides: {},
-      });
-      setShowFinanceConceptsSheet(false);
-      setAcademicPaymentMessage('Pago registrado. Estás al día.');
-    } catch (error) {
-      const whatsappUrl = error?.response?.data?.dataSchoolWhatsappUrl;
-      if (whatsappUrl) {
-        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      }
-      setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo registrar el pago.');
-    } finally {
-      setPayingChargeId('');
-    }
-  };
-
-  const onSelectSection = (sectionKey) => {
-    if (sectionKey === 'nursing') {
-      if (visibleParentCareMenuItems.length <= 1) {
-        const onlyCareSection = visibleParentCareMenuItems[0]?.id || 'nursing';
-        setShowCareMenu(false);
-        if (usesRoutedSections) {
-          navigate(buildRoutedSectionPath(normalizedRouteBase, onlyCareSection));
-          return;
-        }
-        setLocalActiveSection(onlyCareSection);
-        return;
-      }
-      setShowCareMenu((currentValue) => !currentValue);
-      return;
-    }
-
-    setShowCareMenu(false);
-
-    if (usesRoutedSections) {
-      navigate(buildRoutedSectionPath(normalizedRouteBase, sectionKey));
-      return;
-    }
-
-    setLocalActiveSection(sectionKey);
-  };
 
   if (!selectedChild) {
     if (parentOverviewLoading) {
