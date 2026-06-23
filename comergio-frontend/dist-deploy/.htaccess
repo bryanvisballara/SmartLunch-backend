@@ -38,4 +38,8 @@
   <FilesMatch "\.(webp|png|jpe?g|gif|avif)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
+
+  <FilesMatch "\.(js|css)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
 </IfModule>

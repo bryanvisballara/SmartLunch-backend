@@ -1,5 +1,3 @@
-import { Capacitor } from '@capacitor/core';
-
 export const PARENT_SECTION_QUERY_KEY = 'section';
 
 const ROUTED_PARENT_SECTION_SUFFIXES = {
@@ -12,9 +10,6 @@ const ROUTED_PARENT_SECTION_SUFFIXES = {
   coexistence: '/coexistence',
   transport: '/transport',
 };
-
-// Sections that still 404 on Hostinger unless the latest dist-deploy bundle is extracted.
-const NATIVE_QUERY_SECTION_KEYS = new Set(['finance', 'academic', 'transport']);
 
 function normalizeRouteBase(routeBase) {
   const normalizedBase = String(routeBase || '').trim();
@@ -38,16 +33,11 @@ export function buildParentRoutedSectionPath(routeBase, sectionKey) {
 }
 
 export function shouldUseParentQuerySectionRouting() {
-  return Capacitor.isNativePlatform();
+  return false;
 }
 
 export function resolveParentSectionFromSearch(search = '') {
   return String(new URLSearchParams(search).get(PARENT_SECTION_QUERY_KEY) || '').trim();
-}
-
-export function shouldNavigateParentSectionWithQuery(sectionKey = '') {
-  return shouldUseParentQuerySectionRouting()
-    && NATIVE_QUERY_SECTION_KEYS.has(String(sectionKey || '').trim());
 }
 
 export function buildParentSectionNavigateTarget(routeBase, sectionKey = '') {
@@ -59,10 +49,6 @@ export function buildParentSectionNavigateTarget(routeBase, sectionKey = '') {
   const normalizedSection = String(sectionKey || '').trim();
   if (!normalizedSection || normalizedSection === 'home') {
     return normalizedBase;
-  }
-
-  if (shouldNavigateParentSectionWithQuery(normalizedSection)) {
-    return `${normalizedBase}?${PARENT_SECTION_QUERY_KEY}=${encodeURIComponent(normalizedSection)}`;
   }
 
   return buildParentRoutedSectionPath(normalizedBase, normalizedSection);

@@ -2,12 +2,15 @@ import UIKit
 import Capacitor
 import FirebaseCore
 import FirebaseMessaging
+import WebKit
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
     private let appShellBackgroundColor = UIColor(red: 245.0 / 255.0, green: 247.0 / 255.0, blue: 251.0 / 255.0, alpha: 1.0)
+    private let webCacheRevisionKey = "comergio.webCacheRevision"
+    private let requiredWebCacheRevision = "2025062301"
 
     override init() {
         super.init()
@@ -18,6 +21,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         NSLog("[Comergio][AppDelegate] didFinishLaunching start firebaseConfigured=\(FirebaseApp.app() != nil)")
+        clearRemoteWebCacheIfNeeded()
         configureFirebaseIfNeeded()
         applyAppShellAppearance()
         NSLog("[Comergio][AppDelegate] didFinishLaunching end firebaseConfigured=\(FirebaseApp.app() != nil)")
@@ -71,6 +75,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return ApplicationDelegateProxy.shared.application(application, open: incomingURL, options: [:])
         }
         return false
+    }
+
+    private func clearRemoteWebCacheIfNeeded() {
+        let storedRevision = UserDefaults.standard.string(forKey: webCacheRevisionKey)
+        if storedRevision == requiredWebCacheRevision {
+            return
+        }
+
+        NSLog("[Comergio][WebCache] clearing remote shell cache revision=\(requiredWebCacheRevision)")
+        URLCache.shared.removeAllCachedResponses()
+
+        let dataStore = WKWebsiteDataStore.default()
+        let allTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        let semaphore = DispatchSemaphore(value: 0)
+
+        dataStore.fetchDataRecords(ofTypes: allTypes) { records in
+            let comergioRecords = records.filter { record in
+                record.displayName.contains("comergio.com")
+            }
+
+            dataStore.removeData(ofTypes: allTypes, for: comergioRecords) {
+                UserDefaults.standard.set(self.requiredWebCacheRevision, forKey: self.webCacheRevisionKey)
+                NSLog("[Comergio][WebCache] cleared \(comergioRecords.count) comergio.com records")
+                semaphore.signal()
+            }
+        }
+
+        _ = semaphore.wait(timeout: .now() + 5)
     }
 
     private func configureFirebaseIfNeeded() {
