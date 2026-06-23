@@ -5642,7 +5642,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
 
         {activeSection === 'cafeteria' ? (
           embedPortal && cafeteriaBasePath ? (
-            <ParentPortal basePath={cafeteriaBasePath} />
+            <ParentPortal basePath={cafeteriaBasePath} embedded />
           ) : (
             <ParentCafeteriaContent
               activeView={activeCafeteriaView}

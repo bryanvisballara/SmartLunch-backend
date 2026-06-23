@@ -13,6 +13,7 @@ import {
   getCampusTeacherCourseDetail,
   getCampusTeacherDisciplineObservations,
   getCampusTeacherParentFeedRequests,
+  getCampusTeacherCalendar,
   getCampusTeacherOverview,
   saveCampusTeacherAttendance,
   saveCampusTeacherStudentGrades,
@@ -705,7 +706,11 @@ function buildCourseTimelineCalendar(monthDate, classSessions, posts) {
         key: `post-${post.id}`,
         kind: 'activity',
         label: post.title || formatPostTypeLabel(post.type),
-        meta: `${formatPostTypeLabel(post.type)} · ${formatDeliveryLabel(post)}`,
+        meta: [
+          String(post.subject || post.courseTitle || '').trim(),
+          formatPostTypeLabel(post.type),
+          formatDeliveryLabel(post),
+        ].filter(Boolean).join(' · '),
         description: post.body || 'Actividad programada para este día.',
       })),
       ...matchingSessions.map((session, index) => ({
@@ -2036,7 +2041,9 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [timelineMonth, setTimelineMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [timelineCourseId, setTimelineCourseId] = useState('');
+  const [dashboardCalendarMonth, setDashboardCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedTimelineDate, setSelectedTimelineDate] = useState('');
+  const [selectedDashboardCalendarDate, setSelectedDashboardCalendarDate] = useState('');
   const [activeIntegralModal, setActiveIntegralModal] = useState('');
   const [showPostSuccessModal, setShowPostSuccessModal] = useState(false);
   const [gradebookSaveModal, setGradebookSaveModal] = useState(null);
@@ -2070,6 +2077,19 @@ function TeacherCampusHome({ forcePreview = false }) {
     retry: false,
     staleTime: 30_000,
     enabled: !previewEnabled && Boolean(authUser?.id),
+  });
+
+  const dashboardCalendarMonthKey = useMemo(
+    () => `${dashboardCalendarMonth.getFullYear()}-${String(dashboardCalendarMonth.getMonth() + 1).padStart(2, '0')}`,
+    [dashboardCalendarMonth]
+  );
+
+  const teacherDashboardCalendarQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'calendar', teacherQueryScope, dashboardCalendarMonthKey],
+    queryFn: () => getCampusTeacherCalendar({ month: dashboardCalendarMonthKey }),
+    enabled: !previewEnabled && Boolean(authUser?.id) && activeTeacherSection === 'dashboard',
+    retry: false,
+    staleTime: 30_000,
   });
 
   const courseDetailQuery = useQuery({
@@ -2184,6 +2204,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     mutationFn: createCampusTeacherPost,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'calendar'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
     },
   });
@@ -2192,6 +2213,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     mutationFn: ({ postId, payload }) => updateCampusTeacherPost(postId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'calendar'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
     },
   });
@@ -2514,6 +2536,57 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => timelineCourseCalendar.find((cell) => !cell.empty && cell.dateValue === selectedTimelineDate) || null,
     [selectedTimelineDate, timelineCourseCalendar]
   );
+  const dashboardCalendarPosts = useMemo(() => {
+    const mapCalendarItemToPost = (item) => ({
+      id: item.id,
+      courseId: item.courseId,
+      courseTitle: item.courseTitle,
+      subject: item.subject,
+      type: item.type,
+      title: item.title,
+      body: item.detail || item.body,
+      deliveryMode: item.deliveryMode,
+      dueAt: item.dueAt,
+      scheduledClassDate: item.scheduledClassDate,
+      status: item.status || 'published',
+    });
+
+    if (previewEnabled) {
+      return (Array.isArray(recentPosts) ? recentPosts : [])
+        .filter((post) => isEvaluativePostType(post.type) && String(post.status || '').toLowerCase() !== 'archived')
+        .filter((post) => {
+          const dateValue = getTimelineDateValue(post);
+          return dateValue && dateValue.startsWith(`${dashboardCalendarMonthKey}-`);
+        });
+    }
+
+    return (teacherDashboardCalendarQuery.data?.items || []).map(mapCalendarItemToPost);
+  }, [dashboardCalendarMonthKey, previewEnabled, recentPosts, teacherDashboardCalendarQuery.data?.items]);
+  const dashboardCalendarGrid = useMemo(
+    () => buildCourseTimelineCalendar(dashboardCalendarMonth, [], dashboardCalendarPosts),
+    [dashboardCalendarMonth, dashboardCalendarPosts]
+  );
+  const selectedDashboardCalendarDay = useMemo(
+    () => dashboardCalendarGrid.find((cell) => !cell.empty && cell.dateValue === selectedDashboardCalendarDate) || null,
+    [dashboardCalendarGrid, selectedDashboardCalendarDate]
+  );
+  const upcomingDashboardActivities = useMemo(() => {
+    const todayValue = buildLocalDateValue(new Date());
+
+    return [...dashboardCalendarPosts]
+      .filter((post) => getTimelineDateValue(post) >= todayValue)
+      .sort((left, right) => getTimelineDateValue(left).localeCompare(getTimelineDateValue(right)))
+      .slice(0, 6)
+      .map((post) => ({
+        id: post.id,
+        title: post.title || formatPostTypeLabel(post.type),
+        typeLabel: formatPostTypeLabel(post.type),
+        courseTitle: String(post.subject || post.courseTitle || 'Curso').trim(),
+        dateLabel: formatTimelineDateLabel(getTimelineDateValue(post)),
+        deliveryLabel: formatDeliveryLabel(post),
+        description: post.body || 'Actividad programada.',
+      }));
+  }, [dashboardCalendarPosts]);
   const teacherResourceItems = teacherResourceItemsQuery.data?.data?.items || teacherResourceItemsQuery.data?.items || [];
   const teacherResourceRequests = teacherResourceRequestsQuery.data?.data?.requests || teacherResourceRequestsQuery.data?.requests || [];
   const teacherPlannerCycles = teacherPlannerCyclesQuery.data?.data?.cycles || teacherPlannerCyclesQuery.data?.cycles || [];
@@ -2654,6 +2727,10 @@ function TeacherCampusHome({ forcePreview = false }) {
   useEffect(() => {
     setSelectedTimelineDate('');
   }, [timelineCourseId, timelineMonth]);
+
+  useEffect(() => {
+    setSelectedDashboardCalendarDate('');
+  }, [dashboardCalendarMonthKey]);
 
   useEffect(() => {
     if (!academicCourses.length) {
@@ -6432,6 +6509,83 @@ function TeacherCampusHome({ forcePreview = false }) {
                   </article>
                 </div>
 
+                <article className="campus-teacher__integral-card campus-teacher__panel-surface campus-teacher__dashboard-calendar">
+                  <div className="campus-teacher__section-head">
+                    <div>
+                      <span className="campus-panel__kicker">Calendario de actividades</span>
+                      <h3>Tus asignaciones en todos los cursos</h3>
+                    </div>
+                    <div className="campus-teacher__activity-timeline-nav">
+                      <button className="campus-teacher__ghost-btn" onClick={() => setDashboardCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} type="button">
+                        Mes anterior
+                      </button>
+                      <button className="campus-teacher__ghost-btn" onClick={() => setDashboardCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} type="button">
+                        Mes siguiente
+                      </button>
+                    </div>
+                  </div>
+                  <p className="campus-panel__meta">Revisa en un solo lugar las tareas, quices, proyectos y demás actividades evaluativas que publicaste en todos tus cursos.</p>
+                  {!previewEnabled && teacherDashboardCalendarQuery.isLoading ? <p className="campus-panel__meta">Cargando calendario...</p> : null}
+                  {!previewEnabled && teacherDashboardCalendarQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el calendario de actividades.</p> : null}
+                  <div className="campus-teacher__activity-calendar-shell">
+                    <div className="campus-teacher__activity-calendar-header">
+                      <p>Calendario mensual</p>
+                      <strong>{formatMonthLabel(dashboardCalendarMonth)}</strong>
+                    </div>
+                    <div className="campus-teacher__activity-calendar-grid" role="list" aria-label={`Calendario de actividades del docente para ${formatMonthLabel(dashboardCalendarMonth)}`}>
+                      {weekdayShortLabels.map((label) => (
+                        <div className="campus-teacher__activity-calendar-weekday" key={`dashboard-calendar-weekday-${label}`} role="listitem" aria-hidden="true">
+                          {label}
+                        </div>
+                      ))}
+                      {dashboardCalendarGrid.map((cell) => (
+                        cell.empty ? (
+                          <div className="campus-teacher__activity-calendar-empty" key={cell.key} aria-hidden="true" />
+                        ) : (
+                          <button
+                            className={`campus-teacher__activity-calendar-day${cell.isToday ? ' is-today' : ''}${cell.hasActivity ? ' has-activity' : ''}`}
+                            key={cell.key}
+                            onClick={() => setSelectedDashboardCalendarDate(cell.dateValue)}
+                            role="listitem"
+                            title={cell.title || undefined}
+                            type="button"
+                          >
+                            <div className="day-number-row">
+                              <span className="day-number">{cell.dayNumber}</span>
+                              {cell.itemCount > 0 ? <span className="day-count">({cell.itemCount})</span> : null}
+                            </div>
+                            {cell.primaryChip ? <span className="day-chip primary" title={cell.primaryChip.title}>{cell.primaryChip.label}</span> : null}
+                            {cell.secondaryChip ? <span className="day-chip secondary" title={cell.secondaryChip.title}>{cell.secondaryChip.label}</span> : null}
+                            {!cell.primaryChip && !cell.secondaryChip ? <span className="day-chip empty">Sin act.</span> : null}
+                          </button>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                  <div className="campus-teacher__dashboard-calendar-upcoming">
+                    <div className="campus-teacher__section-head">
+                      <div>
+                        <span className="campus-panel__kicker">Próximas actividades</span>
+                        <h3>Lo que viene en este mes</h3>
+                      </div>
+                    </div>
+                    <div className="campus-teacher__integral-activity-list">
+                      {upcomingDashboardActivities.length > 0 ? upcomingDashboardActivities.map((item) => (
+                        <article className="campus-teacher__integral-activity" key={item.id}>
+                          <div>
+                            <strong>{item.title}</strong>
+                            <p>{item.courseTitle}</p>
+                          </div>
+                          <div className="campus-teacher__integral-activity-meta">
+                            <span>{item.typeLabel}</span>
+                            <span>{item.dateLabel}</span>
+                          </div>
+                        </article>
+                      )) : <p className="campus-panel__meta">No hay actividades evaluativas próximas en este mes.</p>}
+                    </div>
+                  </div>
+                </article>
+
                 {activeIntegralModal === 'risk' ? (
                   <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setActiveIntegralModal('')} role="presentation">
                     <div
@@ -6529,6 +6683,39 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <p>{item.description}</p>
                           </article>
                         )) : <p className="campus-panel__meta">No hay tareas, quiz, exposiciones u otras actividades evaluativas programadas para mañana.</p>}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeTeacherSection === 'dashboard' && selectedDashboardCalendarDay ? (
+                  <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setSelectedDashboardCalendarDate('')} role="presentation">
+                    <div
+                      aria-label={`Actividades del ${selectedDashboardCalendarDay.formattedDate}`}
+                      aria-modal="true"
+                      className="campus-teacher__timeline-modal"
+                      onClick={(event) => event.stopPropagation()}
+                      role="dialog"
+                    >
+                      <div className="campus-teacher__timeline-modal-head">
+                        <div>
+                          <span className="campus-panel__kicker">Actividades del día</span>
+                          <h3>{selectedDashboardCalendarDay.formattedDate}</h3>
+                        </div>
+                        <button className="campus-teacher__ghost-btn" onClick={() => setSelectedDashboardCalendarDate('')} type="button">
+                          Cerrar
+                        </button>
+                      </div>
+
+                      <div className="campus-teacher__timeline-modal-body">
+                        {selectedDashboardCalendarDay.items.length > 0 ? selectedDashboardCalendarDay.items.map((item) => (
+                          <article className={`campus-teacher__timeline-modal-item is-${item.kind}`} key={item.key}>
+                            <span className="campus-teacher__timeline-modal-item-kind">{item.kind === 'class' ? 'Clase' : 'Actividad'}</span>
+                            <strong>{item.label}</strong>
+                            <span>{item.meta}</span>
+                            <p>{item.description}</p>
+                          </article>
+                        )) : <p className="campus-panel__meta">No hay actividades programadas para este día.</p>}
                       </div>
                     </div>
                   </div>

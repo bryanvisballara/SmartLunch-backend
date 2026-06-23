@@ -71,6 +71,30 @@ function canUseBiometricAuth() {
   return typeof window !== 'undefined' && window.isSecureContext && typeof window.PublicKeyCredential !== 'undefined';
 }
 
+function resolveLoginSchoolId({
+  schoolSearch,
+  selectedSchoolId,
+  countrySchoolOptions,
+  filteredSchoolOptions = [],
+}) {
+  const typedSchoolKey = normalizeSearchText(schoolSearch);
+  const exactTypedSchool = countrySchoolOptions.find((school) => (
+    normalizeSearchText(school.label) === typedSchoolKey
+    || normalizeSearchText(school.id) === typedSchoolKey
+  ));
+  const selectedCountrySchoolId = countrySchoolOptions.some((school) => school.id === selectedSchoolId)
+    ? selectedSchoolId
+    : '';
+
+  // The visible school field wins over a stale selectedSchoolId (e.g. after async school list load).
+  if (exactTypedSchool?.id) {
+    return exactTypedSchool.id;
+  }
+
+  return selectedCountrySchoolId
+    || (filteredSchoolOptions.length === 1 ? filteredSchoolOptions[0].id : '');
+}
+
 function InputAdornment({ kind }) {
   if (kind === 'country') {
     return (
@@ -152,6 +176,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const [forgotInfo, setForgotInfo] = useState('');
   const [forgotResendCountdown, setForgotResendCountdown] = useState(0);
   const hasUserTypedRef = useRef(false);
+  const schoolSelectionTouchedRef = useRef(false);
   const directLoginAttemptedRef = useRef(false);
   const schoolPickerRef = useRef(null);
   const countryPickerRef = useRef(null);
@@ -178,6 +203,15 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
       normalizeSearchText(`${school.label} ${school.id}`).includes(query)
     ));
   }, [countrySchoolOptions, schoolSearch]);
+
+  const getResolvedLoginSchoolId = useCallback(() => (
+    resolveLoginSchoolId({
+      schoolSearch,
+      selectedSchoolId,
+      countrySchoolOptions,
+      filteredSchoolOptions,
+    })
+  ), [schoolSearch, selectedSchoolId, countrySchoolOptions, filteredSchoolOptions]);
 
   useEffect(() => {
     document.documentElement.classList.add('login-route-active');
@@ -240,9 +274,24 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
         const fetchedSchoolOptions = normalizeSchoolOptions(response.data?.schools || []);
         const nextSchoolOptions = rememberSchoolOptions(fetchedSchoolOptions.length ? fetchedSchoolOptions : SCHOOL_OPTIONS);
         setSchoolOptions(nextSchoolOptions);
-        setSelectedSchoolId((currentSchoolId) => (
-          resolveStoredSchoolId(currentSchoolId || localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID, nextSchoolOptions)
-        ));
+        setSelectedSchoolId((currentSchoolId) => {
+          if (schoolSelectionTouchedRef.current) {
+            if (!currentSchoolId) {
+              return '';
+            }
+
+            if (nextSchoolOptions.some((school) => school.id === currentSchoolId)) {
+              return currentSchoolId;
+            }
+
+            return resolveStoredSchoolId(currentSchoolId, nextSchoolOptions);
+          }
+
+          return resolveStoredSchoolId(
+            localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID,
+            nextSchoolOptions
+          );
+        });
       })
       .catch(() => {
         if (!cancelled) {
@@ -286,8 +335,10 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   };
 
   const selectSchoolOption = (school) => {
+    schoolSelectionTouchedRef.current = true;
     setSelectedSchoolId(school.id);
     setSchoolSearch(school.label);
+    localStorage.setItem('selectedSchoolId', school.id);
     setIsSchoolPickerOpen(false);
     blurActiveLoginControl();
   };
@@ -523,10 +574,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     event.preventDefault();
     setError('');
 
-    const typedSchoolKey = normalizeSearchText(schoolSearch);
-    const exactTypedSchool = countrySchoolOptions.find((school) => normalizeSearchText(school.label) === typedSchoolKey || normalizeSearchText(school.id) === typedSchoolKey);
-    const selectedCountrySchoolId = countrySchoolOptions.some((school) => school.id === selectedSchoolId) ? selectedSchoolId : '';
-    const resolvedSchoolId = selectedCountrySchoolId || exactTypedSchool?.id || (filteredSchoolOptions.length === 1 ? filteredSchoolOptions[0].id : '');
+    const resolvedSchoolId = getResolvedLoginSchoolId();
 
     if (!resolvedSchoolId) {
       setError('Selecciona un colegio para continuar.');
@@ -535,6 +583,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
     if (resolvedSchoolId !== selectedSchoolId) {
       setSelectedSchoolId(resolvedSchoolId);
+      localStorage.setItem('selectedSchoolId', resolvedSchoolId);
     }
 
     setLoading(true);
@@ -548,7 +597,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
       const backendMessage = requestError?.response?.data?.message || requestError?.message || '';
       setError(
         backendMessage === 'Invalid credentials'
-          ? 'Correo, contraseña o colegio incorrectos. Para docentes de Comergio Demo usa el colegio "Comergio Demo".'
+          ? 'Correo, contraseña o colegio incorrectos. Verifica que el colegio seleccionado sea el correcto.'
           : backendMessage || 'No se pudo iniciar sesión. Revisa backend o credenciales.'
       );
     } finally {
@@ -570,24 +619,26 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
         throw new Error('Ingresa tu usuario para continuar con Face ID/huella.');
       }
 
-      if (!selectedSchoolId) {
+      const resolvedSchoolId = getResolvedLoginSchoolId();
+
+      if (!resolvedSchoolId) {
         throw new Error('Selecciona un colegio para continuar con Face ID/huella.');
       }
 
       const optionsResponse = await getBiometricLoginOptions({
         username: normalizedUsername,
-        schoolId: selectedSchoolId,
+        schoolId: resolvedSchoolId,
       });
       const authenticationResponse = await startAuthentication({ optionsJSON: optionsResponse.data });
       const verifyResponse = await verifyBiometricLogin({
         username: normalizedUsername,
-        schoolId: selectedSchoolId,
+        schoolId: resolvedSchoolId,
         authenticationResponse,
       });
 
       setAuth(verifyResponse.data);
       localStorage.setItem('lastParentUsername', normalizedUsername);
-      localStorage.setItem('selectedSchoolId', selectedSchoolId);
+      localStorage.setItem('selectedSchoolId', resolvedSchoolId);
       if (verifyResponse.data?.user?.role === 'parent' && !isNativeAndroid) {
         setupPushIfPossible();
       }
@@ -624,9 +675,9 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     setForgotLoading(false);
   };
 
-  const sendForgotCodeRequest = async () => {
+  const sendForgotCodeRequest = async (schoolId) => {
     return sendForgotPasswordCode({
-      schoolId: selectedSchoolId,
+      schoolId,
       email: normalizeUsername(forgotEmail),
     });
   };
@@ -635,7 +686,9 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     setForgotError('');
     setForgotInfo('');
 
-    if (!selectedSchoolId) {
+    const resolvedSchoolId = getResolvedLoginSchoolId();
+
+    if (!resolvedSchoolId) {
       setForgotError('Selecciona un colegio antes de recuperar tu contrasena.');
       return;
     }
@@ -647,7 +700,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
     setForgotLoading(true);
     try {
-      const response = await sendForgotCodeRequest();
+      const response = await sendForgotCodeRequest(resolvedSchoolId);
       setForgotInfo(response.data?.message || 'Si el correo existe, enviamos un codigo de recuperacion.');
       setForgotStep('verify');
       setForgotResendCountdown(60);
@@ -666,8 +719,15 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     setForgotLoading(true);
     setForgotError('');
 
+    const resolvedSchoolId = getResolvedLoginSchoolId();
+    if (!resolvedSchoolId) {
+      setForgotError('Selecciona un colegio antes de recuperar tu contrasena.');
+      setForgotLoading(false);
+      return;
+    }
+
     try {
-      const response = await sendForgotCodeRequest();
+      const response = await sendForgotCodeRequest(resolvedSchoolId);
       setForgotInfo(response.data?.message || 'Si el correo existe, enviamos un codigo de recuperacion.');
       setForgotResendCountdown(60);
     } catch (requestError) {
@@ -687,8 +747,14 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
     setForgotLoading(true);
     try {
+      const resolvedSchoolId = getResolvedLoginSchoolId();
+      if (!resolvedSchoolId) {
+        setForgotError('Selecciona un colegio antes de recuperar tu contrasena.');
+        return;
+      }
+
       const response = await verifyForgotPasswordCode({
-        schoolId: selectedSchoolId,
+        schoolId: resolvedSchoolId,
         email: normalizeUsername(forgotEmail),
         code: String(forgotCode || '').trim(),
       });
@@ -717,8 +783,14 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
     setForgotLoading(true);
     try {
+      const resolvedSchoolId = getResolvedLoginSchoolId();
+      if (!resolvedSchoolId) {
+        setForgotError('Selecciona un colegio antes de recuperar tu contrasena.');
+        return;
+      }
+
       await resetForgotPassword({
-        schoolId: selectedSchoolId,
+        schoolId: resolvedSchoolId,
         email: normalizeUsername(forgotEmail),
         resetToken: forgotResetToken,
         newPassword: forgotNewPassword,
@@ -813,6 +885,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
               name="comergio_school"
               onChange={(e) => {
                 const nextValue = e.target.value;
+                schoolSelectionTouchedRef.current = true;
                 setSchoolSearch(nextValue);
                 setIsSchoolPickerOpen(true);
                 if (selectedSchool && normalizeSearchText(nextValue) !== normalizeSearchText(selectedSchool.label)) {

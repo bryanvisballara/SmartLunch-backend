@@ -5,6 +5,7 @@ import './RectoriaDashboard.css';
 import { buildAcademicEnrollmentProrationTable } from '../lib/academicEnrollment';
 import { findMatchingFeeSetting, getFeeGradeAliases, resolveStructureGradeKeyForStudent, studentMatchesAnyGradeKey, buildAcademicStructureGradeMetadataIndex, gradesMatchForFilter } from '../lib/feeGradeMatching';
 import { resolveGradeCourses, resolveStudentCourseKey, studentHasAssignedCourseInGrade } from '../lib/academicGradeCourses';
+import { formatEducationalGradeLabel } from '../lib/educationalGradeLabels';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
@@ -249,9 +250,13 @@ function normalizeCampusCourseForAcademicContent(course = {}) {
   const key = String(course.key || course.id || course._id || course.title || course.section || '').trim();
   return {
     key,
+    id: String(course.id || course._id || course.key || '').trim(),
     label: String(course.label || course.title || course.section || '').trim(),
+    title: String(course.title || course.label || '').trim(),
     teacherUserId: String(course.teacherUserId || '').trim(),
     gradeKey: String(course.gradeKey || course.studentGradeKey || course.gradeLevel || '').trim(),
+    studentGradeKey: String(course.studentGradeKey || course.gradeKey || course.gradeLevel || '').trim(),
+    sourceCourseKey: String(course.sourceCourseKey || '').trim(),
     subject: String(course.subject || '').trim(),
     section: String(course.section || '').trim(),
     academicContent: Array.isArray(course.academicContent) ? course.academicContent : [],
@@ -267,6 +272,290 @@ function buildRectoriaCourseGroupKey(course = {}) {
   const gradeKey = String(course.gradeKey || course.studentGradeKey || course.gradeLevel || '').trim();
   const section = String(course.section || course.key || course.label || '').trim();
   return `${gradeKey}::${section}`;
+}
+
+function normalizeInstitutionalLabelCompare(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_-]+/g, ' ');
+}
+
+function looksLikeTechnicalCourseKey(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return true;
+  }
+
+  if (/^[0-9]+[A-Z]?$/i.test(normalized) || /^[A-Z]$/i.test(normalized)) {
+    return false;
+  }
+
+  return normalized.includes('_') || /^[A-Z0-9_:-]+$/.test(normalized);
+}
+
+function formatRectoriaInstitutionalCourseLabel(course = {}, labelContext = {}) {
+  const getGradeLabel = labelContext.getGradeLabel || ((value) => String(value || '').trim());
+  const getCourseLabel = labelContext.getCourseLabel || ((value) => String(value || '').trim());
+  const getSubjectLabel = labelContext.getSubjectLabel || ((value) => String(value || '').trim());
+
+  const subjectKey = String(course.subject || '').trim();
+  const subjectLabel = getSubjectLabel(subjectKey) || subjectKey;
+  const gradeKey = normalizeAcademicGradeKey(
+    course.gradeKey || course.studentGradeKey || course.gradeLevel || ''
+  );
+  const gradeLabel = gradeKey ? getGradeLabel(gradeKey) : '';
+
+  const sourceCourseKey = String(course.sourceCourseKey || '').trim();
+  const sectionValue = String(course.section || '').trim();
+  const courseKeyCandidate = sourceCourseKey || sectionValue;
+  let courseGroupLabel = courseKeyCandidate ? getCourseLabel(courseKeyCandidate) : '';
+
+  if (
+    !courseGroupLabel
+    || courseGroupLabel === courseKeyCandidate
+    || looksLikeTechnicalCourseKey(courseGroupLabel)
+  ) {
+    if (/^[A-Z]$/i.test(sectionValue) && gradeLabel) {
+      courseGroupLabel = `${gradeLabel}${sectionValue.toUpperCase()}`;
+    } else {
+      courseGroupLabel = gradeLabel;
+    }
+  }
+
+  const parts = [];
+  if (subjectLabel) {
+    parts.push(subjectLabel);
+  }
+
+  const subjectCompare = normalizeInstitutionalLabelCompare(subjectLabel);
+  const groupCompare = normalizeInstitutionalLabelCompare(courseGroupLabel);
+  const gradeCompare = normalizeInstitutionalLabelCompare(gradeLabel);
+
+  if (courseGroupLabel && groupCompare && groupCompare !== subjectCompare && !subjectCompare.includes(groupCompare)) {
+    parts.push(courseGroupLabel);
+  } else if (gradeLabel && gradeCompare !== subjectCompare && !parts.some((part) => normalizeInstitutionalLabelCompare(part) === gradeCompare)) {
+    parts.push(gradeLabel);
+  }
+
+  return parts.filter(Boolean).join(' · ') || subjectLabel || 'Curso';
+}
+
+function resolveRectoriaPerformanceMeta(score, gradingScale = defaultAcademicGradingScale) {
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return { tone: 'neutral', label: 'Sin calificaciones', color: '#64748b' };
+  }
+
+  const performanceLevels = Array.isArray(gradingScale?.performanceLevels) && gradingScale.performanceLevels.length > 0
+    ? gradingScale.performanceLevels
+    : defaultAcademicPerformanceLevels;
+  const match = performanceLevels.find((level) => (
+    numericScore >= Number(level.minScore)
+    && numericScore <= Number(level.maxScore)
+  ));
+  const passingScore = Number(gradingScale?.passingScore ?? defaultAcademicGradingScale.passingScore);
+
+  if (numericScore < passingScore) {
+    return { tone: 'danger', label: match?.label || 'Bajo umbral', color: match?.color || '#ef4444' };
+  }
+
+  if (numericScore < passingScore + Math.max(4, (Number(gradingScale?.maxScore || 100) - passingScore) * 0.15)) {
+    return { tone: 'warn', label: match?.label || 'En umbral', color: match?.color || '#f97316' };
+  }
+
+  return { tone: 'good', label: match?.label || 'Aprobado', color: match?.color || '#15803d' };
+}
+
+function buildRectoriaStudentPerformanceRows(courses = [], { teacherLabelById = {} } = {}) {
+  const buckets = new Map();
+
+  courses.forEach((course) => {
+    const evaluatedStudents = Array.isArray(course.stats?.evaluatedStudents) ? course.stats.evaluatedStudents : [];
+    evaluatedStudents.forEach((student) => {
+      const studentKey = buildRectoriaStudentScoreKey(student);
+      if (!studentKey || !Number.isFinite(Number(student.finalScore))) {
+        return;
+      }
+
+      const current = buckets.get(studentKey) || {
+        studentId: student.studentId,
+        name: student.name,
+        schoolCode: student.schoolCode,
+        grade: student.grade || course.gradeKey,
+        scores: [],
+        courseLabels: new Set(),
+        subjects: new Set(),
+        teacherLabels: new Set(),
+      };
+
+      current.scores.push(Number(student.finalScore));
+      if (course.displayLabel) {
+        current.courseLabels.add(course.displayLabel);
+      } else if (course.label) {
+        current.courseLabels.add(course.label);
+      }
+      if (course.subject) current.subjects.add(course.subject);
+      current.teacherLabels.add(teacherLabelById[course.teacherUserId] || 'Docente sin asignar');
+      buckets.set(studentKey, current);
+    });
+  });
+
+  return Array.from(buckets.values())
+    .map((student) => ({
+      studentId: student.studentId,
+      name: student.name,
+      schoolCode: student.schoolCode,
+      grade: student.grade,
+      finalScore: student.scores.length > 0
+        ? Number((student.scores.reduce((sum, score) => sum + score, 0) / student.scores.length).toFixed(2))
+        : null,
+      courseLabel: Array.from(student.courseLabels).slice(0, 2).join(' · ') || 'Curso',
+      subject: Array.from(student.subjects).slice(0, 2).join(' · ') || 'Asignatura',
+      teacherLabel: Array.from(student.teacherLabels).slice(0, 2).join(' · ') || 'Docente sin asignar',
+    }))
+    .filter((student) => Number.isFinite(Number(student.finalScore)));
+}
+
+function buildRectoriaInstitutionalPerformanceSnapshot({
+  courses = [],
+  gradingScale = defaultAcademicGradingScale,
+  teacherLabelById = {},
+  educationalLevelSummaries = [],
+  groupedEducationalLevels = [],
+  courseAttentionScore = 70,
+}) {
+  const passingScore = Number(gradingScale.passingScore ?? defaultAcademicGradingScale.passingScore);
+  const coursesWithAverage = courses.filter((course) => (
+    Number(course.stats?.evaluatedStudentCount || 0) > 0
+    && Number.isFinite(Number(course.averageScore))
+    && Array.isArray(course.stats?.evaluatedStudents)
+    && course.stats.evaluatedStudents.some((student) => Number.isFinite(Number(student.finalScore)))
+  ));
+
+  const evaluatedStudents = buildRectoriaStudentPerformanceRows(coursesWithAverage, { teacherLabelById });
+  const evaluatedStudentCount = evaluatedStudents.length;
+  const weightedAverage = evaluatedStudentCount > 0
+    ? Number((evaluatedStudents.reduce((sum, student) => sum + Number(student.finalScore || 0), 0) / evaluatedStudentCount).toFixed(2))
+    : null;
+  const atRiskStudents = evaluatedStudents
+    .filter((student) => Number(student.finalScore) < passingScore)
+    .sort((left, right) => Number(left.finalScore || 0) - Number(right.finalScore || 0));
+
+  const courseAttentionBuckets = coursesWithAverage
+    .filter((course) => Number(course.averageScore) < courseAttentionScore || Number(course.atRiskCount || 0) > 0)
+    .reduce((accumulator, course) => {
+      const groupKey = buildRectoriaCourseGroupKey(course);
+        const current = accumulator.get(groupKey) || {
+          ...course,
+          key: groupKey,
+          label: course.displayLabel || course.section || course.label,
+        subjects: [],
+        atRiskCount: 0,
+        evaluatedStudentCount: 0,
+        weightedScoreTotal: 0,
+      };
+      current.subjects.push(course.subject);
+      current.atRiskCount += Number(course.atRiskCount || 0);
+      current.evaluatedStudentCount += Number(course.evaluatedStudentCount || 0);
+      current.weightedScoreTotal += Number(course.averageScore || 0) * Number(course.evaluatedStudentCount || 0);
+      current.averageScore = current.evaluatedStudentCount > 0
+        ? Number((current.weightedScoreTotal / current.evaluatedStudentCount).toFixed(2))
+        : course.averageScore;
+      accumulator.set(groupKey, current);
+      return accumulator;
+    }, new Map());
+
+  const coursesNeedingAttention = Array.from(courseAttentionBuckets.values())
+    .sort((left, right) => Number(right.atRiskCount || 0) - Number(left.atRiskCount || 0) || Number(left.averageScore || 10) - Number(right.averageScore || 10));
+
+  const teacherBuckets = coursesWithAverage.reduce((accumulator, course) => {
+    const teacherKey = String(course.teacherUserId || 'sin-docente');
+    if (!accumulator[teacherKey]) {
+      accumulator[teacherKey] = {
+        key: teacherKey,
+        label: teacherLabelById[teacherKey] || 'Docente sin asignar',
+        courseIds: new Set(),
+        studentKeys: new Set(),
+        atRiskStudentKeys: new Set(),
+        pendingGradingCount: 0,
+        scoreTotal: 0,
+        scoreCount: 0,
+      };
+    }
+
+    const current = accumulator[teacherKey];
+    current.courseIds.add(String(course.id || course.key || course.label || ''));
+    current.pendingGradingCount += Number(course.pendingGradingCount || 0);
+    (Array.isArray(course.stats?.evaluatedStudents) ? course.stats.evaluatedStudents : []).forEach((student) => {
+      const studentKey = buildRectoriaStudentScoreKey(student);
+      if (!studentKey || !Number.isFinite(Number(student.finalScore))) {
+        return;
+      }
+
+      current.studentKeys.add(studentKey);
+      current.scoreTotal += Number(student.finalScore);
+      current.scoreCount += 1;
+      if (Number(student.finalScore) < passingScore) {
+        current.atRiskStudentKeys.add(studentKey);
+      }
+    });
+
+    return accumulator;
+  }, {});
+
+  const teacherAttentionRows = Object.values(teacherBuckets)
+    .map((teacher) => ({
+      key: teacher.key,
+      label: teacher.label,
+      coursesCount: teacher.courseIds.size,
+      evaluatedStudentCount: teacher.studentKeys.size,
+      atRiskCount: teacher.atRiskStudentKeys.size,
+      pendingGradingCount: teacher.pendingGradingCount,
+      averageScore: teacher.scoreCount > 0 ? Number((teacher.scoreTotal / teacher.scoreCount).toFixed(2)) : null,
+    }))
+    .filter((teacher) => teacher.averageScore !== null)
+    .sort((left, right) => Number(right.atRiskCount || 0) - Number(left.atRiskCount || 0) || Number(left.averageScore || 10) - Number(right.averageScore || 10));
+
+  const levelRows = educationalLevelSummaries.map((level) => {
+    const gradeKeys = new Set((groupedEducationalLevels.find((group) => group.key === level.key)?.grades || []).map((grade) => grade.key));
+    const levelCourses = coursesWithAverage.filter((course) => gradeKeys.has(course.gradeKey));
+    const levelStudents = buildRectoriaStudentPerformanceRows(levelCourses, { teacherLabelById });
+    const levelAverage = levelStudents.length > 0
+      ? Number((levelStudents.reduce((sum, student) => sum + Number(student.finalScore || 0), 0) / levelStudents.length).toFixed(2))
+      : null;
+    const levelAtRisk = levelStudents.filter((student) => Number(student.finalScore) < passingScore).length;
+    const attentionCourses = levelCourses.filter((course) => (
+      Number(course.averageScore) < courseAttentionScore || Number(course.atRiskCount || 0) > 0
+    ));
+
+    return {
+      ...level,
+      averageScore: levelAverage,
+      evaluatedStudentCount: levelStudents.length,
+      atRiskCount: levelAtRisk,
+      lowCoursesCount: new Set(attentionCourses.map(buildRectoriaCourseGroupKey)).size,
+      lowestCourses: levelCourses
+        .filter((course) => Number(course.stats?.evaluatedStudentCount || 0) > 0 && Number.isFinite(Number(course.averageScore)))
+        .sort((left, right) => Number(left.averageScore || 10) - Number(right.averageScore || 10))
+        .slice(0, 3),
+      performanceMeta: resolveRectoriaPerformanceMeta(levelAverage, gradingScale),
+    };
+  });
+
+  return {
+    coursesWithAverage,
+    weightedAverage,
+    evaluatedStudentCount,
+    atRiskStudents,
+    coursesNeedingAttention,
+    teacherAttentionRows,
+    levelRows,
+    pendingGradingCount: courses.reduce((sum, course) => sum + Number(course.pendingGradingCount || 0), 0),
+    performanceMeta: resolveRectoriaPerformanceMeta(weightedAverage, gradingScale),
+  };
 }
 
 function createDefaultAcademicScheduleGroupSettings(index = 0, { weekdays = [], gradeKeys = [] } = {}) {
@@ -2713,8 +3002,83 @@ function RectoriaDashboard() {
     [academicStructureDraft.grades]
   );
 
-  const getGradeLabel = (gradeKey) => configuredGradeLabels[gradeKey] || gradeKey;
-  const getCourseLabel = (courseKey) => configuredCourseLabels[courseKey] || courseKey;
+  const getGradeLabel = (gradeKey) => {
+    const rawKey = String(gradeKey || '').trim();
+    const normalizedKey = normalizeAcademicGradeKey(rawKey);
+    const keyCandidates = Array.from(new Set([
+      rawKey,
+      normalizedKey,
+      normalizeEducationalLevelKey(rawKey),
+      rawKey.replace(/_/g, ' '),
+    ].filter(Boolean)));
+
+    for (const candidate of keyCandidates) {
+      const configuredLabel = configuredGradeLabels[candidate];
+      if (configuredLabel && normalizeInstitutionalLabelCompare(configuredLabel) !== normalizeInstitutionalLabelCompare(candidate)) {
+        return configuredLabel;
+      }
+    }
+
+    const matchedGrade = academicStructureDraft.grades.find((grade) => (
+      keyCandidates.some((candidate) => normalizeInstitutionalLabelCompare(grade.key) === normalizeInstitutionalLabelCompare(candidate))
+      || keyCandidates.some((candidate) => normalizeInstitutionalLabelCompare(normalizeAcademicGradeKey(grade.key)) === normalizeInstitutionalLabelCompare(normalizedKey))
+    ));
+    if (matchedGrade?.label) {
+      return matchedGrade.label;
+    }
+
+    return formatEducationalGradeLabel(rawKey)
+      || formatEducationalGradeLabel(normalizedKey)
+      || String(rawKey).replace(/_/g, ' ').trim();
+  };
+  const getCourseLabel = (courseKey) => {
+    const rawKey = String(courseKey || '').trim();
+    if (!rawKey) {
+      return '';
+    }
+
+    const configuredLabel = configuredCourseLabels[rawKey];
+    if (configuredLabel && !looksLikeTechnicalCourseKey(configuredLabel)) {
+      return configuredLabel;
+    }
+
+    const matchedCourse = academicStructureDraft.grades
+      .flatMap((grade) => resolveGradeCourses(grade))
+      .find((course) => (
+        normalizeInstitutionalLabelCompare(course.key) === normalizeInstitutionalLabelCompare(rawKey)
+        || normalizeInstitutionalLabelCompare(course.section) === normalizeInstitutionalLabelCompare(rawKey)
+      ));
+
+    if (matchedCourse) {
+      const matchedGrade = academicStructureDraft.grades.find((grade) => (
+        resolveGradeCourses(grade).some((course) => course.key === matchedCourse.key)
+      ));
+      if (matchedGrade) {
+        return buildRectoriaCourseOptionLabel(matchedGrade, matchedCourse, resolveGradeCourses(matchedGrade));
+      }
+    }
+
+    return configuredLabel && !looksLikeTechnicalCourseKey(configuredLabel)
+      ? configuredLabel
+      : rawKey.replace(/_/g, ' ').trim();
+  };
+  const getSubjectLabel = (subjectKey) => {
+    const normalizedKey = String(subjectKey || '').trim().toLowerCase();
+    const matchedSubject = academicStructureDraft.subjects.find((subject) => (
+      String(subject.key || '').trim().toLowerCase() === normalizedKey
+      || String(subject.label || '').trim().toLowerCase() === normalizedKey
+    ));
+
+    return matchedSubject?.label || subjectKey;
+  };
+  const institutionalCourseLabelContext = useMemo(
+    () => ({
+      getGradeLabel,
+      getCourseLabel,
+      getSubjectLabel,
+    }),
+    [configuredCourseLabels, configuredGradeLabels, academicStructureDraft.grades, academicStructureDraft.subjects]
+  );
   const academicGradingLevelOptions = useMemo(
     () => academicStructureDraft.levels.map((level) => ({ value: level.key, label: level.label || level.key })).filter((option) => option.value),
     [academicStructureDraft.levels]
@@ -3732,18 +4096,23 @@ function RectoriaDashboard() {
 
   const campusPerformanceCourses = useMemo(
     () => (billingBootstrap.campusCourses || [])
-      .map((course) => ({
-        ...course,
-        averageScore: Number.isFinite(Number(course.stats?.averageScore)) ? Number(course.stats.averageScore) : null,
-        studentCount: Number(course.stats?.studentCount || 0),
-        evaluatedStudentCount: Number(course.stats?.evaluatedStudentCount || 0),
-        atRiskCount: Number(course.stats?.atRiskCount || 0),
-        pendingGradingCount: Number(course.stats?.pendingGradingCount || 0),
-        gradingCoverageRate: Number.isFinite(Number(course.stats?.gradingCoverageRate)) ? Number(course.stats.gradingCoverageRate) : null,
-        atRiskStudents: Array.isArray(course.stats?.atRiskStudents) ? course.stats.atRiskStudents : [],
-      }))
+      .map((course) => {
+        const normalizedCourse = normalizeCampusCourseForAcademicContent(course);
+        return {
+          ...normalizedCourse,
+          displayLabel: formatRectoriaInstitutionalCourseLabel(normalizedCourse, institutionalCourseLabelContext),
+          averageScore: Number.isFinite(Number(course.stats?.averageScore)) ? Number(course.stats.averageScore) : null,
+          studentCount: Number(course.stats?.studentCount || 0),
+          evaluatedStudentCount: Number(course.stats?.evaluatedStudentCount || 0),
+          atRiskCount: Number(course.stats?.atRiskCount || 0),
+          pendingGradingCount: Number(course.stats?.pendingGradingCount || 0),
+          gradingCoverageRate: Number.isFinite(Number(course.stats?.gradingCoverageRate)) ? Number(course.stats.gradingCoverageRate) : null,
+          atRiskStudents: Array.isArray(course.stats?.atRiskStudents) ? course.stats.atRiskStudents : [],
+          stats: course.stats,
+        };
+      })
       .filter((course) => course.stats),
-    [billingBootstrap.campusCourses]
+    [billingBootstrap.campusCourses, institutionalCourseLabelContext]
   );
 
   const academicGradingScale = useMemo(
@@ -3756,143 +4125,17 @@ function RectoriaDashboard() {
     Number((Number(academicGradingScale.passingScore || 3) + ((Number(academicGradingScale.maxScore || 5) - Number(academicGradingScale.minScore || 0)) * 0.1)).toFixed(2))
   );
 
-  const overviewAcademicPerformance = useMemo(() => {
-    const coursesWithAverage = campusPerformanceCourses.filter((course) => (
-      Number.isFinite(Number(course.averageScore))
-      && Array.isArray(course.stats?.evaluatedStudents)
-      && course.stats.evaluatedStudents.some((student) => Number.isFinite(Number(student.finalScore)))
-    ));
-    const studentScoreBuckets = new Map();
-
-    coursesWithAverage.forEach((course) => {
-      const evaluatedStudents = Array.isArray(course.stats?.evaluatedStudents) ? course.stats.evaluatedStudents : [];
-      evaluatedStudents.forEach((student) => {
-        const studentKey = buildRectoriaStudentScoreKey(student);
-        if (!studentKey || !Number.isFinite(Number(student.finalScore))) {
-          return;
-        }
-
-        const current = studentScoreBuckets.get(studentKey) || {
-          studentId: student.studentId,
-          name: student.name,
-          schoolCode: student.schoolCode,
-          grade: student.grade || course.gradeKey,
-          scores: [],
-          courseLabel: course.label,
-          subject: course.subject,
-          teacherLabel: teacherLabelById[course.teacherUserId] || 'Docente sin asignar',
-        };
-        current.scores.push(Number(student.finalScore));
-        studentScoreBuckets.set(studentKey, current);
-      });
-    });
-
-    const evaluatedStudents = Array.from(studentScoreBuckets.values())
-      .map((student) => ({
-        ...student,
-        finalScore: student.scores.length > 0
-          ? Number((student.scores.reduce((sum, score) => sum + score, 0) / student.scores.length).toFixed(2))
-          : null,
-      }))
-      .filter((student) => Number.isFinite(Number(student.finalScore)));
-    const evaluatedStudentCount = evaluatedStudents.length;
-    const weightedAverage = evaluatedStudentCount > 0
-      ? Number((evaluatedStudents.reduce((sum, student) => sum + Number(student.finalScore || 0), 0) / evaluatedStudentCount).toFixed(2))
-      : null;
-    const atRiskStudents = evaluatedStudents
-      .filter((student) => Number(student.finalScore) < academicGradingScale.passingScore)
-      .sort((left, right) => Number(left.finalScore || 0) - Number(right.finalScore || 0));
-
-    const courseAttentionBuckets = coursesWithAverage
-      .filter((course) => Number(course.averageScore) < courseAttentionScore || Number(course.atRiskCount || 0) > 0)
-      .reduce((accumulator, course) => {
-        const groupKey = buildRectoriaCourseGroupKey(course);
-        const current = accumulator.get(groupKey) || {
-          ...course,
-          key: groupKey,
-          label: course.section || course.label,
-          subjects: [],
-          atRiskCount: 0,
-          evaluatedStudentCount: 0,
-          weightedScoreTotal: 0,
-        };
-        current.subjects.push(course.subject);
-        current.atRiskCount += Number(course.atRiskCount || 0);
-        current.evaluatedStudentCount += Number(course.evaluatedStudentCount || 0);
-        current.weightedScoreTotal += Number(course.averageScore || 0) * Number(course.evaluatedStudentCount || 0);
-        current.averageScore = current.evaluatedStudentCount > 0
-          ? Number((current.weightedScoreTotal / current.evaluatedStudentCount).toFixed(2))
-          : course.averageScore;
-        accumulator.set(groupKey, current);
-        return accumulator;
-      }, new Map());
-
-    const coursesNeedingAttention = Array.from(courseAttentionBuckets.values())
-      .sort((left, right) => Number(right.atRiskCount || 0) - Number(left.atRiskCount || 0) || Number(left.averageScore || 10) - Number(right.averageScore || 10));
-
-    const teacherBuckets = coursesWithAverage.reduce((accumulator, course) => {
-      const teacherKey = String(course.teacherUserId || 'sin-docente');
-      const current = accumulator[teacherKey] || {
-        key: teacherKey,
-        label: teacherLabelById[teacherKey] || 'Docente sin asignar',
-        coursesCount: 0,
-        evaluatedStudentCount: 0,
-        weightedScoreTotal: 0,
-        atRiskCount: 0,
-        pendingGradingCount: 0,
-      };
-      current.coursesCount += 1;
-      current.evaluatedStudentCount += Number(course.evaluatedStudentCount || 0);
-      current.weightedScoreTotal += Number(course.averageScore || 0) * Number(course.evaluatedStudentCount || 0);
-      current.atRiskCount += Number(course.atRiskCount || 0);
-      current.pendingGradingCount += Number(course.pendingGradingCount || 0);
-      accumulator[teacherKey] = current;
-      return accumulator;
-    }, {});
-
-    const teacherAttentionRows = Object.values(teacherBuckets)
-      .map((teacher) => ({
-        ...teacher,
-        averageScore: teacher.evaluatedStudentCount > 0 ? Number((teacher.weightedScoreTotal / teacher.evaluatedStudentCount).toFixed(2)) : null,
-      }))
-      .filter((teacher) => teacher.averageScore !== null)
-      .sort((left, right) => Number(right.atRiskCount || 0) - Number(left.atRiskCount || 0) || Number(left.averageScore || 10) - Number(right.averageScore || 10));
-
-    const levelRows = educationalLevelSummaries.map((level) => {
-      const gradeKeys = new Set((groupedEducationalLevels.find((group) => group.key === level.key)?.grades || []).map((grade) => grade.key));
-      const levelCourses = coursesWithAverage.filter((course) => gradeKeys.has(course.gradeKey));
-      const levelEvaluated = levelCourses.reduce((sum, course) => sum + Number(course.evaluatedStudentCount || 0), 0);
-      const levelAtRisk = levelCourses.reduce((sum, course) => sum + Number(course.atRiskCount || 0), 0);
-      const levelAverage = levelEvaluated > 0
-        ? Number((levelCourses.reduce((sum, course) => sum + (Number(course.averageScore || 0) * Number(course.evaluatedStudentCount || 0)), 0) / levelEvaluated).toFixed(2))
-        : null;
-
-      return {
-        ...level,
-        averageScore: levelAverage,
-        evaluatedStudentCount: levelEvaluated,
-        atRiskCount: levelAtRisk,
-        lowCoursesCount: new Set(levelCourses
-          .filter((course) => Number(course.averageScore) < courseAttentionScore || Number(course.atRiskCount || 0) > 0)
-          .map(buildRectoriaCourseGroupKey)).size,
-        lowestCourses: levelCourses
-          .filter((course) => Number.isFinite(Number(course.averageScore)))
-          .sort((left, right) => Number(left.averageScore || 10) - Number(right.averageScore || 10))
-          .slice(0, 3),
-      };
-    });
-
-    return {
-      coursesWithAverage,
-      weightedAverage,
-      evaluatedStudentCount,
-      atRiskStudents,
-      coursesNeedingAttention,
-      teacherAttentionRows,
-      levelRows,
-      pendingGradingCount: campusPerformanceCourses.reduce((sum, course) => sum + Number(course.pendingGradingCount || 0), 0),
-    };
-  }, [academicGradingScale.passingScore, campusPerformanceCourses, courseAttentionScore, educationalLevelSummaries, groupedEducationalLevels, teacherLabelById]);
+  const overviewAcademicPerformance = useMemo(
+    () => buildRectoriaInstitutionalPerformanceSnapshot({
+      courses: campusPerformanceCourses,
+      gradingScale: academicGradingScale,
+      teacherLabelById,
+      educationalLevelSummaries,
+      groupedEducationalLevels,
+      courseAttentionScore,
+    }),
+    [academicGradingScale, campusPerformanceCourses, courseAttentionScore, educationalLevelSummaries, groupedEducationalLevels, teacherLabelById]
+  );
 
   const overviewAcademicLevelKpi = useMemo(() => {
     const levels = educationalLevelSummaries.map((level) => ({
@@ -7018,55 +7261,70 @@ function RectoriaDashboard() {
           </div>
 
           <article className="panel rectoria-panel rectoria-overview-levels-panel">
-            <div className="rectoria-section-header">
-              <div>
+            <div className="rectoria-overview-levels-hero">
+              <div className="rectoria-overview-levels-copy">
+                <span className="rectoria-panel-kicker">Resumen institucional</span>
                 <h3>Niveles académicos</h3>
-                <p>{isCoordinationPortal ? 'Lectura ejecutiva del nivel académico asignado para seguimiento y planes de refuerzo.' : 'Lectura ejecutiva de rendimiento por nivel para orientar reuniones, planes de refuerzo y seguimiento docente.'}</p>
+                <p>{isCoordinationPortal ? 'Lectura ejecutiva del nivel académico asignado para seguimiento y planes de refuerzo.' : 'Promedio consolidado por estudiante único, usando solo cursos con calificaciones registradas.'}</p>
               </div>
-              <strong className="rectoria-overview-levels-total">{overviewAcademicPerformance.weightedAverage ?? '-'}</strong>
+              <div className={`rectoria-overview-levels-total is-tone-${overviewAcademicPerformance.performanceMeta?.tone || 'neutral'}`}>
+                <span>Promedio general</span>
+                <strong>{overviewAcademicPerformance.weightedAverage === null ? '—' : formatAcademicScore(overviewAcademicPerformance.weightedAverage)}</strong>
+                <small>{overviewAcademicPerformance.performanceMeta?.label || 'Sin calificaciones'}</small>
+              </div>
             </div>
             <div className="rectoria-overview-level-summary">
-              <div>
-                <span>Promedio general</span>
-                <strong>{overviewAcademicPerformance.weightedAverage ?? 'Sin calificaciones'}</strong>
+              <div className="rectoria-overview-metric-card">
+                <span>Estudiantes evaluados</span>
+                <strong>{overviewAcademicPerformance.evaluatedStudentCount}</strong>
+                <small>Con notas publicadas en al menos un curso</small>
               </div>
-              <div>
+              <div className="rectoria-overview-metric-card">
                 <span>Cursos en atención</span>
                 <strong>{overviewAcademicPerformance.coursesNeedingAttention.length}</strong>
+                <small>Promedio bajo o alumnos en riesgo</small>
               </div>
-              <div>
+              <div className="rectoria-overview-metric-card">
                 <span>Estudiantes bajo {passingScoreLabel}</span>
                 <strong>{overviewAcademicPerformance.atRiskStudents.length}</strong>
+                <small>Promedio consolidado por alumno</small>
               </div>
-              <div>
+              <div className="rectoria-overview-metric-card">
                 <span>Pendientes por calificar</span>
                 <strong>{overviewAcademicPerformance.pendingGradingCount}</strong>
+                <small>Actividades evaluativas activas</small>
               </div>
             </div>
-            {overviewAcademicPerformance.levelRows.length === 0 ? <p>No hay niveles académicos configurados todavía.</p> : null}
+            {overviewAcademicPerformance.levelRows.length === 0 ? <p className="rectoria-overview-empty-note">No hay niveles académicos configurados todavía.</p> : null}
             <div className="rectoria-overview-level-grid">
               {overviewAcademicPerformance.levelRows.map((level) => (
                 <div className="rectoria-overview-level-card" key={level.key}>
                   <div className="rectoria-overview-level-card-head">
-                    <span>{level.label}</span>
-                    <strong>{level.averageScore ?? '-'}</strong>
+                    <div>
+                      <span>{level.label}</span>
+                      <small>{level.evaluatedStudentCount} estudiantes evaluados</small>
+                    </div>
+                    <div className={`rectoria-overview-level-score is-tone-${level.performanceMeta?.tone || 'neutral'}`}>
+                      <strong>{level.averageScore === null ? '—' : formatAcademicScore(level.averageScore)}</strong>
+                      <small>{level.performanceMeta?.label || 'Sin calificaciones'}</small>
+                    </div>
                   </div>
                   <div className="rectoria-overview-mini-grid">
-                    <div><span>Evaluados</span><strong>{level.evaluatedStudentCount}</strong></div>
-                    <div><span>Bajo {passingScoreLabel}</span><strong>{level.atRiskCount}</strong></div>
+                    <div><span>En riesgo</span><strong>{level.atRiskCount}</strong></div>
                     <div><span>Cursos bajos</span><strong>{level.lowCoursesCount}</strong></div>
                     <div><span>Coordinadores</span><strong>{level.coordinatorCount}</strong></div>
+                    <div><span>Grados</span><strong>{level.gradesCount || 0}</strong></div>
                   </div>
                   {level.lowestCourses.length > 0 ? (
                     <div className="rectoria-overview-attention-list">
                       {level.lowestCourses.map((course) => (
-                        <p key={`${level.key}-${course.key}`}>
-                          <strong>{course.label || course.subject || 'Curso'}</strong>
-                          <span>Promedio {course.averageScore} · {course.atRiskCount} estudiantes bajo {passingScoreLabel}</span>
+                        <p key={`${level.key}-${course.key || course.id || course.label}`}>
+                          <strong>{course.displayLabel || formatRectoriaInstitutionalCourseLabel(course, institutionalCourseLabelContext)}</strong>
+                          <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} estudiantes bajo {passingScoreLabel}</span>
                         </p>
                       ))}
                     </div>
-                  ) : <p className="rectoria-overview-empty-note">Sin cursos evaluados en este nivel.</p>}
+                  ) : <p className="rectoria-overview-empty-note">Sin cursos con calificaciones en este nivel.</p>}
                 </div>
               ))}
             </div>
@@ -7076,9 +7334,9 @@ function RectoriaDashboard() {
                 <h4>Estudiantes con promedios bajos</h4>
                 {overviewAcademicPerformance.atRiskStudents.length === 0 ? <p className="rectoria-overview-empty-note">No hay estudiantes bajo {passingScoreLabel} con calificaciones registradas.</p> : null}
                 {overviewAcademicPerformance.atRiskStudents.slice(0, 6).map((student) => (
-                  <p key={`${student.courseKey}-${student.studentId}`}>
+                  <p key={`${student.studentId || student.schoolCode || student.name}`}>
                     <strong>{student.name || 'Alumno'}</strong>
-                    <span>{student.finalScore} · {student.courseLabel} · {student.teacherLabel}</span>
+                    <span>{formatAcademicScore(student.finalScore)} · {student.courseLabel} · {student.teacherLabel}</span>
                   </p>
                 ))}
               </article>
@@ -7087,8 +7345,8 @@ function RectoriaDashboard() {
                 {overviewAcademicPerformance.coursesNeedingAttention.length === 0 ? <p className="rectoria-overview-empty-note">No hay cursos por debajo del umbral de atención.</p> : null}
                 {overviewAcademicPerformance.coursesNeedingAttention.slice(0, 6).map((course) => (
                   <p key={course.key}>
-                    <strong>{course.label || course.subject || 'Curso'}</strong>
-                    <span>Promedio {course.averageScore} · {course.atRiskCount} bajo {passingScoreLabel} · {teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}</span>
+                    <strong>{course.displayLabel || course.label || course.subject || 'Curso'}</strong>
+                    <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} bajo {passingScoreLabel} · {teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}</span>
                   </p>
                 ))}
               </article>
@@ -7098,7 +7356,7 @@ function RectoriaDashboard() {
                 {overviewAcademicPerformance.teacherAttentionRows.slice(0, 6).map((teacher) => (
                   <p key={teacher.key}>
                     <strong>{teacher.label}</strong>
-                    <span>Promedio {teacher.averageScore} · {teacher.atRiskCount} estudiantes en riesgo · {teacher.coursesCount} cursos</span>
+                    <span>Promedio {formatAcademicScore(teacher.averageScore)} · {teacher.atRiskCount} estudiantes en riesgo · {teacher.coursesCount} cursos</span>
                   </p>
                 ))}
               </article>

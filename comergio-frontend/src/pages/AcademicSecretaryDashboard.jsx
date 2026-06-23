@@ -1089,19 +1089,14 @@ function AcademicSecretaryMediaPreview({ items = [] }) {
   }
 
   return (
-    <div className="academic-secretary__media-strip academic-secretary__media-strip--readonly">
+    <div className="academic-secretary__media-strip academic-secretary__media-strip--readonly academic-secretary__media-strip--visual-only">
       {items.map((item, index) => (
-        <article className="academic-secretary__media-card" key={`${item.kind || 'image'}-${item.src || 'media'}-${index}`}>
+        <article className="academic-secretary__media-card academic-secretary__media-card--visual-only" key={`${item.kind || 'image'}-${item.src || 'media'}-${index}`}>
           <div className="academic-secretary__media-thumb">
             {item.kind === 'video'
               ? <div className="academic-secretary__media-video">Video</div>
-              : <img alt={item.alt || `Adjunto ${index + 1}`} src={item.thumbUrl || item.src} />}
+              : <img alt={item.alt || `Imagen ${index + 1} del docente`} src={item.thumbUrl || item.src} />}
           </div>
-          <div className="academic-secretary__media-copy">
-            <strong>{item.kind === 'video' ? 'Video del docente' : `Adjunto ${index + 1}`}</strong>
-            <span>{item.src || 'Sin URL'}</span>
-          </div>
-          <a className="academic-secretary__media-link" href={item.src || '#'} rel="noreferrer" target="_blank">Abrir</a>
         </article>
       ))}
     </div>

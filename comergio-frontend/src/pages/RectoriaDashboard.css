@@ -259,21 +259,112 @@
 .rectoria-overview-levels-panel {
   display: grid;
   gap: 18px;
+  border: 1px solid #dbeafe;
+  background:
+    radial-gradient(circle at top right, rgba(14, 116, 144, 0.08), transparent 42%),
+    linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.rectoria-overview-levels-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.rectoria-overview-levels-copy {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+}
+
+.rectoria-overview-levels-copy p {
+  margin: 0;
+  color: #64748b;
 }
 
 .rectoria-overview-levels-total {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
+  min-width: 180px;
+  border-radius: 18px;
+  padding: 16px 18px;
   display: grid;
-  place-items: center;
-  background: #0f766e;
+  gap: 4px;
+  align-content: center;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.rectoria-overview-levels-total span,
+.rectoria-overview-level-score small {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.92;
+}
+
+.rectoria-overview-levels-total strong {
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.rectoria-overview-levels-total small {
+  font-size: 0.88rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rectoria-overview-levels-total.is-tone-good,
+.rectoria-overview-level-score.is-tone-good {
+  background: linear-gradient(180deg, #15803d 0%, #166534 100%);
   color: #fff;
-  font-size: 2rem;
+}
+
+.rectoria-overview-levels-total.is-tone-warn,
+.rectoria-overview-level-score.is-tone-warn {
+  background: linear-gradient(180deg, #ea580c 0%, #c2410c 100%);
+  color: #fff;
+}
+
+.rectoria-overview-levels-total.is-tone-danger,
+.rectoria-overview-level-score.is-tone-danger {
+  background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
+  color: #fff;
+}
+
+.rectoria-overview-levels-total.is-tone-neutral,
+.rectoria-overview-level-score.is-tone-neutral {
+  background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+  color: #fff;
 }
 
 .rectoria-overview-level-summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.rectoria-overview-metric-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  padding: 14px 16px;
+  display: grid;
+  gap: 6px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.rectoria-overview-metric-card span {
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.rectoria-overview-metric-card strong {
+  color: #0f172a;
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.rectoria-overview-metric-card small {
+  color: #94a3b8;
+  font-size: 0.82rem;
 }
 
 .rectoria-overview-level-grid {
@@ -283,24 +374,51 @@
 }
 
 .rectoria-overview-level-card {
-  border: 1px solid #ccfbf1;
-  border-radius: 16px;
-  background: #f8fffd;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   padding: 16px;
   display: grid;
   gap: 14px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
 }
 
 .rectoria-overview-level-card-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.rectoria-overview-level-card-head strong {
+.rectoria-overview-level-card-head > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.rectoria-overview-level-card-head > div:first-child span {
   color: #0f172a;
-  font-size: 2rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.rectoria-overview-level-card-head > div:first-child small {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.rectoria-overview-level-score {
+  min-width: 92px;
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+
+.rectoria-overview-level-score strong {
+  color: inherit;
+  font-size: 1.55rem;
   line-height: 1;
 }
 
@@ -308,8 +426,20 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.rectoria-overview-attention-list,
+.rectoria-overview-academic-alerts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .rectoria-overview-academic-alerts article {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  padding: 16px;
+}
+
+.rectoria-overview-attention-list {
   display: grid;
   gap: 10px;
 }
@@ -3582,13 +3712,12 @@ button.rectoria-team-assignment-card.is-active {
     grid-template-columns: 1fr;
   }
 
-  .rectoria-overview-kpi strong {
-    font-size: 2.25rem;
+  .rectoria-overview-levels-hero {
+    flex-direction: column;
   }
 
   .rectoria-overview-levels-total {
-    width: 56px;
-    height: 56px;
+    width: 100%;
   }
 
   .rectoria-billing-actions {

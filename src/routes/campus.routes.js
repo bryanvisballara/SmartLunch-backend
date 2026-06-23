@@ -959,6 +959,74 @@ function isEvaluativePostType(value) {
   return Boolean(normalizedType) && !['aviso', 'announcement', 'material'].includes(normalizedType);
 }
 
+function buildMonthKey(dateValue) {
+  const date = new Date(dateValue);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function parseYearMonth(value, fallbackDate = new Date()) {
+  const rawValue = normalizeText(value);
+  const match = rawValue.match(/^(\d{4})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const monthIndex = Number(match[2]) - 1;
+    if (year >= 2000 && monthIndex >= 0 && monthIndex <= 11) {
+      return new Date(year, monthIndex, 1);
+    }
+  }
+
+  return new Date(fallbackDate.getFullYear(), fallbackDate.getMonth(), 1);
+}
+
+function getMonthRange(value, fallbackDate = new Date()) {
+  const monthStart = parseYearMonth(value, fallbackDate);
+  return {
+    monthStart,
+    monthEnd: new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1),
+    monthKey: buildMonthKey(monthStart),
+  };
+}
+
+function getTeacherCalendarPostDate(post = {}) {
+  const value = post.deliveryMode === 'class' ? post.scheduledClassDate : post.dueAt;
+  return value || post.dueAt || post.scheduledClassDate || post.publishedAt || post.createdAt || null;
+}
+
+function getTeacherCalendarAccent(type = '') {
+  const normalizedType = normalizeText(type).toLowerCase();
+  if (/quiz|examen|evaluaci/.test(normalizedType)) return 'warn';
+  if (/tarea|proyecto|entrega|laboratorio/.test(normalizedType)) return 'sky';
+  if (/material|aviso/.test(normalizedType)) return 'neutral';
+  return 'good';
+}
+
+function serializeTeacherCalendarPost(post = {}) {
+  const postDate = getTeacherCalendarPostDate(post);
+  const course = post.courseId && typeof post.courseId === 'object' ? post.courseId : {};
+  const courseTitle = normalizeText(course.title);
+  const subject = normalizeText(course.subject) || courseTitle;
+  const type = normalizePostType(post.type) || 'Aviso';
+
+  return {
+    id: String(post._id || post.id || ''),
+    date: postDate,
+    dateKey: postDate ? `${buildMonthKey(postDate)}-${String(new Date(postDate).getDate()).padStart(2, '0')}` : '',
+    type,
+    accent: getTeacherCalendarAccent(type),
+    title: normalizeText(post.title) || type,
+    detail: normalizeText(post.body) || 'Actividad publicada para el curso.',
+    courseId: String(course._id || post.courseId || ''),
+    courseTitle,
+    subject,
+    deliveryMode: normalizeText(post.deliveryMode) || 'date',
+    dueAt: post.dueAt || null,
+    scheduledClassDate: post.scheduledClassDate || null,
+    scheduledClassSession: post.scheduledClassSession || null,
+    publishedAt: post.publishedAt || null,
+    status: normalizeText(post.status) || 'published',
+  };
+}
+
 function parseOptionalDate(value) {
   if (value === null || value === undefined || String(value).trim() === '') {
     return null;
@@ -2728,6 +2796,47 @@ router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => 
   }
 });
 
+router.get('/teacher/calendar', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { monthStart, monthEnd, monthKey } = getMonthRange(req.query.month);
+
+    const posts = await CampusPost.find({
+      schoolId,
+      teacherUserId: userId,
+      status: 'published',
+      $or: [
+        { dueAt: { $gte: monthStart, $lt: monthEnd } },
+        { scheduledClassDate: { $gte: monthStart, $lt: monthEnd } },
+        { dueAt: null, scheduledClassDate: null, publishedAt: { $gte: monthStart, $lt: monthEnd } },
+      ],
+    })
+      .populate('courseId', 'title subject section studentGradeKey')
+      .sort({ dueAt: 1, scheduledClassDate: 1, publishedAt: 1, createdAt: 1 })
+      .lean();
+
+    const items = posts
+      .filter((post) => isEvaluativePostType(post.type))
+      .map(serializeTeacherCalendarPost)
+      .filter((item) => {
+        if (!item.id || !item.date) {
+          return false;
+        }
+
+        const itemDate = new Date(item.date);
+        return !Number.isNaN(itemDate.getTime()) && itemDate >= monthStart && itemDate < monthEnd;
+      })
+      .sort((left, right) => new Date(left.date) - new Date(right.date));
+
+    return res.status(200).json({
+      month: monthKey,
+      items,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/teacher/profile-photo', requireCampusTeacherAccess, (req, res) => {
   uploadTeacherProfilePhoto(req, res, async (error) => {
     if (error) {
@@ -4036,6 +4145,21 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
       ? courses.filter((course) => coordinationGradeKeys.has(normalizeCampusGradeKey(course.studentGradeKey || course.gradeLevel)))
       : courses;
     const visibleCourseIds = new Set(visibleCourses.map((course) => String(course._id)));
+    const gradeEntryCounts = visibleCourses.length > 0
+      ? await CampusGradeEntry.aggregate([
+        {
+          $match: {
+            schoolId,
+            courseId: { $in: visibleCourses.map((course) => course._id) },
+          },
+        },
+        { $group: { _id: '$courseId', count: { $sum: 1 } } },
+      ])
+      : [];
+    const gradeEntryCountByCourseId = new Map();
+    gradeEntryCounts.forEach((item) => {
+      gradeEntryCountByCourseId.set(String(item._id), Number(item.count || 0));
+    });
 
     const postsByCourseId = new Map();
     for (const post of posts) {
@@ -4064,6 +4188,7 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
           courseDetail,
           posts: postsByCourseId.get(String(course._id)) || [],
           gradingScale: courseGradingScale,
+          hasGradeEntries: Number(gradeEntryCountByCourseId.get(String(course._id)) || 0) > 0,
         }),
       };
     }));

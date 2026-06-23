@@ -12,6 +12,10 @@ export function getCampusTeacherOverview() {
   return api.get('/campus/teacher/overview').then((response) => response.data);
 }
 
+export function getCampusTeacherCalendar(params = {}) {
+  return api.get('/campus/teacher/calendar', { params }).then((response) => response.data);
+}
+
 export function uploadCampusTeacherProfilePhoto(file, preferredName = '') {
   const formData = new FormData();
   formData.append('image', file);
