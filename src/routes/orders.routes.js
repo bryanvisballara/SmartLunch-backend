@@ -104,14 +104,46 @@ async function buildNextSchoolBillingStatementNumber(schoolId) {
 }
 
 function buildSchoolBillingGroupingKey(order = {}) {
-  const billingFor = String(order.schoolBillingFor || '').trim().toLowerCase();
-  const billingResponsible = String(order.schoolBillingResponsible || '').trim().toLowerCase();
+  const billingFor = normalizeSchoolBillingParty(order.schoolBillingFor).toLowerCase();
+  const billingResponsible = normalizeSchoolBillingParty(order.schoolBillingResponsible).toLowerCase();
   const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
   const dateKey = Number.isNaN(createdAt.getTime())
     ? ''
     : createdAt.toISOString().slice(0, 10);
 
   return `${billingFor}::${billingResponsible}::${dateKey}`;
+}
+
+function normalizeSchoolBillingParty(value = '') {
+  return String(value || '').trim();
+}
+
+function schoolBillingPartiesMatch(left = '', right = '') {
+  return normalizeSchoolBillingParty(left).toLowerCase() === normalizeSchoolBillingParty(right).toLowerCase();
+}
+
+function pickSchoolBillingPartyLabel(orders = [], field) {
+  const values = orders
+    .map((order) => normalizeSchoolBillingParty(order[field]))
+    .filter(Boolean);
+
+  if (!values.length) {
+    return '';
+  }
+
+  return values.sort((left, right) => right.length - left.length)[0];
+}
+
+function resolveSchoolBillingGeneratedAt(orders = [], fallback = new Date()) {
+  const timestamps = orders
+    .map((order) => (order.createdAt ? new Date(order.createdAt) : null))
+    .filter((value) => value && !Number.isNaN(value.getTime()));
+
+  if (!timestamps.length) {
+    return fallback;
+  }
+
+  return new Date(Math.max(...timestamps.map((value) => value.getTime())));
 }
 
 async function loadSchoolBillingOrdersByIds({ schoolId, orderIds = [] }) {
@@ -144,6 +176,7 @@ async function createSchoolBillingStatement({
   userId,
   userName,
   orders = [],
+  generatedAt = null,
 }) {
   if (!orders.length) {
     throw new Error('Debes seleccionar al menos una orden de cuenta de cobro colegio.');
@@ -154,11 +187,11 @@ async function createSchoolBillingStatement({
     throw new Error('Una o más órdenes ya están incluidas en una cuenta de cobro generada.');
   }
 
-  const billingFor = String(orders[0]?.schoolBillingFor || '').trim();
-  const billingResponsible = String(orders[0]?.schoolBillingResponsible || '').trim();
+  const billingFor = pickSchoolBillingPartyLabel(orders, 'schoolBillingFor');
+  const billingResponsible = pickSchoolBillingPartyLabel(orders, 'schoolBillingResponsible');
   const mismatchedOrder = orders.find((order) => (
-    String(order.schoolBillingFor || '').trim() !== billingFor
-    || String(order.schoolBillingResponsible || '').trim() !== billingResponsible
+    !schoolBillingPartiesMatch(order.schoolBillingFor, billingFor)
+    || !schoolBillingPartiesMatch(order.schoolBillingResponsible, billingResponsible)
   ));
 
   if (mismatchedOrder) {
@@ -168,11 +201,11 @@ async function createSchoolBillingStatement({
   const serializedOrders = orders.map(serializeStatementOrder);
   const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const statementNumber = await buildNextSchoolBillingStatementNumber(schoolId);
-  const generatedAt = new Date();
+  const resolvedGeneratedAt = generatedAt || resolveSchoolBillingGeneratedAt(orders);
   const documentHtml = buildSchoolBillingStatementHtml({
     schoolName,
     statementNumber,
-    generatedAt,
+    generatedAt: resolvedGeneratedAt,
     billingFor,
     billingResponsible,
     orders: serializedOrders,
@@ -192,6 +225,8 @@ async function createSchoolBillingStatement({
     documentHtml,
     generatedBy: userId,
     generatedByName: userName,
+    createdAt: resolvedGeneratedAt,
+    updatedAt: resolvedGeneratedAt,
   });
 
   await Order.updateMany(
@@ -614,22 +649,42 @@ router.post('/school-billing/statements/backfill', roleMiddleware('admin'), asyn
     }, new Map());
 
     const createdStatements = [];
+    const failedGroups = [];
     for (const orders of groupedOrders.values()) {
-      const statement = await createSchoolBillingStatement({
-        schoolId,
-        schoolName,
-        userId,
-        userName,
-        orders,
+      try {
+        const statement = await createSchoolBillingStatement({
+          schoolId,
+          schoolName,
+          userId,
+          userName,
+          orders,
+          generatedAt: resolveSchoolBillingGeneratedAt(orders),
+        });
+        createdStatements.push(statement);
+      } catch (error) {
+        failedGroups.push({
+          message: String(error.message || 'No se pudo importar un grupo de órdenes.'),
+          orderCount: orders.length,
+        });
+      }
+    }
+
+    if (!createdStatements.length && failedGroups.length) {
+      return res.status(400).json({
+        message: failedGroups[0]?.message || 'No se pudieron importar las cuentas de cobro.',
+        createdCount: 0,
+        failedCount: failedGroups.length,
+        failures: failedGroups,
       });
-      createdStatements.push(statement);
     }
 
     return res.status(201).json({
       message: createdStatements.length
-        ? `Se importaron ${createdStatements.length} cuentas de cobro al historial.`
+        ? `Se importaron ${createdStatements.length} cuentas de cobro al historial.${failedGroups.length ? ` ${failedGroups.length} grupo(s) no se pudieron importar.` : ''}`
         : 'No había cuentas pendientes de importar.',
       createdCount: createdStatements.length,
+      failedCount: failedGroups.length,
+      failures: failedGroups,
       statements: createdStatements.map((statement) => ({
         _id: statement._id,
         statementNumber: statement.statementNumber,

@@ -2611,12 +2611,18 @@ function AdminDashboard() {
 
     setLoading(true);
     clearMessages();
-    Promise.all([
+    Promise.allSettled([
       loadSchoolBillingOrders(schoolBillingFilters),
       loadSchoolBillingStatements(),
     ])
-      .catch((requestError) => {
-        setError(requestError?.response?.data?.message || 'No se pudieron cargar las cuentas de cobro colegio.');
+      .then((results) => {
+        const statementsResult = results[1];
+        if (statementsResult.status === 'rejected') {
+          setError(
+            statementsResult.reason?.response?.data?.message
+              || 'No se pudo cargar el historial de cuentas de cobro. Las órdenes pendientes sí están disponibles.'
+          );
+        }
       })
       .finally(() => {
         setLoading(false);
