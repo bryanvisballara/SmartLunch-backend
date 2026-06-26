@@ -32,6 +32,7 @@ const studentMedicalProfileSchema = new mongoose.Schema(
 const studentSchema = new mongoose.Schema(
   {
     schoolId: { type: String, required: true, index: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     name: { type: String, required: true, trim: true },
     firstName: { type: String, trim: true, default: '' },
     lastName: { type: String, trim: true, default: '' },

@@ -901,6 +901,7 @@ function buildAuthResponse(user, refreshToken, schoolName = '') {
       username: user.username,
       role: user.role,
       coordinationScope: String(user.coordinationScope || '').trim(),
+      linkedStudentId: user.linkedStudentId ? String(user.linkedStudentId) : '',
       biometricEnabled: Boolean(user.webauthn?.credentials?.length),
       assignedStore,
     },

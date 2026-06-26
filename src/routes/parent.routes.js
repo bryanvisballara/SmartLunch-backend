@@ -6328,4 +6328,20 @@ router.post('/portal/meriendas/waitlist', roleMiddleware('parent'), async (req, 
   }
 });
 
+router.academicPortalHelpers = {
+  toObjectId,
+  normalizeText,
+  buildParentStudentAcademicMatchValues,
+  buildParentGradebookCoursesFromStructure,
+  buildParentAcademicScheduleFromStructure,
+  buildParentAcademicGradebook,
+  buildParentAcademicRanking,
+  resolveParentGradingScaleForGrade,
+  getMonthRange,
+  serializeParentAcademicCalendarPost,
+  serializeParentAcademicCalendarAssignment,
+  isParentEvaluativePostType,
+  resolveParentUpcomingAssignmentCourseIds,
+};
+
 module.exports = router;

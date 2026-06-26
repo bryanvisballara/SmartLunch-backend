@@ -17,6 +17,48 @@ import './campus.css';
 const campusPreviewEnabled = String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
 const schoolRoutePortalRoles = ['school_route', 'admin', 'rectoria', 'direccion'];
 
+function buildStudentFallbackContext(user, campusContext = {}) {
+  const memberships = [...(campusContext.memberships || [])];
+  if (!memberships.some((membership) => membership.memberType === 'campus_student')) {
+    memberships.push({
+      memberType: 'campus_student',
+      status: 'active',
+      title: 'Campus Alumno',
+      launchPath: '/campus/student',
+      permissions: ['academic_portal'],
+      virtual: true,
+    });
+  }
+
+  const navigation = [...(campusContext.navigation || [])];
+  if (!navigation.some((item) => item.memberType === 'campus_student' || item.path === '/campus/student')) {
+    navigation.push({
+      memberType: 'campus_student',
+      path: '/campus/student',
+      title: 'Campus Alumno',
+      description: 'Portal académico del estudiante.',
+      virtual: true,
+    });
+  }
+
+  return {
+    ...campusContext,
+    enabled: true,
+    reason: '',
+    memberships,
+    navigation,
+    defaultPath: '/campus/student',
+    user: {
+      ...(campusContext.user || {}),
+      userId: user?.id || campusContext.user?.userId || '',
+      schoolId: user?.schoolId || campusContext.user?.schoolId || '',
+      role: 'student',
+      name: user?.name || campusContext.user?.name || '',
+      username: user?.username || campusContext.user?.username || '',
+    },
+  };
+}
+
 function buildSchoolRouteFallbackContext(user, campusContext = {}) {
   const memberships = [...(campusContext.memberships || [])];
   if (!memberships.some((membership) => membership.memberType === 'campus_school_route')) {
@@ -64,6 +106,7 @@ function CampusApp({ forcePreview = false }) {
   const location = useLocation();
   const normalizedPathname = location.pathname !== '/' ? location.pathname.replace(/\/+$/, '') : '/';
   const isSchoolRouteUser = user?.role === 'school_route';
+  const isStudentUser = user?.role === 'student';
   const canOpenSchoolRoutePortal = schoolRoutePortalRoles.includes(user?.role) && normalizedPathname === '/campus/route';
   const previewEnabled = campusPreviewEnabled || forcePreview;
   const routeBase = campusPreviewEnabled ? '/campus-preview' : '/campus';
@@ -137,21 +180,25 @@ function CampusApp({ forcePreview = false }) {
     );
   }
 
-  if (campusMeQuery.isError && !canOpenSchoolRoutePortal) {
+  if (!previewEnabled && campusMeQuery.isError && !canOpenSchoolRoutePortal && !isStudentUser) {
     return <CampusUnavailable errorMessage={campusMeQuery.error?.message || 'No fue posible cargar Campus.'} />;
   }
 
-  const rawCampusContext = campusMeQuery.data || {};
-  const campusContext = canOpenSchoolRoutePortal && !rawCampusContext.enabled
-    ? buildSchoolRouteFallbackContext(user, rawCampusContext)
-    : rawCampusContext;
-  const navigation = canOpenSchoolRoutePortal
+  const rawCampusContext = campusMeQuery.isError ? {} : (campusMeQuery.data || {});
+  const campusContext = isStudentUser && !rawCampusContext.enabled
+    ? buildStudentFallbackContext(user, rawCampusContext)
+    : canOpenSchoolRoutePortal && !rawCampusContext.enabled
+      ? buildSchoolRouteFallbackContext(user, rawCampusContext)
+      : rawCampusContext;
+  const navigation = isStudentUser || canOpenSchoolRoutePortal
     ? campusContext.navigation || []
     : navigationQuery.data?.navigation || campusContext.navigation || [];
   const memberTypes = new Set((campusContext.memberships || []).map((membership) => membership.memberType));
-  const defaultPath = campusContext.defaultPath || navigation[0]?.path || '/campus';
+  const defaultPath = isStudentUser
+    ? '/campus/student'
+    : (campusContext.defaultPath || navigation[0]?.path || '/campus');
 
-  if (!campusContext.enabled) {
+  if (!campusContext.enabled && !isStudentUser) {
     return <CampusUnavailable campusContext={campusContext} />;
   }
 
@@ -164,7 +211,7 @@ function CampusApp({ forcePreview = false }) {
           path="parent"
         />
         <Route
-          element={memberTypes.has('campus_student') ? <StudentCampusHome /> : <Navigate replace to="/campus" />}
+          element={memberTypes.has('campus_student') || isStudentUser ? <StudentCampusHome /> : <Navigate replace to="/campus" />}
           path="student"
         />
         <Route

@@ -88,6 +88,10 @@ function getDefaultRouteByRole(role) {
     return '/campus/teacher';
   }
 
+  if (role === 'student') {
+    return '/campus/student';
+  }
+
   if (role === 'school_route') {
     return '/campus/route';
   }

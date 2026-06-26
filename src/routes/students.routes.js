@@ -6,6 +6,7 @@ const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
 const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
+const { upsertStudentAccount } = require('../utils/studentAccount');
 
 const router = express.Router();
 
@@ -216,6 +217,12 @@ router.post('/', roleMiddleware('admin'), async (req, res) => {
         { schoolId, parentId, studentId: student._id, status: 'active' },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
+    }
+
+    try {
+      await upsertStudentAccount({ schoolId, student });
+    } catch (accountError) {
+      console.warn('[STUDENT_ACCOUNT_UPSERT_ERROR]', accountError?.message || accountError);
     }
 
     return res.status(201).json(student);

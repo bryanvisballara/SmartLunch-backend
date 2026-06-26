@@ -28,6 +28,7 @@ const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
 const { ensureStudentWallet } = require('../utils/studentWallet');
+const { upsertStudentAccount } = require('../utils/studentAccount');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
@@ -7339,6 +7340,12 @@ router.post('/database/import', (req, res) => {
 
           await ensureStudentWallet({ schoolId, studentId: student._id });
 
+          try {
+            await upsertStudentAccount({ schoolId, student });
+          } catch (accountError) {
+            console.warn('[STUDENT_ACCOUNT_UPSERT_ERROR]', accountError?.message || accountError);
+          }
+
           const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, row.grade);
           const existingBillingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
           const billingProfilePayload = {
@@ -8109,6 +8116,12 @@ router.post('/enrollments', async (req, res) => {
       }
 
       await ensureStudentWallet({ schoolId, studentId: student._id });
+
+      try {
+        await upsertStudentAccount({ schoolId, student });
+      } catch (accountError) {
+        console.warn('[STUDENT_ACCOUNT_UPSERT_ERROR]', accountError?.message || accountError);
+      }
 
       let billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
       const hadBillingProfile = Boolean(billingProfile);

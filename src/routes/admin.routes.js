@@ -36,6 +36,7 @@ const {
   deriveThumbUrlFromImageUrl,
   validateIncomingImageUrl,
 } = require('../utils/imageUpload');
+const { upsertStudentAccount } = require('../utils/studentAccount');
 const { invalidateSchoolMenuCache } = require('../services/menuCache.service');
 
 const router = express.Router();
@@ -1893,6 +1894,12 @@ router.post('/students', async (req, res) => {
         { schoolId, parentId, studentId: student._id, relationship: 'parent', status: 'active' },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
+    }
+
+    try {
+      await upsertStudentAccount({ schoolId, student });
+    } catch (accountError) {
+      console.warn('[STUDENT_ACCOUNT_UPSERT_ERROR]', accountError?.message || accountError);
     }
 
     return res.status(201).json(student);

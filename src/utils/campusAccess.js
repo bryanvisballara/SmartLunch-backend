@@ -88,6 +88,19 @@ function buildFallbackMemberships(user) {
     });
   }
 
+  if (String(user?.role || '') === 'student') {
+    memberships.push({
+      memberType: 'campus_student',
+      status: 'active',
+      permissions: ['academic_portal'],
+      metadata: {
+        title: 'Campus Alumno',
+        launchPath: '/campus/student',
+      },
+      virtual: true,
+    });
+  }
+
   return memberships;
 }
 
@@ -171,7 +184,7 @@ async function getCampusAccessContext(user) {
   }
 
   const featureFlags = resolveFeatureFlags(user);
-  const roleEnabledByDefault = String(user?.role || '') === 'school_route';
+  const roleEnabledByDefault = ['school_route', 'student'].includes(String(user?.role || ''));
   const featureEnabled =
     featureFlags.globalEnabled ||
     featureFlags.enabledBySchool ||
