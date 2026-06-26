@@ -10,12 +10,14 @@ import {
 } from '../lib/academicEnrollment';
 import { findMatchingFeeSetting, getFeeGradeAliases, buildAcademicStructureGradeMetadataIndex, resolveStructureGradeKeyForStudent, gradesMatchForFilter } from '../lib/feeGradeMatching';
 import MillenniumEnrollmentSignatureBlock from '../components/MillenniumEnrollmentSignatureBlock';
+import MillenniumInstitutionSignatureBlock from '../components/MillenniumInstitutionSignatureBlock';
 import MillenniumPagareDebtorsTable from '../components/MillenniumPagareDebtorsTable';
 import {
   buildMillenniumEnrollmentContractContext,
   canPreviewMillenniumEnrollmentContracts,
   downloadMillenniumEnrollmentContractPdf,
   downloadMillenniumPagareContractPdf,
+  getEnrollmentContractDocumentTitle,
   getPagareDebtorColumns,
   millenniumSchoolCrest,
   parseEnrollmentContractSections,
@@ -3886,10 +3888,30 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                             <div className="academic-secretary__contract-document">
                               <header className="academic-secretary__contract-header academic-secretary__contract-header--left">
                                 <img alt="Millennium School" src={millenniumSchoolCrest} />
-                                <h5>Contrato de matrícula 2026-2027</h5>
+                                <h5>{getEnrollmentContractDocumentTitle(millenniumContractParams, millenniumContractContext)}</h5>
                               </header>
                               <div className="academic-secretary__contract-preview">
-                                {parseEnrollmentContractSections(renderMillenniumEnrollmentContract(millenniumContractContext)).flatMap((section, sectionIndex) => {
+                                {parseEnrollmentContractSections(renderMillenniumEnrollmentContract(millenniumContractContext, millenniumContractParams)).flatMap((section, sectionIndex) => {
+                                  if (section.type === 'contractors-table') {
+                                    const debtorColumns = getPagareDebtorColumns({
+                                      father: enrollmentForm.father,
+                                      mother: enrollmentForm.mother,
+                                    });
+                                    return [
+                                      <MillenniumPagareDebtorsTable
+                                        debtorOne={debtorColumns.debtorOne}
+                                        debtorTwo={debtorColumns.debtorTwo}
+                                        key={`contract-contractors-${sectionIndex}`}
+                                      />,
+                                    ];
+                                  }
+
+                                  if (section.type === 'institution-signature-block') {
+                                    return [
+                                      <MillenniumInstitutionSignatureBlock key={`contract-institution-${sectionIndex}`} />,
+                                    ];
+                                  }
+
                                   if (section.type === 'signature-block') {
                                     return [
                                       <MillenniumEnrollmentSignatureBlock

@@ -1,37 +1,59 @@
 CARTA DE INSTRUCCIONES PARA SUSCRIBIR EL PAGARE A FAVOR DEL MILLENNIUM SCHOOL CON NIT: 901.495.429-8
 
-
-
-
 Señora
-LUISA FERNANDA BENEDETTI LARA 
-Representante Legal 
+LUISA FERNANDA BENEDETTI LARA
+Representante Legal
 MILLENNIUM SCHOOL
 
-Nosotros, {{DEBTOR_ONE_NAME}} Y {{DEBTOR_TWO_NAME}} los suscritos, identificados conforme se detalla al pie de nuestras firmas, actuando en nombre propio, mediante el presente documento y con fundamento en lo dispuesto en el artículo 622 del Código de Comercio, otorgamos de manera irrevocable al MILLENNIUM SCHOOL , identificada con NIT 901.495.429-8, la facultad para diligenciar sin previo aviso el pagaré identificado con el número 000003, suscrito a su favor, con los datos relativos a su cuantía, intereses y fecha de vencimiento, bajo las siguientes condiciones:
+El (los) suscritos {{DEBTOR_ONE_NAME}} y {{DEBTOR_TWO_NAME}}, identificados como aparece al pie de nuestras firmas y domiciliados como allí se indica, actuando en nombre propio, manifestamos por medio de la presente que, en virtud de lo dispuesto por el artículo 622 del Código de Comercio Colombiano, facultamos de manera expresa, permanente e irrevocable al COLEGIO BILINGÜE MILENIO., identificado con NIT 901.495.429-8, propietario del establecimiento educativo denominado MILLENIUM SCHOOL, para diligenciar, completar y llenar sin previo aviso el Pagaré N.º ________ que hemos suscrito a su favor, con los datos relativos a su cuantía, intereses, lugar y fecha de vencimiento, conforme a las siguientes instrucciones:
 
-Ocasión para el diligenciamiento: El título valor podrá ser diligenciado en el momento en que incurramos en mora respecto de cualquier suma adeudada, ya sea por concepto de capital o intereses.
-Cuantía: La cuantía a diligenciar será equivalente al monto total de las obligaciones pendientes de pago, derivadas de los conceptos indicados en el numeral anterior.
-Intereses de mora: Se aplicará la tasa máxima permitida por las autoridades competentes para operaciones de crédito ordinario, conforme a la legislación vigente al momento del diligenciamiento.
-Fecha de vencimiento: La fecha de vencimiento corresponderá al día en que el título valor sea diligenciado.
+INSTRUCCIONES DE DILIGENCIAMIENTO
 
-Adicionalmente, declaramos que el pagaré diligenciado será plenamente exigible y constituirá mérito ejecutivo, conforme a lo establecido en la normativa aplicable, sin necesidad de requerimiento judicial o extrajudicial previo, a los cuales renunciamos expresamente.
+Ocasión para el Diligenciamiento: El pagaré podrá ser diligenciado en el momento en que el (los) suscriptor(es) incurra(n) en mora por el pago de cualquier suma de dinero derivada del contrato de prestación de servicios educativos, restaurante o transporte, o de cualquier obligación económica contraída con el colegio.
 
-En constancia de lo anterior, firmamos el presente documento en la ciudad de Barranquilla, a los {{CONTRACT_DAY}} días del mes de {{CONTRACT_MONTH}} del año {{CONTRACT_YEAR}}.
+Determinación de la Cuantía: La cuantía que se diligencie corresponderá al valor total de las sumas adeudadas, incluyendo capital, intereses corrientes o moratorios, costos administrativos, gastos de cobranza y demás conceptos pendientes conforme al contrato y a la normatividad vigente.
 
-Atentamente, 
+Intereses Aplicables: Los intereses de mora que se incluyan serán los máximos autorizados por la Superintendencia Financiera de Colombia para las operaciones de crédito ordinario, vigentes al momento del diligenciamiento.
+
+Fecha de Vencimiento: La fecha de vencimiento del pagaré será el día en que se proceda a su diligenciamiento, de conformidad con lo dispuesto en los artículos 709, 710 y 711 del Código de Comercio, prestando mérito ejecutivo desde dicho momento.
+
+MÉRITO EJECUTIVO Y RENUNCIA EXPRESA
+
+El pagaré así diligenciado prestará mérito ejecutivo pleno, sin necesidad de requerimiento judicial o extrajudicial alguno, conforme a los artículos 488 del Código General del Proceso y 619 y siguientes del Código de Comercio. Por la presente, renunciamos expresamente a cualquier tipo de requerimiento previo, protesto, notificación o constitución en mora, reconociendo la validez de la información consignada por el acreedor en el título valor.
+
+En constancia de aceptación, suscribimos la presente Carta de Instrucciones en Barranquilla, a los {{CONTRACT_DAY}} días del mes de {{CONTRACT_MONTH}} del año {{CONTRACT_YEAR}}, en dos (2) ejemplares del mismo tenor y valor, quedando uno en poder del acreedor y otro en poder del(los) suscriptor(es).
+
+Atentamente,
 
 DEUDORES
 
 [[DEBTORS_TABLE]]
 
-Este PAGARE es parte integral del contrato de Prestación de Servicios Educativos suscrito entre las partes y se hará efectivo únicamente en caso de incumplimiento con las obligaciones adquiridas en las condiciones y términos establecidos.
+PAGARÉ N° _________
 
-PAGARE No:  000003 Que es parte integral del contrato de prestación de servicios educativos, restaurante y transporte.
+El presente PAGARÉ hace parte integral del Contrato de Prestación de Servicios Educativos, de Restaurante y Transporte Escolar, suscrito entre las partes, y solo se hará efectivo en caso de incumplimiento de las obligaciones adquiridas en las condiciones y términos establecidos en dicho contrato, en cumplimiento de la Ley 115 de 1994 y las normas civiles y comerciales aplicables al sector educativo.
 
-Yo / Nosotros: {{DEBTOR_ONE_NAME}} y {{DEBTOR_TWO_NAME}}, identificados conforme consta al pie de nuestras firmas y domiciliados en los lugares allí señalados, en adelante denominados como LOS DEUDORES, nos obligamos solidaria e incondicionalmente a pagar en efectivo y a la orden del MILLENNIUM SCHOOL, identificada con NIT 901.495.429-8 o a quien represente sus derechos, en adelante EL ACREEDOR, la suma de {{TOTAL_AMOUNT_WORDS}} PESOS MONEDA CORRIENTE (${{TOTAL_AMOUNT}}), conforme a los términos y condiciones que se detallan a continuación: FORMA DE PAGO: El monto total adeudado será pagado en {{INSTALLMENT_COUNT_WORDS}} ({{INSTALLMENT_COUNT}}) cuotas mensuales, cada una por valor de {{INSTALLMENT_AMOUNT_WORDS}} PESOS MONEDA CORRIENTE (${{INSTALLMENT_AMOUNT}} M/CTE), a ser canceladas dentro de los primeros (10) días de cada mes, hasta cubrir la totalidad de la deuda. LUGAR DE CUMPLIMIENTO El cumplimiento de todas las obligaciones derivadas de este pagaré tendrá lugar en la ciudad de Barranquilla, salvo que EL ACREEDOR determine otro lugar, lo cual será debidamente notificado a LOS DEUDORES. INTERESES ORDINARIOS Mientras la obligación permanezca vigente, LOS DEUDORES se obligan a pagar intereses a la tasa máxima permitida por la ley vigente. INTERESES MORATORIOS: En caso de mora, LOS DEUDORES reconocerán y pagarán intereses moratorios calculados sobre el saldo de capital, a la tasa máxima autorizada por la legislación aplicable. COSTOS DE RECAUDO: LOS DEUDORES asumen los costos asociados al cobro judicial o extrajudicial de la obligación, incluyendo honorarios de abogados y demás gastos de cobranza. CAPITALIZACIÓN DE INTERESES: Autorizamos a EL ACREEDOR para que, en los términos del artículo 886 del Código de Comercio y del artículo 121 del Estatuto del Sistema Financiero, proceda con la capitalización de los intereses devengados. GASTOS E IMPUESTOS: LOS DEUDORES se comprometen a asumir todos los gastos e impuestos derivados de la ejecución y otorgamiento de este pagaré. CLÁUSULA ACELERATORIA: EL ACREEDOR podrá declarar vencido el plazo y exigir el pago total de la obligación, en los siguientes eventos: a) Mora o incumplimiento en el pago de una o más cuotas de capital o intereses. b) Incumplimiento de cualquier obligación relacionada con pensiones, transporte, alimentación o servicios complementarios. c) Giro de cheques sin provisión de fondos o incumplimiento en el pago de títulos valores aceptados por EL ACREEDOR. d) Muerte del deudor, disolución de una persona jurídica deudora, o sometimiento a procesos de insolvencia, reestructuración o liquidación obligatoria. AUTORIZACIÓN DE CONSULTA Y REPORTE DE DATOS: LOS DEUDORES autorizan expresamente a EL ACREEDOR para consultar, reportar, procesar y divulgar información financiera y comercial relacionada con este pagaré a DataSchool y otras entidades que manejen bases de datos con fines similares, conforme a las leyes aplicables. MÉRITO EJECUTIVO: El presente pagaré constituye título valor conforme a los artículos 619 y siguientes del Código de Comercio y presta mérito ejecutivo sin necesidad de requerimiento judicial o extrajudicial previo, renunciando expresamente LOS DEUDORES a cualquier notificación previa en relación con su ejecución.
+Yo / Nosotros, {{DEBTOR_ONE_NAME}} y {{DEBTOR_TWO_NAME}}, identificados como aparece al pie de nuestras firmas y domiciliados como allí se indica, actuando en nombre propio, que en adelante se denominarán LOS DEUDORES, nos obligamos solidaria e incondicionalmente, a pagar en efectivo y a la orden del COLEGIO BILINGÜE MILENIO, identificado con NIT : 901.495.429-8, propietario del establecimiento educativo denominado MILLENIUM SCHOOL o a quien represente sus derechos, en adelante EL ACREEDOR, la suma de {{TOTAL_AMOUNT_WORDS}} (${{TOTAL_AMOUNT}} PESOS MONEDA CORRIENTE), conforme a las siguientes condiciones:
 
-En constancia de aceptación y mutuo consentimiento, se firma el presente documento en la ciudad de Barranquilla, a los {{CONTRACT_DAY}} días del mes de {{CONTRACT_MONTH}} del año {{CONTRACT_YEAR}}.
+1. El valor total adeudado será cancelado en {{INSTALLMENT_COUNT_WORDS}} ({{INSTALLMENT_COUNT}}) cuotas mensuales sucesivas, cada una por valor de {{INSTALLMENT_AMOUNT_WORDS}} (${{INSTALLMENT_AMOUNT}} PESOS M/CTE), que LOS DEUDORES se obligan a pagar dentro de los primeros diez (10) días de cada mes, hasta cubrir la totalidad del saldo, en la sede principal del colegio o en la cuenta designada por EL ACREEDOR.
+
+2. El lugar de cumplimiento de las obligaciones derivadas del presente título será la ciudad de Barranquilla (Atlántico), sin perjuicio de la facultad del acreedor para ejercer el cobro judicial o extrajudicial en el domicilio contractual de los deudores o en cualquier otro lugar en que estos desarrollen su actividad económica o educativa.
+
+3. Mientras la obligación se encuentre vigente, LOS DEUDORES se obligan a reconocer y pagar intereses a la tasa máxima legal permitida por la Superintendencia Financiera de Colombia, conforme al artículo 884 del Código de Comercio.
+
+4. En caso de mora, LOS DEUDORES pagarán intereses moratorios sobre el capital adeudado a la tasa máxima autorizada por la ley, sin perjuicio de las acciones judiciales que correspondan para la recuperación de la cartera. Se autoriza expresamente a EL ACREEDOR a la capitalización de intereses, de conformidad con el artículo 886 del Código de Comercio y el artículo 121 del Estatuto Orgánico del Sistema Financiero.
+
+5. LOS DEUDORES reconocen que todos los gastos, costas judiciales y extrajudiciales, así como honorarios de abogados, derechos notariales, timbres e impuestos que se generen con ocasión del otorgamiento, diligenciamiento o cobro del presente pagaré, serán de su exclusiva responsabilidad y cargo.
+
+6. LOS DEUDORES facultan expresamente a EL ACREEDOR para declarar vencido el plazo y exigir el pago total e inmediato de las obligaciones derivadas del presente título valor, en cualquiera de los siguientes casos: a) Mora o incumplimiento en el pago de uno o más vencimientos de capital o intereses. b) Incumplimiento de cualquier obligación contractual derivada de los servicios de educación, transporte, restaurante u otros cobros complementarios. c) Giro de cheques sin provisión de fondos o no pago de títulos valores entregados en garantía. d) Fallecimiento de alguno de los deudores, disolución de la persona jurídica o acogimiento a procesos de insolvencia conforme a la Ley 2445 de 2025, que regula la reestructuración de deudas para personas naturales no comerciantes.
+
+7. LOS DEUDORES autorizan de manera expresa, libre e informada al MILLENIUM SCHOOL, para consultar, reportar, procesar, suministrar y divulgar su información financiera, comercial y de comportamiento de pago ante la Central de Información del Sector Educativo Colombiano DataSchool, EduScore y ante cualquier otra entidad legalmente autorizada que administre bases de datos con fines similares, conforme a la Ley 1581 de 2012, el Decreto 1377 de 2013, y las políticas de protección de datos personales adoptadas por EL ACREEDOR.
+
+8. El presente pagaré se rige por los artículos 619 y siguientes del Código de Comercio Colombiano, en especial los artículos 709, 710 y 711, relativos a la exigibilidad, firma y mérito ejecutivo de los títulos valores, y prestará mérito ejecutivo sin necesidad de requerimiento previo, de conformidad con lo dispuesto en el artículo 488 del Código General del Proceso, a lo cual LOS DEUDORES renuncian expresamente. De igual forma, se tendrán en cuenta las siguientes normas complementarias: Ley 2445 de 2025, Ley 2300 de 2025, Ley 2540 de 2025.
+
+9. El presente título valor constituye una obligación cierta, expresa y exigible, que podrá hacerse efectiva mediante proceso ejecutivo civil o arbitraje, según lo permita la ley. La suscripción implica la aceptación plena de todas las condiciones aquí contenidas, que se entienden complementarias e inseparables del contrato educativo suscrito entre las partes.
+
+En constancia de aceptación y libre consentimiento, se firma en la ciudad de Barranquilla, a los {{CONTRACT_DAY}} días del mes de {{CONTRACT_MONTH}} del año {{CONTRACT_YEAR}}, en dos (2) ejemplares del mismo tenor y valor, quedando uno en poder del ACREEDOR y otro en poder de LOS DEUDORES.
 
 FIRMA DE LOS DEUDORES
 

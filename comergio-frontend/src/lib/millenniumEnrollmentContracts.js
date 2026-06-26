@@ -1,6 +1,9 @@
 import { jsPDF } from 'jspdf';
 import millenniumSchoolCrest from '../assets/millennium-school-crest.png';
-import contratoTemplate from './contracts/millennium/contrato-matricula-template.txt?raw';
+import { isEducationalLevelKey } from './feeGradeMatching';
+import { openJsPdfDocument } from './openPdfDocument';
+import contratoPreescolarTemplate from './contracts/millennium/contrato-matricula-preescolar-template.txt?raw';
+import contratoPrimariaSecundariaTemplate from './contracts/millennium/contrato-matricula-primaria-secundaria-template.txt?raw';
 import pagareTemplate from './contracts/millennium/pagare-carta-template.txt?raw';
 
 export { millenniumSchoolCrest };
@@ -175,6 +178,57 @@ function getContractDateParts(date = new Date()) {
   };
 }
 
+function normalizeGradeLookupValue(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+export function isPreschoolEnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    if (isEducationalLevelKey(candidate)) {
+      return true;
+    }
+
+    const normalized = normalizeGradeLookupValue(candidate);
+    if (!normalized) {
+      return false;
+    }
+
+    return /^(maternal|kinder|prep|prejardin|jardin|transicion|toddlers|infants|nursery|k-grade|kgrade)/.test(normalized)
+      || normalized.includes('preescolar');
+  });
+}
+
+function resolveEnrollmentContractParams(contractParams = {}, context = {}) {
+  return {
+    grade: contractParams?.student?.grade || context?.STUDENT_GRADE || '',
+    gradeLabel: contractParams?.gradeLabel || context?.GRADE_LABEL || '',
+  };
+}
+
+export function usesPreschoolEnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isPreschoolEnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+function getEnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return usesPreschoolEnrollmentContractTemplate(contractParams, context)
+    ? contratoPreescolarTemplate
+    : contratoPrimariaSecundariaTemplate;
+}
+
+export function getEnrollmentContractDocumentTitle(contractParams = {}, context = {}) {
+  return usesPreschoolEnrollmentContractTemplate(contractParams, context)
+    ? 'CONTRATO DE MATRÍCULA Y PRESTACIÓN DE SERVICIOS EDUCATIVOS AÑO ACADEMICO 2026-2027'
+    : 'CONTRATO DE MATRÍCULA 2026-27';
+}
+
 export function isMillenniumSchool(schoolName = '') {
   const normalized = normalizeText(schoolName).toLowerCase();
   return MILLENNIUM_SCHOOL_IDS.has(normalized) || normalized.includes('millennium');
@@ -271,13 +325,17 @@ export function buildMillenniumEnrollmentContractContext({
   const monthlyTuitionAmount = Math.max(0, Math.round(Number(pricing.monthlyTuitionAmount || 0)));
   const enrollmentFeeAmount = Math.max(0, Math.round(Number(pricing.proratedAnnualTuitionAmount || 0)));
   const installmentCount = Math.max(1, Number(pricing.annualTuitionInstallments || 10));
-  const annualTotalAmount = monthlyTuitionAmount * 10;
+  const annualTuitionAmount = monthlyTuitionAmount * installmentCount;
+  const annualTotalAmount = annualTuitionAmount;
+  const annualServiceTotalAmount = enrollmentFeeAmount + annualTuitionAmount;
   const pagareTotalAmount = enrollmentFeeAmount;
   const installmentAmount = Math.max(0, Math.round(pagareTotalAmount / installmentCount));
+  const latePaymentAmount = Math.max(0, Math.round(monthlyTuitionAmount * 1.133));
   const dateParts = getContractDateParts();
 
   return {
     ...dateParts,
+    STUDENT_GRADE: normalizeText(student.grade),
     STUDENT_NAME_UPPER: studentNameUpper || '________________',
     GRADE_LABEL: normalizeText(gradeLabel) || normalizeText(student.grade) || '____',
     FINANCIAL_RESPONSIBLE_NAME_UPPER: financialResponsibleNameUpper || '________________',
@@ -288,9 +346,16 @@ export function buildMillenniumEnrollmentContractContext({
     FINANCIAL_RESPONSIBLE_PHONE: normalizeText(primaryParent.phone) || '____________',
     FINANCIAL_RESPONSIBLE_EMAIL: normalizeText(primaryParent.email) || '____________',
     ANNUAL_TOTAL_AMOUNT: formatCurrencyNumber(annualTotalAmount),
+    ANNUAL_TUITION_AMOUNT: formatCurrencyNumber(annualTuitionAmount),
+    ANNUAL_TUITION_AMOUNT_WORDS: numberToWordsSpanish(annualTuitionAmount),
+    ANNUAL_SERVICE_TOTAL_AMOUNT: formatCurrencyNumber(annualServiceTotalAmount),
+    ANNUAL_SERVICE_TOTAL_AMOUNT_WORDS: numberToWordsSpanish(annualServiceTotalAmount),
     MONTHLY_TUITION_AMOUNT: formatCurrencyNumber(monthlyTuitionAmount),
     ENROLLMENT_FEE_AMOUNT: formatCurrencyNumber(enrollmentFeeAmount),
-    LATE_PAYMENT_AMOUNT_1: formatCurrencyNumber(Math.round(monthlyTuitionAmount * 1.133)),
+    ENROLLMENT_FEE_AMOUNT_WORDS: numberToWordsSpanish(enrollmentFeeAmount),
+    LATE_PAYMENT_AMOUNT: formatCurrencyNumber(latePaymentAmount),
+    LATE_PAYMENT_AMOUNT_WORDS: numberToWordsSpanish(latePaymentAmount),
+    LATE_PAYMENT_AMOUNT_1: formatCurrencyNumber(latePaymentAmount),
     LATE_PAYMENT_AMOUNT_2: formatCurrencyNumber(Math.round(monthlyTuitionAmount * 1.333)),
     INSTALLMENT_COUNT: String(installmentCount),
     INSTALLMENT_COUNT_WORDS: COUNT_WORDS[installmentCount] || String(installmentCount),
@@ -319,7 +384,15 @@ export function getPagareDebtorColumns(context = {}) {
 }
 
 const PAGARE_DEBTORS_TABLE_MARKER = '[[DEBTORS_TABLE]]';
+const ENROLLMENT_CONTRACTORS_TABLE_MARKER = '[[CONTRACTORS_TABLE]]';
+const ENROLLMENT_INSTITUTION_SIGNATURE_MARKER = '[[INSTITUTION_SIGNATURE_BLOCK]]';
 const ENROLLMENT_SIGNATURE_MARKER = '[[SIGNATURE_BLOCK]]';
+
+const ENROLLMENT_CONTRACT_MARKERS = [
+  { marker: ENROLLMENT_CONTRACTORS_TABLE_MARKER, type: 'contractors-table' },
+  { marker: ENROLLMENT_INSTITUTION_SIGNATURE_MARKER, type: 'institution-signature-block' },
+  { marker: ENROLLMENT_SIGNATURE_MARKER, type: 'signature-block' },
+];
 
 const MILLENNIUM_LEGAL_REPRESENTATIVE = {
   name: 'LUISA FERNANDA BENNEDETTI LARA',
@@ -352,24 +425,52 @@ export function parsePagareDocumentSections(content) {
 }
 
 export function parseEnrollmentContractSections(content) {
-  const markerIndex = String(content || '').indexOf(ENROLLMENT_SIGNATURE_MARKER);
-  if (markerIndex === -1) {
+  const sections = [];
+  let remaining = String(content || '');
+
+  while (remaining.length > 0) {
+    let nextMarker = null;
+    let nextMarkerIndex = -1;
+
+    ENROLLMENT_CONTRACT_MARKERS.forEach((entry) => {
+      const markerIndex = remaining.indexOf(entry.marker);
+      if (markerIndex === -1) {
+        return;
+      }
+
+      if (nextMarkerIndex === -1 || markerIndex < nextMarkerIndex) {
+        nextMarkerIndex = markerIndex;
+        nextMarker = entry;
+      }
+    });
+
+    if (!nextMarker || nextMarkerIndex === -1) {
+      const trailingContent = remaining.trim();
+      if (trailingContent) {
+        sections.push({ type: 'text', content: trailingContent });
+      }
+      break;
+    }
+
+    const before = remaining.slice(0, nextMarkerIndex).trim();
+    if (before) {
+      sections.push({ type: 'text', content: before });
+    }
+
+    sections.push({ type: nextMarker.type });
+    remaining = remaining.slice(nextMarkerIndex + nextMarker.marker.length);
+  }
+
+  if (!sections.length) {
     return [{ type: 'text', content: String(content || '').trim() }];
   }
 
-  const before = String(content || '').slice(0, markerIndex).trim();
-  const sections = [];
-
-  if (before) {
-    sections.push({ type: 'text', content: before });
-  }
-
-  sections.push({ type: 'signature-block' });
   return sections;
 }
 
-export function renderMillenniumEnrollmentContract(context) {
-  return fillTemplate(contratoTemplate, context);
+export function renderMillenniumEnrollmentContract(context, contractParams = {}) {
+  const template = getEnrollmentContractTemplate(contractParams, context);
+  return fillTemplate(template, context);
 }
 
 export function renderMillenniumPagareContract(context) {
@@ -398,7 +499,7 @@ export function splitContractParagraphs(content) {
   }
 
   return normalized
-    .split(/(?=(?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA|SÉPTIMA|SEPTIMA|OCTAVA|NOVENA|DÉCIMA|DECIMA|CONTRATO DE|ESTUDIANTE:|Leído el presente|CARTA DE INSTRUCCIONES|PAGARE No:|Este PAGARE))/u)
+    .split(/(?=(?:PRIMERA|SEGUNDA|TERCERA|CUARTA|QUINTA|SEXTA|SÉPTIMA|SEPTIMA|OCTAVA|NOVENA|DÉCIMA|DECIMA|CLÁUSULA|CLAUSULA|INSTRUCCIONES DE|MÉRITO EJECUTIVO|CONTRATO DE|ESTUDIANTE:|Leído el presente|CARTA DE INSTRUCCIONES|PAGARÉ N|PAGARE No:|Este PAGARE|Yo \/ Nosotros|PAGARÉ N°))/u)
     .map(normalizeParagraphText)
     .filter(Boolean);
 }
@@ -486,6 +587,41 @@ function writeParagraphsToPdf(doc, {
   return y;
 }
 
+function drawInstitutionSignatureBlockPdf(doc, {
+  margin,
+  pageWidth,
+  pageHeight,
+  cursorY,
+}) {
+  const blockHeight = 96;
+  let y = ensurePdfSpace(doc, {
+    cursorY,
+    requiredHeight: blockHeight,
+    margin,
+    pageHeight,
+  });
+
+  const columnWidth = (pageWidth - (margin * 2));
+  const signatureLineY = y + 72;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text(MILLENNIUM_LEGAL_REPRESENTATIVE.name, margin, y);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(MILLENNIUM_LEGAL_REPRESENTATIVE.doc.replace('CC. ', ''), margin, y + 16);
+  doc.text(MILLENNIUM_LEGAL_REPRESENTATIVE.role, margin, y + 30);
+  doc.text(MILLENNIUM_LEGAL_REPRESENTATIVE.school, margin, y + 44);
+
+  doc.setLineWidth(0.8);
+  doc.line(margin, signatureLineY, margin + columnWidth - 8, signatureLineY);
+  doc.setFontSize(7);
+  doc.text('Firma institución', margin, signatureLineY + 12);
+
+  return signatureLineY + 28;
+}
+
 function drawEnrollmentSignatureBlockPdf(doc, {
   margin,
   pageWidth,
@@ -553,6 +689,7 @@ function drawEnrollmentSignatureBlockPdf(doc, {
 function buildEnrollmentContractPdfDoc({
   content,
   context,
+  contractParams = {},
   headerImage,
   parentSignatureDataUrl = '',
 }) {
@@ -562,16 +699,43 @@ function buildEnrollmentContractPdfDoc({
   const margin = 48;
   const maxWidth = pageWidth - (margin * 2);
   const sections = parseEnrollmentContractSections(content);
+  const debtorColumns = getPagareDebtorColumns({
+    father: contractParams?.father || {},
+    mother: contractParams?.mother || {},
+  });
   let cursorY = drawPdfHeader(doc, {
     margin,
     headerImage,
-    title: 'CONTRATO DE MATRÍCULA 2026-2027',
+    title: getEnrollmentContractDocumentTitle(contractParams, context),
   });
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
 
   sections.forEach((section) => {
+    if (section.type === 'contractors-table') {
+      cursorY = drawPagareDebtorsTablePdf(doc, {
+        margin,
+        pageWidth,
+        pageHeight,
+        cursorY: cursorY + 8,
+        debtorOne: debtorColumns.debtorOne,
+        debtorTwo: debtorColumns.debtorTwo,
+        primarySignatureDataUrl: parentSignatureDataUrl,
+      });
+      return;
+    }
+
+    if (section.type === 'institution-signature-block') {
+      cursorY = drawInstitutionSignatureBlockPdf(doc, {
+        margin,
+        pageWidth,
+        pageHeight,
+        cursorY: cursorY + 8,
+      });
+      return;
+    }
+
     if (section.type === 'signature-block') {
       cursorY = drawEnrollmentSignatureBlockPdf(doc, {
         margin,
@@ -597,20 +761,22 @@ function buildEnrollmentContractPdfDoc({
   return doc;
 }
 
-function downloadEnrollmentContractPdf({
+async function downloadEnrollmentContractPdf({
   content,
   fileName,
   headerImage,
   context,
+  contractParams = {},
   parentSignatureDataUrl = '',
 }) {
   const doc = buildEnrollmentContractPdfDoc({
     content,
     context,
+    contractParams,
     headerImage,
     parentSignatureDataUrl,
   });
-  doc.save(fileName);
+  await openJsPdfDocument(doc, fileName);
 }
 
 function buildPagarePdfDoc({
@@ -660,13 +826,13 @@ function buildPagarePdfDoc({
   return doc;
 }
 
-function downloadPagarePdf({ content, fileName, debtorColumns, primarySignatureDataUrl = '' }) {
+async function downloadPagarePdf({ content, fileName, debtorColumns, primarySignatureDataUrl = '' }) {
   const doc = buildPagarePdfDoc({
     content,
     debtorColumns,
     primarySignatureDataUrl,
   });
-  doc.save(fileName);
+  await openJsPdfDocument(doc, fileName);
 }
 
 function pdfDocToBase64(doc) {
@@ -676,10 +842,11 @@ function pdfDocToBase64(doc) {
 export function generateSignedEnrollmentContractPdfBase64(params, signatureDataUrl = '') {
   const contractParams = normalizeOfficialEnrollmentContractParams(params);
   const context = buildMillenniumEnrollmentContractContext(contractParams);
-  const content = renderMillenniumEnrollmentContract(context);
+  const content = renderMillenniumEnrollmentContract(context, contractParams);
   const doc = buildEnrollmentContractPdfDoc({
     content,
     context,
+    contractParams,
     headerImage: millenniumSchoolCrest,
     parentSignatureDataUrl: signatureDataUrl,
   });
@@ -841,24 +1008,25 @@ function downloadTextAsPdf({
   doc.save(fileName);
 }
 
-export function downloadMillenniumEnrollmentContractPdf(params) {
+export async function downloadMillenniumEnrollmentContractPdf(params) {
   const contractParams = normalizeOfficialEnrollmentContractParams(params);
   const context = buildMillenniumEnrollmentContractContext(contractParams);
-  const content = renderMillenniumEnrollmentContract(context);
+  const content = renderMillenniumEnrollmentContract(context, contractParams);
   const studentSlug = normalizeText(`${contractParams?.student?.firstName}-${contractParams?.student?.lastName}`)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'alumno';
 
-  downloadEnrollmentContractPdf({
+  return downloadEnrollmentContractPdf({
     content,
     context,
+    contractParams,
     fileName: `contrato-matricula-${studentSlug}.pdf`,
     headerImage: millenniumSchoolCrest,
   });
 }
 
-export function downloadMillenniumPagareContractPdf(params) {
+export async function downloadMillenniumPagareContractPdf(params) {
   const contractParams = normalizeOfficialEnrollmentContractParams(params);
   const context = buildMillenniumEnrollmentContractContext(contractParams);
   const content = renderMillenniumPagareContract(context);
@@ -871,7 +1039,7 @@ export function downloadMillenniumPagareContractPdf(params) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'alumno';
 
-  downloadPagarePdf({
+  return downloadPagarePdf({
     content,
     fileName: `pagare-carta-${studentSlug}.pdf`,
     debtorColumns,

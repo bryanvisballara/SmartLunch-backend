@@ -105,6 +105,7 @@ function SignatureCanvas({ onChange, disabled = false }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const emitFrameRef = useRef(null);
+  const displaySizeRef = useRef({ width: 0, height: 0 });
 
   const emitSignature = () => {
     const canvas = canvasRef.current;
@@ -120,26 +121,39 @@ function SignatureCanvas({ onChange, disabled = false }) {
     });
   };
 
+  const configureContext = (context) => {
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.lineWidth = 2.4;
+    context.strokeStyle = '#0f172a';
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
     const resize = () => {
-      const rect = canvas.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = rect.width * ratio;
-      canvas.height = rect.height * ratio;
+      const ratio = Math.max(window.devicePixelRatio || 1, 1);
+      const width = canvas.offsetWidth;
+      const height = canvas.offsetHeight;
+      displaySizeRef.current = { width, height };
+      canvas.width = Math.max(1, Math.floor(width * ratio));
+      canvas.height = Math.max(1, Math.floor(height * ratio));
       const context = canvas.getContext('2d');
-      context.scale(ratio, ratio);
-      context.lineCap = 'round';
-      context.lineJoin = 'round';
-      context.lineWidth = 2.4;
-      context.strokeStyle = '#0f172a';
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      configureContext(context);
     };
 
     resize();
+
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => resize())
+      : null;
+    observer?.observe(canvas);
     window.addEventListener('resize', resize);
+
     return () => {
+      observer?.disconnect();
       window.removeEventListener('resize', resize);
       if (emitFrameRef.current) {
         window.cancelAnimationFrame(emitFrameRef.current);
@@ -149,21 +163,39 @@ function SignatureCanvas({ onChange, disabled = false }) {
 
   const getPoint = (event) => {
     const canvas = canvasRef.current;
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
+
+    if (typeof event.offsetX === 'number' && !Number.isNaN(event.offsetX)
+      && typeof event.offsetY === 'number' && !Number.isNaN(event.offsetY)
+      && event.target === canvas) {
+      return {
+        x: event.offsetX,
+        y: event.offsetY,
+      };
+    }
+
     const rect = canvas.getBoundingClientRect();
-    const source = event.touches?.[0] || event;
+    const source = event.touches?.[0] || event.changedTouches?.[0] || event;
+
     return {
-      x: source.clientX - rect.left,
-      y: source.clientY - rect.top,
+      x: source.clientX - rect.left - (canvas.clientLeft || 0),
+      y: source.clientY - rect.top - (canvas.clientTop || 0),
     };
   };
 
   const startDrawing = (event) => {
     if (disabled) return;
     drawingRef.current = true;
-    const context = canvasRef.current.getContext('2d');
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
     const point = getPoint(event);
     context.beginPath();
     context.moveTo(point.x, point.y);
+    if (typeof canvas.setPointerCapture === 'function' && event.pointerId != null) {
+      canvas.setPointerCapture(event.pointerId);
+    }
     event.preventDefault();
   };
 
@@ -177,16 +209,26 @@ function SignatureCanvas({ onChange, disabled = false }) {
     event.preventDefault();
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (event) => {
     if (!drawingRef.current) return;
     drawingRef.current = false;
+    const canvas = canvasRef.current;
+    if (typeof canvas.releasePointerCapture === 'function' && event?.pointerId != null) {
+      try {
+        canvas.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // Ignore capture release errors when the pointer is already released.
+      }
+    }
     emitSignature();
+    event?.preventDefault();
   };
 
   const onClear = () => {
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    const { width, height } = displaySizeRef.current;
+    context.clearRect(0, 0, width || canvas.offsetWidth, height || canvas.offsetHeight);
     onChange?.('');
   };
 
@@ -194,13 +236,11 @@ function SignatureCanvas({ onChange, disabled = false }) {
     <div className={`matricula-signature-canvas${disabled ? ' is-disabled' : ''}`}>
       <canvas
         ref={canvasRef}
-        onMouseDown={startDrawing}
-        onMouseMove={draw}
-        onMouseUp={stopDrawing}
-        onMouseLeave={stopDrawing}
-        onTouchStart={startDrawing}
-        onTouchMove={draw}
-        onTouchEnd={stopDrawing}
+        onPointerDown={startDrawing}
+        onPointerMove={draw}
+        onPointerUp={stopDrawing}
+        onPointerCancel={stopDrawing}
+        onPointerLeave={stopDrawing}
       />
       <button className="matricula-signature-canvas__clear" disabled={disabled} onClick={onClear} type="button">
         Limpiar firma

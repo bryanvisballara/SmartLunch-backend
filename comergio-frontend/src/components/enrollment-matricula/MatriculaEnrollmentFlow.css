@@ -485,6 +485,12 @@
   font-size: 13px;
 }
 
+.matricula-flow-note--error {
+  color: #b91c1c;
+  font-weight: 600;
+  font-size: 13px;
+}
+
 .matricula-flow-pending-intro {
   display: grid;
   gap: 10px;
@@ -746,12 +752,14 @@
 }
 
 .matricula-signature-canvas canvas {
+  display: block;
   width: 100%;
   height: 180px;
   border-radius: 18px;
   border: 2px dashed rgba(37, 99, 235, 0.35);
   background: #fff;
   touch-action: none;
+  box-sizing: border-box;
 }
 
 .matricula-signature-canvas__clear {
