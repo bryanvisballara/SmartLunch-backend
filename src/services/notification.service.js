@@ -240,6 +240,80 @@ function normalizeStudentNotificationRef(student) {
   };
 }
 
+async function queueStudentUserNotification({ schoolId, studentId, title, body, payload = {} }) {
+  return runWithSchoolContext(schoolId, async () => {
+    if (!studentId) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const studentUser = await User.findOne({
+      schoolId,
+      role: 'student',
+      linkedStudentId: studentId,
+      status: 'active',
+      deletedAt: null,
+    }).select('_id').lean();
+
+    if (!studentUser?._id) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    return queueNotificationsForParents({
+      schoolId,
+      parentIds: [studentUser._id],
+      studentId,
+      title,
+      body,
+      payload: {
+        audience: 'student',
+        studentId: String(studentId),
+        ...payload,
+      },
+    });
+  });
+}
+
+async function queueStudentUserNotifications({ schoolId, students = [], buildNotification }) {
+  return runWithSchoolContext(schoolId, async () => {
+    if (typeof buildNotification !== 'function') {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const uniqueStudents = [];
+    const seenStudentIds = new Set();
+    for (const item of students) {
+      const normalized = normalizeStudentNotificationRef(item);
+      if (!normalized || seenStudentIds.has(normalized.studentId)) {
+        continue;
+      }
+      seenStudentIds.add(normalized.studentId);
+      uniqueStudents.push(normalized);
+    }
+
+    if (!uniqueStudents.length) {
+      return { notificationsCreated: 0, tokensFound: 0 };
+    }
+
+    const results = [];
+    for (const student of uniqueStudents) {
+      const notification = buildNotification(student) || {};
+      if (!notification.title || !notification.body) {
+        continue;
+      }
+
+      results.push(await queueStudentUserNotification({
+        schoolId,
+        studentId: student.studentId,
+        title: notification.title,
+        body: notification.body,
+        payload: notification.payload || {},
+      }));
+    }
+
+    return summarizeNotificationResults(results);
+  });
+}
+
 async function queueStudentParentNotification({ schoolId, studentId, title, body, payload = {} }) {
   return runWithSchoolContext(schoolId, async () => {
     if (!studentId) {
@@ -504,6 +578,8 @@ async function queueApprovalPendingNotificationForAdmins({
 module.exports = {
   queueOrderCreatedNotifications,
   queueNotificationsForParents,
+  queueStudentUserNotification,
+  queueStudentUserNotifications,
   queueStudentParentNotification,
   queueStudentParentNotifications,
   queueLowBalanceAlertNotification,

@@ -190,28 +190,33 @@ const academicMenuItems = [
   {
     id: 'academic-performance',
     title: 'Desempeño',
+    navShortTitle: 'Desempeño',
     description: 'Dashboard académico, promedio general, rendimiento por materia, evolución y ranking en el curso.',
     icon: 'performance',
   },
   {
     id: 'academic-attendance',
     title: 'Asistencia',
+    navShortTitle: 'Asistencia',
     icon: 'attendance',
   },
   {
     id: 'academic-grades',
     title: 'Calificaciones',
+    navShortTitle: 'Notas',
     icon: 'grades',
   },
   {
     id: 'academic-calendar',
     title: 'Calendario escolar',
+    navShortTitle: 'Calendario',
     description: 'Exámenes próximos, entregas de trabajos, eventos del colegio y días sin clase.',
     icon: 'calendar',
   },
   {
     id: 'academic-schedule',
     title: 'Horario de clase',
+    navShortTitle: 'Horario',
     icon: 'schedule',
   },
 ];
@@ -5735,12 +5740,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const parentSectionChrome = !shouldUsePortalHeader ? (
     <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}`}>
           <ParentMobilePortalHeader
-            canOpenMenu={activeSection === 'academic'}
+            canOpenMenu={!studentPortalMode && activeSection === 'academic'}
             guardianName={studentPortalMode ? (selectedChild?.name || user?.name) : workspace.guardian.name}
-            isMenuOpen={activeSection === 'academic' ? showAcademicMenu : false}
+            isMenuOpen={!studentPortalMode && activeSection === 'academic' ? showAcademicMenu : false}
             onLogout={onLogout}
             onToggleMenu={() => {
-              if (activeSection === 'academic') {
+              if (!studentPortalMode && activeSection === 'academic') {
                 setShowAcademicMenu((currentValue) => !currentValue);
               }
             }}
@@ -5766,7 +5771,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
+      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${studentPortalMode ? ' has-student-academic-bottom-nav' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
       {...pullRefreshTouchHandlers}
     >
       <ParentPullToRefreshIndicator
@@ -5777,7 +5782,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       />
       {parentSectionChrome}
 
-      {activeSection === 'academic' && showAcademicMenu ? (
+      {activeSection === 'academic' && showAcademicMenu && !studentPortalMode ? (
         <div className="campus-parent-mobile__academic-drawer-layer" onClick={() => setShowAcademicMenu(false)} role="presentation">
           <aside
             aria-label="Menu academico"
@@ -6298,7 +6303,30 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         />
       ) : null}
 
-      {studentPortalMode ? null : (
+      {studentPortalMode ? (
+        <nav aria-label="Navegacion academica del alumno" className="campus-parent-mobile__bottom-nav campus-student-academic__bottom-nav">
+          {academicMenuItems.map((item) => (
+            <button
+              aria-label={item.title}
+              className={`campus-parent-mobile__nav-item campus-student-academic__nav-item${item.id === activeAcademicView ? ' is-active' : ''}`}
+              key={item.id}
+              onClick={() => {
+                setActiveAcademicView(item.id);
+                setShowAcademicMenu(false);
+              }}
+              title={item.title}
+              type="button"
+            >
+              <span className="campus-student-academic__nav-icon">
+                <AcademicMenuIcon icon={item.icon} />
+              </span>
+              <span className="campus-student-academic__nav-label">{item.navShortTitle || item.title}</span>
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
+      {!studentPortalMode ? (
       <nav aria-label="Navegacion principal del padre" className="campus-parent-mobile__bottom-nav">
         {visibleParentAppSections.map((section) => {
           const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);
@@ -6358,7 +6386,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           );
         })}
       </nav>
-      )}
+      ) : null}
     </section>
   );
 }

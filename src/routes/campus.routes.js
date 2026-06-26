@@ -17,6 +17,8 @@ const {
   queueNotificationsForParents,
   queueStudentParentNotification,
   queueStudentParentNotifications,
+  queueStudentUserNotification,
+  queueStudentUserNotifications,
 } = require('../services/notification.service');
 const { getCampusAccessContext } = require('../utils/campusAccess');
 const {
@@ -30,6 +32,7 @@ const {
   buildParentPushUrl,
   getCampusPostCategoryLabel,
 } = require('../utils/parentPushTargets');
+const { buildStudentPushUrl } = require('../utils/studentPushTargets');
 const {
   isCloudinaryEnabled,
   normalizeStoredImageUrl,
@@ -2144,81 +2147,153 @@ async function notifyStudentGradePublished({ schoolId, student, course, grades }
   const childName = firstCampusName(student?.name);
   const studentId = String(student?._id || student?.studentId || '');
 
-  return queueStudentParentNotification({
-    schoolId,
-    studentId: student?._id || student?.studentId,
-    title: `Nueva calificación en ${courseLabel}`,
-    body: `${childName} tiene ${gradeCount === 1 ? 'una nueva calificación' : `${gradeCount} nuevas calificaciones`} en ${courseLabel}.`,
-    payload: {
-      type: 'campus.grade_published',
-      courseId: String(course?._id || ''),
-      courseTitle: normalizeText(course?.title),
-      subject: normalizeText(course?.subject),
-      gradeCount,
-      studentId,
-      url: buildParentPushUrl('campus.grade_published', { studentId }),
-    },
-  });
+  const [parentResult] = await Promise.all([
+    queueStudentParentNotification({
+      schoolId,
+      studentId: student?._id || student?.studentId,
+      title: `Nueva calificación en ${courseLabel}`,
+      body: `${childName} tiene ${gradeCount === 1 ? 'una nueva calificación' : `${gradeCount} nuevas calificaciones`} en ${courseLabel}.`,
+      payload: {
+        type: 'campus.grade_published',
+        courseId: String(course?._id || ''),
+        courseTitle: normalizeText(course?.title),
+        subject: normalizeText(course?.subject),
+        gradeCount,
+        studentId,
+        url: buildParentPushUrl('campus.grade_published', { studentId }),
+      },
+    }),
+    queueStudentUserNotification({
+      schoolId,
+      studentId: student?._id || student?.studentId,
+      title: `Nueva calificación en ${courseLabel}`,
+      body: `Tienes ${gradeCount === 1 ? 'una nueva calificación' : `${gradeCount} nuevas calificaciones`} en ${courseLabel}.`,
+      payload: {
+        type: 'campus.grade_published',
+        courseId: String(course?._id || ''),
+        courseTitle: normalizeText(course?.title),
+        subject: normalizeText(course?.subject),
+        gradeCount,
+        studentId,
+        url: buildStudentPushUrl('campus.grade_published'),
+      },
+    }),
+  ]);
+
+  return parentResult;
 }
 
 async function notifyAttendanceSessionSubmitted({ schoolId, course, session }) {
   const courseLabel = normalizeText(course?.subject) || normalizeText(course?.title) || 'clase';
   const attendanceTypeLabel = campusAttendanceTypeLabels[normalizeCampusAttendanceType(session?.attendanceType)] || 'Asistencia';
 
-  return queueStudentParentNotifications({
-    schoolId,
-    students: Array.isArray(session?.records) ? session.records : [],
-    buildNotification: (record) => {
-      const status = normalizeCampusAttendanceStatus(record.status);
-      const statusLabel = campusAttendanceStatusLabels[status] || 'Registrado';
-      const childName = firstCampusName(record.studentNameSnapshot);
+  const [parentResult] = await Promise.all([
+    queueStudentParentNotifications({
+      schoolId,
+      students: Array.isArray(session?.records) ? session.records : [],
+      buildNotification: (record) => {
+        const status = normalizeCampusAttendanceStatus(record.status);
+        const statusLabel = campusAttendanceStatusLabels[status] || 'Registrado';
+        const childName = firstCampusName(record.studentNameSnapshot);
 
-      return {
-        title: `Asistencia registrada: ${courseLabel}`,
-        body: `${childName} quedó marcado como ${statusLabel.toLowerCase()} en ${attendanceTypeLabel.toLowerCase()}.`,
-        payload: {
-          type: 'campus.attendance_recorded',
-          attendanceSessionId: String(session?._id || ''),
-          courseId: String(course?._id || session?.courseId || ''),
-          courseTitle: normalizeText(course?.title || session?.courseTitleSnapshot),
-          subject: normalizeText(course?.subject || session?.subjectSnapshot),
-          date: normalizeText(session?.date),
-          status,
-          studentId: String(record.studentId || record._id || ''),
-          url: buildParentPushUrl('campus.attendance_recorded', { studentId: record.studentId || record._id }),
-        },
-      };
-    },
-  });
+        return {
+          title: `Asistencia registrada: ${courseLabel}`,
+          body: `${childName} quedó marcado como ${statusLabel.toLowerCase()} en ${attendanceTypeLabel.toLowerCase()}.`,
+          payload: {
+            type: 'campus.attendance_recorded',
+            attendanceSessionId: String(session?._id || ''),
+            courseId: String(course?._id || session?.courseId || ''),
+            courseTitle: normalizeText(course?.title || session?.courseTitleSnapshot),
+            subject: normalizeText(course?.subject || session?.subjectSnapshot),
+            date: normalizeText(session?.date),
+            status,
+            studentId: String(record.studentId || record._id || ''),
+            url: buildParentPushUrl('campus.attendance_recorded', { studentId: record.studentId || record._id }),
+          },
+        };
+      },
+    }),
+    queueStudentUserNotifications({
+      schoolId,
+      students: Array.isArray(session?.records) ? session.records : [],
+      buildNotification: (record) => {
+        const status = normalizeCampusAttendanceStatus(record.status);
+        const statusLabel = campusAttendanceStatusLabels[status] || 'Registrado';
+
+        return {
+          title: `Asistencia registrada: ${courseLabel}`,
+          body: `Quedaste marcado como ${statusLabel.toLowerCase()} en ${attendanceTypeLabel.toLowerCase()}.`,
+          payload: {
+            type: 'campus.attendance_recorded',
+            attendanceSessionId: String(session?._id || ''),
+            courseId: String(course?._id || session?.courseId || ''),
+            courseTitle: normalizeText(course?.title || session?.courseTitleSnapshot),
+            subject: normalizeText(course?.subject || session?.subjectSnapshot),
+            date: normalizeText(session?.date),
+            status,
+            studentId: String(record.studentId || record._id || ''),
+            url: buildStudentPushUrl('campus.attendance_recorded'),
+          },
+        };
+      },
+    }),
+  ]);
+
+  return parentResult;
 }
 
 async function notifyCampusPostPublished({ schoolId, course, post, students }) {
   const courseLabel = normalizeText(course?.subject) || normalizeText(course?.title) || 'clase';
   const postType = normalizePostType(post?.type) || 'Publicación';
   const postCategoryLabel = getCampusPostCategoryLabel(postType);
+  const isAssignmentLike = isEvaluativePostType(postType);
 
-  return queueStudentParentNotifications({
-    schoolId,
-    students,
-    buildNotification: (student) => {
-      const studentId = String(student._id || student.studentId || student.id || '');
+  const [parentResult] = await Promise.all([
+    queueStudentParentNotifications({
+      schoolId,
+      students,
+      buildNotification: (student) => {
+        const studentId = String(student._id || student.studentId || student.id || '');
 
-      return {
-        title: `${postCategoryLabel} nueva: ${normalizeText(post?.title)}`,
-        body: `${firstCampusName(student.name || student.studentNameSnapshot)} tiene una nueva publicación de ${courseLabel}.`,
-        payload: {
-          type: 'campus.teacher_post_published',
-          postId: String(post?._id || ''),
-          courseId: String(course?._id || post?.courseId || ''),
-          courseTitle: normalizeText(course?.title),
-          subject: normalizeText(course?.subject),
-          postType,
-          studentId,
-          url: buildParentPushUrl('campus.teacher_post_published', { studentId, postType }),
-        },
-      };
-    },
-  });
+        return {
+          title: `${postCategoryLabel} nueva: ${normalizeText(post?.title)}`,
+          body: `${firstCampusName(student.name || student.studentNameSnapshot)} tiene una nueva publicación de ${courseLabel}.`,
+          payload: {
+            type: 'campus.teacher_post_published',
+            postId: String(post?._id || ''),
+            courseId: String(course?._id || post?.courseId || ''),
+            courseTitle: normalizeText(course?.title),
+            subject: normalizeText(course?.subject),
+            postType,
+            studentId,
+            url: buildParentPushUrl('campus.teacher_post_published', { studentId, postType }),
+          },
+        };
+      },
+    }),
+    isAssignmentLike
+      ? queueStudentUserNotifications({
+        schoolId,
+        students,
+        buildNotification: (student) => ({
+          title: `${postCategoryLabel} nueva: ${normalizeText(post?.title)}`,
+          body: `Tienes una nueva ${postCategoryLabel.toLowerCase()} en ${courseLabel}.`,
+          payload: {
+            type: 'campus.teacher_post_published',
+            postId: String(post?._id || ''),
+            courseId: String(course?._id || post?.courseId || ''),
+            courseTitle: normalizeText(course?.title),
+            subject: normalizeText(course?.subject),
+            postType,
+            studentId: String(student.studentId || student._id || student.id || ''),
+            url: buildStudentPushUrl('campus.teacher_post_published'),
+          },
+        }),
+      })
+      : Promise.resolve({ notificationsCreated: 0, tokensFound: 0 }),
+  ]);
+
+  return parentResult;
 }
 
 async function notifyDisciplineObservation({ schoolId, observation }) {

@@ -18,6 +18,42 @@ function buildParentNotificationSectionPath(sectionKey, extraQuery = '') {
   return `${basePath}${separator}${normalizedExtraQuery}`;
 }
 
+export function resolveStudentNotificationPath(payload = {}) {
+  const explicitUrl = normalizeText(payload.url);
+  if (explicitUrl.startsWith('/student')) {
+    return explicitUrl;
+  }
+
+  const type = normalizeText(payload.type);
+
+  switch (type) {
+    case 'campus.grade_published':
+      return '/student?academicView=academic-grades';
+
+    case 'campus.attendance_recorded':
+      return '/student?academicView=academic-attendance';
+
+    case 'campus.teacher_post_published':
+    case 'academic.calendar_assignment':
+      return '/student?academicView=academic-calendar';
+
+    case 'academic.course_assigned':
+      return '/student?academicView=academic-performance';
+
+    default:
+      return '/student';
+  }
+}
+
+export function resolveNotificationPath(payload = {}, options = {}) {
+  const audience = normalizeText(payload.audience || options.audience);
+  if (audience === 'student') {
+    return resolveStudentNotificationPath(payload);
+  }
+
+  return resolveParentNotificationPath(payload);
+}
+
 export function resolveParentNotificationPath(payload = {}) {
   const explicitUrl = normalizeText(payload.url);
   if (explicitUrl.startsWith('/')) {

@@ -3,7 +3,7 @@ import { FirebaseMessaging } from '@capacitor-firebase/messaging';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { registerDeviceToken } from '../services/notifications.service';
-import { resolveParentNotificationPath } from './parentNotificationNavigation';
+import { resolveNotificationPath } from './parentNotificationNavigation';
 
 const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
 const PENDING_PUSH_NAVIGATION_KEY = 'comergioPendingPushNavigation';
@@ -58,7 +58,7 @@ export function registerPushNotificationNavigation(handler) {
 }
 
 function openPushTarget(rawPayload = {}) {
-  const path = resolveParentNotificationPath(rawPayload);
+  const path = resolveNotificationPath(rawPayload);
   if (!path) {
     return;
   }

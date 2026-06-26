@@ -5229,6 +5229,45 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   color: #fff;
 }
 
+.campus-parent-mobile-app.has-student-academic-bottom-nav .campus-parent-mobile__content {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5.5rem);
+}
+
+.campus-student-academic__bottom-nav {
+  z-index: 8;
+}
+
+.campus-student-academic__nav-item {
+  gap: 0.2rem;
+  min-height: 58px;
+  padding: 0.35rem 0.15rem 0.2rem;
+}
+
+.campus-student-academic__nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+}
+
+.campus-student-academic__nav-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.campus-student-academic__nav-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.62rem;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .campus-parent-mobile__care-nav {
   position: relative;
   display: flex;
