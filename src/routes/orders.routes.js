@@ -21,6 +21,7 @@ const {
   buildSchoolBillingStatementHtml,
   serializeStatementOrder,
 } = require('../utils/schoolBillingStatementDocument');
+const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
 
 const router = express.Router();
 
@@ -233,6 +234,130 @@ async function createSchoolBillingStatement({
     { _id: { $in: orders.map((order) => order._id) }, schoolId },
     { $set: { schoolBillingStatementId: statement._id } }
   );
+
+  return statement;
+}
+
+async function buildConsolidatedSchoolBillingStatementNumber(schoolId, from = '', to = '') {
+  const fromKey = String(from || '').slice(0, 7).replace(/-/g, '') || '000000';
+  const toKey = String(to || '').slice(0, 7).replace(/-/g, '') || '000000';
+  const prefix = `CC-CONS-${fromKey}-${toKey}-`;
+  const lastStatement = await SchoolBillingStatement.findOne({
+    schoolId,
+    statementNumber: { $regex: `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` },
+  })
+    .sort({ statementNumber: -1 })
+    .lean();
+
+  let sequence = 1;
+  if (lastStatement?.statementNumber) {
+    const sequenceText = String(lastStatement.statementNumber).split('-').pop();
+    const parsedSequence = Number(sequenceText);
+    if (Number.isFinite(parsedSequence)) {
+      sequence = parsedSequence + 1;
+    }
+  }
+
+  return `${prefix}${String(sequence).padStart(2, '0')}`;
+}
+
+async function loadSchoolBillingOrdersInRange({ schoolId, from = '', to = '' }) {
+  const fromDate = resolveDateQueryBoundary(from, 'start');
+  const toDate = resolveDateQueryBoundary(to, 'end');
+  const query = {
+    schoolId,
+    paymentMethod: 'school_billing',
+    status: 'completed',
+  };
+
+  if (fromDate || toDate) {
+    query.createdAt = {};
+    if (fromDate) {
+      query.createdAt.$gte = fromDate;
+    }
+    if (toDate) {
+      query.createdAt.$lte = toDate;
+    }
+  }
+
+  return Order.find(query)
+    .populate('studentId', 'name schoolCode')
+    .populate('storeId', 'name')
+    .populate('vendorId', 'name username')
+    .sort({ createdAt: 1 })
+    .lean();
+}
+
+async function cleanupOrphanedSchoolBillingStatements(schoolId) {
+  const statements = await SchoolBillingStatement.find({ schoolId }).select('_id').lean();
+
+  await Promise.all(statements.map(async (statement) => {
+    const linkedOrderCount = await Order.countDocuments({
+      schoolId,
+      schoolBillingStatementId: statement._id,
+    });
+
+    if (!linkedOrderCount) {
+      await SchoolBillingStatement.deleteOne({ _id: statement._id, schoolId });
+    }
+  }));
+}
+
+async function createConsolidatedSchoolBillingStatement({
+  schoolId,
+  schoolName,
+  userId,
+  userName,
+  from = '',
+  to = '',
+  billingFor = '',
+  billingResponsible = '',
+}) {
+  const orders = await loadSchoolBillingOrdersInRange({ schoolId, from, to });
+  if (!orders.length) {
+    throw new Error('No hay órdenes de cuenta de cobro colegio en el periodo seleccionado.');
+  }
+
+  const resolvedBillingFor = normalizeSchoolBillingParty(billingFor) || 'Cuenta consolidada colegio';
+  const resolvedBillingResponsible = normalizeSchoolBillingParty(billingResponsible) || 'Administración cafetería';
+  const serializedOrders = orders.map(serializeStatementOrder);
+  const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const statementNumber = await buildConsolidatedSchoolBillingStatementNumber(schoolId, from, to);
+  const generatedAt = resolveSchoolBillingGeneratedAt(orders);
+
+  const documentHtml = buildSchoolBillingStatementHtml({
+    schoolName,
+    statementNumber,
+    generatedAt,
+    billingFor: resolvedBillingFor,
+    billingResponsible: resolvedBillingResponsible,
+    orders: serializedOrders,
+    totalAmount,
+    generatedByName: userName,
+  });
+
+  const statement = await SchoolBillingStatement.create({
+    schoolId,
+    statementNumber,
+    billingFor: resolvedBillingFor,
+    billingResponsible: resolvedBillingResponsible,
+    orderIds: orders.map((order) => order._id),
+    orders: serializedOrders,
+    orderCount: serializedOrders.length,
+    totalAmount,
+    documentHtml,
+    generatedBy: userId,
+    generatedByName: userName,
+    createdAt: generatedAt,
+    updatedAt: generatedAt,
+  });
+
+  await Order.updateMany(
+    { _id: { $in: orders.map((order) => order._id) }, schoolId },
+    { $set: { schoolBillingStatementId: statement._id } }
+  );
+
+  await cleanupOrphanedSchoolBillingStatements(schoolId);
 
   return statement;
 }
@@ -698,10 +823,42 @@ router.post('/school-billing/statements/backfill', roleMiddleware('admin'), asyn
   }
 });
 
+router.post('/school-billing/statements/consolidated', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId, name, username } = req.user;
+    const schoolName = await getSchoolDisplayName(schoolId);
+    const userName = String(name || username || 'Administración');
+    const from = String(req.body?.from || '').trim();
+    const to = String(req.body?.to || '').trim();
+    const billingFor = String(req.body?.billingFor || '').trim();
+    const billingResponsible = String(req.body?.billingResponsible || '').trim();
+
+    if (!from || !to) {
+      return res.status(400).json({ message: 'Debes indicar las fechas desde y hasta del periodo.' });
+    }
+
+    const statement = await createConsolidatedSchoolBillingStatement({
+      schoolId,
+      schoolName,
+      userId,
+      userName,
+      from,
+      to,
+      billingFor,
+      billingResponsible,
+    });
+
+    return res.status(201).json(statement);
+  } catch (error) {
+    const statusCode = /periodo seleccionado|fechas/i.test(String(error.message || '')) ? 400 : 500;
+    return res.status(statusCode).json({ message: error.message });
+  }
+});
+
 router.post('/school-billing/statements', roleMiddleware('admin'), async (req, res) => {
   try {
     const { schoolId, userId, name, username } = req.user;
-    const schoolName = String(schoolId || 'Colegio');
+    const schoolName = await getSchoolDisplayName(schoolId);
     const userName = String(name || username || 'Administración');
     const orderIds = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
 
@@ -1086,5 +1243,7 @@ router.get('/:id', async (req, res) => {
     return res.status(500).json({ message: error.message });
   }
 });
+
+router.createConsolidatedSchoolBillingStatement = createConsolidatedSchoolBillingStatement;
 
 module.exports = router;

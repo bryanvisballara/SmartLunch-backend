@@ -71,6 +71,7 @@ import {
   markSchoolBillingCollected,
   getSchoolBillingStatements,
   createSchoolBillingStatement,
+  createConsolidatedSchoolBillingStatement,
   backfillSchoolBillingStatements,
   getSchoolBillingStatementDocument,
 } from '../services/orders.service';
@@ -532,6 +533,12 @@ function AdminDashboard() {
   });
   const [historyType, setHistoryType] = useState('sales');
   const [schoolBillingFilters, setSchoolBillingFilters] = useState({ from: '', to: '', q: '' });
+  const [consolidatedBillingFilters, setConsolidatedBillingFilters] = useState({
+    from: '2026-03-01',
+    to: '2026-05-31',
+    billingFor: 'Cuenta consolidada colegio',
+    billingResponsible: 'Administración cafetería',
+  });
   const [schoolBillingOrders, setSchoolBillingOrders] = useState([]);
   const [schoolBillingStatements, setSchoolBillingStatements] = useState([]);
   const [selectedSchoolBillingOrderIds, setSelectedSchoolBillingOrderIds] = useState([]);
@@ -2472,6 +2479,55 @@ function AdminDashboard() {
       ]);
     }, 'Historial de cuentas de cobro actualizado.');
   };
+
+  const onGenerateConsolidatedSchoolBillingStatement = () => {
+    if (!consolidatedBillingFilters.from || !consolidatedBillingFilters.to) {
+      setError('Indica las fechas desde y hasta para generar la cuenta consolidada.');
+      return;
+    }
+
+    runAction(async () => {
+      const response = await createConsolidatedSchoolBillingStatement(consolidatedBillingFilters);
+      if (response?.data?.documentHtml) {
+        openSchoolBillingDocumentHtml(response.data.documentHtml);
+      }
+      await Promise.all([
+        loadSchoolBillingOrders(schoolBillingFilters),
+        loadSchoolBillingStatements(),
+      ]);
+    }, 'Cuenta consolidada generada y guardada en el historial.');
+  };
+
+  const consolidatedSchoolBillingPreview = useMemo(() => {
+    const fromDate = consolidatedBillingFilters.from ? new Date(`${consolidatedBillingFilters.from}T00:00:00.000Z`) : null;
+    const toDate = consolidatedBillingFilters.to ? new Date(`${consolidatedBillingFilters.to}T23:59:59.999Z`) : null;
+
+    const orders = (schoolBillingOrders || []).filter((order) => {
+      if (String(order?.paymentMethod || '').toLowerCase() !== 'school_billing') {
+        return false;
+      }
+
+      const createdAt = order.createdAt ? new Date(order.createdAt) : null;
+      if (!createdAt || Number.isNaN(createdAt.getTime())) {
+        return false;
+      }
+
+      if (fromDate && createdAt < fromDate) {
+        return false;
+      }
+
+      if (toDate && createdAt > toDate) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return {
+      count: orders.length,
+      total: orders.reduce((sum, order) => sum + Number(order.total || 0), 0),
+    };
+  }, [schoolBillingOrders, consolidatedBillingFilters.from, consolidatedBillingFilters.to]);
 
   const loadClosures = async (filters = closureFilters) => {
     if (!filters.storeId) {
@@ -5667,6 +5723,59 @@ function AdminDashboard() {
           </button>
 
           <div className="card">
+            <h4>Cuenta consolidada del periodo</h4>
+            <p className="helper">
+              Genera un solo PDF con todas las órdenes de cuenta de cobro colegio del rango de fechas, como la cuenta mensual que se envía al colegio.
+            </p>
+            <div className="admin-form-grid">
+              <label>
+                Desde
+                <input
+                  type="date"
+                  value={consolidatedBillingFilters.from}
+                  onChange={(event) => setConsolidatedBillingFilters((prev) => ({ ...prev, from: event.target.value }))}
+                />
+              </label>
+              <label>
+                Hasta
+                <input
+                  type="date"
+                  value={consolidatedBillingFilters.to}
+                  onChange={(event) => setConsolidatedBillingFilters((prev) => ({ ...prev, to: event.target.value }))}
+                />
+              </label>
+              <label>
+                Dirigido a
+                <input
+                  value={consolidatedBillingFilters.billingFor}
+                  onChange={(event) => setConsolidatedBillingFilters((prev) => ({ ...prev, billingFor: event.target.value }))}
+                  placeholder="Cuenta consolidada colegio"
+                />
+              </label>
+              <label>
+                Responsable
+                <input
+                  value={consolidatedBillingFilters.billingResponsible}
+                  onChange={(event) => setConsolidatedBillingFilters((prev) => ({ ...prev, billingResponsible: event.target.value }))}
+                  placeholder="Administración cafetería"
+                />
+              </label>
+            </div>
+            <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" onClick={onGenerateConsolidatedSchoolBillingStatement} type="button">
+                Generar cuenta consolidada
+              </button>
+              {consolidatedSchoolBillingPreview.count > 0 ? (
+                <strong>
+                  Incluirá {consolidatedSchoolBillingPreview.count} órdenes · Total estimado: {formatCurrency(consolidatedSchoolBillingPreview.total)}
+                </strong>
+              ) : (
+                <span className="helper">Filtra o actualiza para ver cuántas órdenes entran en el periodo.</span>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
             <h4>Generar cuenta de cobro</h4>
             <p className="helper">
               Selecciona órdenes pendientes con el mismo dirigido a y responsable. El PDF quedará guardado en el historial.
@@ -5842,7 +5951,7 @@ function AdminDashboard() {
               </button>
             </div>
             <p className="helper">
-              Aquí puedes volver a abrir e imprimir las cuentas de cobro PDF que ya se generaron.
+              Importa cuentas pequeñas por día y responsable. Para recuperar la cuenta mensual grande del colegio, usa la sección de cuenta consolidada del periodo.
             </p>
             {schoolBillingStatements.length === 0 ? (
               <p>No hay cuentas de cobro guardadas en el historial.</p>
