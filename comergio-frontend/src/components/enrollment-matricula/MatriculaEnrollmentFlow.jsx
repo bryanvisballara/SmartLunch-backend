@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   acceptEnrollmentMatriculaConsent,
   acknowledgeEnrollmentMatriculaIntro,
@@ -102,7 +103,72 @@ function resolveActiveStep(process) {
   return 'consent';
 }
 
-function SignatureCanvas({ onChange, disabled = false }) {
+function prefersTouchSignatureSurface() {
+  return /iPad|iPhone|iPod|Android/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+let touchYOffsetCalibrationPx = null;
+
+function measureCssMm(mm) {
+  if (typeof document === 'undefined') return mm * 3.78;
+  const ruler = document.createElement('div');
+  ruler.style.cssText = `position:fixed;left:-10000px;top:0;width:1px;height:${mm}mm;visibility:hidden;pointer-events:none;`;
+  document.body.appendChild(ruler);
+  const px = ruler.getBoundingClientRect().height || mm * 3.78;
+  ruler.remove();
+  return px;
+}
+
+function getTouchYOffsetCalibrationPx() {
+  if (touchYOffsetCalibrationPx != null) return touchYOffsetCalibrationPx;
+  touchYOffsetCalibrationPx = measureCssMm(5);
+  return touchYOffsetCalibrationPx;
+}
+
+function isIosTouchDevice() {
+  return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function getCanvasPointerPoint(canvas, event, { fixedSurface = false } = {}) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) {
+    return { x: 0, y: 0 };
+  }
+
+  const touch = event.touches?.[0] || event.changedTouches?.[0];
+  const isTouchInput = Boolean(touch) || event.pointerType === 'touch';
+
+  if (
+    !isTouchInput
+    && event.target === canvas
+    && typeof event.offsetX === 'number'
+    && !Number.isNaN(event.offsetX)
+    && typeof event.offsetY === 'number'
+    && !Number.isNaN(event.offsetY)
+  ) {
+    return {
+      x: event.offsetX,
+      y: event.offsetY,
+    };
+  }
+
+  const source = touch || event;
+  let clientX = Number(source.clientX ?? 0);
+  let clientY = Number(source.clientY ?? 0);
+
+  if (isTouchInput && fixedSurface && isIosTouchDevice()) {
+    clientY += getTouchYOffsetCalibrationPx();
+  }
+
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+  };
+}
+
+function SignatureCanvas({ onChange, disabled = false, fixedSurface = false }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const emitFrameRef = useRef(null);
@@ -135,8 +201,10 @@ function SignatureCanvas({ onChange, disabled = false }) {
 
     const resize = () => {
       const ratio = Math.max(window.devicePixelRatio || 1, 1);
-      const width = canvas.offsetWidth;
-      const height = canvas.offsetHeight;
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width || canvas.clientWidth || canvas.offsetWidth;
+      const height = rect.height || canvas.clientHeight || canvas.offsetHeight;
+      if (!width || !height) return;
       displaySizeRef.current = { width, height };
       canvas.width = Math.max(1, Math.floor(width * ratio));
       canvas.height = Math.max(1, Math.floor(height * ratio));
@@ -152,10 +220,15 @@ function SignatureCanvas({ onChange, disabled = false }) {
       : null;
     observer?.observe(canvas);
     window.addEventListener('resize', resize);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener('resize', resize);
+    viewport?.addEventListener('scroll', resize);
 
     return () => {
       observer?.disconnect();
       window.removeEventListener('resize', resize);
+      viewport?.removeEventListener('resize', resize);
+      viewport?.removeEventListener('scroll', resize);
       if (emitFrameRef.current) {
         window.cancelAnimationFrame(emitFrameRef.current);
       }
@@ -168,38 +241,27 @@ function SignatureCanvas({ onChange, disabled = false }) {
       return { x: 0, y: 0 };
     }
 
-    const rect = canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) {
-      return { x: 0, y: 0 };
-    }
-
-    const useMouseOffset = event.pointerType === 'mouse'
-      && event.target === canvas
-      && typeof event.offsetX === 'number'
-      && !Number.isNaN(event.offsetX)
-      && typeof event.offsetY === 'number'
-      && !Number.isNaN(event.offsetY);
-
-    if (useMouseOffset) {
-      return {
-        x: event.offsetX,
-        y: event.offsetY,
-      };
-    }
-
-    const source = event.touches?.[0] || event.changedTouches?.[0] || event;
-    const clientX = Number(source.clientX ?? 0);
-    const clientY = Number(source.clientY ?? 0);
-    const displayWidth = displaySizeRef.current.width || canvas.offsetWidth || rect.width;
-    const displayHeight = displaySizeRef.current.height || canvas.offsetHeight || rect.height;
-    const scaleX = displayWidth / rect.width;
-    const scaleY = displayHeight / rect.height;
-
-    return {
-      x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY,
-    };
+    return getCanvasPointerPoint(canvas, event, { fixedSurface });
   };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || disabled) return undefined;
+
+    const preventScrollWhileDrawing = (event) => {
+      if (drawingRef.current) {
+        event.preventDefault();
+      }
+    };
+
+    canvas.addEventListener('touchstart', preventScrollWhileDrawing, { passive: false });
+    canvas.addEventListener('touchmove', preventScrollWhileDrawing, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', preventScrollWhileDrawing);
+      canvas.removeEventListener('touchmove', preventScrollWhileDrawing);
+    };
+  }, [disabled]);
 
   const startDrawing = (event) => {
     if (disabled) return;
@@ -249,7 +311,7 @@ function SignatureCanvas({ onChange, disabled = false }) {
   };
 
   return (
-    <div className={`matricula-signature-canvas${disabled ? ' is-disabled' : ''}`}>
+    <div className={`matricula-signature-canvas${disabled ? ' is-disabled' : ''}${fixedSurface ? ' is-fixed-surface' : ''}`}>
       <canvas
         ref={canvasRef}
         onPointerDown={startDrawing}
@@ -264,6 +326,70 @@ function SignatureCanvas({ onChange, disabled = false }) {
       </button>
     </div>
   );
+}
+
+function MatriculaSignatureZone({
+  enabled,
+  disabled,
+  loading,
+  helperText,
+  submitLabel,
+  submittingLabel,
+  onChange,
+  onSubmit,
+}) {
+  const useFixedDrawer = enabled && !disabled && prefersTouchSignatureSurface();
+
+  useEffect(() => {
+    if (!useFixedDrawer) return undefined;
+    document.body.classList.add('matricula-signature-drawer-open');
+    const scrollY = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    return () => {
+      document.body.classList.remove('matricula-signature-drawer-open');
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.left = '';
+      document.body.style.right = '';
+      window.scrollTo(0, scrollY);
+    };
+  }, [useFixedDrawer]);
+
+  if (!enabled) {
+    return null;
+  }
+  const content = (
+    <>
+      {helperText ? <p className="matricula-flow-signature-label">{helperText}</p> : null}
+      <SignatureCanvas disabled={disabled} fixedSurface={useFixedDrawer} onChange={onChange} />
+      <button
+        className="matricula-flow-primary"
+        disabled={disabled || loading}
+        onClick={onSubmit}
+        type="button"
+      >
+        {loading ? submittingLabel : submitLabel}
+      </button>
+    </>
+  );
+
+  if (useFixedDrawer) {
+    return createPortal(
+      <div aria-label="Panel de firma" className="matricula-signature-drawer" role="region">
+        <div className="matricula-signature-drawer__sheet">
+          <div aria-hidden="true" className="matricula-signature-drawer__handle" />
+          <strong className="matricula-signature-drawer__title">Firma con tu dedo</strong>
+          {content}
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  return <div className="matricula-flow-signature-zone">{content}</div>;
 }
 
 function PendingSignatureIntro({ process, pendingSignatureResume }) {
@@ -307,8 +433,8 @@ function MatriculaEnrollmentFlow({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [signatureImage, setSignatureImage] = useState('');
-  const [contractDownloaded, setContractDownloaded] = useState(false);
-  const [pagareDownloaded, setPagareDownloaded] = useState(false);
+  const [contractAccepted, setContractAccepted] = useState(false);
+  const [pagareAccepted, setPagareAccepted] = useState(false);
 
   useEffect(() => {
     setProcess(initialProcess);
@@ -322,11 +448,11 @@ function MatriculaEnrollmentFlow({
 
   useEffect(() => {
     if (activeStep === 'contract') {
-      setContractDownloaded(false);
+      setContractAccepted(false);
       setSignatureImage('');
     }
     if (activeStep === 'pagare') {
-      setPagareDownloaded(false);
+      setPagareAccepted(false);
       setSignatureImage('');
     }
   }, [activeStep, process?._id]);
@@ -416,8 +542,8 @@ function MatriculaEnrollmentFlow({
   };
 
   const onSignContract = async () => {
-    if (!contractDownloaded) {
-      setErrorMessage('Debes descargar el contrato en PDF para habilitar la firma.');
+    if (!contractAccepted) {
+      setErrorMessage('Debes leer y aceptar el contrato para habilitar la firma.');
       return;
     }
     if (!(await validateSignatureBeforeSubmit())) {
@@ -449,8 +575,8 @@ function MatriculaEnrollmentFlow({
   };
 
   const onSignPagare = async () => {
-    if (!pagareDownloaded) {
-      setErrorMessage('Debes descargar el pagaré en PDF para habilitar la firma.');
+    if (!pagareAccepted) {
+      setErrorMessage('Debes leer y aceptar el pagaré para habilitar la firma.');
       return;
     }
     if (!(await validateSignatureBeforeSubmit())) {
@@ -636,29 +762,33 @@ function MatriculaEnrollmentFlow({
                 <MatriculaContractDocumentPreview
                   contractParams={contractDocumentParams || contractParams}
                   liveSignatureImage={signatureImage}
-                  onDocumentDownloaded={() => setContractDownloaded(true)}
                   schoolId={schoolId || process?.schoolId || contractParams?.schoolId}
                   schoolName={schoolName}
                   variant="contract"
                 />
-                {!contractDownloaded ? (
+                <label className="matricula-flow-checkbox">
+                  <input
+                    checked={contractAccepted}
+                    onChange={(event) => setContractAccepted(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>He leído el contrato y acepto los términos y condiciones suscritos en él.</span>
+                </label>
+                {!contractAccepted ? (
                   <p className="matricula-flow-note matricula-flow-note--muted">
-                    Debes descargar el contrato en PDF para habilitar la firma.
+                    Marca la casilla de aceptación para habilitar la firma del contrato.
                   </p>
-                ) : (
-                  <p className="matricula-flow-signature-label">
-                    Cuando hayas leído el contrato, firma con tu dedo en el recuadro para legalizarlo.
-                  </p>
-                )}
-                <SignatureCanvas disabled={loading || !contractDownloaded} onChange={setSignatureImage} />
-                <button
-                  className="matricula-flow-primary"
-                  disabled={loading || !contractDownloaded}
-                  onClick={onSignContract}
-                  type="button"
-                >
-                  {loading ? 'Guardando firma...' : 'Firmar contrato'}
-                </button>
+                ) : null}
+                <MatriculaSignatureZone
+                  enabled={contractAccepted}
+                  disabled={loading || !contractAccepted}
+                  helperText="Firma con tu dedo en el recuadro para legalizar el contrato."
+                  loading={loading}
+                  onChange={setSignatureImage}
+                  onSubmit={onSignContract}
+                  submitLabel="Firmar contrato"
+                  submittingLabel="Guardando firma..."
+                />
               </section>
             ) : null}
 
@@ -668,29 +798,33 @@ function MatriculaEnrollmentFlow({
                 <MatriculaContractDocumentPreview
                   contractParams={contractDocumentParams || contractParams}
                   liveSignatureImage={signatureImage}
-                  onDocumentDownloaded={() => setPagareDownloaded(true)}
                   schoolId={schoolId || process?.schoolId || contractParams?.schoolId}
                   schoolName={schoolName}
                   variant="pagare"
                 />
-                {!pagareDownloaded ? (
+                <label className="matricula-flow-checkbox">
+                  <input
+                    checked={pagareAccepted}
+                    onChange={(event) => setPagareAccepted(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>He leído el pagaré y acepto los términos y condiciones suscritos en él.</span>
+                </label>
+                {!pagareAccepted ? (
                   <p className="matricula-flow-note matricula-flow-note--muted">
-                    Debes descargar el pagaré en PDF para habilitar la firma.
+                    Marca la casilla de aceptación para habilitar la firma del pagaré.
                   </p>
-                ) : (
-                  <p className="matricula-flow-signature-label">
-                    Cuando hayas leído el pagaré, firma en el recuadro para completar tu matrícula.
-                  </p>
-                )}
-                <SignatureCanvas disabled={loading || !pagareDownloaded} onChange={setSignatureImage} />
-                <button
-                  className="matricula-flow-primary"
-                  disabled={loading || !pagareDownloaded}
-                  onClick={onSignPagare}
-                  type="button"
-                >
-                  {loading ? 'Guardando firma...' : 'Firmar pagaré'}
-                </button>
+                ) : null}
+                <MatriculaSignatureZone
+                  enabled={pagareAccepted}
+                  disabled={loading || !pagareAccepted}
+                  helperText="Firma con tu dedo en el recuadro para completar tu matrícula."
+                  loading={loading}
+                  onChange={setSignatureImage}
+                  onSubmit={onSignPagare}
+                  submitLabel="Firmar pagaré"
+                  submittingLabel="Guardando firma..."
+                />
               </section>
             ) : null}
 
