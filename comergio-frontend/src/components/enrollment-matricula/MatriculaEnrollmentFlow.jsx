@@ -168,21 +168,36 @@ function SignatureCanvas({ onChange, disabled = false }) {
       return { x: 0, y: 0 };
     }
 
-    if (typeof event.offsetX === 'number' && !Number.isNaN(event.offsetX)
-      && typeof event.offsetY === 'number' && !Number.isNaN(event.offsetY)
-      && event.target === canvas) {
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return { x: 0, y: 0 };
+    }
+
+    const useMouseOffset = event.pointerType === 'mouse'
+      && event.target === canvas
+      && typeof event.offsetX === 'number'
+      && !Number.isNaN(event.offsetX)
+      && typeof event.offsetY === 'number'
+      && !Number.isNaN(event.offsetY);
+
+    if (useMouseOffset) {
       return {
         x: event.offsetX,
         y: event.offsetY,
       };
     }
 
-    const rect = canvas.getBoundingClientRect();
     const source = event.touches?.[0] || event.changedTouches?.[0] || event;
+    const clientX = Number(source.clientX ?? 0);
+    const clientY = Number(source.clientY ?? 0);
+    const displayWidth = displaySizeRef.current.width || canvas.offsetWidth || rect.width;
+    const displayHeight = displaySizeRef.current.height || canvas.offsetHeight || rect.height;
+    const scaleX = displayWidth / rect.width;
+    const scaleY = displayHeight / rect.height;
 
     return {
-      x: source.clientX - rect.left - (canvas.clientLeft || 0),
-      y: source.clientY - rect.top - (canvas.clientTop || 0),
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
     };
   };
 
@@ -242,6 +257,7 @@ function SignatureCanvas({ onChange, disabled = false }) {
         onPointerUp={stopDrawing}
         onPointerCancel={stopDrawing}
         onPointerLeave={stopDrawing}
+        style={{ touchAction: 'none' }}
       />
       <button className="matricula-signature-canvas__clear" disabled={disabled} onClick={onClear} type="button">
         Limpiar firma

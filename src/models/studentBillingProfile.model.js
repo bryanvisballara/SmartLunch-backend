@@ -20,7 +20,9 @@ const studentBillingProfileSchema = new mongoose.Schema(
     annualTuitionAdditionalDiscountLabel: { type: String, trim: true, default: '' },
     monthlyTuitionAmount: { type: Number, min: 0, default: 0 },
     initialEnrollmentAndFirstTuitionPaid: { type: Boolean, default: false },
+    monthlyTuitionAdditionalDiscountType: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
     monthlyTuitionAdditionalDiscountPercent: { type: Number, min: 0, max: 100, default: 0 },
+    monthlyTuitionAdditionalDiscountFixedAmount: { type: Number, min: 0, default: 0 },
     monthlyTuitionAdditionalDiscountLabel: { type: String, trim: true, default: '' },
     dueDay: { type: Number, min: 1, max: 28, default: 10 },
     benefitRules: {

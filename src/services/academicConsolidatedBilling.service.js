@@ -6,6 +6,10 @@ const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('./notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { findGradeFeeSetting, getFeeGradeAliases } = require('../utils/feeGradeMatching');
+const {
+  applyMonthlyTuitionAdditionalDiscount,
+  normalizeAdditionalPensionDiscount,
+} = require('../utils/academicAdditionalPensionDiscount');
 
 const DEFAULT_ACADEMIC_MONTHLY_DUE_DAY = 10;
 
@@ -147,15 +151,15 @@ function resolveMonthlyTuitionAmount(profile = {}, dueDate = new Date()) {
   const isFixedBenefit = normalizeText(benefitRule?.discountType) === 'fixed';
   const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
   const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, profile.grade) : 0;
-  const additionalDiscountPercent = normalizeAdditionalDiscountPercent(profile.monthlyTuitionAdditionalDiscountPercent);
-  const discountPercent = Math.min(100, baseDiscountPercent + additionalDiscountPercent);
   const appliedFixedDiscount = Math.min(baseAmount, Math.max(0, Number(fixedDiscountAmount || 0)));
   const amountAfterFixed = Math.max(0, baseAmount - appliedFixedDiscount);
-  const effectiveAmount = discountPercent > 0
-    ? Math.max(0, Math.round(amountAfterFixed * (1 - (discountPercent / 100))))
+  const amountAfterRectoriaPercent = baseDiscountPercent > 0
+    ? Math.max(0, Math.round(amountAfterFixed * (1 - (baseDiscountPercent / 100))))
     : amountAfterFixed;
+  const effectiveAmount = applyMonthlyTuitionAdditionalDiscount(amountAfterRectoriaPercent, profile);
+  const additionalDiscount = normalizeAdditionalPensionDiscount(profile);
+  const labels = [normalizeText(benefitRule?.label), additionalDiscount.label].filter(Boolean);
 
-  const labels = [normalizeText(benefitRule?.label), normalizeText(profile.monthlyTuitionAdditionalDiscountLabel)].filter(Boolean);
   return {
     amount: effectiveAmount,
     originalAmount: baseAmount,

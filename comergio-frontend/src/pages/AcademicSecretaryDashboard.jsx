@@ -56,6 +56,7 @@ import {
   updateAcademicSecretaryDatabaseRow,
   updateAcademicSecretaryCommunicationAuthor,
   updateAcademicSecretaryCommunication,
+  updateAcademicSecretaryPensionDiscount,
   updateAcademicSecretarySchoolRouteStop,
   uploadAcademicSecretaryCommunicationImage,
   uploadAcademicSecretaryCommunicationMedia,
@@ -103,7 +104,44 @@ function filterBillingEnrollmentAccounts(accounts = [], subview = 'pending') {
   if (subview === 'paid') {
     return accounts.filter((account) => account.enrollmentStatus === 'paid');
   }
-  return accounts.filter((account) => account.enrollmentStatus === 'pending');
+  return accounts.filter((account) => account.enrollmentStatus === 'pending' && Number(account.enrollmentPendingAmount || 0) > 0);
+}
+
+function resolveEnrollmentBillingStatusClass(account = {}) {
+  if (account.enrollmentStatus === 'paid') return 'paid';
+  if (account.enrollmentStatus === 'none') return 'current';
+  if (Number(account.enrollmentOverdueMonths || 0) > 0) return 'overdue';
+  return 'pending';
+}
+
+function resolvePensionBillingStatusClass(account = {}) {
+  if (Number(account.pensionPendingAmount || 0) <= 0) return 'paid';
+  if (Number(account.overdueMonths || 0) > 0) return 'overdue';
+  return 'pending';
+}
+
+function resolveBillingAccountPendingAmount(account = {}, activeSection = 'overview', billingEnrollmentFocus = false) {
+  if (activeSection === 'enrollments') return Number(account.enrollmentPendingAmount || 0);
+  if (activeSection === 'pensions') return Number(account.pensionPendingAmount || 0);
+  if (billingEnrollmentFocus) return Number(account.enrollmentPendingAmount || 0);
+  return Number(account.pendingAmount || 0);
+}
+
+function resolveBillingAccountPaidAmount(account = {}, activeSection = 'overview', billingEnrollmentFocus = false) {
+  if (activeSection === 'enrollments') return Number(account.enrollmentPaidAmount || 0);
+  if (activeSection === 'pensions') return Number(account.pensionPaidAmount || 0);
+  if (billingEnrollmentFocus) return Number(account.enrollmentPaidAmount || 0);
+  return Number(account.paidAmount || 0);
+}
+
+function createPensionDiscountDraft(account = {}) {
+  const discountType = account?.monthlyTuitionAdditionalDiscountType === 'fixed' ? 'fixed' : 'percent';
+  return {
+    discountType,
+    discountPercent: account?.monthlyTuitionAdditionalDiscountPercent ?? '',
+    discountFixedAmount: account?.monthlyTuitionAdditionalDiscountFixedAmount ?? '',
+    discountLabel: account?.monthlyTuitionAdditionalDiscountLabel || '',
+  };
 }
 
 function filterBillingPensionAccounts(accounts = []) {
@@ -1515,6 +1553,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [billingPaymentDraft, setBillingPaymentDraft] = useState(createBillingPaymentDraft);
   const [billingPaymentModal, setBillingPaymentModal] = useState({ open: false, row: null });
   const [billingPaymentDetailModal, setBillingPaymentDetailModal] = useState({ open: false, row: null });
+  const [pensionDiscountDraft, setPensionDiscountDraft] = useState(createPensionDiscountDraft);
   const [followUpModal, setFollowUpModal] = useState({ open: false, type: '', item: null, title: '', body: '' });
   const [deleteCommunicationModal, setDeleteCommunicationModal] = useState({ open: false, item: null });
   const [communicationEngagementModal, setCommunicationEngagementModal] = useState({ open: false, type: 'comments', item: null });
@@ -1727,10 +1766,16 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
   const selectedAccountPendingAmount = useMemo(() => {
     if (!selectedBillingAccount) return 0;
-    if (activeSection === 'enrollments') return Number(selectedBillingAccount.enrollmentPendingAmount || 0);
-    if (activeSection === 'pensions') return Number(selectedBillingAccount.pensionPendingAmount || 0);
-    return Number(selectedBillingAccount.pendingAmount || 0);
-  }, [activeSection, selectedBillingAccount]);
+    return resolveBillingAccountPendingAmount(selectedBillingAccount, activeSection, billingEnrollmentFocus);
+  }, [activeSection, billingEnrollmentFocus, selectedBillingAccount]);
+
+  useEffect(() => {
+    if (!selectedBillingAccount) {
+      setPensionDiscountDraft(createPensionDiscountDraft());
+      return;
+    }
+    setPensionDiscountDraft(createPensionDiscountDraft(selectedBillingAccount));
+  }, [selectedBillingAccount?.studentId, activeSection]);
 
   const selectedBillingPendingCharges = useMemo(() => (
     (selectedBillingAccount?.charges || []).filter((charge) => ['pending', 'overdue'].includes(String(charge.status)) && Number(charge.amount || 0) > 0)
@@ -2967,6 +3012,28 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     setBillingPaymentModal({ open: false, row: null });
   };
 
+  const onSavePensionDiscount = async (event) => {
+    event.preventDefault();
+    if (!selectedBillingAccount?.studentId) return;
+
+    await runAction(async () => {
+      const response = await updateAcademicSecretaryPensionDiscount(selectedBillingAccount.studentId, {
+        discountType: pensionDiscountDraft.discountType,
+        discountPercent: pensionDiscountDraft.discountType === 'percent' ? pensionDiscountDraft.discountPercent : 0,
+        discountFixedAmount: pensionDiscountDraft.discountType === 'fixed' ? pensionDiscountDraft.discountFixedAmount : 0,
+        discountLabel: pensionDiscountDraft.discountLabel,
+      });
+      if (response?.data?.billing) {
+        setBootstrap((previous) => ({
+          ...previous,
+          billing: response.data.billing,
+        }));
+      } else {
+        await loadBootstrap();
+      }
+    }, 'Descuento de pensión actualizado para el alumno.', 'pensions');
+  };
+
   const openBillingPaymentDetailModal = (row = null) => {
     if (!row) return;
     setBillingPaymentDetailModal({ open: true, row });
@@ -3435,21 +3502,21 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                           <td><strong>{account.parentName || 'Sin acudiente'}</strong><div>{account.parentPhone || account.parentEmail || '-'}</div></td>
                           {activeSection === 'enrollments' ? (
                             <>
-                              <td><span className={`academic-secretary__billing-status is-${account.enrollmentStatus === 'paid' ? 'paid' : account.status}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
+                              <td><span className={`academic-secretary__billing-status is-${resolveEnrollmentBillingStatusClass(account)}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
                               <td>{Number(account.enrollmentPendingAmount || 0) > 0 ? formatCurrency(account.enrollmentPendingAmount) : '$0'}</td>
                               <td>{formatCurrency(account.enrollmentPaidAmount || 0)}</td>
                             </>
                           ) : activeSection === 'pensions' ? (
                             <>
-                              <td><span className={`academic-secretary__billing-status is-${Number(account.pensionPendingAmount || 0) > 0 ? account.status : 'paid'}`}>{Number(account.pensionPendingAmount || 0) > 0 ? 'Pensión pendiente' : 'Al día'}</span></td>
+                              <td><span className={`academic-secretary__billing-status is-${resolvePensionBillingStatusClass(account)}`}>{Number(account.pensionPendingAmount || 0) > 0 ? 'Pensión pendiente' : 'Al día'}</span></td>
                               <td>{Number(account.pensionPendingAmount || 0) > 0 ? formatCurrency(account.pensionPendingAmount) : '$0'}</td>
                               <td>{formatCurrency(account.pensionPaidAmount || 0)}</td>
                             </>
                           ) : (
                             <>
-                              <td><span className={`academic-secretary__billing-status is-${account.status}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
-                              <td>{Number(account.pendingAmount || 0) > 0 ? formatCurrency(account.pendingAmount) : '$0'}</td>
-                              <td>{formatCurrency(account.paidAmount || 0)}</td>
+                              <td><span className={`academic-secretary__billing-status is-${billingEnrollmentFocus ? resolveEnrollmentBillingStatusClass(account) : account.status}`}>{billingEnrollmentFocus ? (account.enrollmentStatusLabel || account.statusLabel) : account.statusLabel}</span></td>
+                              <td>{resolveBillingAccountPendingAmount(account, activeSection, billingEnrollmentFocus) > 0 ? formatCurrency(resolveBillingAccountPendingAmount(account, activeSection, billingEnrollmentFocus)) : '$0'}</td>
+                              <td>{formatCurrency(resolveBillingAccountPaidAmount(account, activeSection, billingEnrollmentFocus))}</td>
                             </>
                           )}
                         </tr>
@@ -3508,6 +3575,62 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                         <div><dt>Correo</dt><dd>{selectedBillingAccount.parentEmail || '-'}</dd></div>
                         {activeSection === 'enrollments' ? <div><dt>Estado matrícula</dt><dd>{selectedBillingAccount.enrollmentStatusLabel || '-'}</dd></div> : null}
                       </dl>
+
+                      {activeSection === 'pensions' ? (
+                        <form className="academic-secretary__billing-pension-discount" onSubmit={onSavePensionDiscount}>
+                          <div className="academic-secretary__billing-payment-plan-head">
+                            <h4>Descuento adicional en pensión</h4>
+                            <span>Independiente de los beneficios de rectoría</span>
+                          </div>
+                          <p>Aplica un descuento individual para este alumno (por ejemplo, hermanos en el colegio). Se refleja en el plan de pagos y en la app del acudiente.</p>
+                          <div className="academic-secretary__form-grid">
+                            <label>
+                              Tipo de descuento
+                              <select
+                                onChange={(event) => setPensionDiscountDraft((previous) => ({ ...previous, discountType: event.target.value }))}
+                                value={pensionDiscountDraft.discountType}
+                              >
+                                <option value="percent">Porcentaje (%)</option>
+                                <option value="fixed">Valor fijo ($)</option>
+                              </select>
+                            </label>
+                            {pensionDiscountDraft.discountType === 'percent' ? (
+                              <label>
+                                Porcentaje de descuento
+                                <input
+                                  max="100"
+                                  min="0"
+                                  onChange={(event) => setPensionDiscountDraft((previous) => ({ ...previous, discountPercent: event.target.value }))}
+                                  placeholder="Ej: 10"
+                                  type="number"
+                                  value={pensionDiscountDraft.discountPercent}
+                                />
+                              </label>
+                            ) : (
+                              <label>
+                                Valor fijo de descuento
+                                <input
+                                  min="0"
+                                  onChange={(event) => setPensionDiscountDraft((previous) => ({ ...previous, discountFixedAmount: event.target.value }))}
+                                  placeholder="Ej: 150000"
+                                  type="number"
+                                  value={pensionDiscountDraft.discountFixedAmount}
+                                />
+                              </label>
+                            )}
+                            <label>
+                              Motivo del descuento
+                              <input
+                                onChange={(event) => setPensionDiscountDraft((previous) => ({ ...previous, discountLabel: event.target.value }))}
+                                placeholder="Ej: Descuento por segundo hijo"
+                                required
+                                value={pensionDiscountDraft.discountLabel}
+                              />
+                            </label>
+                          </div>
+                          <button className="btn" disabled={busy} type="submit">Guardar descuento de pensión</button>
+                        </form>
+                      ) : null}
 
                       <div className="academic-secretary__billing-payment-plan">
                         <div className="academic-secretary__billing-payment-plan-head">

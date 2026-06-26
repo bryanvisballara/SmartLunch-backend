@@ -9,6 +9,11 @@ const {
   redactParentEnrollmentChargeAmount,
   redactParentEnrollmentPricingGuide,
 } = require('../utils/millenniumSchool');
+const {
+  applyMonthlyTuitionAdditionalDiscount,
+  hasMonthlyTuitionAdditionalDiscount,
+  normalizeAdditionalPensionDiscount,
+} = require('../utils/academicAdditionalPensionDiscount');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -1024,14 +1029,12 @@ function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = ne
   const isFixedBenefit = String(benefitRule?.discountType || '').trim().toLowerCase() === 'fixed';
   const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
   const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, billingProfile?.grade) : 0;
-  const additionalDiscountPercent = normalizeAcademicAdditionalDiscountPercent(billingProfile?.monthlyTuitionAdditionalDiscountPercent || 0);
-  const discountPercent = Math.min(100, baseDiscountPercent + additionalDiscountPercent);
-  const labels = [String(benefitRule?.label || '').trim(), String(billingProfile?.monthlyTuitionAdditionalDiscountLabel || '').trim()].filter(Boolean);
 
   return {
-    discountPercent,
+    discountPercent: baseDiscountPercent,
     fixedDiscountAmount,
-    benefitLabel: labels.join(' + '),
+    benefitLabel: String(benefitRule?.label || '').trim(),
+    additionalDiscount: normalizeAdditionalPensionDiscount(billingProfile),
   };
 }
 
@@ -1068,20 +1071,27 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
 
   const monthlyDiscountConfig = String(charge?.category || '') === 'monthly_tuition'
     ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
-    : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '' };
+    : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '', additionalDiscount: normalizeAdditionalPensionDiscount() };
   const discountPercent = monthlyDiscountConfig.discountPercent;
   const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(monthlyDiscountConfig.fixedDiscountAmount || 0)));
   const amountAfterFixedDiscount = Math.max(0, baseAmount - fixedDiscountAmount);
-  const effectiveAmount = discountPercent > 0 || fixedDiscountAmount > 0
+  const amountAfterRectoriaPercent = discountPercent > 0 || fixedDiscountAmount > 0
     ? Math.max(0, Math.round(amountAfterFixedDiscount * (1 - (discountPercent / 100))))
     : baseAmount;
+  const effectiveAmount = String(charge?.category || '') === 'monthly_tuition'
+    ? applyMonthlyTuitionAdditionalDiscount(amountAfterRectoriaPercent, billingProfile)
+    : amountAfterRectoriaPercent;
+  const benefitLabels = [
+    monthlyDiscountConfig.benefitLabel,
+    hasMonthlyTuitionAdditionalDiscount(billingProfile) ? normalizeAdditionalPensionDiscount(billingProfile).label : '',
+  ].filter(Boolean);
 
   return {
     baseAmount,
     effectiveAmount,
     discountPercent,
     fixedDiscountAmount,
-    benefitLabel: monthlyDiscountConfig.benefitLabel,
+    benefitLabel: benefitLabels.join(' + '),
   };
 }
 
@@ -1526,7 +1536,6 @@ function buildParentAcademicPricingGuide(profile = {}, feeConfiguration = {}) {
     || profile?.monthlyTuitionAmount
     || 0,
   )));
-  const additionalMonthlyDiscountPercent = normalizeAcademicAdditionalDiscountPercent(profile?.monthlyTuitionAdditionalDiscountPercent || 0);
 
   const enrollmentBenefits = (Array.isArray(feeConfiguration?.enrollmentBenefitRules) ? feeConfiguration.enrollmentBenefitRules : [])
     .filter((rule) => doesEnrollmentBenefitRuleApplyToGrade(rule, grade))
@@ -1548,7 +1557,7 @@ function buildParentAcademicPricingGuide(profile = {}, feeConfiguration = {}) {
       monthlyFullAmount,
       rule,
       grade,
-      additionalMonthlyDiscountPercent,
+      0,
     );
     const isFixedBenefit = String(rule?.discountType || '').trim().toLowerCase() === 'fixed';
     const discountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(rule.discountPercent || 0)));
@@ -1564,13 +1573,14 @@ function buildParentAcademicPricingGuide(profile = {}, feeConfiguration = {}) {
     };
   });
 
-  if (additionalMonthlyDiscountPercent > 0 && normalizeText(profile?.monthlyTuitionAdditionalDiscountLabel)) {
+  const additionalMonthlyDiscount = normalizeAdditionalPensionDiscount(profile);
+  if (hasMonthlyTuitionAdditionalDiscount(profile) && additionalMonthlyDiscount.label) {
     monthlyBenefits.push({
-      label: normalizeText(profile.monthlyTuitionAdditionalDiscountLabel),
-      amount: Math.max(0, Math.round(monthlyFullAmount * (1 - (additionalMonthlyDiscountPercent / 100)))),
+      label: additionalMonthlyDiscount.label,
+      amount: applyMonthlyTuitionAdditionalDiscount(monthlyFullAmount, profile),
       fullAmount: monthlyFullAmount,
-      discountPercent: additionalMonthlyDiscountPercent,
-      fixedDiscountAmount: 0,
+      discountPercent: additionalMonthlyDiscount.type === 'percent' ? additionalMonthlyDiscount.percent : 0,
+      fixedDiscountAmount: additionalMonthlyDiscount.type === 'fixed' ? additionalMonthlyDiscount.fixedAmount : 0,
       windowLabel: 'Descuento adicional configurado para este alumno.',
     });
   }
