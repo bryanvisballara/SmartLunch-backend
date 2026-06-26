@@ -3694,6 +3694,77 @@ function resolveAcademicAnnualTuitionDiscountConfig(billingProfile = {}) {
   };
 }
 
+function resolveAcademicAnnualTuitionPricing({
+  charge = null,
+  billingProfile = {},
+  feeConfiguration = {},
+  referenceDate = new Date(),
+} = {}) {
+  const grade = normalizeText(billingProfile?.grade || '');
+  const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, grade);
+  const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(feeConfiguration || {}, grade);
+  const annualBaseAmount = Math.max(
+    0,
+    Number(
+      charge?.originalAmount
+      || billingProfile?.annualTuitionBaseAmount
+      || gradeFeeSetting?.enrollmentFee
+      || charge?.amount
+      || billingProfile?.annualTuitionAmount
+      || 0
+    )
+  );
+  const annualDiscountConfig = resolveAcademicAnnualTuitionDiscountConfig(billingProfile);
+  const activeAnnualBenefitRule = getApplicableEnrollmentBenefitRule(
+    schoolYearConfiguration.enrollmentBenefitRules,
+    referenceDate,
+    grade
+  );
+  const activeAnnualBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(
+    annualBaseAmount,
+    activeAnnualBenefitRule,
+    grade
+  );
+  const amountAfterActiveAnnualBenefit = Math.max(0, annualBaseAmount - activeAnnualBenefitDiscountAmount);
+  const activeAnnualAdditionalDiscountAmount = Number(annualDiscountConfig.discountPercent || 0) > 0
+    ? Math.min(amountAfterActiveAnnualBenefit, Math.round(amountAfterActiveAnnualBenefit * (Number(annualDiscountConfig.discountPercent || 0) / 100)))
+    : Math.min(amountAfterActiveAnnualBenefit, Math.max(0, Number(billingProfile?.annualTuitionAdditionalDiscountAmount || 0)));
+  let effectiveAmount = Math.max(0, amountAfterActiveAnnualBenefit - activeAnnualAdditionalDiscountAmount);
+  const profileEffectiveAmount = Math.max(0, Number(billingProfile?.annualTuitionAmount || 0));
+  const storedBenefitDiscount = Math.max(0, Number(billingProfile?.annualTuitionDiscountAmount || 0));
+  const storedAdditionalDiscount = Math.max(0, Number(billingProfile?.annualTuitionAdditionalDiscountAmount || 0));
+  const profileDerivedAmount = profileEffectiveAmount > 0
+    ? profileEffectiveAmount
+    : Math.max(0, annualBaseAmount - storedBenefitDiscount - storedAdditionalDiscount);
+
+  if (profileDerivedAmount > 0 && profileDerivedAmount < annualBaseAmount && profileDerivedAmount < effectiveAmount) {
+    effectiveAmount = profileDerivedAmount;
+  }
+
+  const resolvedBenefitDiscountAmount = activeAnnualBenefitDiscountAmount > 0
+    ? activeAnnualBenefitDiscountAmount
+    : Math.max(0, annualBaseAmount - effectiveAmount - Math.max(0, activeAnnualAdditionalDiscountAmount));
+  const resolvedAdditionalDiscountAmount = activeAnnualAdditionalDiscountAmount > 0
+    ? activeAnnualAdditionalDiscountAmount
+    : Math.max(0, storedAdditionalDiscount);
+  const annualBenefitLabel = [
+    normalizeText(activeAnnualBenefitRule?.label),
+    normalizeText(annualDiscountConfig.benefitLabel),
+  ].filter(Boolean).join(' + ');
+
+  return {
+    baseAmount: annualBaseAmount,
+    effectiveAmount,
+    discountPercent: annualDiscountConfig.discountPercent || 0,
+    fixedDiscountAmount: Math.max(0, annualBaseAmount - effectiveAmount),
+    benefitLabel: annualBenefitLabel || normalizeText(billingProfile?.annualTuitionBenefitLabel) || normalizeText(billingProfile?.annualTuitionAdditionalDiscountLabel),
+    benefitWindowLabel: activeAnnualBenefitRule?.endDate ? getAcademicBenefitWindowLabel(activeAnnualBenefitRule) : '',
+    category: 'annual_tuition',
+    activeAnnualBenefitDiscountAmount: resolvedBenefitDiscountAmount,
+    activeAnnualAdditionalDiscountAmount: resolvedAdditionalDiscountAmount,
+  };
+}
+
 function addAcademicMonthsUtc(date, monthCount = 0) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + Number(monthCount || 0), 1));
 }
@@ -3734,7 +3805,7 @@ function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
   return 0;
 }
 
-function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date()) {
+function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date(), feeConfiguration = null) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
   if (charge?.category === 'monthly_statement') {
     const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
@@ -3749,16 +3820,12 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
     };
   }
   if (charge?.category === 'annual_tuition') {
-    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
-    return {
-      baseAmount,
-      effectiveAmount,
-      discountPercent: 0,
-      fixedDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
-      benefitLabel: normalizeText(billingProfile?.annualTuitionBenefitLabel) || normalizeText(billingProfile?.annualTuitionAdditionalDiscountLabel),
-      benefitWindowLabel: '',
-      category: charge?.category || '',
-    };
+    return resolveAcademicAnnualTuitionPricing({
+      charge,
+      billingProfile,
+      feeConfiguration: feeConfiguration || {},
+      referenceDate,
+    });
   }
 
   const discountConfig = charge?.category === 'monthly_tuition'
@@ -3870,7 +3937,12 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     const dueDate = parseAcademicCalendarDate(charge.dueDate) || parsedEntryDate;
     const paidReferenceDate = latestPayment?.paidAt || charge?.paidAt || dueDate;
     const chargeIsPaid = String(charge?.status || '') === 'paid';
-    const pricing = resolveAcademicChargeAmounts(charge, effectiveBillingProfile, chargeIsPaid ? paidReferenceDate : dueDate);
+    const pricing = resolveAcademicChargeAmounts(
+      charge,
+      effectiveBillingProfile,
+      chargeIsPaid ? paidReferenceDate : now,
+      feeConfiguration
+    );
     const effectiveAmount = chargeIsPaid
       ? Number(rawPaidAmount || charge?.chargeAmount || charge?.amount || pricing.effectiveAmount || 0)
       : Number(pricing.effectiveAmount || charge?.chargeAmount || charge?.amount || 0);
@@ -3899,7 +3971,19 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       outstandingAmount,
       benefitLabel: pricing.benefitLabel || effectiveBillingProfile.annualTuitionBenefitLabel || '',
       benefitWindowLabel: pricing.benefitWindowLabel || '',
-      benefitDescription: charge?.description || buildAcademicPaymentPlanBenefitDescription(pricing),
+      benefitDescription: (() => {
+        const parts = [];
+        if (Number(pricing.activeAnnualBenefitDiscountAmount || 0) > 0) {
+          parts.push(`${formatCurrency(pricing.activeAnnualBenefitDiscountAmount)} de beneficio de matrícula`);
+        }
+        if (Number(pricing.activeAnnualAdditionalDiscountAmount || 0) > 0) {
+          parts.push(`${formatCurrency(pricing.activeAnnualAdditionalDiscountAmount)} de descuento adicional`);
+        }
+        if (parts.length) {
+          return `${parts.join(' + ')}.`;
+        }
+        return charge?.description || buildAcademicPaymentPlanBenefitDescription(pricing);
+      })(),
       paymentMethod,
       paymentMethodLabel: isPaid ? labelAcademicPaymentMethod(paymentMethod) : '',
       paidAt: isPaid ? paidReferenceDate : null,
@@ -3910,9 +3994,12 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
   });
 
   if (!annualTuitionRows.length && (Number(effectiveBillingProfile.annualTuitionBaseAmount || 0) > 0 || Number(effectiveBillingProfile.annualTuitionAmount || 0) > 0)) {
-    const annualDiscountConfig = resolveAcademicAnnualTuitionDiscountConfig(effectiveBillingProfile);
-    const annualBaseAmount = Math.max(0, Number(effectiveBillingProfile.annualTuitionBaseAmount || effectiveBillingProfile.annualTuitionAmount || 0));
-    const activeAnnualBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, now, effectiveBillingProfile.grade);
+    const annualPricing = resolveAcademicAnnualTuitionPricing({
+      billingProfile: effectiveBillingProfile,
+      feeConfiguration,
+      referenceDate: now,
+    });
+    const annualBaseAmount = annualPricing.baseAmount;
     const annualTuitionDueDate = resolveAcademicAnnualTuitionFirstDueDate({
       feeConfiguration,
       grade: effectiveBillingProfile.grade,
@@ -3920,19 +4007,13 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       referenceDate: now,
       billingProfile: effectiveBillingProfile,
     });
-    const activeAnnualBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(annualBaseAmount, activeAnnualBenefitRule, effectiveBillingProfile.grade);
-    const amountAfterActiveAnnualBenefit = Math.max(0, annualBaseAmount - activeAnnualBenefitDiscountAmount);
-    const activeAnnualAdditionalDiscountAmount = Number(annualDiscountConfig.discountPercent || 0) > 0
-      ? Math.min(amountAfterActiveAnnualBenefit, Math.round(amountAfterActiveAnnualBenefit * (Number(annualDiscountConfig.discountPercent || 0) / 100)))
-      : Math.min(amountAfterActiveAnnualBenefit, Math.max(0, Number(effectiveBillingProfile.annualTuitionAdditionalDiscountAmount || 0)));
-    const annualAmount = Math.max(0, amountAfterActiveAnnualBenefit - activeAnnualAdditionalDiscountAmount);
+    const activeAnnualBenefitDiscountAmount = annualPricing.activeAnnualBenefitDiscountAmount;
+    const activeAnnualAdditionalDiscountAmount = annualPricing.activeAnnualAdditionalDiscountAmount;
+    const annualAmount = annualPricing.effectiveAmount;
+    const annualBenefitLabel = annualPricing.benefitLabel;
     const annualInstallmentCount = normalizeAcademicInstallmentCount(effectiveBillingProfile.annualTuitionInstallments, 1);
     const annualInstallmentAmounts = annualAmount > 0 ? splitAcademicAmountIntoInstallments(annualAmount, annualInstallmentCount) : [0];
     const annualBaseInstallmentAmounts = annualBaseAmount > 0 ? splitAcademicAmountIntoInstallments(annualBaseAmount, annualInstallmentCount) : annualInstallmentAmounts;
-    const annualBenefitLabel = [
-      normalizeText(activeAnnualBenefitRule?.label),
-      normalizeText(annualDiscountConfig.benefitLabel),
-    ].filter(Boolean).join(' + ');
     const annualBenefitParts = [];
     if (activeAnnualBenefitDiscountAmount > 0) {
       annualBenefitParts.push(`${formatCurrency(activeAnnualBenefitDiscountAmount)} de beneficio de matrícula`);
@@ -4683,10 +4764,7 @@ function narrowStudentAccountsToPendingEnrollment(studentAccounts = []) {
         status: hasOverdue ? 'overdue' : 'pending',
         statusLabel: hasOverdue ? 'Matrícula en mora' : 'Matrícula pendiente',
         charges: enrollmentCharges,
-        paymentPlan: account.paymentPlan ? {
-          ...account.paymentPlan,
-          rows: (account.paymentPlan.rows || []).filter((row) => String(row.category || '') === 'annual_tuition'),
-        } : account.paymentPlan,
+        paymentPlan: account.paymentPlan,
       };
     })
     .filter(Boolean);
@@ -4753,7 +4831,7 @@ async function buildBillingSummary(schoolId) {
   charges.forEach((charge) => {
     chargeById.set(String(charge._id), charge);
     const billingProfile = billingProfileMap.get(String(charge.billingProfileId || '')) || null;
-    const pricing = resolveAcademicChargeAmounts(charge, billingProfile, now);
+    const pricing = resolveAcademicChargeAmounts(charge, billingProfile, now, feeConfiguration);
     const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0);
     const settledPaidAmount = String(charge.status) === 'paid' && rawPaidAmount <= 0 ? pricing.effectiveAmount : rawPaidAmount;
     const outstandingAmount = String(charge.status) === 'paid' ? 0 : Math.max(0, pricing.effectiveAmount - settledPaidAmount);
@@ -5023,13 +5101,16 @@ async function createCharge({ schoolId, createdByUserId, createdByRole, parentId
 }
 
 async function getAcademicChargeOutstandingAmount(charge, referenceDate = new Date()) {
-  const [billingProfile, payments] = await Promise.all([
+  const [billingProfile, payments, feeConfiguration] = await Promise.all([
     charge.billingProfileId
       ? StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId: charge.schoolId }).lean()
       : null,
     AcademicChargePayment.find({ schoolId: charge.schoolId, chargeId: charge._id }).select('amount').lean(),
+    String(charge?.category || '') === 'annual_tuition'
+      ? ensureAcademicFeeConfiguration(charge.schoolId, [])
+      : Promise.resolve(null),
   ]);
-  const pricing = resolveAcademicChargeAmounts(charge, billingProfile, referenceDate);
+  const pricing = resolveAcademicChargeAmounts(charge, billingProfile, referenceDate, feeConfiguration || {});
   const paidAmount = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
   return {
