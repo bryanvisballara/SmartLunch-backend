@@ -939,7 +939,13 @@ function createBillingPaymentDraft() {
     method: 'bank_transfer',
     paidAt: formatDateInputValue(new Date()),
     notes: '',
+    enrollmentContractMode: '',
   };
+}
+
+function isMatriculaBillingPaymentRow(row = null, charge = null) {
+  const category = String(row?.category || charge?.category || '').toLowerCase();
+  return category === 'annual_tuition';
 }
 
 function createEmptyParentDraft() {
@@ -1610,6 +1616,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     () => bootstrap.billing || { kpis: { pendingAmount: 0, totalPendingCharges: 0, paidThisMonth: 0, overdueBuckets: {} }, charges: [], studentAccounts: [], overdueParents: [], recentPayments: [], followUps: [] },
     [bootstrap.billing]
   );
+  const billingEnrollmentFocus = billing.billingFocus === 'enrollment';
 
   const billingStudentAccounts = useMemo(() => Array.isArray(billing.studentAccounts) ? billing.studentAccounts : [], [billing.studentAccounts]);
   const filteredBillingStudentRows = useMemo(() => {
@@ -1647,7 +1654,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const selectedBillingPendingCharges = useMemo(() => (
     (selectedBillingAccount?.charges || []).filter((charge) => ['pending', 'overdue'].includes(String(charge.status)) && Number(charge.amount || 0) > 0)
   ), [selectedBillingAccount]);
-  const billingPaymentModalCanSubmit = Boolean(billingPaymentDraft.chargeId || billingPaymentModal.row);
+  const billingPaymentSelectedCharge = useMemo(
+    () => selectedBillingPendingCharges.find((charge) => String(charge._id) === String(billingPaymentDraft.chargeId)) || null,
+    [billingPaymentDraft.chargeId, selectedBillingPendingCharges]
+  );
+  const showEnrollmentContractModeField = billingEnrollmentFocus && isMatriculaBillingPaymentRow(billingPaymentModal.row, billingPaymentSelectedCharge);
+  const billingPaymentModalCanSubmit = Boolean(billingPaymentDraft.chargeId || billingPaymentModal.row)
+    && (!showEnrollmentContractModeField || Boolean(billingPaymentDraft.enrollmentContractMode));
 
   useEffect(() => {
     setBillingStudentPage(1);
@@ -2805,6 +2818,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       return;
     }
 
+    const selectedCharge = selectedBillingPendingCharges.find((charge) => String(charge._id) === String(billingPaymentDraft.chargeId)) || null;
+    if (showEnrollmentContractModeField && !billingPaymentDraft.enrollmentContractMode) {
+      setError('Selecciona si el contrato de matrícula es físico o digital.');
+      return;
+    }
+
     await runAction(async () => {
       let chargeId = billingPaymentDraft.chargeId;
       if (!chargeId && modalRow && selectedBillingAccount) {
@@ -2835,6 +2854,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         paidAt: billingPaymentDraft.paidAt,
         notes: billingPaymentDraft.notes,
         settleAsPaid: Boolean(modalRow),
+        enrollmentContractMode: showEnrollmentContractModeField ? billingPaymentDraft.enrollmentContractMode : undefined,
       });
       setBillingPaymentDraft(createBillingPaymentDraft());
       setBillingPaymentModal({ open: false, row: null });
@@ -2847,9 +2867,10 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     const preferredCharge = selectedBillingPendingCharges.find((charge) => String(charge._id) === String(preferredChargeId));
     const rowAmount = Number(row?.outstandingAmount || row?.amount || row?.chargeAmount || 0);
     setBillingPaymentDraft((previous) => ({
-      ...previous,
+      ...createBillingPaymentDraft(),
       chargeId: preferredCharge?._id || '',
       amount: String(Math.round(rowAmount > 0 ? rowAmount : Number(preferredCharge?.amount || 0))),
+      enrollmentContractMode: isMatriculaBillingPaymentRow(row, preferredCharge) ? '' : '',
     }));
     setBillingPaymentModal({ open: true, row });
   };
@@ -3204,18 +3225,19 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         isBillingPortal ? (
           <>
             <section className="academic-secretary__kpis">
-              <article className="academic-secretary__kpi"><span>Saldo pendiente</span><strong>{formatCurrency(billing.kpis?.pendingAmount || 0)}</strong></article>
-              <article className="academic-secretary__kpi"><span>Cargos pendientes</span><strong>{billing.kpis?.totalPendingCharges || 0}</strong></article>
+              <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Matrícula pendiente' : 'Saldo pendiente'}</span><strong>{formatCurrency(billing.kpis?.pendingAmount || 0)}</strong></article>
+              <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Alumnos con matrícula pendiente' : 'Cargos pendientes'}</span><strong>{billingEnrollmentFocus ? billingStudentAccounts.length : (billing.kpis?.totalPendingCharges || 0)}</strong></article>
               <article className="academic-secretary__kpi"><span>Pagado este mes</span><strong>{formatCurrency(billing.kpis?.paidThisMonth || 0)}</strong></article>
-              <article className="academic-secretary__kpi"><span>Alumnos/familias en cartera</span><strong>{overdueFamilyRows.length}</strong></article>
+              <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Familias en seguimiento' : 'Alumnos/familias en cartera'}</span><strong>{billingEnrollmentFocus ? billingStudentAccounts.length : overdueFamilyRows.length}</strong></article>
             </section>
 
             <section className="academic-secretary__panel academic-secretary__billing-panel">
               <div className="academic-secretary__panel-head">
                 <div>
-                  <h2>Estado de cuenta por alumno</h2>
-                  <p>Filtra por alumno o acudiente, revisa cargos y registra pagos presenciales.</p>
+                  <h2>{billingEnrollmentFocus ? 'Matrícula pendiente por alumno' : 'Estado de cuenta por alumno'}</h2>
+                  <p>{billingEnrollmentFocus ? 'Familias con matrícula sin pagar. Filtra por alumno o acudiente y registra pagos presenciales.' : 'Filtra por alumno o acudiente, revisa cargos y registra pagos presenciales.'}</p>
                 </div>
+                {!billingEnrollmentFocus ? (
                 <div className="academic-secretary__billing-bucket-actions">
                   {Object.entries(billing.kpis?.overdueBuckets || {}).filter(([, count]) => Number(count || 0) > 0).map(([bucket, count]) => (
                     <button disabled={busy} key={bucket} onClick={() => onSendReminder(bucket)} type="button">
@@ -3223,6 +3245,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     </button>
                   ))}
                 </div>
+                ) : null}
               </div>
               <div className="academic-secretary__billing-search-row">
                 <label>
@@ -3250,7 +3273,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     </thead>
                     <tbody>
                       {filteredBillingStudentRows.length === 0 ? (
-                        <tr><td colSpan="5">No hay alumnos que coincidan con el filtro.</td></tr>
+                        <tr><td colSpan="5">{billingEnrollmentFocus ? 'No hay alumnos con matrícula pendiente.' : 'No hay alumnos que coincidan con el filtro.'}</td></tr>
                       ) : paginatedBillingStudentRows.map((account) => (
                         <tr
                           className={String(selectedBillingAccount?.studentId || '') === String(account.studentId) ? 'is-selected' : ''}
@@ -4393,7 +4416,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   disabled={busy || (!selectedBillingPendingCharges.length && !billingPaymentModal.row)}
                   onChange={(event) => {
                     const nextCharge = selectedBillingPendingCharges.find((charge) => String(charge._id) === event.target.value);
-                    setBillingPaymentDraft((previous) => ({ ...previous, chargeId: event.target.value, amount: nextCharge ? String(Math.round(Number(nextCharge.amount || 0))) : '' }));
+                    setBillingPaymentDraft((previous) => ({
+                      ...previous,
+                      chargeId: event.target.value,
+                      amount: nextCharge ? String(Math.round(Number(nextCharge.amount || 0))) : '',
+                      enrollmentContractMode: isMatriculaBillingPaymentRow(null, nextCharge) ? previous.enrollmentContractMode : '',
+                    }));
                   }}
                   value={billingPaymentDraft.chargeId}
                 >
@@ -4416,6 +4444,23 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   </select>
                 </label>
               </div>
+              {showEnrollmentContractModeField ? (
+                <label>
+                  Contrato de matrícula
+                  <select
+                    disabled={busy}
+                    onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, enrollmentContractMode: event.target.value }))}
+                    value={billingPaymentDraft.enrollmentContractMode}
+                  >
+                    <option value="">Selecciona una opción</option>
+                    <option value="physical">Contrato físico</option>
+                    <option value="digital">Contrato digital</option>
+                  </select>
+                  <small className="academic-secretary__field-hint">
+                    Físico: firmado en oficina. Digital: el acudiente firmará contrato y pagaré en la app al iniciar sesión.
+                  </small>
+                </label>
+              ) : null}
               <label>
                 Fecha de pago
                 <input disabled={!billingPaymentModalCanSubmit || busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, paidAt: event.target.value }))} type="date" value={billingPaymentDraft.paidAt} />

@@ -5109,6 +5109,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           setParentOverview({ children: [] });
           setParentAppFeatures(defaultParentAppFeatures);
         }),
+      refreshMatriculaPendingSignatures(),
     ];
 
     if (['home', 'finance', 'academic'].includes(activeSection)) {
@@ -5162,7 +5163,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     }
 
     await Promise.allSettled(refreshTasks);
-  }, [activeSection, selectedChildId, studentPortalMode, user]);
+  }, [activeSection, refreshMatriculaPendingSignatures, selectedChildId, studentPortalMode, user]);
 
   const {
     contentOffset: pullRefreshContentOffset,

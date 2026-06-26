@@ -31,6 +31,8 @@ const { ensureStudentWallet } = require('../utils/studentWallet');
 const { upsertStudentAccount } = require('../utils/studentAccount');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
+const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
+const { linkCarteraPaymentToEnrollmentMatricula } = require('../services/enrollmentMatricula.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   normalizeStoredImageUrl,
@@ -4637,6 +4639,59 @@ async function dispatchBillingNotice({ schoolId, schoolName, parents, title, int
   return { push: pushResult, emailed };
 }
 
+function isPendingEnrollmentCharge(charge = {}) {
+  return String(charge.category || '') === 'annual_tuition'
+    && ['pending', 'overdue'].includes(String(charge.status || ''))
+    && Number(charge.amount || charge.outstandingAmount || 0) > 0;
+}
+
+function isPendingEnrollmentPlanRow(row = {}) {
+  return String(row.category || '') === 'annual_tuition'
+    && ['pending', 'overdue', 'upcoming'].includes(String(row.status || ''))
+    && Number(row.outstandingAmount || row.amount || 0) > 0;
+}
+
+function narrowStudentAccountsToPendingEnrollment(studentAccounts = []) {
+  return studentAccounts
+    .map((account) => {
+      const enrollmentCharges = (account.charges || []).filter((charge) => String(charge.category || '') === 'annual_tuition');
+      const pendingEnrollmentCharges = enrollmentCharges.filter(isPendingEnrollmentCharge);
+      const pendingEnrollmentPlanRows = (account.paymentPlan?.rows || []).filter(isPendingEnrollmentPlanRow);
+      const pendingAmountFromCharges = pendingEnrollmentCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0);
+      const pendingAmountFromPlan = pendingEnrollmentPlanRows
+        .filter((row) => {
+          const chargeId = String(row.existingChargeId || '').trim();
+          if (!chargeId) return true;
+          return !pendingEnrollmentCharges.some((charge) => String(charge._id) === chargeId);
+        })
+        .reduce((sum, row) => sum + Number(row.outstandingAmount || row.amount || 0), 0);
+      const pendingAmount = pendingAmountFromCharges + pendingAmountFromPlan;
+
+      if (pendingAmount <= 0) {
+        return null;
+      }
+
+      const hasOverdue = pendingEnrollmentCharges.some((charge) => String(charge.status) === 'overdue' || Number(charge.overdueMonths || 0) > 0)
+        || pendingEnrollmentPlanRows.some((row) => String(row.status) === 'overdue');
+
+      return {
+        ...account,
+        pendingAmount,
+        pendingCount: pendingEnrollmentCharges.length || pendingEnrollmentPlanRows.length,
+        paidAmount: enrollmentCharges.reduce((sum, charge) => sum + Number(charge.paidAmount || 0), 0),
+        overdueMonths: pendingEnrollmentCharges.reduce((maxMonths, charge) => Math.max(maxMonths, Number(charge.overdueMonths || 0)), 0),
+        status: hasOverdue ? 'overdue' : 'pending',
+        statusLabel: hasOverdue ? 'Matrícula en mora' : 'Matrícula pendiente',
+        charges: enrollmentCharges,
+        paymentPlan: account.paymentPlan ? {
+          ...account.paymentPlan,
+          rows: (account.paymentPlan.rows || []).filter((row) => String(row.category || '') === 'annual_tuition'),
+        } : account.paymentPlan,
+      };
+    })
+    .filter(Boolean);
+}
+
 async function buildBillingSummary(schoolId) {
   const now = new Date();
   let [charges, recentPayments, chargePayments, billingProfiles, primaryParentByStudentId, followUps, students] = await Promise.all([
@@ -4869,17 +4924,29 @@ async function buildBillingSummary(schoolId) {
     .filter((payment) => new Date(payment.paidAt || payment.createdAt) >= startOfMonth)
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
+  const millenniumEnrollmentFocus = isMillenniumSchoolId(schoolId);
+  const scopedStudentAccounts = millenniumEnrollmentFocus
+    ? narrowStudentAccountsToPendingEnrollment(studentAccounts)
+    : studentAccounts;
+  const scopedPendingCharges = millenniumEnrollmentFocus
+    ? pendingCharges.filter((charge) => String(charge.category || '') === 'annual_tuition')
+    : pendingCharges;
+  const activePendingCharges = scopedPendingCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status)));
+
   return {
+    billingFocus: millenniumEnrollmentFocus ? 'enrollment' : 'all',
     kpis: {
-      pendingAmount: pendingCharges
-        .filter((charge) => ['pending', 'overdue'].includes(String(charge.status)))
-        .reduce((sum, charge) => sum + Number(charge.amount || 0), 0),
-      totalPendingCharges: pendingCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status))).length,
+      pendingAmount: millenniumEnrollmentFocus
+        ? scopedStudentAccounts.reduce((sum, account) => sum + Number(account.pendingAmount || 0), 0)
+        : activePendingCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0),
+      totalPendingCharges: millenniumEnrollmentFocus
+        ? scopedStudentAccounts.length
+        : activePendingCharges.length,
       paidThisMonth,
-      overdueBuckets: bucketCounts,
+      overdueBuckets: millenniumEnrollmentFocus ? { '2': 0, '3': 0, '4': 0, '5': 0, '6_plus': 0 } : bucketCounts,
     },
-    charges: pendingCharges,
-    studentAccounts,
+    charges: scopedPendingCharges,
+    studentAccounts: scopedStudentAccounts,
     recentPayments: recentPayments.map((payment) => ({
       ...payment,
       parentId: primaryParentByStudentId.get(String(payment.studentId?._id || payment.studentId || ''))?._id || payment.parentId,
@@ -4899,6 +4966,7 @@ async function buildBillingSummary(schoolId) {
 
 function createEmptyBillingSummary() {
   return {
+    billingFocus: 'all',
     kpis: {
       pendingAmount: 0,
       totalPendingCharges: 0,
@@ -8394,6 +8462,13 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
       return res.status(404).json({ message: 'El cargo no existe o ya está pagado.' });
     }
 
+    if (isMillenniumSchoolId(schoolId) && String(charge.category || '') === 'annual_tuition') {
+      const contractMode = normalizeText(req.body?.enrollmentContractMode).toLowerCase();
+      if (!['physical', 'digital', 'fisico', 'contrato_fisico', 'contrato fisico', 'contrato_digital', 'contrato digital'].includes(contractMode)) {
+        return res.status(400).json({ message: 'Selecciona si el contrato de matrícula es físico o digital.' });
+      }
+    }
+
     const paidAt = req.body?.paidAt ? new Date(req.body.paidAt) : new Date();
     if (Number.isNaN(paidAt.getTime())) {
       return res.status(400).json({ message: 'La fecha de pago no es válida.' });
@@ -8450,6 +8525,17 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
     }
     charge.paymentMethod = method;
     await charge.save();
+
+    if (isMillenniumSchoolId(schoolId) && String(charge.category || '') === 'annual_tuition') {
+      await linkCarteraPaymentToEnrollmentMatricula({
+        schoolId,
+        charge,
+        chargePayment: payment,
+        contractMode: req.body?.enrollmentContractMode,
+        recordedByUserId: userId,
+        recordedByRole: role,
+      });
+    }
 
     queueNotificationsForParents({
       schoolId,

@@ -71,6 +71,11 @@ const enrollmentMatriculaProcessSchema = new mongoose.Schema(
     contract: { type: signatureEvidenceSchema, default: () => ({}) },
     pagare: { type: signatureEvidenceSchema, default: () => ({}) },
     contractParamsSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+    contractMode: {
+      type: String,
+      enum: ['digital', 'physical'],
+      default: 'digital',
+    },
     studentName: { type: String, trim: true, default: '' },
     parentName: { type: String, trim: true, default: '' },
   },

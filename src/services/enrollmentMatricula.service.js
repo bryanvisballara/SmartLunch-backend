@@ -617,8 +617,119 @@ async function listSignedDocumentsForRectoria({ schoolId }) {
     ],
   })
     .sort({ updatedAt: -1 })
-    .select('studentName parentName contract pagare status academicYear payment studentId parentId')
+    .select('studentName parentName contract pagare status academicYear payment studentId parentId contractMode')
     .lean();
+}
+
+function normalizeEnrollmentContractMode(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === 'physical' || normalized === 'fisico' || normalized === 'contrato_fisico' || normalized === 'contrato fisico') {
+    return 'physical';
+  }
+  if (normalized === 'digital' || normalized === 'contrato_digital' || normalized === 'contrato digital') {
+    return 'digital';
+  }
+  return '';
+}
+
+async function linkCarteraPaymentToEnrollmentMatricula({
+  schoolId,
+  charge,
+  chargePayment,
+  contractMode,
+  recordedByUserId,
+  recordedByRole,
+}) {
+  if (!isMillenniumSchoolId(schoolId)) {
+    return null;
+  }
+
+  if (String(charge?.category || '') !== 'annual_tuition') {
+    return null;
+  }
+
+  const normalizedContractMode = normalizeEnrollmentContractMode(contractMode);
+  if (!normalizedContractMode) {
+    throw new Error('Selecciona si el contrato de matricula es fisico o digital.');
+  }
+
+  const parentId = toObjectId(chargePayment?.parentId || charge?.parentId);
+  const chargeId = toObjectId(charge?._id);
+  if (!parentId || !chargeId) {
+    throw new Error('No se pudo vincular el pago de matricula con el acudiente.');
+  }
+
+  const [student, parentUser, billingProfile] = await Promise.all([
+    Student.findOne({ _id: charge.studentId, schoolId }).select('name').lean(),
+    User.findOne({ _id: parentId, schoolId }).select('name').lean(),
+    charge.billingProfileId
+      ? StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
+      : StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean(),
+  ]);
+
+  let process = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId });
+  if (!process) {
+    process = new EnrollmentMatriculaProcess({
+      schoolId,
+      studentId: charge.studentId,
+      parentId,
+      chargeId,
+      academicYear: normalizeText(billingProfile?.academicYear),
+      studentName: normalizeText(student?.name) || 'Estudiante',
+      parentName: normalizeText(parentUser?.name) || 'Acudiente',
+    });
+  }
+
+  const paidAt = chargePayment?.paidAt || new Date();
+  process.contractMode = normalizedContractMode;
+  process.consent = {
+    accepted: true,
+    acceptedAt: paidAt,
+    version: CONSENT_VERSION,
+    userId: recordedByUserId || null,
+    studentId: charge.studentId,
+    device: 'Portal de cartera',
+    userAgent: `Registrado por ${normalizeText(recordedByRole) || 'cartera'}`,
+    ipAddress: '',
+  };
+  process.payment = {
+    transactionId: normalizeText(chargePayment?._id),
+    reference: normalizeText(chargePayment?.notes),
+    amount: Math.max(0, Number(chargePayment?.amount || 0)),
+    paidAt,
+    status: 'PAID',
+    method: normalizeText(chargePayment?.method) || 'bank_transfer',
+    chargePaymentId: chargePayment?._id || null,
+    paymentTransactionId: null,
+  };
+
+  if (normalizedContractMode === 'digital') {
+    process.contractParamsSnapshot = await buildContractParamsSnapshot({
+      schoolId,
+      studentId: charge.studentId,
+      charge,
+      billingProfile,
+    });
+    process.status = 'contract_pending';
+    process.contract = {};
+    process.pagare = {};
+    await process.save();
+    return process;
+  }
+
+  const physicalSignedAt = paidAt;
+  const physicalEvidence = {
+    signedAt: physicalSignedAt,
+    fileName: 'contrato-fisico-oficina',
+    device: 'Oficina del colegio',
+    userAgent: `Registrado por ${normalizeText(recordedByRole) || 'cartera'}`,
+    userId: recordedByUserId || null,
+  };
+  process.contract = { ...physicalEvidence };
+  process.pagare = { ...physicalEvidence, fileName: 'pagare-fisico-oficina' };
+  process.status = 'completed';
+  await process.save();
+  return process;
 }
 
 module.exports = {
@@ -632,6 +743,7 @@ module.exports = {
   listConsentsForRectoria,
   listPendingSignaturesForParent,
   listSignedDocumentsForRectoria,
+  linkCarteraPaymentToEnrollmentMatricula,
   markPaymentPending,
   parseClientIp,
   parseDeviceLabel,
