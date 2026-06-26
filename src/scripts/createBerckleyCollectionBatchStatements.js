@@ -31,8 +31,8 @@ async function main() {
         userId: null,
         userName: 'Bryan Visbal',
         collectedDay,
-        billingFor: 'Cuenta consolidada colegio',
-        billingResponsible: 'Administración cafetería',
+        billingFor: '',
+        billingResponsible: '',
       });
       createdStatements.push(statement);
     }

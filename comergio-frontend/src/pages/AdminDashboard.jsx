@@ -2473,8 +2473,8 @@ function AdminDashboard() {
   const onRebuildSchoolBillingStatementsFromCollectionDates = () => {
     runAction(async () => {
       await rebuildSchoolBillingStatementsFromCollectionDates({
-        billingFor: 'Cuenta consolidada colegio',
-        billingResponsible: 'Administración cafetería',
+        billingFor: '',
+        billingResponsible: '',
       });
       setSelectedSchoolBillingOrderIds([]);
       await Promise.all([

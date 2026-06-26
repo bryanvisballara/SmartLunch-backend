@@ -47,6 +47,8 @@ function buildSchoolBillingStatementHtml({
 
     return `<tr>
       <td>${escapeHtml(order.orderNumber || order.orderId || '')}</td>
+      <td>${escapeHtml(order.billingFor || 'N/A')}</td>
+      <td>${escapeHtml(order.billingResponsible || 'N/A')}</td>
       <td>${escapeHtml(order.storeName || 'N/A')}</td>
       <td>${escapeHtml(order.studentName || 'Venta externa')}</td>
       <td>${escapeHtml(order.vendorName || 'N/A')}</td>
@@ -55,6 +57,8 @@ function buildSchoolBillingStatementHtml({
       <td>${formatCurrency(order.total)}</td>
     </tr>`;
   }).join('');
+
+  const resolvedHeader = resolveStatementHeaderParties(orders, billingFor, billingResponsible);
 
   return `<!doctype html>
 <html lang="es">
@@ -94,17 +98,19 @@ function buildSchoolBillingStatementHtml({
       </div>
       <div class="meta-card">
         <span>Dirigido a</span>
-        <strong>${escapeHtml(billingFor || 'N/A')}</strong>
+        <strong>${escapeHtml(resolvedHeader.billingFor || 'N/A')}</strong>
       </div>
       <div class="meta-card">
         <span>Responsable</span>
-        <strong>${escapeHtml(billingResponsible || 'N/A')}</strong>
+        <strong>${escapeHtml(resolvedHeader.billingResponsible || 'N/A')}</strong>
       </div>
     </div>
     <table>
       <thead>
         <tr>
           <th>Orden</th>
+          <th>Dirigido a</th>
+          <th>Responsable</th>
           <th>Tienda</th>
           <th>Alumno</th>
           <th>Vendedor</th>
@@ -121,10 +127,38 @@ function buildSchoolBillingStatementHtml({
 </html>`;
 }
 
+function normalizeStatementParty(value = '') {
+  return String(value || '').trim();
+}
+
+function resolveStatementHeaderParties(orders = [], billingFor = '', billingResponsible = '') {
+  const billingForValues = orders
+    .map((order) => normalizeStatementParty(order.billingFor))
+    .filter(Boolean);
+  const billingResponsibleValues = orders
+    .map((order) => normalizeStatementParty(order.billingResponsible))
+    .filter(Boolean);
+
+  const uniqueFor = new Set(billingForValues.map((value) => value.toLowerCase()));
+  const uniqueResponsible = new Set(billingResponsibleValues.map((value) => value.toLowerCase()));
+
+  const resolvedBillingFor = normalizeStatementParty(billingFor)
+    || (uniqueFor.size === 1 ? billingForValues[0] : uniqueFor.size > 1 ? 'Varios' : '');
+  const resolvedBillingResponsible = normalizeStatementParty(billingResponsible)
+    || (uniqueResponsible.size === 1 ? billingResponsibleValues[0] : uniqueResponsible.size > 1 ? 'Varios' : '');
+
+  return {
+    billingFor: resolvedBillingFor,
+    billingResponsible: resolvedBillingResponsible,
+  };
+}
+
 function serializeStatementOrder(order = {}) {
   return {
     orderId: order._id,
     orderNumber: String(order.orderNumber || order._id || ''),
+    billingFor: String(order.schoolBillingFor || order.billingFor || ''),
+    billingResponsible: String(order.schoolBillingResponsible || order.billingResponsible || ''),
     storeName: String(order.storeId?.name || order.storeName || ''),
     vendorName: String(order.vendorId?.name || order.vendorId?.username || order.vendorName || ''),
     studentName: order.guestSale
@@ -143,6 +177,7 @@ function serializeStatementOrder(order = {}) {
 module.exports = {
   buildSchoolBillingStatementHtml,
   serializeStatementOrder,
+  resolveStatementHeaderParties,
   formatCurrency,
   formatDateTime,
 };

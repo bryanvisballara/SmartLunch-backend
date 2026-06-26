@@ -5,6 +5,8 @@ const schoolBillingStatementOrderSchema = new mongoose.Schema(
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
     orderNumber: { type: String, trim: true, default: '' },
     storeName: { type: String, trim: true, default: '' },
+    billingFor: { type: String, trim: true, default: '' },
+    billingResponsible: { type: String, trim: true, default: '' },
     vendorName: { type: String, trim: true, default: '' },
     studentName: { type: String, trim: true, default: '' },
     total: { type: Number, required: true, default: 0 },

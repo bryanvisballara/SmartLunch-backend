@@ -20,6 +20,7 @@ const {
 const {
   buildSchoolBillingStatementHtml,
   serializeStatementOrder,
+  resolveStatementHeaderParties,
 } = require('../utils/schoolBillingStatementDocument');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
 
@@ -203,12 +204,17 @@ async function createSchoolBillingStatement({
   const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const statementNumber = await buildNextSchoolBillingStatementNumber(schoolId);
   const resolvedGeneratedAt = generatedAt || resolveSchoolBillingGeneratedAt(orders);
+  const headerParties = resolveStatementHeaderParties(
+    serializedOrders,
+    billingFor,
+    billingResponsible
+  );
   const documentHtml = buildSchoolBillingStatementHtml({
     schoolName,
     statementNumber,
     generatedAt: resolvedGeneratedAt,
-    billingFor,
-    billingResponsible,
+    billingFor: headerParties.billingFor,
+    billingResponsible: headerParties.billingResponsible,
     orders: serializedOrders,
     totalAmount,
     generatedByName: userName,
@@ -217,8 +223,8 @@ async function createSchoolBillingStatement({
   const statement = await SchoolBillingStatement.create({
     schoolId,
     statementNumber,
-    billingFor,
-    billingResponsible,
+    billingFor: headerParties.billingFor,
+    billingResponsible: headerParties.billingResponsible,
     orderIds: orders.map((order) => order._id),
     orders: serializedOrders,
     orderCount: serializedOrders.length,
@@ -318,19 +324,22 @@ async function createConsolidatedSchoolBillingStatement({
     throw new Error('No hay órdenes de cuenta de cobro colegio en el periodo seleccionado.');
   }
 
-  const resolvedBillingFor = normalizeSchoolBillingParty(billingFor) || 'Cuenta consolidada colegio';
-  const resolvedBillingResponsible = normalizeSchoolBillingParty(billingResponsible) || 'Administración cafetería';
   const serializedOrders = orders.map(serializeStatementOrder);
   const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const statementNumber = await buildConsolidatedSchoolBillingStatementNumber(schoolId, from, to);
   const generatedAt = resolveSchoolBillingGeneratedAt(orders);
+  const headerParties = resolveStatementHeaderParties(
+    serializedOrders,
+    billingFor,
+    billingResponsible
+  );
 
   const documentHtml = buildSchoolBillingStatementHtml({
     schoolName,
     statementNumber,
     generatedAt,
-    billingFor: resolvedBillingFor,
-    billingResponsible: resolvedBillingResponsible,
+    billingFor: headerParties.billingFor,
+    billingResponsible: headerParties.billingResponsible,
     orders: serializedOrders,
     totalAmount,
     generatedByName: userName,
@@ -339,8 +348,8 @@ async function createConsolidatedSchoolBillingStatement({
   const statement = await SchoolBillingStatement.create({
     schoolId,
     statementNumber,
-    billingFor: resolvedBillingFor,
-    billingResponsible: resolvedBillingResponsible,
+    billingFor: headerParties.billingFor,
+    billingResponsible: headerParties.billingResponsible,
     orderIds: orders.map((order) => order._id),
     orders: serializedOrders,
     orderCount: serializedOrders.length,
@@ -431,19 +440,22 @@ async function createSchoolBillingStatementFromCollectionBatch({
     throw new Error(`No hay órdenes marcadas como cobradas el ${collectedDay}.`);
   }
 
-  const resolvedBillingFor = normalizeSchoolBillingParty(billingFor) || 'Cuenta consolidada colegio';
-  const resolvedBillingResponsible = normalizeSchoolBillingParty(billingResponsible) || 'Administración cafetería';
   const serializedOrders = orders.map(serializeStatementOrder);
   const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const statementNumber = await buildCollectionBatchStatementNumber(schoolId, collectedDay);
   const generatedAt = resolveSchoolBillingCollectedAt(orders);
+  const headerParties = resolveStatementHeaderParties(
+    serializedOrders,
+    billingFor,
+    billingResponsible
+  );
 
   const documentHtml = buildSchoolBillingStatementHtml({
     schoolName,
     statementNumber,
     generatedAt,
-    billingFor: resolvedBillingFor,
-    billingResponsible: resolvedBillingResponsible,
+    billingFor: headerParties.billingFor,
+    billingResponsible: headerParties.billingResponsible,
     orders: serializedOrders,
     totalAmount,
     generatedByName: userName,
@@ -452,8 +464,8 @@ async function createSchoolBillingStatementFromCollectionBatch({
   const statement = await SchoolBillingStatement.create({
     schoolId,
     statementNumber,
-    billingFor: resolvedBillingFor,
-    billingResponsible: resolvedBillingResponsible,
+    billingFor: headerParties.billingFor,
+    billingResponsible: headerParties.billingResponsible,
     orderIds: orders.map((order) => order._id),
     orders: serializedOrders,
     orderCount: serializedOrders.length,
