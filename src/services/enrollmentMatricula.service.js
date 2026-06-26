@@ -10,6 +10,8 @@ const User = require('../models/user.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
 
+const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
+
 const CONSENT_VERSION = 'Consentimiento Matricula v1.0';
 
 function normalizeText(value) {
@@ -261,16 +263,20 @@ async function getOrCreateProcessForCharge({ schoolId, parentId, chargeId, req }
 
 function serializeProcess(process, charge = null) {
   const doc = process?.toObject ? process.toObject() : process;
+  const paymentConfirmed = normalizeText(doc?.payment?.status).includes('PAID') || Boolean(doc?.payment?.chargePaymentId);
+  const hideEnrollmentAmount = isMillenniumSchoolId(doc?.schoolId) && !paymentConfirmed;
+
   return {
     ...doc,
     charge: charge ? {
       _id: charge._id,
       concept: charge.concept,
-      amount: charge.amount,
-      originalAmount: charge.originalAmount,
+      amount: hideEnrollmentAmount ? null : charge.amount,
+      originalAmount: hideEnrollmentAmount ? null : charge.originalAmount,
       dueDate: charge.dueDate,
       category: charge.category,
       status: charge.status,
+      amountHiddenUntilGateway: hideEnrollmentAmount || undefined,
     } : undefined,
     requiresSignature: ['payment_confirmed', 'contract_pending', 'pagare_pending'].includes(doc.status),
     pendingContractSignature: ['payment_confirmed', 'contract_pending'].includes(doc.status),

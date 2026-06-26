@@ -12,6 +12,7 @@ import {
   generateSignedEnrollmentContractPdfBase64,
   generateSignedPagarePdfBase64,
   normalizeOfficialEnrollmentContractParams,
+  shouldHideParentEnrollmentPaymentAmount,
 } from '../../lib/millenniumEnrollmentContracts';
 import MatriculaContractDocumentPreview from './MatriculaContractDocumentPreview';
 import { evaluateSignatureImage } from './signatureValidation';
@@ -299,6 +300,9 @@ function MatriculaEnrollmentFlow({
 
   const activeStep = useMemo(() => resolveActiveStep(process), [process]);
   const contractParams = process?.contractParamsSnapshot || null;
+  const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({ schoolId, schoolName })
+    && activeStep === 'payment'
+    && process.payment?.status !== 'PAID';
 
   useEffect(() => {
     if (activeStep === 'contract') {
@@ -570,7 +574,11 @@ function MatriculaEnrollmentFlow({
               <section className="matricula-flow-panel">
                 <div className="matricula-flow-payment-card">
                   <span>Pago de matrícula</span>
-                  <strong>{formatCurrency(charge?.amount)}</strong>
+                  {hideEnrollmentPaymentAmount ? (
+                    <p className="matricula-flow-note">El valor se mostrará en la pasarela de pago.</p>
+                  ) : (
+                    <strong>{formatCurrency(charge?.amount)}</strong>
+                  )}
                   <p>{charge?.concept || 'Matrícula anual'}</p>
                 </div>
                 <p className="matricula-flow-note">

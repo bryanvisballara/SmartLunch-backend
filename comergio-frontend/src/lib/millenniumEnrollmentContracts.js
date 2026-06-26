@@ -229,9 +229,17 @@ export function getEnrollmentContractDocumentTitle(contractParams = {}, context 
     : 'CONTRATO DE MATRÍCULA 2026-27';
 }
 
-export function isMillenniumSchool(schoolName = '') {
+export function isMillenniumSchool(schoolName = '', schoolId = '') {
   const normalized = normalizeText(schoolName).toLowerCase();
-  return MILLENNIUM_SCHOOL_IDS.has(normalized) || normalized.includes('millennium');
+  const normalizedId = normalizeText(schoolId).toLowerCase();
+  return MILLENNIUM_SCHOOL_IDS.has(normalized)
+    || MILLENNIUM_SCHOOL_IDS.has(normalizedId)
+    || normalized.includes('millennium')
+    || normalizedId.includes('millennium');
+}
+
+export function shouldHideParentEnrollmentPaymentAmount({ schoolId = '', schoolName = '' } = {}) {
+  return isMillenniumSchool(schoolName, schoolId);
 }
 
 export function usesOfficialEnrollmentContractTemplate({ schoolId = '', schoolName = '' } = {}) {

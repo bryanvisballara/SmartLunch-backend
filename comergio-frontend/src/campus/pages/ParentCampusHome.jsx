@@ -47,6 +47,7 @@ import {
   getEnrollmentMatriculaProcess,
   getEnrollmentMatriculaPaymentStatus,
 } from '../../services/enrollmentMatricula.service';
+import { shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
 
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
@@ -566,7 +567,7 @@ function resolveParentPricingGuide(pricingGuides, selectedChild, financeCharges 
   };
 }
 
-function ParentFinancePricingGuide({ isLoading = false, pricingGuide }) {
+function ParentFinancePricingGuide({ hideEnrollmentAmounts = false, isLoading = false, pricingGuide }) {
   if (isLoading) {
     return (
       <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
@@ -585,13 +586,19 @@ function ParentFinancePricingGuide({ isLoading = false, pricingGuide }) {
     );
   }
 
-  const enrollmentFullAmount = Number(pricingGuide?.enrollment?.fullAmount || 0);
+  const enrollmentFullAmount = hideEnrollmentAmounts
+    ? 0
+    : Number(pricingGuide?.enrollment?.fullAmount || 0);
   const monthlyFullAmount = Number(pricingGuide?.monthlyTuition?.fullAmount || 0);
   if (enrollmentFullAmount <= 0 && monthlyFullAmount <= 0) {
     return (
       <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
         <h3>Valores de matrícula y pensión</h3>
-        <p className="campus-parent-mobile__empty-note">No hay tarifas configuradas para mostrar en este grado.</p>
+        <p className="campus-parent-mobile__empty-note">
+          {hideEnrollmentAmounts
+            ? 'El valor de matrícula se mostrará al pagar en la pasarela. No hay tarifas de pensión configuradas para este grado.'
+            : 'No hay tarifas configuradas para mostrar en este grado.'}
+        </p>
       </section>
     );
   }
@@ -630,8 +637,11 @@ function ParentFinancePricingGuide({ isLoading = false, pricingGuide }) {
   return (
     <section className="campus-parent-mobile__finance-group campus-parent-mobile__finance-pricing-guide">
       <h3>Valores de matrícula y pensión</h3>
+      {hideEnrollmentAmounts ? (
+        <p className="campus-parent-mobile__empty-note">El valor de matrícula se mostrará al pagar en la pasarela.</p>
+      ) : null}
       <div className="campus-parent-mobile__finance-pricing-card">
-        {renderPricingRows(pricingGuide.enrollment, 'Matrícula')}
+        {!hideEnrollmentAmounts ? renderPricingRows(pricingGuide.enrollment, 'Matrícula') : null}
         {renderPricingRows(pricingGuide.monthlyTuition, 'Pensión')}
       </div>
     </section>
@@ -5220,6 +5230,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       : String(primaryPendingCharge?.category || '').toLowerCase() === 'monthly_tuition'
         ? 'Pagar pensión'
         : 'Pagar');
+  const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({
+    schoolId: user?.schoolId,
+    schoolName: schoolDisplayName,
+  }) && String(primaryPendingCharge?.category || '').toLowerCase() === 'annual_tuition';
   const financeHeroNote = selectedFinanceSummary?.requiresDataSchoolContact
     ? `Tienes ${selectedFinanceSummary.overdueMonths} mensualidades vencidas.`
     : selectedFinanceConcepts.length > 1
@@ -5347,18 +5361,20 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
       </div>
       <div className="campus-parent-mobile__finance-price-meta">
         {selectedFinanceSummary?.requiresDataSchoolContact ? <span className="campus-parent-mobile__finance-status-label">Gestión especial</span> : null}
-        {selectedFinanceHasDiscount ? <span className="campus-parent-mobile__finance-original-amount">{formatCurrency(selectedFinanceFullAmount)}</span> : null}
+        {!hideEnrollmentPaymentAmount && selectedFinanceHasDiscount ? <span className="campus-parent-mobile__finance-original-amount">{formatCurrency(selectedFinanceFullAmount)}</span> : null}
         {!primaryPendingCharge ? <span className="campus-parent-mobile__finance-discount-tag">Estás al día</span> : null}
       </div>
       <h2>
         {selectedFinanceSummary?.requiresDataSchoolContact
           ? 'Contacta DataSchool'
-          : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0))}
+          : (hideEnrollmentPaymentAmount
+            ? 'Matrícula pendiente'
+            : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0)))}
       </h2>
       <span className="campus-parent-mobile__finance-current-note">
         {financeHeroNote}
       </span>
-      {selectedFinanceConcepts.length ? (
+      {selectedFinanceConcepts.length && !hideEnrollmentPaymentAmount ? (
         <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">
           Ver detalle
         </button>
@@ -5791,7 +5807,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
               payments={paginatedFinancePayments}
               totalPages={financePaymentsTotalPages}
             />
-            <ParentFinancePricingGuide isLoading={academicLoading} pricingGuide={selectedPricingGuide} />
+            <ParentFinancePricingGuide
+              hideEnrollmentAmounts={shouldHideParentEnrollmentPaymentAmount({
+                schoolId: user?.schoolId,
+                schoolName: schoolDisplayName,
+              })}
+              isLoading={academicLoading}
+              pricingGuide={selectedPricingGuide}
+            />
           </>
         ) : null}
 
@@ -6094,14 +6117,18 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
                   <strong>{concept.concept || 'Concepto académico'}</strong>
                   {concept.description ? <small>{concept.description}</small> : null}
                 </div>
-                <strong>{formatCurrency(concept.amount || 0)}</strong>
+                {hideEnrollmentPaymentAmount ? null : (
+                  <strong>{formatCurrency(concept.amount || 0)}</strong>
+                )}
               </article>
             )) : <p className="campus-parent-mobile__sheet-empty">No hay detalle disponible para este cobro.</p>}
           </div>
-          <div className="campus-parent-mobile__finance-concepts-total">
-            <span>Total</span>
-            <strong>{formatCurrency(selectedFinanceConceptsTotal || selectedFinanceAmount)}</strong>
-          </div>
+          {!hideEnrollmentPaymentAmount ? (
+            <div className="campus-parent-mobile__finance-concepts-total">
+              <span>Total</span>
+              <strong>{formatCurrency(selectedFinanceConceptsTotal || selectedFinanceAmount)}</strong>
+            </div>
+          ) : null}
           {selectedFinanceSummary?.requiresDataSchoolContact ? (
             <button className="campus-parent-mobile__finance-sheet-action" onClick={onPayAcademicCharge} type="button">Contactar DataSchool</button>
           ) : primaryPendingCharge ? (

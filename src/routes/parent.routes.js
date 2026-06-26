@@ -4,6 +4,11 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { getFeeGradeAliases, findGradeFeeSetting } = require('../utils/feeGradeMatching');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
+const {
+  isMillenniumSchoolId,
+  redactParentEnrollmentChargeAmount,
+  redactParentEnrollmentPricingGuide,
+} = require('../utils/millenniumSchool');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -4325,8 +4330,11 @@ router.get('/portal/academic-billing', async (req, res) => {
       now,
     ));
     const normalizedCharges = sortAcademicChargesForDisplay([...normalizedStatementCharges, ...normalizedIndividualCharges]);
+    const chargesForParent = isMillenniumSchoolId(schoolId)
+      ? normalizedCharges.map((charge) => redactParentEnrollmentChargeAmount(charge))
+      : normalizedCharges;
 
-    const currentCharges = normalizedCharges
+    const currentCharges = chargesForParent
       .filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()));
 
     const paymentRecords = payments.map((payment) => ({
@@ -4349,7 +4357,7 @@ router.get('/portal/academic-billing', async (req, res) => {
     );
 
     const paymentHistory = [
-      ...normalizedCharges
+      ...chargesForParent
         .filter((charge) => String(charge.status) === 'paid')
         .filter((charge) => !paidChargeIdsWithPaymentRecord.has(String(charge._id)))
         .map((charge) => ({
@@ -4367,9 +4375,12 @@ router.get('/portal/academic-billing', async (req, res) => {
       ...paymentRecords,
     ].sort((left, right) => new Date(right.paidAt || 0) - new Date(left.paidAt || 0));
 
-    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: normalizedCharges, referenceDate: now });
+    const studentSummaries = buildParentAcademicBillingSummaryByStudent({ charges: chargesForParent, referenceDate: now });
     const pricingGuides = billingProfiles.reduce((accumulator, profile) => {
-      accumulator[String(profile.studentId)] = buildParentAcademicPricingGuide(profile, feeConfiguration);
+      const guide = buildParentAcademicPricingGuide(profile, feeConfiguration);
+      accumulator[String(profile.studentId)] = isMillenniumSchoolId(schoolId)
+        ? redactParentEnrollmentPricingGuide(guide)
+        : guide;
       return accumulator;
     }, {});
 
