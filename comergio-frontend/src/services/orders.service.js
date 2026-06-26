@@ -13,4 +13,5 @@ export const getSchoolBillingStatements = (params = {}) => api.get('/orders/scho
 export const createSchoolBillingStatement = (data) => api.post('/orders/school-billing/statements', data);
 export const createConsolidatedSchoolBillingStatement = (data) => api.post('/orders/school-billing/statements/consolidated', data);
 export const backfillSchoolBillingStatements = () => api.post('/orders/school-billing/statements/backfill');
+export const rebuildSchoolBillingStatementsFromCollectionDates = (data = {}) => api.post('/orders/school-billing/statements/rebuild-from-collection-dates', data);
 export const getSchoolBillingStatementDocument = (statementId) => api.get(`/orders/school-billing/statements/${statementId}/document`, { responseType: 'text' });

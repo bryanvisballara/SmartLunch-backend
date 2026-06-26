@@ -362,6 +362,163 @@ async function createConsolidatedSchoolBillingStatement({
   return statement;
 }
 
+async function buildCollectionBatchStatementNumber(schoolId, collectedDay = '') {
+  const dateKey = String(collectedDay || '').replace(/-/g, '').slice(0, 8) || '00000000';
+  const prefix = `CC-${dateKey}-`;
+  const lastStatement = await SchoolBillingStatement.findOne({
+    schoolId,
+    statementNumber: { $regex: `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` },
+  })
+    .sort({ statementNumber: -1 })
+    .lean();
+
+  let sequence = 1;
+  if (lastStatement?.statementNumber) {
+    const sequenceText = String(lastStatement.statementNumber).split('-').pop();
+    const parsedSequence = Number(sequenceText);
+    if (Number.isFinite(parsedSequence)) {
+      sequence = parsedSequence + 1;
+    }
+  }
+
+  return `${prefix}${String(sequence).padStart(4, '0')}`;
+}
+
+async function loadSchoolBillingOrdersByCollectedDay({ schoolId, collectedDay = '' }) {
+  const fromDate = resolveDateQueryBoundary(collectedDay, 'start');
+  const toDate = resolveDateQueryBoundary(collectedDay, 'end');
+
+  if (!fromDate || !toDate) {
+    return [];
+  }
+
+  return Order.find({
+    schoolId,
+    paymentMethod: 'school_billing',
+    status: 'completed',
+    schoolBillingCollectedAt: { $gte: fromDate, $lte: toDate },
+  })
+    .populate('studentId', 'name schoolCode')
+    .populate('storeId', 'name')
+    .populate('vendorId', 'name username')
+    .sort({ createdAt: 1 })
+    .lean();
+}
+
+function resolveSchoolBillingCollectedAt(orders = [], fallback = new Date()) {
+  const timestamps = orders
+    .map((order) => (order.schoolBillingCollectedAt ? new Date(order.schoolBillingCollectedAt) : null))
+    .filter((value) => value && !Number.isNaN(value.getTime()));
+
+  if (!timestamps.length) {
+    return fallback;
+  }
+
+  return new Date(Math.min(...timestamps.map((value) => value.getTime())));
+}
+
+async function createSchoolBillingStatementFromCollectionBatch({
+  schoolId,
+  schoolName,
+  userId,
+  userName,
+  collectedDay = '',
+  billingFor = '',
+  billingResponsible = '',
+}) {
+  const orders = await loadSchoolBillingOrdersByCollectedDay({ schoolId, collectedDay });
+  if (!orders.length) {
+    throw new Error(`No hay órdenes marcadas como cobradas el ${collectedDay}.`);
+  }
+
+  const resolvedBillingFor = normalizeSchoolBillingParty(billingFor) || 'Cuenta consolidada colegio';
+  const resolvedBillingResponsible = normalizeSchoolBillingParty(billingResponsible) || 'Administración cafetería';
+  const serializedOrders = orders.map(serializeStatementOrder);
+  const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const statementNumber = await buildCollectionBatchStatementNumber(schoolId, collectedDay);
+  const generatedAt = resolveSchoolBillingCollectedAt(orders);
+
+  const documentHtml = buildSchoolBillingStatementHtml({
+    schoolName,
+    statementNumber,
+    generatedAt,
+    billingFor: resolvedBillingFor,
+    billingResponsible: resolvedBillingResponsible,
+    orders: serializedOrders,
+    totalAmount,
+    generatedByName: userName,
+  });
+
+  const statement = await SchoolBillingStatement.create({
+    schoolId,
+    statementNumber,
+    billingFor: resolvedBillingFor,
+    billingResponsible: resolvedBillingResponsible,
+    orderIds: orders.map((order) => order._id),
+    orders: serializedOrders,
+    orderCount: serializedOrders.length,
+    totalAmount,
+    documentHtml,
+    generatedBy: userId,
+    generatedByName: userName,
+    createdAt: generatedAt,
+    updatedAt: generatedAt,
+  });
+
+  await Order.updateMany(
+    { _id: { $in: orders.map((order) => order._id) }, schoolId },
+    { $set: { schoolBillingStatementId: statement._id } }
+  );
+
+  await cleanupOrphanedSchoolBillingStatements(schoolId);
+
+  return statement;
+}
+
+async function rebuildSchoolBillingStatementsFromCollectionDates({
+  schoolId,
+  schoolName,
+  userId,
+  userName,
+  billingFor = '',
+  billingResponsible = '',
+}) {
+  const collectedDays = await Order.distinct('schoolBillingCollectedAt', {
+    schoolId,
+    paymentMethod: 'school_billing',
+    status: 'completed',
+    schoolBillingCollectedAt: { $ne: null },
+  });
+
+  const normalizedDays = Array.from(new Set(
+    collectedDays
+      .map((value) => {
+        const date = value ? new Date(value) : null;
+        if (!date || Number.isNaN(date.getTime())) {
+          return '';
+        }
+        return date.toISOString().slice(0, 10);
+      })
+      .filter(Boolean)
+  )).sort();
+
+  const createdStatements = [];
+  for (const collectedDay of normalizedDays) {
+    const statement = await createSchoolBillingStatementFromCollectionBatch({
+      schoolId,
+      schoolName,
+      userId,
+      userName,
+      collectedDay,
+      billingFor,
+      billingResponsible,
+    });
+    createdStatements.push(statement);
+  }
+
+  return createdStatements;
+}
+
 function resolveLowBalanceAlertTransition({ currentLevel = 'none', nextBalance = 0 }) {
   const normalizedCurrentLevel = ['none', 'lt20', 'lt10'].includes(String(currentLevel))
     ? String(currentLevel)
@@ -855,6 +1012,41 @@ router.post('/school-billing/statements/consolidated', roleMiddleware('admin'), 
   }
 });
 
+router.post('/school-billing/statements/rebuild-from-collection-dates', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId, name, username } = req.user;
+    const schoolName = await getSchoolDisplayName(schoolId);
+    const userName = String(name || username || 'Administración');
+    const billingFor = String(req.body?.billingFor || '').trim();
+    const billingResponsible = String(req.body?.billingResponsible || '').trim();
+
+    const statements = await rebuildSchoolBillingStatementsFromCollectionDates({
+      schoolId,
+      schoolName,
+      userId,
+      userName,
+      billingFor,
+      billingResponsible,
+    });
+
+    return res.status(201).json({
+      message: statements.length
+        ? `Se reconstruyeron ${statements.length} cuentas de cobro según la fecha en que se marcaron como cobradas.`
+        : 'No había cuentas de cobro para reconstruir.',
+      createdCount: statements.length,
+      statements: statements.map((statement) => ({
+        _id: statement._id,
+        statementNumber: statement.statementNumber,
+        orderCount: statement.orderCount,
+        totalAmount: statement.totalAmount,
+        createdAt: statement.createdAt,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/school-billing/statements', roleMiddleware('admin'), async (req, res) => {
   try {
     const { schoolId, userId, name, username } = req.user;
@@ -1245,5 +1437,7 @@ router.get('/:id', async (req, res) => {
 });
 
 router.createConsolidatedSchoolBillingStatement = createConsolidatedSchoolBillingStatement;
+router.rebuildSchoolBillingStatementsFromCollectionDates = rebuildSchoolBillingStatementsFromCollectionDates;
+router.createSchoolBillingStatementFromCollectionBatch = createSchoolBillingStatementFromCollectionBatch;
 
 module.exports = router;

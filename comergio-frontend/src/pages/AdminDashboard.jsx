@@ -73,6 +73,7 @@ import {
   createSchoolBillingStatement,
   createConsolidatedSchoolBillingStatement,
   backfillSchoolBillingStatements,
+  rebuildSchoolBillingStatementsFromCollectionDates,
   getSchoolBillingStatementDocument,
 } from '../services/orders.service';
 import { getStudents } from '../services/students.service';
@@ -2467,6 +2468,20 @@ function AdminDashboard() {
         openSchoolBillingDocumentHtml(response.data);
       }
     }, 'Cuenta de cobro abierta.');
+  };
+
+  const onRebuildSchoolBillingStatementsFromCollectionDates = () => {
+    runAction(async () => {
+      await rebuildSchoolBillingStatementsFromCollectionDates({
+        billingFor: 'Cuenta consolidada colegio',
+        billingResponsible: 'Administración cafetería',
+      });
+      setSelectedSchoolBillingOrderIds([]);
+      await Promise.all([
+        loadSchoolBillingOrders(schoolBillingFilters),
+        loadSchoolBillingStatements(),
+      ]);
+    }, 'Cuentas de cobro reconstruidas por fecha de cobro.');
   };
 
   const onBackfillSchoolBillingStatements = () => {
@@ -5946,12 +5961,12 @@ function AdminDashboard() {
           <div className="card">
             <div className="row gap" style={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
               <h4 style={{ margin: 0 }}>Historial de cuentas generadas</h4>
-              <button className="btn" onClick={onBackfillSchoolBillingStatements} type="button">
-                Importar cuentas desde órdenes anteriores
+              <button className="btn btn-primary" onClick={onRebuildSchoolBillingStatementsFromCollectionDates} type="button">
+                Reconstruir cuentas por fecha de cobro
               </button>
             </div>
             <p className="helper">
-              Importa cuentas pequeñas por día y responsable. Para recuperar la cuenta mensual grande del colegio, usa la sección de cuenta consolidada del periodo.
+              Recupera las cuentas consolidadas que se generaron al marcar las órdenes como cobradas. Cada fecha de cobro queda como un PDF separado en el historial.
             </p>
             {schoolBillingStatements.length === 0 ? (
               <p>No hay cuentas de cobro guardadas en el historial.</p>
