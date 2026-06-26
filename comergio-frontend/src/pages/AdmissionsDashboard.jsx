@@ -6,6 +6,7 @@ import { redirectToLoginPage } from '../lib/authNavigation';
 import { getSchoolDisplayName } from '../lib/schools';
 import useAuthStore from '../store/auth.store';
 import AcademicSecretaryDashboard from './AcademicSecretaryDashboard';
+import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import {
   createAdmissionApplicant,
   createAdmissionEvent,
@@ -63,6 +64,7 @@ const ADMISSIONS_VIEW_OPTIONS = [
   { key: 'costos', label: 'Costos', status: '', empty: '' },
   { key: 'marketing', label: 'Marketing', status: '', empty: '' },
   { key: 'matricula', label: 'Matrícula', status: '', empty: '' },
+  { key: 'matriculas_digitales', label: 'Matrículas digitales', status: '', empty: '' },
 ];
 
 const APPOINTMENT_TYPE_OPTIONS = [
@@ -1138,6 +1140,19 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             <AcademicSecretaryDashboard embedded initialSection="enrollments" />
           ) : null}
 
+          {currentView === 'matriculas_digitales' && !showApplicantDetail ? (
+            <section className="dashboard-card admissions-digital-enrollment-card">
+              <div className="admin-panel-heading">
+                <div>
+                  <span>Supervisión</span>
+                  <h2>Matrículas digitales</h2>
+                  <p>Consentimientos previos, pagos confirmados y documentos firmados por los acudientes.</p>
+                </div>
+              </div>
+              <EnrollmentMatriculaRectoriaPanel />
+            </section>
+          ) : null}
+
           {currentView === 'agenda' && !showApplicantDetail ? (
             <section className="dashboard-card admissions-agenda-card">
               <div className="admissions-calendar-toolbar">
@@ -1193,7 +1208,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             </section>
           ) : null}
 
-          {!['dashboard', 'agenda', 'aspirantes', 'desistidos', 'costos', 'matricula'].includes(currentView) && !showApplicantDetail ? (
+          {!['dashboard', 'agenda', 'aspirantes', 'desistidos', 'costos', 'matricula', 'matriculas_digitales'].includes(currentView) && !showApplicantDetail ? (
             <section className="dashboard-card admissions-placeholder-card">
               <span>{currentViewConfig.label}</span>
               <h2>{currentViewConfig.label}</h2>

@@ -176,7 +176,7 @@ router.post('/portal/enrollment-matricula/process/:processId/sign-pagare', async
 
 const rectoriaRouter = express.Router();
 rectoriaRouter.use(authMiddleware);
-rectoriaRouter.use(roleMiddleware(['rectoria', 'direccion', 'admin', 'academic_secretary']));
+rectoriaRouter.use(roleMiddleware(['rectoria', 'direccion', 'admin', 'academic_secretary', 'admissions']));
 
 rectoriaRouter.get('/consents', async (req, res) => {
   try {
