@@ -2507,10 +2507,7 @@ button.campus-coordination__selected-item.is-selected {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  position: absolute;
-  top: 50%;
-  right: 1rem;
-  transform: translateY(-50%);
+  flex-shrink: 0;
   border: 0;
   border-radius: 999px;
   padding: 0.55rem 0.95rem;
@@ -2520,6 +2517,7 @@ button.campus-coordination__selected-item.is-selected {
   font-size: 0.84rem;
   font-weight: 800;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .campus-parent-mobile__finance-pay-button:disabled {
@@ -2541,13 +2539,23 @@ button.campus-coordination__selected-item.is-selected {
 }
 
 .campus-parent-mobile__hero-card.is-finance {
-  position: relative;
-  padding-right: 8rem;
   background: linear-gradient(145deg, #102a43 0%, #0f172a 100%);
 }
 
 .campus-parent-mobile__hero-card.is-finance .campus-parent-mobile__hero-card-head {
-  justify-content: flex-start;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.campus-parent-mobile__hero-card.is-finance .campus-parent-mobile__eyebrow {
+  flex: 1;
+  min-width: 0;
+}
+
+.campus-parent-mobile__hero-card.is-finance h2 {
+  padding-right: 0;
+  word-break: break-word;
 }
 
 .campus-parent-mobile__hero-card.is-finance h2,

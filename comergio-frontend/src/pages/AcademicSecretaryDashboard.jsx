@@ -89,6 +89,8 @@ const BILLING_PAYMENT_METHOD_OPTIONS = [
   { value: 'other', label: 'Otro' },
 ];
 
+const BILLING_STUDENT_ROWS_PER_PAGE = 15;
+
 function labelBillingPaymentMethod(value) {
   return BILLING_PAYMENT_METHOD_OPTIONS.find((option) => option.value === value)?.label || '';
 }
@@ -1453,6 +1455,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     notes: '',
   });
   const [billingSearch, setBillingSearch] = useState('');
+  const [billingStudentPage, setBillingStudentPage] = useState(1);
   const [selectedBillingStudentId, setSelectedBillingStudentId] = useState('');
   const [billingPaymentDraft, setBillingPaymentDraft] = useState(createBillingPaymentDraft);
   const [billingPaymentModal, setBillingPaymentModal] = useState({ open: false, row: null });
@@ -1623,8 +1626,18 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       ].filter(Boolean).join(' ')).includes(term))
       : billingStudentAccounts;
 
-    return rows.slice(0, 50);
+    return rows;
   }, [billingSearch, billingStudentAccounts]);
+
+  const billingStudentTotalPages = useMemo(() => {
+    if (!filteredBillingStudentRows.length) return 1;
+    return Math.ceil(filteredBillingStudentRows.length / BILLING_STUDENT_ROWS_PER_PAGE);
+  }, [filteredBillingStudentRows.length]);
+
+  const paginatedBillingStudentRows = useMemo(() => {
+    const start = (billingStudentPage - 1) * BILLING_STUDENT_ROWS_PER_PAGE;
+    return filteredBillingStudentRows.slice(start, start + BILLING_STUDENT_ROWS_PER_PAGE);
+  }, [billingStudentPage, filteredBillingStudentRows]);
 
   const selectedBillingAccount = useMemo(() => {
     if (!filteredBillingStudentRows.length) return null;
@@ -1635,6 +1648,16 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     (selectedBillingAccount?.charges || []).filter((charge) => ['pending', 'overdue'].includes(String(charge.status)) && Number(charge.amount || 0) > 0)
   ), [selectedBillingAccount]);
   const billingPaymentModalCanSubmit = Boolean(billingPaymentDraft.chargeId || billingPaymentModal.row);
+
+  useEffect(() => {
+    setBillingStudentPage(1);
+  }, [billingSearch]);
+
+  useEffect(() => {
+    if (billingStudentPage > billingStudentTotalPages) {
+      setBillingStudentPage(billingStudentTotalPages);
+    }
+  }, [billingStudentPage, billingStudentTotalPages]);
 
   useEffect(() => {
     if (!isBillingPortal || !filteredBillingStudentRows.length) return;
@@ -3228,7 +3251,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     <tbody>
                       {filteredBillingStudentRows.length === 0 ? (
                         <tr><td colSpan="5">No hay alumnos que coincidan con el filtro.</td></tr>
-                      ) : filteredBillingStudentRows.map((account) => (
+                      ) : paginatedBillingStudentRows.map((account) => (
                         <tr
                           className={String(selectedBillingAccount?.studentId || '') === String(account.studentId) ? 'is-selected' : ''}
                           key={account.studentId}
@@ -3243,6 +3266,29 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                       ))}
                     </tbody>
                   </table>
+                  {filteredBillingStudentRows.length > BILLING_STUDENT_ROWS_PER_PAGE ? (
+                    <div className="academic-secretary__billing-pagination row gap">
+                      <button
+                        className="btn"
+                        disabled={billingStudentPage <= 1}
+                        onClick={() => setBillingStudentPage((prev) => Math.max(1, prev - 1))}
+                        type="button"
+                      >
+                        Anterior
+                      </button>
+                      <p>
+                        Página {billingStudentPage} de {billingStudentTotalPages}
+                      </p>
+                      <button
+                        className="btn"
+                        disabled={billingStudentPage >= billingStudentTotalPages}
+                        onClick={() => setBillingStudentPage((prev) => Math.min(billingStudentTotalPages, prev + 1))}
+                        type="button"
+                      >
+                        Siguiente
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 <aside className="academic-secretary__billing-ledger-detail">
