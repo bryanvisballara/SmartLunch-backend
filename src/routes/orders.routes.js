@@ -8,6 +8,7 @@ const Product = require('../models/product.model');
 const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const Order = require('../models/order.model');
+const SchoolBillingStatement = require('../models/schoolBillingStatement.model');
 const DailyClosure = require('../models/dailyClosure.model');
 const OrderCancellationRequest = require('../models/orderCancellationRequest.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
@@ -16,6 +17,10 @@ const {
   queueLowBalanceAlertNotification,
   queueApprovalPendingNotificationForAdmins,
 } = require('../services/notification.service');
+const {
+  buildSchoolBillingStatementHtml,
+  serializeStatementOrder,
+} = require('../utils/schoolBillingStatementDocument');
 
 const router = express.Router();
 
@@ -74,6 +79,127 @@ async function parentCanSeeStudent(user, studentId) {
   });
 
   return Boolean(link);
+}
+
+async function buildNextSchoolBillingStatementNumber(schoolId) {
+  const dateKey = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const prefix = `CC-${dateKey}-`;
+  const lastStatement = await SchoolBillingStatement.findOne({
+    schoolId,
+    statementNumber: { $regex: `^${prefix}` },
+  })
+    .sort({ statementNumber: -1 })
+    .lean();
+
+  let sequence = 1;
+  if (lastStatement?.statementNumber) {
+    const sequenceText = String(lastStatement.statementNumber).split('-').pop();
+    const parsedSequence = Number(sequenceText);
+    if (Number.isFinite(parsedSequence)) {
+      sequence = parsedSequence + 1;
+    }
+  }
+
+  return `${prefix}${String(sequence).padStart(4, '0')}`;
+}
+
+function buildSchoolBillingGroupingKey(order = {}) {
+  const billingFor = String(order.schoolBillingFor || '').trim().toLowerCase();
+  const billingResponsible = String(order.schoolBillingResponsible || '').trim().toLowerCase();
+  const createdAt = order.createdAt ? new Date(order.createdAt) : new Date();
+  const dateKey = Number.isNaN(createdAt.getTime())
+    ? ''
+    : createdAt.toISOString().slice(0, 10);
+
+  return `${billingFor}::${billingResponsible}::${dateKey}`;
+}
+
+async function loadSchoolBillingOrdersByIds({ schoolId, orderIds = [] }) {
+  const normalizedIds = Array.from(new Set(
+    (Array.isArray(orderIds) ? orderIds : [])
+      .map((value) => String(value || '').trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value))
+  ));
+
+  if (!normalizedIds.length) {
+    return [];
+  }
+
+  return Order.find({
+    _id: { $in: normalizedIds },
+    schoolId,
+    paymentMethod: 'school_billing',
+    status: 'completed',
+  })
+    .populate('studentId', 'name schoolCode')
+    .populate('storeId', 'name')
+    .populate('vendorId', 'name username')
+    .sort({ createdAt: 1 })
+    .lean();
+}
+
+async function createSchoolBillingStatement({
+  schoolId,
+  schoolName,
+  userId,
+  userName,
+  orders = [],
+}) {
+  if (!orders.length) {
+    throw new Error('Debes seleccionar al menos una orden de cuenta de cobro colegio.');
+  }
+
+  const alreadyLinked = orders.filter((order) => order.schoolBillingStatementId);
+  if (alreadyLinked.length) {
+    throw new Error('Una o más órdenes ya están incluidas en una cuenta de cobro generada.');
+  }
+
+  const billingFor = String(orders[0]?.schoolBillingFor || '').trim();
+  const billingResponsible = String(orders[0]?.schoolBillingResponsible || '').trim();
+  const mismatchedOrder = orders.find((order) => (
+    String(order.schoolBillingFor || '').trim() !== billingFor
+    || String(order.schoolBillingResponsible || '').trim() !== billingResponsible
+  ));
+
+  if (mismatchedOrder) {
+    throw new Error('Todas las órdenes de una cuenta de cobro deben compartir el mismo dirigido a y responsable.');
+  }
+
+  const serializedOrders = orders.map(serializeStatementOrder);
+  const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+  const statementNumber = await buildNextSchoolBillingStatementNumber(schoolId);
+  const generatedAt = new Date();
+  const documentHtml = buildSchoolBillingStatementHtml({
+    schoolName,
+    statementNumber,
+    generatedAt,
+    billingFor,
+    billingResponsible,
+    orders: serializedOrders,
+    totalAmount,
+    generatedByName: userName,
+  });
+
+  const statement = await SchoolBillingStatement.create({
+    schoolId,
+    statementNumber,
+    billingFor,
+    billingResponsible,
+    orderIds: orders.map((order) => order._id),
+    orders: serializedOrders,
+    orderCount: serializedOrders.length,
+    totalAmount,
+    documentHtml,
+    generatedBy: userId,
+    generatedByName: userName,
+  });
+
+  await Order.updateMany(
+    { _id: { $in: orders.map((order) => order._id) }, schoolId },
+    { $set: { schoolBillingStatementId: statement._id } }
+  );
+
+  return statement;
 }
 
 function resolveLowBalanceAlertTransition({ currentLevel = 'none', nextBalance = 0 }) {
@@ -409,6 +535,138 @@ router.get('/', async (req, res) => {
     return res.status(200).json(orders);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/school-billing/statements', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+
+    const statements = await SchoolBillingStatement.find({ schoolId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return res.status(200).json(statements.map((statement) => ({
+      _id: statement._id,
+      statementNumber: statement.statementNumber,
+      billingFor: statement.billingFor,
+      billingResponsible: statement.billingResponsible,
+      orderCount: statement.orderCount,
+      totalAmount: statement.totalAmount,
+      generatedByName: statement.generatedByName,
+      createdAt: statement.createdAt,
+      updatedAt: statement.updatedAt,
+    })));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/school-billing/statements/:statementId/document', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const statement = await SchoolBillingStatement.findOne({
+      _id: req.params.statementId,
+      schoolId,
+    }).lean();
+
+    if (!statement) {
+      return res.status(404).json({ message: 'Cuenta de cobro no encontrada.' });
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(statement.documentHtml || '');
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/school-billing/statements/backfill', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId, name, username } = req.user;
+    const schoolName = String(schoolId || 'Colegio');
+    const userName = String(name || username || 'Administración');
+
+    const orphanOrders = await Order.find({
+      schoolId,
+      paymentMethod: 'school_billing',
+      status: 'completed',
+      $or: [
+        { schoolBillingStatementId: null },
+        { schoolBillingStatementId: { $exists: false } },
+      ],
+    })
+      .populate('studentId', 'name schoolCode')
+      .populate('storeId', 'name')
+      .populate('vendorId', 'name username')
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const groupedOrders = orphanOrders.reduce((groups, order) => {
+      const key = buildSchoolBillingGroupingKey(order);
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
+      groups.get(key).push(order);
+      return groups;
+    }, new Map());
+
+    const createdStatements = [];
+    for (const orders of groupedOrders.values()) {
+      const statement = await createSchoolBillingStatement({
+        schoolId,
+        schoolName,
+        userId,
+        userName,
+        orders,
+      });
+      createdStatements.push(statement);
+    }
+
+    return res.status(201).json({
+      message: createdStatements.length
+        ? `Se importaron ${createdStatements.length} cuentas de cobro al historial.`
+        : 'No había cuentas pendientes de importar.',
+      createdCount: createdStatements.length,
+      statements: createdStatements.map((statement) => ({
+        _id: statement._id,
+        statementNumber: statement.statementNumber,
+        orderCount: statement.orderCount,
+        totalAmount: statement.totalAmount,
+        createdAt: statement.createdAt,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/school-billing/statements', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId, userId, name, username } = req.user;
+    const schoolName = String(schoolId || 'Colegio');
+    const userName = String(name || username || 'Administración');
+    const orderIds = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
+
+    const orders = await loadSchoolBillingOrdersByIds({ schoolId, orderIds });
+    if (orders.length !== orderIds.length) {
+      return res.status(400).json({ message: 'Una o más órdenes no son válidas para cuenta de cobro colegio.' });
+    }
+
+    const statement = await createSchoolBillingStatement({
+      schoolId,
+      schoolName,
+      userId,
+      userName,
+      orders,
+    });
+
+    return res.status(201).json(statement);
+  } catch (error) {
+    const statusCode = /seleccionar|incluidas|compartir/i.test(String(error.message || '')) ? 400 : 500;
+    return res.status(statusCode).json({ message: error.message });
   }
 });
 

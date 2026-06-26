@@ -154,6 +154,7 @@ router.get('/portal/overview', async (req, res) => {
         schedule,
         ranking,
         overallAverage,
+        gradingScale,
       },
     });
   } catch (error) {

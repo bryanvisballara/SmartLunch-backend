@@ -9,3 +9,7 @@ export const approveOrderCancellation = (id) => api.post(`/orders/cancel-request
 export const rejectOrderCancellation = (id) => api.post(`/orders/cancel-requests/${id}/reject`);
 export const cancelOrderDirect = (id) => api.post(`/orders/${id}/cancel`);
 export const markSchoolBillingCollected = (id) => api.post(`/orders/${id}/school-billing/collect`);
+export const getSchoolBillingStatements = (params = {}) => api.get('/orders/school-billing/statements', { params });
+export const createSchoolBillingStatement = (data) => api.post('/orders/school-billing/statements', data);
+export const backfillSchoolBillingStatements = () => api.post('/orders/school-billing/statements/backfill');
+export const getSchoolBillingStatementDocument = (statementId) => api.get(`/orders/school-billing/statements/${statementId}/document`, { responseType: 'text' });

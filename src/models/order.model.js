@@ -24,6 +24,7 @@ const orderSchema = new mongoose.Schema(
     schoolBillingStatus: { type: String, enum: ['pending', 'collected'], default: 'pending' },
     schoolBillingCollectedAt: { type: Date, default: null },
     schoolBillingCollectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    schoolBillingStatementId: { type: mongoose.Schema.Types.ObjectId, ref: 'SchoolBillingStatement', default: null },
     items: { type: [orderItemSchema], required: true },
     total: { type: Number, required: true },
     status: { type: String, enum: ['completed', 'cancelled'], default: 'completed' },

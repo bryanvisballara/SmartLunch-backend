@@ -69,6 +69,10 @@ import {
   rejectOrderCancellation,
   cancelOrderDirect,
   markSchoolBillingCollected,
+  getSchoolBillingStatements,
+  createSchoolBillingStatement,
+  backfillSchoolBillingStatements,
+  getSchoolBillingStatementDocument,
 } from '../services/orders.service';
 import { getStudents } from '../services/students.service';
 import {
@@ -529,6 +533,8 @@ function AdminDashboard() {
   const [historyType, setHistoryType] = useState('sales');
   const [schoolBillingFilters, setSchoolBillingFilters] = useState({ from: '', to: '', q: '' });
   const [schoolBillingOrders, setSchoolBillingOrders] = useState([]);
+  const [schoolBillingStatements, setSchoolBillingStatements] = useState([]);
+  const [selectedSchoolBillingOrderIds, setSelectedSchoolBillingOrderIds] = useState([]);
   const [salesStudentQuery, setSalesStudentQuery] = useState('');
   const [showSalesStudentOptions, setShowSalesStudentOptions] = useState(false);
   const [salesPage, setSalesPage] = useState(1);
@@ -1116,6 +1122,21 @@ function AdminDashboard() {
   const collectedSchoolBillingOrders = useMemo(
     () => (schoolBillingOrders || []).filter((order) => String(order.schoolBillingStatus || 'pending') === 'collected'),
     [schoolBillingOrders]
+  );
+
+  const selectableSchoolBillingOrders = useMemo(
+    () => pendingSchoolBillingOrders.filter((order) => !order.schoolBillingStatementId),
+    [pendingSchoolBillingOrders]
+  );
+
+  const selectedSchoolBillingOrders = useMemo(
+    () => selectableSchoolBillingOrders.filter((order) => selectedSchoolBillingOrderIds.includes(String(order._id))),
+    [selectableSchoolBillingOrders, selectedSchoolBillingOrderIds]
+  );
+
+  const selectedSchoolBillingTotal = useMemo(
+    () => selectedSchoolBillingOrders.reduce((sum, order) => sum + Number(order.total || 0), 0),
+    [selectedSchoolBillingOrders]
   );
 
   const accountingWeeklyRows = useMemo(() => {
@@ -2371,6 +2392,87 @@ function AdminDashboard() {
     setSchoolBillingOrders(filtered);
   };
 
+  const loadSchoolBillingStatements = async () => {
+    const response = await getSchoolBillingStatements({ limit: 100 });
+    setSchoolBillingStatements(response.data || []);
+  };
+
+  const openSchoolBillingDocumentHtml = (html) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setError('No se pudo abrir la ventana para generar PDF.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const onToggleSchoolBillingOrderSelection = (orderId, checked) => {
+    const normalizedId = String(orderId || '');
+    if (!normalizedId) {
+      return;
+    }
+
+    setSelectedSchoolBillingOrderIds((previous) => {
+      if (checked) {
+        return previous.includes(normalizedId) ? previous : [...previous, normalizedId];
+      }
+      return previous.filter((id) => id !== normalizedId);
+    });
+  };
+
+  const onToggleAllSelectableSchoolBillingOrders = (checked) => {
+    if (!checked) {
+      setSelectedSchoolBillingOrderIds([]);
+      return;
+    }
+
+    setSelectedSchoolBillingOrderIds(selectableSchoolBillingOrders.map((order) => String(order._id)));
+  };
+
+  const onGenerateSchoolBillingStatement = () => {
+    if (!selectedSchoolBillingOrderIds.length) {
+      setError('Selecciona al menos una orden pendiente para generar la cuenta de cobro.');
+      return;
+    }
+
+    runAction(async () => {
+      const response = await createSchoolBillingStatement({ orderIds: selectedSchoolBillingOrderIds });
+      if (response?.data?.documentHtml) {
+        openSchoolBillingDocumentHtml(response.data.documentHtml);
+      }
+      setSelectedSchoolBillingOrderIds([]);
+      await Promise.all([
+        loadSchoolBillingOrders(schoolBillingFilters),
+        loadSchoolBillingStatements(),
+      ]);
+    }, 'Cuenta de cobro generada y guardada en el historial.');
+  };
+
+  const onOpenSchoolBillingStatement = (statementId) => {
+    runAction(async () => {
+      const response = await getSchoolBillingStatementDocument(statementId);
+      if (response?.data) {
+        openSchoolBillingDocumentHtml(response.data);
+      }
+    }, 'Cuenta de cobro abierta.');
+  };
+
+  const onBackfillSchoolBillingStatements = () => {
+    runAction(async () => {
+      await backfillSchoolBillingStatements();
+      setSelectedSchoolBillingOrderIds([]);
+      await Promise.all([
+        loadSchoolBillingOrders(schoolBillingFilters),
+        loadSchoolBillingStatements(),
+      ]);
+    }, 'Historial de cuentas de cobro actualizado.');
+  };
+
   const loadClosures = async (filters = closureFilters) => {
     if (!filters.storeId) {
       setClosures([]);
@@ -2509,7 +2611,10 @@ function AdminDashboard() {
 
     setLoading(true);
     clearMessages();
-    loadSchoolBillingOrders(schoolBillingFilters)
+    Promise.all([
+      loadSchoolBillingOrders(schoolBillingFilters),
+      loadSchoolBillingStatements(),
+    ])
       .catch((requestError) => {
         setError(requestError?.response?.data?.message || 'No se pudieron cargar las cuentas de cobro colegio.');
       })
@@ -5555,6 +5660,32 @@ function AdminDashboard() {
             Actualizar
           </button>
 
+          <div className="card">
+            <h4>Generar cuenta de cobro</h4>
+            <p className="helper">
+              Selecciona órdenes pendientes con el mismo dirigido a y responsable. El PDF quedará guardado en el historial.
+            </p>
+            <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-primary"
+                disabled={selectedSchoolBillingOrderIds.length === 0}
+                onClick={onGenerateSchoolBillingStatement}
+                type="button"
+              >
+                Generar PDF ({selectedSchoolBillingOrderIds.length})
+              </button>
+              <button className="btn" onClick={() => onToggleAllSelectableSchoolBillingOrders(true)} type="button">
+                Seleccionar pendientes disponibles
+              </button>
+              <button className="btn" onClick={() => setSelectedSchoolBillingOrderIds([])} type="button">
+                Limpiar selección
+              </button>
+              {selectedSchoolBillingOrderIds.length > 0 ? (
+                <strong>Total seleccionado: {formatCurrency(selectedSchoolBillingTotal)}</strong>
+              ) : null}
+            </div>
+          </div>
+
           {schoolBillingOrders.length === 0 ? <p>No hay cuentas de cobro colegio para los filtros seleccionados.</p> : null}
 
           {pendingSchoolBillingOrders.length > 0 ? (
@@ -5563,6 +5694,14 @@ function AdminDashboard() {
               <table className="simple-table">
                 <thead>
                   <tr>
+                    <th>
+                      <input
+                        aria-label="Seleccionar todas las órdenes pendientes disponibles"
+                        checked={selectableSchoolBillingOrders.length > 0 && selectableSchoolBillingOrders.every((order) => selectedSchoolBillingOrderIds.includes(String(order._id)))}
+                        onChange={(event) => onToggleAllSelectableSchoolBillingOrders(event.target.checked)}
+                        type="checkbox"
+                      />
+                    </th>
                     <th>Orden</th>
                     <th>Tienda</th>
                     <th>Vendedor</th>
@@ -5579,6 +5718,18 @@ function AdminDashboard() {
                 <tbody>
                   {pendingSchoolBillingOrders.map((order) => (
                     <tr key={`summary-${order._id}`} className="school-billing-row-detail">
+                      <td>
+                        {order.schoolBillingStatementId ? (
+                          <span className="helper">En historial</span>
+                        ) : (
+                          <input
+                            aria-label={`Seleccionar orden ${order.orderNumber || order._id}`}
+                            checked={selectedSchoolBillingOrderIds.includes(String(order._id))}
+                            onChange={(event) => onToggleSchoolBillingOrderSelection(order._id, event.target.checked)}
+                            type="checkbox"
+                          />
+                        )}
+                      </td>
                       <td>{order.orderNumber || order._id}</td>
                       <td>{order.storeId?.name || 'N/A'}</td>
                       <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
@@ -5676,6 +5827,54 @@ function AdminDashboard() {
               </table>
             </div>
           ) : null}
+
+          <div className="card">
+            <div className="row gap" style={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <h4 style={{ margin: 0 }}>Historial de cuentas generadas</h4>
+              <button className="btn" onClick={onBackfillSchoolBillingStatements} type="button">
+                Importar cuentas desde órdenes anteriores
+              </button>
+            </div>
+            <p className="helper">
+              Aquí puedes volver a abrir e imprimir las cuentas de cobro PDF que ya se generaron.
+            </p>
+            {schoolBillingStatements.length === 0 ? (
+              <p>No hay cuentas de cobro guardadas en el historial.</p>
+            ) : (
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Número</th>
+                    <th>Dirigido a</th>
+                    <th>Responsable</th>
+                    <th>Órdenes</th>
+                    <th>Total</th>
+                    <th>Generada por</th>
+                    <th>Fecha</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {schoolBillingStatements.map((statement) => (
+                    <tr key={statement._id}>
+                      <td>{statement.statementNumber}</td>
+                      <td>{statement.billingFor || 'N/A'}</td>
+                      <td>{statement.billingResponsible || 'N/A'}</td>
+                      <td>{statement.orderCount || 0}</td>
+                      <td>{formatCurrency(statement.totalAmount)}</td>
+                      <td>{statement.generatedByName || 'Administración'}</td>
+                      <td>{formatDateTime(statement.createdAt)}</td>
+                      <td>
+                        <button className="btn btn-primary" onClick={() => onOpenSchoolBillingStatement(statement._id)} type="button">
+                          Ver PDF
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </section>
       ) : null}
 

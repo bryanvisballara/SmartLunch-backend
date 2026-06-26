@@ -46,7 +46,7 @@ export function getDefaultRouteByRole(role) {
   }
 
   if (role === 'student') {
-    return '/campus/student';
+    return '/student';
   }
 
   if (role === 'school_route') {

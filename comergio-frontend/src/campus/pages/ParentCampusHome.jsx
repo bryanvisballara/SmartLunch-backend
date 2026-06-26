@@ -48,6 +48,8 @@ import {
   getEnrollmentMatriculaPaymentStatus,
 } from '../../services/enrollmentMatricula.service';
 import { shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
+import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance } from '../../services/studentPortal.service';
+import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
 
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
@@ -3039,7 +3041,7 @@ function ParentStudentOptionsPortal({ anchorRef, children, isOpen }) {
   );
 }
 
-function ParentFinanceStudentSelector({ children, className = '', includeAllOption = false, isOpen, onSelectChild, onToggle, selectedChild }) {
+function ParentFinanceStudentSelector({ children, className = '', includeAllOption = false, isOpen, onSelectChild, onToggle, readOnly = false, selectedChild }) {
   const studentSwitcherRef = useRef(null);
   const renderStudentAvatar = (child, sizeClass = '') => (
     <span className={`parent-student-avatar${sizeClass ? ` ${sizeClass}` : ''}`}>
@@ -3050,15 +3052,15 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
   );
 
   return (
-    <section className={`parent-student-switcher${className ? ` ${className}` : ''}${isOpen ? ' is-open' : ''}`} aria-label="Selector de alumno" ref={studentSwitcherRef}>
+    <section className={`parent-student-switcher${className ? ` ${className}` : ''}${isOpen ? ' is-open' : ''}${readOnly ? ' is-readonly' : ''}`} aria-label="Selector de alumno" ref={studentSwitcherRef}>
       <div className="parent-student-toggle-card">
-        <button className="parent-student-toggle" onClick={onToggle} type="button" aria-expanded={isOpen}>
+        <button className="parent-student-toggle" onClick={readOnly ? undefined : onToggle} type="button" aria-expanded={readOnly ? false : isOpen} disabled={readOnly}>
           <div className="parent-student-toggle-copy">
             <p className="meta">Alumno seleccionado</p>
             <h3>{selectedChild.name}</h3>
             <p>{getParentStudentGradeLabel(selectedChild)}</p>
           </div>
-          <span className={`chevron ${isOpen ? 'open' : ''}`}>⌄</span>
+          {readOnly ? null : <span className={`chevron ${isOpen ? 'open' : ''}`}>⌄</span>}
         </button>
 
         <button aria-label={`Avatar de ${selectedChild.name}`} className="parent-student-photo-btn" type="button">
@@ -3144,6 +3146,7 @@ function ParentAcademicContent({
   academicSchedule = null,
   refreshKey = 0,
   isPerformanceLoading = false,
+  studentPortalMode = false,
 }) {
   const academicWorkspace = useMemo(() => (
     selectedChild?.isRealParentChild
@@ -3218,7 +3221,11 @@ function ParentAcademicContent({
     let isMounted = true;
     setParentAcademicCalendar((current) => ({ ...current, isLoading: true, error: '' }));
 
-    getParentAcademicCalendar({ studentId: selectedChild.id, month: buildMonthKey(calendarMonthDate) })
+    const calendarRequest = studentPortalMode
+      ? getStudentAcademicCalendar({ month: buildMonthKey(calendarMonthDate) })
+      : getParentAcademicCalendar({ studentId: selectedChild.id, month: buildMonthKey(calendarMonthDate) });
+
+    calendarRequest
       .then((response) => {
         if (!isMounted) {
           return;
@@ -3245,7 +3252,7 @@ function ParentAcademicContent({
     return () => {
       isMounted = false;
     };
-  }, [effectiveActiveView, calendarMonthDate, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey]);
+  }, [effectiveActiveView, calendarMonthDate, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey, studentPortalMode]);
 
   useEffect(() => {
     if (!selectedChild?.isRealParentChild || !['academic-performance', 'academic-attendance'].includes(effectiveActiveView)) {
@@ -3255,7 +3262,11 @@ function ParentAcademicContent({
     let isMounted = true;
     setParentAcademicAttendance((current) => ({ ...current, isLoading: true, error: '' }));
 
-    getParentAcademicAttendance({ studentId: selectedChild.id })
+    const attendanceRequest = studentPortalMode
+      ? getStudentAcademicAttendance({ attendanceType: 'subject_class' })
+      : getParentAcademicAttendance({ studentId: selectedChild.id });
+
+    attendanceRequest
       .then((response) => {
         if (!isMounted) {
           return;
@@ -3278,10 +3289,10 @@ function ParentAcademicContent({
     return () => {
       isMounted = false;
     };
-  }, [effectiveActiveView, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey]);
+  }, [effectiveActiveView, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey, studentPortalMode]);
 
   useEffect(() => {
-    if (!guidanceRoutineLog.isOpen || !selectedChild?.isRealParentChild || !selectedChild?.id) {
+    if (!guidanceRoutineLog.isOpen || !selectedChild?.isRealParentChild || !selectedChild?.id || studentPortalMode) {
       return undefined;
     }
 
@@ -4587,7 +4598,7 @@ function ParentAcademicContent({
   );
 }
 
-function ParentCampusHome({ routeBase = '', embedPortal = false }) {
+function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMode = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
@@ -4598,7 +4609,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const [parentAppFeatures, setParentAppFeatures] = useState(defaultParentAppFeatures);
   const [parentOverviewLoading, setParentOverviewLoading] = useState(true);
   const [selectedChildId, setSelectedChildId] = useState('');
-  const [localActiveSection, setLocalActiveSection] = useState('home');
+  const [localActiveSection, setLocalActiveSection] = useState(studentPortalMode ? 'academic' : 'home');
   const [activeAcademicView, setActiveAcademicView] = useState('academic-performance');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showFinanceChildOptions, setShowFinanceChildOptions] = useState(false);
@@ -4642,9 +4653,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   const pendingFeedCommentLikeKeysRef = useRef(new Set());
   const userMenuRef = useRef(null);
   const normalizedRouteBase = useMemo(() => normalizeRouteBase(routeBase), [routeBase]);
-  const usesRoutedSections = Boolean(normalizedRouteBase);
+  const usesRoutedSections = Boolean(normalizedRouteBase) && !studentPortalMode;
   const useQuerySectionRouting = shouldUseParentQuerySectionRouting();
   const activeSection = useMemo(() => {
+    if (studentPortalMode) {
+      return 'academic';
+    }
+
     if (!usesRoutedSections) {
       return localActiveSection;
     }
@@ -4663,6 +4678,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     location.search,
     normalizedRouteBase,
     parentAppFeatures,
+    studentPortalMode,
     useQuerySectionRouting,
     usesRoutedSections,
   ]);
@@ -4763,6 +4779,33 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     let cancelled = false;
     setParentOverviewLoading(true);
 
+    if (studentPortalMode) {
+      getStudentPortalOverview()
+        .then((response) => {
+          if (cancelled) {
+            return;
+          }
+          const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
+          setParentOverview(mappedOverview);
+          setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setParentOverview({ children: [] });
+            setParentAppFeatures({ ...defaultParentAppFeatures, academic: true });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setParentOverviewLoading(false);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const overviewParams = selectedChildId && selectedChildId !== PARENT_FEED_ALL_CHILDREN_ID ? { studentId: selectedChildId } : {};
 
     getParentPortalOverview(overviewParams)
@@ -4788,7 +4831,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     return () => {
       cancelled = true;
     };
-  }, [selectedChildId]);
+  }, [selectedChildId, studentPortalMode, user]);
 
   useEffect(() => {
     if (!workspace.children.length) {
@@ -4811,7 +4854,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   }, [activeSection, selectedChildId, workspace.children]);
 
   useEffect(() => {
-    if (activeSection !== 'academic' || activeAcademicView !== 'academic-schedule' || !selectedChild?.id) {
+    if (studentPortalMode || activeSection !== 'academic' || activeAcademicView !== 'academic-schedule' || !selectedChild?.id) {
       return undefined;
     }
 
@@ -4829,10 +4872,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     return () => {
       cancelled = true;
     };
-  }, [activeAcademicView, activeSection, selectedChild?.id]);
+  }, [activeAcademicView, activeSection, selectedChild?.id, studentPortalMode]);
 
   useEffect(() => {
-    if (parentOverviewLoading) {
+    if (studentPortalMode || parentOverviewLoading) {
       return undefined;
     }
 
@@ -4878,9 +4921,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     return () => {
       cancelled = true;
     };
-  }, [parentOverviewLoading, selectedChildId, feedRefreshCount]);
+  }, [parentOverviewLoading, selectedChildId, feedRefreshCount, studentPortalMode]);
 
   useEffect(() => {
+    if (studentPortalMode) {
+      return undefined;
+    }
+
     let cancelled = false;
     setNursingLoading(true);
 
@@ -4904,9 +4951,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [studentPortalMode]);
 
   useEffect(() => {
+    if (studentPortalMode) {
+      return undefined;
+    }
+
     let cancelled = false;
     setPsychologyLoading(true);
 
@@ -4930,7 +4981,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [studentPortalMode]);
 
   const refreshMatriculaPendingSignatures = useCallback(async () => {
     try {
@@ -5026,6 +5077,20 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
   }, [location.search, refreshMatriculaPendingSignatures]);
 
   const refreshParentSection = useCallback(async () => {
+    if (studentPortalMode) {
+      try {
+        const response = await getStudentPortalOverview();
+        const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
+        setParentOverview(mappedOverview);
+        setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
+      } catch {
+        setParentOverview({ children: [] });
+      }
+
+      setAcademicRefreshCount((currentValue) => currentValue + 1);
+      return;
+    }
+
     const overviewParams = selectedChildId && selectedChildId !== PARENT_FEED_ALL_CHILDREN_ID
       ? { studentId: selectedChildId }
       : {};
@@ -5092,7 +5157,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     }
 
     await Promise.allSettled(refreshTasks);
-  }, [activeSection, selectedChildId]);
+  }, [activeSection, selectedChildId, studentPortalMode, user]);
 
   const {
     contentOffset: pullRefreshContentOffset,
@@ -5652,10 +5717,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     if (parentOverviewLoading) {
       return (
         <ParentPortalBootScreen
-          message="Estamos consultando la información real del acudiente y preparando tu experiencia."
+          message={studentPortalMode
+            ? 'Estamos consultando tu información académica y preparando tu portal.'
+            : 'Estamos consultando la información real del acudiente y preparando tu experiencia.'}
           onLogout={onLogout}
           schoolName={workspace.guardian.schoolName}
-          title="Cargando alumnos vinculados"
+          title={studentPortalMode ? 'Cargando portal académico' : 'Cargando alumnos vinculados'}
         />
       );
     }
@@ -5669,7 +5736,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
     <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}`}>
           <ParentMobilePortalHeader
             canOpenMenu={activeSection === 'academic'}
-            guardianName={workspace.guardian.name}
+            guardianName={studentPortalMode ? (selectedChild?.name || user?.name) : workspace.guardian.name}
             isMenuOpen={activeSection === 'academic' ? showAcademicMenu : false}
             onLogout={onLogout}
             onToggleMenu={() => {
@@ -5683,13 +5750,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
           />
           <ParentFinanceStudentSelector
             children={workspace.children}
-            includeAllOption={activeSection === 'home' && workspace.children.length > 1}
+            includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
             isOpen={showFinanceChildOptions}
             onSelectChild={(childId) => {
               setSelectedChildId(childId);
               setShowFinanceChildOptions(false);
             }}
             onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
+            readOnly={studentPortalMode}
             selectedChild={selectedChildForSwitcher}
           />
           {financeHeroCard}
@@ -5826,6 +5894,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
               isPerformanceLoading={parentOverviewLoading}
               refreshKey={academicRefreshCount}
               selectedChild={selectedChild}
+              studentPortalMode={studentPortalMode}
             />
           </>
         ) : null}
@@ -6229,6 +6298,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
         />
       ) : null}
 
+      {studentPortalMode ? null : (
       <nav aria-label="Navegacion principal del padre" className="campus-parent-mobile__bottom-nav">
         {visibleParentAppSections.map((section) => {
           const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);
@@ -6288,6 +6358,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false }) {
           );
         })}
       </nav>
+      )}
     </section>
   );
 }

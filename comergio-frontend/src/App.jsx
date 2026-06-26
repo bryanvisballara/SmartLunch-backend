@@ -104,6 +104,7 @@ function App() {
   const isCampusRoute = normalizedPathname === '/campus' || normalizedPathname.startsWith('/campus/');
   const isCampusPreviewRoute = normalizedPathname === '/campus-preview' || normalizedPathname.startsWith('/campus-preview/');
   const isParentRoute = normalizedPathname === '/parent' || normalizedPathname.startsWith('/parent/');
+  const isStudentRoute = normalizedPathname === '/student' || normalizedPathname.startsWith('/student/');
   const isSchoolCreationRoute = normalizedPathname === '/schoolcreation';
   const isCampusLikeRoute = isCampusRoute || isCampusPreviewRoute;
   const campusLoginPath = '/login';
@@ -123,11 +124,11 @@ function App() {
     '/recursos-humanos',
     '/academic-secretary/admissions',
     '/campus',
-    '/campus/student',
+    '/student',
     '/daily-closure',
     '/meriendas/operator',
     '/pos',
-  ].includes(normalizedPathname) || normalizedPathname.startsWith('/campus/student');
+  ].includes(normalizedPathname) || normalizedPathname.startsWith('/student');
   const showNavbar =
     !isLandingRoute &&
     normalizedPathname !== '/login' &&
@@ -141,6 +142,7 @@ function App() {
     !isSuperAdminRoute &&
     !isCampusLikeRoute &&
     !normalizedPathname.startsWith('/parent') &&
+    !normalizedPathname.startsWith('/student') &&
     !['/privacy', '/contact'].includes(normalizedPathname);
   const hideFooter =
     isLandingRoute ||
@@ -154,6 +156,7 @@ function App() {
     isSuperAdminRoute ||
     isCampusLikeRoute ||
     isParentRoute ||
+    isStudentRoute ||
     isEpaycoReturnRoute;
 
   useEffect(() => {
@@ -325,7 +328,7 @@ function App() {
   return (
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
+      <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<Login />} path="/login" />
@@ -569,6 +572,8 @@ function App() {
             )}
             path="/meriendas/operator"
           />
+          <Route element={<Navigate replace to="/student" />} path="/campus/student" />
+          <Route element={<Navigate replace to="/student" />} path="/campus/student/*" />
           <Route
             element={(
               <RequireAuth isAuthenticated={isAuthenticated} loginPath={campusLoginPath}>
@@ -578,6 +583,18 @@ function App() {
             path="/campus/*"
           />
           {campusPreviewEnabled ? <Route element={<CampusApp />} path="/campus-preview/*" /> : null}
+          <Route
+            element={(
+              <RequireRole
+                allowedRoles={['student']}
+                isAuthenticated={isAuthenticated}
+                userRole={userRole}
+              >
+                <ParentCampusHome studentPortalMode />
+              </RequireRole>
+            )}
+            path="/student/*"
+          />
           <Route
             element={(
               <RequireRole

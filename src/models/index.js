@@ -7,6 +7,7 @@ require('./store.model');
 require('./category.model');
 require('./product.model');
 require('./order.model');
+require('./schoolBillingStatement.model');
 require('./inventoryMovement.model');
 require('./inventoryRequest.model');
 require('./dailyClosure.model');
