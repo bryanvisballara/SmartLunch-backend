@@ -14,6 +14,37 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatEnrollmentMatriculaConsentStatus(item = {}) {
+  if (item?.statusLabel) return item.statusLabel;
+
+  if (item?.status === 'office_payment_confirmed') {
+    const methodLabels = {
+      cash: 'Pago en efectivo',
+      bank_transfer: 'Pago por transferencia',
+      card: 'Pago con datáfono',
+      pse: 'Pago por PSE',
+      epayco: 'Pago por ePayco',
+      bold: 'Pago por Bold',
+      other: 'Pago registrado en cartera',
+    };
+    return methodLabels[String(item?.payment?.method || '').toLowerCase()] || 'Pago registrado en cartera';
+  }
+
+  const labels = {
+    intro_pending: 'Introducción pendiente',
+    consent_pending: 'Consentimiento pendiente',
+    consent_accepted: 'Consentimiento aceptado',
+    payment_pending: 'Pago pendiente',
+    payment_confirmed: 'Pago confirmado',
+    contract_pending: 'Firma de contrato pendiente',
+    pagare_pending: 'Firma de pagaré pendiente',
+    completed: 'Matrícula completada',
+    cancelled: 'Cancelado',
+  };
+
+  return labels[item?.status] || item?.status || '—';
+}
+
 function downloadBlob(blob, fileName) {
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -118,7 +149,7 @@ function EnrollmentMatriculaRectoriaPanel() {
                         <span>Dispositivo: {item.consent?.device || '—'}</span>
                       </div>
                     </td>
-                    <td>{item.status}</td>
+                    <td>{formatEnrollmentMatriculaConsentStatus(item)}</td>
                   </tr>
                 )) : (
                   <tr>

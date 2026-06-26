@@ -77,6 +77,8 @@ const SECTION_OPTIONS = [
 
 const BILLING_SECTION_OPTIONS = [
   { key: 'overview', label: 'Resumen de cartera' },
+  { key: 'enrollments', label: 'Matrículas' },
+  { key: 'pensions', label: 'Pensiones' },
 ];
 
 const BILLING_PAYMENT_METHOD_OPTIONS = [
@@ -89,10 +91,56 @@ const BILLING_PAYMENT_METHOD_OPTIONS = [
   { value: 'other', label: 'Otro' },
 ];
 
+const MATRICULA_BILLING_PAYMENT_METHOD_OPTIONS = [
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'card', label: 'Datáfono' },
+  { value: 'bank_transfer', label: 'Transferencia' },
+];
+
 const BILLING_STUDENT_ROWS_PER_PAGE = 15;
+
+function filterBillingEnrollmentAccounts(accounts = [], subview = 'pending') {
+  if (subview === 'paid') {
+    return accounts.filter((account) => account.enrollmentStatus === 'paid');
+  }
+  return accounts.filter((account) => account.enrollmentStatus === 'pending');
+}
+
+function filterBillingPensionAccounts(accounts = []) {
+  return accounts.filter((account) => account.hasPensionActivity);
+}
+
+function filterBillingPaymentPlanRows(rows = [], billingSection = 'overview') {
+  if (billingSection === 'enrollments') {
+    return rows.filter((row) => String(row.category || '') === 'annual_tuition');
+  }
+  if (billingSection === 'pensions') {
+    return rows.filter((row) => String(row.category || '') === 'monthly_tuition');
+  }
+  return rows;
+}
 
 function labelBillingPaymentMethod(value) {
   return BILLING_PAYMENT_METHOD_OPTIONS.find((option) => option.value === value)?.label || '';
+}
+
+function labelEnrollmentMatriculaConsentStatus(item = {}) {
+  if (item?.statusLabel) return item.statusLabel;
+  if (item?.status === 'office_payment_confirmed') {
+    return labelBillingPaymentMethod(item?.payment?.method) || 'Pago registrado en cartera';
+  }
+  const labels = {
+    intro_pending: 'Introducción pendiente',
+    consent_pending: 'Consentimiento pendiente',
+    consent_accepted: 'Consentimiento aceptado',
+    payment_pending: 'Pago pendiente',
+    payment_confirmed: 'Pago confirmado',
+    contract_pending: 'Firma de contrato pendiente',
+    pagare_pending: 'Firma de pagaré pendiente',
+    completed: 'Matrícula completada',
+    cancelled: 'Cancelado',
+  };
+  return labels[item?.status] || item?.status || '—';
 }
 
 function labelBillingPlanConcept(row = {}) {
@@ -1461,6 +1509,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     notes: '',
   });
   const [billingSearch, setBillingSearch] = useState('');
+  const [billingEnrollmentSubview, setBillingEnrollmentSubview] = useState('pending');
   const [billingStudentPage, setBillingStudentPage] = useState(1);
   const [selectedBillingStudentId, setSelectedBillingStudentId] = useState('');
   const [billingPaymentDraft, setBillingPaymentDraft] = useState(createBillingPaymentDraft);
@@ -1619,10 +1668,19 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const billingEnrollmentFocus = billing.billingFocus === 'enrollment';
 
   const billingStudentAccounts = useMemo(() => Array.isArray(billing.studentAccounts) ? billing.studentAccounts : [], [billing.studentAccounts]);
+  const billingWorkspaceAccounts = useMemo(() => {
+    if (activeSection === 'enrollments') {
+      return filterBillingEnrollmentAccounts(billingStudentAccounts, billingEnrollmentSubview);
+    }
+    if (activeSection === 'pensions') {
+      return filterBillingPensionAccounts(billingStudentAccounts);
+    }
+    return billingStudentAccounts;
+  }, [activeSection, billingEnrollmentSubview, billingStudentAccounts]);
   const filteredBillingStudentRows = useMemo(() => {
     const term = normalizeBillingSearch(billingSearch);
     const rows = term
-      ? billingStudentAccounts.filter((account) => normalizeBillingSearch([
+      ? billingWorkspaceAccounts.filter((account) => normalizeBillingSearch([
         account.studentName,
         account.documentNumber,
         account.grade,
@@ -1630,11 +1688,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         account.parentName,
         account.parentPhone,
         account.parentEmail,
+        account.enrollmentStatusLabel,
       ].filter(Boolean).join(' ')).includes(term))
-      : billingStudentAccounts;
+      : billingWorkspaceAccounts;
 
     return rows;
-  }, [billingSearch, billingStudentAccounts]);
+  }, [billingSearch, billingWorkspaceAccounts]);
 
   const billingStudentTotalPages = useMemo(() => {
     if (!filteredBillingStudentRows.length) return 1;
@@ -1651,6 +1710,28 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     return filteredBillingStudentRows.find((account) => String(account.studentId) === String(selectedBillingStudentId)) || filteredBillingStudentRows[0];
   }, [filteredBillingStudentRows, selectedBillingStudentId]);
 
+  const selectedBillingPlanRows = useMemo(() => (
+    filterBillingPaymentPlanRows(selectedBillingAccount?.paymentPlan?.rows || [], activeSection)
+  ), [activeSection, selectedBillingAccount]);
+
+  const selectedBillingLedgerCharges = useMemo(() => {
+    const charges = selectedBillingAccount?.charges || [];
+    if (activeSection === 'enrollments') {
+      return charges.filter((charge) => String(charge.category || '') === 'annual_tuition');
+    }
+    if (activeSection === 'pensions') {
+      return charges.filter((charge) => String(charge.category || '') === 'monthly_tuition');
+    }
+    return charges;
+  }, [activeSection, selectedBillingAccount]);
+
+  const selectedAccountPendingAmount = useMemo(() => {
+    if (!selectedBillingAccount) return 0;
+    if (activeSection === 'enrollments') return Number(selectedBillingAccount.enrollmentPendingAmount || 0);
+    if (activeSection === 'pensions') return Number(selectedBillingAccount.pensionPendingAmount || 0);
+    return Number(selectedBillingAccount.pendingAmount || 0);
+  }, [activeSection, selectedBillingAccount]);
+
   const selectedBillingPendingCharges = useMemo(() => (
     (selectedBillingAccount?.charges || []).filter((charge) => ['pending', 'overdue'].includes(String(charge.status)) && Number(charge.amount || 0) > 0)
   ), [selectedBillingAccount]);
@@ -1659,12 +1740,15 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     [billingPaymentDraft.chargeId, selectedBillingPendingCharges]
   );
   const showEnrollmentContractModeField = billingEnrollmentFocus && isMatriculaBillingPaymentRow(billingPaymentModal.row, billingPaymentSelectedCharge);
+  const billingPaymentMethodOptions = showEnrollmentContractModeField
+    ? MATRICULA_BILLING_PAYMENT_METHOD_OPTIONS
+    : BILLING_PAYMENT_METHOD_OPTIONS;
   const billingPaymentModalCanSubmit = Boolean(billingPaymentDraft.chargeId || billingPaymentModal.row)
     && (!showEnrollmentContractModeField || Boolean(billingPaymentDraft.enrollmentContractMode));
 
   useEffect(() => {
     setBillingStudentPage(1);
-  }, [billingSearch]);
+  }, [billingSearch, activeSection, billingEnrollmentSubview]);
 
   useEffect(() => {
     if (billingStudentPage > billingStudentTotalPages) {
@@ -2856,9 +2940,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         settleAsPaid: Boolean(modalRow),
         enrollmentContractMode: showEnrollmentContractModeField ? billingPaymentDraft.enrollmentContractMode : undefined,
       });
+      const paidEnrollmentRow = modalRow?.category === 'annual_tuition';
       setBillingPaymentDraft(createBillingPaymentDraft());
       setBillingPaymentModal({ open: false, row: null });
       await loadBootstrap();
+      if (activeSection === 'enrollments' && paidEnrollmentRow) {
+        setBillingEnrollmentSubview('paid');
+      }
     }, 'Pago registrado y estado de cuenta actualizado.', 'overview');
   };
 
@@ -3221,23 +3309,58 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         </div>
       ) : null}
 
-      {activeSection === 'overview' ? (
-        isBillingPortal ? (
+      {isBillingPortal && ['overview', 'enrollments', 'pensions'].includes(activeSection) ? (
           <>
             <section className="academic-secretary__kpis">
-              <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Matrícula pendiente' : 'Saldo pendiente'}</span><strong>{formatCurrency(billing.kpis?.pendingAmount || 0)}</strong></article>
-              <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Alumnos con matrícula pendiente' : 'Cargos pendientes'}</span><strong>{billingEnrollmentFocus ? billingStudentAccounts.length : (billing.kpis?.totalPendingCharges || 0)}</strong></article>
-              <article className="academic-secretary__kpi"><span>Pagado este mes</span><strong>{formatCurrency(billing.kpis?.paidThisMonth || 0)}</strong></article>
-              <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Familias en seguimiento' : 'Alumnos/familias en cartera'}</span><strong>{billingEnrollmentFocus ? billingStudentAccounts.length : overdueFamilyRows.length}</strong></article>
+              {activeSection === 'overview' ? (
+                <>
+                  <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Matrícula pendiente' : 'Saldo pendiente'}</span><strong>{formatCurrency(billing.kpis?.pendingAmount || 0)}</strong></article>
+                  <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Alumnos con matrícula pendiente' : 'Cargos pendientes'}</span><strong>{billingEnrollmentFocus ? (billing.kpis?.enrollmentPendingCount || 0) : (billing.kpis?.totalPendingCharges || 0)}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Pagado este mes</span><strong>{formatCurrency(billing.kpis?.paidThisMonth || 0)}</strong></article>
+                  <article className="academic-secretary__kpi"><span>{billingEnrollmentFocus ? 'Alumnos matriculados pagados' : 'Alumnos/familias en cartera'}</span><strong>{billingEnrollmentFocus ? (billing.kpis?.enrollmentPaidCount || 0) : overdueFamilyRows.length}</strong></article>
+                </>
+              ) : null}
+              {activeSection === 'enrollments' ? (
+                <>
+                  <article className="academic-secretary__kpi"><span>Matrículas pendientes</span><strong>{billing.kpis?.enrollmentPendingCount || 0}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Matrículas pagadas</span><strong>{billing.kpis?.enrollmentPaidCount || 0}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Saldo matrícula pendiente</span><strong>{formatCurrency(billing.kpis?.pendingAmount || 0)}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Total matrículas pagadas</span><strong>{formatCurrency(billing.kpis?.enrollmentPaidAmount || 0)}</strong></article>
+                </>
+              ) : null}
+              {activeSection === 'pensions' ? (
+                <>
+                  <article className="academic-secretary__kpi"><span>Alumnos con pensiones</span><strong>{billing.kpis?.pensionStudentsCount || 0}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Pensión pendiente</span><strong>{formatCurrency(billing.kpis?.pensionPendingAmount || 0)}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Pagado este mes</span><strong>{formatCurrency(billing.kpis?.paidThisMonth || 0)}</strong></article>
+                  <article className="academic-secretary__kpi"><span>Alumnos en cartera</span><strong>{billingStudentAccounts.length}</strong></article>
+                </>
+              ) : null}
             </section>
 
             <section className="academic-secretary__panel academic-secretary__billing-panel">
               <div className="academic-secretary__panel-head">
                 <div>
-                  <h2>{billingEnrollmentFocus ? 'Matrícula pendiente por alumno' : 'Estado de cuenta por alumno'}</h2>
-                  <p>{billingEnrollmentFocus ? 'Familias con matrícula sin pagar. Filtra por alumno o acudiente y registra pagos presenciales.' : 'Filtra por alumno o acudiente, revisa cargos y registra pagos presenciales.'}</p>
+                  <h2>
+                    {activeSection === 'enrollments'
+                      ? (billingEnrollmentSubview === 'paid' ? 'Alumnos matriculados' : 'Matrículas pendientes por alumno')
+                      : activeSection === 'pensions'
+                        ? 'Pensiones por alumno'
+                        : (billingEnrollmentFocus ? 'Resumen por alumno' : 'Estado de cuenta por alumno')}
+                  </h2>
+                  <p>
+                    {activeSection === 'enrollments'
+                      ? (billingEnrollmentSubview === 'paid'
+                        ? 'Alumnos que ya pagaron matrícula. Puedes revisar el recibo y el estado del proceso.'
+                        : 'Filtra por alumno o acudiente y registra pagos de matrícula presenciales.')
+                      : activeSection === 'pensions'
+                        ? 'Selecciona un alumno para ver su calendario de pensiones con los valores vigentes según beneficios y fecha actual.'
+                        : (billingEnrollmentFocus
+                          ? 'Vista general de todos los alumnos. Usa Matrículas o Pensiones para registrar pagos específicos.'
+                          : 'Filtra por alumno o acudiente, revisa cargos y registra pagos presenciales.')}
+                  </p>
                 </div>
-                {!billingEnrollmentFocus ? (
+                {activeSection === 'overview' && !billingEnrollmentFocus ? (
                 <div className="academic-secretary__billing-bucket-actions">
                   {Object.entries(billing.kpis?.overdueBuckets || {}).filter(([, count]) => Number(count || 0) > 0).map(([bucket, count]) => (
                     <button disabled={busy} key={bucket} onClick={() => onSendReminder(bucket)} type="button">
@@ -3247,6 +3370,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 </div>
                 ) : null}
               </div>
+              {activeSection === 'enrollments' ? (
+                <div className="academic-secretary__billing-subtabs">
+                  <button className={`academic-secretary__billing-subtab${billingEnrollmentSubview === 'pending' ? ' is-active' : ''}`} onClick={() => setBillingEnrollmentSubview('pending')} type="button">Pendientes por pagar</button>
+                  <button className={`academic-secretary__billing-subtab${billingEnrollmentSubview === 'paid' ? ' is-active' : ''}`} onClick={() => setBillingEnrollmentSubview('paid')} type="button">Matriculados (pagado)</button>
+                </div>
+              ) : null}
               <div className="academic-secretary__billing-search-row">
                 <label>
                   Buscar alumno o acudiente
@@ -3257,7 +3386,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     value={billingSearch}
                   />
                 </label>
-                <span>{filteredBillingStudentRows.length} de {billingStudentAccounts.length} alumnos</span>
+                <span>{filteredBillingStudentRows.length} de {billingWorkspaceAccounts.length} alumnos</span>
               </div>
               <div className="academic-secretary__billing-ledger-layout">
                 <div className="academic-secretary__table-wrap academic-secretary__billing-student-table">
@@ -3266,14 +3395,36 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                       <tr>
                         <th>Alumno</th>
                         <th>Acudiente</th>
-                        <th>Estado</th>
-                        <th>Saldo</th>
-                        <th>Pagado</th>
+                        {activeSection === 'enrollments' ? (
+                          <>
+                            <th>Estado matrícula</th>
+                            <th>Pendiente</th>
+                            <th>Pagado</th>
+                          </>
+                        ) : activeSection === 'pensions' ? (
+                          <>
+                            <th>Estado</th>
+                            <th>Pensión pendiente</th>
+                            <th>Pensión pagada</th>
+                          </>
+                        ) : (
+                          <>
+                            <th>Estado</th>
+                            <th>Saldo</th>
+                            <th>Pagado</th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
                       {filteredBillingStudentRows.length === 0 ? (
-                        <tr><td colSpan="5">{billingEnrollmentFocus ? 'No hay alumnos con matrícula pendiente.' : 'No hay alumnos que coincidan con el filtro.'}</td></tr>
+                        <tr><td colSpan="5">
+                          {activeSection === 'enrollments'
+                            ? (billingEnrollmentSubview === 'paid' ? 'No hay alumnos matriculados pagados.' : 'No hay alumnos con matrícula pendiente.')
+                            : activeSection === 'pensions'
+                              ? 'No hay alumnos con plan de pensiones.'
+                              : 'No hay alumnos que coincidan con el filtro.'}
+                        </td></tr>
                       ) : paginatedBillingStudentRows.map((account) => (
                         <tr
                           className={String(selectedBillingAccount?.studentId || '') === String(account.studentId) ? 'is-selected' : ''}
@@ -3282,9 +3433,25 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                         >
                           <td><strong>{account.studentName}</strong><div>{formatGradeLabel(account.grade)}{account.course ? ` · ${account.course}` : ''}</div></td>
                           <td><strong>{account.parentName || 'Sin acudiente'}</strong><div>{account.parentPhone || account.parentEmail || '-'}</div></td>
-                          <td><span className={`academic-secretary__billing-status is-${account.status}`}>{account.statusLabel}</span></td>
-                          <td>{Number(account.pendingAmount || 0) > 0 ? formatCurrency(account.pendingAmount) : '$0'}</td>
-                          <td>{formatCurrency(account.paidAmount || 0)}</td>
+                          {activeSection === 'enrollments' ? (
+                            <>
+                              <td><span className={`academic-secretary__billing-status is-${account.enrollmentStatus === 'paid' ? 'paid' : account.status}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
+                              <td>{Number(account.enrollmentPendingAmount || 0) > 0 ? formatCurrency(account.enrollmentPendingAmount) : '$0'}</td>
+                              <td>{formatCurrency(account.enrollmentPaidAmount || 0)}</td>
+                            </>
+                          ) : activeSection === 'pensions' ? (
+                            <>
+                              <td><span className={`academic-secretary__billing-status is-${Number(account.pensionPendingAmount || 0) > 0 ? account.status : 'paid'}`}>{Number(account.pensionPendingAmount || 0) > 0 ? 'Pensión pendiente' : 'Al día'}</span></td>
+                              <td>{Number(account.pensionPendingAmount || 0) > 0 ? formatCurrency(account.pensionPendingAmount) : '$0'}</td>
+                              <td>{formatCurrency(account.pensionPaidAmount || 0)}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td><span className={`academic-secretary__billing-status is-${account.status}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
+                              <td>{Number(account.pendingAmount || 0) > 0 ? formatCurrency(account.pendingAmount) : '$0'}</td>
+                              <td>{formatCurrency(account.paidAmount || 0)}</td>
+                            </>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -3325,27 +3492,30 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                           <p>{formatGradeLabel(selectedBillingAccount.grade)}{selectedBillingAccount.course ? ` · ${selectedBillingAccount.course}` : ''}</p>
                         </div>
                         <div className="academic-secretary__billing-detail-summary">
-                          <strong>{Number(selectedBillingAccount.pendingAmount || 0) > 0 ? formatCurrency(selectedBillingAccount.pendingAmount) : 'Al día'}</strong>
+                          <strong>{selectedAccountPendingAmount > 0 ? formatCurrency(selectedAccountPendingAmount) : 'Al día'}</strong>
+                          {activeSection === 'overview' ? (
                           <div className="academic-secretary__billing-detail-actions">
-                            <button disabled={busy || Number(selectedBillingAccount.pendingAmount || 0) <= 0} onClick={() => openPushEmailModal({ parentId: selectedBillingAccount.parentId, parentName: selectedBillingAccount.parentName, parentPhone: selectedBillingAccount.parentPhone, students: [selectedBillingAccount.studentName], amount: selectedBillingAccount.pendingAmount, overdueDays: Math.max(...(selectedBillingPendingCharges.map((charge) => calculateOverdueDays(charge.dueDate))), 0), overdueMonths: selectedBillingAccount.overdueMonths })} type="button">Enviar recordatorio</button>
-                            <button disabled={busy || Number(selectedBillingAccount.pendingAmount || 0) <= 0 || !normalizePhoneForWhatsapp(selectedBillingAccount.parentPhone)} onClick={() => onOpenWhatsapp({ parentId: selectedBillingAccount.parentId, parentName: selectedBillingAccount.parentName, parentPhone: selectedBillingAccount.parentPhone, students: [selectedBillingAccount.studentName], amount: selectedBillingAccount.pendingAmount, overdueDays: Math.max(...(selectedBillingPendingCharges.map((charge) => calculateOverdueDays(charge.dueDate))), 0), overdueMonths: selectedBillingAccount.overdueMonths })} type="button">WhatsApp</button>
-                            <button disabled={busy || Number(selectedBillingAccount.pendingAmount || 0) <= 0} onClick={() => openManualNoteModal({ parentId: selectedBillingAccount.parentId, parentName: selectedBillingAccount.parentName, parentPhone: selectedBillingAccount.parentPhone, students: [selectedBillingAccount.studentName], amount: selectedBillingAccount.pendingAmount, overdueDays: Math.max(...(selectedBillingPendingCharges.map((charge) => calculateOverdueDays(charge.dueDate))), 0), overdueMonths: selectedBillingAccount.overdueMonths })} type="button">Nota</button>
+                            <button disabled={busy || selectedAccountPendingAmount <= 0} onClick={() => openPushEmailModal({ parentId: selectedBillingAccount.parentId, parentName: selectedBillingAccount.parentName, parentPhone: selectedBillingAccount.parentPhone, students: [selectedBillingAccount.studentName], amount: selectedAccountPendingAmount, overdueDays: Math.max(...(selectedBillingPendingCharges.map((charge) => calculateOverdueDays(charge.dueDate))), 0), overdueMonths: selectedBillingAccount.overdueMonths })} type="button">Enviar recordatorio</button>
+                            <button disabled={busy || selectedAccountPendingAmount <= 0 || !normalizePhoneForWhatsapp(selectedBillingAccount.parentPhone)} onClick={() => onOpenWhatsapp({ parentId: selectedBillingAccount.parentId, parentName: selectedBillingAccount.parentName, parentPhone: selectedBillingAccount.parentPhone, students: [selectedBillingAccount.studentName], amount: selectedAccountPendingAmount, overdueDays: Math.max(...(selectedBillingPendingCharges.map((charge) => calculateOverdueDays(charge.dueDate))), 0), overdueMonths: selectedBillingAccount.overdueMonths })} type="button">WhatsApp</button>
+                            <button disabled={busy || selectedAccountPendingAmount <= 0} onClick={() => openManualNoteModal({ parentId: selectedBillingAccount.parentId, parentName: selectedBillingAccount.parentName, parentPhone: selectedBillingAccount.parentPhone, students: [selectedBillingAccount.studentName], amount: selectedAccountPendingAmount, overdueDays: Math.max(...(selectedBillingPendingCharges.map((charge) => calculateOverdueDays(charge.dueDate))), 0), overdueMonths: selectedBillingAccount.overdueMonths })} type="button">Nota</button>
                           </div>
+                          ) : null}
                         </div>
                       </div>
                       <dl className="academic-secretary__billing-contact">
                         <div><dt>Acudiente</dt><dd>{selectedBillingAccount.parentName || '-'}</dd></div>
                         <div><dt>Teléfono</dt><dd>{selectedBillingAccount.parentPhone || '-'}</dd></div>
                         <div><dt>Correo</dt><dd>{selectedBillingAccount.parentEmail || '-'}</dd></div>
+                        {activeSection === 'enrollments' ? <div><dt>Estado matrícula</dt><dd>{selectedBillingAccount.enrollmentStatusLabel || '-'}</dd></div> : null}
                       </dl>
 
                       <div className="academic-secretary__billing-payment-plan">
                         <div className="academic-secretary__billing-payment-plan-head">
-                          <h4>Plan de pagos</h4>
+                          <h4>{activeSection === 'pensions' ? 'Calendario de pensiones' : activeSection === 'enrollments' ? 'Matrícula' : 'Plan de pagos'}</h4>
                           <span>{selectedBillingAccount.paymentPlan?.academicYear || 'Año escolar activo'}</span>
                         </div>
-                        {(selectedBillingAccount.paymentPlan?.rows || []).length === 0 ? (
-                          <p>No hay plan de pagos configurado para este alumno.</p>
+                        {selectedBillingPlanRows.length === 0 ? (
+                          <p>{activeSection === 'pensions' ? 'No hay pensiones configuradas para este alumno.' : activeSection === 'enrollments' ? 'No hay matrícula configurada para este alumno.' : 'No hay plan de pagos configurado para este alumno.'}</p>
                         ) : (
                           <div className="academic-secretary__table-wrap academic-secretary__billing-payment-plan-table">
                             <table className="academic-secretary__table academic-secretary__table--billing-plan">
@@ -3361,7 +3531,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                 </tr>
                               </thead>
                               <tbody>
-                                {(selectedBillingAccount.paymentPlan?.rows || []).map((row) => (
+                                {selectedBillingPlanRows.map((row) => (
                                   <tr className={row.status === 'paid' ? 'is-paid' : ''} key={row.key || row.monthKey}>
                                     <td><strong>{row.monthLabel || row.concept}</strong><div>{row.concept}</div></td>
                                     <td>{formatDate(row.dueDate)}</td>
@@ -3369,7 +3539,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                     <td><strong>{labelBillingPlanConcept(row)}</strong></td>
                                     <td><strong>{row.benefitLabel || 'Precio full'}</strong><div>{row.benefitDescription || row.benefitWindowLabel || 'Sin beneficio activo.'}</div></td>
                                     <td><strong>{formatCurrency(row.status === 'paid' ? row.paidAmount || row.chargeAmount || 0 : row.amount || row.chargeAmount || 0)}</strong>{Number(row.paidAmount || 0) > 0 ? <div>Pagado: {formatCurrency(row.paidAmount)}</div> : null}</td>
-                                    <td>{row.status === 'paid' ? <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button> : <button className="academic-secretary__billing-plan-action" disabled={busy || Number(row.amount || row.chargeAmount || 0) <= 0} onClick={() => openBillingPaymentModal(row)} type="button">Registrar pago</button>}</td>
+                                    <td>{row.status === 'paid' ? <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button> : <button className="academic-secretary__billing-plan-action" disabled={busy || (activeSection === 'enrollments' && billingEnrollmentSubview === 'paid') || Number(row.amount || row.chargeAmount || 0) <= 0} onClick={() => openBillingPaymentModal(row)} type="button">Registrar pago</button>}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -3380,7 +3550,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
                       <div className="academic-secretary__billing-ledger-list">
                         <h4>Cargos</h4>
-                        {(selectedBillingAccount.charges || []).length === 0 ? <p>No hay cargos registrados.</p> : (selectedBillingAccount.charges || []).map((charge) => (
+                        {selectedBillingLedgerCharges.length === 0 ? <p>No hay cargos registrados.</p> : selectedBillingLedgerCharges.map((charge) => (
                           <div className="academic-secretary__billing-ledger-item" key={charge._id}>
                             <div><strong>{charge.concept}</strong><span>{formatDate(charge.dueDate)} · {charge.status === 'paid' ? 'Pagado' : 'Pendiente'}</span></div>
                             <strong>{formatCurrency(charge.amount || 0)}</strong>
@@ -3402,6 +3572,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               </div>
             </section>
 
+            {activeSection === 'overview' ? (
             <section className="academic-secretary__grid">
               <article className="academic-secretary__panel">
                 <div className="academic-secretary__panel-head"><div><h2>Seguimiento de cartera</h2><p>Registro de push, correo, WhatsApp y notas manuales realizadas desde el portal.</p></div></div>
@@ -3425,8 +3596,11 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 </div>
               </article>
             </section>
+            ) : null}
           </>
-        ) : (
+      ) : null}
+
+      {activeSection === 'overview' && !isBillingPortal ? (
         <>
           <section className="academic-secretary__kpis">
             <article className="academic-secretary__kpi"><span>Comunicados enviados</span><strong>{bootstrap.communications.length}</strong></article>
@@ -3475,7 +3649,6 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
             </article>
           </section>
         </>
-        )
       ) : null}
 
       {activeSection === 'communications' ? (
@@ -4435,12 +4608,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               <div className="academic-secretary__form-row">
                 <label>
                   Valor recibido
-                  <input disabled={!billingPaymentModalCanSubmit || busy} min="1" onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, amount: event.target.value }))} type="number" value={billingPaymentDraft.amount} />
+                  <input disabled={busy} min="1" onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, amount: event.target.value }))} type="number" value={billingPaymentDraft.amount} />
                 </label>
                 <label>
                   Medio de pago
-                  <select disabled={!billingPaymentModalCanSubmit || busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, method: event.target.value }))} value={billingPaymentDraft.method}>
-                    {BILLING_PAYMENT_METHOD_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  <select disabled={busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, method: event.target.value }))} value={billingPaymentDraft.method}>
+                    {billingPaymentMethodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </label>
               </div>
@@ -4457,17 +4630,17 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     <option value="digital">Contrato digital</option>
                   </select>
                   <small className="academic-secretary__field-hint">
-                    Físico: firmado en oficina. Digital: el acudiente firmará contrato y pagaré en la app al iniciar sesión.
+                    Físico: contrato firmado en oficina. Digital: pago registrado en cartera; el acudiente no debe firmar en la app si ya pagó aquí.
                   </small>
                 </label>
               ) : null}
               <label>
                 Fecha de pago
-                <input disabled={!billingPaymentModalCanSubmit || busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, paidAt: event.target.value }))} type="date" value={billingPaymentDraft.paidAt} />
+                <input disabled={busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, paidAt: event.target.value }))} type="date" value={billingPaymentDraft.paidAt} />
               </label>
               <label>
                 Nota o referencia
-                <textarea disabled={!billingPaymentModalCanSubmit || busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, notes: event.target.value }))} placeholder="Referencia de transferencia, voucher de datáfono o nota interna" value={billingPaymentDraft.notes} />
+                <textarea disabled={busy} onChange={(event) => setBillingPaymentDraft((previous) => ({ ...previous, notes: event.target.value }))} placeholder="Referencia de transferencia, voucher de datáfono o nota interna" value={billingPaymentDraft.notes} />
               </label>
               <div className="academic-secretary__actions"><button className="btn btn-outline" disabled={busy} onClick={closeBillingPaymentModal} type="button">Cancelar</button><button className="btn btn-primary" disabled={!billingPaymentModalCanSubmit || busy} type="submit">{busy ? 'Guardando...' : 'Registrar pago'}</button></div>
             </form>

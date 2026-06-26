@@ -1,5 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 function openUrlInNewTab(url) {
   const popup = window.open(url, '_blank', 'noopener,noreferrer');
@@ -28,25 +30,62 @@ function triggerDownload(url, fileName) {
   anchor.remove();
 }
 
+function sanitizePdfFileName(fileName = 'documento.pdf') {
+  const trimmed = String(fileName || 'documento.pdf').trim() || 'documento.pdf';
+  return trimmed.toLowerCase().endsWith('.pdf') ? trimmed : `${trimmed}.pdf`;
+}
+
+async function openPdfOnNative(doc, fileName) {
+  const safeFileName = sanitizePdfFileName(fileName).replace(/[^\w.\-]+/g, '-');
+  const base64 = doc.output('datauristring').split(',')[1];
+  if (!base64) {
+    throw new Error('No se pudo generar el contenido del PDF.');
+  }
+
+  await Filesystem.writeFile({
+    path: safeFileName,
+    data: base64,
+    directory: Directory.Cache,
+    recursive: true,
+  });
+
+  const { uri } = await Filesystem.getUri({
+    directory: Directory.Cache,
+    path: safeFileName,
+  });
+
+  try {
+    await Share.share({
+      title: safeFileName,
+      text: 'Documento de matrícula',
+      url: uri,
+      dialogTitle: 'Guardar o abrir PDF',
+    });
+    return { url: uri, mode: 'native-share' };
+  } catch (shareError) {
+    const shareMessage = String(shareError?.message || '').toLowerCase();
+    if (shareMessage.includes('cancel') || shareMessage.includes('canceled') || shareMessage.includes('cancelled')) {
+      return { url: uri, mode: 'native-share-cancelled' };
+    }
+
+    const webPath = Capacitor.convertFileSrc(uri);
+    await Browser.open({ url: webPath, presentationStyle: 'fullscreen' });
+    return { url: webPath, mode: 'native-browser-file' };
+  }
+}
+
 export async function openJsPdfDocument(doc, fileName = 'documento.pdf') {
   if (!doc || typeof doc.output !== 'function') {
     throw new Error('No se pudo generar el PDF.');
   }
 
-  const safeFileName = String(fileName || 'documento.pdf').trim() || 'documento.pdf';
+  const safeFileName = sanitizePdfFileName(fileName);
   const blob = doc.output('blob');
   const blobUrl = URL.createObjectURL(blob);
 
   try {
     if (Capacitor.isNativePlatform()) {
-      try {
-        await Browser.open({ url: blobUrl, presentationStyle: 'fullscreen' });
-        return { url: blobUrl, mode: 'native-browser-blob' };
-      } catch (browserError) {
-        const dataUri = doc.output('datauristring');
-        await Browser.open({ url: dataUri, presentationStyle: 'fullscreen' });
-        return { url: dataUri, mode: 'native-browser-data-uri' };
-      }
+      return openPdfOnNative(doc, safeFileName);
     }
 
     const opened = openUrlInNewTab(blobUrl);

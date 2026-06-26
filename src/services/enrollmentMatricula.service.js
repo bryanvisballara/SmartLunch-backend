@@ -281,8 +281,46 @@ function serializeProcess(process, charge = null) {
     requiresSignature: ['payment_confirmed', 'contract_pending', 'pagare_pending'].includes(doc.status),
     pendingContractSignature: ['payment_confirmed', 'contract_pending'].includes(doc.status),
     pendingPagareSignature: doc.status === 'pagare_pending',
-    isCompleted: doc.status === 'completed',
+    isCompleted: doc.status === 'completed' || doc.status === 'office_payment_confirmed',
+    officePaymentConfirmed: doc.status === 'office_payment_confirmed',
+    statusLabel: resolveEnrollmentMatriculaStatusLabel(doc),
   };
+}
+
+function resolveEnrollmentMatriculaStatusLabel(process = {}) {
+  const status = normalizeText(process?.status);
+  if (status === 'office_payment_confirmed') {
+    return resolveCarteraPaymentMethodLabel(process?.payment?.method) || 'Pago registrado en cartera';
+  }
+
+  const labels = {
+    intro_pending: 'Introducción pendiente',
+    consent_pending: 'Consentimiento pendiente',
+    consent_accepted: 'Consentimiento aceptado',
+    payment_pending: 'Pago pendiente',
+    payment_confirmed: 'Pago confirmado',
+    contract_pending: 'Firma de contrato pendiente',
+    pagare_pending: 'Firma de pagaré pendiente',
+    completed: 'Matrícula completada',
+    cancelled: 'Cancelado',
+  };
+
+  return labels[status] || status || '—';
+}
+
+function resolveCarteraPaymentMethodLabel(method = '') {
+  const normalized = normalizeText(method).toLowerCase();
+  const labels = {
+    cash: 'Pago en efectivo',
+    bank_transfer: 'Pago por transferencia',
+    card: 'Pago con datáfono',
+    pse: 'Pago por PSE',
+    epayco: 'Pago por ePayco',
+    bold: 'Pago por Bold',
+    other: 'Pago registrado en cartera',
+  };
+
+  return labels[normalized] || '';
 }
 
 async function acknowledgeIntro({ processId, schoolId, parentId }) {
@@ -599,13 +637,18 @@ async function listPendingSignaturesForParent({ schoolId, parentId }) {
 }
 
 async function listConsentsForRectoria({ schoolId }) {
-  return EnrollmentMatriculaProcess.find({
+  const items = await EnrollmentMatriculaProcess.find({
     schoolId,
     'consent.accepted': true,
   })
     .sort({ 'consent.acceptedAt': -1 })
-    .select('studentName parentName consent status academicYear createdAt updatedAt studentId parentId chargeId')
+    .select('studentName parentName consent status academicYear payment createdAt updatedAt studentId parentId chargeId contractMode')
     .lean();
+
+  return items.map((item) => ({
+    ...item,
+    statusLabel: resolveEnrollmentMatriculaStatusLabel(item),
+  }));
 }
 
 async function listSignedDocumentsForRectoria({ schoolId }) {
@@ -710,7 +753,7 @@ async function linkCarteraPaymentToEnrollmentMatricula({
       charge,
       billingProfile,
     });
-    process.status = 'contract_pending';
+    process.status = 'office_payment_confirmed';
     process.contract = {};
     process.pagare = {};
     await process.save();

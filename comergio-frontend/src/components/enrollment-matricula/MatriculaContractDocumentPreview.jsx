@@ -98,7 +98,7 @@ function MatriculaContractDocumentPreview({
             onClick={onDownload}
             type="button"
           >
-            {downloading ? 'Abriendo PDF...' : 'Descargar PDF'}
+            {downloading ? 'Abriendo PDF...' : 'Abrir o guardar PDF'}
           </button>
         ) : null}
       </div>

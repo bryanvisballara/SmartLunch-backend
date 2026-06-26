@@ -4732,42 +4732,68 @@ function isPendingEnrollmentPlanRow(row = {}) {
     && Number(row.outstandingAmount || row.amount || 0) > 0;
 }
 
-function narrowStudentAccountsToPendingEnrollment(studentAccounts = []) {
-  return studentAccounts
-    .map((account) => {
-      const enrollmentCharges = (account.charges || []).filter((charge) => String(charge.category || '') === 'annual_tuition');
-      const pendingEnrollmentCharges = enrollmentCharges.filter(isPendingEnrollmentCharge);
-      const pendingEnrollmentPlanRows = (account.paymentPlan?.rows || []).filter(isPendingEnrollmentPlanRow);
-      const pendingAmountFromCharges = pendingEnrollmentCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0);
-      const pendingAmountFromPlan = pendingEnrollmentPlanRows
-        .filter((row) => {
-          const chargeId = String(row.existingChargeId || '').trim();
-          if (!chargeId) return true;
-          return !pendingEnrollmentCharges.some((charge) => String(charge._id) === chargeId);
-        })
-        .reduce((sum, row) => sum + Number(row.outstandingAmount || row.amount || 0), 0);
-      const pendingAmount = pendingAmountFromCharges + pendingAmountFromPlan;
-
-      if (pendingAmount <= 0) {
-        return null;
-      }
-
-      const hasOverdue = pendingEnrollmentCharges.some((charge) => String(charge.status) === 'overdue' || Number(charge.overdueMonths || 0) > 0)
-        || pendingEnrollmentPlanRows.some((row) => String(row.status) === 'overdue');
-
-      return {
-        ...account,
-        pendingAmount,
-        pendingCount: pendingEnrollmentCharges.length || pendingEnrollmentPlanRows.length,
-        paidAmount: enrollmentCharges.reduce((sum, charge) => sum + Number(charge.paidAmount || 0), 0),
-        overdueMonths: pendingEnrollmentCharges.reduce((maxMonths, charge) => Math.max(maxMonths, Number(charge.overdueMonths || 0)), 0),
-        status: hasOverdue ? 'overdue' : 'pending',
-        statusLabel: hasOverdue ? 'Matrícula en mora' : 'Matrícula pendiente',
-        charges: enrollmentCharges,
-        paymentPlan: account.paymentPlan,
-      };
+function summarizeStudentAccountEnrollment(account = {}) {
+  const enrollmentCharges = (account.charges || []).filter((charge) => String(charge.category || '') === 'annual_tuition');
+  const enrollmentPlanRows = (account.paymentPlan?.rows || []).filter((row) => String(row.category || '') === 'annual_tuition');
+  const pendingEnrollmentCharges = enrollmentCharges.filter(isPendingEnrollmentCharge);
+  const pendingEnrollmentPlanRows = enrollmentPlanRows.filter(isPendingEnrollmentPlanRow);
+  const pendingAmountFromCharges = pendingEnrollmentCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0);
+  const pendingAmountFromPlan = pendingEnrollmentPlanRows
+    .filter((row) => {
+      const chargeId = String(row.existingChargeId || '').trim();
+      if (!chargeId) return true;
+      return !pendingEnrollmentCharges.some((charge) => String(charge._id) === chargeId);
     })
-    .filter(Boolean);
+    .reduce((sum, row) => sum + Number(row.outstandingAmount || row.amount || 0), 0);
+  const enrollmentPendingAmount = pendingAmountFromCharges + pendingAmountFromPlan;
+  const enrollmentPaidAmount = Math.max(
+    enrollmentCharges.reduce((sum, charge) => sum + Number(charge.paidAmount || 0), 0),
+    enrollmentPlanRows.reduce((sum, row) => sum + Number(row.paidAmount || 0), 0),
+    enrollmentPlanRows.some((row) => String(row.status || '') === 'paid') ? enrollmentPlanRows
+      .filter((row) => String(row.status || '') === 'paid')
+      .reduce((sum, row) => sum + Number(row.paidAmount || row.chargeAmount || row.amount || 0), 0) : 0
+  );
+  const hasEnrollmentActivity = enrollmentCharges.length > 0
+    || enrollmentPlanRows.length > 0
+    || enrollmentPaidAmount > 0
+    || enrollmentPendingAmount > 0;
+  const enrollmentStatus = enrollmentPendingAmount > 0
+    ? 'pending'
+    : (hasEnrollmentActivity ? 'paid' : 'none');
+  const hasEnrollmentOverdue = pendingEnrollmentCharges.some((charge) => String(charge.status) === 'overdue' || Number(charge.overdueMonths || 0) > 0)
+    || pendingEnrollmentPlanRows.some((row) => String(row.status) === 'overdue');
+  const pensionPlanRows = (account.paymentPlan?.rows || []).filter((row) => String(row.category || '') === 'monthly_tuition');
+  const pensionPendingAmount = pensionPlanRows
+    .filter((row) => String(row.status || '') !== 'paid' && Number(row.outstandingAmount || row.amount || 0) > 0)
+    .reduce((sum, row) => sum + Number(row.outstandingAmount || row.amount || 0), 0);
+  const pensionPaidAmount = pensionPlanRows
+    .filter((row) => String(row.status || '') === 'paid')
+    .reduce((sum, row) => sum + Number(row.paidAmount || row.chargeAmount || row.amount || 0), 0);
+  const hasPensionActivity = pensionPlanRows.length > 0 || pensionPendingAmount > 0 || pensionPaidAmount > 0;
+
+  return {
+    enrollmentStatus,
+    enrollmentStatusLabel: enrollmentStatus === 'pending'
+      ? (hasEnrollmentOverdue ? 'Matrícula en mora' : 'Matrícula pendiente')
+      : (enrollmentStatus === 'paid' ? 'Matrícula pagada' : 'Sin matrícula'),
+    enrollmentPendingAmount,
+    enrollmentPaidAmount,
+    enrollmentOverdueMonths: pendingEnrollmentCharges.reduce((maxMonths, charge) => Math.max(maxMonths, Number(charge.overdueMonths || 0)), 0),
+    pensionPendingAmount,
+    pensionPaidAmount,
+    hasPensionActivity,
+  };
+}
+
+function enrichStudentAccountsForEnrollmentBilling(studentAccounts = []) {
+  return studentAccounts.map((account) => {
+    const enrollmentSummary = summarizeStudentAccountEnrollment(account);
+
+    return {
+      ...account,
+      ...enrollmentSummary,
+    };
+  });
 }
 
 async function buildBillingSummary(schoolId) {
@@ -5004,8 +5030,10 @@ async function buildBillingSummary(schoolId) {
 
   const millenniumEnrollmentFocus = isMillenniumSchoolId(schoolId);
   const scopedStudentAccounts = millenniumEnrollmentFocus
-    ? narrowStudentAccountsToPendingEnrollment(studentAccounts)
+    ? enrichStudentAccountsForEnrollmentBilling(studentAccounts)
     : studentAccounts;
+  const enrollmentPendingAccounts = scopedStudentAccounts.filter((account) => account.enrollmentStatus === 'pending');
+  const enrollmentPaidAccounts = scopedStudentAccounts.filter((account) => account.enrollmentStatus === 'paid');
   const scopedPendingCharges = millenniumEnrollmentFocus
     ? pendingCharges.filter((charge) => String(charge.category || '') === 'annual_tuition')
     : pendingCharges;
@@ -5015,13 +5043,18 @@ async function buildBillingSummary(schoolId) {
     billingFocus: millenniumEnrollmentFocus ? 'enrollment' : 'all',
     kpis: {
       pendingAmount: millenniumEnrollmentFocus
-        ? scopedStudentAccounts.reduce((sum, account) => sum + Number(account.pendingAmount || 0), 0)
+        ? enrollmentPendingAccounts.reduce((sum, account) => sum + Number(account.enrollmentPendingAmount || 0), 0)
         : activePendingCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0),
       totalPendingCharges: millenniumEnrollmentFocus
-        ? scopedStudentAccounts.length
+        ? enrollmentPendingAccounts.length
         : activePendingCharges.length,
       paidThisMonth,
       overdueBuckets: millenniumEnrollmentFocus ? { '2': 0, '3': 0, '4': 0, '5': 0, '6_plus': 0 } : bucketCounts,
+      enrollmentPendingCount: enrollmentPendingAccounts.length,
+      enrollmentPaidCount: enrollmentPaidAccounts.length,
+      enrollmentPaidAmount: enrollmentPaidAccounts.reduce((sum, account) => sum + Number(account.enrollmentPaidAmount || 0), 0),
+      pensionPendingAmount: scopedStudentAccounts.reduce((sum, account) => sum + Number(account.pensionPendingAmount || 0), 0),
+      pensionStudentsCount: scopedStudentAccounts.filter((account) => account.hasPensionActivity).length,
     },
     charges: scopedPendingCharges,
     studentAccounts: scopedStudentAccounts,
@@ -5050,6 +5083,11 @@ function createEmptyBillingSummary() {
       totalPendingCharges: 0,
       paidThisMonth: 0,
       overdueBuckets: { '2': 0, '3': 0, '4': 0, '5': 0, '6_plus': 0 },
+      enrollmentPendingCount: 0,
+      enrollmentPaidCount: 0,
+      enrollmentPaidAmount: 0,
+      pensionPendingAmount: 0,
+      pensionStudentsCount: 0,
     },
     charges: [],
     studentAccounts: [],

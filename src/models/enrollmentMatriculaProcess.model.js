@@ -59,6 +59,7 @@ const enrollmentMatriculaProcessSchema = new mongoose.Schema(
         'payment_confirmed',
         'contract_pending',
         'pagare_pending',
+        'office_payment_confirmed',
         'completed',
         'cancelled',
       ],
