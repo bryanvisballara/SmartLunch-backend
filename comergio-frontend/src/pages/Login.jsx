@@ -19,6 +19,7 @@ import useAuthStore from '../store/auth.store';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
 import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
+import { getDefaultRouteByRole } from '../lib/defaultRouteByRole';
 import {
   SCHOOL_OPTIONS,
   DEFAULT_SCHOOL_ID,
@@ -49,7 +50,6 @@ const DEV_DIRECT_LOGIN_PROFILES = {
   },
 };
 
-const INSTITUTIONAL_PLACEHOLDER_ROLES = ['coordination', 'nursing', 'psychology', 'human_resources'];
 const COUNTRY_OPTIONS = [
   { id: 'CO', label: 'Colombia' },
   { id: 'MX', label: 'Mexico' },
@@ -363,67 +363,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
       return;
     }
 
-    if (role === 'vendor') {
-      navigate('/daily-closure', { replace: true });
-      return;
-    }
-
-    if (role === 'merienda_operator') {
-      navigate('/meriendas/operator', { replace: true });
-      return;
-    }
-
-    if (role === 'parent') {
-      navigate('/parent', { replace: true });
-      return;
-    }
-
-    if (role === 'admin') {
-      navigate('/admin', { replace: true });
-      return;
-    }
-
-    if (role === 'super_admin') {
-      navigate('/super-admin', { replace: true });
-      return;
-    }
-
-    if (role === 'rectoria') {
-      navigate('/rectoria', { replace: true });
-      return;
-    }
-
-    if (role === 'coordination') {
-      navigate('/coordinacion', { replace: true });
-      return;
-    }
-
-    if (role === 'direccion') {
-      navigate('/direccion', { replace: true });
-      return;
-    }
-
-    if (role === 'academic_secretary' || role === 'billing') {
-      navigate(role === 'billing' ? '/cartera' : '/academic-secretary', { replace: true });
-      return;
-    }
-
-    if (role === 'teacher') {
-      navigate('/campus/teacher', { replace: true });
-      return;
-    }
-
-    if (role === 'school_route') {
-      navigate('/campus/route', { replace: true });
-      return;
-    }
-
-    if (INSTITUTIONAL_PLACEHOLDER_ROLES.includes(role)) {
-      navigate('/portal-institucional', { replace: true });
-      return;
-    }
-
-    navigate('/pos', { replace: true });
+    navigate(getDefaultRouteByRole(role), { replace: true });
   }, [navigate]);
 
   const finalizeAuth = useCallback(async (authResponse, normalizedUsername, preferredPath = '', schoolIdOverride = '') => {
