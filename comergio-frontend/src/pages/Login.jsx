@@ -14,7 +14,7 @@ import {
   verifyBiometricLogin,
   verifyBiometricRegistration,
 } from '../services/auth.service';
-import loginLogo from '../assets/logonuevo.png';
+import colibriLogo from '../assets/colibrisinfondo.png';
 import useAuthStore from '../store/auth.store';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { ensurePortalPushNotifications } from '../lib/pushNotifications';
@@ -750,17 +750,21 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
   return (
     <div className="page-center login-page login-page-auth">
+      <div className="login-auth-content">
       <section className="login-auth-hero" aria-label="Identidad de Comergio">
         <div className="login-auth-logo-wrap" aria-hidden="true">
-          <img className="login-auth-sublogo-image" src={loginLogo} alt="Comergio" />
+          <img className="login-auth-colibri-image" src={colibriLogo} alt="" />
         </div>
+        <h1 className="login-auth-brand-title">
+          <span className="login-auth-brand-comer">Comer</span>
+          <span className="login-auth-brand-gio login-auth-text-gradient">gio</span>
+        </h1>
+        <p className="login-auth-tagline">
+          Todo tu colegio <span className="login-auth-tagline-accent">conectado</span> en un solo lugar.
+        </p>
       </section>
 
       <form className="login-panel login-auth-card" autoComplete="off" onSubmit={onSubmit}>
-        <div className="login-auth-card-head">
-          <h2>Bienvenido,</h2>
-          <p>Administra el consumo escolar de forma simple y segura.</p>
-        </div>
 
         <label>
           <span>País</span>
@@ -941,7 +945,14 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
         <div className={`login-actions-row${supportsBiometric ? ' has-biometric' : ''}`}>
           <button className="btn btn-primary login-primary-btn" disabled={loading || biometricLoading} type="submit">
-            {loading ? 'Entrando...' : 'Entrar'}
+            {loading ? 'Entrando...' : (
+              <>
+                Entrar
+                <svg aria-hidden="true" className="login-primary-btn-chevron" viewBox="0 0 20 20">
+                  <path d="m8 5 5 5-5 5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+                </svg>
+              </>
+            )}
           </button>
 
           {supportsBiometric ? (
@@ -981,11 +992,20 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
       </form>
 
-      <p className="login-meta-links" aria-label="Informacion legal">
-        <span>Privacy</span>
-        <span aria-hidden="true"> | </span>
-        <span>Contact</span>
+      <p className="login-security-note">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M12 3 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-3Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <path d="m9 12 2 2 4-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+        </svg>
+        Tu información está segura con nosotros
       </p>
+
+      <p className="login-meta-links" aria-label="Informacion legal">
+        <Link to="/privacy">Privacidad</Link>
+        <span aria-hidden="true"> | </span>
+        <Link to="/contact">Contacto</Link>
+      </p>
+      </div>
 
       {showForgotPasswordPopup ? (
         <div className="register-verification-overlay" role="dialog" aria-modal="true" aria-label="Recuperar contrasena">

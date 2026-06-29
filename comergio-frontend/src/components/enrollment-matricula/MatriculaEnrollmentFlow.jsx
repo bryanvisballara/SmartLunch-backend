@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   acceptEnrollmentMatriculaConsent,
   acknowledgeEnrollmentMatriculaIntro,
@@ -103,72 +102,64 @@ function resolveActiveStep(process) {
   return 'consent';
 }
 
-function prefersTouchSignatureSurface() {
-  return /iPad|iPhone|iPod|Android/i.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-let touchYOffsetCalibrationPx = null;
-
-function measureCssMm(mm) {
-  if (typeof document === 'undefined') return mm * 3.78;
-  const ruler = document.createElement('div');
-  ruler.style.cssText = `position:fixed;left:-10000px;top:0;width:1px;height:${mm}mm;visibility:hidden;pointer-events:none;`;
-  document.body.appendChild(ruler);
-  const px = ruler.getBoundingClientRect().height || mm * 3.78;
-  ruler.remove();
-  return px;
-}
-
-function getTouchYOffsetCalibrationPx() {
-  if (touchYOffsetCalibrationPx != null) return touchYOffsetCalibrationPx;
-  touchYOffsetCalibrationPx = measureCssMm(5);
-  return touchYOffsetCalibrationPx;
-}
+let fallbackFingerTipOffsetPx = null;
+let extraFingerTipCalibrationPx = null;
 
 function isIosTouchDevice() {
+  if (typeof navigator === 'undefined') return false;
   return /iPad|iPhone|iPod/i.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-function getCanvasPointerPoint(canvas, event, { fixedSurface = false } = {}) {
+function measureCssMillimeters(mm) {
+  if (typeof document === 'undefined') return mm * 3.78;
+  const ruler = document.createElement('div');
+  ruler.style.cssText = `position:fixed;left:-9999px;top:0;width:1px;height:${mm}mm;visibility:hidden;pointer-events:none;`;
+  document.body.appendChild(ruler);
+  const measured = ruler.getBoundingClientRect().height;
+  ruler.remove();
+  return measured || mm * 3.78;
+}
+
+function getFingerTipOffsetPx(touch) {
+  if (!touch) return 0;
+  if (!isIosTouchDevice()) return 0;
+  if (fallbackFingerTipOffsetPx == null) {
+    fallbackFingerTipOffsetPx = measureCssMillimeters(5);
+  }
+  if (extraFingerTipCalibrationPx == null) {
+    extraFingerTipCalibrationPx = measureCssMillimeters(3);
+  }
+  const touchRadius = Number(touch.radiusY || touch.radiusX || 0);
+  const calibratedFallback = fallbackFingerTipOffsetPx + extraFingerTipCalibrationPx;
+  if (touchRadius > 0) {
+    return Math.min(42, Math.max(calibratedFallback, touchRadius + extraFingerTipCalibrationPx));
+  }
+  return calibratedFallback;
+}
+
+function clampSignaturePoint(value, max) {
+  return Math.min(Math.max(value, 0), max);
+}
+
+function getCanvasPointerPoint(canvas, event) {
   const rect = canvas.getBoundingClientRect();
   if (!rect.width || !rect.height) {
     return { x: 0, y: 0 };
   }
 
   const touch = event.touches?.[0] || event.changedTouches?.[0];
-  const isTouchInput = Boolean(touch) || event.pointerType === 'touch';
-
-  if (
-    !isTouchInput
-    && event.target === canvas
-    && typeof event.offsetX === 'number'
-    && !Number.isNaN(event.offsetX)
-    && typeof event.offsetY === 'number'
-    && !Number.isNaN(event.offsetY)
-  ) {
-    return {
-      x: event.offsetX,
-      y: event.offsetY,
-    };
-  }
-
   const source = touch || event;
-  let clientX = Number(source.clientX ?? 0);
-  let clientY = Number(source.clientY ?? 0);
-
-  if (isTouchInput && fixedSurface && isIosTouchDevice()) {
-    clientY += getTouchYOffsetCalibrationPx();
-  }
+  const clientX = Number(source.clientX ?? 0);
+  const clientY = Number(source.clientY ?? 0) + getFingerTipOffsetPx(touch);
 
   return {
-    x: clientX - rect.left,
-    y: clientY - rect.top,
+    x: clampSignaturePoint(clientX - rect.left, rect.width),
+    y: clampSignaturePoint(clientY - rect.top, rect.height),
   };
 }
 
-function SignatureCanvas({ onChange, disabled = false, fixedSurface = false }) {
+function SignatureCanvas({ onChange, disabled = false }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
   const emitFrameRef = useRef(null);
@@ -241,66 +232,58 @@ function SignatureCanvas({ onChange, disabled = false, fixedSurface = false }) {
       return { x: 0, y: 0 };
     }
 
-    return getCanvasPointerPoint(canvas, event, { fixedSurface });
+    return getCanvasPointerPoint(canvas, event);
   };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || disabled) return undefined;
 
-    const preventScrollWhileDrawing = (event) => {
-      if (drawingRef.current) {
-        event.preventDefault();
-      }
+    const beginStroke = (event) => {
+      if (disabled) return;
+      event.preventDefault();
+      drawingRef.current = true;
+      const context = canvas.getContext('2d');
+      const point = getPoint(event);
+      context.beginPath();
+      context.moveTo(point.x, point.y);
     };
 
-    canvas.addEventListener('touchstart', preventScrollWhileDrawing, { passive: false });
-    canvas.addEventListener('touchmove', preventScrollWhileDrawing, { passive: false });
+    const continueStroke = (event) => {
+      if (!drawingRef.current || disabled) return;
+      event.preventDefault();
+      const context = canvas.getContext('2d');
+      const point = getPoint(event);
+      context.lineTo(point.x, point.y);
+      context.stroke();
+      scheduleEmitSignature();
+    };
+
+    const endStroke = (event) => {
+      if (!drawingRef.current) return;
+      event?.preventDefault();
+      drawingRef.current = false;
+      emitSignature();
+    };
+
+    canvas.addEventListener('touchstart', beginStroke, { passive: false });
+    canvas.addEventListener('touchmove', continueStroke, { passive: false });
+    canvas.addEventListener('touchend', endStroke, { passive: false });
+    canvas.addEventListener('touchcancel', endStroke, { passive: false });
+    canvas.addEventListener('mousedown', beginStroke);
+    canvas.addEventListener('mousemove', continueStroke);
+    window.addEventListener('mouseup', endStroke);
 
     return () => {
-      canvas.removeEventListener('touchstart', preventScrollWhileDrawing);
-      canvas.removeEventListener('touchmove', preventScrollWhileDrawing);
+      canvas.removeEventListener('touchstart', beginStroke);
+      canvas.removeEventListener('touchmove', continueStroke);
+      canvas.removeEventListener('touchend', endStroke);
+      canvas.removeEventListener('touchcancel', endStroke);
+      canvas.removeEventListener('mousedown', beginStroke);
+      canvas.removeEventListener('mousemove', continueStroke);
+      window.removeEventListener('mouseup', endStroke);
     };
   }, [disabled]);
-
-  const startDrawing = (event) => {
-    if (disabled) return;
-    drawingRef.current = true;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    const point = getPoint(event);
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-    if (typeof canvas.setPointerCapture === 'function' && event.pointerId != null) {
-      canvas.setPointerCapture(event.pointerId);
-    }
-    event.preventDefault();
-  };
-
-  const draw = (event) => {
-    if (!drawingRef.current || disabled) return;
-    const context = canvasRef.current.getContext('2d');
-    const point = getPoint(event);
-    context.lineTo(point.x, point.y);
-    context.stroke();
-    scheduleEmitSignature();
-    event.preventDefault();
-  };
-
-  const stopDrawing = (event) => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    const canvas = canvasRef.current;
-    if (typeof canvas.releasePointerCapture === 'function' && event?.pointerId != null) {
-      try {
-        canvas.releasePointerCapture(event.pointerId);
-      } catch (error) {
-        // Ignore capture release errors when the pointer is already released.
-      }
-    }
-    emitSignature();
-    event?.preventDefault();
-  };
 
   const onClear = () => {
     const canvas = canvasRef.current;
@@ -311,16 +294,10 @@ function SignatureCanvas({ onChange, disabled = false, fixedSurface = false }) {
   };
 
   return (
-    <div className={`matricula-signature-canvas${disabled ? ' is-disabled' : ''}${fixedSurface ? ' is-fixed-surface' : ''}`}>
-      <canvas
-        ref={canvasRef}
-        onPointerDown={startDrawing}
-        onPointerMove={draw}
-        onPointerUp={stopDrawing}
-        onPointerCancel={stopDrawing}
-        onPointerLeave={stopDrawing}
-        style={{ touchAction: 'none' }}
-      />
+    <div className={`matricula-signature-canvas${disabled ? ' is-disabled' : ''}`}>
+      <div className="matricula-signature-canvas__pad">
+        <canvas ref={canvasRef} />
+      </div>
       <button className="matricula-signature-canvas__clear" disabled={disabled} onClick={onClear} type="button">
         Limpiar firma
       </button>
@@ -338,33 +315,14 @@ function MatriculaSignatureZone({
   onChange,
   onSubmit,
 }) {
-  const useFixedDrawer = enabled && !disabled && prefersTouchSignatureSurface();
-
-  useEffect(() => {
-    if (!useFixedDrawer) return undefined;
-    document.body.classList.add('matricula-signature-drawer-open');
-    const scrollY = window.scrollY;
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.left = '0';
-    document.body.style.right = '0';
-    return () => {
-      document.body.classList.remove('matricula-signature-drawer-open');
-      document.body.style.position = '';
-      document.body.style.top = '';
-      document.body.style.left = '';
-      document.body.style.right = '';
-      window.scrollTo(0, scrollY);
-    };
-  }, [useFixedDrawer]);
-
   if (!enabled) {
     return null;
   }
-  const content = (
-    <>
+
+  return (
+    <div className="matricula-flow-signature-zone">
       {helperText ? <p className="matricula-flow-signature-label">{helperText}</p> : null}
-      <SignatureCanvas disabled={disabled} fixedSurface={useFixedDrawer} onChange={onChange} />
+      <SignatureCanvas disabled={disabled} onChange={onChange} />
       <button
         className="matricula-flow-primary"
         disabled={disabled || loading}
@@ -373,23 +331,8 @@ function MatriculaSignatureZone({
       >
         {loading ? submittingLabel : submitLabel}
       </button>
-    </>
+    </div>
   );
-
-  if (useFixedDrawer) {
-    return createPortal(
-      <div aria-label="Panel de firma" className="matricula-signature-drawer" role="region">
-        <div className="matricula-signature-drawer__sheet">
-          <div aria-hidden="true" className="matricula-signature-drawer__handle" />
-          <strong className="matricula-signature-drawer__title">Firma con tu dedo</strong>
-          {content}
-        </div>
-      </div>,
-      document.body,
-    );
-  }
-
-  return <div className="matricula-flow-signature-zone">{content}</div>;
 }
 
 function PendingSignatureIntro({ process, pendingSignatureResume }) {
@@ -611,11 +554,20 @@ function MatriculaEnrollmentFlow({
     return null;
   }
 
+  const signaturePadVisible = (activeStep === 'contract' && contractAccepted)
+    || (activeStep === 'pagare' && pagareAccepted);
+  const shellClassName = [
+    'matricula-flow-shell',
+    showIntro ? 'matricula-flow-shell--intro' : '',
+    blocking ? 'matricula-flow-shell--blocking' : '',
+    signaturePadVisible ? 'matricula-flow-shell--signature-active' : '',
+  ].filter(Boolean).join(' ');
+
   return (
     <div className="matricula-flow-overlay" role="presentation">
       <div
         aria-modal="true"
-        className={`matricula-flow-shell${showIntro ? ' matricula-flow-shell--intro' : ''}${blocking ? ' matricula-flow-shell--blocking' : ''}`}
+        className={shellClassName}
         role="dialog"
       >
         {!blocking ? (

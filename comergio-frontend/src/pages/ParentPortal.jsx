@@ -43,7 +43,8 @@ import bancolombiaLogo from '../assets/bancolombia.png';
 import brebLogo from '../assets/breb.png';
 import pseLogo from '../assets/PSE.png';
 import warningLogo from '../assets/warning.png';
-import smartLogo from '../assets/comergio.png';
+import { ComergioBrandTitle } from '../components/ComergioBrandTitle';
+import { ColibriBootSplash } from '../components/ColibriBootSplash';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -2851,7 +2852,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
 
   return (
     <div
-      className={`parent-mobile-page${embedded ? ' parent-mobile-page-embedded' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshReloading ? ' parent-mobile-page-refreshing' : ''}`}
+      className={`parent-mobile-page${embedded ? ' parent-mobile-page-embedded' : ''}${embedded && loading ? ' is-boot-loading' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshReloading ? ' parent-mobile-page-refreshing' : ''}`}
       ref={portalRootRef}
       {...pullRefreshTouchHandlers}
     >
@@ -2870,7 +2871,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
           </button>
 
           <div className="parent-title-wrap">
-            <img className="parent-brand-logo" src={smartLogo} alt="Comergio" />
+            <ComergioBrandTitle />
             <h1>Cafetería</h1>
           </div>
 
@@ -2885,7 +2886,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
           </button>
 
           <div className="parent-title-wrap">
-            <img className="parent-brand-logo" src={smartLogo} alt="Comergio" />
+            <ComergioBrandTitle />
             <h1>Hola, {headerName}!</h1>
           </div>
 
@@ -2972,8 +2973,15 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
         </ParentStudentOptionsPortal>
       </section>
 
-      <main className="parent-mobile-content" style={{ transform: `translateY(${pullRefreshContentOffset}px)` }}>
-        {loading ? <div className="parent-loading">Cargando portal...</div> : null}
+      <main className={`parent-mobile-content${loading ? ' is-boot-loading' : ''}`} style={{ transform: `translateY(${pullRefreshContentOffset}px)` }}>
+        {loading ? (
+          <ColibriBootSplash
+            ariaLabel={embedded ? 'Cargando portal de cafetería' : 'Cargando portal de acudientes'}
+            embedded={embedded}
+            minimal={embedded}
+            title={embedded ? 'Cargando portal de cafetería' : 'Cargando portal'}
+          />
+        ) : null}
         {!loading && error ? <div className="parent-error">{error}</div> : null}
         {!loading && !error && walletReturnNotice?.message && walletReturnNotice?.type !== 'info' ? (
           <div className={walletReturnNotice?.type === 'error' ? 'parent-error' : walletReturnNotice?.type === 'success' ? 'parent-success' : 'parent-topup-fee-note'}>

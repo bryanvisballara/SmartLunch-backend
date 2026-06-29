@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import comergioLogo from '../../assets/comergio.png';
+import { ComergioBrandTitle } from '../../components/ComergioBrandTitle';
 import femImage from '../../assets/fem.png';
 import informesImage from '../../assets/informes.png';
 import spellingImage from '../../assets/spelling.png';
@@ -9,10 +9,11 @@ import ParentPullToRefreshIndicator from '../../components/ParentPullToRefreshIn
 import {
   ParentFeedEmptyState,
   ParentFeedLoadingSkeleton,
-  ParentPortalBootScreen,
   ParentPortalEmptyStudentsState,
 } from '../../components/ParentPortalExperienceStates';
+import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import { useParentPullToRefresh } from '../../hooks/useParentPullToRefresh';
+import { useFloatingBottomNavSize } from '../../hooks/useFloatingBottomNavSize';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
 import {
@@ -1195,6 +1196,23 @@ function getParentAttendanceCardColor(rate) {
   return '#b42318';
 }
 
+function getAttendanceRateTone(rate) {
+  const numericRate = Number(rate);
+  if (!Number.isFinite(numericRate)) {
+    return 'neutral';
+  }
+  if (numericRate >= 90) {
+    return 'good';
+  }
+  if (numericRate >= 75) {
+    return 'basic';
+  }
+  if (numericRate >= 60) {
+    return 'warn';
+  }
+  return 'bad';
+}
+
 function getGradeTextLabel(value, performanceLevel = null) {
   if (performanceLevel?.label) {
     return String(performanceLevel.label).toUpperCase();
@@ -1210,6 +1228,107 @@ function getGradeTextLabel(value, performanceLevel = null) {
   if (numericValue >= 80) return 'ALTO';
   if (numericValue >= 70) return 'BÁSICO';
   return 'BAJO';
+}
+
+function getGradeDisplayLabel(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 'Sin nota';
+  }
+  if (numericValue >= 90) return 'Muy bueno';
+  if (numericValue >= 80) return 'Bueno';
+  if (numericValue >= 70) return 'Básico';
+  return 'Bajo desempeño';
+}
+
+function getGradeScoreTone(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 'neutral';
+  }
+  if (numericValue >= 80) {
+    return 'good';
+  }
+  if (numericValue >= 70) {
+    return 'basic';
+  }
+  if (numericValue >= 60) {
+    return 'warn';
+  }
+  return 'bad';
+}
+
+function ParentGradeScoreIcon({ tone = 'neutral' }) {
+  if (tone === 'good') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M8.2 12.4 10.8 15l5-5.8"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.2"
+        />
+      </svg>
+    );
+  }
+
+  if (tone === 'basic') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M7.5 12h9"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2.2"
+        />
+      </svg>
+    );
+  }
+
+  if (tone === 'warn' || tone === 'bad') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M8.4 8.4 15.6 15.6M15.6 8.4 8.4 15.6"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2.2"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function resolveParentSubjectVisualMeta(subjectName = '') {
+  const normalizedSubject = normalizeLookupKey(subjectName);
+
+  if (/deporte|educacionfisica|edfisica|futbol|soccer/.test(normalizedSubject)) {
+    return { accent: 'sport', iconVariant: 'sport' };
+  }
+  if (/ingles|english|frances|francais|espanol|lengua|fonoaudiolog/.test(normalizedSubject)) {
+    return { accent: 'task', iconVariant: 'task' };
+  }
+  if (/arte|danza|musica/.test(normalizedSubject)) {
+    return { accent: 'workshop', iconVariant: 'workshop' };
+  }
+  if (/matematic|fisica|quimica|biolog|ciencia/.test(normalizedSubject)) {
+    return { accent: 'quiz', iconVariant: 'quiz' };
+  }
+  if (/estimul|psico|orient/.test(normalizedSubject)) {
+    return { accent: 'activity', iconVariant: 'activity' };
+  }
+
+  const accents = ['task', 'activity', 'sport', 'workshop', 'quiz'];
+  const hash = normalizedSubject.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const accent = accents[Math.abs(hash) % accents.length];
+  return { accent, iconVariant: accent };
 }
 
 function darkenPerformanceHeroColor(hexColor, amount = 0.22) {
@@ -1279,29 +1398,117 @@ function resolvePerformanceHeroClassName(performanceLevel = null, average = null
 
 function buildPerformanceHeroStyle(performanceLevel = null, average = null, gradingScale = null) {
   const heroColor = resolvePerformanceHeroColor(performanceLevel, average, gradingScale);
-  if (!heroColor) {
-    return undefined;
-  }
+  const heroStart = heroColor || '#102c42';
+  const heroEnd = heroColor ? (darkenPerformanceHeroColor(heroColor) || heroColor) : '#1d4d6e';
 
-  const heroEndColor = darkenPerformanceHeroColor(heroColor) || heroColor;
   return {
-    '--performance-hero-start': heroColor,
-    '--performance-hero-end': heroEndColor,
-    background: `linear-gradient(145deg, ${heroColor} 0%, ${heroEndColor} 100%)`,
+    '--performance-accent': heroStart,
+    '--performance-hero-start': heroStart,
+    '--performance-hero-end': heroEnd,
+    background: `linear-gradient(145deg, ${heroStart} 0%, ${heroEnd} 100%)`,
   };
 }
 
 function mapParentUpcomingAssignmentRow(item) {
-  const normalizedType = normalizeLookupKey(item.type || item.title);
+  const typeMeta = resolveParentAssignmentTypeMeta(item);
+  const dueAt = item.date || item.dueAt || item.scheduledAt || null;
+  const dateLabel = item.dateLabel || formatAcademicCalendarDate(dueAt);
+  const remainingLabel = formatAssignmentDaysRemaining(dueAt, item.dueLabel || item.meta);
+
   return {
     id: item.id,
     title: item.title,
     subtitle: item.subject || item.courseTitle || 'Actividad académica',
-    meta: item.dateLabel || formatAcademicCalendarDate(item.date || item.dueAt),
+    meta: dateLabel,
+    dueAt,
+    remainingLabel,
     detail: item.detail || 'Actividad publicada por el docente.',
     type: item.type || 'Asignación',
-    tone: /quiz|examen|evaluaci/.test(normalizedType) ? 'high' : 'medium',
+    typeLabel: typeMeta.label,
+    iconVariant: typeMeta.iconVariant,
+    accent: typeMeta.accent,
+    tone: /quiz|examen|evaluaci/.test(normalizeLookupKey(item.type || item.title)) ? 'high' : 'medium',
   };
+}
+
+function resolveParentAssignmentTypeMeta(item = {}) {
+  const normalizedType = normalizeLookupKey(item.type || item.title);
+  const normalizedSubject = normalizeLookupKey(item.subject || item.subtitle || item.courseTitle || '');
+
+  if (/quiz|quices/.test(normalizedType)) {
+    return { label: 'QUICES', iconVariant: 'quiz', accent: 'quiz' };
+  }
+
+  if (/deporte|educacionfisica|edfisica/.test(normalizedSubject)) {
+    return {
+      label: /actividades/.test(normalizedType) ? 'ACTIVIDADES' : 'ACTIVIDAD',
+      iconVariant: 'sport',
+      accent: 'sport',
+    };
+  }
+
+  if (/actividad/.test(normalizedType)) {
+    return {
+      label: /actividades/.test(normalizedType) ? 'ACTIVIDADES' : 'ACTIVIDAD',
+      iconVariant: 'activity',
+      accent: 'activity',
+    };
+  }
+
+  if (/taller/.test(normalizedType)) {
+    return { label: 'TALLER', iconVariant: 'workshop', accent: 'workshop' };
+  }
+
+  if (/examen|evaluaci/.test(normalizedType)) {
+    return { label: 'EXAMEN', iconVariant: 'quiz', accent: 'quiz' };
+  }
+
+  if (/tareas/.test(normalizedType)) {
+    return { label: 'TAREAS', iconVariant: 'workshop', accent: 'workshop' };
+  }
+
+  return { label: 'TAREA', iconVariant: 'task', accent: 'task' };
+}
+
+function formatAssignmentDaysRemaining(dueAt, fallbackLabel = '') {
+  if (dueAt) {
+    const dueDate = new Date(dueAt);
+    if (!Number.isNaN(dueDate.getTime())) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dueDay = new Date(dueDate);
+      dueDay.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((dueDay.getTime() - today.getTime()) / 86400000);
+
+      if (diffDays < 0) {
+        return 'Vencida';
+      }
+      if (diffDays === 0) {
+        return 'Hoy';
+      }
+      if (diffDays === 1) {
+        return '1 día restante';
+      }
+      return `${diffDays} días restantes`;
+    }
+  }
+
+  const fallback = String(fallbackLabel || '').toLowerCase();
+  if (fallback.includes('hoy')) {
+    return 'Hoy';
+  }
+  if (fallback.includes('manana') || fallback.includes('mañana')) {
+    return '1 día restante';
+  }
+  if (/\d+\s*d[ií]as?/.test(fallback)) {
+    const match = fallback.match(/(\d+)\s*d[ií]as?/);
+    if (match) {
+      const days = Number(match[1]);
+      return days === 1 ? '1 día restante' : `${days} días restantes`;
+    }
+  }
+
+  return '';
 }
 
 function formatAcademicRankingLabel(ranking, gradebook = []) {
@@ -2234,6 +2441,15 @@ function ParentAppIcon({ icon }) {
     );
   }
 
+  if (icon === 'transport') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M6.3 16.2h11.4M7.2 18.6v.7m9.6-.7v.7M5.7 7.8c.3-1.5 1.5-2.5 3-2.5h6.6c1.5 0 2.7 1 3 2.5l.8 4.6c.2 1.2-.7 2.3-1.9 2.3H6.8c-1.2 0-2.1-1.1-1.9-2.3l.8-4.6Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+        <path d="M8.2 10.2h7.6M8.3 13h.1m7.2 0h.1" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+      </svg>
+    );
+  }
+
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M4 16.2V8.8l8-4.8 8 4.8v7.4M7.5 17.5h9M9 20h6M6.7 8.8l5.3 3.2 5.3-3.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
@@ -2261,6 +2477,150 @@ function ParentCareOptionIcon({ icon }) {
   }
 
   return <ParentAppIcon icon="nursing" />;
+}
+
+function ParentTransportHeroIcon() {
+  return (
+    <span className="campus-parent-mobile__transport-hero-icon" aria-hidden="true">
+      <ParentAppIcon icon="transport" />
+    </span>
+  );
+}
+
+function ParentTransportInfoIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" fill="currentColor" opacity="0.14" r="10" />
+      <path d="M12 10.2v5.2M12 8.1h.01" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" />
+    </svg>
+  );
+}
+
+function ParentTransportBellIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 4.2c2.4 0 4.3 1.9 4.3 4.3v2.4l1.2 2.1a1 1 0 0 1-.9 1.4H7.4a1 1 0 0 1-.9-1.4l1.2-2.1V8.5c0-2.4 1.9-4.3 4.3-4.3Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+      <path d="M10.1 18.2a1.9 1.9 0 0 0 3.8 0" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+    </svg>
+  );
+}
+
+function ParentTransportSceneIllustration() {
+  return (
+    <svg aria-hidden="true" className="campus-parent-mobile__transport-illustration" viewBox="0 0 360 200">
+      <defs>
+        <linearGradient id="parent-transport-road" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stopColor="#dbeafe" />
+          <stop offset="100%" stopColor="#bfdbfe" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="180" cy="176" fill="#e0f2fe" rx="150" ry="18" />
+      <path d="M0 154h360v18c0 8-70 14-180 14S0 180 0 172Z" fill="url(#parent-transport-road)" />
+      <path d="M0 168h360" stroke="#93c5fd" strokeDasharray="10 12" strokeWidth="2" />
+      <rect fill="#eff6ff" height="34" opacity="0.9" rx="6" width="42" x="34" y="112" />
+      <path d="M40 146h30v-8H40Z" fill="#dbeafe" />
+      <rect fill="#eff6ff" height="28" opacity="0.85" rx="5" width="36" x="286" y="118" />
+      <path d="M292 146h24v-6h-24Z" fill="#dbeafe" />
+      <circle cx="312" cy="104" fill="#dcfce7" r="16" />
+      <path d="M312 92v8M308 100h8" stroke="#86efac" strokeLinecap="round" strokeWidth="2" />
+      <ellipse cx="72" cy="58" fill="#f8fafc" rx="24" ry="10" />
+      <ellipse cx="118" cy="48" fill="#f8fafc" rx="18" ry="8" />
+      <ellipse cx="250" cy="54" fill="#f8fafc" rx="22" ry="9" />
+      <g transform="translate(248 86)">
+        <rect fill="#60a5fa" height="52" rx="8" width="14" x="0" y="0" />
+        <rect fill="#3b82f6" height="10" rx="3" width="18" x="-2" y="10" />
+        <circle cx="7" cy="56" fill="#2563eb" r="5" />
+        <rect fill="#dbeafe" height="18" rx="2" width="12" x="20" y="8" />
+        <path d="M26 8v18" stroke="#93c5fd" strokeWidth="1.5" />
+      </g>
+      <g transform="translate(58 98)">
+        <rect fill="#38bdf8" height="34" rx="7" width="74" x="0" y="16" />
+        <rect fill="#0ea5e9" height="18" rx="5" width="52" x="10" y="4" />
+        <rect fill="#e0f2fe" height="12" rx="2" width="10" x="12" y="8" />
+        <rect fill="#e0f2fe" height="12" rx="2" width="10" x="26" y="8" />
+        <rect fill="#e0f2fe" height="12" rx="2" width="10" x="40" y="8" />
+        <circle cx="20" cy="52" fill="#1d4ed8" r="7" />
+        <circle cx="56" cy="52" fill="#1d4ed8" r="7" />
+        <circle cx="20" cy="52" fill="#bfdbfe" r="3" />
+        <circle cx="56" cy="52" fill="#bfdbfe" r="3" />
+      </g>
+    </svg>
+  );
+}
+
+function ParentTransportSection({ hasAssignedRoute, transport }) {
+  if (hasAssignedRoute) {
+    return (
+      <section className="campus-parent-mobile__transport-page">
+        <header className="campus-parent-mobile__transport-hero">
+          <ParentTransportHeroIcon />
+          <span className="campus-parent-mobile__transport-kicker">Transporte escolar</span>
+          <h2>{transport.routeName}</h2>
+          <span aria-hidden="true" className="campus-parent-mobile__transport-accent" />
+          <p>{transport.stop ? `${transport.stop} · llegada estimada ${transport.eta || 'por confirmar'}` : 'Ruta escolar asignada para este alumno.'}</p>
+        </header>
+
+        <section aria-label="Detalle de la ruta" className="campus-parent-mobile__transport-status-grid">
+          <article>
+            <span>Conductor</span>
+            <strong>{transport.operator || 'Por confirmar'}</strong>
+          </article>
+          <article>
+            <span>Parada</span>
+            <strong>{transport.stop || 'Por confirmar'}</strong>
+          </article>
+          <article>
+            <span>Llegada</span>
+            <strong>{transport.eta || 'Por confirmar'}</strong>
+          </article>
+        </section>
+
+        {transport.note ? (
+          <article className="campus-parent-mobile__transport-info-card">
+            <span className="campus-parent-mobile__transport-info-icon"><ParentTransportInfoIcon /></span>
+            <p>{transport.note}</p>
+          </article>
+        ) : null}
+
+        <ParentTransportSceneIllustration />
+
+        <article className="campus-parent-mobile__transport-notify-card">
+          <span className="campus-parent-mobile__transport-notify-icon"><ParentTransportBellIcon /></span>
+          <div>
+            <strong>Te avisaremos</strong>
+            <p>Recibirás una notificación cuando haya novedades sobre la ruta escolar.</p>
+          </div>
+        </article>
+      </section>
+    );
+  }
+
+  return (
+    <section className="campus-parent-mobile__transport-page is-empty">
+      <header className="campus-parent-mobile__transport-hero">
+        <ParentTransportHeroIcon />
+        <span className="campus-parent-mobile__transport-kicker">Transporte escolar</span>
+        <h2>Sin ruta asignada</h2>
+        <span aria-hidden="true" className="campus-parent-mobile__transport-accent" />
+        <p>Aún no hay una ruta escolar registrada para este alumno.</p>
+      </header>
+
+      <article className="campus-parent-mobile__transport-info-card">
+        <span className="campus-parent-mobile__transport-info-icon"><ParentTransportInfoIcon /></span>
+        <p>Cuando el colegio asigne una ruta, aparecerán aquí el conductor, la parada y la hora estimada.</p>
+      </article>
+
+      <ParentTransportSceneIllustration />
+
+      <article className="campus-parent-mobile__transport-notify-card">
+        <span className="campus-parent-mobile__transport-notify-icon"><ParentTransportBellIcon /></span>
+        <div>
+          <strong>Te avisaremos</strong>
+          <p>Recibirás una notificación cuando haya novedades sobre la ruta escolar.</p>
+        </div>
+      </article>
+    </section>
+  );
 }
 
 const cafeteriaMenuItems = [
@@ -2376,7 +2736,7 @@ function ParentCafeteriaContent({
         </button>
 
         <div className="parent-title-wrap">
-          <img className="parent-brand-logo" src={comergioLogo} alt="Comergio" />
+          <ComergioBrandTitle />
           <h1>{`Hola, ${parentFirstName}!`}</h1>
         </div>
 
@@ -3112,7 +3472,7 @@ function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpe
       ) : <span aria-hidden="true" className="parent-icon-btn parent-icon-btn--placeholder" />}
 
       <div className="parent-title-wrap">
-        <img className="parent-brand-logo" src={comergioLogo} alt="Comergio" />
+        <ComergioBrandTitle />
         <h1>{`Hola, ${parentFirstName}!`}</h1>
       </div>
 
@@ -3145,6 +3505,278 @@ function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpe
   );
 }
 
+function ParentAcademicKpiIcon({ variant = 'grades' }) {
+  if (variant === 'ranking') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M7 18V12" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+        <path d="M12 18V7" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+        <path d="M17 18V10" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+        <path d="M5 18h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" opacity="0.45" />
+      </svg>
+    );
+  }
+
+  if (variant === 'warn') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M6 5v14"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2"
+        />
+        <path
+          d="M6 19h13"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="2"
+        />
+        <path
+          d="M8 8.25 10.85 12.1 9.95 11.2 13.75 15.35 16.35 17.6"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+        <path
+          d="M14.5 16.1 17.35 18.7 14.7 18.7"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+        />
+      </svg>
+    );
+  }
+
+  if (variant === 'assignments') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 4h8a2 2 0 0 1 2 2v14l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        <path d="M9 9h6M9 13h4" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (variant === 'attendance') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M9 3h6v3H9V3Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        <path d="M8 6H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        <path d="M9 12h6M9 16h4" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M7 4h10a2 2 0 0 1 2 2v14H5V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M8 4v16M16 4v16" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M10 9h4M10 13h4" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ParentAssignmentCalendarIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M8 4v2M16 4v2M5 9h14"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+      <rect
+        height="14"
+        rx="2.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        width="16"
+        x="4"
+        y="6"
+      />
+    </svg>
+  );
+}
+
+function ParentAssignmentTypeIcon({ variant = 'task' }) {
+  if (variant === 'quiz') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M7.5 6.5h9a2.2 2.2 0 0 1 2.2 2.2v5.1a2.2 2.2 0 0 1-2.2 2.2H11l-3.2 2.4V16H7.5a2.2 2.2 0 0 1-2.2-2.2V8.7a2.2 2.2 0 0 1 2.2-2.2Z"
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M12 9.2v4.1"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+        <circle cx="12" cy="15.1" fill="currentColor" r="0.85" />
+      </svg>
+    );
+  }
+
+  if (variant === 'activity') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M12 7.4V18.8"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M6.6 6.9c0-1.05.85-1.9 1.9-1.9H12v13.8H8.5c-1.05 0-1.9-.85-1.9-1.9V6.9Z"
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M17.4 6.9c0-1.05-.85-1.9-1.9-1.9H12v13.8h3.5c1.05 0 1.9-.85 1.9-1.9V6.9Z"
+          stroke="currentColor"
+          strokeLinejoin="round"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M9.2 9.2h1.6M9.2 11.6h1.6M14.2 9.2h1.6M14.2 11.6h1.6"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.4"
+          opacity="0.9"
+        />
+      </svg>
+    );
+  }
+
+  if (variant === 'sport') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="7.2" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M12 4.8 9.2 8.7h5.6L12 4.8ZM7.1 9.8l2.1 4.9 2.8-2.1-2.1-4.9-2.8 2.1Zm9.8 0-2.8 2.1 2.1 4.9 2.8-2.1-2.1-4.9ZM12 19.2l2.8-3.9H9.2l2.8 3.9Z"
+          fill="currentColor"
+        />
+      </svg>
+    );
+  }
+
+  if (variant === 'workshop') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="8.2" cy="8.2" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+        <circle cx="15.8" cy="15.8" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M10.1 10.1 13.9 13.9M13.9 10.1l-1.2 1.2M10.1 13.9l1.2-1.2"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <text
+        dominantBaseline="middle"
+        fill="currentColor"
+        fontFamily="Poppins, Segoe UI, sans-serif"
+        fontSize="10.5"
+        fontWeight="800"
+        textAnchor="middle"
+        x="12"
+        y="12.5"
+      >
+        Aa
+      </text>
+    </svg>
+  );
+}
+
+function ParentAcademicChevronIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9.5 7.5 14 12l-4.5 4.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function ParentAttendanceSummaryIcon({ variant = 'present' }) {
+  if (variant === 'late') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="7.2" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M12 8.2V12l2.6 1.6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (variant === 'absent') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="7.2" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M9.2 9.2 14.8 14.8M14.8 9.2 9.2 14.8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (variant === 'group') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="9" cy="9.5" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M4.8 17.2c0-2.2 1.8-3.6 4.2-3.6s4.2 1.4 4.2 3.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+        <circle cx="16.2" cy="10.2" r="1.9" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M14.2 17.2c0-1.7 1.2-2.8 3-2.8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (variant === 'excused') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 4v2M16 4v2M5 9h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+        <rect height="14" rx="2.2" stroke="currentColor" strokeWidth="1.8" width="16" x="4" y="6" />
+        <path d="M9.2 12.2 11.1 14.1 14.9 10.3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  if (variant === 'records') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 5h8a2 2 0 0 1 2 2v12H6V7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        <path d="M9 9h6M9 13h4M9 17h6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M8 4v2M16 4v2M5 9h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <rect height="14" rx="2.2" stroke="currentColor" strokeWidth="1.8" width="16" x="4" y="6" />
+      <path d="M8.5 13.2h7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ParentAttendanceKpiCard({ count = 0, iconVariant = 'present', label = '', suffix = 'días', tone = 'present' }) {
+  return (
+    <article className={`campus-parent-mobile__attendance-kpi-card is-${tone}`}>
+      <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
+        <ParentAttendanceSummaryIcon variant={iconVariant} />
+      </span>
+      <span className="campus-parent-mobile__attendance-kpi-label">{label}</span>
+      <strong>{count}</strong>
+      {suffix ? <small>{suffix}</small> : null}
+    </article>
+  );
+}
+
 function ParentAcademicContent({
   activeView,
   selectedChild,
@@ -3152,6 +3784,7 @@ function ParentAcademicContent({
   refreshKey = 0,
   isPerformanceLoading = false,
   studentPortalMode = false,
+  onSelectAcademicView = null,
 }) {
   const academicWorkspace = useMemo(() => (
     selectedChild?.isRealParentChild
@@ -3434,29 +4067,28 @@ function ParentAcademicContent({
   const resolvedPerformanceLevel = academicPerformanceAverage !== null && academicPerformanceAverage !== undefined
     ? academicPerformanceLevel
     : null;
-  const performanceHeroStyle = isPerformanceLoading
-    ? undefined
-    : buildPerformanceHeroStyle(
-      resolvedPerformanceLevel,
-      academicPerformanceAverage,
-      selectedChild?.academicGradingScale,
-    );
+  const performanceHeroStyle = buildPerformanceHeroStyle(
+    isPerformanceLoading ? null : resolvedPerformanceLevel,
+    isPerformanceLoading ? null : academicPerformanceAverage,
+    selectedChild?.academicGradingScale,
+  );
   const performanceHeroClassName = isPerformanceLoading
     ? ''
     : resolvePerformanceHeroClassName(resolvedPerformanceLevel, academicPerformanceAverage);
+  const performanceProgress = academicPerformanceAverage !== null && academicPerformanceAverage !== undefined
+    ? Math.max(0, Math.min(100, Math.round(Number(academicPerformanceAverage) || 0)))
+    : 0;
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const upcomingAssignments = selectedChild?.isRealParentChild
     ? (selectedChild.academicUpcomingAssignments || []).map(mapParentUpcomingAssignmentRow)
     : [
-      ...selectedChild.tasks.map((task) => ({
+      ...selectedChild.tasks.map((task) => mapParentUpcomingAssignmentRow({
         id: task.id,
         title: task.title,
-        subtitle: task.course,
-        meta: task.dueLabel,
-        detail: task.meta,
+        subject: task.course,
         type: /quiz/i.test(task.title) ? 'Quiz' : /taller/i.test(task.title) ? 'Taller' : 'Tarea',
-        tone: task.urgency,
+        dueLabel: task.dueLabel,
       })),
       ...academicCalendarItems
         .filter((item) => {
@@ -3498,24 +4130,45 @@ function ParentAcademicContent({
     return (
       <section className="campus-parent-mobile__academic-page">
         <article
-          className={`campus-parent-mobile__performance-hero${performanceHeroClassName ? ` ${performanceHeroClassName}` : ''}`}
+          className={`campus-parent-mobile__performance-hero${performanceHeroClassName ? ` ${performanceHeroClassName}` : ''}${isPerformanceLoading ? ' is-loading' : ''}`}
           style={performanceHeroStyle}
         >
-          <div>
-            <span className="campus-parent-mobile__eyebrow">Desempeño</span>
-            <h2>
-              {isPerformanceLoading
-                ? 'Cargando promedio y ranking del curso'
-                : (academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota')}
-            </h2>
-            <p>
-              {isPerformanceLoading
-                ? 'CONSULTANDO CALIFICACIONES'
-                : getGradeTextLabel(academicPerformanceAverage, resolvedPerformanceLevel)}
-            </p>
+          <div className="campus-parent-mobile__performance-hero-body">
+            <div className="campus-parent-mobile__performance-hero-main">
+              <div className="campus-parent-mobile__performance-hero-copy">
+                <span className="campus-parent-mobile__performance-hero-eyebrow">Promedio general</span>
+                <h2>
+                  {isPerformanceLoading
+                    ? '—'
+                    : (academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota')}
+                </h2>
+                <p>
+                  {isPerformanceLoading
+                    ? 'Consultando calificaciones'
+                    : getGradeTextLabel(academicPerformanceAverage, resolvedPerformanceLevel)}
+                </p>
+              </div>
+            </div>
+            <div
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={isPerformanceLoading ? 0 : performanceProgress}
+              className="campus-parent-mobile__performance-hero-progress"
+              role="progressbar"
+            >
+              <div
+                className="campus-parent-mobile__performance-hero-progress-bar"
+                style={{ width: isPerformanceLoading ? '0%' : `${performanceProgress}%` }}
+              />
+            </div>
           </div>
           <div className="campus-parent-mobile__performance-rank">
-            <span>Ranking del curso</span>
+            <span className="campus-parent-mobile__performance-rank-label">
+              <span className="campus-parent-mobile__performance-rank-icon" aria-hidden="true">
+                <ParentAcademicKpiIcon variant="ranking" />
+              </span>
+              Ranking del curso
+            </span>
             <strong>
               {isPerformanceLoading
                 ? 'Cargando...'
@@ -3525,39 +4178,84 @@ function ParentAcademicContent({
         </article>
         <section className="campus-parent-mobile__performance-kpi-grid" aria-label="Indicadores académicos del alumno">
           <article className="campus-parent-mobile__performance-kpi-card is-primary">
-            <span>Materias con nota</span>
-            <strong>{gradedSubjects.length}</strong>
-            <small>{sortedGradebookSubjects.length} asignadas</small>
+            <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
+              <ParentAcademicKpiIcon variant="grades" />
+            </span>
+            <div className="campus-parent-mobile__performance-kpi-copy">
+              <span>Materias con nota</span>
+              <strong>{gradedSubjects.length}</strong>
+              <small>{sortedGradebookSubjects.length} asignadas</small>
+            </div>
           </article>
           <article className="campus-parent-mobile__performance-kpi-card is-warn">
-            <span>Bajo desempeño</span>
-            <strong>{subjectsToReinforce.length}</strong>
-            <small>{subjectsToReinforce.length ? 'Requieren seguimiento' : 'Sin alertas'}</small>
+            <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
+              <ParentAcademicKpiIcon variant="warn" />
+            </span>
+            <div className="campus-parent-mobile__performance-kpi-copy">
+              <span>Bajo desempeño</span>
+              <strong>{subjectsToReinforce.length}</strong>
+              <small>{subjectsToReinforce.length ? 'Requieren seguimiento' : 'Sin alertas'}</small>
+            </div>
           </article>
-          <article className="campus-parent-mobile__performance-kpi-card is-sky">
-            <span>Próximas asignaciones</span>
-            <strong>{weeklyAssignedActivities.length}</strong>
-            <small>Publicadas por docentes</small>
+          <article className="campus-parent-mobile__performance-kpi-card is-violet">
+            <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
+              <ParentAcademicKpiIcon variant="assignments" />
+            </span>
+            <div className="campus-parent-mobile__performance-kpi-copy">
+              <span>Próximas asignaciones</span>
+              <strong>{weeklyAssignedActivities.length}</strong>
+              <small>Publicadas por docentes</small>
+            </div>
           </article>
           <article className="campus-parent-mobile__performance-kpi-card is-good">
-            <span>Asistencia</span>
-            <strong>{attendanceSummary.attendanceRate || selectedChild.attendanceRate}</strong>
-            <small>{Number(attendanceSummary.total || 0)} registros</small>
+            <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
+              <ParentAcademicKpiIcon variant="attendance" />
+            </span>
+            <div className="campus-parent-mobile__performance-kpi-copy">
+              <span>Asistencia</span>
+              <strong>{attendanceSummary.attendanceRate || selectedChild.attendanceRate}</strong>
+              <small>{Number(attendanceSummary.total || 0)} registros</small>
+            </div>
           </article>
         </section>
-        <section className="campus-parent-mobile__academic-section">
-          <h3>Próximas asignaciones</h3>
+        <section className="campus-parent-mobile__academic-section campus-parent-mobile__assignments-section">
+          <header className="campus-parent-mobile__assignments-head">
+            <h3>Próximas asignaciones</h3>
+            {typeof onSelectAcademicView === 'function' ? (
+              <button
+                className="campus-parent-mobile__assignments-link"
+                onClick={() => onSelectAcademicView('academic-calendar')}
+                type="button"
+              >
+                Ver todas
+                <span aria-hidden="true">&gt;</span>
+              </button>
+            ) : null}
+          </header>
           {parentAcademicCalendar.isLoading ? <p className="campus-parent-mobile__academic-calendar-status">Cargando calendario académico...</p> : null}
           {parentAcademicCalendar.error ? <p className="campus-parent-mobile__academic-calendar-status is-error">{parentAcademicCalendar.error}</p> : null}
-          <div className="campus-parent-mobile__performance-list">
-            {weeklyAssignedActivities.length ? weeklyAssignedActivities.map((activity) => (
-              <article className={`campus-parent-mobile__performance-row is-${activity.tone}`} key={activity.id}>
-                <div>
-                  <span>{activity.type}</span>
+          <div className="campus-parent-mobile__assignments-list">
+            {weeklyAssignedActivities.length ? weeklyAssignedActivities.slice(0, 5).map((activity) => (
+              <article className="campus-parent-mobile__assignment-card" key={activity.id}>
+                <span className={`campus-parent-mobile__assignment-card-icon is-${activity.accent || 'task'}`} aria-hidden="true">
+                  <ParentAssignmentTypeIcon variant={activity.iconVariant || 'task'} />
+                </span>
+                <div className="campus-parent-mobile__assignment-card-copy">
+                  <span className={`campus-parent-mobile__assignment-card-type is-${activity.accent || 'task'}`}>
+                    {activity.typeLabel || 'TAREA'}
+                  </span>
                   <strong>{activity.title}</strong>
                   <small>{activity.subtitle}</small>
                 </div>
-                <time>{activity.meta || 'Sin fecha'}</time>
+                <div className="campus-parent-mobile__assignment-card-due">
+                  <span className="campus-parent-mobile__assignment-card-date">
+                    <ParentAssignmentCalendarIcon />
+                    {activity.meta || 'Sin fecha'}
+                  </span>
+                  {activity.remainingLabel ? (
+                    <span className="campus-parent-mobile__assignment-card-remaining">{activity.remainingLabel}</span>
+                  ) : null}
+                </div>
               </article>
             )) : (
               <article className="campus-parent-mobile__performance-empty-card">
@@ -3567,19 +4265,34 @@ function ParentAcademicContent({
             )}
           </div>
         </section>
-        <section className="campus-parent-mobile__academic-section">
+        <section className="campus-parent-mobile__academic-section campus-parent-mobile__grades-section">
           <h3>Últimas calificaciones</h3>
-          <div className="campus-parent-mobile__performance-list">
-            {recentGradeEntries.length ? recentGradeEntries.map((gradeEntry) => (
-              <article className="campus-parent-mobile__performance-row is-grade" key={gradeEntry.id}>
-                <div>
-                  <span>{gradeEntry.subject}</span>
-                  <strong>{gradeEntry.title}</strong>
-                  <small>{gradeEntry.teacher}{gradeEntry.feedback ? ` · ${gradeEntry.feedback}` : ''}</small>
-                </div>
-                <strong>{formatGrade(gradeEntry.score)}</strong>
-              </article>
-            )) : (
+          <div className="campus-parent-mobile__grades-list">
+            {recentGradeEntries.length ? recentGradeEntries.map((gradeEntry) => {
+              const scoreTone = getGradeScoreTone(gradeEntry.score);
+
+              return (
+                <article className="campus-parent-mobile__grade-card" key={gradeEntry.id}>
+                  <span className={`campus-parent-mobile__grade-card-icon is-${scoreTone}`} aria-hidden="true">
+                    <ParentGradeScoreIcon tone={scoreTone} />
+                  </span>
+                  <div className="campus-parent-mobile__grade-card-copy">
+                    <strong>{gradeEntry.title}</strong>
+                    <small>
+                      {gradeEntry.teacher}
+                      {gradeEntry.feedback ? ` · ${gradeEntry.feedback}` : ''}
+                    </small>
+                  </div>
+                  <div className="campus-parent-mobile__grade-card-score">
+                    <strong className={`is-${scoreTone}`}>{formatGrade(gradeEntry.score)}</strong>
+                    <span className={`is-${scoreTone}`}>{getGradeDisplayLabel(gradeEntry.score)}</span>
+                  </div>
+                  <span className="campus-parent-mobile__grade-card-chevron" aria-hidden="true">
+                    <ParentAcademicChevronIcon />
+                  </span>
+                </article>
+              );
+            }) : (
               <article className="campus-parent-mobile__performance-empty-card">
                 <strong>Sin calificaciones recientes</strong>
                 <span>Cuando un docente guarde notas, verás aquí las más nuevas.</span>
@@ -3587,18 +4300,44 @@ function ParentAcademicContent({
             )}
           </div>
         </section>
-        <section className="campus-parent-mobile__academic-section">
-          <h3>Materias con bajo desempeño</h3>
-          <div className="campus-parent-mobile__performance-list">
-            {subjectsToReinforce.length ? subjectsToReinforce.map((subject) => (
-              <article className="campus-parent-mobile__performance-row is-low" key={subject.id}>
-                <div>
-                  <strong>{subject.name}</strong>
-                  <small>{subject.teacher}</small>
-                </div>
-                <strong>{formatGrade(subject.finalAverage)}</strong>
-              </article>
-            )) : (
+        <section className="campus-parent-mobile__academic-section campus-parent-mobile__reinforce-section">
+          <header className="campus-parent-mobile__assignments-head">
+            <h3>Materias con bajo desempeño</h3>
+            {typeof onSelectAcademicView === 'function' ? (
+              <button
+                className="campus-parent-mobile__assignments-link"
+                onClick={() => onSelectAcademicView('academic-grades')}
+                type="button"
+              >
+                Ver todas
+                <span aria-hidden="true">&gt;</span>
+              </button>
+            ) : null}
+          </header>
+          <div className="campus-parent-mobile__reinforce-list">
+            {subjectsToReinforce.length ? subjectsToReinforce.map((subject) => {
+              const scoreTone = getGradeScoreTone(subject.finalAverage);
+
+              return (
+                <article className="campus-parent-mobile__reinforce-card" key={subject.id}>
+                  <span className={`campus-parent-mobile__reinforce-card-icon is-${scoreTone}`} aria-hidden="true">
+                    <ParentGradeScoreIcon tone={scoreTone} />
+                  </span>
+                  <div className="campus-parent-mobile__reinforce-card-copy">
+                    <strong>{subject.name}</strong>
+                    <small>{subject.teacher}</small>
+                    <span className="campus-parent-mobile__reinforce-card-badge">Bajo desempeño</span>
+                  </div>
+                  <div className="campus-parent-mobile__reinforce-card-score">
+                    <strong className={`is-${scoreTone}`}>{formatGrade(subject.finalAverage)}</strong>
+                    <small>Requiere seguimiento</small>
+                  </div>
+                  <span className="campus-parent-mobile__reinforce-card-chevron" aria-hidden="true">
+                    <ParentAcademicChevronIcon />
+                  </span>
+                </article>
+              );
+            }) : (
               <article className="campus-parent-mobile__performance-empty-card is-good">
                 <strong>Sin materias críticas</strong>
                 <span>Las materias con nota están por encima del umbral de bajo desempeño.</span>
@@ -3606,42 +4345,61 @@ function ParentAcademicContent({
             )}
           </div>
         </section>
-        <section className="campus-parent-mobile__academic-section">
+        <section className="campus-parent-mobile__academic-section campus-parent-mobile__attendance-summary-section">
           <h3>Asistencia</h3>
           {parentAcademicAttendance.isLoading ? <p className="campus-parent-mobile__academic-calendar-status">Cargando asistencia...</p> : null}
           {parentAcademicAttendance.error ? <p className="campus-parent-mobile__academic-calendar-status is-error">{parentAcademicAttendance.error}</p> : null}
-          <div className="campus-parent-mobile__performance-attendance-grid">
-            <article>
-              <span>Presente</span>
+          <div className="campus-parent-mobile__attendance-kpi-grid">
+            <article className="campus-parent-mobile__attendance-kpi-card is-present">
+              <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
+                <ParentAttendanceSummaryIcon variant="present" />
+              </span>
+              <span className="campus-parent-mobile__attendance-kpi-label">Presente</span>
               <strong>{attendanceSummary.present || 0}</strong>
+              <small>días</small>
             </article>
-            <article>
-              <span>Tardanzas</span>
+            <article className="campus-parent-mobile__attendance-kpi-card is-late">
+              <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
+                <ParentAttendanceSummaryIcon variant="late" />
+              </span>
+              <span className="campus-parent-mobile__attendance-kpi-label">Tardanzas</span>
               <strong>{attendanceSummary.lateCount || 0}</strong>
+              <small>días</small>
             </article>
-            <article>
-              <span>Ausencias</span>
+            <article className="campus-parent-mobile__attendance-kpi-card is-absent">
+              <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
+                <ParentAttendanceSummaryIcon variant="absent" />
+              </span>
+              <span className="campus-parent-mobile__attendance-kpi-label">Ausencias</span>
               <strong>{attendanceSummary.unexcusedAbsences || 0}</strong>
+              <small>días</small>
             </article>
           </div>
-          <div className="campus-parent-mobile__performance-list">
-            {attendanceRecords.slice(0, 3).map((record) => (
-              <article className="campus-parent-mobile__performance-row is-attendance" key={record.id}>
-                <div>
-                  <span>{record.statusLabel}</span>
-                  <strong>{record.dateLabel || record.date}</strong>
-                  <small>{[record.attendanceTypeLabel, record.courseTitle || record.subject].filter(Boolean).join(' · ')}</small>
-                </div>
-                <small>{record.note || 'Registrado'}</small>
-              </article>
-            ))}
-            {!parentAcademicAttendance.isLoading && attendanceRecords.length === 0 ? (
-              <article className="campus-parent-mobile__performance-empty-card">
+          {!parentAcademicAttendance.isLoading && attendanceRecords.length === 0 ? (
+            <article className="campus-parent-mobile__attendance-empty-card">
+              <span className="campus-parent-mobile__attendance-empty-icon" aria-hidden="true">
+                <ParentAttendanceSummaryIcon variant="group" />
+              </span>
+              <div className="campus-parent-mobile__attendance-empty-copy">
                 <strong>Sin asistencias registradas</strong>
                 <span>Cuando el colegio tome asistencia, aparecerá aquí el resumen del alumno.</span>
-              </article>
-            ) : null}
-          </div>
+              </div>
+            </article>
+          ) : null}
+          {attendanceRecords.length ? (
+            <div className="campus-parent-mobile__attendance-records-list">
+              {attendanceRecords.slice(0, 3).map((record) => (
+                <article className="campus-parent-mobile__attendance-record-card" key={record.id}>
+                  <div className="campus-parent-mobile__attendance-record-copy">
+                    <span>{record.statusLabel}</span>
+                    <strong>{record.dateLabel || record.date}</strong>
+                    <small>{[record.attendanceTypeLabel, record.courseTitle || record.subject].filter(Boolean).join(' · ')}</small>
+                  </div>
+                  <small>{record.note || 'Registrado'}</small>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </section>
         {recentBehaviorComments.length ? (
           <section className="campus-parent-mobile__academic-section">
@@ -3730,26 +4488,41 @@ function ParentAcademicContent({
             </div>
           </article>
         </section>
-        <section className="campus-parent-mobile__academic-section">
-          <h3>Próximas fechas clave</h3>
-          <div className="campus-parent-mobile__card-stack">
-            {academicCalendarItems.length ? paginatedCalendarKeyDates.map((item) => (
-              <article className={`campus-parent-mobile__list-card campus-parent-mobile__timeline-card is-${item.accent}`} key={item.id}>
-                <div>
-                  <strong>{item.title}</strong>
-                  <span>{item.subject || item.courseTitle || item.detail}</span>
-                </div>
-                <div className="campus-parent-mobile__finance-entry-meta">
-                  <strong>{item.type}</strong>
-                  <span>{item.dateLabel || formatAcademicCalendarDate(item.date)}</span>
-                </div>
-              </article>
-            )) : (
-              <article className="campus-parent-mobile__list-card campus-parent-mobile__timeline-card is-neutral">
-                <div>
-                  <strong>Sin publicaciones este mes</strong>
-                  <span>Las tareas, quices, evaluaciones y avisos aparecerán cuando el docente los publique.</span>
-                </div>
+        <section className="campus-parent-mobile__academic-section campus-parent-mobile__assignments-section">
+          <header className="campus-parent-mobile__assignments-head">
+            <h3>Próximas fechas clave</h3>
+          </header>
+          <div className="campus-parent-mobile__assignments-list">
+            {academicCalendarItems.length ? paginatedCalendarKeyDates.map((item) => {
+              const keyDate = mapParentUpcomingAssignmentRow(item);
+
+              return (
+                <article className="campus-parent-mobile__assignment-card" key={keyDate.id}>
+                  <span className={`campus-parent-mobile__assignment-card-icon is-${keyDate.accent || 'task'}`} aria-hidden="true">
+                    <ParentAssignmentTypeIcon variant={keyDate.iconVariant || 'task'} />
+                  </span>
+                  <div className="campus-parent-mobile__assignment-card-copy">
+                    <span className={`campus-parent-mobile__assignment-card-type is-${keyDate.accent || 'task'}`}>
+                      {keyDate.typeLabel || 'TAREA'}
+                    </span>
+                    <strong>{keyDate.title}</strong>
+                    <small>{keyDate.subtitle}</small>
+                  </div>
+                  <div className="campus-parent-mobile__assignment-card-due">
+                    <span className="campus-parent-mobile__assignment-card-date">
+                      <ParentAssignmentCalendarIcon />
+                      {keyDate.meta || 'Sin fecha'}
+                    </span>
+                    {keyDate.remainingLabel ? (
+                      <span className="campus-parent-mobile__assignment-card-remaining">{keyDate.remainingLabel}</span>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            }) : (
+              <article className="campus-parent-mobile__performance-empty-card">
+                <strong>Sin publicaciones este mes</strong>
+                <span>Las tareas, quices, evaluaciones y avisos aparecerán cuando el docente los publique.</span>
               </article>
             )}
           </div>
@@ -4317,32 +5090,24 @@ function ParentAcademicContent({
                 <p>Corresponde al ingreso del alumno a la jornada del día.</p>
               </div>
             </div>
-            <div className="campus-parent-mobile__mini-grid campus-parent-mobile__attendance-summary-grid">
-              <article className="campus-parent-mobile__metric-card">
-                <span>A tiempo</span>
-                <strong>{guidanceRoutineSummary.present || 0}</strong>
-              </article>
-              <article className="campus-parent-mobile__metric-card">
-                <span>Tarde</span>
-                <strong>{guidanceRoutineSummary.late || 0}</strong>
-              </article>
-              <article className="campus-parent-mobile__metric-card">
-                <span>No llegó</span>
-                <strong>{guidanceRoutineSummary.absent || 0}</strong>
-              </article>
-              <article className="campus-parent-mobile__metric-card">
-                <span>Excusado</span>
-                <strong>{guidanceRoutineSummary.excused || 0}</strong>
-              </article>
+            <div className="campus-parent-mobile__attendance-kpi-grid is-quad">
+              <ParentAttendanceKpiCard count={guidanceRoutineSummary.present || 0} iconVariant="present" label="A tiempo" tone="present" />
+              <ParentAttendanceKpiCard count={guidanceRoutineSummary.late || 0} iconVariant="late" label="Tarde" tone="late" />
+              <ParentAttendanceKpiCard count={guidanceRoutineSummary.absent || 0} iconVariant="absent" label="No llegó" tone="absent" />
+              <ParentAttendanceKpiCard count={guidanceRoutineSummary.excused || 0} iconVariant="excused" label="Excusado" tone="excused" />
             </div>
-            <div className="campus-parent-mobile__card-stack">
+            <div className="campus-parent-mobile__attendance-panel-stack">
               {Number(guidanceRoutineSummary.total || 0) > 0 ? (
-                <article className="campus-parent-mobile__list-card campus-parent-mobile__attendance-card campus-parent-mobile__attendance-records-entry">
-                  <div>
+                <article className="campus-parent-mobile__attendance-action-card">
+                  <span className="campus-parent-mobile__attendance-kpi-icon is-records" aria-hidden="true">
+                    <ParentAttendanceSummaryIcon variant="records" />
+                  </span>
+                  <div className="campus-parent-mobile__attendance-empty-copy">
                     <strong>Ver registros</strong>
                     <span>Consulta el historial de llegadas en páginas de {PARENT_GUIDANCE_ROUTINE_PAGE_SIZE} registros.</span>
                   </div>
                   <button
+                    className="campus-parent-mobile__attendance-action-button"
                     onClick={() => setGuidanceRoutineLog((current) => ({ ...current, isOpen: true, page: 1, error: '' }))}
                     type="button"
                   >
@@ -4351,8 +5116,11 @@ function ParentAcademicContent({
                 </article>
               ) : null}
               {!parentAcademicAttendance.isLoading && Number(guidanceRoutineSummary.total || 0) === 0 ? (
-                <article className="campus-parent-mobile__list-card campus-parent-mobile__attendance-card">
-                  <div>
+                <article className="campus-parent-mobile__attendance-empty-card">
+                  <span className="campus-parent-mobile__attendance-empty-icon" aria-hidden="true">
+                    <ParentAttendanceSummaryIcon variant="group" />
+                  </span>
+                  <div className="campus-parent-mobile__attendance-empty-copy">
                     <strong>Sin registros de Guidance Routine</strong>
                     <span>Todavía no hay llegadas al colegio guardadas para este alumno.</span>
                   </div>
@@ -4369,86 +5137,77 @@ function ParentAcademicContent({
                 <p>Aquí puedes ver por asignatura si entró a tiempo, llegó tarde o no asistió a la clase.</p>
               </div>
             </div>
-            <div className="campus-parent-mobile__mini-grid campus-parent-mobile__attendance-summary-grid">
-              <article className="campus-parent-mobile__metric-card">
-                <span>Registros</span>
-                <strong>{classAttendanceSummary.total || 0}</strong>
-              </article>
-              <article className="campus-parent-mobile__metric-card">
-                <span>A tiempo</span>
-                <strong>{classAttendanceSummary.present || 0}</strong>
-              </article>
-              <article className="campus-parent-mobile__metric-card">
-                <span>Tarde</span>
-                <strong>{classAttendanceSummary.late || 0}</strong>
-              </article>
-              <article className="campus-parent-mobile__metric-card">
-                <span>No asistió</span>
-                <strong>{classAttendanceSummary.absent || 0}</strong>
-              </article>
+            <div className="campus-parent-mobile__attendance-kpi-grid is-quad">
+              <ParentAttendanceKpiCard count={classAttendanceSummary.total || 0} iconVariant="records" label="Registros" suffix="total" tone="records" />
+              <ParentAttendanceKpiCard count={classAttendanceSummary.present || 0} iconVariant="present" label="A tiempo" tone="present" />
+              <ParentAttendanceKpiCard count={classAttendanceSummary.late || 0} iconVariant="late" label="Tarde" tone="late" />
+              <ParentAttendanceKpiCard count={classAttendanceSummary.absent || 0} iconVariant="absent" label="No asistió" tone="absent" />
             </div>
-            <div className="campus-parent-mobile__card-stack">
+            <div className="campus-parent-mobile__attendance-panel-stack">
               {classAttendanceSubjects.map((subjectGroup) => (
                 (() => {
                   const summary = subjectGroup.summary || emptyAttendanceSummary;
                   const punctualityRate = getParentAttendanceRate(summary);
                   const isOpen = selectedAttendanceSubjectKey === subjectGroup.key;
                   const hasAttendanceRecords = Number(summary.total || 0) > 0;
-                  const subjectColor = hasAttendanceRecords ? getParentAttendanceCardColor(punctualityRate) : '';
+                  const rateTone = hasAttendanceRecords ? getAttendanceRateTone(punctualityRate) : 'neutral';
+                  const subjectVisual = resolveParentSubjectVisualMeta(subjectGroup.subject || subjectGroup.courseTitle || '');
 
                   return (
                     <article
-                      className={`campus-parent-mobile__subject-card campus-parent-mobile__attendance-subject-card${isOpen ? ' is-open' : ''}${hasAttendanceRecords ? '' : ' is-ungraded'}`}
+                      className={`campus-parent-mobile__attendance-subject-card${isOpen ? ' is-open' : ''}`}
                       key={subjectGroup.key}
-                      style={hasAttendanceRecords && subjectColor ? { '--subject-card-color': subjectColor } : undefined}
                     >
                       <button
-                        className="campus-parent-mobile__subject-card-button"
+                        className="campus-parent-mobile__attendance-subject-trigger"
                         onClick={() => setSelectedAttendanceSubjectKey(isOpen ? '' : subjectGroup.key)}
                         type="button"
                       >
-                        <div className="campus-parent-mobile__subject-card-copy">
+                        <span className={`campus-parent-mobile__grade-card-icon is-${subjectVisual.accent}`} aria-hidden="true">
+                          <ParentAssignmentTypeIcon variant={subjectVisual.iconVariant} />
+                        </span>
+                        <div className="campus-parent-mobile__attendance-subject-copy">
                           <span>{subjectGroup.courseTitle || 'Asistencia a clase'}</span>
                           <strong>{subjectGroup.subject || subjectGroup.courseTitle || 'Asignatura'}</strong>
                         </div>
-                        <div className={`campus-parent-mobile__subject-card-score${hasAttendanceRecords ? '' : ' is-empty'}`}>
-                          <strong>{hasAttendanceRecords ? `${punctualityRate}%` : 'Sin registros'}</strong>
+                        <div className="campus-parent-mobile__attendance-subject-score">
+                          <strong className={`is-${rateTone}`}>{hasAttendanceRecords ? `${punctualityRate}%` : 'Sin registros'}</strong>
                           <small>% de llegadas a tiempo</small>
                         </div>
+                        <span className={`campus-parent-mobile__attendance-subject-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true">
+                          <ParentAcademicChevronIcon />
+                        </span>
                       </button>
                       {isOpen ? (
-                        <div className="campus-parent-mobile__subject-card-detail campus-parent-mobile__attendance-subject-detail">
-                          <div className="campus-parent-mobile__attendance-subject-summary-grid">
-                            <article className="campus-parent-mobile__grade-period-card campus-parent-mobile__attendance-summary-item">
-                              <span>A tiempo</span>
-                              <strong>{summary.present || 0}</strong>
-                            </article>
-                            <article className="campus-parent-mobile__grade-period-card campus-parent-mobile__attendance-summary-item">
-                              <span>Tarde</span>
-                              <strong>{summary.late || 0}</strong>
-                            </article>
-                            <article className="campus-parent-mobile__grade-period-card campus-parent-mobile__attendance-summary-item">
-                              <span>No asistió</span>
-                              <strong>{summary.absent || 0}</strong>
-                            </article>
+                        <div className="campus-parent-mobile__attendance-subject-detail">
+                          <div className="campus-parent-mobile__attendance-kpi-grid">
+                            <ParentAttendanceKpiCard count={summary.present || 0} iconVariant="present" label="A tiempo" tone="present" />
+                            <ParentAttendanceKpiCard count={summary.late || 0} iconVariant="late" label="Tarde" tone="late" />
+                            <ParentAttendanceKpiCard count={summary.absent || 0} iconVariant="absent" label="No asistió" tone="absent" />
                           </div>
                           {(Array.isArray(subjectGroup.records) ? subjectGroup.records : []).length ? (
-                            <div className="campus-parent-mobile__attendance-history">
+                            <div className="campus-parent-mobile__attendance-records-list">
                               {(Array.isArray(subjectGroup.records) ? subjectGroup.records : []).map((record) => (
-                                <div className={`campus-parent-mobile__attendance-detail-row is-${record.status || 'present'}`} key={`${subjectGroup.key}-${record.id}`}>
-                                  <div>
-                                    <strong>{record.statusLabel || record.status}</strong>
-                                    <span>{record.dateLabel || record.date}</span>
+                                <article className="campus-parent-mobile__attendance-record-card" key={`${subjectGroup.key}-${record.id}`}>
+                                  <div className="campus-parent-mobile__attendance-record-copy">
+                                    <span>{record.statusLabel || record.status}</span>
+                                    <strong>{record.dateLabel || record.date}</strong>
+                                    <small>{record.note || record.classSessionKey || 'Registro de clase'}</small>
                                   </div>
-                                  <small>{record.note || record.classSessionKey || 'Registro de clase'}</small>
-                                </div>
+                                  <small>{record.attendanceTypeLabel || 'Registrado'}</small>
+                                </article>
                               ))}
                             </div>
                           ) : (
-                            <div className="campus-parent-mobile__subject-empty-detail">
-                              <strong>Sin asistencias registradas</strong>
-                              <span>Cuando el docente de esta materia guarde asistencia, verás aquí el detalle.</span>
-                            </div>
+                            <article className="campus-parent-mobile__attendance-empty-card is-compact">
+                              <span className="campus-parent-mobile__attendance-empty-icon" aria-hidden="true">
+                                <ParentAttendanceSummaryIcon variant="group" />
+                              </span>
+                              <div className="campus-parent-mobile__attendance-empty-copy">
+                                <strong>Sin asistencias registradas</strong>
+                                <span>Cuando el docente de esta materia guarde asistencia, verás aquí el detalle.</span>
+                              </div>
+                            </article>
                           )}
                         </div>
                       ) : null}
@@ -4457,8 +5216,11 @@ function ParentAcademicContent({
                 })()
               ))}
               {!parentAcademicAttendance.isLoading && classAttendanceSubjects.length === 0 ? (
-                <article className="campus-parent-mobile__list-card campus-parent-mobile__attendance-card">
-                  <div>
+                <article className="campus-parent-mobile__attendance-empty-card">
+                  <span className="campus-parent-mobile__attendance-empty-icon" aria-hidden="true">
+                    <ParentAttendanceSummaryIcon variant="group" />
+                  </span>
+                  <div className="campus-parent-mobile__attendance-empty-copy">
                     <strong>Sin asistencias por materia</strong>
                     <span>Todavía no hay clases con asistencia guardada para este alumno.</span>
                   </div>
@@ -5388,6 +6150,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   };
 
   const onSelectSection = (sectionKey) => {
+    expandBottomNav();
+
     if (sectionKey === 'nursing') {
       if (visibleParentCareMenuItems.length <= 1) {
         const onlyCareSection = visibleParentCareMenuItems[0]?.id || 'nursing';
@@ -5719,15 +6483,23 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     };
   }, [showAcademicMenu]);
 
+  const bottomNavScrollEnabled = Boolean(selectedChild) && !parentOverviewLoading;
+  const { bottomNavClassName, expandBottomNav } = useFloatingBottomNavSize(bottomNavScrollEnabled);
+
+  useEffect(() => {
+    expandBottomNav();
+  }, [activeSection, activeAcademicView, expandBottomNav]);
+
   if (!selectedChild) {
     if (parentOverviewLoading) {
       return (
-        <ParentPortalBootScreen
+        <ColibriBootSplash
+          ariaLabel={studentPortalMode ? 'Cargando portal académico' : 'Cargando portal de acudientes'}
+          eyebrow={studentPortalMode ? 'Portal académico' : 'Portal de acudientes'}
+          indeterminate
           message={studentPortalMode
             ? 'Estamos consultando tu información académica y preparando tu portal.'
             : 'Estamos consultando la información real del acudiente y preparando tu experiencia.'}
-          onLogout={onLogout}
-          schoolName={workspace.guardian.schoolName}
           title={studentPortalMode ? 'Cargando portal académico' : 'Cargando alumnos vinculados'}
         />
       );
@@ -5737,9 +6509,227 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }
 
   const isHomeFeedLoading = parentOverviewLoading || academicLoading;
+  const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);
+  const isStackedPortalSection = isCareSection || activeSection === 'transport';
+
+  const parentTransportSectionContent = activeSection === 'transport' ? (
+    <ParentTransportSection hasAssignedRoute={hasAssignedTransportRoute} transport={selectedChildTransport} />
+  ) : null;
+
+  const parentCareSectionContent = isCareSection ? (
+    <>
+      {activeSection === 'nursing' ? (
+        <section className="campus-parent-mobile__nursing-page">
+          <header className="campus-parent-mobile__nursing-overview">
+            <div className="campus-parent-mobile__nursing-overview-copy">
+              <span className="campus-parent-mobile__nursing-kicker">Enfermería escolar</span>
+              <h2>{latestNursingRecord ? 'Seguimiento de salud' : 'Sin atenciones registradas'}</h2>
+              <p>
+                {latestNursingRecord
+                  ? `Última atención registrada para ${selectedChild.name}.`
+                  : `${selectedChild.name} no tiene atenciones visibles para acudientes.`}
+              </p>
+            </div>
+            <span className="campus-parent-mobile__nursing-overview-icon"><ParentAppIcon icon="nursing" /></span>
+          </header>
+
+          <section className="campus-parent-mobile__nursing-status-grid" aria-label="Resumen de enfermería">
+            <article>
+              <span>Registros</span>
+              <strong>{selectedChildNursingRecords.length}</strong>
+            </article>
+            <article>
+              <span>Última atención</span>
+              <strong>{latestNursingRecord ? formatParentNursingDate(latestNursingRecord.attendedAt) : 'Sin fecha'}</strong>
+            </article>
+            <article>
+              <span>Estado</span>
+              <strong>{latestNursingRecord ? getParentNursingDispositionLabel(latestNursingRecord.disposition) : 'Sin novedades'}</strong>
+            </article>
+          </section>
+
+          {nursingLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando historial de enfermería...</p> : null}
+
+          <section className="campus-parent-mobile__nursing-record-list">
+            {selectedChildNursingRecords.length > 0 ? selectedChildNursingRecords.map((record) => {
+              const recordId = String(record.id || record._id || record.attendedAt || 'nursing-record');
+              const isExpanded = expandedNursingRecordId === recordId;
+
+              return (
+                <article className={`campus-parent-mobile__nursing-record-card${isExpanded ? ' is-open' : ''}`} key={recordId}>
+                  <button
+                    aria-expanded={isExpanded}
+                    className="campus-parent-mobile__nursing-record-toggle"
+                    onClick={() => setExpandedNursingRecordId(isExpanded ? '' : recordId)}
+                    type="button"
+                  >
+                    <div className="campus-parent-mobile__nursing-record-toggle-copy">
+                      <span>Atención registrada</span>
+                      <strong>{record.symptoms || 'Registro de enfermería'}</strong>
+                    </div>
+                    <div className="campus-parent-mobile__nursing-record-toggle-meta">
+                      <strong>{formatParentNursingDate(record.attendedAt)}</strong>
+                      <span>{getParentNursingDispositionLabel(record.disposition)}</span>
+                    </div>
+                    <span className="campus-parent-mobile__nursing-record-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                  {isExpanded ? (
+                    <>
+                      <div className="campus-parent-mobile__nursing-record-body">
+                        <article>
+                          <span>Síntomas</span>
+                          <p>{record.symptoms}</p>
+                        </article>
+                        <article>
+                          <span>Manejo</span>
+                          <p>{record.treatment}</p>
+                        </article>
+                        <article>
+                          <span>Resultado</span>
+                          <p>{getParentNursingDispositionLabel(record.disposition)}</p>
+                        </article>
+                        {record.notes ? (
+                          <article className="is-wide">
+                            <span>Observaciones</span>
+                            <p>{record.notes}</p>
+                          </article>
+                        ) : null}
+                      </div>
+                      <footer className="campus-parent-mobile__nursing-record-footer">
+                        <span>{record.attendedBy?.name ? `Registró ${record.attendedBy.name}` : 'Registro de enfermería'}</span>
+                      </footer>
+                    </>
+                  ) : null}
+                </article>
+              );
+            }) : (
+              <article className="campus-parent-mobile__care-empty-card">
+                <span className="campus-parent-mobile__care-empty-mark"><ParentAppIcon icon="nursing" /></span>
+                <strong>Sin atenciones registradas</strong>
+                <p>{selectedChild.name} aún no tiene registros de enfermería visibles para acudientes.</p>
+              </article>
+            )}
+          </section>
+        </section>
+      ) : null}
+
+      {activeSection === 'wellbeing' ? (
+        <section className="campus-parent-mobile__nursing-page campus-parent-mobile__wellbeing-page">
+          <header className="campus-parent-mobile__nursing-overview campus-parent-mobile__wellbeing-overview">
+            <div className="campus-parent-mobile__nursing-overview-copy">
+              <span className="campus-parent-mobile__nursing-kicker">Psicología - bienestar</span>
+              <h2>{latestPsychologyCase ? 'Seguimientos activos' : 'Sin seguimientos activos'}</h2>
+              <p>
+                {latestPsychologyCase
+                  ? `Bienestar tiene ${selectedChildPsychologyCases.length} seguimiento${selectedChildPsychologyCases.length === 1 ? '' : 's'} activo${selectedChildPsychologyCases.length === 1 ? '' : 's'} para ${selectedChild.name}.`
+                  : `Cuando orientación o bienestar registre acompañamientos para ${selectedChild.name}, los verás aquí.`}
+              </p>
+            </div>
+            <span className="campus-parent-mobile__nursing-overview-icon"><ParentCareOptionIcon icon="wellbeing" /></span>
+          </header>
+
+          {psychologyLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando seguimientos de bienestar...</p> : null}
+
+          {selectedChildPsychologyCases.length > 0 ? (
+            <section className="campus-parent-mobile__nursing-record-list">
+              {selectedChildPsychologyCases.map((item) => {
+                const latestFamilyNote = Array.isArray(item.notes) && item.notes.length ? item.notes[0] : null;
+                return (
+                  <article className="campus-parent-mobile__nursing-record-card campus-parent-mobile__wellbeing-record-card" key={item.id}>
+                    <div className="campus-parent-mobile__nursing-record-toggle">
+                      <div className="campus-parent-mobile__nursing-record-toggle-copy">
+                        <span>{getParentPsychologyStatusLabel(item.status)}</span>
+                        <strong>{item.title || 'Seguimiento de bienestar'}</strong>
+                      </div>
+                      <div className="campus-parent-mobile__nursing-record-toggle-meta">
+                        <strong>{formatParentNursingDate(item.updatedAt || item.createdAt)}</strong>
+                        <span>Prioridad {getParentPsychologyPriorityLabel(item.priority)}</span>
+                      </div>
+                    </div>
+                    {latestFamilyNote ? (
+                      <div className="campus-parent-mobile__nursing-record-body">
+                        <article>
+                          <span>Nota para acudientes</span>
+                          <p>{latestFamilyNote.content}</p>
+                        </article>
+                        {latestFamilyNote.recommendations ? (
+                          <article className="is-wide">
+                            <span>Recomendaciones</span>
+                            <p>{latestFamilyNote.recommendations}</p>
+                          </article>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </section>
+          ) : !psychologyLoading ? (
+            <section className="campus-parent-mobile__care-empty-card is-wellbeing">
+              <span className="campus-parent-mobile__care-empty-mark"><ParentCareOptionIcon icon="wellbeing" /></span>
+              <strong>Bienestar sin seguimientos activos</strong>
+              <p>Cuando orientación o bienestar registre acompañamientos para {selectedChild.name}, los verás aquí.</p>
+            </section>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeSection === 'coexistence' ? (
+        <section className="campus-parent-mobile__nursing-page campus-parent-mobile__coexistence-page">
+          <header className="campus-parent-mobile__nursing-overview campus-parent-mobile__coexistence-overview">
+            <div className="campus-parent-mobile__nursing-overview-copy">
+              <span className="campus-parent-mobile__nursing-kicker">Convivencia escolar</span>
+              <h2>{latestCoexistenceObservation ? 'Observaciones registradas' : 'Convivencia sin novedades'}</h2>
+              <p>
+                {latestCoexistenceObservation
+                  ? `${selectedChild.name} tiene ${selectedChildCoexistenceObservations.length} observación${selectedChildCoexistenceObservations.length === 1 ? '' : 'es'} de convivencia registrada${selectedChildCoexistenceObservations.length === 1 ? '' : 's'}.`
+                  : `Los reportes, acuerdos o reconocimientos de convivencia para ${selectedChild.name} aparecerán aquí.`}
+              </p>
+            </div>
+            <span className="campus-parent-mobile__nursing-overview-icon"><ParentCareOptionIcon icon="coexistence" /></span>
+          </header>
+
+          {parentOverviewLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando convivencia escolar...</p> : null}
+
+          {selectedChildCoexistenceObservations.length > 0 ? (
+            <section className="campus-parent-mobile__nursing-record-list">
+              {selectedChildCoexistenceObservations.map((item) => (
+                <article className="campus-parent-mobile__nursing-record-card campus-parent-mobile__wellbeing-record-card" key={item.id}>
+                  <div className="campus-parent-mobile__nursing-record-toggle">
+                    <div className="campus-parent-mobile__nursing-record-toggle-copy">
+                      <span>{item.subject || item.courseTitle || 'Convivencia escolar'}</span>
+                      <strong>{item.observation || 'Observación registrada'}</strong>
+                    </div>
+                    <div className="campus-parent-mobile__nursing-record-toggle-meta">
+                      <strong>{formatParentNursingDate(item.submittedAt || item.createdAt)}</strong>
+                      <span>{item.teacherName ? `Docente ${item.teacherName}` : item.courseTitle || 'Registro docente'}</span>
+                    </div>
+                  </div>
+                  {item.courseTitle ? (
+                    <div className="campus-parent-mobile__nursing-record-body">
+                      <article>
+                        <span>Curso</span>
+                        <p>{item.courseTitle}</p>
+                      </article>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </section>
+          ) : !parentOverviewLoading ? (
+            <section className="campus-parent-mobile__care-empty-card is-coexistence">
+              <span className="campus-parent-mobile__care-empty-mark"><ParentCareOptionIcon icon="coexistence" /></span>
+              <strong>Convivencia sin novedades</strong>
+              <p>Los reportes, acuerdos o reconocimientos de convivencia aparecerán en este espacio.</p>
+            </section>
+          ) : null}
+        </section>
+      ) : null}
+    </>
+  ) : null;
 
   const parentSectionChrome = !shouldUsePortalHeader ? (
-    <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}`}>
+    <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}`}>
           <ParentMobilePortalHeader
             canOpenMenu={!studentPortalMode && activeSection === 'academic'}
             guardianName={studentPortalMode ? (selectedChild?.name || user?.name) : workspace.guardian.name}
@@ -5766,13 +6756,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             readOnly={studentPortalMode}
             selectedChild={selectedChildForSwitcher}
           />
+          {parentCareSectionContent}
+          {parentTransportSectionContent}
           {financeHeroCard}
     </div>
   ) : null;
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${studentPortalMode ? ' has-student-academic-bottom-nav' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
+      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${studentPortalMode ? ' has-student-academic-bottom-nav' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}`}
       {...pullRefreshTouchHandlers}
     >
       <ParentPullToRefreshIndicator
@@ -5818,8 +6810,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         </div>
       ) : null}
 
+      {!isStackedPortalSection ? (
       <div
-        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}${activeSection === 'nursing' || activeSection === 'wellbeing' ? ' is-nursing' : ''}`}
+        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}`}
         style={{ transform: canUseCampusPullRefresh ? `translateY(${pullRefreshContentOffset}px)` : undefined }}
       >
         {activeSection === 'home' ? (
@@ -5898,6 +6891,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               academicSchedule={resolvedAcademicSchedule}
               activeView={activeAcademicView}
               isPerformanceLoading={parentOverviewLoading}
+              onSelectAcademicView={(viewId) => {
+                setActiveAcademicView(viewId);
+                setShowAcademicMenu(false);
+              }}
               refreshKey={academicRefreshCount}
               selectedChild={selectedChild}
               studentPortalMode={studentPortalMode}
@@ -5933,253 +6930,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             />
           )
         ) : null}
-
-        {activeSection === 'nursing' ? (
-          <section className="campus-parent-mobile__nursing-page">
-                <header className="campus-parent-mobile__nursing-overview">
-                  <div className="campus-parent-mobile__nursing-overview-copy">
-                    <span className="campus-parent-mobile__nursing-kicker">Enfermería escolar</span>
-                    <h2>{latestNursingRecord ? 'Seguimiento de salud' : 'Sin atenciones registradas'}</h2>
-                    <p>
-                      {latestNursingRecord
-                        ? `Última atención registrada para ${selectedChild.name}.`
-                        : `${selectedChild.name} no tiene atenciones visibles para acudientes.`}
-                    </p>
-                  </div>
-                  <span className="campus-parent-mobile__nursing-overview-icon"><ParentAppIcon icon="nursing" /></span>
-                </header>
-
-                <section className="campus-parent-mobile__nursing-status-grid" aria-label="Resumen de enfermería">
-                  <article>
-                    <span>Registros</span>
-                    <strong>{selectedChildNursingRecords.length}</strong>
-                  </article>
-                  <article>
-                    <span>Última atención</span>
-                    <strong>{latestNursingRecord ? formatParentNursingDate(latestNursingRecord.attendedAt) : 'Sin fecha'}</strong>
-                  </article>
-                  <article>
-                    <span>Estado</span>
-                    <strong>{latestNursingRecord ? getParentNursingDispositionLabel(latestNursingRecord.disposition) : 'Sin novedades'}</strong>
-                  </article>
-                </section>
-
-                {nursingLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando historial de enfermería...</p> : null}
-
-                <section className="campus-parent-mobile__nursing-record-list">
-                  {selectedChildNursingRecords.length > 0 ? selectedChildNursingRecords.map((record) => {
-                    const recordId = String(record.id || record._id || record.attendedAt || 'nursing-record');
-                    const isExpanded = expandedNursingRecordId === recordId;
-
-                    return (
-                      <article className={`campus-parent-mobile__nursing-record-card${isExpanded ? ' is-open' : ''}`} key={recordId}>
-                        <button
-                          aria-expanded={isExpanded}
-                          className="campus-parent-mobile__nursing-record-toggle"
-                          onClick={() => setExpandedNursingRecordId(isExpanded ? '' : recordId)}
-                          type="button"
-                        >
-                          <div className="campus-parent-mobile__nursing-record-toggle-copy">
-                            <span>Atención registrada</span>
-                            <strong>{record.symptoms || 'Registro de enfermería'}</strong>
-                          </div>
-                          <div className="campus-parent-mobile__nursing-record-toggle-meta">
-                            <strong>{formatParentNursingDate(record.attendedAt)}</strong>
-                            <span>{getParentNursingDispositionLabel(record.disposition)}</span>
-                          </div>
-                          <span className="campus-parent-mobile__nursing-record-chevron" aria-hidden="true">⌄</span>
-                        </button>
-                        {isExpanded ? (
-                          <>
-                            <div className="campus-parent-mobile__nursing-record-body">
-                              <article>
-                                <span>Síntomas</span>
-                                <p>{record.symptoms}</p>
-                              </article>
-                              <article>
-                                <span>Manejo</span>
-                                <p>{record.treatment}</p>
-                              </article>
-                              <article>
-                                <span>Resultado</span>
-                                <p>{getParentNursingDispositionLabel(record.disposition)}</p>
-                              </article>
-                              {record.notes ? (
-                                <article className="is-wide">
-                                  <span>Observaciones</span>
-                                  <p>{record.notes}</p>
-                                </article>
-                              ) : null}
-                            </div>
-                            <footer className="campus-parent-mobile__nursing-record-footer">
-                              <span>{record.attendedBy?.name ? `Registró ${record.attendedBy.name}` : 'Registro de enfermería'}</span>
-                            </footer>
-                          </>
-                        ) : null}
-                      </article>
-                    );
-                  }) : (
-                    <article className="campus-parent-mobile__care-empty-card">
-                      <span className="campus-parent-mobile__care-empty-mark"><ParentAppIcon icon="nursing" /></span>
-                      <strong>Sin atenciones registradas</strong>
-                      <p>{selectedChild.name} aún no tiene registros de enfermería visibles para acudientes.</p>
-                    </article>
-                  )}
-                </section>
-              </section>
-        ) : null}
-
-        {activeSection === 'wellbeing' ? (
-              <section className="campus-parent-mobile__nursing-page campus-parent-mobile__wellbeing-page">
-                <header className="campus-parent-mobile__nursing-overview campus-parent-mobile__wellbeing-overview">
-                  <div className="campus-parent-mobile__nursing-overview-copy">
-                    <span className="campus-parent-mobile__nursing-kicker">Psicología - bienestar</span>
-                    <h2>{latestPsychologyCase ? 'Seguimientos activos' : 'Sin seguimientos activos'}</h2>
-                    <p>
-                      {latestPsychologyCase
-                        ? `Bienestar tiene ${selectedChildPsychologyCases.length} seguimiento${selectedChildPsychologyCases.length === 1 ? '' : 's'} activo${selectedChildPsychologyCases.length === 1 ? '' : 's'} para ${selectedChild.name}.`
-                        : `Cuando orientación o bienestar registre acompañamientos para ${selectedChild.name}, los verás aquí.`}
-                    </p>
-                  </div>
-                  <span className="campus-parent-mobile__nursing-overview-icon"><ParentCareOptionIcon icon="wellbeing" /></span>
-                </header>
-
-                {psychologyLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando seguimientos de bienestar...</p> : null}
-
-                {selectedChildPsychologyCases.length > 0 ? (
-                  <section className="campus-parent-mobile__nursing-record-list">
-                    {selectedChildPsychologyCases.map((item) => {
-                      const latestFamilyNote = Array.isArray(item.notes) && item.notes.length ? item.notes[0] : null;
-                      return (
-                        <article className="campus-parent-mobile__nursing-record-card campus-parent-mobile__wellbeing-record-card" key={item.id}>
-                          <div className="campus-parent-mobile__nursing-record-toggle">
-                            <div className="campus-parent-mobile__nursing-record-toggle-copy">
-                              <span>{getParentPsychologyStatusLabel(item.status)}</span>
-                              <strong>{item.title || 'Seguimiento de bienestar'}</strong>
-                            </div>
-                            <div className="campus-parent-mobile__nursing-record-toggle-meta">
-                              <strong>{formatParentNursingDate(item.updatedAt || item.createdAt)}</strong>
-                              <span>Prioridad {getParentPsychologyPriorityLabel(item.priority)}</span>
-                            </div>
-                          </div>
-                          {latestFamilyNote ? (
-                            <div className="campus-parent-mobile__nursing-record-body">
-                              <article>
-                                <span>Nota para acudientes</span>
-                                <p>{latestFamilyNote.content}</p>
-                              </article>
-                              {latestFamilyNote.recommendations ? (
-                                <article className="is-wide">
-                                  <span>Recomendaciones</span>
-                                  <p>{latestFamilyNote.recommendations}</p>
-                                </article>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </section>
-                ) : !psychologyLoading ? (
-                  <section className="campus-parent-mobile__care-empty-card is-wellbeing">
-                    <span className="campus-parent-mobile__care-empty-mark"><ParentCareOptionIcon icon="wellbeing" /></span>
-                    <strong>Bienestar sin seguimientos activos</strong>
-                    <p>Cuando orientación o bienestar registre acompañamientos para {selectedChild.name}, los verás aquí.</p>
-                  </section>
-                ) : null}
-              </section>
-        ) : null}
-
-        {activeSection === 'coexistence' ? (
-          <section className="campus-parent-mobile__nursing-page campus-parent-mobile__coexistence-page">
-            <header className="campus-parent-mobile__nursing-overview campus-parent-mobile__coexistence-overview">
-              <div className="campus-parent-mobile__nursing-overview-copy">
-                <span className="campus-parent-mobile__nursing-kicker">Convivencia escolar</span>
-                <h2>{latestCoexistenceObservation ? 'Observaciones registradas' : 'Convivencia sin novedades'}</h2>
-                <p>
-                  {latestCoexistenceObservation
-                    ? `${selectedChild.name} tiene ${selectedChildCoexistenceObservations.length} observación${selectedChildCoexistenceObservations.length === 1 ? '' : 'es'} de convivencia registrada${selectedChildCoexistenceObservations.length === 1 ? '' : 's'}.`
-                    : `Los reportes, acuerdos o reconocimientos de convivencia para ${selectedChild.name} aparecerán aquí.`}
-                </p>
-              </div>
-              <span className="campus-parent-mobile__nursing-overview-icon"><ParentCareOptionIcon icon="coexistence" /></span>
-            </header>
-
-            {parentOverviewLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando convivencia escolar...</p> : null}
-
-            {selectedChildCoexistenceObservations.length > 0 ? (
-              <section className="campus-parent-mobile__nursing-record-list">
-                {selectedChildCoexistenceObservations.map((item) => (
-                  <article className="campus-parent-mobile__nursing-record-card campus-parent-mobile__wellbeing-record-card" key={item.id}>
-                    <div className="campus-parent-mobile__nursing-record-toggle">
-                      <div className="campus-parent-mobile__nursing-record-toggle-copy">
-                        <span>{item.subject || item.courseTitle || 'Convivencia escolar'}</span>
-                        <strong>{item.observation || 'Observación registrada'}</strong>
-                      </div>
-                      <div className="campus-parent-mobile__nursing-record-toggle-meta">
-                        <strong>{formatParentNursingDate(item.submittedAt || item.createdAt)}</strong>
-                        <span>{item.teacherName ? `Docente ${item.teacherName}` : item.courseTitle || 'Registro docente'}</span>
-                      </div>
-                    </div>
-                    {item.courseTitle ? (
-                      <div className="campus-parent-mobile__nursing-record-body">
-                        <article>
-                          <span>Curso</span>
-                          <p>{item.courseTitle}</p>
-                        </article>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </section>
-            ) : !parentOverviewLoading ? (
-              <section className="campus-parent-mobile__care-empty-card is-coexistence">
-                <span className="campus-parent-mobile__care-empty-mark"><ParentCareOptionIcon icon="coexistence" /></span>
-                <strong>Convivencia sin novedades</strong>
-                <p>Los reportes, acuerdos o reconocimientos de convivencia aparecerán en este espacio.</p>
-              </section>
-            ) : null}
-          </section>
-        ) : null}
-
-        {activeSection === 'transport' ? (
-          <>
-            {hasAssignedTransportRoute ? (
-              <>
-                <article className="campus-parent-mobile__hero-card is-transport">
-                  <span className="campus-parent-mobile__eyebrow">Transporte escolar</span>
-                  <h2>{selectedChildTransport.routeName}</h2>
-                  <p>{selectedChildTransport.stop} · llegada estimada {selectedChildTransport.eta}</p>
-                  <small>{selectedChildTransport.note}</small>
-                </article>
-                <section className="campus-parent-mobile__mini-grid">
-                  <article className="campus-parent-mobile__metric-card">
-                    <span>Conductor</span>
-                    <strong>{selectedChildTransport.operator}</strong>
-                  </article>
-                  <article className="campus-parent-mobile__metric-card">
-                    <span>Parada</span>
-                    <strong>{selectedChildTransport.stop}</strong>
-                  </article>
-                </section>
-              </>
-            ) : (
-              <article className="campus-parent-mobile__transport-empty">
-                <span className="campus-parent-mobile__transport-empty-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" role="img">
-                    <path d="M6.3 16.2h11.4M7.2 18.6v.7m9.6-.7v.7M5.7 7.8c.3-1.5 1.5-2.5 3-2.5h6.6c1.5 0 2.7 1 3 2.5l.8 4.6c.2 1.2-.7 2.3-1.9 2.3H6.8c-1.2 0-2.1-1.1-1.9-2.3l.8-4.6Z" />
-                    <path d="M8.2 10.2h7.6M8.3 13h.1m7.2 0h.1" />
-                  </svg>
-                </span>
-                <span className="campus-parent-mobile__eyebrow">Transporte escolar</span>
-                <h2>Sin ruta asignada</h2>
-                <p>Aún no hay una ruta escolar registrada para este alumno.</p>
-                <small>Cuando el colegio asigne una ruta, aparecerán aquí el conductor, la parada y la hora estimada.</small>
-              </article>
-            )}
-          </>
-        ) : null}
       </div>
+      ) : null}
 
       {feedActionMessage ? <p className="campus-parent-mobile__feed-error">{feedActionMessage}</p> : null}
 
@@ -6305,13 +7057,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       ) : null}
 
       {studentPortalMode ? (
-        <nav aria-label="Navegacion academica del alumno" className="campus-parent-mobile__bottom-nav campus-student-academic__bottom-nav">
+        <nav aria-label="Navegacion academica del alumno" className={`campus-parent-mobile__bottom-nav campus-student-academic__bottom-nav ${bottomNavClassName}`}>
           {academicMenuItems.map((item) => (
             <button
               aria-label={item.title}
               className={`campus-parent-mobile__nav-item campus-student-academic__nav-item${item.id === activeAcademicView ? ' is-active' : ''}`}
               key={item.id}
               onClick={() => {
+                expandBottomNav();
                 setActiveAcademicView(item.id);
                 setShowAcademicMenu(false);
               }}
@@ -6328,7 +7081,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       ) : null}
 
       {!studentPortalMode ? (
-      <nav aria-label="Navegacion principal del padre" className="campus-parent-mobile__bottom-nav">
+      <nav aria-label="Navegacion principal del padre" className={`campus-parent-mobile__bottom-nav ${bottomNavClassName}`}>
         {visibleParentAppSections.map((section) => {
           const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);
           const isActive = section.key === activeSection || (section.key === 'nursing' && isCareSection);
@@ -6343,6 +7096,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                         className={`campus-parent-mobile__care-menu-item${activeSection === item.id ? ' is-active' : ''}`}
                         key={item.id}
                         onClick={() => {
+                          expandBottomNav();
                           setShowCareMenu(false);
                           if (usesRoutedSections) {
                             navigate(buildRoutedSectionPath(normalizedRouteBase, item.id));
