@@ -10,7 +10,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private let appShellBackgroundColor = UIColor(red: 245.0 / 255.0, green: 247.0 / 255.0, blue: 251.0 / 255.0, alpha: 1.0)
     private let webCacheRevisionKey = "comergio.webCacheRevision"
-    private let requiredWebCacheRevision = "2025062302"
+    private let requiredWebCacheRevision = "2025062801"
 
     override init() {
         super.init()
