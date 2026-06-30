@@ -6026,6 +6026,19 @@ body.login-boot-active main.container {
   margin: 0 auto;
 }
 
+.parent-topups-actions.parent-topups-actions-duo {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.parent-topups-action-icon-bold {
+  border-color: #c4b5fd;
+  background: linear-gradient(135deg, #ddd6fe 0%, #a78bfa 38%, #7c3aed 100%);
+  color: #2e1065;
+  box-shadow: 0 10px 20px rgba(91, 33, 182, 0.2);
+}
+
 .parent-topups-actions button {
   border: 0;
   background: transparent;

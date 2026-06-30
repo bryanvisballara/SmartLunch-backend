@@ -21,6 +21,14 @@ export const DEFAULT_SCHOOL_COUNTRY = 'CO';
 const KNOWN_SCHOOL_OPTIONS_STORAGE_KEY = 'knownSchoolOptions';
 
 const MILLENNIUM_SCHOOL_ID = 'Millennium School';
+export const BERCKLEY_SCHOOL_ID = 'International Berckley School';
+
+export function isBerckleySchool(userOrSchoolId = {}) {
+  const schoolId = typeof userOrSchoolId === 'string'
+    ? userOrSchoolId
+    : String(userOrSchoolId?.schoolId || userOrSchoolId?.id || '').trim();
+  return schoolId === BERCKLEY_SCHOOL_ID;
+}
 
 const STORED_SCHOOL_ID_ALIASES = {
   'comergio-demo': DEFAULT_SCHOOL_ID,

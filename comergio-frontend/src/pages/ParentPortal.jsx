@@ -45,6 +45,7 @@ import pseLogo from '../assets/PSE.png';
 import warningLogo from '../assets/warning.png';
 import { ComergioBrandTitle } from '../components/ComergioBrandTitle';
 import { ColibriBootSplash } from '../components/ColibriBootSplash';
+import { isBerckleySchool } from '../lib/schools';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -310,6 +311,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
+  const boldRechargeEnabled = useMemo(() => isBerckleySchool(user), [user]);
   const portalRootRef = useRef(null);
   const studentSwitcherRef = useRef(null);
   const studentPhotoInputRef = useRef(null);
@@ -3200,7 +3202,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
               </div>
             </div>
 
-            <div className="parent-topups-actions parent-topups-actions-single">
+            <div className={`parent-topups-actions ${boldRechargeEnabled ? 'parent-topups-actions-duo' : 'parent-topups-actions-single'}`}>
               <button onClick={() => navigate(topupEpaycoPath)} type="button">
                 <span className="parent-topups-action-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3209,6 +3211,16 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
                 </span>
                 <span>Recargar saldo</span>
               </button>
+              {boldRechargeEnabled ? (
+                <button onClick={() => navigate(topupDaviPlataPath)} type="button">
+                  <span className="parent-topups-action-icon parent-topups-action-icon-bold" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <span>Recarga con Bold</span>
+                </button>
+              ) : null}
             </div>
 
             <section className="parent-section">

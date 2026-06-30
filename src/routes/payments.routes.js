@@ -28,6 +28,11 @@ const {
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
 const router = express.Router();
+const BERCKLEY_SCHOOL_ID = 'International Berckley School';
+
+function isBerckleySchoolId(schoolId) {
+  return String(schoolId || '').trim() === BERCKLEY_SCHOOL_ID;
+}
 const boldWebhookFallbackRetryTimers = new Map();
 
 function toObjectId(id) {
@@ -2642,6 +2647,9 @@ router.post('/bold/recharge', async (req, res) => {
     }
 
     const { schoolId, userId } = req.user;
+    if (!isBerckleySchoolId(schoolId)) {
+      return res.status(403).json({ message: 'Bold solo esta disponible para International Berckley School.' });
+    }
     const {
       studentId,
       amount,
