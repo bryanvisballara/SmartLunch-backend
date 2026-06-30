@@ -18,6 +18,7 @@ const {
 } = require('../services/bancolombia.service');
 const {
   isBoldPaymentApiConfigured,
+  isBoldConfigured,
   getWebhookSecret: getBoldWebhookSecret,
   getIdentityKey,
   generateIntegrityHash,
@@ -25,7 +26,7 @@ const {
   createPaymentIntent,
   createPaymentAttempt,
   getPseBanks,
-  getPaymentAttemptStatus,
+  fetchBoldPaymentStatusPayload,
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 
@@ -159,6 +160,50 @@ function getFrontendBaseUrlFromRequest(req) {
   }
 
   return getFrontendBaseUrl();
+}
+
+/**
+ * Bold's payment button requires https:// for redirection-url and origin-url.
+ * Local dev often runs on http://localhost — remap to the configured HTTPS FRONTEND_URL
+ * while preserving path/query. Replaces 127.0.0.1 with localhost per Bold docs.
+ */
+function normalizeBoldButtonHttpsUrl(rawUrl, fallbackBaseUrl = getFrontendBaseUrl()) {
+  const value = String(rawUrl || '').trim();
+  if (!value) {
+    return '';
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    return '';
+  }
+
+  if (parsed.hostname === '127.0.0.1') {
+    parsed.hostname = 'localhost';
+  }
+
+  if (parsed.protocol === 'https:') {
+    return parsed.toString();
+  }
+
+  const fallback = String(fallbackBaseUrl || getFrontendBaseUrl()).trim().replace(/\/$/, '');
+  if (!fallback) {
+    return '';
+  }
+
+  try {
+    const fallbackOrigin = new URL(`${fallback}/`);
+    if (fallbackOrigin.protocol !== 'https:') {
+      return '';
+    }
+
+    const normalized = new URL(`${parsed.pathname}${parsed.search}`, fallbackOrigin);
+    return normalized.toString();
+  } catch (error) {
+    return '';
+  }
 }
 
 function getPublicBackendUrl(req) {
@@ -858,7 +903,13 @@ function buildBoldCheckoutRedirectUrl({ returnBasePath = '/parent', studentId, f
   if (studentId) {
     url.searchParams.set('studentId', String(studentId));
   }
-  return url.toString();
+  return normalizeBoldButtonHttpsUrl(url.toString(), getFrontendBaseUrl());
+}
+
+function buildBoldCheckoutOriginUrl({ returnBasePath = '/parent', frontendBaseUrl }) {
+  const normalizedBasePath = String(returnBasePath || '/parent').trim().replace(/\/$/, '') || '/parent';
+  const url = new URL(`${normalizedBasePath}/cafeteria/recargas/metodos/daviplata`, `${frontendBaseUrl}/`);
+  return normalizeBoldButtonHttpsUrl(url.toString(), getFrontendBaseUrl());
 }
 
 function mapBoldButtonDocumentType(value) {
@@ -1192,7 +1243,8 @@ async function reconcileBoldWebhookByProviderLookup({ providerTransactionId, ref
       return { received: true, ignored: true, reason: 'Payment record not found' };
     }
 
-    const providerPayload = await getPaymentAttemptStatus(reference);
+    const checkoutMode = String(paymentRecord?.providerResponse?.checkoutMode || '').trim();
+    const providerPayload = await fetchBoldPaymentStatusPayload(reference, { checkoutMode });
     const result = await reconcileBoldPaymentRecord(paymentRecord, providerPayload, { source });
 
     console.info('[BOLD_WEBHOOK_FALLBACK_RECONCILED]', {
@@ -2468,13 +2520,15 @@ router.get('/bold/recharge-status', async (req, res) => {
 
     if (payment.method === 'bold' && payment.status === 'pending' && isBoldPaymentApiConfigured()) {
       try {
-        const providerPayload = await getPaymentAttemptStatus(reference);
+        const checkoutMode = String(payment?.providerResponse?.checkoutMode || '').trim();
+        const providerPayload = await fetchBoldPaymentStatusPayload(reference, { checkoutMode });
         await reconcileBoldPaymentRecord(payment, providerPayload, { source: 'status_query' });
         payment = await PaymentTransaction.findById(payment._id);
       } catch (providerError) {
         if (Number(providerError?.status) !== 404) {
           console.warn('[BOLD_STATUS_SYNC_FAILED]', {
             reference,
+            checkoutMode: String(payment?.providerResponse?.checkoutMode || ''),
             message: providerError.message,
           });
         }
@@ -2682,8 +2736,10 @@ router.post('/epayco/recharge', async (req, res) => {
 
 router.post('/bold/checkout-button', async (req, res) => {
   try {
-    if (!isBoldPaymentApiConfigured()) {
-      return res.status(503).json({ message: 'Bold no esta configurado en el backend.' });
+    if (!isBoldPaymentApiConfigured() || !isBoldConfigured()) {
+      return res.status(503).json({
+        message: 'Bold no esta configurado en el backend. Verifica BOLD_IDENTITY_KEY y BOLD_SECRET_KEY del boton de pagos.',
+      });
     }
 
     const { schoolId, userId } = req.user;
@@ -2751,6 +2807,10 @@ router.post('/bold/checkout-button', async (req, res) => {
       studentId: studentObjectId,
       frontendBaseUrl,
     });
+    const originUrl = buildBoldCheckoutOriginUrl({
+      returnBasePath: normalizedReturnBasePath,
+      frontendBaseUrl,
+    });
     const paymentDescription = String(
       description || `Recarga cafetería ${student.name || 'alumno'}`
     ).trim().slice(0, 100);
@@ -2785,6 +2845,12 @@ router.post('/bold/checkout-button', async (req, res) => {
 
     const integritySignature = generateIntegrityHash(reference, totalToPay, currency);
 
+    if (!redirectionUrl) {
+      return res.status(500).json({
+        message: 'No se pudo preparar la URL de retorno HTTPS para Bold. Configura FRONTEND_URL con https://.',
+      });
+    }
+
     return res.status(200).json({
       orderId: reference,
       reference,
@@ -2795,6 +2861,7 @@ router.post('/bold/checkout-button', async (req, res) => {
       integritySignature,
       apiKey: getIdentityKey(),
       redirectionUrl,
+      originUrl,
       description: paymentDescription,
       customerData,
       extraData1: String(studentObjectId),

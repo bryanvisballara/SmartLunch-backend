@@ -284,6 +284,93 @@ async function getPaymentAttemptStatus(referenceId) {
   return boldPaymentApiRequest(`/v1/payment/${encodeURIComponent(String(referenceId || '').trim())}`);
 }
 
+function pickPreferredBoldNotification(notifications = []) {
+  const priority = {
+    SALE_APPROVED: 5,
+    VOID_APPROVED: 4,
+    SALE_REJECTED: 3,
+    VOID_REJECTED: 2,
+  };
+
+  return [...notifications].sort((a, b) => {
+    const typeA = String(a?.type || '').toUpperCase();
+    const typeB = String(b?.type || '').toUpperCase();
+    const priorityDiff = (priority[typeB] || 0) - (priority[typeA] || 0);
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    return Number(b?.time || 0) - Number(a?.time || 0);
+  })[0];
+}
+
+/**
+ * Bold webhook fallback API for Botón de pagos / link de pago orders.
+ * @see https://developers.bold.co/webhook (Servicio de fallback del webhook)
+ */
+async function getPaymentButtonNotificationStatus(referenceId) {
+  const identityKey = getAccessKey();
+  if (!identityKey) {
+    throw new Error('BOLD_IDENTITY_KEY must be configured');
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const encodedRef = encodeURIComponent(String(referenceId || '').trim());
+  const url = new URL(`/payments/webhook/notifications/${encodedRef}`, baseUrl);
+  url.searchParams.set('is_external_reference', 'true');
+
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers: {
+      Authorization: `x-api-key ${identityKey}`,
+      Accept: 'application/json',
+    },
+  });
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch (error) {
+    data = {};
+  }
+
+  if (!response.ok) {
+    const requestError = new Error(
+      String(data?.message || data?.error || '').trim()
+        || `Bold notification lookup failed (${response.status})`
+    );
+    requestError.status = response.status;
+    requestError.providerPayload = data;
+    throw requestError;
+  }
+
+  const notifications = Array.isArray(data?.notifications) ? data.notifications : [];
+  if (!notifications.length) {
+    const requestError = new Error('Bold payment notification not found');
+    requestError.status = 404;
+    requestError.providerPayload = data;
+    throw requestError;
+  }
+
+  return pickPreferredBoldNotification(notifications);
+}
+
+async function fetchBoldPaymentStatusPayload(referenceId, { checkoutMode } = {}) {
+  const mode = String(checkoutMode || '').trim();
+  if (mode === 'payment_button') {
+    return getPaymentButtonNotificationStatus(referenceId);
+  }
+
+  try {
+    return await getPaymentAttemptStatus(referenceId);
+  } catch (error) {
+    if (Number(error?.status) === 404) {
+      return getPaymentButtonNotificationStatus(referenceId);
+    }
+    throw error;
+  }
+}
+
 async function createCardToken({ cardNumber, expirationMonth, expirationYear, securityCode, cardholder }) {
   const endpoint = String(process.env.BOLD_CARD_TOKEN_PATH || '/online/card-tokens').trim();
 
@@ -350,7 +437,11 @@ function generateIntegrityHash(orderId, amount, currency) {
   if (!secretKey) {
     throw new Error('BOLD_SECRET_KEY is not configured');
   }
-  const raw = `${orderId}${amount}${currency}${secretKey}`;
+  const normalizedAmount = Math.round(Number(amount));
+  if (!Number.isFinite(normalizedAmount) || normalizedAmount < 0) {
+    throw new Error('Invalid amount for Bold integrity hash');
+  }
+  const raw = `${String(orderId || '').trim()}${String(normalizedAmount)}${String(currency || '').trim()}${secretKey}`;
   return require('crypto').createHash('sha256').update(raw).digest('hex');
 }
 
@@ -370,5 +461,7 @@ module.exports = {
   createPaymentAttempt,
   getPseBanks,
   getPaymentAttemptStatus,
+  getPaymentButtonNotificationStatus,
+  fetchBoldPaymentStatusPayload,
   generateIntegrityHash,
 };

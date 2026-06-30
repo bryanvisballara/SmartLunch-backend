@@ -39,15 +39,22 @@ function waitForBoldCheckout(timeoutMs = 10000) {
 }
 
 function buildBoldCheckoutConfig(config = {}) {
+  const normalizedAmount = Math.round(Number(config.amount));
   const checkoutConfig = {
     apiKey: String(config.apiKey || '').trim(),
-    amount: String(config.amount || '').trim(),
+    amount: Number.isFinite(normalizedAmount) ? String(normalizedAmount) : '',
     currency: String(config.currency || 'COP').trim(),
     orderId: String(config.orderId || config.reference || '').trim(),
     integritySignature: String(config.integritySignature || '').trim(),
     redirectionUrl: String(config.redirectionUrl || '').trim(),
     description: String(config.description || 'Recarga Comergio').trim(),
   };
+
+  // Bold rejects http:// origins (BTN-001). Override the library default of window.location.href.
+  const originUrl = String(config.originUrl || config.redirectionUrl || '').trim();
+  if (originUrl) {
+    checkoutConfig.originUrl = originUrl;
+  }
 
   if (config.customerData && typeof config.customerData === 'object') {
     checkoutConfig.customerData = JSON.stringify(config.customerData);
