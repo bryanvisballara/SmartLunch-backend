@@ -7080,7 +7080,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         </nav>
       ) : null}
 
-      {!studentPortalMode ? (
+      {!studentPortalMode && visibleParentAppSections.length > 1 ? (
       <nav aria-label="Navegacion principal del padre" className={`campus-parent-mobile__bottom-nav ${bottomNavClassName}`}>
         {visibleParentAppSections.map((section) => {
           const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);

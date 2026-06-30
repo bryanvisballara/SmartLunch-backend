@@ -2877,7 +2877,31 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
             <h1>Cafetería</h1>
           </div>
 
-          <span aria-hidden="true" className="parent-icon-btn parent-icon-btn--placeholder" />
+          <div className="parent-profile-wrap">
+            <button
+              aria-expanded={profileMenuOpen}
+              aria-haspopup="menu"
+              aria-label="Abrir opciones de perfil"
+              className="parent-avatar parent-avatar-btn"
+              onClick={() => setProfileMenuOpen((prev) => !prev)}
+              type="button"
+            >
+              {parentInitial}
+            </button>
+
+            {profileMenuOpen ? (
+              <div className="parent-profile-menu" role="menu">
+                <button className="logout" onClick={onLogout} type="button">
+                  <span className="icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <span>Cerrar sesión</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
         </header>
       ) : (
         <header className="parent-topbar">
@@ -4586,7 +4610,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
           tabIndex={0}
         />
       ) : null}
-      {!embedded && profileMenuOpen ? (
+      {profileMenuOpen ? (
         <div
           className="parent-profile-backdrop"
           onClick={() => setProfileMenuOpen(false)}

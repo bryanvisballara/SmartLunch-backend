@@ -4981,6 +4981,16 @@ body.login-boot-active main.container {
   letter-spacing: 0.08em;
 }
 
+.parent-topbar--embedded-cafeteria .parent-profile-wrap {
+  align-self: center;
+}
+
+.parent-topbar--embedded-cafeteria .parent-avatar-btn {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
 .parent-title-wrap {
   flex: 1;
   display: grid;
@@ -6047,9 +6057,39 @@ body.login-boot-active main.container {
 
 .bold-payment-button-mount {
   display: flex;
+  flex-direction: column;
   justify-content: center;
+  align-items: center;
+  gap: 0.65rem;
   min-height: 56px;
   width: 100%;
+}
+
+.parent-bold-checkout-btn {
+  border: 0;
+  border-radius: 32px;
+  min-height: 48px;
+  min-width: min(100%, 280px);
+  padding: 0.85rem 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(270deg, #ff2947 13.86%, #121e6c 83.33%);
+  box-shadow: 0 12px 24px rgba(18, 30, 108, 0.22);
+}
+
+.parent-bold-checkout-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.parent-bold-checkout-btn strong {
+  letter-spacing: 0.02em;
 }
 
 .parent-topups-actions button {
