@@ -2,6 +2,7 @@ import api from '../lib/api';
 
 export const createDaviPlataPayment = (data) => api.post('/payments/daviplata', data);
 export const createBoldRechargePayment = (data) => api.post('/payments/bold/recharge', data);
+export const createBoldCheckoutButtonSession = (data) => api.post('/payments/bold/checkout-button', data);
 export const createEpaycoRechargePayment = (data) => api.post('/payments/epayco/recharge', data);
 export const getEpaycoRechargeStatus = (reference) => api.get('/payments/epayco/recharge-status', { params: { reference } });
 export const getBoldPseBanks = () => api.get('/payments/bold/pse-banks');

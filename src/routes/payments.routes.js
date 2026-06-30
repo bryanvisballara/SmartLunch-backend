@@ -19,6 +19,8 @@ const {
 const {
   isBoldPaymentApiConfigured,
   getWebhookSecret: getBoldWebhookSecret,
+  getIdentityKey,
+  generateIntegrityHash,
   toInternalStatus: toBoldInternalStatus,
   createPaymentIntent,
   createPaymentAttempt,
@@ -848,6 +850,44 @@ function buildBoldWalletReturnUrl({ studentId, reference }) {
     url.searchParams.set('paymentReference', String(reference));
   }
   return url.toString();
+}
+
+function buildBoldCheckoutRedirectUrl({ returnBasePath = '/parent', studentId, frontendBaseUrl }) {
+  const normalizedBasePath = String(returnBasePath || '/parent').trim().replace(/\/$/, '') || '/parent';
+  const url = new URL(`${normalizedBasePath}/bold-resultado`, `${frontendBaseUrl}/`);
+  if (studentId) {
+    url.searchParams.set('studentId', String(studentId));
+  }
+  return url.toString();
+}
+
+function mapBoldButtonDocumentType(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (['CC', 'CE', 'PA', 'NIT', 'TI'].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === 'CEDULA') return 'CC';
+  if (normalized === 'CEDULA_DE_EXTRANJERIA') return 'CE';
+  if (normalized === 'PASAPORTE') return 'PA';
+  if (normalized === 'TARJETA_DE_IDENTIDAD') return 'TI';
+  return 'CC';
+}
+
+function buildBoldButtonCustomerData(parentUser, payer = {}) {
+  const payerName = String(payer?.name || parentUser?.name || '').trim();
+  const payerEmail = String(payer?.email || parentUser?.email || '').trim().toLowerCase();
+  const payerPhone = normalizePhoneNumber(payer?.phone || parentUser?.phone || '');
+  const payerDocument = resolvePayerDocument(parentUser, payer);
+  const phoneDigits = payerPhone.replace(/\D/g, '');
+
+  return {
+    email: payerEmail,
+    fullName: payerName,
+    phone: phoneDigits.slice(-10),
+    dialCode: '+57',
+    documentNumber: payerDocument.documentNumber,
+    documentType: mapBoldButtonDocumentType(payerDocument.documentType),
+  };
 }
 
 function buildEpaycoWalletReturnUrl({ studentId, reference, status = '', frontendBaseUrl = '' }) {
@@ -2634,6 +2674,130 @@ router.post('/epayco/recharge', async (req, res) => {
       },
       responseUrl: checkoutData.response,
       confirmationUrl: checkoutData.confirmation,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/bold/checkout-button', async (req, res) => {
+  try {
+    if (!isBoldPaymentApiConfigured()) {
+      return res.status(503).json({ message: 'Bold no esta configurado en el backend.' });
+    }
+
+    const { schoolId, userId } = req.user;
+    if (!isBerckleySchoolId(schoolId)) {
+      return res.status(403).json({ message: 'Bold solo esta disponible para International Berckley School.' });
+    }
+
+    const {
+      studentId,
+      amount,
+      description = 'Recarga Comergio',
+      returnBasePath = '/parent',
+    } = req.body || {};
+
+    const studentObjectId = toObjectId(studentId);
+    if (!studentObjectId) {
+      return res.status(400).json({ message: 'studentId is required' });
+    }
+
+    const numericAmount = Math.round(Number(amount));
+    if (!Number.isFinite(numericAmount) || numericAmount < 20000) {
+      return res.status(400).json({ message: 'Amount must be at least 20000 COP' });
+    }
+
+    const allowed = await canAccessStudent(req.user, studentObjectId);
+    if (!allowed) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const student = await Student.findOne({
+      _id: studentObjectId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('_id name');
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: studentObjectId });
+    if (!wallet) {
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    const parentUser = await User.findOne({
+      _id: userId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('name email phone documentType documentNumber');
+
+    if (!parentUser) {
+      return res.status(404).json({ message: 'Parent user not found' });
+    }
+
+    const feeAmount = Math.round(numericAmount * 0.015);
+    const totalToPay = numericAmount + feeAmount;
+    const currency = 'COP';
+    const reference = buildReference();
+    const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
+    const normalizedReturnBasePath = String(returnBasePath || '/parent').trim().replace(/\/$/, '') || '/parent';
+    const redirectionUrl = buildBoldCheckoutRedirectUrl({
+      returnBasePath: normalizedReturnBasePath,
+      studentId: studentObjectId,
+      frontendBaseUrl,
+    });
+    const paymentDescription = String(
+      description || `Recarga cafetería ${student.name || 'alumno'}`
+    ).trim().slice(0, 100);
+    const customerData = buildBoldButtonCustomerData(parentUser);
+
+    if (!customerData.fullName || !customerData.email || customerData.phone.length < 7 || !customerData.documentNumber) {
+      return res.status(400).json({
+        message: 'Faltan datos del titular para procesar el pago con Bold. Verifica nombre, correo, telefono y documento.',
+      });
+    }
+
+    await PaymentTransaction.create({
+      schoolId,
+      studentId: studentObjectId,
+      parentId: userId,
+      amount: numericAmount,
+      method: 'bold',
+      documentType: '',
+      documentNumber: '',
+      reference,
+      status: 'pending',
+      providerStatus: 'PENDING',
+      description: paymentDescription,
+      providerResponse: {
+        rechargeAmount: numericAmount,
+        feeAmount,
+        totalToPay,
+        checkoutMode: 'payment_button',
+        redirectionUrl,
+      },
+    });
+
+    const integritySignature = generateIntegrityHash(reference, totalToPay, currency);
+
+    return res.status(200).json({
+      orderId: reference,
+      reference,
+      amount: totalToPay,
+      rechargeAmount: numericAmount,
+      feeAmount,
+      currency,
+      integritySignature,
+      apiKey: getIdentityKey(),
+      redirectionUrl,
+      description: paymentDescription,
+      customerData,
+      extraData1: String(studentObjectId),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

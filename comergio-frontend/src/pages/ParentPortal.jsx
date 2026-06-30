@@ -5,6 +5,7 @@ import { AppLauncher } from '@capacitor/app-launcher';
 import { Browser } from '@capacitor/browser';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ParentPullToRefreshIndicator from '../components/ParentPullToRefreshIndicator';
+import BoldPaymentButton from '../components/BoldPaymentButton';
 import { useParentPullToRefresh } from '../hooks/useParentPullToRefresh';
 import useAuthStore from '../store/auth.store';
 import { deleteAccount } from '../services/auth.service';
@@ -33,6 +34,7 @@ import {
 } from '../services/parent.service';
 import {
   createBoldRechargePayment,
+  createBoldCheckoutButtonSession,
   createEpaycoRechargePayment,
   getBoldPseBanks,
   getBoldRechargeStatus,
@@ -74,26 +76,79 @@ function formatSignedCurrency(value) {
   return `${prefix} ${formatCurrency(absAmount)}`;
 }
 
-function BoldResultContent() {
+function BoldResultContent({ onPaymentConfirmed }) {
   const params = new URLSearchParams(window.location.search);
-  const txStatus = String(params.get('bold-tx-status') || '').toLowerCase();
-  const orderId = String(params.get('bold-order-id') || '');
+  const txStatus = String(params.get('bold-tx-status') || '').trim().toLowerCase();
+  const orderId = String(params.get('bold-order-id') || params.get('paymentReference') || '').trim();
+  const [syncStatus, setSyncStatus] = useState('pending');
+  const [syncMessage, setSyncMessage] = useState('');
 
-  if (txStatus === 'approved') {
+  useEffect(() => {
+    if (!orderId) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const syncPayment = async () => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          const response = await getBoldRechargeStatus(orderId);
+          const status = String(response.data?.status || '').trim().toLowerCase();
+
+          if (status === 'approved') {
+            setSyncStatus('approved');
+            setSyncMessage('La recarga fue acreditada correctamente en la billetera.');
+            onPaymentConfirmed?.(response.data);
+            return;
+          }
+
+          if (status === 'rejected' || status === 'failed') {
+            setSyncStatus('rejected');
+            setSyncMessage('El pago no fue aprobado. La billetera no recibió saldo nuevo.');
+            return;
+          }
+        } catch (requestError) {
+          if (attempt === 7) {
+            setSyncStatus('pending');
+            setSyncMessage(requestError?.response?.data?.message || 'Seguimos verificando tu pago. Revisa la billetera en unos segundos.');
+            return;
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1800));
+      }
+
+      setSyncStatus('pending');
+      setSyncMessage('Seguimos verificando tu pago. Revisa la billetera en unos segundos.');
+    };
+
+    syncPayment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, onPaymentConfirmed]);
+
+  if (txStatus === 'approved' || syncStatus === 'approved') {
     return (
       <div className="parent-topup-davi-fee-box">
         <p style={{ fontWeight: 'bold', color: '#22c55e' }}>¡Pago exitoso!</p>
-        <p>Tu recarga está siendo procesada. El saldo se acreditará en unos instantes.</p>
+        <p>{syncMessage || 'Tu recarga está siendo procesada. El saldo se acreditará en unos instantes.'}</p>
         {orderId ? <p style={{ fontSize: '0.8rem', color: '#888' }}>Referencia: {orderId}</p> : null}
       </div>
     );
   }
 
-  if (txStatus === 'rejected' || txStatus === 'failed' || txStatus === 'denied') {
+  if (txStatus === 'rejected' || txStatus === 'failed' || txStatus === 'denied' || syncStatus === 'rejected') {
     return (
       <div className="parent-topup-davi-fee-box">
         <p style={{ fontWeight: 'bold', color: '#ef4444' }}>Pago rechazado</p>
-        <p>No fue posible procesar tu pago. Por favor intenta de nuevo.</p>
+        <p>{syncMessage || 'No fue posible procesar tu pago. Por favor intenta de nuevo.'}</p>
       </div>
     );
   }
@@ -101,7 +156,7 @@ function BoldResultContent() {
   return (
     <div className="parent-topup-davi-fee-box">
       <p style={{ fontWeight: 'bold' }}>Pago en proceso</p>
-      <p>Tu pago está siendo verificado. Recibirás una confirmación pronto.</p>
+      <p>{syncMessage || 'Tu pago está siendo verificado. Recibirás una confirmación pronto.'}</p>
       {orderId ? <p style={{ fontSize: '0.8rem', color: '#888' }}>Referencia: {orderId}</p> : null}
     </div>
   );
@@ -348,15 +403,9 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
   const [studentPhotoError, setStudentPhotoError] = useState('');
   const [studentPhotoSuccess, setStudentPhotoSuccess] = useState('');
   const [daviAmount, setDaviAmount] = useState('');
-  const [daviSubmitLoading, setDaviSubmitLoading] = useState(false);
-  const [daviSubmitError, setDaviSubmitError] = useState('');
-  const [daviSubmitSuccess, setDaviSubmitSuccess] = useState('');
-  const [showBoldCardForm, setShowBoldCardForm] = useState(false);
-  const [isBoldCardFormClosing, setIsBoldCardFormClosing] = useState(false);
-  const [boldTopupCardNumber, setBoldTopupCardNumber] = useState('');
-  const [boldTopupCardExpiry, setBoldTopupCardExpiry] = useState('');
-  const [boldTopupCardCvv, setBoldTopupCardCvv] = useState('');
-  const [boldTopupCardholderName, setBoldTopupCardholderName] = useState('');
+  const [boldCheckoutConfig, setBoldCheckoutConfig] = useState(null);
+  const [boldCheckoutLoading, setBoldCheckoutLoading] = useState(false);
+  const [boldCheckoutError, setBoldCheckoutError] = useState('');
   const [epaycoAmount, setEpaycoAmount] = useState('');
   const [epaycoSubmitLoading, setEpaycoSubmitLoading] = useState(false);
   const [epaycoSubmitError, setEpaycoSubmitError] = useState('');
@@ -585,17 +634,6 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
   const canContinueNequiRecharge = Boolean(
     Number.isFinite(nequiAmountNumber) &&
     nequiAmountNumber >= minimumBoldRecharge
-  );
-  const boldTopupCardDigits = String(boldTopupCardNumber || '').replace(/\D/g, '');
-  const boldTopupExpiryDigits = String(boldTopupCardExpiry || '').replace(/\D/g, '');
-  const boldTopupCvvDigits = String(boldTopupCardCvv || '').replace(/\D/g, '');
-  const canSubmitBoldCardDetails = Boolean(
-    boldTopupCardDigits.length >= 13 &&
-    boldTopupCardDigits.length <= 19 &&
-    boldTopupExpiryDigits.length === 4 &&
-    boldTopupCvvDigits.length >= 3 &&
-    boldTopupCvvDigits.length <= 4 &&
-    String(boldTopupCardholderName || '').trim().length >= 5
   );
   const canContinuePseRecharge = Boolean(
     Number.isFinite(pseAmountNumber) &&
@@ -1977,56 +2015,71 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
 
   useEffect(() => {
     if (!isTopupDaviPlataPage) {
-      setShowBoldCardForm(false);
-      setIsBoldCardFormClosing(false);
-      setDaviSubmitError('');
-      setDaviSubmitSuccess('');
-      return;
-    }
-
-    if (!selectedStudent?._id) {
-      setDaviSubmitError('Selecciona un alumno antes de continuar.');
-      return;
-    }
-
-    if (!canContinueDaviRecharge) {
-      setDaviSubmitSuccess('');
-      if (daviAmountNumber > 0) {
-        setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
-      } else {
-        setDaviSubmitError('');
-      }
-      return;
-    }
-
-    setDaviSubmitError('');
-  }, [isTopupDaviPlataPage, selectedStudent?._id, daviAmountNumber, canContinueDaviRecharge, minimumBoldRecharge]);
-
-  useEffect(() => {
-    if (!isBoldCardFormClosing) {
+      setBoldCheckoutConfig(null);
+      setBoldCheckoutError('');
+      setBoldCheckoutLoading(false);
       return undefined;
     }
 
-    const closeTimer = window.setTimeout(() => {
-      setShowBoldCardForm(false);
-      setIsBoldCardFormClosing(false);
-    }, 220);
-
-    return () => window.clearTimeout(closeTimer);
-  }, [isBoldCardFormClosing]);
-
-  const openBoldCardModal = () => {
-    setIsBoldCardFormClosing(false);
-    setShowBoldCardForm(true);
-  };
-
-  const closeBoldCardModal = () => {
-    if (daviSubmitLoading || !showBoldCardForm) {
-      return;
+    if (!selectedStudent?._id) {
+      setBoldCheckoutConfig(null);
+      setBoldCheckoutError('Selecciona un alumno antes de continuar.');
+      return undefined;
     }
 
-    setIsBoldCardFormClosing(true);
-  };
+    if (!canContinueDaviRecharge) {
+      setBoldCheckoutConfig(null);
+      setBoldCheckoutError(
+        daviAmountNumber > 0
+          ? `El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`
+          : ''
+      );
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setBoldCheckoutLoading(true);
+      setBoldCheckoutError('');
+
+      try {
+        const response = await createBoldCheckoutButtonSession({
+          studentId: selectedStudent._id,
+          amount: daviAmountNumber,
+          description: `Recarga cafetería ${selectedStudent?.name || 'alumno'}`,
+          returnBasePath: normalizedBasePath,
+        });
+
+        if (!cancelled) {
+          setBoldCheckoutConfig(response.data);
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setBoldCheckoutConfig(null);
+          setBoldCheckoutError(
+            requestError?.response?.data?.message || requestError?.message || 'No se pudo preparar el pago con Bold.'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setBoldCheckoutLoading(false);
+        }
+      }
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isTopupDaviPlataPage,
+    selectedStudent?._id,
+    selectedStudent?.name,
+    daviAmountNumber,
+    canContinueDaviRecharge,
+    minimumBoldRecharge,
+    normalizedBasePath,
+  ]);
 
   const onSubmitPseTopup = async () => {
     if (!canContinuePseRecharge) {
@@ -2237,59 +2290,6 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
       setBrebSubmitError(requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar la recarga por Bre-B.');
     } finally {
       setBrebSubmitLoading(false);
-    }
-  };
-
-  const onSubmitBoldCardTopup = async () => {
-    if (!selectedStudent?._id) {
-      setDaviSubmitError('Selecciona un alumno antes de continuar.');
-      return;
-    }
-
-    if (!canContinueDaviRecharge) {
-      setDaviSubmitError(`El valor minimo para recargar con Bold es ${formatCurrency(minimumBoldRecharge)}.`);
-      return;
-    }
-
-    if (!canSubmitBoldCardDetails) {
-      setDaviSubmitError('Completa correctamente los datos de la tarjeta y del titular.');
-      return;
-    }
-
-    const expiryMonth = boldTopupExpiryDigits.slice(0, 2);
-    const expiryYear = `20${boldTopupExpiryDigits.slice(2, 4)}`;
-
-    setDaviSubmitLoading(true);
-    setDaviSubmitError('');
-    setDaviSubmitSuccess('');
-
-    try {
-      const response = await createBoldRechargePayment({
-        studentId: selectedStudent._id,
-        amount: daviAmountNumber,
-        description: `Recarga Comergio - ${selectedStudent?.name || 'Alumno'}`,
-        payer: {
-          name: String(boldTopupCardholderName || '').trim(),
-        },
-        paymentMethod: {
-          cardNumber: boldTopupCardDigits,
-          cardholderName: String(boldTopupCardholderName || '').trim(),
-          expirationMonth: expiryMonth,
-          expirationYear: expiryYear,
-          installments: 1,
-          cvc: boldTopupCvvDigits,
-        },
-        deviceFingerprint: buildBoldDeviceFingerprint(),
-      });
-
-      setDaviSubmitSuccess('Pago enviado a Bold. Estamos validando el resultado.');
-      await redirectAfterBoldTopupStart(response.data, selectedStudent._id);
-    } catch (requestError) {
-      setDaviSubmitError(
-        requestError?.response?.data?.message || requestError?.message || 'No se pudo iniciar el pago con Bold.'
-      );
-    } finally {
-      setDaviSubmitLoading(false);
     }
   };
 
@@ -3619,122 +3619,16 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
               </div>
             ) : null}
 
-            <div className="parent-topup-method-selector-wrap">
-              <button
-                className={`parent-topup-method-selector ${showBoldCardForm ? 'is-selected' : ''}`}
-                onClick={openBoldCardModal}
-                type="button"
-              >
-                <span className="parent-topup-method-selector-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span className="parent-topup-method-selector-copy">
-                  <strong>Tarjeta de credito o debito</strong>
-                  <small>Visa, Mastercard y otras franquicias</small>
-                  <small>Si Bold solicita 3DS, te redirigiremos y luego volverás a esta billetera para confirmar la recarga.</small>
-                </span>
-              </button>
-            </div>
-
-            {showBoldCardForm ? (
-              <div
-                className={`parent-bold-card-modal-overlay ${isBoldCardFormClosing ? 'is-closing' : ''}`}
-                onClick={closeBoldCardModal}
-                role="dialog"
-                aria-modal="true"
-                aria-label="Formulario de tarjeta para recarga Bold"
-              >
-                <div className={`parent-bold-card-modal ${isBoldCardFormClosing ? 'is-closing' : ''}`} onClick={(event) => event.stopPropagation()}>
-                  <button
-                    aria-label="Cerrar formulario de tarjeta"
-                    className="parent-bold-card-modal-close"
-                    disabled={daviSubmitLoading}
-                    onClick={closeBoldCardModal}
-                    type="button"
-                  >
-                    ×
-                  </button>
-
-                  <div className="parent-bold-card-modal-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
-                    </svg>
-                  </div>
-
-                  <div className="parent-bold-card-modal-head">
-                    <h3>Tarjeta de credito o debito</h3>
-                    <p>Completa los datos de la tarjeta para continuar con la recarga.</p>
-                  </div>
-
-                  <div className="parent-topup-card-form">
-                    <label className="parent-topup-davi-amount">
-                      Nombre del titular
-                      <input
-                        type="text"
-                        placeholder="Nombre completo"
-                        value={boldTopupCardholderName}
-                        onChange={(event) => setBoldTopupCardholderName(event.target.value)}
-                      />
-                    </label>
-
-                    <label className="parent-topup-davi-amount">
-                      Número de tarjeta
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="4111 1111 1111 1111"
-                        value={boldTopupCardNumber}
-                        onChange={(event) => {
-                          const digits = event.target.value.replace(/\D/g, '').slice(0, 19);
-                          const chunks = digits.match(/.{1,4}/g) || [];
-                          setBoldTopupCardNumber(chunks.join(' '));
-                        }}
-                      />
-                    </label>
-
-                    <div className="parent-topup-davi-grid">
-                      <label>
-                        Vencimiento
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="MM/AA"
-                          value={boldTopupCardExpiry}
-                          onChange={(event) => {
-                            const digits = event.target.value.replace(/\D/g, '').slice(0, 4);
-                            const formatted = digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
-                            setBoldTopupCardExpiry(formatted);
-                          }}
-                        />
-                      </label>
-
-                      <label>
-                        CVV
-                        <input
-                          type="password"
-                          inputMode="numeric"
-                          placeholder="123"
-                          value={boldTopupCardCvv}
-                          onChange={(event) => setBoldTopupCardCvv(event.target.value.replace(/\D/g, '').slice(0, 4))}
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  <button
-                    className="parent-topup-davi-continue"
-                    disabled={!canSubmitBoldCardDetails || daviSubmitLoading}
-                    onClick={onSubmitBoldCardTopup}
-                    type="button"
-                  >
-                    {daviSubmitLoading ? 'Procesando...' : 'Pagar con tarjeta'}
-                  </button>
-
-                  {daviSubmitError ? <p className="parent-error">{daviSubmitError}</p> : null}
-                  {daviSubmitSuccess ? <p className="parent-success">{daviSubmitSuccess}</p> : null}
-                </div>
+            {canContinueDaviRecharge ? (
+              <div className="parent-bold-checkout-wrap">
+                <p className="parent-topup-davi-caption">
+                  Al presionar el botón de Bold serás redirigido a la pasarela segura para elegir tu medio de pago.
+                </p>
+                {boldCheckoutLoading ? <p className="parent-loading">Preparando botón de pago...</p> : null}
+                {!boldCheckoutLoading && boldCheckoutConfig ? (
+                  <BoldPaymentButton config={boldCheckoutConfig} />
+                ) : null}
+                {boldCheckoutError ? <p className="parent-error">{boldCheckoutError}</p> : null}
               </div>
             ) : null}
           </section>
@@ -3748,7 +3642,17 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
               </svg>
               <span>Ir a recargas</span>
             </button>
-            <BoldResultContent />
+            <BoldResultContent
+              onPaymentConfirmed={(payload) => {
+                const studentId = String(
+                  payload?.studentId || new URLSearchParams(location.search).get('studentId') || selectedStudent?._id || ''
+                ).trim();
+                if (studentId) {
+                  setSelectedStudentId(studentId);
+                  loadOverview(studentId);
+                }
+              }}
+            />
           </section>
         ) : null}
 

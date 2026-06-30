@@ -6039,6 +6039,19 @@ body.login-boot-active main.container {
   box-shadow: 0 10px 20px rgba(91, 33, 182, 0.2);
 }
 
+.parent-bold-checkout-wrap {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.35rem;
+}
+
+.bold-payment-button-mount {
+  display: flex;
+  justify-content: center;
+  min-height: 56px;
+  width: 100%;
+}
+
 .parent-topups-actions button {
   border: 0;
   background: transparent;
