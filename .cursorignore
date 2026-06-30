@@ -1,0 +1,25 @@
+# Build outputs and deploy artifacts
+comergio-frontend/dist-deploy/
+comergio-frontend/dist-deploy */
+comergio-frontend/dist-deploy.zip
+comergio-frontend/ios/build/
+**/*.xcarchive/
+**/*.ipa
+**/*.dSYM/
+
+# Large archives
+Comergio.zip
+deploy.zip
+deploy-hostinger-*.zip
+
+# Logs
+.build-*.log
+frontend-build.log
+
+# Uploaded media (local, not app source)
+public/assets/academic-communications/
+public/assets/admissions-marketing/
+
+# Dependencies
+node_modules/
+comergio-frontend/node_modules/

@@ -4,4 +4,34 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+
+# Frontend build artifacts
 comergio-frontend/dist-deploy.zip
+comergio-frontend/dist-deploy*/
+
+# iOS / Android local builds
+comergio-frontend/ios/build/
+comergio-frontend/ios/**/*.xcarchive/
+comergio-frontend/ios/**/*.ipa
+comergio-frontend/android/app/google-services.json
+
+# Deploy packages and logs
+Comergio.zip
+deploy.zip
+deploy-hostinger-*.zip
+.build-*.log
+frontend-build.log
+
+# Local scratch / media uploads (not source)
+public/assets/academic-communications/
+public/assets/admissions-marketing/
+public/assets/bienvenidos-*
+public/assets/deportes-perfil-*
+public/assets/secretaria-academica-perfil-*
+public/assets/efgve-*
+public/assets/fghnf-*
+public/assets/test-*
+push ios.WAV
+push sound comergio.MP3
+logonuevo-CGMgdqGl.png
+ziCyosyG
