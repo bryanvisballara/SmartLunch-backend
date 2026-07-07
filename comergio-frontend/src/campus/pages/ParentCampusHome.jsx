@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { LOGIN_PATH } from '../../lib/authNavigation';
 import { ComergioBrandTitle } from '../../components/ComergioBrandTitle';
 import femImage from '../../assets/fem.png';
 import informesImage from '../../assets/informes.png';
@@ -47,8 +48,10 @@ import {
   getEnrollmentMatriculaPendingSignatures,
   getEnrollmentMatriculaProcess,
   getEnrollmentMatriculaPaymentStatus,
+  getEnrollmentMatriculaRequirement,
+  getWompiMatriculaPaymentStatus,
 } from '../../services/enrollmentMatricula.service';
-import { shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
+import { isMillenniumSchool, shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
 import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance } from '../../services/studentPortal.service';
 import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
 
@@ -5765,6 +5768,47 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [refreshMatriculaPendingSignatures]);
 
   useEffect(() => {
+    if (studentPortalMode || matriculaFlowOpen || !user?.schoolId) {
+      return undefined;
+    }
+
+    if (!isMillenniumSchool(schoolDisplayName, user.schoolId)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const openRequiredMatriculaFlow = async () => {
+      try {
+        const response = await getEnrollmentMatriculaRequirement();
+        if (cancelled || !response.data?.required || !response.data?.process) {
+          return;
+        }
+
+        const nextProcess = response.data.process;
+        setMatriculaProcess(nextProcess);
+        setMatriculaFlowCharge(response.data.charge || nextProcess.charge || null);
+        setMatriculaFlowPendingResume(
+          response.data.reason === 'signature_pending'
+          || Boolean(nextProcess.requiresSignature),
+        );
+        setMatriculaFlowOpen(true);
+        setMatriculaPendingSignature(
+          response.data.reason === 'signature_pending' ? nextProcess : null,
+        );
+      } catch (error) {
+        // Requirement check failed silently; pending-signatures fallback still runs.
+      }
+    };
+
+    openRequiredMatriculaFlow();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matriculaFlowOpen, schoolDisplayName, studentPortalMode, user?.schoolId]);
+
+  useEffect(() => {
     if (!matriculaPendingSignature?._id) {
       return undefined;
     }
@@ -5814,6 +5858,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     const params = new URLSearchParams(location.search || '');
     const processId = String(params.get('matriculaProcessId') || '').trim();
     const paymentPurpose = String(params.get('paymentPurpose') || '').trim();
+    const wompiTransactionId = String(params.get('id') || '').trim();
     if (!processId || paymentPurpose !== 'enrollment_matricula') {
       return;
     }
@@ -5821,6 +5866,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     let cancelled = false;
     const resumeMatriculaFlow = async () => {
       try {
+        if (wompiTransactionId) {
+          await getWompiMatriculaPaymentStatus({ transactionId: wompiTransactionId }).catch(() => null);
+        }
         const response = await getEnrollmentMatriculaPaymentStatus(processId);
         if (cancelled) return;
         const nextProcess = response.data?.process;
@@ -6042,8 +6090,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [academicBilling.pricingGuides, financeCharges, selectedChild]);
 
   const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
-  const isBlockingMatriculaSignature = Boolean(
-    matriculaProcess?.requiresSignature && !matriculaProcess?.isCompleted,
+  const isBlockingMatriculaFlow = Boolean(
+    matriculaFlowOpen && matriculaProcess && !matriculaProcess.isCompleted,
   );
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
   const selectedFinanceConceptsTotal = selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
@@ -6080,7 +6128,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const onLogout = () => {
     setShowUserMenu(false);
     logout();
-    navigate('/login', { replace: true });
+    navigate(LOGIN_PATH, { replace: true });
   };
 
   const onPayAcademicCharge = async () => {
@@ -7016,7 +7064,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         <MatriculaEnrollmentFlow
           charge={matriculaFlowCharge || primaryPendingCharge}
           onClose={() => {
-            if (isBlockingMatriculaSignature) {
+            if (isBlockingMatriculaFlow) {
               return;
             }
 
@@ -7046,7 +7094,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               refreshMatriculaPendingSignatures();
             }
           }}
-          blocking={isBlockingMatriculaSignature}
+          blocking={isBlockingMatriculaFlow}
           open={matriculaFlowOpen}
           pendingSignatureResume={matriculaFlowPendingResume}
           process={matriculaProcess}

@@ -30,7 +30,14 @@ const {
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 const {
+  buildMatriculaReference,
+  buildWompiIntegritySignature,
+  fetchWompiTransaction,
+  getWompiPublicKey,
   isWompiConfigured,
+  isWompiSandboxMode,
+  isWompiSchoolId,
+  normalizeWompiLegalIdType,
   toWompiInternalStatus,
   verifyWompiEventChecksum,
 } = require('../services/wompi.service');
@@ -2036,6 +2043,91 @@ function handleBoldAsyncWebhookAck(req, res, { label }) {
   });
 }
 
+function buildWompiMatriculaRedirectUrl({ frontendBaseUrl, processId }) {
+  const base = String(frontendBaseUrl || getFrontendBaseUrl()).trim().replace(/\/$/, '');
+  const url = new URL('/parent', `${base}/`);
+  url.searchParams.set('section', 'finance');
+  url.searchParams.set('matriculaProcessId', String(processId || '').trim());
+  url.searchParams.set('paymentPurpose', 'enrollment_matricula');
+  return url.toString();
+}
+
+async function reconcileWompiPaymentRecord(paymentRecord, providerPayload, { source = 'webhook' } = {}) {
+  return runWithSchoolContext(paymentRecord?.schoolId, async () => {
+    let session;
+
+    try {
+      const transaction = providerPayload?.data?.transaction || providerPayload?.transaction || {};
+      const providerTransactionId = String(transaction?.id || paymentRecord.providerTransactionId || '').trim();
+      const providerStatus = String(transaction?.status || paymentRecord.providerStatus || 'PENDING').trim();
+      const internalStatus = toWompiInternalStatus(providerStatus);
+
+      if (internalStatus !== 'approved') {
+        paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
+        paymentRecord.providerStatus = providerStatus;
+        paymentRecord.status = internalStatus;
+        paymentRecord.failureReason = internalStatus === 'pending' ? null : `Provider status ${providerStatus}`;
+        paymentRecord.providerResponse = {
+          ...(paymentRecord.providerResponse || {}),
+          [source]: providerPayload,
+        };
+        if (String(source).includes('webhook')) {
+          paymentRecord.callbackPayload = providerPayload;
+        }
+        await paymentRecord.save();
+
+        return {
+          received: true,
+          credited: false,
+          status: internalStatus,
+        };
+      }
+
+      if (paymentRecord.walletTransactionId || paymentRecord.academicChargePaymentId) {
+        return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+      }
+
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      const lockedPayment = await PaymentTransaction.findById(paymentRecord._id).session(session);
+      if (!lockedPayment) {
+        await session.abortTransaction();
+        return { received: true, credited: false, status: 'failed', message: 'Payment transaction not found' };
+      }
+
+      if (lockedPayment.walletTransactionId || lockedPayment.academicChargePaymentId) {
+        await session.commitTransaction();
+        return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
+      }
+
+      if (lockedPayment.purpose === 'academic_matricula') {
+        const { completeMatriculaGatewayPayment } = require('../services/enrollmentMatricula.service');
+        await completeMatriculaGatewayPayment(lockedPayment, providerPayload, session);
+        await session.commitTransaction();
+        return {
+          received: true,
+          credited: true,
+          status: 'approved',
+          purpose: 'academic_matricula',
+        };
+      }
+
+      await session.abortTransaction();
+      return { received: true, credited: false, status: 'failed', message: 'Unsupported Wompi payment purpose' };
+    } catch (error) {
+      if (session) {
+        await session.abortTransaction();
+      }
+      throw error;
+    } finally {
+      if (session) {
+        session.endSession();
+      }
+    }
+  });
+}
+
 async function handleWompiWebhook(req, res) {
   try {
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
@@ -2077,7 +2169,28 @@ async function handleWompiWebhook(req, res) {
         providerStatus: String(transaction?.status || '').trim() || null,
         internalStatus,
       });
-      // TODO: reconcile matricula/pension payments once checkout endpoints are wired.
+
+      const reference = String(transaction?.reference || '').trim();
+      const providerTransactionId = String(transaction?.id || '').trim();
+      const paymentRecord = await findPaymentTransactionRecord({
+        method: 'wompi',
+        $or: [
+          ...(reference ? [{ reference }] : []),
+          ...(providerTransactionId ? [{ providerTransactionId }] : []),
+        ],
+      });
+
+      if (paymentRecord) {
+        try {
+          await reconcileWompiPaymentRecord(paymentRecord, payload, { source: 'webhook' });
+        } catch (reconcileError) {
+          console.error('[WOMPI_WEBHOOK_RECONCILE_FAILED]', {
+            reference,
+            providerTransactionId,
+            message: reconcileError.message,
+          });
+        }
+      }
     }
 
     return res.status(200).json({ ok: true });
@@ -2502,6 +2615,222 @@ router.get('/epayco/checkout/:reference', async (req, res) => {
 
 router.use(authMiddleware);
 router.use(roleMiddleware('parent', 'admin'));
+
+router.post('/wompi/matricula-checkout', async (req, res) => {
+  try {
+    if (!isWompiConfigured()) {
+      return res.status(503).json({ message: 'Wompi no esta configurado en el backend.' });
+    }
+
+    const { schoolId, userId, role } = req.user;
+    if (!isWompiSchoolId(schoolId)) {
+      return res.status(403).json({ message: 'Wompi solo esta disponible para Millennium School.' });
+    }
+
+    const processId = toObjectId(req.body?.processId);
+    if (!processId) {
+      return res.status(400).json({ message: 'processId is required' });
+    }
+
+    const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
+    const AcademicCharge = require('../models/academicCharge.model');
+    const StudentBillingProfile = require('../models/studentBillingProfile.model');
+    const { markPaymentPending, resolveChargeAmount } = require('../services/enrollmentMatricula.service');
+
+    const process = await EnrollmentMatriculaProcess.findOne({
+      _id: processId,
+      schoolId,
+      parentId: role === 'admin' ? req.body?.parentUserId || userId : userId,
+    });
+
+    if (!process) {
+      return res.status(404).json({ message: 'Proceso de matricula no encontrado.' });
+    }
+
+    if (process.payment?.chargePaymentId || String(process.payment?.status || '').includes('PAID')) {
+      return res.status(409).json({ message: 'Este proceso de matricula ya tiene el pago confirmado.' });
+    }
+
+    if (!['consent_accepted', 'payment_pending'].includes(process.status)) {
+      return res.status(409).json({ message: 'Debes aceptar el consentimiento antes de pagar.' });
+    }
+
+    const charge = await AcademicCharge.findOne({
+      _id: process.chargeId,
+      schoolId,
+      category: 'annual_tuition',
+      status: { $in: ['pending', 'overdue'] },
+    });
+
+    if (!charge) {
+      return res.status(404).json({ message: 'Cobro de matricula no encontrado o ya pagado.' });
+    }
+
+    const allowed = await canAccessStudent(req.user, charge.studentId);
+    if (!allowed) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const billingProfile = charge.billingProfileId
+      ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
+      : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
+    const { effectiveAmount } = resolveChargeAmount(charge, billingProfile);
+    const amountInCents = Math.max(1, Math.round(Number(effectiveAmount || 0) * 100));
+    if (!Number.isFinite(amountInCents) || amountInCents < 100) {
+      return res.status(400).json({ message: 'Monto de matricula invalido.' });
+    }
+
+    const parentUser = await User.findOne({
+      _id: userId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('name email phone documentType documentNumber');
+
+    if (!parentUser) {
+      return res.status(404).json({ message: 'Parent user not found' });
+    }
+
+    const student = await Student.findOne({
+      _id: charge.studentId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('name');
+
+    const reference = buildMatriculaReference();
+    const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
+    const redirectUrl = buildWompiMatriculaRedirectUrl({
+      frontendBaseUrl,
+      processId: process._id,
+    });
+    const integritySignature = buildWompiIntegritySignature({
+      reference,
+      amountInCents,
+      currency: 'COP',
+    });
+
+    const payment = await PaymentTransaction.create({
+      schoolId,
+      studentId: charge.studentId,
+      parentId: userId,
+      amount: Math.round(Number(effectiveAmount || 0)),
+      method: 'wompi',
+      documentType: normalizeWompiLegalIdType(parentUser.documentType),
+      documentNumber: String(parentUser.documentNumber || '').trim(),
+      reference,
+      status: 'pending',
+      providerStatus: 'PENDING',
+      purpose: 'academic_matricula',
+      enrollmentMatriculaProcessId: process._id,
+      academicChargeId: charge._id,
+      description: `Matricula ${student?.name || 'estudiante'}`,
+      providerResponse: {
+        frontendBaseUrl,
+        redirectUrl,
+      },
+    });
+
+    await markPaymentPending({
+      process,
+      paymentTransaction: payment,
+      amount: payment.amount,
+      method: 'wompi',
+    });
+
+    return res.status(200).json({
+      paymentId: payment._id,
+      reference,
+      amount: payment.amount,
+      amountInCents,
+      checkout: {
+        publicKey: getWompiPublicKey(),
+        currency: 'COP',
+        amountInCents,
+        reference,
+        integritySignature,
+        redirectUrl,
+        sandbox: isWompiSandboxMode(),
+        customerData: {
+          email: String(parentUser.email || '').trim(),
+          fullName: String(parentUser.name || '').trim(),
+          phoneNumber: String(parentUser.phone || '').replace(/\D/g, '').slice(-10),
+          phoneNumberPrefix: '+57',
+          legalId: String(parentUser.documentNumber || '').trim(),
+          legalIdType: normalizeWompiLegalIdType(parentUser.documentType),
+        },
+        description: payment.description,
+        processId: String(process._id),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/wompi/matricula-status', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const reference = String(req.query?.reference || '').trim();
+    const transactionId = String(req.query?.transactionId || req.query?.id || '').trim();
+
+    if (!reference && !transactionId) {
+      return res.status(400).json({ message: 'reference or transactionId is required' });
+    }
+
+    const paymentQuery = { schoolId, method: 'wompi', purpose: 'academic_matricula' };
+    if (role !== 'admin') {
+      paymentQuery.parentId = userId;
+    }
+
+    const payment = await findPaymentTransactionRecord({
+      ...paymentQuery,
+      $or: [
+        ...(reference ? [{ reference }] : []),
+        ...(transactionId ? [{ providerTransactionId: transactionId }] : []),
+      ],
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    if (transactionId && payment.status === 'pending' && isWompiConfigured()) {
+      try {
+        const providerTransaction = await fetchWompiTransaction(transactionId);
+        if (providerTransaction) {
+          await reconcileWompiPaymentRecord(payment, { data: { transaction: providerTransaction } }, { source: 'status_query' });
+        }
+      } catch (statusError) {
+        console.warn('[WOMPI_MATRICULA_STATUS_SYNC_FAILED]', {
+          reference: payment.reference,
+          transactionId,
+          message: statusError.message,
+        });
+      }
+    }
+
+    const refreshedPayment = await findPaymentTransactionRecord({ _id: payment._id }, { lean: true });
+    const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
+    const { serializeProcess } = require('../services/enrollmentMatricula.service');
+    const process = refreshedPayment?.enrollmentMatriculaProcessId
+      ? await EnrollmentMatriculaProcess.findOne({
+        _id: refreshedPayment.enrollmentMatriculaProcessId,
+        schoolId,
+      })
+      : null;
+
+    return res.status(200).json({
+      reference: refreshedPayment?.reference || payment.reference,
+      status: refreshedPayment?.status || payment.status,
+      providerStatus: refreshedPayment?.providerStatus || payment.providerStatus,
+      approvedAt: refreshedPayment?.approvedAt || payment.approvedAt || null,
+      process: process ? serializeProcess(process) : null,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 router.get('/epayco/recharge-status', async (req, res) => {
   try {

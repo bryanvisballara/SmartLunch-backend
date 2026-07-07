@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   acceptEnrollmentMatriculaConsent,
   acknowledgeEnrollmentMatriculaIntro,
-  confirmEnrollmentMatriculaPayment,
+  createWompiMatriculaCheckout,
   getEnrollmentMatriculaPaymentStatus,
+  getWompiMatriculaPaymentStatus,
   signEnrollmentMatriculaContract,
   signEnrollmentMatriculaPagare,
 } from '../../services/enrollmentMatricula.service';
+import WompiPaymentButton from '../WompiPaymentButton';
 import {
   canUseOfficialEnrollmentContract,
   generateSignedEnrollmentContractPdfBase64,
@@ -96,7 +98,7 @@ function resolveActiveStep(process) {
   const status = String(process?.status || '');
   if (['intro_pending', 'consent_pending'].includes(status)) return 'consent';
   if (['consent_accepted', 'payment_pending'].includes(status)) return 'payment';
-  if (['payment_confirmed', 'contract_pending'].includes(status)) return 'contract';
+  if (['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(status)) return 'contract';
   if (status === 'pagare_pending') return 'pagare';
   if (status === 'completed') return 'done';
   return 'consent';
@@ -378,12 +380,22 @@ function MatriculaEnrollmentFlow({
   const [signatureImage, setSignatureImage] = useState('');
   const [contractAccepted, setContractAccepted] = useState(false);
   const [pagareAccepted, setPagareAccepted] = useState(false);
+  const [wompiCheckoutConfig, setWompiCheckoutConfig] = useState(null);
+  const [wompiCheckoutLoading, setWompiCheckoutLoading] = useState(false);
 
   useEffect(() => {
     setProcess(initialProcess);
   }, [initialProcess]);
 
   const activeStep = useMemo(() => resolveActiveStep(process), [process]);
+
+  useEffect(() => {
+    if (activeStep !== 'payment') {
+      setWompiCheckoutConfig(null);
+      setWompiCheckoutLoading(false);
+    }
+  }, [activeStep, process?._id]);
+
   const contractParams = process?.contractParamsSnapshot || null;
   const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({ schoolId, schoolName })
     && activeStep === 'payment'
@@ -462,14 +474,43 @@ function MatriculaEnrollmentFlow({
 
   const onStartPayment = async () => {
     setLoading(true);
+    setWompiCheckoutLoading(true);
     setErrorMessage('');
     try {
-      const response = await confirmEnrollmentMatriculaPayment(process._id);
-      const nextProcess = response.data?.process || process;
-      setProcess(nextProcess);
-      onProcessUpdated?.(nextProcess);
+      const response = await createWompiMatriculaCheckout(process._id);
+      const checkout = response.data?.checkout;
+      if (!checkout?.reference || !checkout?.integritySignature) {
+        throw new Error('No se pudo preparar la pasarela Wompi.');
+      }
+      setWompiCheckoutConfig(checkout);
     } catch (error) {
-      setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo confirmar el pago.');
+      setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo iniciar el pago con Wompi.');
+      setWompiCheckoutConfig(null);
+    } finally {
+      setLoading(false);
+      setWompiCheckoutLoading(false);
+    }
+  };
+
+  const onWompiPaymentCompleted = async (transaction) => {
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      const response = await getWompiMatriculaPaymentStatus({
+        reference: wompiCheckoutConfig?.reference || process?.payment?.reference,
+        transactionId: transaction?.id,
+      });
+      const nextProcess = response.data?.process;
+      if (nextProcess) {
+        setProcess(nextProcess);
+        onProcessUpdated?.(nextProcess);
+        setWompiCheckoutConfig(null);
+        return;
+      }
+      await refreshProcess();
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || 'Pago recibido. Estamos confirmando tu matricula, intenta de nuevo en unos segundos.');
+      await refreshProcess();
     } finally {
       setLoading(false);
     }
@@ -690,9 +731,23 @@ function MatriculaEnrollmentFlow({
                     Continuar a firma de contrato
                   </button>
                 ) : (
-                  <button className="matricula-flow-primary" disabled={loading} onClick={onStartPayment} type="button">
-                    {loading ? 'Confirmando pago...' : 'Pagar matrícula'}
-                  </button>
+                  <>
+                    {!wompiCheckoutConfig ? (
+                      <button className="matricula-flow-primary" disabled={loading || wompiCheckoutLoading} onClick={onStartPayment} type="button">
+                        {loading || wompiCheckoutLoading ? 'Preparando pago...' : 'Pagar matrícula con Wompi'}
+                      </button>
+                    ) : (
+                      <WompiPaymentButton
+                        config={wompiCheckoutConfig}
+                        label="Abrir pasarela Wompi"
+                        onCompleted={onWompiPaymentCompleted}
+                        onError={(error) => setErrorMessage(error?.message || 'No se pudo abrir Wompi.')}
+                      />
+                    )}
+                    <p className="matricula-flow-note matricula-flow-note--muted">
+                      El pago se confirma automaticamente cuando Wompi aprueba la transaccion.
+                    </p>
+                  </>
                 )}
               </section>
             ) : null}

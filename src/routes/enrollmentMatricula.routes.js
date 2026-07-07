@@ -7,7 +7,7 @@ const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess
 const {
   acceptConsent,
   acknowledgeIntro,
-  completeMatriculaDirectPayment,
+  getMatriculaRequirementForParent,
   getOrCreateProcessForCharge,
   listConsentsForRectoria,
   listPendingSignaturesForParent,
@@ -29,6 +29,20 @@ function normalizeText(value) {
 }
 
 router.use(authMiddleware);
+
+router.get('/portal/enrollment-matricula/requirement', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const parentUserId = role === 'admin' ? req.query?.parentUserId || userId : userId;
+    const requirement = await getMatriculaRequirementForParent({
+      schoolId,
+      parentId: parentUserId,
+    });
+    return res.status(200).json(requirement);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
 router.get('/portal/enrollment-matricula/process', async (req, res) => {
   try {
@@ -95,21 +109,10 @@ router.post('/portal/enrollment-matricula/process/:processId/consent', async (re
 });
 
 router.post('/portal/enrollment-matricula/process/:processId/payment/confirm', async (req, res) => {
-  try {
-    const { schoolId, userId, role } = req.user;
-    const parentUserId = role === 'admin' ? req.body?.parentUserId || userId : userId;
-    const process = await completeMatriculaDirectPayment({
-      processId: req.params.processId,
-      schoolId,
-      parentId: parentUserId,
-    });
-    return res.status(200).json({
-      message: 'Pago de matricula confirmado.',
-      process: serializeProcess(process),
-    });
-  } catch (error) {
-    return res.status(error.statusCode || 400).json({ message: error.message });
-  }
+  return res.status(410).json({
+    message: 'El pago de matricula debe realizarse mediante la pasarela Wompi.',
+    gateway: 'wompi',
+  });
 });
 
 router.get('/portal/enrollment-matricula/process/:processId/payment-status', async (req, res) => {

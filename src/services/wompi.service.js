@@ -107,11 +107,67 @@ function toWompiInternalStatus(providerStatus) {
   return 'pending';
 }
 
+function isWompiSchoolId(schoolId) {
+  const normalizedSchoolId = normalizeText(schoolId);
+  const configuredSchoolId = getWompiSchoolId();
+  return normalizedSchoolId === configuredSchoolId
+    || normalizedSchoolId.toLowerCase().includes('millennium');
+}
+
+function normalizeWompiLegalIdType(value) {
+  const normalized = normalizeText(value).toUpperCase();
+  const allowed = new Set(['CC', 'CE', 'NIT', 'PP', 'TI', 'DNI', 'RG', 'OTHER']);
+  return allowed.has(normalized) ? normalized : 'CC';
+}
+
+async function wompiRequest(path, { method = 'GET', body = null } = {}) {
+  const privateKey = getWompiPrivateKey();
+  if (!privateKey) {
+    throw new Error('WOMPI_PRIVATE_KEY no configurada');
+  }
+
+  const response = await fetch(`${getWompiApiBaseUrl()}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${privateKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data?.error?.reason
+      || data?.error?.message
+      || data?.message
+      || `Wompi request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+async function fetchWompiTransaction(transactionId) {
+  const normalizedId = normalizeText(transactionId);
+  if (!normalizedId) {
+    throw new Error('Wompi transaction id is required');
+  }
+
+  const data = await wompiRequest(`/transactions/${encodeURIComponent(normalizedId)}`);
+  return data?.data || data;
+}
+
+function buildMatriculaReference() {
+  return `MAT-${Date.now()}-${Math.floor(Math.random() * 1e6).toString().padStart(6, '0')}`;
+}
+
 module.exports = {
   MILLENNIUM_SCHOOL_ID,
   WOMPI_SANDBOX_API_URL,
   WOMPI_PRODUCTION_API_URL,
+  buildMatriculaReference,
   buildWompiIntegritySignature,
+  fetchWompiTransaction,
   getWompiApiBaseUrl,
   getWompiEventsSecret,
   getWompiIntegritySecret,
@@ -120,6 +176,9 @@ module.exports = {
   getWompiSchoolId,
   isWompiConfigured,
   isWompiSandboxMode,
+  isWompiSchoolId,
+  normalizeWompiLegalIdType,
   toWompiInternalStatus,
   verifyWompiEventChecksum,
+  wompiRequest,
 };

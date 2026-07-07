@@ -2,8 +2,15 @@
   RewriteEngine On
   RewriteBase /
 
+  # Canonical host and legacy login path.
+  RewriteCond %{HTTP_HOST} ^www\.comergio\.com$ [NC]
+  RewriteRule ^(.*)$ https://comergio.com/$1 [R=301,L]
+  RewriteRule ^login/?$ / [R=301,L]
+
   # Keep direct access to index and uploaded assets untouched.
   RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_URI} ^/tourvirtualberckley/ [NC]
+  RewriteRule ^ - [L]
   RewriteCond %{REQUEST_URI} ^/assets/ [NC]
   RewriteRule ^ - [L]
   RewriteCond %{REQUEST_URI} ^/uploads/ [NC]

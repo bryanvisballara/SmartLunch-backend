@@ -278,10 +278,10 @@ function serializeProcess(process, charge = null) {
       status: charge.status,
       amountHiddenUntilGateway: hideEnrollmentAmount || undefined,
     } : undefined,
-    requiresSignature: ['payment_confirmed', 'contract_pending', 'pagare_pending'].includes(doc.status),
-    pendingContractSignature: ['payment_confirmed', 'contract_pending'].includes(doc.status),
+    requiresSignature: ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(doc.status),
+    pendingContractSignature: ['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(doc.status),
     pendingPagareSignature: doc.status === 'pagare_pending',
-    isCompleted: doc.status === 'completed' || doc.status === 'office_payment_confirmed',
+    isCompleted: doc.status === 'completed',
     officePaymentConfirmed: doc.status === 'office_payment_confirmed',
     statusLabel: resolveEnrollmentMatriculaStatusLabel(doc),
   };
@@ -317,6 +317,7 @@ function resolveCarteraPaymentMethodLabel(method = '') {
     pse: 'Pago por PSE',
     epayco: 'Pago por ePayco',
     bold: 'Pago por Bold',
+    wompi: 'Pago por Wompi',
     other: 'Pago registrado en cartera',
   };
 
@@ -518,7 +519,8 @@ async function completeMatriculaDirectPayment({ processId, schoolId, parentId })
 
 async function completeMatriculaGatewayPayment(paymentRecord, providerPayload, session) {
   const providerTransactionId = String(
-    providerPayload?.data?.payment_id
+    providerPayload?.data?.transaction?.id
+    || providerPayload?.data?.payment_id
     || providerPayload?.payment_id
     || providerPayload?.x_transaction_id
     || providerPayload?.x_ref_payco
@@ -563,7 +565,7 @@ async function completeMatriculaGatewayPayment(paymentRecord, providerPayload, s
     paymentMeta: {
       transactionId: providerTransactionId,
       reference: paymentRecord.reference,
-      method: paymentRecord.method === 'epayco' ? 'epayco' : 'bold',
+      method: paymentRecord.method === 'epayco' ? 'epayco' : (paymentRecord.method === 'wompi' ? 'wompi' : 'bold'),
       notes: `Pago matricula via pasarela (${paymentRecord.reference})`,
       paymentTransactionId: paymentRecord._id,
     },
@@ -587,7 +589,7 @@ async function signDocument({
 }) {
   const process = await EnrollmentMatriculaProcess.findOne({ _id: processId, schoolId, parentId });
   if (!process) throw new Error('Proceso de matricula no encontrado.');
-  if (!['payment_confirmed', 'contract_pending', 'pagare_pending'].includes(process.status)) {
+  if (!['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(process.status)) {
     throw new Error('El pago debe estar confirmado antes de firmar.');
   }
   if (!normalizeText(process.payment?.status).includes('PAID') && !process.payment?.chargePaymentId) {
@@ -604,7 +606,7 @@ async function signDocument({
   };
 
   if (documentType === 'contract') {
-    if (!['payment_confirmed', 'contract_pending'].includes(process.status)) {
+    if (!['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(process.status)) {
       throw new Error('El contrato ya fue firmado o no esta disponible.');
     }
     process.contract = payload;
@@ -627,7 +629,7 @@ async function listPendingSignaturesForParent({ schoolId, parentId }) {
   const processes = await EnrollmentMatriculaProcess.find({
     schoolId,
     parentId,
-    status: { $in: ['payment_confirmed', 'contract_pending', 'pagare_pending'] },
+    status: { $in: ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'] },
   })
     .sort({ updatedAt: -1 })
     .select('studentName parentName status chargeId studentId parentId consent payment contract pagare contractParamsSnapshot academicYear')
@@ -775,6 +777,72 @@ async function linkCarteraPaymentToEnrollmentMatricula({
   return process;
 }
 
+async function getMatriculaRequirementForParent({ schoolId, parentId }) {
+  if (!isMillenniumSchoolId(schoolId)) {
+    return { required: false, blocking: false };
+  }
+
+  const parentObjectId = toObjectId(parentId);
+  if (!parentObjectId) {
+    return { required: false, blocking: false };
+  }
+
+  const pendingSignatures = await listPendingSignaturesForParent({ schoolId, parentId: parentObjectId });
+  if (pendingSignatures.length > 0) {
+    const process = pendingSignatures[0];
+    const charge = process?.chargeId
+      ? await AcademicCharge.findOne({ _id: process.chargeId, schoolId }).lean()
+      : null;
+    return {
+      required: true,
+      blocking: true,
+      reason: 'signature_pending',
+      process,
+      charge,
+    };
+  }
+
+  const links = await ParentStudentLink.find({ schoolId, parentId: parentObjectId, status: 'active' })
+    .select('studentId')
+    .lean();
+  const studentIds = links.map((link) => link.studentId).filter(Boolean);
+  if (!studentIds.length) {
+    return { required: false, blocking: false };
+  }
+
+  const unpaidCharge = await AcademicCharge.findOne({
+    schoolId,
+    studentId: { $in: studentIds },
+    category: 'annual_tuition',
+    status: { $in: ['pending', 'overdue'] },
+  })
+    .sort({ dueDate: 1, createdAt: 1 })
+    .lean();
+
+  if (!unpaidCharge) {
+    return { required: false, blocking: false };
+  }
+
+  const { process, charge } = await getOrCreateProcessForCharge({
+    schoolId,
+    parentId: parentObjectId,
+    chargeId: unpaidCharge._id,
+  });
+
+  const paymentConfirmed = normalizeText(process?.payment?.status).includes('PAID') || Boolean(process?.payment?.chargePaymentId);
+  if (paymentConfirmed || ['contract_pending', 'pagare_pending', 'completed'].includes(process.status)) {
+    return { required: false, blocking: false };
+  }
+
+  return {
+    required: true,
+    blocking: true,
+    reason: 'payment_pending',
+    process: serializeProcess(process, charge),
+    charge,
+  };
+}
+
 module.exports = {
   CONSENT_VERSION,
   acceptConsent,
@@ -782,6 +850,7 @@ module.exports = {
   buildContractParamsSnapshot,
   completeMatriculaDirectPayment,
   completeMatriculaGatewayPayment,
+  getMatriculaRequirementForParent,
   getOrCreateProcessForCharge,
   listConsentsForRectoria,
   listPendingSignaturesForParent,
@@ -791,6 +860,7 @@ module.exports = {
   parseClientIp,
   parseDeviceLabel,
   refreshContractParamsSnapshotIfNeeded,
+  resolveChargeAmount,
   serializeProcess,
   signDocument,
 };
