@@ -37,7 +37,10 @@ const {
   hasMonthlyTuitionAdditionalDiscount,
   normalizeAdditionalPensionDiscount,
 } = require('../utils/academicAdditionalPensionDiscount');
-const { linkCarteraPaymentToEnrollmentMatricula } = require('../services/enrollmentMatricula.service');
+const {
+  linkCarteraPaymentToEnrollmentMatricula,
+  unlinkCarteraPaymentFromEnrollmentMatricula,
+} = require('../services/enrollmentMatricula.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   normalizeStoredImageUrl,
@@ -94,8 +97,11 @@ router.use((req, res, next) => {
   const isAcademicDatabaseAccessRoute = (req.path === '/database' && method === 'GET')
     || (/^\/database\/[^/]+$/.test(req.path) && method === 'PATCH');
   const isBillingAccessRoute = (req.path === '/billing' && method === 'GET')
+    || (req.path === '/billing/payments' && method === 'GET')
     || (req.path === '/billing/charges' && method === 'POST')
     || (/^\/billing\/charges\/[^/]+\/pay$/.test(req.path) && method === 'POST')
+    || (/^\/billing\/payments\/[^/]+$/.test(req.path) && method === 'DELETE')
+    || (/^\/billing\/students\/[^/]+\/pension-discount$/.test(req.path) && method === 'PATCH')
     || (req.path === '/billing/reminders' && method === 'POST')
     || (req.path === '/billing/follow-ups' && method === 'POST');
 
@@ -8766,6 +8772,151 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
       payment,
       remainingAmount,
       chargeStatus: charge.status,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+function getBogotaTodayDateInput(referenceDate = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(referenceDate);
+}
+
+function parseBillingPaymentDateFilter(value, { endOfDay = false } = {}) {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00-05:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (endOfDay) {
+    return new Date(date.getTime() + (24 * 60 * 60 * 1000) - 1);
+  }
+  return date;
+}
+
+router.get('/billing/payments', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const studentId = toObjectId(req.query.studentId);
+    const today = getBogotaTodayDateInput();
+    const dateFrom = parseBillingPaymentDateFilter(req.query.dateFrom || today);
+    const dateTo = parseBillingPaymentDateFilter(req.query.dateTo || req.query.dateFrom || today, { endOfDay: true });
+
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ message: 'Las fechas del filtro no son válidas.' });
+    }
+
+    const filter = {
+      schoolId,
+      paidAt: {
+        $gte: dateFrom,
+        $lte: dateTo,
+      },
+    };
+    if (studentId) {
+      filter.studentId = studentId;
+    }
+
+    const [payments, primaryParentByStudentId] = await Promise.all([
+      AcademicChargePayment.find(filter)
+        .populate('chargeId', 'concept category')
+        .populate('studentId', 'name grade course documentNumber')
+        .populate('parentId', 'name phone email')
+        .sort({ paidAt: -1, createdAt: -1 })
+        .limit(500)
+        .lean(),
+      resolvePrimaryParentContacts(schoolId),
+    ]);
+
+    return res.status(200).json({
+      payments: payments.map((payment) => {
+        const studentKey = String(payment.studentId?._id || payment.studentId || '').trim();
+        const primaryParent = studentKey ? primaryParentByStudentId.get(studentKey) || null : null;
+        return {
+          _id: payment._id,
+          chargeId: payment.chargeId?._id || payment.chargeId || null,
+          studentId: studentKey || null,
+          studentName: payment.studentId?.name || 'Familia',
+          documentNumber: payment.studentId?.documentNumber || '',
+          grade: payment.studentId?.grade || '',
+          course: payment.studentId?.course || '',
+          parentId: primaryParent?._id || payment.parentId?._id || payment.parentId || null,
+          parentName: primaryParent?.name || payment.parentId?.name || 'Acudiente',
+          parentPhone: primaryParent?.phone || payment.parentId?.phone || '',
+          concept: payment.chargeId?.concept || payment.notes || 'Pago académico',
+          category: payment.chargeId?.category || '',
+          amount: Number(payment.amount || 0),
+          method: payment.method || '',
+          methodLabel: labelAcademicPaymentMethod(payment.method),
+          notes: payment.notes || '',
+          paidAt: payment.paidAt || payment.createdAt,
+          recordedByRole: payment.recordedByRole || '',
+        };
+      }),
+      filters: {
+        dateFrom: req.query.dateFrom || today,
+        dateTo: req.query.dateTo || req.query.dateFrom || today,
+        studentId: studentId ? String(studentId) : '',
+      },
+      total: payments.length,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/billing/payments/:paymentId', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const paymentId = toObjectId(req.params.paymentId);
+    if (!paymentId) {
+      return res.status(400).json({ message: 'paymentId no es válido.' });
+    }
+
+    const payment = await AcademicChargePayment.findOne({ _id: paymentId, schoolId });
+    if (!payment) {
+      return res.status(404).json({ message: 'El pago no existe.' });
+    }
+
+    const charge = await AcademicCharge.findOne({ _id: payment.chargeId, schoolId });
+    if (!charge) {
+      return res.status(404).json({ message: 'El cargo asociado al pago no existe.' });
+    }
+
+    if (['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(payment.method || '').toLowerCase())) {
+      return res.status(409).json({
+        message: 'Este pago fue registrado por pasarela o portal del acudiente. No puede eliminarse desde cartera.',
+      });
+    }
+
+    await unlinkCarteraPaymentFromEnrollmentMatricula({
+      schoolId,
+      charge,
+      chargePaymentId: payment._id,
+    });
+
+    await AcademicChargePayment.deleteOne({ _id: payment._id, schoolId });
+
+    const { outstandingAmount } = await getAcademicChargeOutstandingAmount(charge, new Date());
+    if (outstandingAmount <= 0) {
+      charge.status = 'paid';
+      charge.paidAt = charge.paidAt || new Date();
+    } else if (new Date(charge.dueDate) < new Date()) {
+      charge.status = 'overdue';
+      charge.paidAt = null;
+      charge.paymentMethod = '';
+    } else {
+      charge.status = 'pending';
+      charge.paidAt = null;
+      charge.paymentMethod = '';
+    }
+    await charge.save();
+
+    const billing = await buildBillingSummary(schoolId);
+    return res.status(200).json({
+      message: 'Pago eliminado correctamente.',
+      billing,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

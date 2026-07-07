@@ -777,6 +777,43 @@ async function linkCarteraPaymentToEnrollmentMatricula({
   return process;
 }
 
+async function unlinkCarteraPaymentFromEnrollmentMatricula({
+  schoolId,
+  charge,
+  chargePaymentId,
+}) {
+  if (!isMillenniumSchoolId(schoolId)) {
+    return null;
+  }
+
+  if (String(charge?.category || '') !== 'annual_tuition') {
+    return null;
+  }
+
+  const process = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId: charge._id });
+  if (!process) {
+    return null;
+  }
+
+  const paymentId = String(chargePaymentId || '').trim();
+  const linkedPaymentId = String(process.payment?.chargePaymentId || '').trim();
+  if (linkedPaymentId && paymentId && linkedPaymentId !== paymentId) {
+    return process;
+  }
+
+  if (normalizeText(process.contract?.signedPdfBase64) || normalizeText(process.pagare?.signedPdfBase64)) {
+    throw new Error('No se puede anular el pago: el acudiente ya firmó contrato o pagaré digitalmente.');
+  }
+
+  process.payment = {};
+  process.contract = {};
+  process.pagare = {};
+  process.contractParamsSnapshot = null;
+  process.status = process.consent?.accepted ? 'payment_pending' : 'payment_pending';
+  await process.save();
+  return process;
+}
+
 async function getMatriculaRequirementForParent({ schoolId, parentId }) {
   if (!isMillenniumSchoolId(schoolId)) {
     return { required: false, blocking: false };
@@ -856,6 +893,7 @@ module.exports = {
   listPendingSignaturesForParent,
   listSignedDocumentsForRectoria,
   linkCarteraPaymentToEnrollmentMatricula,
+  unlinkCarteraPaymentFromEnrollmentMatricula,
   markPaymentPending,
   parseClientIp,
   parseDeviceLabel,

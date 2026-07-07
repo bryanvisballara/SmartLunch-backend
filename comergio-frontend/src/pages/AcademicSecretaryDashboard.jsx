@@ -43,8 +43,10 @@ import {
   deleteAcademicSecretaryCommunicationAuthor,
   createAcademicSecretaryEnrollment,
   deleteAcademicSecretaryCommunication,
+  deleteAcademicSecretaryBillingPayment,
   deleteAcademicSecretaryCommunicationComment,
   getAcademicSecretaryBootstrap,
+  getAcademicSecretaryBillingPayments,
   getAcademicSecretaryFeeSettings,
   getAcademicSecretarySchoolRoutes,
   importAcademicSecretaryDatabase,
@@ -63,6 +65,7 @@ import {
 } from '../services/academicSecretary.service';
 import { getAdmissionMarketingHistory, getAdmissions, sendAdmissionMarketingCampaign, uploadAdmissionMarketingImage } from '../services/admissions.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
+import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 
 const SECTION_OPTIONS = [
   { key: 'overview', label: 'Dashboard KPI' },
@@ -77,9 +80,10 @@ const SECTION_OPTIONS = [
 ];
 
 const BILLING_SECTION_OPTIONS = [
-  { key: 'overview', label: 'Resumen de cartera' },
+  { key: 'overview', label: 'Alumnos' },
   { key: 'enrollments', label: 'Matrículas' },
   { key: 'pensions', label: 'Pensiones' },
+  { key: 'payment-history', label: 'Historial de pagos' },
 ];
 
 const BILLING_PAYMENT_METHOD_OPTIONS = [
@@ -99,6 +103,23 @@ const MATRICULA_BILLING_PAYMENT_METHOD_OPTIONS = [
 ];
 
 const BILLING_STUDENT_ROWS_PER_PAGE = 15;
+
+function getBogotaTodayDateInput(referenceDate = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(referenceDate);
+}
+
+function resolveEnrollmentPaidPaymentIds(account = {}) {
+  const rows = (account.paymentPlan?.rows || []).filter(
+    (row) => String(row.category || '') === 'annual_tuition' && String(row.status || '') === 'paid',
+  );
+  const paymentIds = [];
+  rows.forEach((row) => {
+    (row.paymentDetails || []).forEach((payment) => {
+      if (payment?._id) paymentIds.push(String(payment._id));
+    });
+  });
+  return paymentIds;
+}
 
 function filterBillingEnrollmentAccounts(accounts = [], subview = 'pending') {
   if (subview === 'paid') {
@@ -1553,6 +1574,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [billingPaymentDraft, setBillingPaymentDraft] = useState(createBillingPaymentDraft);
   const [billingPaymentModal, setBillingPaymentModal] = useState({ open: false, row: null });
   const [billingPaymentDetailModal, setBillingPaymentDetailModal] = useState({ open: false, row: null });
+  const [paymentHistoryFilters, setPaymentHistoryFilters] = useState(() => ({
+    dateFrom: getBogotaTodayDateInput(),
+    dateTo: getBogotaTodayDateInput(),
+    studentId: '',
+  }));
+  const [paymentHistory, setPaymentHistory] = useState({ payments: [], total: 0, loading: false });
+  const [deleteBillingPaymentModal, setDeleteBillingPaymentModal] = useState({ open: false, paymentId: '', studentName: '', concept: '' });
   const [pensionDiscountDraft, setPensionDiscountDraft] = useState(createPensionDiscountDraft);
   const [followUpModal, setFollowUpModal] = useState({ open: false, type: '', item: null, title: '', body: '' });
   const [deleteCommunicationModal, setDeleteCommunicationModal] = useState({ open: false, item: null });
@@ -1808,6 +1836,30 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       setSelectedBillingStudentId(String(filteredBillingStudentRows[0].studentId || ''));
     }
   }, [filteredBillingStudentRows, isBillingPortal, selectedBillingStudentId]);
+
+  const loadPaymentHistory = async (filters = paymentHistoryFilters) => {
+    setPaymentHistory((previous) => ({ ...previous, loading: true }));
+    try {
+      const response = await getAcademicSecretaryBillingPayments({
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        studentId: filters.studentId || undefined,
+      });
+      setPaymentHistory({
+        payments: response.data?.payments || [],
+        total: Number(response.data?.total || 0),
+        loading: false,
+      });
+    } catch (requestError) {
+      setPaymentHistory((previous) => ({ ...previous, loading: false }));
+      setError(getAcademicSecretaryRequestMessage(requestError, 'No se pudo cargar el historial de pagos.'));
+    }
+  };
+
+  useEffect(() => {
+    if (!isBillingPortal || activeSection !== 'payment-history') return;
+    loadPaymentHistory(paymentHistoryFilters);
+  }, [isBillingPortal, activeSection, paymentHistoryFilters.dateFrom, paymentHistoryFilters.dateTo, paymentHistoryFilters.studentId]);
 
   useEffect(() => {
     if (!isBillingPortal) return;
@@ -3043,6 +3095,37 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     setBillingPaymentDetailModal({ open: false, row: null });
   };
 
+  const openDeleteBillingPaymentModal = ({ paymentId = '', studentName = '', concept = '' } = {}) => {
+    if (!paymentId) return;
+    setDeleteBillingPaymentModal({ open: true, paymentId, studentName, concept });
+  };
+
+  const closeDeleteBillingPaymentModal = () => {
+    setDeleteBillingPaymentModal({ open: false, paymentId: '', studentName: '', concept: '' });
+  };
+
+  const onDeleteBillingPayment = async () => {
+    const paymentId = String(deleteBillingPaymentModal.paymentId || '').trim();
+    if (!paymentId) return;
+
+    await runAction(async () => {
+      const response = await deleteAcademicSecretaryBillingPayment(paymentId);
+      if (response?.data?.billing) {
+        setBootstrap((previous) => ({
+          ...previous,
+          billing: response.data.billing,
+        }));
+      } else {
+        await loadBootstrap();
+      }
+      if (activeSection === 'payment-history') {
+        await loadPaymentHistory(paymentHistoryFilters);
+      }
+      closeDeleteBillingPaymentModal();
+      closeBillingPaymentDetailModal();
+    }, 'Pago eliminado correctamente.');
+  };
+
   const onCommunicationImagesSelected = async (event) => {
     const selectedFiles = Array.from(event.target.files || []).filter((file) => {
       const fileType = String(file.type || '').toLowerCase();
@@ -3413,7 +3496,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                       ? (billingEnrollmentSubview === 'paid' ? 'Alumnos matriculados' : 'Matrículas pendientes por alumno')
                       : activeSection === 'pensions'
                         ? 'Pensiones por alumno'
-                        : (billingEnrollmentFocus ? 'Resumen por alumno' : 'Estado de cuenta por alumno')}
+                        : (billingEnrollmentFocus ? 'Alumnos' : 'Estado de cuenta por alumno')}
                   </h2>
                   <p>
                     {activeSection === 'enrollments'
@@ -3467,6 +3550,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                             <th>Estado matrícula</th>
                             <th>Pendiente</th>
                             <th>Pagado</th>
+                            {billingEnrollmentSubview === 'paid' ? <th>Acciones</th> : null}
                           </>
                         ) : activeSection === 'pensions' ? (
                           <>
@@ -3485,7 +3569,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     </thead>
                     <tbody>
                       {filteredBillingStudentRows.length === 0 ? (
-                        <tr><td colSpan="5">
+                        <tr><td colSpan={activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' ? 6 : 5}>
                           {activeSection === 'enrollments'
                             ? (billingEnrollmentSubview === 'paid' ? 'No hay alumnos matriculados pagados.' : 'No hay alumnos con matrícula pendiente.')
                             : activeSection === 'pensions'
@@ -3505,6 +3589,28 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                               <td><span className={`academic-secretary__billing-status is-${resolveEnrollmentBillingStatusClass(account)}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
                               <td>{Number(account.enrollmentPendingAmount || 0) > 0 ? formatCurrency(account.enrollmentPendingAmount) : '$0'}</td>
                               <td>{formatCurrency(account.enrollmentPaidAmount || 0)}</td>
+                              {billingEnrollmentSubview === 'paid' ? (
+                                <td>
+                                  {resolveEnrollmentPaidPaymentIds(account).length ? (
+                                    <button
+                                      className="academic-secretary__billing-plan-action is-danger"
+                                      disabled={busy}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        const paymentId = resolveEnrollmentPaidPaymentIds(account)[0];
+                                        openDeleteBillingPaymentModal({
+                                          paymentId,
+                                          studentName: account.studentName,
+                                          concept: 'Matrícula',
+                                        });
+                                      }}
+                                      type="button"
+                                    >
+                                      Borrar pago
+                                    </button>
+                                  ) : '—'}
+                                </td>
+                              ) : null}
                             </>
                           ) : activeSection === 'pensions' ? (
                             <>
@@ -3662,7 +3768,27 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                     <td><strong>{labelBillingPlanConcept(row)}</strong></td>
                                     <td><strong>{row.benefitLabel || 'Precio full'}</strong><div>{row.benefitDescription || row.benefitWindowLabel || 'Sin beneficio activo.'}</div></td>
                                     <td><strong>{formatCurrency(row.status === 'paid' ? row.paidAmount || row.chargeAmount || 0 : row.amount || row.chargeAmount || 0)}</strong>{Number(row.paidAmount || 0) > 0 ? <div>Pagado: {formatCurrency(row.paidAmount)}</div> : null}</td>
-                                    <td>{row.status === 'paid' ? <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button> : <button className="academic-secretary__billing-plan-action" disabled={busy || (activeSection === 'enrollments' && billingEnrollmentSubview === 'paid') || Number(row.amount || row.chargeAmount || 0) <= 0} onClick={() => openBillingPaymentModal(row)} type="button">Registrar pago</button>}</td>
+                                    <td>{row.status === 'paid' ? (
+                                      activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && (row.paymentDetails || []).length ? (
+                                        <div className="academic-secretary__billing-plan-actions">
+                                          <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
+                                          <button
+                                            className="academic-secretary__billing-plan-action is-danger"
+                                            disabled={busy}
+                                            onClick={() => openDeleteBillingPaymentModal({
+                                              paymentId: row.paymentDetails[0]?._id,
+                                              studentName: selectedBillingAccount?.studentName,
+                                              concept: row.concept || row.monthLabel,
+                                            })}
+                                            type="button"
+                                          >
+                                            Borrar
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
+                                      )
+                                    ) : <button className="academic-secretary__billing-plan-action" disabled={busy || (activeSection === 'enrollments' && billingEnrollmentSubview === 'paid') || Number(row.amount || row.chargeAmount || 0) <= 0} onClick={() => openBillingPaymentModal(row)} type="button">Registrar pago</button>}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -3695,6 +3821,18 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               </div>
             </section>
 
+            {activeSection === 'enrollments' ? (
+              <section className="academic-secretary__panel academic-secretary__billing-panel">
+                <div className="academic-secretary__panel-head">
+                  <div>
+                    <h2>Consentimientos y contratos firmados</h2>
+                    <p>Registro de consentimientos previos y documentos firmados por los acudientes en el proceso de matrícula digital.</p>
+                  </div>
+                </div>
+                <EnrollmentMatriculaRectoriaPanel />
+              </section>
+            ) : null}
+
             {activeSection === 'overview' ? (
             <section className="academic-secretary__grid">
               <article className="academic-secretary__panel">
@@ -3721,6 +3859,107 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
             </section>
             ) : null}
           </>
+      ) : null}
+
+      {isBillingPortal && activeSection === 'payment-history' ? (
+        <section className="academic-secretary__panel academic-secretary__billing-panel">
+          <div className="academic-secretary__panel-head">
+            <div>
+              <h2>Historial de pagos</h2>
+              <p>Consulta los pagos registrados por fecha o por alumno. Por defecto se muestran los pagos del día.</p>
+            </div>
+          </div>
+
+          <div className="academic-secretary__billing-search-row academic-secretary__billing-history-filters">
+            <label>
+              Desde
+              <input
+                onChange={(event) => setPaymentHistoryFilters((previous) => ({ ...previous, dateFrom: event.target.value }))}
+                type="date"
+                value={paymentHistoryFilters.dateFrom}
+              />
+            </label>
+            <label>
+              Hasta
+              <input
+                onChange={(event) => setPaymentHistoryFilters((previous) => ({ ...previous, dateTo: event.target.value }))}
+                type="date"
+                value={paymentHistoryFilters.dateTo}
+              />
+            </label>
+            <label>
+              Alumno
+              <select
+                onChange={(event) => setPaymentHistoryFilters((previous) => ({ ...previous, studentId: event.target.value }))}
+                value={paymentHistoryFilters.studentId}
+              >
+                <option value="">Todos los alumnos</option>
+                {billingStudentAccounts.map((account) => (
+                  <option key={account.studentId} value={account.studentId}>{account.studentName}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="btn"
+              disabled={paymentHistory.loading}
+              onClick={() => loadPaymentHistory(paymentHistoryFilters)}
+              type="button"
+            >
+              {paymentHistory.loading ? 'Consultando...' : 'Actualizar'}
+            </button>
+            <span>{paymentHistory.total} pago{paymentHistory.total === 1 ? '' : 's'}</span>
+          </div>
+
+          <div className="academic-secretary__table-wrap">
+            <table className="academic-secretary__table academic-secretary__table--billing">
+              <thead>
+                <tr>
+                  <th>Alumno</th>
+                  <th>Acudiente</th>
+                  <th>Concepto</th>
+                  <th>Método</th>
+                  <th>Fecha</th>
+                  <th>Valor</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentHistory.loading ? (
+                  <tr><td colSpan="7">Cargando historial de pagos...</td></tr>
+                ) : paymentHistory.payments.length === 0 ? (
+                  <tr><td colSpan="7">No hay pagos para el filtro seleccionado.</td></tr>
+                ) : paymentHistory.payments.map((payment) => (
+                  <tr key={payment._id}>
+                    <td>
+                      <strong>{payment.studentName}</strong>
+                      <div>{formatGradeLabel(payment.grade)}{payment.course ? ` · ${payment.course}` : ''}</div>
+                    </td>
+                    <td>{payment.parentName}</td>
+                    <td>{payment.concept}</td>
+                    <td>{payment.methodLabel || 'Sin método'}</td>
+                    <td>{formatDateTime(payment.paidAt)}</td>
+                    <td>{formatCurrency(payment.amount)}</td>
+                    <td>
+                      <button
+                        className="academic-secretary__billing-plan-action is-danger"
+                        disabled={busy || ['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(payment.method || '').toLowerCase())}
+                        onClick={() => openDeleteBillingPaymentModal({
+                          paymentId: payment._id,
+                          studentName: payment.studentName,
+                          concept: payment.concept,
+                        })}
+                        title={['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(payment.method || '').toLowerCase()) ? 'Los pagos por pasarela no se pueden borrar desde cartera' : 'Eliminar pago registrado por error'}
+                        type="button"
+                      >
+                        Borrar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       ) : null}
 
       {activeSection === 'overview' && !isBillingPortal ? (
@@ -4694,6 +4933,18 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         />
       ) : null}
 
+      {deleteBillingPaymentModal.open ? (
+        <BrandConfirmModal
+          confirmLabel="Borrar pago"
+          eyebrow="Portal de cartera"
+          loading={busy}
+          message={`Se eliminará el pago de ${deleteBillingPaymentModal.concept || 'matrícula'} de ${deleteBillingPaymentModal.studentName || 'este alumno'}. El cargo volverá a quedar pendiente si corresponde.`}
+          onCancel={closeDeleteBillingPaymentModal}
+          onConfirm={onDeleteBillingPayment}
+          title="¿Borrar este pago?"
+        />
+      ) : null}
+
       {billingPaymentModal.open ? (
         <div className="academic-secretary__modal-overlay" role="dialog" aria-modal="true" aria-label="Registrar pago de pension">
           <div className="academic-secretary__modal-card academic-secretary__modal-card--payment">
@@ -4801,7 +5052,23 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   </div>
                 ))}
               </div>
-              <div className="academic-secretary__actions"><button className="btn btn-primary" onClick={closeBillingPaymentDetailModal} type="button">Cerrar</button></div>
+              <div className="academic-secretary__actions">
+                {activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && (row.paymentDetails || [])[0]?._id ? (
+                  <button
+                    className="btn btn-outline is-danger"
+                    disabled={busy}
+                    onClick={() => openDeleteBillingPaymentModal({
+                      paymentId: row.paymentDetails[0]._id,
+                      studentName: selectedBillingAccount?.studentName,
+                      concept: row.concept || row.monthLabel,
+                    })}
+                    type="button"
+                  >
+                    Borrar pago
+                  </button>
+                ) : null}
+                <button className="btn btn-primary" onClick={closeBillingPaymentDetailModal} type="button">Cerrar</button>
+              </div>
             </div>
           </div>
         );

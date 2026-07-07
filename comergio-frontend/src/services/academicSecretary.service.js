@@ -6,6 +6,8 @@ export const getAcademicSecretaryBootstrap = () => api.get('/academic-secretary/
 	timeout: DASHBOARD_HEAVY_REQUEST_TIMEOUT_MS,
 });
 export const getAcademicSecretaryBilling = () => api.get('/academic-secretary/billing');
+export const getAcademicSecretaryBillingPayments = (params = {}) => api.get('/academic-secretary/billing/payments', { params });
+export const deleteAcademicSecretaryBillingPayment = (paymentId) => api.delete(`/academic-secretary/billing/payments/${paymentId}`);
 export const getAcademicSecretaryFeeSettings = () => api.get('/academic-secretary/fee-settings');
 export const saveAcademicSecretaryFeeSettings = (data) => api.put('/academic-secretary/fee-settings', data);
 export const getAcademicSecretaryCommunicationRequests = () => api.get('/academic-secretary/communication-requests');
