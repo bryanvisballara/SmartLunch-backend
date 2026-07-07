@@ -3,14 +3,11 @@ const mongoose = require('mongoose');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
-const { ensureRectoriaAuthorization } = require('../utils/rectoriaAuthorization');
 const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
 const {
   acceptConsent,
   acknowledgeIntro,
   buildSignedDocumentsZipForRectoria,
-  clearAllConsentsForRectoria,
-  clearAllSignedDocumentsForRectoria,
   getMatriculaRequirementForParent,
   getOrCreateProcessForCharge,
   listConsentsForRectoria,
@@ -20,8 +17,29 @@ const {
   signDocument,
   refreshContractParamsSnapshotIfNeeded,
 } = require('../services/enrollmentMatricula.service');
+const {
+  approveMatriculaPurgeRequest,
+  createMatriculaPurgeRequest,
+  getMatriculaPurgeRequestSummary,
+  listMatriculaPurgeRequestsForRequester,
+  listMatriculaPurgeRequestsForReviewer,
+  rejectMatriculaPurgeRequest,
+  resolveReviewerName,
+} = require('../services/enrollmentMatriculaPurgeRequest.service');
 
-const router = express.Router();
+const RECTORIA_APPROVER_ROLES = ['rectoria', 'direccion', 'admin'];
+
+function assertRectoriaApproverRole(role) {
+  if (!RECTORIA_APPROVER_ROLES.includes(String(role || ''))) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Solo Rectoría puede autorizar esta solicitud.',
+    };
+  }
+
+  return { ok: true };
+}
 
 function toObjectId(value) {
   if (!mongoose.Types.ObjectId.isValid(String(value || ''))) return null;
@@ -31,6 +49,8 @@ function toObjectId(value) {
 function normalizeText(value) {
   return String(value || '').trim();
 }
+
+const router = express.Router();
 
 router.use(authMiddleware);
 
@@ -203,49 +223,123 @@ rectoriaRouter.get('/signatures', async (req, res) => {
   }
 });
 
-rectoriaRouter.delete('/consents', async (req, res) => {
+rectoriaRouter.get('/purge-requests/summary', async (req, res) => {
   try {
-    const authorization = await ensureRectoriaAuthorization({
-      schoolId: req.user.schoolId,
-      password: req.body?.rectoriaPassword,
-    });
-    if (!authorization.ok) {
-      return res.status(authorization.status).json({ message: authorization.message });
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
     }
 
-    const result = await clearAllConsentsForRectoria({ schoolId: req.user.schoolId });
-    return res.status(200).json({
-      message: result.updated
-        ? `Se eliminaron ${result.updated} consentimiento(s) registrado(s).`
-        : 'No había consentimientos para eliminar.',
-      authorizedBy: authorization.authorizedBy,
-      ...result,
-    });
+    const summary = await getMatriculaPurgeRequestSummary({ schoolId: req.user.schoolId });
+    return res.status(200).json(summary);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
 });
 
-rectoriaRouter.delete('/signatures', async (req, res) => {
+rectoriaRouter.get('/purge-requests/pending', async (req, res) => {
   try {
-    const authorization = await ensureRectoriaAuthorization({
-      schoolId: req.user.schoolId,
-      password: req.body?.rectoriaPassword,
-    });
-    if (!authorization.ok) {
-      return res.status(authorization.status).json({ message: authorization.message });
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
     }
 
-    const result = await clearAllSignedDocumentsForRectoria({ schoolId: req.user.schoolId });
+    const items = await listMatriculaPurgeRequestsForReviewer({
+      schoolId: req.user.schoolId,
+      status: 'pending',
+    });
+    return res.status(200).json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.get('/purge-requests/mine', async (req, res) => {
+  try {
+    const items = await listMatriculaPurgeRequestsForRequester({
+      schoolId: req.user.schoolId,
+      userId: req.user.userId,
+    });
+    return res.status(200).json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.post('/purge-requests', async (req, res) => {
+  try {
+    const request = await createMatriculaPurgeRequest({
+      schoolId: req.user.schoolId,
+      userId: req.user.userId,
+      userRole: req.user.role,
+      userName: req.user.name,
+      actionType: req.body?.actionType,
+    });
+
+    return res.status(201).json({
+      message: 'Solicitud enviada a Rectoría para autorización.',
+      request,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.post('/purge-requests/:requestId/approve', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const reviewerName = await resolveReviewerName({
+      schoolId: req.user.schoolId,
+      userId: req.user.userId,
+    });
+    const { request, result } = await approveMatriculaPurgeRequest({
+      schoolId: req.user.schoolId,
+      requestId: req.params.requestId,
+      reviewerUserId: req.user.userId,
+      reviewerName,
+    });
+
     return res.status(200).json({
       message: result.updated
-        ? `Se eliminaron ${result.updated} registro(s) de documentos firmados.`
-        : 'No había documentos firmados para eliminar.',
-      authorizedBy: authorization.authorizedBy,
+        ? `Autorización aprobada. Se eliminaron ${result.updated} registro(s).`
+        : 'Autorización aprobada. No había registros para eliminar.',
+      request,
       ...result,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return res.status(error.statusCode || 400).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.post('/purge-requests/:requestId/reject', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const reviewerName = await resolveReviewerName({
+      schoolId: req.user.schoolId,
+      userId: req.user.userId,
+    });
+    const request = await rejectMatriculaPurgeRequest({
+      schoolId: req.user.schoolId,
+      requestId: req.params.requestId,
+      reviewerUserId: req.user.userId,
+      reviewerName,
+      reviewNotes: req.body?.reviewNotes,
+    });
+
+    return res.status(200).json({
+      message: 'Solicitud rechazada.',
+      request,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ message: error.message });
   }
 });
 

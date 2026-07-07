@@ -51,3 +51,4 @@ require('./admissionApplicant.model');
 require('./admissionMarketingAsset.model');
 require('./admissionMarketingCampaign.model');
 require('./enrollmentMatriculaProcess.model');
+require('./enrollmentMatriculaPurgeRequest.model');

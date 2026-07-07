@@ -927,67 +927,11 @@
   font-weight: 600;
 }
 
-.enrollment-matricula-rectoria__modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(15, 23, 42, 0.48);
-}
-
-.enrollment-matricula-rectoria__modal {
-  width: min(100%, 480px);
-  display: grid;
-  gap: 16px;
-  padding: 24px;
-  border-radius: 18px;
-  background: #fff;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
-}
-
-.enrollment-matricula-rectoria__modal-head h3 {
-  margin: 8px 0 6px;
-  color: #0f172a;
-}
-
-.enrollment-matricula-rectoria__modal-head p {
-  margin: 0;
-  color: #475569;
-  line-height: 1.5;
-}
-
-.enrollment-matricula-rectoria__modal-eyebrow {
-  color: #1d4ed8;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.enrollment-matricula-rectoria__modal-label {
-  display: grid;
-  gap: 8px;
-  color: #334155;
-  font-size: 14px;
+.enrollment-matricula-rectoria__pending-note {
+  margin: 8px 0 0;
+  color: #b45309;
+  font-size: 13px;
   font-weight: 600;
-}
-
-.enrollment-matricula-rectoria__modal-label input {
-  width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  border-radius: 12px;
-  padding: 12px 14px;
-  font: inherit;
-}
-
-.enrollment-matricula-rectoria__modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 
 .enrollment-matricula-rectoria__table-wrap {

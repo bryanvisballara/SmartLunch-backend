@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  deleteAllRectoriaEnrollmentConsents,
-  deleteAllRectoriaEnrollmentSignatures,
+  createEnrollmentMatriculaPurgeRequest,
   downloadRectoriaEnrollmentDocument,
   downloadRectoriaEnrollmentDocumentsZip,
+  getEnrollmentMatriculaPurgeRequestsMine,
   getRectoriaEnrollmentConsents,
   getRectoriaEnrollmentSignatures,
 } from '../../services/enrollmentMatricula.service';
@@ -57,35 +57,28 @@ function downloadBlob(blob, fileName) {
   window.URL.revokeObjectURL(url);
 }
 
-function createAuthorizationModalState() {
-  return {
-    open: false,
-    action: '',
-    password: '',
-    error: '',
-  };
-}
-
 function EnrollmentMatriculaRectoriaPanel() {
   const [activeTab, setActiveTab] = useState('consents');
   const [consents, setConsents] = useState([]);
   const [signatures, setSignatures] = useState([]);
+  const [myRequests, setMyRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-  const [authorizationModal, setAuthorizationModal] = useState(createAuthorizationModalState);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
     setErrorMessage('');
     try {
-      const [consentsResponse, signaturesResponse] = await Promise.all([
+      const [consentsResponse, signaturesResponse, requestsResponse] = await Promise.all([
         getRectoriaEnrollmentConsents(),
         getRectoriaEnrollmentSignatures(),
+        getEnrollmentMatriculaPurgeRequestsMine(),
       ]);
       setConsents(consentsResponse.data?.items || []);
       setSignatures(signaturesResponse.data?.items || []);
+      setMyRequests(requestsResponse.data?.items || []);
     } catch (error) {
       setErrorMessage(error?.response?.data?.message || 'No se pudieron cargar los registros de matrícula.');
     } finally {
@@ -96,6 +89,15 @@ function EnrollmentMatriculaRectoriaPanel() {
   useEffect(() => {
     loadRecords();
   }, [loadRecords]);
+
+  const pendingConsentRequest = useMemo(
+    () => myRequests.find((item) => item.actionType === 'clear_consents' && item.status === 'pending'),
+    [myRequests]
+  );
+  const pendingSignatureRequest = useMemo(
+    () => myRequests.find((item) => item.actionType === 'clear_signatures' && item.status === 'pending'),
+    [myRequests]
+  );
 
   const onDownload = async (processId, documentType, fileName) => {
     try {
@@ -122,86 +124,24 @@ function EnrollmentMatriculaRectoriaPanel() {
     }
   };
 
-  const openAuthorizationModal = (action) => {
+  const onRequestPurge = async (actionType) => {
+    setActionLoading(actionType);
     setErrorMessage('');
     setSuccessMessage('');
-    setAuthorizationModal({
-      open: true,
-      action,
-      password: '',
-      error: '',
-    });
-  };
-
-  const closeAuthorizationModal = () => {
-    if (actionLoading) return;
-    setAuthorizationModal(createAuthorizationModalState());
-  };
-
-  const onSubmitAuthorization = async (event) => {
-    event.preventDefault();
-
-    const action = authorizationModal.action;
-    const rectoriaPassword = String(authorizationModal.password || '').trim();
-    if (!rectoriaPassword) {
-      setAuthorizationModal((previous) => ({
-        ...previous,
-        error: 'Debes ingresar la clave de autorización de Rectoría.',
-      }));
-      return;
-    }
-
-    setActionLoading(action);
-    setAuthorizationModal((previous) => ({ ...previous, error: '' }));
-    setErrorMessage('');
-    setSuccessMessage('');
-
     try {
-      const response = action === 'consents'
-        ? await deleteAllRectoriaEnrollmentConsents({ rectoriaPassword })
-        : await deleteAllRectoriaEnrollmentSignatures({ rectoriaPassword });
-
-      const authorizedByName = response.data?.authorizedBy?.name;
-      const baseMessage = response.data?.message || 'Registros eliminados correctamente.';
-      setSuccessMessage(
-        authorizedByName
-          ? `${baseMessage} Autorizado por ${authorizedByName}.`
-          : baseMessage
-      );
-      setAuthorizationModal(createAuthorizationModalState());
+      const response = await createEnrollmentMatriculaPurgeRequest({ actionType });
+      setSuccessMessage(response.data?.message || 'Solicitud enviada a Rectoría.');
       await loadRecords();
     } catch (error) {
-      const message = error?.response?.data?.message || 'No se pudo completar la eliminación.';
-      setAuthorizationModal((previous) => ({
-        ...previous,
-        error: message,
-      }));
+      setErrorMessage(error?.response?.data?.message || 'No se pudo enviar la solicitud.');
     } finally {
       setActionLoading('');
     }
   };
 
-  const onDeleteAllConsents = () => {
-    if (!consents.length) return;
-    openAuthorizationModal('consents');
-  };
-
-  const onDeleteAllSignatures = () => {
-    if (!signatures.length) return;
-    openAuthorizationModal('signatures');
-  };
-
   const signaturesWithPdf = signatures.filter(
     (item) => item.contract?.signedPdfBase64 || item.pagare?.signedPdfBase64
   );
-
-  const authorizationTitle = authorizationModal.action === 'consents'
-    ? `¿Borrar ${consents.length} consentimiento(s)?`
-    : `¿Borrar ${signatures.length} documento(s) firmado(s)?`;
-
-  const authorizationMessage = authorizationModal.action === 'consents'
-    ? 'Esta acción elimina todos los consentimientos registrados. Debes ingresar la clave de un usuario de Rectoría o Dirección para autorizarla.'
-    : 'Esta acción elimina todos los contratos y pagarés firmados. Debes ingresar la clave de un usuario de Rectoría o Dirección para autorizarla.';
 
   return (
     <div className="enrollment-matricula-rectoria">
@@ -232,14 +172,19 @@ function EnrollmentMatriculaRectoriaPanel() {
             <div>
               <h3>Consentimientos previos de matrícula</h3>
               <p>Registro de acudientes que aceptaron el consentimiento previo antes del pago.</p>
+              {pendingConsentRequest ? (
+                <p className="enrollment-matricula-rectoria__pending-note">
+                  Solicitud pendiente en Rectoría desde {formatDateTime(pendingConsentRequest.submittedAt)}.
+                </p>
+              ) : null}
             </div>
             <button
               className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
-              disabled={!consents.length || actionLoading === 'consents'}
-              onClick={onDeleteAllConsents}
+              disabled={!consents.length || Boolean(pendingConsentRequest) || actionLoading === 'clear_consents'}
+              onClick={() => onRequestPurge('clear_consents')}
               type="button"
             >
-              {actionLoading === 'consents' ? 'Eliminando...' : 'Borrar todos los consentimientos'}
+              {actionLoading === 'clear_consents' ? 'Enviando...' : 'Solicitar borrado a Rectoría'}
             </button>
           </div>
           <div className="enrollment-matricula-rectoria__table-wrap">
@@ -285,6 +230,11 @@ function EnrollmentMatriculaRectoriaPanel() {
             <div>
               <h3>Contratos y pagarés firmados</h3>
               <p>Documentos firmados digitalmente por los acudientes después del pago.</p>
+              {pendingSignatureRequest ? (
+                <p className="enrollment-matricula-rectoria__pending-note">
+                  Solicitud pendiente en Rectoría desde {formatDateTime(pendingSignatureRequest.submittedAt)}.
+                </p>
+              ) : null}
             </div>
             <div className="enrollment-matricula-rectoria__actions">
               <button
@@ -297,11 +247,11 @@ function EnrollmentMatriculaRectoriaPanel() {
               </button>
               <button
                 className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
-                disabled={!signatures.length || actionLoading === 'signatures'}
-                onClick={onDeleteAllSignatures}
+                disabled={!signatures.length || Boolean(pendingSignatureRequest) || actionLoading === 'clear_signatures'}
+                onClick={() => onRequestPurge('clear_signatures')}
                 type="button"
               >
-                {actionLoading === 'signatures' ? 'Eliminando...' : 'Borrar todos los documentos'}
+                {actionLoading === 'clear_signatures' ? 'Enviando...' : 'Solicitar borrado a Rectoría'}
               </button>
             </div>
           </div>
@@ -373,56 +323,6 @@ function EnrollmentMatriculaRectoriaPanel() {
             </table>
           </div>
         </section>
-      ) : null}
-
-      {authorizationModal.open ? (
-        <div className="enrollment-matricula-rectoria__modal-overlay" role="dialog" aria-modal="true">
-          <form className="enrollment-matricula-rectoria__modal" onSubmit={onSubmitAuthorization}>
-            <div className="enrollment-matricula-rectoria__modal-head">
-              <span className="enrollment-matricula-rectoria__modal-eyebrow">Autorización de Rectoría</span>
-              <h3>{authorizationTitle}</h3>
-              <p>{authorizationMessage}</p>
-            </div>
-
-            {authorizationModal.error ? (
-              <div className="matricula-flow-error">{authorizationModal.error}</div>
-            ) : null}
-
-            <label className="enrollment-matricula-rectoria__modal-label">
-              Clave de autorización de Rectoría
-              <input
-                autoComplete="current-password"
-                autoFocus
-                onChange={(event) => setAuthorizationModal((previous) => ({
-                  ...previous,
-                  password: event.target.value,
-                  error: '',
-                }))}
-                placeholder="Ingresa la clave de Rectoría o Dirección"
-                type="password"
-                value={authorizationModal.password}
-              />
-            </label>
-
-            <div className="enrollment-matricula-rectoria__modal-actions">
-              <button
-                className="enrollment-matricula-rectoria__action"
-                disabled={Boolean(actionLoading)}
-                onClick={closeAuthorizationModal}
-                type="button"
-              >
-                Cancelar
-              </button>
-              <button
-                className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
-                disabled={Boolean(actionLoading) || !String(authorizationModal.password || '').trim()}
-                type="submit"
-              >
-                {actionLoading ? 'Autorizando...' : 'Autorizar y borrar'}
-              </button>
-            </div>
-          </form>
-        </div>
       ) : null}
     </div>
   );

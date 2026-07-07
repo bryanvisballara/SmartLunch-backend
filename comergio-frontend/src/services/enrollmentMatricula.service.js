@@ -15,10 +15,14 @@ export const createWompiMatriculaCheckout = (processId) => api.post('/payments/w
 export const getWompiMatriculaPaymentStatus = (params) => api.get('/payments/wompi/matricula-status', { params });
 export const getRectoriaEnrollmentConsents = () => api.get('/enrollment-matricula/consents');
 export const getRectoriaEnrollmentSignatures = () => api.get('/enrollment-matricula/signatures');
-export const deleteAllRectoriaEnrollmentConsents = (data = {}) =>
-  api.delete('/enrollment-matricula/consents', { data });
-export const deleteAllRectoriaEnrollmentSignatures = (data = {}) =>
-  api.delete('/enrollment-matricula/signatures', { data });
+export const getEnrollmentMatriculaPurgeRequestsMine = () => api.get('/enrollment-matricula/purge-requests/mine');
+export const getEnrollmentMatriculaPurgeRequestsPending = () => api.get('/enrollment-matricula/purge-requests/pending');
+export const getEnrollmentMatriculaPurgeRequestSummary = () => api.get('/enrollment-matricula/purge-requests/summary');
+export const createEnrollmentMatriculaPurgeRequest = (data = {}) => api.post('/enrollment-matricula/purge-requests', data);
+export const approveEnrollmentMatriculaPurgeRequest = (requestId) =>
+  api.post(`/enrollment-matricula/purge-requests/${requestId}/approve`);
+export const rejectEnrollmentMatriculaPurgeRequest = (requestId, data = {}) =>
+  api.post(`/enrollment-matricula/purge-requests/${requestId}/reject`, data);
 export const downloadRectoriaEnrollmentDocumentsZip = () =>
   api.get('/enrollment-matricula/signatures/download-zip', { responseType: 'blob' });
 export const downloadRectoriaEnrollmentDocument = (processId, documentType) =>

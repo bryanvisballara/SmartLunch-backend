@@ -8,10 +8,12 @@ import { resolveGradeCourses, resolveStudentCourseKey, studentHasAssignedCourseI
 import { formatEducationalGradeLabel } from '../lib/educationalGradeLabels';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
+import EnrollmentMatriculaAuthorizationsPanel from '../components/enrollment-matricula/EnrollmentMatriculaAuthorizationsPanel';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
+import { getEnrollmentMatriculaPurgeRequestSummary } from '../services/enrollmentMatricula.service';
 import {
   createAdminUser,
   deleteAdminUser,
@@ -107,6 +109,7 @@ const BASE_SECTION_OPTIONS = [
   { key: 'database', label: 'Base de datos' },
   { key: 'fees', label: 'Costos' },
   { key: 'enrollment_matricula', label: 'Matrículas digitales' },
+  { key: 'matricula_authorizations', label: 'Autorizaciones' },
 ];
 const ACADEMIC_MANAGEMENT_SECTION_OPTIONS = [
   { key: 'grades_courses', label: 'Grados y cursos' },
@@ -2275,6 +2278,7 @@ function RectoriaDashboard() {
   const [newScheduleBreakGradeKeys, setNewScheduleBreakGradeKeys] = useState([]);
   const [scheduleBreakGradeSelections, setScheduleBreakGradeSelections] = useState({});
   const [activeAdmissionsView, setActiveAdmissionsView] = useState('dashboard');
+  const [matriculaAuthorizationPendingCount, setMatriculaAuthorizationPendingCount] = useState(0);
 
   const sectionOptions = useMemo(
     () => {
@@ -2597,8 +2601,18 @@ function RectoriaDashboard() {
     }
   };
 
-  const closeCreatedUserModal = () => {
-    setCreatedUserModal({ open: false, name: '', role: '', username: '' });
+  const refreshMatriculaAuthorizationSummary = async () => {
+    if (isCoordinationPortal) {
+      setMatriculaAuthorizationPendingCount(0);
+      return;
+    }
+
+    try {
+      const response = await getEnrollmentMatriculaPurgeRequestSummary();
+      setMatriculaAuthorizationPendingCount(Number(response.data?.pending || 0));
+    } catch {
+      setMatriculaAuthorizationPendingCount(0);
+    }
   };
 
   const loadPortal = async ({ silent = false } = {}) => {
@@ -2762,6 +2776,7 @@ function RectoriaDashboard() {
     } catch (requestError) {
       setError(requestError?.response?.data?.message || `No se pudo cargar el portal de ${portalLabel}.`);
     } finally {
+      await refreshMatriculaAuthorizationSummary();
       setLoading(false);
       setRefreshing(false);
     }
@@ -7160,7 +7175,11 @@ function RectoriaDashboard() {
                   onClick={() => onSidebarSectionClick(section.key)}
                   type="button"
                 >
-                  <span>{section.label}</span>
+                  <span>
+                    {section.key === 'matricula_authorizations' && matriculaAuthorizationPendingCount > 0
+                      ? `${section.label} (${matriculaAuthorizationPendingCount})`
+                      : section.label}
+                  </span>
                 </button>
                 {expandedSidebarSection === section.key && section.key === 'team' ? (
                   <div className="rectoria-sidebar-subnav" aria-label="Roles institucionales">
@@ -9808,6 +9827,20 @@ function RectoriaDashboard() {
               </div>
             </div>
             <EnrollmentMatriculaRectoriaPanel />
+          </section>
+        </div>
+      ) : null}
+
+      {!isCoordinationPortal && activeSection === 'matricula_authorizations' ? (
+        <div className="rectoria-stack">
+          <section className="panel rectoria-panel">
+            <div className="rectoria-section-header">
+              <div>
+                <h3>Autorizaciones de matrícula</h3>
+                <p>Aprueba o rechaza solicitudes de borrado enviadas desde cartera.</p>
+              </div>
+            </div>
+            <EnrollmentMatriculaAuthorizationsPanel onUpdated={refreshMatriculaAuthorizationSummary} />
           </section>
         </div>
       ) : null}
