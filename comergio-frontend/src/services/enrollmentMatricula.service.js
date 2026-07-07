@@ -15,8 +15,10 @@ export const createWompiMatriculaCheckout = (processId) => api.post('/payments/w
 export const getWompiMatriculaPaymentStatus = (params) => api.get('/payments/wompi/matricula-status', { params });
 export const getRectoriaEnrollmentConsents = () => api.get('/enrollment-matricula/consents');
 export const getRectoriaEnrollmentSignatures = () => api.get('/enrollment-matricula/signatures');
-export const deleteAllRectoriaEnrollmentConsents = () => api.delete('/enrollment-matricula/consents');
-export const deleteAllRectoriaEnrollmentSignatures = () => api.delete('/enrollment-matricula/signatures');
+export const deleteAllRectoriaEnrollmentConsents = (data = {}) =>
+  api.delete('/enrollment-matricula/consents', { data });
+export const deleteAllRectoriaEnrollmentSignatures = (data = {}) =>
+  api.delete('/enrollment-matricula/signatures', { data });
 export const downloadRectoriaEnrollmentDocumentsZip = () =>
   api.get('/enrollment-matricula/signatures/download-zip', { responseType: 'blob' });
 export const downloadRectoriaEnrollmentDocument = (processId, documentType) =>

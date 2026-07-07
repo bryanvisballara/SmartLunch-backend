@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
+const { ensureRectoriaAuthorization } = require('../utils/rectoriaAuthorization');
 const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
 const {
   acceptConsent,
@@ -204,11 +205,20 @@ rectoriaRouter.get('/signatures', async (req, res) => {
 
 rectoriaRouter.delete('/consents', async (req, res) => {
   try {
+    const authorization = await ensureRectoriaAuthorization({
+      schoolId: req.user.schoolId,
+      password: req.body?.rectoriaPassword,
+    });
+    if (!authorization.ok) {
+      return res.status(authorization.status).json({ message: authorization.message });
+    }
+
     const result = await clearAllConsentsForRectoria({ schoolId: req.user.schoolId });
     return res.status(200).json({
       message: result.updated
         ? `Se eliminaron ${result.updated} consentimiento(s) registrado(s).`
         : 'No había consentimientos para eliminar.',
+      authorizedBy: authorization.authorizedBy,
       ...result,
     });
   } catch (error) {
@@ -218,11 +228,20 @@ rectoriaRouter.delete('/consents', async (req, res) => {
 
 rectoriaRouter.delete('/signatures', async (req, res) => {
   try {
+    const authorization = await ensureRectoriaAuthorization({
+      schoolId: req.user.schoolId,
+      password: req.body?.rectoriaPassword,
+    });
+    if (!authorization.ok) {
+      return res.status(authorization.status).json({ message: authorization.message });
+    }
+
     const result = await clearAllSignedDocumentsForRectoria({ schoolId: req.user.schoolId });
     return res.status(200).json({
       message: result.updated
         ? `Se eliminaron ${result.updated} registro(s) de documentos firmados.`
         : 'No había documentos firmados para eliminar.',
+      authorizedBy: authorization.authorizedBy,
       ...result,
     });
   } catch (error) {
