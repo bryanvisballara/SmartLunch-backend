@@ -9,7 +9,7 @@ const academicChargePaymentSchema = new mongoose.Schema(
     recordedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     recordedByRole: { type: String, trim: true, default: '' },
     amount: { type: Number, required: true, min: 1 },
-    method: { type: String, enum: ['parent_portal', 'cash', 'bank_transfer', 'card', 'pse', 'epayco', 'bold', 'other'], default: 'parent_portal' },
+    method: { type: String, enum: ['parent_portal', 'cash', 'bank_transfer', 'card', 'pse', 'epayco', 'bold', 'wompi', 'other'], default: 'parent_portal' },
     notes: { type: String, trim: true, default: '' },
     paidAt: { type: Date, default: Date.now },
   },

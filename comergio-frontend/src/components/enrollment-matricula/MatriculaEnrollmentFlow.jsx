@@ -8,7 +8,7 @@ import {
   signEnrollmentMatriculaContract,
   signEnrollmentMatriculaPagare,
 } from '../../services/enrollmentMatricula.service';
-import WompiPaymentButton from '../WompiPaymentButton';
+import { launchWompiWebCheckout } from '../WompiPaymentButton';
 import {
   canUseOfficialEnrollmentContract,
   generateSignedEnrollmentContractPdfBase64,
@@ -396,6 +396,42 @@ function MatriculaEnrollmentFlow({
     }
   }, [activeStep, process?._id]);
 
+  useEffect(() => {
+    if (activeStep !== 'payment' || process?.payment?.status === 'PAID') {
+      return undefined;
+    }
+
+    const reference = String(process?.payment?.reference || '').trim();
+    if (!reference || String(process?.payment?.method || '').toLowerCase() !== 'wompi') {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const syncPendingWompiPayment = async () => {
+      try {
+        const response = await getWompiMatriculaPaymentStatus({ reference });
+        if (cancelled) return;
+        const nextProcess = response.data?.process;
+        if (nextProcess?.payment?.status === 'PAID') {
+          setProcess(nextProcess);
+          onProcessUpdated?.(nextProcess);
+          setWompiCheckoutConfig(null);
+        }
+      } catch (error) {
+        // Keep polling while Wompi/webhook reconciliation finishes.
+      }
+    };
+
+    syncPendingWompiPayment();
+    const timer = window.setInterval(syncPendingWompiPayment, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeStep, onProcessUpdated, process?._id, process?.payment?.method, process?.payment?.reference, process?.payment?.status]);
+
   const contractParams = process?.contractParamsSnapshot || null;
   const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({ schoolId, schoolName })
     && activeStep === 'payment'
@@ -483,36 +519,13 @@ function MatriculaEnrollmentFlow({
         throw new Error('No se pudo preparar la pasarela Wompi.');
       }
       setWompiCheckoutConfig(checkout);
+      launchWompiWebCheckout(checkout);
     } catch (error) {
       setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo iniciar el pago con Wompi.');
       setWompiCheckoutConfig(null);
     } finally {
       setLoading(false);
       setWompiCheckoutLoading(false);
-    }
-  };
-
-  const onWompiPaymentCompleted = async (transaction) => {
-    setLoading(true);
-    setErrorMessage('');
-    try {
-      const response = await getWompiMatriculaPaymentStatus({
-        reference: wompiCheckoutConfig?.reference || process?.payment?.reference,
-        transactionId: transaction?.id,
-      });
-      const nextProcess = response.data?.process;
-      if (nextProcess) {
-        setProcess(nextProcess);
-        onProcessUpdated?.(nextProcess);
-        setWompiCheckoutConfig(null);
-        return;
-      }
-      await refreshProcess();
-    } catch (error) {
-      setErrorMessage(error?.response?.data?.message || 'Pago recibido. Estamos confirmando tu matricula, intenta de nuevo en unos segundos.');
-      await refreshProcess();
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -732,20 +745,16 @@ function MatriculaEnrollmentFlow({
                   </button>
                 ) : (
                   <>
-                    {!wompiCheckoutConfig ? (
-                      <button className="matricula-flow-primary" disabled={loading || wompiCheckoutLoading} onClick={onStartPayment} type="button">
-                        {loading || wompiCheckoutLoading ? 'Preparando pago...' : 'Pagar matrícula con Wompi'}
+                    <button className="matricula-flow-primary" disabled={loading || wompiCheckoutLoading} onClick={onStartPayment} type="button">
+                      {loading || wompiCheckoutLoading ? 'Abriendo Wompi...' : 'Pagar matrícula con Wompi'}
+                    </button>
+                    {wompiCheckoutConfig?.reference ? (
+                      <button className="matricula-flow-secondary" disabled={loading} onClick={refreshProcess} type="button">
+                        Ya pagué, verificar estado
                       </button>
-                    ) : (
-                      <WompiPaymentButton
-                        config={wompiCheckoutConfig}
-                        label="Abrir pasarela Wompi"
-                        onCompleted={onWompiPaymentCompleted}
-                        onError={(error) => setErrorMessage(error?.message || 'No se pudo abrir Wompi.')}
-                      />
-                    )}
+                    ) : null}
                     <p className="matricula-flow-note matricula-flow-note--muted">
-                      El pago se confirma automaticamente cuando Wompi aprueba la transaccion.
+                      Serás redirigido a la pasarela segura de Wompi en pantalla completa. El pago se confirma automáticamente al aprobarse.
                     </p>
                   </>
                 )}

@@ -535,6 +535,7 @@ function labelAcademicPaymentMethod(method) {
   if (normalized === 'pse') return 'PSE';
   if (normalized === 'epayco') return 'ePayco';
   if (normalized === 'bold') return 'Bold';
+  if (normalized === 'wompi') return 'Wompi';
   if (normalized === 'other') return 'Otro';
   return normalized || 'Sin método';
 }
@@ -5191,7 +5192,7 @@ function resolveAcademicChargePaymentReferenceDate(charge, paidAt = new Date()) 
 
 function normalizeAcademicManualPaymentMethod(value) {
   const normalized = normalizeText(value).toLowerCase();
-  if (['cash', 'bank_transfer', 'card', 'pse', 'epayco', 'bold', 'other'].includes(normalized)) {
+  if (['cash', 'bank_transfer', 'card', 'pse', 'epayco', 'bold', 'wompi', 'other'].includes(normalized)) {
     return normalized;
   }
   if (['transferencia', 'transfer', 'bank'].includes(normalized)) return 'bank_transfer';
