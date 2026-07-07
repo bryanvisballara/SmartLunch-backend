@@ -29,6 +29,11 @@ const {
   fetchBoldPaymentStatusPayload,
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
+const {
+  isWompiConfigured,
+  toWompiInternalStatus,
+  verifyWompiEventChecksum,
+} = require('../services/wompi.service');
 
 const router = express.Router();
 const BERCKLEY_SCHOOL_ID = 'International Berckley School';
@@ -2030,6 +2035,60 @@ function handleBoldAsyncWebhookAck(req, res, { label }) {
     }
   });
 }
+
+async function handleWompiWebhook(req, res) {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const incomingChecksum = String(
+      req.headers['x-event-checksum']
+      || payload?.signature?.checksum
+      || ''
+    ).trim();
+
+    console.info('[WOMPI_WEBHOOK_RECEIVED]', {
+      path: req.originalUrl,
+      event: String(payload?.event || '').trim() || 'unknown',
+      environment: String(payload?.environment || '').trim() || 'unknown',
+      transactionId: String(payload?.data?.transaction?.id || '').trim() || null,
+      reference: String(payload?.data?.transaction?.reference || '').trim() || null,
+      status: String(payload?.data?.transaction?.status || '').trim() || null,
+    });
+
+    if (!isWompiConfigured()) {
+      console.warn('[WOMPI_WEBHOOK_IGNORED] Wompi keys are not configured on the server');
+      return res.status(200).json({ ok: true, ignored: true, reason: 'wompi_not_configured' });
+    }
+
+    if (!verifyWompiEventChecksum(payload, incomingChecksum)) {
+      console.warn('[WOMPI_WEBHOOK_INVALID_SIGNATURE]', {
+        event: String(payload?.event || '').trim() || 'unknown',
+        reference: String(payload?.data?.transaction?.reference || '').trim() || null,
+      });
+      return res.status(401).json({ message: 'Invalid Wompi event checksum' });
+    }
+
+    const eventType = String(payload?.event || '').trim();
+    if (eventType === 'transaction.updated') {
+      const transaction = payload?.data?.transaction || {};
+      const internalStatus = toWompiInternalStatus(transaction?.status);
+      console.info('[WOMPI_TRANSACTION_UPDATED]', {
+        transactionId: String(transaction?.id || '').trim() || null,
+        reference: String(transaction?.reference || '').trim() || null,
+        providerStatus: String(transaction?.status || '').trim() || null,
+        internalStatus,
+      });
+      // TODO: reconcile matricula/pension payments once checkout endpoints are wired.
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error('[WOMPI_WEBHOOK_FAILED]', { message: error.message });
+    return res.status(500).json({ message: error.message });
+  }
+}
+
+router.post('/wompi/webhook', handleWompiWebhook);
+router.post('/wompi/events', handleWompiWebhook);
 
 router.post('/bold', handleBoldWebhook);
 router.post('/bold/webhook', handleBoldWebhook);
