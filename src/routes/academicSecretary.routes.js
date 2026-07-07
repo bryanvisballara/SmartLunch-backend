@@ -43,6 +43,7 @@ const {
   linkCarteraPaymentToEnrollmentMatricula,
   unlinkCarteraPaymentFromEnrollmentMatricula,
 } = require('../services/enrollmentMatricula.service');
+const { createBillingPaymentDeletionRequest } = require('../services/enrollmentMatriculaPurgeRequest.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   normalizeStoredImageUrl,
@@ -8869,89 +8870,35 @@ router.get('/billing/payments', async (req, res) => {
 });
 
 router.delete('/billing/payments/:paymentId', async (req, res) => {
+  return res.status(409).json({
+    message: 'Los pagos deben anularse mediante solicitud autorizada por Rectoría.',
+  });
+});
+
+router.post('/billing/payments/:paymentId/deletion-request', async (req, res) => {
   try {
-    const { schoolId } = req.user;
+    const { schoolId, userId, role, name } = req.user;
     const paymentId = toObjectId(req.params.paymentId);
     if (!paymentId) {
       return res.status(400).json({ message: 'paymentId no es válido.' });
     }
 
-    const payment = await AcademicChargePayment.findOne({ _id: paymentId, schoolId });
-    if (!payment) {
-      return res.status(404).json({ message: 'El pago no existe.' });
-    }
-
-    const charge = await AcademicCharge.findOne({ _id: payment.chargeId, schoolId });
-    if (!charge) {
-      return res.status(404).json({ message: 'El cargo asociado al pago no existe.' });
-    }
-
-    const paymentMethod = String(payment.method || '').toLowerCase();
-    const isMatriculaCharge = String(charge.category || '') === 'annual_tuition';
-    const isGatewayPayment = ['wompi', 'parent_portal', 'epayco', 'bold'].includes(paymentMethod);
-
-    if (isGatewayPayment && !isMatriculaCharge) {
-      return res.status(409).json({
-        message: 'Este pago fue registrado por pasarela o portal del acudiente. No puede eliminarse desde cartera.',
-      });
-    }
-
-    let paymentTransactionId = null;
-    if (isMillenniumSchoolId(schoolId) && isMatriculaCharge) {
-      const enrollmentProcess = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId: charge._id })
-        .select('payment')
-        .lean();
-      paymentTransactionId = enrollmentProcess?.payment?.paymentTransactionId || null;
-    }
-
-    try {
-      await unlinkCarteraPaymentFromEnrollmentMatricula({
-        schoolId,
-        charge,
-        chargePaymentId: payment._id,
-      });
-    } catch (unlinkError) {
-      return res.status(409).json({ message: unlinkError.message });
-    }
-
-    if (paymentTransactionId) {
-      await PaymentTransaction.updateOne(
-        { _id: paymentTransactionId, schoolId },
-        {
-          $set: {
-            status: 'rejected',
-            providerStatus: 'VOIDED',
-            failureReason: 'Pago de matricula anulado desde cartera',
-            academicChargePaymentId: null,
-          },
-        }
-      );
-    }
-
-    await AcademicChargePayment.deleteOne({ _id: payment._id, schoolId });
-
-    const { outstandingAmount } = await getAcademicChargeOutstandingAmount(charge, new Date());
-    if (outstandingAmount <= 0) {
-      charge.status = 'paid';
-      charge.paidAt = charge.paidAt || new Date();
-    } else if (new Date(charge.dueDate) < new Date()) {
-      charge.status = 'overdue';
-      charge.paidAt = null;
-      charge.paymentMethod = '';
-    } else {
-      charge.status = 'pending';
-      charge.paidAt = null;
-      charge.paymentMethod = '';
-    }
-    await charge.save();
+    const request = await createBillingPaymentDeletionRequest({
+      schoolId,
+      userId,
+      userRole: role,
+      userName: name,
+      paymentId,
+    });
 
     const billing = await buildBillingSummary(schoolId);
-    return res.status(200).json({
-      message: 'Pago eliminado correctamente.',
+    return res.status(201).json({
+      message: 'Solicitud enviada a Rectoría para autorización.',
+      request,
       billing,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return res.status(error.statusCode || 400).json({ message: error.message });
   }
 });
 

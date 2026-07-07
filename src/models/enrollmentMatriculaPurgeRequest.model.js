@@ -5,7 +5,7 @@ const enrollmentMatriculaPurgeRequestSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     actionType: {
       type: String,
-      enum: ['clear_consents', 'clear_signatures'],
+      enum: ['clear_consents', 'clear_signatures', 'delete_billing_payment'],
       required: true,
       index: true,
     },
@@ -19,6 +19,14 @@ const enrollmentMatriculaPurgeRequestSchema = new mongoose.Schema(
     requestedByName: { type: String, trim: true, default: '' },
     requestedByRole: { type: String, trim: true, default: '' },
     recordCount: { type: Number, min: 0, default: 0 },
+    paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicChargePayment', default: null, index: true },
+    chargeId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicCharge', default: null, index: true },
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null, index: true },
+    studentName: { type: String, trim: true, default: '' },
+    paymentConcept: { type: String, trim: true, default: '' },
+    paymentAmount: { type: Number, min: 0, default: 0 },
+    paymentMethod: { type: String, trim: true, default: '' },
+    paymentMethodLabel: { type: String, trim: true, default: '' },
     submittedAt: { type: Date, default: Date.now, index: true },
     reviewedAt: { type: Date, default: null },
     reviewedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
@@ -32,7 +40,23 @@ const enrollmentMatriculaPurgeRequestSchema = new mongoose.Schema(
 enrollmentMatriculaPurgeRequestSchema.index({ schoolId: 1, status: 1, submittedAt: -1 });
 enrollmentMatriculaPurgeRequestSchema.index(
   { schoolId: 1, actionType: 1 },
-  { unique: true, partialFilterExpression: { status: 'pending' } }
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: 'pending',
+      actionType: { $in: ['clear_consents', 'clear_signatures'] },
+    },
+  }
+);
+enrollmentMatriculaPurgeRequestSchema.index(
+  { schoolId: 1, paymentId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: 'pending',
+      actionType: 'delete_billing_payment',
+    },
+  }
 );
 
 module.exports = registerSchoolScopedModel('EnrollmentMatriculaPurgeRequest', enrollmentMatriculaPurgeRequestSchema);

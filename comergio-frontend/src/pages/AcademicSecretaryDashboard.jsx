@@ -29,6 +29,7 @@ import {
 } from '../lib/millenniumEnrollmentContracts';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
+import { getEnrollmentMatriculaPurgeRequestsMine } from '../services/enrollmentMatricula.service';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
 import {
@@ -43,7 +44,7 @@ import {
   deleteAcademicSecretaryCommunicationAuthor,
   createAcademicSecretaryEnrollment,
   deleteAcademicSecretaryCommunication,
-  deleteAcademicSecretaryBillingPayment,
+  requestAcademicSecretaryBillingPaymentDeletion,
   deleteAcademicSecretaryCommunicationComment,
   getAcademicSecretaryBootstrap,
   getAcademicSecretaryBillingPayments,
@@ -122,14 +123,40 @@ function resolveEnrollmentPaidPaymentIds(account = {}) {
 }
 
 function isGatewayBillingPaymentMethod(method = '') {
-  return ['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(method || '').toLowerCase());
+  return ['wompi', 'parent_portal', 'epayco', 'bold', 'pse'].includes(String(method || '').toLowerCase());
 }
 
-function canDeleteBillingPaymentFromCartera({ method = '', category = '' } = {}) {
-  if (String(category || '') === 'annual_tuition') {
-    return true;
+function isCarteraBillingPaymentMethod(method = '') {
+  return ['cash', 'bank_transfer', 'card', 'other'].includes(String(method || '').toLowerCase());
+}
+
+function canRequestBillingPaymentDeletion(payment = {}) {
+  if (!payment?._id) return false;
+  return isCarteraBillingPaymentMethod(payment.method);
+}
+
+function findPendingBillingPaymentDeletionRequest(requests = [], paymentId = '') {
+  return (requests || []).find((request) => (
+    request.actionType === 'delete_billing_payment'
+    && request.status === 'pending'
+    && String(request.paymentId || '') === String(paymentId || '')
+  )) || null;
+}
+
+function resolveCarteraDeletablePaymentFromRow(row = {}) {
+  const payment = (row.paymentDetails || []).find((item) => canRequestBillingPaymentDeletion(item));
+  return payment || null;
+}
+
+function resolveCarteraDeletablePaymentFromAccount(account = {}) {
+  const rows = (account.paymentPlan?.rows || []).filter(
+    (row) => String(row.category || '') === 'annual_tuition' && String(row.status || '') === 'paid',
+  );
+  for (const row of rows) {
+    const payment = resolveCarteraDeletablePaymentFromRow(row);
+    if (payment) return payment;
   }
-  return !isGatewayBillingPaymentMethod(method);
+  return null;
 }
 
 function resolveEnrollmentPaymentMethodLabel(account = {}) {
@@ -1620,6 +1647,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   }));
   const [paymentHistory, setPaymentHistory] = useState({ payments: [], total: 0, loading: false });
   const [deleteBillingPaymentModal, setDeleteBillingPaymentModal] = useState({ open: false, paymentId: '', studentName: '', concept: '' });
+  const [billingPaymentDeletionRequests, setBillingPaymentDeletionRequests] = useState([]);
   const [pensionDiscountDraft, setPensionDiscountDraft] = useState(createPensionDiscountDraft);
   const [followUpModal, setFollowUpModal] = useState({ open: false, type: '', item: null, title: '', body: '' });
   const [deleteCommunicationModal, setDeleteCommunicationModal] = useState({ open: false, item: null });
@@ -1657,6 +1685,16 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     const payload = response.data || {};
     const feeSettings = await resolveFeeSettingsForBootstrap(payload);
     setBootstrap(buildAcademicSecretaryBootstrapState(payload, feeSettings));
+  };
+
+  const loadBillingPaymentDeletionRequests = async () => {
+    try {
+      const response = await getEnrollmentMatriculaPurgeRequestsMine();
+      const items = (response.data?.items || []).filter((item) => item.actionType === 'delete_billing_payment');
+      setBillingPaymentDeletionRequests(items);
+    } catch {
+      setBillingPaymentDeletionRequests([]);
+    }
   };
 
   const loadSchoolRouteAssignments = async () => {
@@ -1734,6 +1772,9 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         const feeSettings = await resolveFeeSettingsForBootstrap(payload);
         if (cancelled) return;
         setBootstrap(buildAcademicSecretaryBootstrapState(payload, feeSettings));
+        if (isBillingPortal) {
+          await loadBillingPaymentDeletionRequests();
+        }
       })
       .catch((requestError) => {
         if (cancelled) return;
@@ -3148,7 +3189,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     if (!paymentId) return;
 
     await runAction(async () => {
-      const response = await deleteAcademicSecretaryBillingPayment(paymentId);
+      const response = await requestAcademicSecretaryBillingPaymentDeletion(paymentId);
       if (response?.data?.billing) {
         setBootstrap((previous) => ({
           ...previous,
@@ -3157,12 +3198,39 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       } else {
         await loadBootstrap();
       }
+      await loadBillingPaymentDeletionRequests();
       if (activeSection === 'payment-history') {
         await loadPaymentHistory(paymentHistoryFilters);
       }
       closeDeleteBillingPaymentModal();
       closeBillingPaymentDetailModal();
-    }, 'Pago eliminado correctamente.');
+    }, 'Solicitud enviada a Rectoría para autorización.');
+  };
+
+  const renderBillingPaymentDeletionAction = (payment = {}, { studentName = '', concept = '' } = {}) => {
+    if (!payment?._id) return '—';
+    if (!canRequestBillingPaymentDeletion(payment)) {
+      return <span title="Los pagos por pasarela no se pueden anular desde cartera">—</span>;
+    }
+    const pendingRequest = findPendingBillingPaymentDeletionRequest(billingPaymentDeletionRequests, payment._id);
+    if (pendingRequest) {
+      return <span className="academic-secretary__billing-plan-action is-pending">Pendiente en Rectoría</span>;
+    }
+    return (
+      <button
+        className="academic-secretary__billing-plan-action is-danger"
+        disabled={busy}
+        onClick={() => openDeleteBillingPaymentModal({
+          paymentId: payment._id,
+          studentName,
+          concept,
+        })}
+        title="Solicitar anulación autorizada por Rectoría"
+        type="button"
+      >
+        Solicitar anulación
+      </button>
+    );
   };
 
   const onCommunicationImagesSelected = async (event) => {
@@ -3630,24 +3698,10 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                               <td>{formatCurrency(account.enrollmentPaidAmount || 0)}</td>
                               {billingEnrollmentSubview === 'paid' ? (
                                 <td>
-                                  {resolveEnrollmentPaidPaymentIds(account).length ? (
-                                    <button
-                                      className="academic-secretary__billing-plan-action is-danger"
-                                      disabled={busy}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        const paymentId = resolveEnrollmentPaidPaymentIds(account)[0];
-                                        openDeleteBillingPaymentModal({
-                                          paymentId,
-                                          studentName: account.studentName,
-                                          concept: 'Matrícula',
-                                        });
-                                      }}
-                                      type="button"
-                                    >
-                                      Borrar pago
-                                    </button>
-                                  ) : '—'}
+                                  {renderBillingPaymentDeletionAction(
+                                    resolveCarteraDeletablePaymentFromAccount(account),
+                                    { studentName: account.studentName, concept: 'Matrícula' },
+                                  )}
                                 </td>
                               ) : null}
                             </>
@@ -3811,18 +3865,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                       activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && (row.paymentDetails || []).length ? (
                                         <div className="academic-secretary__billing-plan-actions">
                                           <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
-                                          <button
-                                            className="academic-secretary__billing-plan-action is-danger"
-                                            disabled={busy}
-                                            onClick={() => openDeleteBillingPaymentModal({
-                                              paymentId: row.paymentDetails[0]?._id,
+                                          {renderBillingPaymentDeletionAction(
+                                            resolveCarteraDeletablePaymentFromRow(row),
+                                            {
                                               studentName: selectedBillingAccount?.studentName,
                                               concept: row.concept || row.monthLabel,
-                                            })}
-                                            type="button"
-                                          >
-                                            Borrar
-                                          </button>
+                                            },
+                                          )}
                                         </div>
                                       ) : (
                                         <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
@@ -3979,19 +4028,10 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     <td>{formatDateTime(payment.paidAt)}</td>
                     <td>{formatCurrency(payment.amount)}</td>
                     <td>
-                      <button
-                        className="academic-secretary__billing-plan-action is-danger"
-                        disabled={busy || !canDeleteBillingPaymentFromCartera(payment)}
-                        onClick={() => openDeleteBillingPaymentModal({
-                          paymentId: payment._id,
-                          studentName: payment.studentName,
-                          concept: payment.concept,
-                        })}
-                        title={!canDeleteBillingPaymentFromCartera(payment) ? 'Los pagos por pasarela no se pueden borrar desde cartera' : 'Eliminar pago registrado por error'}
-                        type="button"
-                      >
-                        Borrar
-                      </button>
+                      {renderBillingPaymentDeletionAction(payment, {
+                        studentName: payment.studentName,
+                        concept: payment.concept,
+                      })}
                     </td>
                   </tr>
                 ))}
@@ -4974,13 +5014,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
       {deleteBillingPaymentModal.open ? (
         <BrandConfirmModal
-          confirmLabel="Borrar pago"
+          confirmLabel="Enviar solicitud"
           eyebrow="Portal de cartera"
           loading={busy}
-          message={`Se eliminará el pago de ${deleteBillingPaymentModal.concept || 'matrícula'} de ${deleteBillingPaymentModal.studentName || 'este alumno'}. El cargo volverá a quedar pendiente si corresponde.`}
+          message={`Se enviará a Rectoría la solicitud para anular el pago de ${deleteBillingPaymentModal.concept || 'matrícula'} de ${deleteBillingPaymentModal.studentName || 'este alumno'}. El cargo volverá a quedar pendiente solo después de la autorización.`}
           onCancel={closeDeleteBillingPaymentModal}
           onConfirm={onDeleteBillingPayment}
-          title="¿Borrar este pago?"
+          title="¿Solicitar anulación del pago?"
         />
       ) : null}
 
@@ -5092,19 +5132,11 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 ))}
               </div>
               <div className="academic-secretary__actions">
-                {activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && (row.paymentDetails || [])[0]?._id ? (
-                  <button
-                    className="btn btn-outline is-danger"
-                    disabled={busy}
-                    onClick={() => openDeleteBillingPaymentModal({
-                      paymentId: row.paymentDetails[0]._id,
-                      studentName: selectedBillingAccount?.studentName,
-                      concept: row.concept || row.monthLabel,
-                    })}
-                    type="button"
-                  >
-                    Borrar pago
-                  </button>
+                {activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && resolveCarteraDeletablePaymentFromRow(row) ? (
+                  renderBillingPaymentDeletionAction(resolveCarteraDeletablePaymentFromRow(row), {
+                    studentName: selectedBillingAccount?.studentName,
+                    concept: row.concept || row.monthLabel,
+                  })
                 ) : null}
                 <button className="btn btn-primary" onClick={closeBillingPaymentDetailModal} type="button">Cerrar</button>
               </div>

@@ -303,10 +303,17 @@ rectoriaRouter.post('/purge-requests/:requestId/approve', async (req, res) => {
       reviewerName,
     });
 
+    let message = 'Autorización aprobada.';
+    if (request.actionType === 'delete_billing_payment') {
+      message = 'Autorización aprobada. El pago fue anulado.';
+    } else if (result?.updated) {
+      message = `Autorización aprobada. Se eliminaron ${result.updated} registro(s).`;
+    } else {
+      message = 'Autorización aprobada. No había registros para eliminar.';
+    }
+
     return res.status(200).json({
-      message: result.updated
-        ? `Autorización aprobada. Se eliminaron ${result.updated} registro(s).`
-        : 'Autorización aprobada. No había registros para eliminar.',
+      message,
       request,
       ...result,
     });

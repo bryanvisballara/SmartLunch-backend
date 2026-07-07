@@ -14,6 +14,28 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatCurrency(value = 0) {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    maximumFractionDigits: 0,
+  }).format(Number(value || 0));
+}
+
+function resolveRequestDetail(item = {}) {
+  if (item.actionType === 'delete_billing_payment') {
+    return (
+      <div className="enrollment-matricula-rectoria__evidence">
+        <span>{item.studentName || '—'}</span>
+        <span>{item.paymentConcept || 'Pago académico'}</span>
+        <span>{formatCurrency(item.paymentAmount)} · {item.paymentMethodLabel || item.paymentMethod || '—'}</span>
+      </div>
+    );
+  }
+
+  return item.recordCount || 0;
+}
+
 function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +77,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
   };
 
   const onReject = async (requestId) => {
-    const confirmed = window.confirm('¿Rechazar esta solicitud de borrado?');
+    const confirmed = window.confirm('¿Rechazar esta solicitud?');
     if (!confirmed) return;
 
     setActionLoading(`reject:${requestId}`);
@@ -84,7 +106,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
           <div className="enrollment-matricula-rectoria__section-head">
             <div>
               <h3>Solicitudes pendientes</h3>
-              <p>Autoriza o rechaza los borrados de consentimientos y documentos firmados solicitados desde cartera.</p>
+              <p>Autoriza o rechaza los borrados de consentimientos, documentos firmados y anulaciones de pagos solicitados desde cartera.</p>
             </div>
           </div>
 
@@ -94,7 +116,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
                 <tr>
                   <th>Solicitud</th>
                   <th>Solicitante</th>
-                  <th>Registros</th>
+                  <th>Detalle</th>
                   <th>Fecha</th>
                   <th>Acciones</th>
                 </tr>
@@ -109,7 +131,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
                         <span>{item.requestedByRole || '—'}</span>
                       </div>
                     </td>
-                    <td>{item.recordCount || 0}</td>
+                    <td>{resolveRequestDetail(item)}</td>
                     <td>{formatDateTime(item.submittedAt)}</td>
                     <td>
                       <div className="enrollment-matricula-rectoria__actions">

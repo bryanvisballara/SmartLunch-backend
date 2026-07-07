@@ -1,14 +1,24 @@
+const AcademicCharge = require('../models/academicCharge.model');
+const AcademicChargePayment = require('../models/academicChargePayment.model');
 const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
 const EnrollmentMatriculaPurgeRequest = require('../models/enrollmentMatriculaPurgeRequest.model');
+const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const {
   clearAllConsentsForRectoria,
   clearAllSignedDocumentsForRectoria,
 } = require('./enrollmentMatricula.service');
+const {
+  executeBillingPaymentDeletion,
+  isCarteraBillingPayment,
+  isGatewayBillingPaymentMethod,
+  labelPaymentMethod,
+} = require('./academicBillingPaymentDeletion.service');
 
 const ACTION_LABELS = {
   clear_consents: 'Borrar consentimientos de matrícula',
   clear_signatures: 'Borrar documentos firmados de matrícula',
+  delete_billing_payment: 'Anular pago de cartera',
 };
 
 function normalizeText(value) {
@@ -58,7 +68,7 @@ async function createMatriculaPurgeRequest({
   actionType,
 }) {
   const normalizedActionType = normalizeText(actionType);
-  if (!ACTION_LABELS[normalizedActionType]) {
+  if (!['clear_consents', 'clear_signatures'].includes(normalizedActionType)) {
     throw createHttpError('Tipo de solicitud inválido.');
   }
 
@@ -85,6 +95,69 @@ async function createMatriculaPurgeRequest({
     requestedByName: normalizeText(userName) || 'Usuario',
     requestedByRole: normalizeText(userRole),
     recordCount,
+    submittedAt: new Date(),
+  });
+
+  return serializePurgeRequest(request);
+}
+
+async function createBillingPaymentDeletionRequest({
+  schoolId,
+  userId,
+  userRole,
+  userName,
+  paymentId,
+}) {
+  const payment = await AcademicChargePayment.findOne({ _id: paymentId, schoolId });
+  if (!payment) {
+    throw createHttpError('El pago no existe.', 404);
+  }
+
+  if (isGatewayBillingPaymentMethod(payment.method)) {
+    throw createHttpError(
+      'Los pagos aprobados por pasarela o portal del acudiente no pueden anularse desde cartera.',
+      409
+    );
+  }
+
+  if (!isCarteraBillingPayment(payment)) {
+    throw createHttpError('Solo se pueden solicitar anulaciones de pagos registrados manualmente en cartera.', 409);
+  }
+
+  const existingPending = await EnrollmentMatriculaPurgeRequest.findOne({
+    schoolId,
+    actionType: 'delete_billing_payment',
+    paymentId: payment._id,
+    status: 'pending',
+  }).lean();
+
+  if (existingPending) {
+    throw createHttpError('Ya existe una solicitud pendiente para este pago.', 409);
+  }
+
+  const [charge, student] = await Promise.all([
+    AcademicCharge.findOne({ _id: payment.chargeId, schoolId }).select('concept category').lean(),
+    payment.studentId
+      ? Student.findOne({ _id: payment.studentId, schoolId }).select('name').lean()
+      : null,
+  ]);
+
+  const request = await EnrollmentMatriculaPurgeRequest.create({
+    schoolId,
+    actionType: 'delete_billing_payment',
+    status: 'pending',
+    requestedByUserId: userId,
+    requestedByName: normalizeText(userName) || 'Usuario',
+    requestedByRole: normalizeText(userRole),
+    recordCount: 1,
+    paymentId: payment._id,
+    chargeId: payment.chargeId,
+    studentId: payment.studentId || null,
+    studentName: normalizeText(student?.name) || '',
+    paymentConcept: normalizeText(charge?.concept) || 'Pago académico',
+    paymentAmount: Number(payment.amount || 0),
+    paymentMethod: normalizeText(payment.method),
+    paymentMethodLabel: labelPaymentMethod(payment.method),
     submittedAt: new Date(),
   });
 
@@ -122,7 +195,7 @@ async function listMatriculaPurgeRequestsForRequester({ schoolId, userId }) {
     status: { $in: ['pending', 'approved', 'rejected'] },
   })
     .sort({ submittedAt: -1, createdAt: -1 })
-    .limit(10)
+    .limit(20)
     .lean();
 
   return items.map(serializePurgeRequest);
@@ -144,15 +217,26 @@ async function approveMatriculaPurgeRequest({
     throw createHttpError('La solicitud no existe o ya fue revisada.', 404);
   }
 
-  const result = request.actionType === 'clear_consents'
-    ? await clearAllConsentsForRectoria({ schoolId })
-    : await clearAllSignedDocumentsForRectoria({ schoolId });
+  let result;
+  if (request.actionType === 'delete_billing_payment') {
+    result = await executeBillingPaymentDeletion({
+      schoolId,
+      paymentId: request.paymentId,
+      allowGateway: false,
+    });
+  } else {
+    result = request.actionType === 'clear_consents'
+      ? await clearAllConsentsForRectoria({ schoolId })
+      : await clearAllSignedDocumentsForRectoria({ schoolId });
+  }
 
   request.status = 'approved';
   request.reviewedAt = new Date();
   request.reviewedByUserId = reviewerUserId;
   request.reviewedByName = normalizeText(reviewerName) || 'Rectoría';
-  request.executedCount = Number(result?.updated || 0);
+  request.executedCount = request.actionType === 'delete_billing_payment'
+    ? 1
+    : Number(result?.updated || 0);
   await request.save();
 
   return {
@@ -202,6 +286,7 @@ async function resolveReviewerName({ schoolId, userId }) {
 module.exports = {
   ACTION_LABELS,
   approveMatriculaPurgeRequest,
+  createBillingPaymentDeletionRequest,
   createMatriculaPurgeRequest,
   getMatriculaPurgeRequestSummary,
   listMatriculaPurgeRequestsForRequester,
