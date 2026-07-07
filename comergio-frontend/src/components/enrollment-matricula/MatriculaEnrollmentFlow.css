@@ -98,6 +98,37 @@
   color: #0f172a;
 }
 
+.matricula-flow-shell__logout {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 180ms ease, background 180ms ease;
+}
+
+.matricula-flow-shell__logout:hover {
+  transform: scale(1.02);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.matricula-flow-shell:not(.matricula-flow-shell--intro) .matricula-flow-shell__logout {
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+}
+
+.matricula-flow-shell:not(.matricula-flow-shell--intro) .matricula-flow-shell__logout:hover {
+  background: rgba(15, 23, 42, 0.1);
+}
+
 .matricula-flow-intro {
   display: grid;
 }

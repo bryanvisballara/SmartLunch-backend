@@ -367,6 +367,7 @@ function MatriculaEnrollmentFlow({
   schoolName,
   schoolId = '',
   onClose,
+  onLogout,
   onProcessUpdated,
   startAtIntro = true,
   pendingSignatureResume = false,
@@ -627,6 +628,10 @@ function MatriculaEnrollmentFlow({
         {!blocking ? (
           <button aria-label="Cerrar" className="matricula-flow-shell__close" onClick={onClose} type="button">
             ×
+          </button>
+        ) : onLogout ? (
+          <button className="matricula-flow-shell__logout" onClick={onLogout} type="button">
+            Cerrar sesión
           </button>
         ) : null}
 

@@ -814,6 +814,63 @@ async function unlinkCarteraPaymentFromEnrollmentMatricula({
   return process;
 }
 
+async function ensureAnnualTuitionChargesForMatriculaGate({ schoolId, parentId, studentIds = [] }) {
+  if (!isMillenniumSchoolId(schoolId) || !studentIds.length) {
+    return;
+  }
+
+  const parentObjectId = toObjectId(parentId);
+  if (!parentObjectId) {
+    return;
+  }
+
+  const billingProfiles = await StudentBillingProfile.find({
+    schoolId,
+    active: true,
+    studentId: { $in: studentIds },
+  }).lean();
+
+  const now = new Date();
+
+  for (const profile of billingProfiles) {
+    const existingCharge = await AcademicCharge.exists({
+      schoolId,
+      studentId: profile.studentId,
+      category: 'annual_tuition',
+      status: { $ne: 'cancelled' },
+    });
+    if (existingCharge) {
+      continue;
+    }
+
+    const amount = Math.max(0, Math.round(Number(profile.annualTuitionAmount || profile.annualTuitionBaseAmount || 0)));
+    if (amount <= 0) {
+      continue;
+    }
+
+    const dueDate = profile.annualTuitionDueDate ? new Date(profile.annualTuitionDueDate) : now;
+    const safeDueDate = Number.isNaN(dueDate.getTime()) ? now : dueDate;
+
+    await AcademicCharge.create({
+      schoolId,
+      createdByUserId: parentObjectId,
+      createdByRole: 'parent',
+      parentId: parentObjectId,
+      studentId: profile.studentId,
+      billingProfileId: profile._id,
+      category: 'annual_tuition',
+      concept: `Matrícula anual ${safeDueDate.getFullYear()}`,
+      description: 'Cargo de matrícula anual generado para el proceso de matrícula.',
+      amount,
+      originalAmount: amount,
+      dueDate: safeDueDate,
+      audienceType: 'individual',
+      targetGrade: profile.grade || '',
+      status: 'pending',
+    });
+  }
+}
+
 async function getMatriculaRequirementForParent({ schoolId, parentId }) {
   if (!isMillenniumSchoolId(schoolId)) {
     return { required: false, blocking: false };
@@ -847,6 +904,12 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     return { required: false, blocking: false };
   }
 
+  await ensureAnnualTuitionChargesForMatriculaGate({
+    schoolId,
+    parentId: parentObjectId,
+    studentIds,
+  });
+
   const unpaidCharge = await AcademicCharge.findOne({
     schoolId,
     studentId: { $in: studentIds },
@@ -867,7 +930,19 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
   });
 
   const paymentConfirmed = normalizeText(process?.payment?.status).includes('PAID') || Boolean(process?.payment?.chargePaymentId);
-  if (paymentConfirmed || ['contract_pending', 'pagare_pending', 'completed'].includes(process.status)) {
+  const requiresSignature = ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(process.status);
+
+  if (requiresSignature) {
+    return {
+      required: true,
+      blocking: true,
+      reason: 'signature_pending',
+      process: serializeProcess(process, charge),
+      charge,
+    };
+  }
+
+  if (paymentConfirmed || process.status === 'completed') {
     return { required: false, blocking: false };
   }
 

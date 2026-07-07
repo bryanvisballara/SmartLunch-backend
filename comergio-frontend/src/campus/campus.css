@@ -1089,6 +1089,13 @@ button.campus-coordination__selected-item.is-selected {
   background: var(--parent-bg);
 }
 
+.campus-parent-mobile-app.is-matricula-locked .campus-parent-mobile__content,
+.campus-parent-mobile-app.is-matricula-locked .parent-mobile-page-embedded,
+.campus-parent-mobile-app.is-matricula-locked .campus-parent-mobile__portal-shell {
+  pointer-events: none;
+  user-select: none;
+}
+
 .campus-parent-mobile-app.has-parent-portal-header {
   background:
     linear-gradient(120deg, #0f172a 0%, #1d3557 45%, #334155 100%) top / 100% calc(max(env(safe-area-inset-top, 0px), 0.75rem) + 7.5rem) no-repeat,
