@@ -1,3 +1,5 @@
+const archiver = require('archiver');
+const { PassThrough } = require('stream');
 const mongoose = require('mongoose');
 const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
 const AcademicCharge = require('../models/academicCharge.model');
@@ -666,6 +668,160 @@ async function listSignedDocumentsForRectoria({ schoolId }) {
     .lean();
 }
 
+function sanitizeZipEntryName(value, fallback = 'documento.pdf') {
+  const cleaned = normalizeText(value)
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || fallback;
+}
+
+function hasEnrollmentPaymentConfirmed(process = {}) {
+  return normalizeText(process.payment?.status).includes('PAID') || Boolean(process.payment?.chargePaymentId);
+}
+
+function hasEnrollmentSignedDocuments(process = {}) {
+  return Boolean(
+    normalizeText(process.contract?.signedPdfBase64)
+    || normalizeText(process.pagare?.signedPdfBase64)
+    || process.contract?.signedAt
+    || process.pagare?.signedAt
+  );
+}
+
+async function clearAllConsentsForRectoria({ schoolId }) {
+  const processes = await EnrollmentMatriculaProcess.find({
+    schoolId,
+    'consent.accepted': true,
+  });
+
+  let updated = 0;
+  for (const process of processes) {
+    process.consent = {
+      accepted: false,
+      acceptedAt: null,
+      ipAddress: '',
+      device: '',
+      userAgent: '',
+      userId: null,
+      studentId: process.studentId,
+      version: CONSENT_VERSION,
+    };
+    process.introAcknowledgedAt = null;
+
+    if (hasEnrollmentSignedDocuments(process)) {
+      // Keep signature flow status when only consent evidence is removed.
+    } else if (hasEnrollmentPaymentConfirmed(process)) {
+      process.status = process.contractMode === 'digital' ? 'office_payment_confirmed' : 'payment_confirmed';
+    } else {
+      process.status = 'intro_pending';
+    }
+
+    await process.save();
+    updated += 1;
+  }
+
+  return { updated };
+}
+
+async function clearAllSignedDocumentsForRectoria({ schoolId }) {
+  const processes = await EnrollmentMatriculaProcess.find({
+    schoolId,
+    $or: [
+      { 'contract.signedAt': { $ne: null } },
+      { 'pagare.signedAt': { $ne: null } },
+    ],
+  });
+
+  let updated = 0;
+  for (const process of processes) {
+    process.contract = {};
+    process.pagare = {};
+
+    if (hasEnrollmentPaymentConfirmed(process)) {
+      process.status = process.contractMode === 'digital' ? 'office_payment_confirmed' : 'payment_confirmed';
+    } else if (process.consent?.accepted) {
+      process.status = 'consent_accepted';
+    } else {
+      process.status = 'intro_pending';
+    }
+
+    await process.save();
+    updated += 1;
+  }
+
+  return { updated };
+}
+
+async function buildSignedDocumentsZipForRectoria({ schoolId }) {
+  const processes = await EnrollmentMatriculaProcess.find({
+    schoolId,
+    $or: [
+      { 'contract.signedPdfBase64': { $ne: '' } },
+      { 'pagare.signedPdfBase64': { $ne: '' } },
+    ],
+  })
+    .sort({ studentName: 1, updatedAt: -1 })
+    .select('studentName contract pagare')
+    .lean();
+
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  const stream = new PassThrough();
+  const usedNames = new Set();
+
+  const ensureUniqueName = (candidate) => {
+    let nextName = candidate;
+    let suffix = 2;
+    while (usedNames.has(nextName)) {
+      const extensionIndex = candidate.lastIndexOf('.');
+      if (extensionIndex > 0) {
+        const base = candidate.slice(0, extensionIndex);
+        const extension = candidate.slice(extensionIndex);
+        nextName = `${base}-${suffix}${extension}`;
+      } else {
+        nextName = `${candidate}-${suffix}`;
+      }
+      suffix += 1;
+    }
+    usedNames.add(nextName);
+    return nextName;
+  };
+
+  const bufferPromise = new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+    archive.on('error', reject);
+    archive.pipe(stream);
+  });
+
+  for (const process of processes) {
+    const studentLabel = sanitizeZipEntryName(process.studentName || 'estudiante', 'estudiante');
+
+    if (normalizeText(process.contract?.signedPdfBase64)) {
+      const fileName = ensureUniqueName(
+        sanitizeZipEntryName(process.contract?.fileName, `${studentLabel}-contrato.pdf`)
+      );
+      archive.append(Buffer.from(process.contract.signedPdfBase64, 'base64'), { name: fileName });
+    }
+
+    if (normalizeText(process.pagare?.signedPdfBase64)) {
+      const fileName = ensureUniqueName(
+        sanitizeZipEntryName(process.pagare?.fileName, `${studentLabel}-pagare.pdf`)
+      );
+      archive.append(Buffer.from(process.pagare.signedPdfBase64, 'base64'), { name: fileName });
+    }
+  }
+
+  await archive.finalize();
+  const buffer = await bufferPromise;
+  return {
+    buffer,
+    fileCount: usedNames.size,
+  };
+}
+
 function normalizeEnrollmentContractMode(value) {
   const normalized = normalizeText(value).toLowerCase();
   if (normalized === 'physical' || normalized === 'fisico' || normalized === 'contrato_fisico' || normalized === 'contrato fisico') {
@@ -960,6 +1116,9 @@ module.exports = {
   acceptConsent,
   acknowledgeIntro,
   buildContractParamsSnapshot,
+  buildSignedDocumentsZipForRectoria,
+  clearAllConsentsForRectoria,
+  clearAllSignedDocumentsForRectoria,
   completeMatriculaDirectPayment,
   completeMatriculaGatewayPayment,
   getMatriculaRequirementForParent,

@@ -884,6 +884,49 @@
   margin: 0 0 6px;
 }
 
+.enrollment-matricula-rectoria__section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.enrollment-matricula-rectoria__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.enrollment-matricula-rectoria__action {
+  border: 0;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.enrollment-matricula-rectoria__action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.enrollment-matricula-rectoria__action--danger {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.enrollment-matricula-rectoria__success {
+  background: #ecfdf5;
+  color: #047857;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 600;
+}
+
 .enrollment-matricula-rectoria__table-wrap {
   overflow: auto;
   margin-top: 16px;

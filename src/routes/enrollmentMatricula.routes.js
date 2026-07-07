@@ -7,6 +7,9 @@ const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess
 const {
   acceptConsent,
   acknowledgeIntro,
+  buildSignedDocumentsZipForRectoria,
+  clearAllConsentsForRectoria,
+  clearAllSignedDocumentsForRectoria,
   getMatriculaRequirementForParent,
   getOrCreateProcessForCharge,
   listConsentsForRectoria,
@@ -194,6 +197,50 @@ rectoriaRouter.get('/signatures', async (req, res) => {
   try {
     const items = await listSignedDocumentsForRectoria({ schoolId: req.user.schoolId });
     return res.status(200).json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.delete('/consents', async (req, res) => {
+  try {
+    const result = await clearAllConsentsForRectoria({ schoolId: req.user.schoolId });
+    return res.status(200).json({
+      message: result.updated
+        ? `Se eliminaron ${result.updated} consentimiento(s) registrado(s).`
+        : 'No había consentimientos para eliminar.',
+      ...result,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.delete('/signatures', async (req, res) => {
+  try {
+    const result = await clearAllSignedDocumentsForRectoria({ schoolId: req.user.schoolId });
+    return res.status(200).json({
+      message: result.updated
+        ? `Se eliminaron ${result.updated} registro(s) de documentos firmados.`
+        : 'No había documentos firmados para eliminar.',
+      ...result,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.get('/signatures/download-zip', async (req, res) => {
+  try {
+    const { buffer, fileCount } = await buildSignedDocumentsZipForRectoria({ schoolId: req.user.schoolId });
+    if (!fileCount) {
+      return res.status(404).json({ message: 'No hay documentos firmados con PDF disponible para exportar.' });
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="documentos-firmados-matricula-${stamp}.zip"`);
+    return res.status(200).send(buffer);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
