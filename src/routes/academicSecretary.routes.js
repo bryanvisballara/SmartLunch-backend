@@ -27,6 +27,8 @@ const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
+const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
+const PaymentTransaction = require('../models/paymentTransaction.model');
 const { ensureStudentWallet } = require('../utils/studentWallet');
 const { upsertStudentAccount } = require('../utils/studentAccount');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
@@ -8884,17 +8886,47 @@ router.delete('/billing/payments/:paymentId', async (req, res) => {
       return res.status(404).json({ message: 'El cargo asociado al pago no existe.' });
     }
 
-    if (['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(payment.method || '').toLowerCase())) {
+    const paymentMethod = String(payment.method || '').toLowerCase();
+    const isMatriculaCharge = String(charge.category || '') === 'annual_tuition';
+    const isGatewayPayment = ['wompi', 'parent_portal', 'epayco', 'bold'].includes(paymentMethod);
+
+    if (isGatewayPayment && !isMatriculaCharge) {
       return res.status(409).json({
         message: 'Este pago fue registrado por pasarela o portal del acudiente. No puede eliminarse desde cartera.',
       });
     }
 
-    await unlinkCarteraPaymentFromEnrollmentMatricula({
-      schoolId,
-      charge,
-      chargePaymentId: payment._id,
-    });
+    let paymentTransactionId = null;
+    if (isMillenniumSchoolId(schoolId) && isMatriculaCharge) {
+      const enrollmentProcess = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId: charge._id })
+        .select('payment')
+        .lean();
+      paymentTransactionId = enrollmentProcess?.payment?.paymentTransactionId || null;
+    }
+
+    try {
+      await unlinkCarteraPaymentFromEnrollmentMatricula({
+        schoolId,
+        charge,
+        chargePaymentId: payment._id,
+      });
+    } catch (unlinkError) {
+      return res.status(409).json({ message: unlinkError.message });
+    }
+
+    if (paymentTransactionId) {
+      await PaymentTransaction.updateOne(
+        { _id: paymentTransactionId, schoolId },
+        {
+          $set: {
+            status: 'rejected',
+            providerStatus: 'VOIDED',
+            failureReason: 'Pago de matricula anulado desde cartera',
+            academicChargePaymentId: null,
+          },
+        }
+      );
+    }
 
     await AcademicChargePayment.deleteOne({ _id: payment._id, schoolId });
 

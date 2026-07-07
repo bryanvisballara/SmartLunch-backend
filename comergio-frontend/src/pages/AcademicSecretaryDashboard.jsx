@@ -121,6 +121,34 @@ function resolveEnrollmentPaidPaymentIds(account = {}) {
   return paymentIds;
 }
 
+function isGatewayBillingPaymentMethod(method = '') {
+  return ['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(method || '').toLowerCase());
+}
+
+function canDeleteBillingPaymentFromCartera({ method = '', category = '' } = {}) {
+  if (String(category || '') === 'annual_tuition') {
+    return true;
+  }
+  return !isGatewayBillingPaymentMethod(method);
+}
+
+function resolveEnrollmentPaymentMethodLabel(account = {}) {
+  const rows = (account.paymentPlan?.rows || []).filter(
+    (row) => String(row.category || '') === 'annual_tuition' && String(row.status || '') === 'paid',
+  );
+  const labels = [];
+  rows.forEach((row) => {
+    (row.paymentDetails || []).forEach((payment) => {
+      const label = payment.methodLabel || labelBillingPaymentMethod(payment.method) || payment.method;
+      if (label) labels.push(label);
+    });
+    if (!row.paymentDetails?.length && row.paymentMethodLabel) {
+      labels.push(row.paymentMethodLabel);
+    }
+  });
+  return labels.length ? [...new Set(labels)].join(' · ') : '—';
+}
+
 function filterBillingEnrollmentAccounts(accounts = [], subview = 'pending') {
   if (subview === 'paid') {
     return accounts.filter((account) => account.enrollmentStatus === 'paid');
@@ -180,7 +208,18 @@ function filterBillingPaymentPlanRows(rows = [], billingSection = 'overview') {
 }
 
 function labelBillingPaymentMethod(value) {
-  return BILLING_PAYMENT_METHOD_OPTIONS.find((option) => option.value === value)?.label || '';
+  const fromOptions = BILLING_PAYMENT_METHOD_OPTIONS.find((option) => option.value === value)?.label;
+  if (fromOptions) return fromOptions;
+
+  const extraLabels = {
+    wompi: 'Wompi',
+    parent_portal: 'Portal acudiente',
+    pse: 'PSE',
+    epayco: 'ePayco',
+    bold: 'Bold',
+    other: 'Otro',
+  };
+  return extraLabels[String(value || '').toLowerCase()] || '';
 }
 
 function labelEnrollmentMatriculaConsentStatus(item = {}) {
@@ -3548,7 +3587,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                         {activeSection === 'enrollments' ? (
                           <>
                             <th>Estado matrícula</th>
-                            <th>Pendiente</th>
+                            <th>Medio de pago</th>
                             <th>Pagado</th>
                             {billingEnrollmentSubview === 'paid' ? <th>Acciones</th> : null}
                           </>
@@ -3587,7 +3626,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                           {activeSection === 'enrollments' ? (
                             <>
                               <td><span className={`academic-secretary__billing-status is-${resolveEnrollmentBillingStatusClass(account)}`}>{account.enrollmentStatusLabel || account.statusLabel}</span></td>
-                              <td>{Number(account.enrollmentPendingAmount || 0) > 0 ? formatCurrency(account.enrollmentPendingAmount) : '$0'}</td>
+                              <td>{resolveEnrollmentPaymentMethodLabel(account)}</td>
                               <td>{formatCurrency(account.enrollmentPaidAmount || 0)}</td>
                               {billingEnrollmentSubview === 'paid' ? (
                                 <td>
@@ -3942,13 +3981,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     <td>
                       <button
                         className="academic-secretary__billing-plan-action is-danger"
-                        disabled={busy || ['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(payment.method || '').toLowerCase())}
+                        disabled={busy || !canDeleteBillingPaymentFromCartera(payment)}
                         onClick={() => openDeleteBillingPaymentModal({
                           paymentId: payment._id,
                           studentName: payment.studentName,
                           concept: payment.concept,
                         })}
-                        title={['wompi', 'parent_portal', 'epayco', 'bold'].includes(String(payment.method || '').toLowerCase()) ? 'Los pagos por pasarela no se pueden borrar desde cartera' : 'Eliminar pago registrado por error'}
+                        title={!canDeleteBillingPaymentFromCartera(payment) ? 'Los pagos por pasarela no se pueden borrar desde cartera' : 'Eliminar pago registrado por error'}
                         type="button"
                       >
                         Borrar
