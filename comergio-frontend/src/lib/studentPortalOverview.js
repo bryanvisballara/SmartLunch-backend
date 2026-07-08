@@ -37,6 +37,7 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
       finance: false,
       academic: true,
       cafeteria: true,
+      games: true,
       nursing: true,
       wellbeing: true,
       coexistence: true,

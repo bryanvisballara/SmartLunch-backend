@@ -12,6 +12,10 @@ const CampusPost = require('../models/campusPost.model');
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
+const {
+  loadGlobalColibriLeaderboard,
+  submitColibriGameScoreForUser,
+} = require('../services/colibriGame.service');
 const PsychologyCase = require('../models/psychologyCase.model');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const Wallet = require('../models/wallet.model');
@@ -30,6 +34,7 @@ const STUDENT_PORTAL_FEATURES = {
   wellbeing: true,
   coexistence: true,
   transport: true,
+  games: true,
 };
 
 function serializeStudentFeedItem(item = {}, currentUserId = '') {
@@ -466,6 +471,36 @@ router.get('/portal/academic-attendance', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/colibri-game/leaderboard', async (_req, res) => {
+  try {
+    const entries = await loadGlobalColibriLeaderboard(50);
+
+    return res.status(200).json({ entries });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar el ranking' });
+  }
+});
+
+router.post('/portal/colibri-game/scores', async (req, res) => {
+  try {
+    const { schoolId, userId, name: userName } = req.user;
+    const result = await submitColibriGameScoreForUser({
+      schoolId,
+      userId,
+      userName,
+      score: req.body?.score,
+    });
+
+    return res.status(result.statusCode).json({
+      message: 'Score saved',
+      entry: result.entry,
+    });
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 500;
+    return res.status(statusCode).json({ message: error.message || 'No se pudo guardar el puntaje' });
   }
 });
 

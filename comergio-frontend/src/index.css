@@ -860,16 +860,22 @@ body {
 .platform-android body.login-route-active:not(.login-boot-active) #root,
 .platform-android body.login-route-active:not(.login-boot-active) #root > div,
 .platform-android body.login-route-active:not(.login-boot-active) main.container {
+  height: 100vh;
+  height: 100svh;
   height: 100dvh;
-  max-height: 100dvh;
-  min-height: 100dvh;
+  height: 100lvh;
+  max-height: 100lvh;
+  min-height: 100lvh;
   overflow: hidden;
 }
 
 .platform-ios .login-page-auth {
+  height: 100vh;
+  height: 100svh;
   height: 100dvh;
-  max-height: 100dvh;
-  min-height: 100dvh;
+  height: 100lvh;
+  max-height: 100lvh;
+  min-height: 100lvh;
   overflow-x: hidden;
   overflow-y: hidden;
   overscroll-behavior-y: none;
@@ -888,9 +894,12 @@ body {
 .platform-ios body.login-route-active:not(.login-boot-active) #root,
 .platform-ios body.login-route-active:not(.login-boot-active) #root > div,
 .platform-ios body.login-route-active:not(.login-boot-active) main.container {
+  height: 100vh;
+  height: 100svh;
   height: 100dvh;
-  max-height: 100dvh;
-  min-height: 100dvh;
+  height: 100lvh;
+  max-height: 100lvh;
+  min-height: 100lvh;
   overflow: hidden;
 }
 
@@ -900,7 +909,9 @@ body {
 
 .platform-web .login-page-auth {
   min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
+  min-height: 100lvh;
   overflow-y: auto;
   overscroll-behavior-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -913,7 +924,9 @@ body.login-route-active:not(.login-boot-active) #root,
 body.login-route-active:not(.login-boot-active) #root > div,
 body.login-route-active:not(.login-boot-active) main.container {
   min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
+  min-height: 100lvh;
   max-width: none;
   width: 100%;
   margin: 0;
@@ -922,6 +935,19 @@ body.login-route-active:not(.login-boot-active) main.container {
     radial-gradient(ellipse 95% 42% at 50% 6%, rgba(1, 93, 137, 0.62) 0%, rgba(0, 49, 104, 0.24) 42%, transparent 72%),
     radial-gradient(ellipse 120% 70% at 50% -4%, rgba(4, 47, 93, 0.38) 0%, transparent 58%),
     linear-gradient(180deg, #001330 0%, #00122e 48%, #000e23 100%);
+}
+
+html.games-route-active,
+body.games-route-active,
+body.games-route-active #root,
+body.games-route-active #root > div,
+body.games-route-active .campus-app-main {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  min-height: 100lvh;
+  background: linear-gradient(160deg, #0b2530 0%, #1d6972 48%, #0d3b66 100%);
+  --app-shell-background: #0d3b66;
 }
 
 html.login-route-active.login-boot-active,
@@ -946,7 +972,10 @@ body.login-route-active.login-boot-active main.container {
   place-items: start center;
   align-content: start;
   justify-items: center;
+  min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
+  min-height: 100lvh;
 }
 
 .login-page-auth .login-auth-content {
@@ -1535,17 +1564,20 @@ label {
   --login-dark: #00122e;
   --login-accent: #00d2ff;
   --login-text: #eef6ff;
+  --login-page-bg:
+    radial-gradient(ellipse 95% 42% at 50% 6%, rgba(1, 93, 137, 0.62) 0%, rgba(0, 49, 104, 0.24) 42%, transparent 72%),
+    radial-gradient(ellipse 120% 70% at 50% -4%, rgba(4, 47, 93, 0.38) 0%, transparent 58%),
+    linear-gradient(180deg, #001330 0%, #00122e 48%, #000e23 100%);
   font-family: 'Inter', 'Poppins', 'Segoe UI', sans-serif;
   width: 100%;
   min-width: 100%;
   margin: 0;
   padding: calc(env(safe-area-inset-top, 0px) + 1.4rem) 1rem calc(env(safe-area-inset-bottom, 0px) + 2.5rem);
   min-height: 100vh;
+  min-height: 100svh;
   min-height: 100dvh;
-  background:
-    radial-gradient(ellipse 95% 42% at 50% 6%, rgba(1, 93, 137, 0.62) 0%, rgba(0, 49, 104, 0.24) 42%, transparent 72%),
-    radial-gradient(ellipse 120% 70% at 50% -4%, rgba(4, 47, 93, 0.38) 0%, transparent 58%),
-    linear-gradient(180deg, #001330 0%, #00122e 48%, #000e23 100%);
+  min-height: 100lvh;
+  background: var(--login-page-bg);
   display: grid;
   justify-items: center;
   align-content: start;
@@ -1555,6 +1587,19 @@ label {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+.login-page-auth::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  height: 100lvh;
+  z-index: -2;
+  background: var(--login-page-bg);
+  pointer-events: none;
 }
 
 .login-page-auth::after {

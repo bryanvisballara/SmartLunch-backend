@@ -5,6 +5,7 @@ const ROUTED_PARENT_SECTION_SUFFIXES = {
   academic: '/academic',
   cafeteria: '/cafeteria',
   finance: '/finance',
+  games: '/juegos',
   nursing: '/enfermeria',
   wellbeing: '/wellbeing',
   coexistence: '/coexistence',
@@ -88,6 +89,10 @@ export function resolveParentNotificationSection(path = '', search = '') {
 
   if (normalizedPath.includes('/cafeteria')) {
     return 'cafeteria';
+  }
+
+  if (normalizedPath.includes('/juegos')) {
+    return 'games';
   }
 
   return 'home';

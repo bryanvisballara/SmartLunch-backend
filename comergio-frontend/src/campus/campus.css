@@ -6384,6 +6384,99 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   background: linear-gradient(180deg, #eff6ff 0%, #fff 100%);
 }
 
+.campus-parent-mobile-app.is-games-section {
+  --parent-bg: #0d3b66;
+  gap: 0;
+  background: linear-gradient(160deg, #0b2530 0%, #1d6972 48%, #0d3b66 100%);
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  min-height: 100lvh;
+}
+
+.campus-parent-mobile-app.has-parent-portal-header.is-games-section {
+  background: linear-gradient(160deg, #0b2530 0%, #1d6972 48%, #0d3b66 100%);
+}
+
+.campus-parent-mobile-app.is-games-section .campus-parent-mobile__content.is-games {
+  display: block;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  min-height: 100lvh;
+  background: transparent;
+}
+
+.campus-parent-mobile-app.has-student-academic-bottom-nav.is-games-section .campus-parent-mobile__content.is-games {
+  padding-bottom: 0;
+}
+
+.campus-parent-mobile-app.is-games-section .colibri-flappy-view {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  min-height: 100lvh;
+}
+
+.campus-parent-mobile__game-promo {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(46, 196, 232, 0.28);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(29, 105, 114, 0.12), rgba(46, 196, 232, 0.08));
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-parent-mobile__game-promo-image {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  background: transparent;
+}
+
+.campus-parent-mobile__game-promo-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.campus-parent-mobile__game-promo-copy strong {
+  color: #0f4c5c;
+  font-size: 0.98rem;
+}
+
+.campus-parent-mobile__game-promo-copy small {
+  color: #4b6b7c;
+  font-size: 0.82rem;
+}
+
+.campus-parent-mobile__game-promo-cta {
+  min-width: 64px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2ec4e8, #1d6972);
+  color: #062028;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.campus-parent-mobile-app:has(.campus-parent-mobile__bottom-nav .campus-parent-mobile__nav-item:nth-child(6)) .campus-parent-mobile__bottom-nav {
+  width: min(calc(100vw - 0.75rem), 28rem);
+}
+
 .campus-parent-mobile__bottom-nav {
   position: fixed;
   left: 50%;

@@ -55,12 +55,15 @@ import {
 import { isMillenniumSchool, shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
 import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance, getStudentAcademicFeed } from '../../services/studentPortal.service';
 import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
+import ColibriFlappyGame from '../../components/games/ColibriFlappyGame';
+import colibriGameCover from '../../assets/colibrisinfondo.png';
 
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
   { key: 'finance', label: 'Cartera', icon: 'money' },
   { key: 'academic', label: 'Academico', icon: 'book' },
   { key: 'cafeteria', label: 'Comida', icon: 'food' },
+  { key: 'games', label: 'Juegos', icon: 'game' },
   { key: 'nursing', label: 'Enfermeria', icon: 'nursing' },
   { key: 'transport', label: 'Ruta', icon: 'transport' },
 ];
@@ -70,6 +73,7 @@ const defaultParentAppFeatures = {
   finance: true,
   academic: true,
   cafeteria: true,
+  games: false,
   nursing: true,
   wellbeing: true,
   coexistence: true,
@@ -83,6 +87,7 @@ const routedParentSectionSuffixes = {
   academic: '/academic',
   cafeteria: '/cafeteria',
   finance: '/finance',
+  games: '/juegos',
   nursing: '/enfermeria',
   wellbeing: '/wellbeing',
   coexistence: '/coexistence',
@@ -171,6 +176,10 @@ function resolveRoutedSection(pathname, routeBase) {
 
   if (normalizedPathname.startsWith(`${buildRoutedSectionPath(normalizedBase, 'transport')}/`) || normalizedPathname === buildRoutedSectionPath(normalizedBase, 'transport')) {
     return 'transport';
+  }
+
+  if (normalizedPathname.startsWith(`${buildRoutedSectionPath(normalizedBase, 'games')}/`) || normalizedPathname === buildRoutedSectionPath(normalizedBase, 'games')) {
+    return 'games';
   }
 
   return 'home';
@@ -2424,6 +2433,13 @@ function ParentAppIcon({ icon }) {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24">
         <path d="M7 3v8M10 3v8M7 7h3M16 3c-1.7 0-3 1.7-3 3.8 0 1.5.7 2.9 1.8 3.5V21M8.5 11v10" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+      </svg>
+    );
+  }
+  if (icon === 'game') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M8.5 14.2h2.8M9.9 12.8v2.8M15.8 13.3h.01M17.6 11.5h.01M7.8 8.4h8.4a3.6 3.6 0 0 1 3.6 3.6v3.2a3.6 3.6 0 0 1-3.6 3.6H7.8a3.6 3.6 0 0 1-3.6-3.6v-3.2a3.6 3.6 0 0 1 3.6-3.6Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
       </svg>
     );
   }
@@ -5452,6 +5468,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   ]);
 
   useEffect(() => {
+    const isGamesRoute = activeSection === 'games';
+    document.documentElement.classList.toggle('games-route-active', isGamesRoute);
+    document.body.classList.toggle('games-route-active', isGamesRoute);
+
+    return () => {
+      document.documentElement.classList.remove('games-route-active');
+      document.body.classList.remove('games-route-active');
+    };
+  }, [activeSection]);
+
+  useEffect(() => {
     const launchParams = readParentNotificationLaunchParams(location.search, location.pathname);
     const validAcademicViews = new Set(academicMenuItems.map((item) => item.id));
 
@@ -5492,10 +5519,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     () => parentAppSections.filter((section) => isParentSectionEnabled(section.key, parentAppFeatures)),
     [parentAppFeatures]
   );
-  const visibleStudentAppSections = useMemo(
-    () => visibleParentAppSections.filter((section) => section.key !== 'finance'),
-    [visibleParentAppSections]
-  );
+  const visibleStudentAppSections = useMemo(() => {
+    const studentFeatures = { ...parentAppFeatures, games: true };
+    return parentAppSections.filter((section) => {
+      if (section.key === 'finance') {
+        return false;
+      }
+      return isParentSectionEnabled(section.key, studentFeatures);
+    });
+  }, [parentAppFeatures]);
   const visiblePortalAppSections = studentPortalMode ? visibleStudentAppSections : visibleParentAppSections;
   const visibleParentCareMenuItems = useMemo(
     () => parentCareMenuItems.filter((item) => parentAppFeatures[item.id] !== false),
@@ -5565,7 +5597,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         .catch(() => {
           if (!cancelled) {
             setParentOverview({ children: [] });
-            setParentAppFeatures({ ...defaultParentAppFeatures, academic: true });
+            setParentAppFeatures({ ...defaultParentAppFeatures, academic: true, games: true });
           }
         })
         .finally(() => {
@@ -6897,6 +6929,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             showUserMenu={showUserMenu}
             userMenuRef={userMenuRef}
           />
+          {activeSection !== 'games' ? (
           <ParentFinanceStudentSelector
             children={workspace.children}
             includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
@@ -6909,6 +6942,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             readOnly={studentPortalMode}
             selectedChild={selectedChildForSwitcher}
           />
+          ) : null}
           {parentCareSectionContent}
           {parentTransportSectionContent}
           {financeHeroCard}
@@ -6917,7 +6951,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}${shouldLockParentPortal ? ' is-matricula-locked' : ''}`}
+      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${activeSection === 'games' ? ' is-games-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}${shouldLockParentPortal ? ' is-matricula-locked' : ''}`}
       {...pullRefreshTouchHandlers}
     >
       <ParentPullToRefreshIndicator
@@ -6926,7 +6960,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         isRefreshing={pullRefreshing}
         threshold={pullRefreshThreshold}
       />
-      {parentSectionChrome}
+      {activeSection !== 'games' ? parentSectionChrome : null}
 
       {activeSection === 'academic' && showAcademicMenu ? (
         <div className="campus-parent-mobile__academic-drawer-layer" onClick={() => setShowAcademicMenu(false)} role="presentation">
@@ -6965,11 +6999,25 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
       {!isStackedPortalSection ? (
       <div
-        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}`}
-        style={{ transform: canUseCampusPullRefresh ? `translateY(${pullRefreshContentOffset}px)` : undefined }}
+        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}${activeSection === 'games' ? ' is-games' : ''}`}
+        style={{ transform: activeSection === 'games' || !canUseCampusPullRefresh ? undefined : `translateY(${pullRefreshContentOffset}px)` }}
       >
         {activeSection === 'home' ? (
           <>
+            {studentPortalMode ? (
+              <button
+                className="campus-parent-mobile__game-promo"
+                onClick={() => onSelectSection('games')}
+                type="button"
+              >
+                <img alt="" className="campus-parent-mobile__game-promo-image" src={colibriGameCover} />
+                <span className="campus-parent-mobile__game-promo-copy">
+                  <strong>Fly</strong>
+                  <small>Vuela sin límites y alcanza la cima.</small>
+                </span>
+                <span className="campus-parent-mobile__game-promo-cta">Jugar</span>
+              </button>
+            ) : null}
             <section className="campus-parent-mobile__feed">
               {isHomeFeedLoading ? (
                 <ParentFeedLoadingSkeleton count={2} />
@@ -7087,6 +7135,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               userMenuRef={userMenuRef}
             />
           )
+        ) : null}
+
+        {activeSection === 'games' ? (
+          <ColibriFlappyGame playerName={selectedChild?.name || user?.name || ''} />
         ) : null}
       </div>
       ) : null}
