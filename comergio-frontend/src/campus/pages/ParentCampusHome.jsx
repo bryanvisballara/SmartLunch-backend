@@ -16,6 +16,7 @@ import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import ParentStudentMedicalProfilePanel from '../../components/ParentStudentMedicalProfilePanel';
 import { useParentPullToRefresh } from '../../hooks/useParentPullToRefresh';
 import { useFloatingBottomNavSize } from '../../hooks/useFloatingBottomNavSize';
+import { useStudentGamesAvailable } from '../../hooks/useStudentGamesAvailable';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
 import {
@@ -5443,6 +5444,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const normalizedRouteBase = useMemo(() => normalizeRouteBase(routeBase), [routeBase]);
   const usesRoutedSections = Boolean(normalizedRouteBase);
   const useQuerySectionRouting = shouldUseParentQuerySectionRouting();
+  const studentGamesAvailable = useStudentGamesAvailable();
+  const portalAppFeatures = useMemo(() => {
+    if (!studentPortalMode) {
+      return parentAppFeatures;
+    }
+
+    return {
+      ...parentAppFeatures,
+      games: studentGamesAvailable,
+    };
+  }, [parentAppFeatures, studentPortalMode, studentGamesAvailable]);
   const activeSection = useMemo(() => {
     if (!usesRoutedSections) {
       return localActiveSection;
@@ -5451,7 +5463,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     const sectionFromSearch = useQuerySectionRouting
       ? resolveParentSectionFromSearch(location.search)
       : '';
-    if (sectionFromSearch && isParentSectionEnabled(sectionFromSearch, parentAppFeatures)) {
+    if (sectionFromSearch && isParentSectionEnabled(sectionFromSearch, portalAppFeatures)) {
       return sectionFromSearch;
     }
 
@@ -5461,7 +5473,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     location.pathname,
     location.search,
     normalizedRouteBase,
-    parentAppFeatures,
+    portalAppFeatures,
     studentPortalMode,
     useQuerySectionRouting,
     usesRoutedSections,
@@ -5516,18 +5528,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const shouldUseEmbeddedCafeteriaPortal = activeSection === 'cafeteria' && embedPortal && cafeteriaBasePath;
   const canUseCampusPullRefresh = !shouldUseEmbeddedCafeteriaPortal;
   const visibleParentAppSections = useMemo(
-    () => parentAppSections.filter((section) => isParentSectionEnabled(section.key, parentAppFeatures)),
-    [parentAppFeatures]
+    () => parentAppSections.filter((section) => isParentSectionEnabled(section.key, portalAppFeatures)),
+    [portalAppFeatures]
   );
   const visibleStudentAppSections = useMemo(() => {
-    const studentFeatures = { ...parentAppFeatures, games: true };
     return parentAppSections.filter((section) => {
       if (section.key === 'finance') {
         return false;
       }
-      return isParentSectionEnabled(section.key, studentFeatures);
+      return isParentSectionEnabled(section.key, portalAppFeatures);
     });
-  }, [parentAppFeatures]);
+  }, [portalAppFeatures]);
   const visiblePortalAppSections = studentPortalMode ? visibleStudentAppSections : visibleParentAppSections;
   const visibleParentCareMenuItems = useMemo(
     () => parentCareMenuItems.filter((item) => parentAppFeatures[item.id] !== false),
@@ -6570,11 +6581,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [usesRoutedSections, location.pathname, location.search, location.hash, navigate, normalizedRouteBase]);
 
   useEffect(() => {
-    if (isParentSectionEnabled(activeSection, parentAppFeatures)) {
+    if (isParentSectionEnabled(activeSection, portalAppFeatures)) {
       return;
     }
 
-    const fallbackSection = getFirstEnabledParentSection(parentAppFeatures);
+    const fallbackSection = getFirstEnabledParentSection(portalAppFeatures);
     setShowCareMenu(false);
 
     if (usesRoutedSections) {
@@ -6583,7 +6594,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     }
 
     setLocalActiveSection(fallbackSection);
-  }, [activeSection, navigate, normalizedRouteBase, parentAppFeatures, usesRoutedSections]);
+  }, [activeSection, navigate, normalizedRouteBase, portalAppFeatures, usesRoutedSections]);
 
   useEffect(() => {
     if (!showUserMenu || typeof document === 'undefined') {
@@ -7004,7 +7015,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       >
         {activeSection === 'home' ? (
           <>
-            {studentPortalMode ? (
+            {studentPortalMode && studentGamesAvailable ? (
               <button
                 className="campus-parent-mobile__game-promo"
                 onClick={() => onSelectSection('games')}
@@ -7137,7 +7148,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           )
         ) : null}
 
-        {activeSection === 'games' ? (
+        {activeSection === 'games' && studentGamesAvailable ? (
           <ColibriFlappyGame playerName={selectedChild?.name || user?.name || ''} />
         ) : null}
       </div>
