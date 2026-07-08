@@ -13,6 +13,7 @@ const { findOneAcrossTenantSchoolDbs, listTenantSchoolContexts, runWithSchoolCon
 require('../models/store.model');
 const User = require('../models/user.model');
 const Student = require('../models/student.model');
+const { upsertStudentAccount } = require('../utils/studentAccount');
 const Wallet = require('../models/wallet.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const { getSchoolDisplayName, humanizeSchoolId, normalizeText } = require('../utils/schoolDisplayName');
@@ -24,6 +25,7 @@ const MeriendaSubscription = require('../models/meriendaSubscription.model');
 const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
+const { resolvePrimaryParentEmailForStudent } = require('../utils/studentParentContact');
 const {
   signAccessToken,
   createRefreshToken,
@@ -196,6 +198,38 @@ async function findPasswordResetCodeWithSchoolCandidates({ schoolId, filter, sor
   return { resetDoc: null, resolvedSchoolId: '' };
 }
 
+async function findActiveUserForPasswordReset({ schoolId, identifier }) {
+  const normalizedIdentifier = normalizeUsername(identifier);
+
+  return findUserWithSchoolCandidates({
+    schoolId,
+    filter: {
+      status: 'active',
+      deletedAt: null,
+      $or: [{ username: normalizedIdentifier }, { email: normalizedIdentifier }],
+    },
+  });
+}
+
+async function resolvePasswordResetDeliveryEmail(user) {
+  if (!user) {
+    return '';
+  }
+
+  if (String(user.role || '') === 'student') {
+    const parentEmail = await resolvePrimaryParentEmailForStudent({
+      schoolId: user.schoolId,
+      studentId: user.linkedStudentId,
+    });
+    if (parentEmail) {
+      return parentEmail;
+    }
+  }
+
+  const directEmail = normalizeEmail(user.email || user.username);
+  return isValidEmail(directEmail) ? directEmail : '';
+}
+
 function hashVerificationCode(code) {
   return crypto.createHash('sha256').update(String(code)).digest('hex');
 }
@@ -354,31 +388,28 @@ router.post('/password/forgot/send-code', async (req, res) => {
     }
 
     const normalizedSchoolId = normalizeSchoolId(schoolId);
-    const normalizedEmail = normalizeEmail(email);
+    const normalizedIdentifier = normalizeUsername(email);
 
-    if (!normalizedSchoolId || !isValidEmail(normalizedEmail)) {
-      return res.status(400).json({ message: 'Debes ingresar un correo valido.' });
+    if (!normalizedSchoolId || !normalizedIdentifier) {
+      return res.status(400).json({ message: 'Debes ingresar tu usuario o correo.' });
     }
 
-    const user = await findUserWithSchoolCandidates({
+    const user = await findActiveUserForPasswordReset({
       schoolId: normalizedSchoolId,
-      filter: {
-        status: 'active',
-        deletedAt: null,
-        $or: [{ username: normalizedEmail }, { email: normalizedEmail }],
-      },
+      identifier: normalizedIdentifier,
     });
 
     if (!user) {
       return res.status(200).json({ success: true, message: safePasswordResetSuccessMessage() });
     }
 
-    const targetEmail = normalizeEmail(user.email || user.username);
-    if (!isValidEmail(targetEmail)) {
+    const targetEmail = await resolvePasswordResetDeliveryEmail(user);
+    if (!targetEmail) {
       return res.status(200).json({ success: true, message: safePasswordResetSuccessMessage() });
     }
 
     const resolvedSchoolId = normalizeSchoolId(user.schoolId);
+    const isStudentAccount = String(user.role || '') === 'student';
 
     await runWithSchoolContext(resolvedSchoolId, async () => {
       await PasswordResetCode.updateMany(
@@ -401,12 +432,18 @@ router.post('/password/forgot/send-code', async (req, res) => {
 
       await sendPasswordResetCodeEmail({
         toEmail: targetEmail,
-        toName: user.name || user.username,
+        toName: isStudentAccount ? `Acudiente de ${user.name || user.username}` : (user.name || user.username),
         code,
       });
     });
 
-    return res.status(200).json({ success: true, message: safePasswordResetSuccessMessage() });
+    return res.status(200).json({
+      success: true,
+      message: isStudentAccount
+        ? 'Si la cuenta existe, enviamos un codigo de recuperacion al correo del acudiente registrado.'
+        : safePasswordResetSuccessMessage(),
+      deliveredToGuardian: isStudentAccount,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -421,17 +458,26 @@ router.post('/password/forgot/verify-code', async (req, res) => {
     }
 
     const normalizedSchoolId = normalizeSchoolId(schoolId);
-    const normalizedEmail = normalizeEmail(email);
+    const normalizedIdentifier = normalizeUsername(email);
     const normalizedCode = String(code || '').trim();
 
     if (!/^\d{6}$/.test(normalizedCode)) {
       return res.status(400).json({ message: 'El codigo debe tener 6 digitos.' });
     }
 
+    const user = await findActiveUserForPasswordReset({
+      schoolId: normalizedSchoolId,
+      identifier: normalizedIdentifier,
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'No se encontro una recuperacion pendiente para este usuario.' });
+    }
+
     const { resetDoc, resolvedSchoolId: resetSchoolId } = await findPasswordResetCodeWithSchoolCandidates({
       schoolId: normalizedSchoolId,
       filter: {
-        email: normalizedEmail,
+        userId: user._id,
         status: 'pending',
       },
     });
@@ -486,12 +532,21 @@ router.post('/password/forgot/reset', async (req, res) => {
     }
 
     const normalizedSchoolId = normalizeSchoolId(schoolId);
-    const normalizedEmail = normalizeEmail(email);
+    const normalizedIdentifier = normalizeUsername(email);
+
+    const user = await findActiveUserForPasswordReset({
+      schoolId: normalizedSchoolId,
+      identifier: normalizedIdentifier,
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'No se encontro una verificacion valida para este usuario.' });
+    }
 
     const { resetDoc, resolvedSchoolId: resetSchoolId } = await findPasswordResetCodeWithSchoolCandidates({
       schoolId: normalizedSchoolId,
       filter: {
-        email: normalizedEmail,
+        userId: user._id,
         status: 'verified',
       },
     });
@@ -1503,5 +1558,55 @@ router.get('/me', authMiddleware, async (req, res) => {
     return res.status(500).json({ message: error.message });
   }
 });
+
+function isDevStudentPreviewEnabled() {
+  if (String(process.env.COMERGIO_ALLOW_DEV_PREVIEW || '').toLowerCase() === 'true') {
+    return true;
+  }
+
+  return process.env.NODE_ENV !== 'production';
+}
+
+if (isDevStudentPreviewEnabled()) {
+  router.post('/dev/preview-student-login', async (req, res) => {
+    try {
+      const schoolId = normalizeSchoolId(req.body?.schoolId);
+      const studentName = normalizeText(req.body?.studentName);
+
+      if (!schoolId || !studentName) {
+        return res.status(400).json({ message: 'schoolId and studentName are required.' });
+      }
+
+      const student = await runWithSchoolContext(schoolId, () => Student.findOne({
+        schoolId,
+        deletedAt: null,
+        status: 'active',
+        name: new RegExp(studentName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+      }).lean());
+
+      if (!student) {
+        return res.status(404).json({ message: 'No se encontró el alumno para la vista previa.' });
+      }
+
+      const accountResult = await runWithSchoolContext(schoolId, () => upsertStudentAccount({ schoolId, student }));
+      const user = accountResult?.user || await runWithSchoolContext(schoolId, () => User.findOne({
+        schoolId,
+        role: 'student',
+        linkedStudentId: student._id,
+        status: 'active',
+        deletedAt: null,
+      }));
+
+      if (!user) {
+        return res.status(404).json({ message: 'No se pudo preparar la cuenta del alumno.' });
+      }
+
+      const authResponse = await issueAuthResponse(user);
+      return res.status(200).json(authResponse);
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+}
 
 module.exports = router;

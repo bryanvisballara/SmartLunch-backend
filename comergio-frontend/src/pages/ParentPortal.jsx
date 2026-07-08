@@ -362,7 +362,7 @@ function ParentStudentOptionsPortal({ anchorRef, children, isOpen }) {
   );
 }
 
-function ParentPortal({ basePath = '/parent', embedded = false }) {
+function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId = '', studentPortalMode = false }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuthStore();
@@ -867,8 +867,11 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
   };
 
   useEffect(() => {
-    loadOverview('');
-  }, []);
+    if (initialStudentId) {
+      setSelectedStudentId(String(initialStudentId));
+    }
+    loadOverview(initialStudentId ? String(initialStudentId) : '');
+  }, [initialStudentId]);
 
   useEffect(() => {
     if ((location.pathname !== normalizedBasePath && location.pathname !== topupsPath) || loading || error) {
@@ -2944,9 +2947,18 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
         </header>
       )}
 
-      <section className={`parent-student-switcher${childrenOpen ? ' is-open' : ''}`} ref={studentSwitcherRef}>
+      <section className={`parent-student-switcher${childrenOpen ? ' is-open' : ''}${studentPortalMode ? ' is-readonly' : ''}`} ref={studentSwitcherRef}>
         <div className="parent-student-toggle-card">
-          <button className="parent-student-toggle" onClick={() => setChildrenOpen((prev) => !prev)} type="button">
+          <button
+            className="parent-student-toggle"
+            disabled={studentPortalMode}
+            onClick={() => {
+              if (!studentPortalMode) {
+                setChildrenOpen((prev) => !prev);
+              }
+            }}
+            type="button"
+          >
             <div className="parent-student-toggle-copy">
               <p className="meta">Alumno seleccionado</p>
               <h3>{selectedStudent?.name || 'Sin alumno'}</h3>
@@ -2954,7 +2966,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
                 {selectedStudent?.grade || 'Sin grado'}
               </p>
             </div>
-            <span className={`chevron ${childrenOpen ? 'open' : ''}`}>⌄</span>
+            {!studentPortalMode ? <span className={`chevron ${childrenOpen ? 'open' : ''}`}>⌄</span> : null}
           </button>
 
           <button
@@ -3226,15 +3238,7 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
               </div>
             </div>
 
-            <div className={`parent-topups-actions ${boldRechargeEnabled ? 'parent-topups-actions-duo' : 'parent-topups-actions-single'}`}>
-              <button onClick={() => navigate(topupEpaycoPath)} type="button">
-                <span className="parent-topups-action-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>Recargar saldo</span>
-              </button>
+            <div className="parent-topups-actions parent-topups-actions-single">
               {boldRechargeEnabled ? (
                 <button onClick={() => navigate(topupDaviPlataPath)} type="button">
                   <span className="parent-topups-action-icon parent-topups-action-icon-bold" aria-hidden="true">
@@ -3242,9 +3246,18 @@ function ParentPortal({ basePath = '/parent', embedded = false }) {
                       <path d="M3 7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v1H3V7Zm0 4h18v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-6Zm3 3a1 1 0 0 0 0 2h4a1 1 0 1 0 0-2H6Z" fill="currentColor"/>
                     </svg>
                   </span>
-                  <span>Recarga con Bold</span>
+                  <span>Recarga ahora</span>
                 </button>
-              ) : null}
+              ) : (
+                <button onClick={() => navigate(topupEpaycoPath)} type="button">
+                  <span className="parent-topups-action-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <span>Recargar saldo</span>
+                </button>
+              )}
             </div>
 
             <section className="parent-section">

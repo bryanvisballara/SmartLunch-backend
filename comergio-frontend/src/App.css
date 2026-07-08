@@ -11,6 +11,12 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.platform-android body.login-route-active #root {
+  overflow-y: hidden;
+  height: 100dvh;
+  max-height: 100dvh;
+}
+
 .logo {
   height: 6em;
   padding: 1.5em;

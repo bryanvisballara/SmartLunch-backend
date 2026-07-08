@@ -12,6 +12,7 @@ export const login = (data) => {
 		password,
 	});
 };
+export const previewStudentDevLogin = (data) => api.post('/auth/dev/preview-student-login', data);
 export const register = (data) => api.post('/auth/register', data);
 export const sendRegisterEmailCode = (data) => api.post('/auth/register/email/send-code', data);
 export const verifyRegisterEmailCode = (data) => api.post('/auth/register/email/verify-code', data);

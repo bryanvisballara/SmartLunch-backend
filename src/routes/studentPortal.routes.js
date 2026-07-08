@@ -11,11 +11,68 @@ const CampusCourse = require('../models/campusCourse.model');
 const CampusPost = require('../models/campusPost.model');
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
+const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
+const PsychologyCase = require('../models/psychologyCase.model');
+const AcademicCommunication = require('../models/academicCommunication.model');
+const Wallet = require('../models/wallet.model');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
 const parentRoutes = require('./parent.routes');
 
 const router = express.Router();
 const H = parentRoutes.academicPortalHelpers || {};
+
+const STUDENT_PORTAL_FEATURES = {
+  home: true,
+  finance: false,
+  academic: true,
+  cafeteria: true,
+  nursing: true,
+  wellbeing: true,
+  coexistence: true,
+  transport: true,
+};
+
+function serializeStudentFeedItem(item = {}, currentUserId = '') {
+  const likes = Array.isArray(item.likes) ? item.likes : [];
+  const comments = Array.isArray(item.comments) ? item.comments : [];
+
+  return {
+    _id: item._id,
+    title: H.normalizeText(item.title),
+    body: H.normalizeText(item.body),
+    sentAt: item.sentAt || item.createdAt || null,
+    authorName: H.normalizeText(item.authorName) || 'Comunicado institucional',
+    authorPhotoUrl: item.authorPhotoUrl || '',
+    media: Array.isArray(item.media) ? item.media : [],
+    likesCount: likes.length,
+    likedByMe: likes.some((like) => String(like.userId || '') === String(currentUserId || '')),
+    commentsCount: comments.length,
+    audienceType: item.audienceType || 'general',
+  };
+}
+
+function serializeStudentPsychologyCase(item = {}) {
+  return {
+    _id: item._id,
+    studentId: item.studentId,
+    caseType: item.caseType || '',
+    status: item.status || '',
+    priority: item.priority || '',
+    summary: H.normalizeText(item.summary),
+    updatedAt: item.updatedAt || null,
+  };
+}
+
+function serializeStudentCoexistenceObservation(item = {}) {
+  return {
+    _id: item._id,
+    studentId: item.studentId,
+    category: H.normalizeText(item.category),
+    status: item.status || '',
+    summary: H.normalizeText(item.summary || item.description),
+    submittedAt: item.submittedAt || item.createdAt || null,
+  };
+}
 
 router.use(authMiddleware);
 router.use(roleMiddleware('student', 'admin'));
@@ -71,7 +128,7 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleValues,
     } = H.buildParentStudentAcademicMatchValues(student);
 
-    const [academicGradeCourses, academicGradeEntryRefs, academicStructure] = await Promise.all([
+    const [academicGradeCourses, academicGradeEntryRefs, academicStructure, psychologyCases, coexistenceObservations, wallet] = await Promise.all([
       gradeValues.length
         ? CampusCourse.find({
           schoolId,
@@ -86,6 +143,23 @@ router.get('/portal/overview', async (req, res) => {
         .select('courseId')
         .lean(),
       AcademicStructure.findOne({ schoolId }).lean(),
+      PsychologyCase.find({
+        schoolId,
+        studentId: student._id,
+        status: { $in: ['open', 'follow_up', 'escalated'] },
+      })
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .lean(),
+      CampusDisciplineObservation.find({
+        schoolId,
+        studentId: student._id,
+        status: { $in: ['submitted', 'reviewed'] },
+      })
+        .sort({ submittedAt: -1, createdAt: -1 })
+        .limit(100)
+        .lean(),
+      Wallet.findOne({ schoolId, studentId: student._id }).lean(),
     ]);
 
     const academicGradeCourseIds = new Set((academicGradeCourses || []).map((course) => String(course._id)));
@@ -149,6 +223,10 @@ router.get('/portal/overview', async (req, res) => {
         displayGrade: resolveStudentDisplayGrade(student, academicStructure),
         schoolCode: student.schoolCode || '',
       },
+      parentAppFeatures: STUDENT_PORTAL_FEATURES,
+      psychologyCases: psychologyCases.map(serializeStudentPsychologyCase),
+      coexistenceObservations: coexistenceObservations.map(serializeStudentCoexistenceObservation),
+      walletBalance: Number(wallet?.balance || 0),
       academic: {
         gradebook,
         schedule,
@@ -157,6 +235,39 @@ router.get('/portal/overview', async (req, res) => {
         gradingScale,
       },
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/academic-feed', async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const student = await resolveStudentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    const { gradeValues } = H.buildParentStudentAcademicMatchValues(student);
+    const audienceFilters = [
+      { audienceType: 'general' },
+      { recipientStudentIds: student._id },
+    ];
+
+    if (gradeValues.length) {
+      audienceFilters.push({ audienceType: 'grade', gradeTargets: { $in: gradeValues } });
+    }
+
+    const feed = await AcademicCommunication.find({
+      schoolId,
+      $or: audienceFilters,
+    })
+      .sort({ sentAt: -1, createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return res.status(200).json(feed.map((item) => serializeStudentFeedItem(item, userId)));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

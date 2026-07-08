@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { LOGIN_PATH } from '../lib/authNavigation';
 import './Contact.css';
 
 function Contact() {
@@ -9,15 +10,15 @@ function Contact() {
       <div className="contact-page__glow contact-page__glow--right" aria-hidden="true" />
 
       <header className="contact-page__header">
-        <Link className="contact-page__logo" to="/">
+        <Link className="contact-page__logo" to="/landing">
           <img alt="Comergio" src="/logonuevo.png" />
         </Link>
 
         <nav aria-label="Acciones principales" className="contact-page__nav">
-          <Link className="contact-page__button contact-page__button--primary" to="/login">
+          <Link className="contact-page__button contact-page__button--primary" to={LOGIN_PATH}>
             Iniciar sesión
           </Link>
-          <Link className="contact-page__button" to="/">
+          <Link className="contact-page__button" to="/landing">
             Inicio
           </Link>
         </nav>

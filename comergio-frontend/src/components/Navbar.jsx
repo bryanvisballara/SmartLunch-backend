@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import { getStores } from '../services/stores.service';
 import { me } from '../services/auth.service';
-import { redirectToLoginPage } from '../lib/authNavigation';
+import { LOGIN_PATH, redirectToLoginPage } from '../lib/authNavigation';
 
 const INSTITUTIONAL_PLACEHOLDER_ROLE_LABELS = {
   coordination: 'Coordinación',
@@ -95,7 +95,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : isRectoria || isDireccion || isCoordination ? (
@@ -107,7 +107,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : isAcademicSecretary || isBilling ? (
@@ -119,7 +119,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : user?.role === 'nursing' ? (
@@ -131,7 +131,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : user?.role === 'psychology' ? (
@@ -143,7 +143,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : user?.role === 'human_resources' ? (
@@ -155,7 +155,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : institutionalPlaceholderLabel ? (
@@ -167,7 +167,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : isMeriendaOperator ? (
@@ -179,7 +179,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       ) : isVendor ? (
@@ -201,7 +201,7 @@ function Navbar() {
                   Logout
                 </button>
               ) : (
-                <Link to="/login">Login</Link>
+                <Link to={LOGIN_PATH}>Login</Link>
               )}
             </div>
           </div>
@@ -243,7 +243,7 @@ function Navbar() {
               Logout
             </button>
           ) : (
-            <Link to="/login">Login</Link>
+            <Link to={LOGIN_PATH}>Login</Link>
           )}
         </div>
       )}

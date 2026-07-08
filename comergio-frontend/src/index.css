@@ -809,6 +809,95 @@ body {
   touch-action: pan-y;
 }
 
+.platform-android .login-page-auth {
+  display: block;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+  box-sizing: border-box;
+}
+
+.platform-android .login-page-auth .login-auth-content {
+  padding-bottom: 0;
+}
+
+.platform-android .login-page-auth .login-register-cta {
+  margin-top: 0.35rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.35rem;
+  line-height: 1.55;
+}
+
+.platform-android .login-page-auth .login-register-cta .login-inline-link {
+  display: inline-block;
+  padding-block: 0.35rem;
+}
+
+.platform-android .login-page-auth .login-security-note {
+  margin-bottom: 0.65rem;
+}
+
+.platform-android .login-page-auth .login-meta-links {
+  padding-bottom: 0.35rem;
+  margin-bottom: 0;
+}
+
+.platform-android .login-auth-bottom-spacer {
+  display: block;
+  width: 100%;
+  height: calc(var(--comergio-android-nav-inset, 112px) + 1.5rem);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.platform-android body.login-route-active:not(.login-boot-active),
+.platform-android body.login-route-active:not(.login-boot-active) #root,
+.platform-android body.login-route-active:not(.login-boot-active) #root > div,
+.platform-android body.login-route-active:not(.login-boot-active) main.container {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.platform-ios .login-page-auth {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
+}
+
+.platform-ios .login-page-auth .login-auth-content {
+  padding-bottom: 0;
+}
+
+.platform-ios .login-auth-bottom-spacer {
+  display: none;
+}
+
+.platform-ios body.login-route-active:not(.login-boot-active),
+.platform-ios body.login-route-active:not(.login-boot-active) #root,
+.platform-ios body.login-route-active:not(.login-boot-active) #root > div,
+.platform-ios body.login-route-active:not(.login-boot-active) main.container {
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.login-auth-bottom-spacer {
+  display: none;
+}
+
 .platform-web .login-page-auth {
   min-height: 100vh;
   min-height: 100dvh;
@@ -851,6 +940,21 @@ body.login-route-active.login-boot-active main.container {
 
 .login-page.login-page-auth {
   background: transparent;
+}
+
+.login-page-auth.page-center {
+  place-items: start center;
+  align-content: start;
+  justify-items: center;
+  min-height: 100dvh;
+}
+
+.login-page-auth .login-auth-content {
+  width: min(440px, calc(100vw - 1.5rem));
+  max-width: min(440px, calc(100vw - 1.5rem));
+  margin-inline: auto;
+  display: grid;
+  gap: 0;
 }
 
 body.login-route-active {
@@ -1472,6 +1576,7 @@ label {
 
 .login-page-auth > .login-auth-hero,
 .login-page-auth > .login-panel.login-auth-card,
+.login-page-auth > .login-auth-content,
 .login-page-auth > .login-security-note,
 .login-page-auth > .login-meta-links {
   position: relative;
@@ -2190,6 +2295,67 @@ body.login-boot-active main.container {
   color: #5dffb8;
 }
 
+.login-page-auth .login-auth-content {
+  position: relative;
+  z-index: 1;
+  width: min(440px, calc(100vw - 1.5rem));
+  margin-inline: auto;
+}
+
+.login-page-auth .register-auth-card {
+  width: 100%;
+}
+
+.login-page-auth .register-auth-card .login-auth-card-head p strong {
+  color: #ffffff;
+}
+
+.login-page-auth .register-students-section h3 {
+  margin: 0;
+  color: #e6f2ff;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.login-page-auth .register-student-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(0, 210, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(4, 20, 48, 0.72);
+}
+
+.login-page-auth .register-student-card > p {
+  margin: 0;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.login-page-auth .register-student-card label span {
+  color: rgba(214, 233, 255, 0.92);
+  font-size: 0.88rem;
+}
+
+.login-page-auth .register-add-student-btn {
+  border-color: rgba(0, 210, 255, 0.35);
+  color: #e6f2ff;
+}
+
+.login-page-auth .register-add-student-btn:hover {
+  background: rgba(0, 210, 255, 0.1);
+}
+
+.login-page-auth .register-auth-card .login-input-shell select {
+  appearance: none;
+  cursor: pointer;
+}
+
+.login-page-auth .register-auth-card .notice-banner {
+  border-radius: 12px;
+}
+
 .login-page-auth .login-security-note {
   display: inline-flex;
   align-items: center;
@@ -2420,6 +2586,22 @@ body.login-boot-active main.container {
 @media (max-width: 480px) {
   .login-page-auth {
     padding: calc(env(safe-area-inset-top, 0px) + 1rem) 0.75rem calc(env(safe-area-inset-bottom, 0px) + 2rem);
+  }
+
+  .platform-android .login-page-auth {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+  }
+
+  .platform-android .login-page-auth .login-auth-content {
+    padding-bottom: 0;
+  }
+
+  .platform-android .login-auth-bottom-spacer {
+    height: calc(var(--comergio-android-nav-inset, 112px) + 1.25rem);
+  }
+
+  .platform-ios .login-page-auth {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
   }
 
   .login-page-auth > .login-auth-hero,
@@ -3683,6 +3865,14 @@ body.login-boot-active main.container {
   font-size: 0.92rem;
   line-height: 1.35;
   white-space: pre-wrap;
+}
+
+.nursing-medical-profile-history .student-medical-profile-history {
+  gap: 0.75rem;
+}
+
+.nursing-medical-profile-history .student-medical-profile-history__card {
+  background: #ffffff;
 }
 
 .nursing-form-row {

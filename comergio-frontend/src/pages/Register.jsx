@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { LOGIN_PATH } from '../lib/authNavigation';
 import { getSchoolOptions, sendRegisterEmailCode, verifyRegisterEmailCode } from '../services/auth.service';
 import DismissibleNotice from '../components/DismissibleNotice';
 import { DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS, normalizeSchoolOptions, rememberSchoolOptions } from '../lib/schools';
-import smartLogo from '../assets/comergio.png';
+import colibriLogo from '../assets/colibrisinfondo.png';
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
@@ -11,6 +12,15 @@ function normalizeEmail(value) {
 
 function isValidEmail(value) {
   return /^\S+@\S+\.\S+$/.test(String(value || ''));
+}
+
+function RegisterField({ label, children }) {
+  return (
+    <label>
+      <span>{label}</span>
+      <div className="login-input-shell">{children}</div>
+    </label>
+  );
 }
 
 function Register() {
@@ -177,60 +187,76 @@ function Register() {
 
   return (
     <div className="page-center login-page login-page-auth">
-      <form className="panel login-panel" onSubmit={onSendCode}>
-        <img className="register-smartlogo" src={smartLogo} alt="Comergio" />
-        <h2>Crea tu cuenta</h2>
-        <label>
-          Colegio
-          <select value={schoolId} onChange={(e) => setSchoolId(e.target.value)}>
-            <option value="">Selecciona tu colegio</option>
-            {schoolOptions.map((school) => (
-              <option key={school.id} value={school.id}>
-                {school.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Nombre
-          <input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-        </label>
-        <label>
-          Apellido
-          <input value={lastName} onChange={(e) => setLastName(e.target.value)} />
-        </label>
-        <label>
-          Numero de telefono
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} />
-        </label>
-        <label>
-          Documento
-          <input
-            inputMode="numeric"
-            value={documentNumber}
-            onChange={(e) => setDocumentNumber(e.target.value)}
-          />
-        </label>
-        <label>
-          Correo electronico (nombre de usuario)
-          <input value={email} onChange={(e) => setEmail(e.target.value)} />
-        </label>
+      <div className="login-auth-content">
+        <section className="login-auth-hero" aria-label="Identidad de Comergio">
+          <div className="login-auth-logo-wrap" aria-hidden="true">
+            <img className="login-auth-colibri-image" src={colibriLogo} alt="" />
+          </div>
+          <h1 className="login-auth-brand-title">
+            <span className="login-auth-brand-comer">Comer</span>
+            <span className="login-auth-brand-gio login-auth-text-gradient">gio</span>
+          </h1>
+        </section>
 
-        <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
-        <DismissibleNotice text={info} type="info" onClose={() => setInfo('')} />
+        <form className="login-panel login-auth-card register-auth-card" onSubmit={onSendCode}>
+          <div className="login-auth-card-head">
+            <h2>Crea tu cuenta</h2>
+            <p>Completa tus datos para verificar tu correo y continuar el registro.</p>
+          </div>
 
-        <button className="btn btn-primary" disabled={sendingCode || verifyingCode} type="submit">
-          {sendingCode ? 'Enviando codigo...' : 'Verificar correo electronico'}
-        </button>
+          <RegisterField label="Colegio">
+            <select value={schoolId} onChange={(e) => setSchoolId(e.target.value)}>
+              <option value="">Selecciona tu colegio</option>
+              {schoolOptions.map((school) => (
+                <option key={school.id} value={school.id}>
+                  {school.label}
+                </option>
+              ))}
+            </select>
+          </RegisterField>
 
-        <p className="login-register-cta">
-          ¿Ya tienes cuenta?{' '}
-          <Link className="login-inline-link" to="/login">
-            Inicia sesión
-          </Link>
-          .
-        </p>
-      </form>
+          <RegisterField label="Nombre">
+            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" />
+          </RegisterField>
+
+          <RegisterField label="Apellido">
+            <input value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" />
+          </RegisterField>
+
+          <RegisterField label="Numero de telefono">
+            <input value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" inputMode="tel" />
+          </RegisterField>
+
+          <RegisterField label="Documento">
+            <input
+              inputMode="numeric"
+              value={documentNumber}
+              onChange={(e) => setDocumentNumber(e.target.value)}
+              autoComplete="off"
+            />
+          </RegisterField>
+
+          <RegisterField label="Correo electronico (nombre de usuario)">
+            <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" inputMode="email" type="email" />
+          </RegisterField>
+
+          <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
+          <DismissibleNotice text={info} type="info" onClose={() => setInfo('')} />
+
+          <button className="btn login-primary-btn" disabled={sendingCode || verifyingCode} type="submit">
+            {sendingCode ? 'Enviando codigo...' : 'Verificar correo electronico'}
+          </button>
+
+          <p className="login-register-cta">
+            ¿Ya tienes cuenta?{' '}
+            <Link className="login-inline-link" to={LOGIN_PATH}>
+              Inicia sesión
+            </Link>
+            .
+          </p>
+        </form>
+        <div aria-hidden="true" className="login-auth-bottom-spacer" />
+      </div>
 
       {showVerificationPopup ? (
         <div className="register-verification-overlay" role="dialog" aria-modal="true" aria-label="Verifica tu correo electronico">

@@ -12,6 +12,7 @@
     "cap:sync": "node scripts/runCapSync.mjs",
     "cap:android": "npx cap open android",
     "cap:ios": "npx cap open ios",
+    "android:icons": "node scripts/generateAndroidIcons.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

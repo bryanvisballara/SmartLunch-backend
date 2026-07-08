@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { LOGIN_PATH } from '../../lib/authNavigation';
 import useAuthStore from '../../store/auth.store';
 import '../../pages/AcademicSecretaryDashboard.css';
 import {
@@ -113,7 +114,7 @@ function SchoolRouteCampusHome() {
 
   function handleLogout() {
     logout();
-    navigate('/login', { replace: true });
+    navigate(LOGIN_PATH, { replace: true });
   }
 
   return (

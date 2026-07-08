@@ -39,3 +39,9 @@ export const confirmParentCardVerification = (cardId, data = {}) =>
 	api.post(`/parent/portal/payment-methods/cards/${cardId}/verification/confirm`, data);
 export const deleteParentCardPaymentMethod = (cardId, params = {}) =>
 	api.delete(`/parent/portal/payment-methods/cards/${cardId}`, { params });
+export const getParentStudentMedicalProfile = (studentId) =>
+	api.get(`/parent/portal/children/${studentId}/medical-profile`);
+export const updateParentStudentMedicalProfile = (studentId, data) =>
+	api.patch(`/parent/portal/children/${studentId}/medical-profile`, data);
+export const getParentStudentMedicalProfileHistory = (studentId, params = {}) =>
+	api.get(`/parent/portal/children/${studentId}/medical-profile/history`, { params });

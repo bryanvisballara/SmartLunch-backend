@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../store/auth.store';
-import { createNursingVisit, getNursingStudentHistory, searchNursingStudents } from '../services/nursing.service';
+import { createNursingVisit, getNursingStudentHistory, getNursingStudentMedicalProfileHistory, searchNursingStudents } from '../services/nursing.service';
+import StudentMedicalProfileHistory from '../components/StudentMedicalProfileHistory';
 
 const dispositionOptions = [
   { value: 'observation', label: 'Queda en observación' },
@@ -81,6 +82,8 @@ function NursingPortal() {
   const [form, setForm] = useState(emptyForm);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [medicalProfileRevisions, setMedicalProfileRevisions] = useState([]);
+  const [loadingMedicalProfileHistory, setLoadingMedicalProfileHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState({ type: '', text: '' });
 
@@ -148,6 +151,37 @@ function NursingPortal() {
       .finally(() => {
         if (!cancelled) {
           setLoadingHistory(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStudent?.id]);
+
+  useEffect(() => {
+    if (!selectedStudent?.id) {
+      setMedicalProfileRevisions([]);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingMedicalProfileHistory(true);
+
+    getNursingStudentMedicalProfileHistory(selectedStudent.id)
+      .then((response) => {
+        if (!cancelled) {
+          setMedicalProfileRevisions(response.data?.revisions || []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMedicalProfileRevisions([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingMedicalProfileHistory(false);
         }
       });
 
@@ -298,6 +332,22 @@ function NursingPortal() {
                 ) : null}
                 {selectedMedicationAuthorization.notes ? <div><span>Observaciones</span><strong>{selectedMedicationAuthorization.notes}</strong></div> : null}
               </div>
+            </section>
+          ) : null}
+
+          {selectedStudent ? (
+            <section className="nursing-panel nursing-medical-profile-history">
+              <div className="nursing-panel-head">
+                <span className="admin-kicker">Historial de cambios</span>
+                <h2>Actualizaciones de la ficha medica</h2>
+              </div>
+              {loadingMedicalProfileHistory ? <p className="nursing-empty">Cargando historial de cambios...</p> : null}
+              {!loadingMedicalProfileHistory ? (
+                <StudentMedicalProfileHistory
+                  emptyMessage="Este alumno aun no tiene cambios registrados en la ficha medica por acudientes."
+                  revisions={medicalProfileRevisions}
+                />
+              ) : null}
             </section>
           ) : null}
 

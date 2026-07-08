@@ -60,6 +60,11 @@ const {
 } = require('../utils/imageUpload');
 const { queueNotificationsForParents } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
+const {
+  serializeStudentMedicalProfile,
+  listStudentMedicalProfileRevisions,
+  applyStudentMedicalProfileUpdate,
+} = require('../services/studentMedicalProfile.service');
 
 const router = express.Router();
 const uploadParentStudentPhoto = uploadImageMiddleware.single('image');
@@ -79,7 +84,7 @@ const DEFAULT_PARENT_APP_FEATURES = {
 };
 
 router.use(authMiddleware);
-router.use(roleMiddleware('parent', 'admin'));
+router.use(roleMiddleware('parent', 'admin', 'student'));
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -652,6 +657,100 @@ function toObjectId(id) {
     return null;
   }
   return new mongoose.Types.ObjectId(String(id));
+}
+
+async function resolvePortalStudentContext(req) {
+  const { schoolId, role, userId, name, username } = req.user;
+
+  if (role === 'student') {
+    const studentUser = await User.findOne({
+      _id: userId,
+      schoolId,
+      role: 'student',
+      status: 'active',
+      deletedAt: null,
+    })
+      .select('linkedStudentId name username')
+      .lean();
+
+    const linkedStudentId = studentUser?.linkedStudentId ? String(studentUser.linkedStudentId) : '';
+    if (!linkedStudentId) {
+      return { ok: false, status: 403, message: 'No linked student profile.' };
+    }
+
+    const parentLink = await ParentStudentLink.findOne({
+      schoolId,
+      studentId: linkedStudentId,
+      status: 'active',
+    })
+      .select('parentId')
+      .lean();
+
+    return {
+      ok: true,
+      role,
+      isStudentPortal: true,
+      portalActorId: String(userId),
+      portalActorName: studentUser?.name || name || username || 'Alumno',
+      portalActorUsername: studentUser?.username || username || '',
+      portalParentUserId: parentLink?.parentId ? String(parentLink.parentId) : null,
+      studentIds: [linkedStudentId],
+    };
+  }
+
+  const requestedParentUserId = role === 'admin'
+    ? req.query.parentUserId || req.body?.parentUserId || userId
+    : userId;
+  const parentUserId = toObjectId(requestedParentUserId);
+
+  if (!parentUserId) {
+    return { ok: false, status: 400, message: 'Invalid parent user id' };
+  }
+
+  const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: 'parent', deletedAt: null })
+    .select('name username')
+    .lean();
+
+  if (!parentUser && role !== 'admin') {
+    return { ok: false, status: 404, message: 'Parent user not found' };
+  }
+
+  const links = await ParentStudentLink.find({
+    schoolId,
+    parentId: parentUserId,
+    status: 'active',
+  })
+    .select('studentId')
+    .lean();
+
+  return {
+    ok: true,
+    role,
+    isStudentPortal: false,
+    portalActorId: String(parentUserId),
+    portalActorName: parentUser?.name || name || username || 'Padre',
+    portalActorUsername: parentUser?.username || username || '',
+    portalParentUserId: String(parentUserId),
+    studentIds: links.map((link) => String(link.studentId)),
+  };
+}
+
+async function assertPortalStudentIdAccess(req, studentId) {
+  const context = await resolvePortalStudentContext(req);
+  if (!context.ok) {
+    return context;
+  }
+
+  const normalizedStudentId = String(studentId || '').trim();
+  if (!normalizedStudentId) {
+    return { ok: false, status: 400, message: 'studentId is required' };
+  }
+
+  if (!context.studentIds.includes(normalizedStudentId)) {
+    return { ok: false, status: 403, message: 'Forbidden studentId' };
+  }
+
+  return { ...context, selectedStudentId: normalizedStudentId };
 }
 
 function startOfToday() {
@@ -3278,31 +3377,24 @@ async function sumOrdersForRange({ schoolId, studentObjectId, fromDate }) {
 
 router.get('/portal/overview', async (req, res) => {
   try {
-    const { schoolId, role, userId, name, username } = req.user;
-    const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
-    const parentUserId = toObjectId(requestedParentUserId);
-
-    if (!parentUserId) {
-      return res.status(400).json({ message: 'Invalid parent user id' });
+    const { schoolId } = req.user;
+    const portalContext = await resolvePortalStudentContext(req);
+    if (!portalContext.ok) {
+      return res.status(portalContext.status).json({ message: portalContext.message });
     }
 
-    const parentUser = await User.findOne({ _id: parentUserId, schoolId, role: 'parent', deletedAt: null })
-      .select('name username')
-      .lean();
-    const parentName = parentUser?.name || name || username || 'Padre';
-    const parentUsername = parentUser?.username || username || '';
+    const {
+      portalActorId,
+      portalActorName,
+      portalActorUsername,
+      portalParentUserId,
+      studentIds,
+    } = portalContext;
+    const parentUserId = toObjectId(portalActorId);
+    const parentName = portalActorName;
+    const parentUsername = portalActorUsername;
     const schoolSettings = await SuperAdminSchoolSettings.findOne({ schoolId }).select('parentFeatures').lean();
     const parentAppFeatures = normalizeParentAppFeatures(schoolSettings?.parentFeatures || {});
-
-    const links = await ParentStudentLink.find({
-      schoolId,
-      parentId: parentUserId,
-      status: 'active',
-    })
-      .select('studentId')
-      .lean();
-
-    const studentIds = links.map((link) => String(link.studentId));
 
     if (studentIds.length === 0) {
       return res.status(200).json({
@@ -3349,7 +3441,7 @@ router.get('/portal/overview', async (req, res) => {
       }).lean(),
       MeriendaSubscription.find({
         schoolId,
-        parentUserId,
+        ...(portalParentUserId ? { parentUserId: portalParentUserId } : {}),
         status: 'active',
       })
         .select('childName paymentStatus currentPeriodMonth parentRecommendations childAllergies')
@@ -4555,30 +4647,15 @@ router.get('/portal/categories', async (req, res) => {
 
 router.get('/portal/orders-history', async (req, res) => {
   try {
-    const { schoolId, role, userId } = req.user;
-    const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
-    const parentUserId = toObjectId(requestedParentUserId);
-    const studentId = toObjectId(req.query.studentId);
-
-    if (!parentUserId) {
-      return res.status(400).json({ message: 'Invalid parent user id' });
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.query.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
     }
 
+    const studentId = toObjectId(access.selectedStudentId);
     if (!studentId) {
-      return res.status(400).json({ message: 'studentId is required' });
-    }
-
-    const links = await ParentStudentLink.find({
-      schoolId,
-      parentId: parentUserId,
-      status: 'active',
-    })
-      .select('studentId')
-      .lean();
-
-    const allowedStudentIds = links.map((link) => String(link.studentId));
-    if (!allowedStudentIds.includes(String(studentId))) {
-      return res.status(403).json({ message: 'Forbidden studentId' });
+      return res.status(400).json({ message: 'Invalid student id' });
     }
 
     const filter = {
@@ -4647,28 +4724,16 @@ router.get('/portal/orders-history', async (req, res) => {
 
 router.get('/portal/meriendas', async (req, res) => {
   try {
-    const { schoolId, role, userId } = req.user;
-    const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
-    const parentUserId = toObjectId(requestedParentUserId);
-    const studentId = toObjectId(req.query.studentId);
-
-    if (!parentUserId) {
-      return res.status(400).json({ message: 'Invalid parent user id' });
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.query.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
     }
 
+    const studentId = toObjectId(access.selectedStudentId);
+    const parentUserId = access.portalParentUserId ? toObjectId(access.portalParentUserId) : null;
     if (!studentId) {
-      return res.status(400).json({ message: 'studentId is required' });
-    }
-
-    const link = await ParentStudentLink.findOne({
-      schoolId,
-      parentId: parentUserId,
-      studentId,
-      status: 'active',
-    }).lean();
-
-    if (!link) {
-      return res.status(403).json({ message: 'Forbidden studentId' });
+      return res.status(400).json({ message: 'Invalid student id' });
     }
 
     const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).lean();
@@ -4679,7 +4744,11 @@ router.get('/portal/meriendas', async (req, res) => {
     const month = String(req.query.month || currentYearMonth()).trim();
 
     const [subscription, operation, schedule] = await Promise.all([
-      MeriendaSubscription.findOne({ schoolId, parentUserId, childName: String(student.name || '').trim() })
+      MeriendaSubscription.findOne({
+        schoolId,
+        ...(parentUserId ? { parentUserId } : {}),
+        childName: String(student.name || '').trim(),
+      })
         .sort({ createdAt: -1 })
         .lean(),
       MeriendaOperation.findOne({ schoolId, month }).lean(),
@@ -4947,6 +5016,11 @@ router.delete('/portal/meriendas/subscription/:id', async (req, res) => {
 router.get('/portal/payment-methods/cards', async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
+
+    if (role === 'student') {
+      return res.status(200).json({ cards: [] });
+    }
+
     const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
     const parentUserId = toObjectId(requestedParentUserId);
 
@@ -5954,12 +6028,14 @@ router.post('/portal/students/:studentId/photo', (req, res) => {
 
 router.post('/portal/gio-ia/chat', async (req, res) => {
   try {
-    const { schoolId, role, userId } = req.user;
-    const requestedParentUserId = role === 'admin'
-      ? req.body.parentUserId || req.query.parentUserId || userId
-      : userId;
-    const parentUserId = toObjectId(requestedParentUserId);
-    const selectedStudentId = toObjectId(req.body.studentId || req.query.studentId);
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.body.studentId || req.query.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const parentUserId = access.portalParentUserId ? toObjectId(access.portalParentUserId) : null;
+    const selectedStudentId = toObjectId(access.selectedStudentId);
     const message = String(req.body?.message || '').trim();
     const context = req.body?.context && typeof req.body.context === 'object' ? req.body.context : {};
     const history = Array.isArray(req.body?.history)
@@ -5973,33 +6049,17 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
         .slice(-20)
       : [];
 
-    if (!parentUserId) {
-      return res.status(400).json({ message: 'Invalid parent user id' });
-    }
-
     if (!selectedStudentId) {
-      return res.status(400).json({ message: 'studentId is required' });
+      return res.status(400).json({ message: 'Invalid student id' });
     }
 
     if (message.length < 2) {
       return res.status(400).json({ message: 'message is required' });
     }
 
-    const links = await ParentStudentLink.find({
-      schoolId,
-      parentId: parentUserId,
-      status: 'active',
-    })
-      .select('studentId')
-      .lean();
-
-    const allowedStudentIds = links.map((item) => String(item.studentId));
+    const allowedStudentIds = access.studentIds;
     if (!allowedStudentIds.length) {
       return res.status(404).json({ message: 'No linked students found' });
-    }
-
-    if (!allowedStudentIds.includes(String(selectedStudentId))) {
-      return res.status(403).json({ message: 'Forbidden studentId' });
     }
 
     const [students, wallets, meriendaSubscriptions] = await Promise.all([
@@ -6018,7 +6078,7 @@ router.post('/portal/gio-ia/chat', async (req, res) => {
       }).lean(),
       MeriendaSubscription.find({
         schoolId,
-        parentUserId,
+        ...(parentUserId ? { parentUserId } : {}),
         status: 'active',
       })
         .select('childName paymentStatus currentPeriodMonth parentRecommendations childAllergies childFoodRestrictionReason lastPaymentAt nextRenewalAt')
@@ -6333,6 +6393,107 @@ router.post('/portal/meriendas/waitlist', roleMiddleware('parent'), async (req, 
     );
 
     return res.status(200).json({ message: 'Agregado a la lista de espera correctamente.' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/children/:studentId/medical-profile', roleMiddleware('parent', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.params.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      deletedAt: null,
+    })
+      .select('name bloodType medicalProfile')
+      .lean();
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    return res.status(200).json({
+      student: {
+        _id: String(student._id),
+        name: normalizeText(student.name),
+        bloodType: normalizeText(student.bloodType),
+      },
+      medicalProfile: serializeStudentMedicalProfile(student.medicalProfile),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/portal/children/:studentId/medical-profile', roleMiddleware('parent', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, role, userId, name, username } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.params.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      deletedAt: null,
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const result = await applyStudentMedicalProfileUpdate({
+      schoolId,
+      student,
+      bloodType: req.body?.bloodType,
+      medicalProfile: req.body?.medicalProfile,
+      actor: {
+        userId,
+        name: name || username || 'Acudiente',
+        role,
+      },
+      source: role === 'admin' ? 'admin' : 'parent',
+    });
+
+    return res.status(200).json({
+      message: result.changed ? 'Ficha medica actualizada correctamente.' : 'No hubo cambios en la ficha medica.',
+      changed: result.changed,
+      student: {
+        _id: String(student._id),
+        name: normalizeText(student.name),
+        bloodType: result.bloodType,
+      },
+      medicalProfile: result.medicalProfile,
+      revision: result.revision,
+    });
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 500;
+    return res.status(statusCode).json({ message: error.message });
+  }
+});
+
+router.get('/portal/children/:studentId/medical-profile/history', roleMiddleware('parent', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.params.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const revisions = await listStudentMedicalProfileRevisions({
+      schoolId,
+      studentId: access.selectedStudentId,
+      limit: req.query.limit,
+    });
+
+    return res.status(200).json({ revisions });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

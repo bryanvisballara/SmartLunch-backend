@@ -8,6 +8,7 @@ import {
   buildEpaycoParentRedirect,
   shouldAttemptNativeDeepLink,
 } from '../lib/deepLinks';
+import { LOGIN_PATH } from '../lib/authNavigation';
 
 function EpaycoReturnBridge() {
   const location = useLocation();
@@ -20,7 +21,7 @@ function EpaycoReturnBridge() {
   const paymentStatus = String(params.get('paymentStatus') || '').trim().toLowerCase();
   const isBackReturn = paymentStatus === 'abandoned';
 
-  const fallbackTarget = isPortalUser ? redirectPath : '/login';
+  const fallbackTarget = isPortalUser ? redirectPath : LOGIN_PATH;
   const deepLinkUrl = buildComergioDeepLink(redirectPath);
   savePostLoginRedirect(redirectPath);
 

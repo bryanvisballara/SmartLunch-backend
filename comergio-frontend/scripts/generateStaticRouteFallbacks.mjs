@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { copyBerckleyTourDeploy } from './copyBerckleyTourDeploy.mjs';
 
 const DIST_DIR = path.resolve(process.cwd(), 'dist');
 const DIST_DEPLOY_DIR = path.resolve(process.cwd(), 'dist-deploy');
@@ -93,6 +94,7 @@ const ROUTE_FALLBACKS = [
   'parent/cafeteria/meriendas',
   'parent/cafeteria/gio-ia',
   'epayco-resultado',
+  'landing',
   'login',
   'cuenta-eliminada',
   'register',
@@ -143,14 +145,18 @@ async function main() {
   await generateFallbacksForDir(DIST_DEPLOY_DIR);
   await writeLegacyBrokenEntryAliases(DIST_DIR);
   await writeLegacyBrokenEntryAliases(DIST_DEPLOY_DIR);
+  await copyBerckleyTourDeploy([DIST_DIR, DIST_DEPLOY_DIR]);
 
   const zipPath = path.join(process.cwd(), 'dist-deploy.zip');
   await fs.rm(zipPath, { force: true });
-  execSync('zip -rq dist-deploy.zip dist-deploy', { cwd: process.cwd(), stdio: 'inherit' });
+  execSync(
+    'zip -rq dist-deploy.zip dist-deploy -x "dist-deploy/tourvirtualberckley/*" "dist-deploy/tourvirtualberckley/**/*"',
+    { cwd: process.cwd(), stdio: 'inherit' },
+  );
 
   console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);
   console.log(`[route-fallbacks] aliased ${LEGACY_BROKEN_ENTRY_ALIASES.length} stale entry bundles to the current build`);
-  console.log('[route-fallbacks] packaged dist-deploy.zip');
+  console.log('[route-fallbacks] packaged dist-deploy.zip (tourvirtualberckley excluded)');
 }
 
 main().catch((error) => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './LandingPage.css';
+import { LOGIN_PATH } from '../lib/authNavigation';
 
 const FRAMES_CACHE_VERSION = 56;
 const VIDEO1_SRC = `/landing/hero-scroll.mp4?v=${FRAMES_CACHE_VERSION}`;
@@ -5232,21 +5233,21 @@ function LandingPage() {
         <div ref={shadeRef} className="landing-video-page__shade" />
 
         <header className="landing-video-page__mobile-topbar">
-          <Link className="landing-video-page__mobile-logo" to="/">
+          <Link className="landing-video-page__mobile-logo" to="/landing">
             <img alt="Comergio" src="/logonuevo.png" />
           </Link>
           <div className="landing-video-page__mobile-topbar-actions">
             <Link className="landing-video-page__mobile-topbar-link" to="/contact">
               Contacto
             </Link>
-            <Link className="landing-video-page__mobile-topbar-btn" to="/login">
+            <Link className="landing-video-page__mobile-topbar-btn" to={LOGIN_PATH}>
               Entrar
             </Link>
           </div>
         </header>
 
         <header className="landing-video-page__actions landing-video-page__actions--desktop">
-          <Link className="landing-video-page__button landing-video-page__button--primary" to="/login">
+          <Link className="landing-video-page__button landing-video-page__button--primary" to={LOGIN_PATH}>
             Iniciar sesión
           </Link>
           <Link className="landing-video-page__button" to="/contact">

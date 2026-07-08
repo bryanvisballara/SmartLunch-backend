@@ -2,6 +2,17 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
   const student = data?.student || {};
   const academic = data?.academic || {};
   const studentId = String(student._id || student.id || '').trim();
+  const childRecord = studentId ? {
+    _id: studentId,
+    id: studentId,
+    name: student.name || 'Alumno',
+    grade: student.grade || '',
+    course: student.course || '',
+    displayGrade: student.displayGrade || '',
+    schoolCode: student.schoolCode || '',
+    isRealParentChild: true,
+    walletBalance: Number(data?.walletBalance || 0),
+  } : null;
 
   return {
     parent: {
@@ -9,25 +20,9 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
       name: student.name || user?.name || 'Alumno',
       username: user?.username || '',
     },
-    children: studentId ? [{
-      _id: studentId,
-      id: studentId,
-      name: student.name || 'Alumno',
-      grade: student.grade || '',
-      course: student.course || '',
-      displayGrade: student.displayGrade || '',
-      schoolCode: student.schoolCode || '',
-    }] : [],
+    children: childRecord ? [childRecord] : [],
     selectedStudentId: studentId || null,
-    selectedStudent: studentId ? {
-      _id: studentId,
-      id: studentId,
-      name: student.name || 'Alumno',
-      grade: student.grade || '',
-      course: student.course || '',
-      displayGrade: student.displayGrade || '',
-      schoolCode: student.schoolCode || '',
-    } : null,
+    selectedStudent: childRecord,
     academicSchedule: academic.schedule || null,
     academicGrades: Array.isArray(academic.gradebook) ? academic.gradebook : [],
     academicRanking: academic.ranking || null,
@@ -35,15 +30,18 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
     academicGradingScale: academic.gradingScale || null,
     academicUpcomingAssignments: Array.isArray(academic.upcomingAssignments) ? academic.upcomingAssignments : [],
     academicContent: [],
+    psychologyCases: Array.isArray(data?.psychologyCases) ? data.psychologyCases : [],
+    coexistenceObservations: Array.isArray(data?.coexistenceObservations) ? data.coexistenceObservations : [],
     parentAppFeatures: {
-      home: false,
+      home: true,
       finance: false,
       academic: true,
-      cafeteria: false,
-      nursing: false,
-      wellbeing: false,
-      coexistence: false,
-      transport: false,
+      cafeteria: true,
+      nursing: true,
+      wellbeing: true,
+      coexistence: true,
+      transport: true,
+      ...(data?.parentAppFeatures || {}),
     },
   };
 }

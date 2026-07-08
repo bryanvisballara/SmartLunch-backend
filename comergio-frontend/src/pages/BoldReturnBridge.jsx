@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import { savePostLoginRedirect } from '../lib/postLoginRedirect';
+import { LOGIN_PATH } from '../lib/authNavigation';
 
 function buildParentRedirect(search) {
   const incoming = new URLSearchParams(search || '');
@@ -46,7 +47,7 @@ function BoldReturnBridge() {
       return;
     }
 
-    navigate('/login', { replace: true });
+    navigate(LOGIN_PATH, { replace: true });
   }, [isPortalUser, navigate, redirectPath]);
 
   const title = paymentStatus === 'approved'

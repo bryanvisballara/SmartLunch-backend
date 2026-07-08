@@ -13,6 +13,7 @@ import {
   ParentPortalEmptyStudentsState,
 } from '../../components/ParentPortalExperienceStates';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
+import ParentStudentMedicalProfilePanel from '../../components/ParentStudentMedicalProfilePanel';
 import { useParentPullToRefresh } from '../../hooks/useParentPullToRefresh';
 import { useFloatingBottomNavSize } from '../../hooks/useFloatingBottomNavSize';
 import useAuthStore from '../../store/auth.store';
@@ -52,7 +53,7 @@ import {
   getWompiMatriculaPaymentStatus,
 } from '../../services/enrollmentMatricula.service';
 import { isMillenniumSchool, shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
-import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance } from '../../services/studentPortal.service';
+import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance, getStudentAcademicFeed } from '../../services/studentPortal.service';
 import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
 
 const parentAppSections = [
@@ -5379,7 +5380,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [parentAppFeatures, setParentAppFeatures] = useState(defaultParentAppFeatures);
   const [parentOverviewLoading, setParentOverviewLoading] = useState(true);
   const [selectedChildId, setSelectedChildId] = useState('');
-  const [localActiveSection, setLocalActiveSection] = useState(studentPortalMode ? 'academic' : 'home');
+  const [localActiveSection, setLocalActiveSection] = useState('home');
   const [activeAcademicView, setActiveAcademicView] = useState('academic-performance');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showFinanceChildOptions, setShowFinanceChildOptions] = useState(false);
@@ -5424,13 +5425,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const pendingFeedCommentLikeKeysRef = useRef(new Set());
   const userMenuRef = useRef(null);
   const normalizedRouteBase = useMemo(() => normalizeRouteBase(routeBase), [routeBase]);
-  const usesRoutedSections = Boolean(normalizedRouteBase) && !studentPortalMode;
+  const usesRoutedSections = Boolean(normalizedRouteBase);
   const useQuerySectionRouting = shouldUseParentQuerySectionRouting();
   const activeSection = useMemo(() => {
-    if (studentPortalMode) {
-      return 'academic';
-    }
-
     if (!usesRoutedSections) {
       return localActiveSection;
     }
@@ -5495,6 +5492,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     () => parentAppSections.filter((section) => isParentSectionEnabled(section.key, parentAppFeatures)),
     [parentAppFeatures]
   );
+  const visibleStudentAppSections = useMemo(
+    () => visibleParentAppSections.filter((section) => section.key !== 'finance'),
+    [visibleParentAppSections]
+  );
+  const visiblePortalAppSections = studentPortalMode ? visibleStudentAppSections : visibleParentAppSections;
   const visibleParentCareMenuItems = useMemo(
     () => parentCareMenuItems.filter((item) => parentAppFeatures[item.id] !== false),
     [parentAppFeatures]
@@ -5646,14 +5648,21 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [activeAcademicView, activeSection, selectedChild?.id, studentPortalMode]);
 
   useEffect(() => {
-    if (studentPortalMode || parentOverviewLoading) {
+    if (parentOverviewLoading) {
       return undefined;
     }
 
     let cancelled = false;
     setAcademicLoading(true);
 
-    Promise.allSettled([getParentAcademicFeed(), getParentAcademicBilling()])
+    const feedRequest = studentPortalMode
+      ? getStudentAcademicFeed()
+      : getParentAcademicFeed();
+    const billingRequest = studentPortalMode
+      ? Promise.resolve({ data: null })
+      : getParentAcademicBilling();
+
+    Promise.allSettled([feedRequest, billingRequest])
       .then(([feedResult, billingResult]) => {
         if (cancelled) {
           return;
@@ -5665,7 +5674,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           setFeedActionMessage(feedResult.reason?.response?.data?.message || 'No se pudo actualizar el feed.');
         }
 
-        if (billingResult.status === 'fulfilled') {
+        if (!studentPortalMode && billingResult.status === 'fulfilled') {
           setAcademicBilling(billingResult.value.data || {
             summary: { pendingAmount: 0, pendingCount: 0 },
             currentCharges: [],
@@ -5695,10 +5704,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [parentOverviewLoading, selectedChildId, feedRefreshCount, studentPortalMode]);
 
   useEffect(() => {
-    if (studentPortalMode) {
-      return undefined;
-    }
-
     let cancelled = false;
     setNursingLoading(true);
 
@@ -5725,10 +5730,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [studentPortalMode]);
 
   useEffect(() => {
-    if (studentPortalMode) {
-      return undefined;
-    }
-
     let cancelled = false;
     setPsychologyLoading(true);
 
@@ -5935,16 +5936,53 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   const refreshParentSection = useCallback(async () => {
     if (studentPortalMode) {
-      try {
-        const response = await getStudentPortalOverview();
-        const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
-        setParentOverview(mappedOverview);
-        setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
-      } catch {
-        setParentOverview({ children: [] });
+      const refreshTasks = [
+        getStudentPortalOverview()
+          .then((response) => {
+            const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
+            setParentOverview(mappedOverview);
+            setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
+          })
+          .catch(() => {
+            setParentOverview({ children: [] });
+          }),
+      ];
+
+      if (['home', 'academic'].includes(activeSection)) {
+        setAcademicLoading(true);
+        refreshTasks.push(
+          getStudentAcademicFeed()
+            .then((response) => setAcademicFeed(response.data || []))
+            .catch(() => setFeedActionMessage('No se pudo actualizar el feed.'))
+            .finally(() => setAcademicLoading(false))
+        );
       }
 
-      setAcademicRefreshCount((currentValue) => currentValue + 1);
+      if (activeSection === 'academic') {
+        setAcademicRefreshCount((currentValue) => currentValue + 1);
+      }
+
+      if (activeSection === 'nursing') {
+        setNursingLoading(true);
+        refreshTasks.push(
+          getParentNursingRecords()
+            .then((response) => setNursingRecords(response.data?.records || []))
+            .catch(() => setNursingRecords([]))
+            .finally(() => setNursingLoading(false))
+        );
+      }
+
+      if (activeSection === 'wellbeing') {
+        setPsychologyLoading(true);
+        refreshTasks.push(
+          getParentPsychologyRecords()
+            .then((response) => setPsychologyCases(response.data?.cases || []))
+            .catch(() => setPsychologyCases([]))
+            .finally(() => setPsychologyLoading(false))
+        );
+      }
+
+      await Promise.allSettled(refreshTasks);
       return;
     }
 
@@ -6601,13 +6639,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     if (parentOverviewLoading) {
       return (
         <ColibriBootSplash
-          ariaLabel={studentPortalMode ? 'Cargando portal académico' : 'Cargando portal de acudientes'}
-          eyebrow={studentPortalMode ? 'Portal académico' : 'Portal de acudientes'}
+          ariaLabel={studentPortalMode ? 'Cargando portal del alumno' : 'Cargando portal de acudientes'}
+          eyebrow={studentPortalMode ? 'Portal del alumno' : 'Portal de acudientes'}
           indeterminate
           message={studentPortalMode
-            ? 'Estamos consultando tu información académica y preparando tu portal.'
+            ? 'Estamos preparando tu feed, calificaciones y servicios del colegio.'
             : 'Estamos consultando la información real del acudiente y preparando tu experiencia.'}
-          title={studentPortalMode ? 'Cargando portal académico' : 'Cargando alumnos vinculados'}
+          title={studentPortalMode ? 'Cargando portal del alumno' : 'Cargando alumnos vinculados'}
         />
       );
     }
@@ -6656,6 +6694,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           </section>
 
           {nursingLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando historial de enfermería...</p> : null}
+
+          {!studentPortalMode && selectedChild?.id ? (
+            <ParentStudentMedicalProfilePanel
+              key={selectedChild.id}
+              studentId={selectedChild.id}
+              studentName={selectedChild.name}
+            />
+          ) : null}
 
           <section className="campus-parent-mobile__nursing-record-list">
             {selectedChildNursingRecords.length > 0 ? selectedChildNursingRecords.map((record) => {
@@ -6838,12 +6884,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const parentSectionChrome = !shouldUsePortalHeader ? (
     <div className={`parent-mobile-page parent-mobile-page-embedded campus-parent-mobile__portal-shell${showFinanceChildOptions ? ' is-student-selector-open' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}`}>
           <ParentMobilePortalHeader
-            canOpenMenu={!studentPortalMode && activeSection === 'academic'}
+            canOpenMenu={activeSection === 'academic'}
             guardianName={studentPortalMode ? (selectedChild?.name || user?.name) : workspace.guardian.name}
-            isMenuOpen={!studentPortalMode && activeSection === 'academic' ? showAcademicMenu : false}
+            isMenuOpen={activeSection === 'academic' ? showAcademicMenu : false}
             onLogout={onLogout}
             onToggleMenu={() => {
-              if (!studentPortalMode && activeSection === 'academic') {
+              if (activeSection === 'academic') {
                 setShowAcademicMenu((currentValue) => !currentValue);
               }
             }}
@@ -6871,7 +6917,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${studentPortalMode ? ' has-student-academic-bottom-nav' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}${shouldLockParentPortal ? ' is-matricula-locked' : ''}`}
+      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}${shouldLockParentPortal ? ' is-matricula-locked' : ''}`}
       {...pullRefreshTouchHandlers}
     >
       <ParentPullToRefreshIndicator
@@ -6882,7 +6928,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       />
       {parentSectionChrome}
 
-      {activeSection === 'academic' && showAcademicMenu && !studentPortalMode ? (
+      {activeSection === 'academic' && showAcademicMenu ? (
         <div className="campus-parent-mobile__academic-drawer-layer" onClick={() => setShowAcademicMenu(false)} role="presentation">
           <aside
             aria-label="Menu academico"
@@ -7011,7 +7057,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
         {activeSection === 'cafeteria' ? (
           embedPortal && cafeteriaBasePath ? (
-            <ParentPortal basePath={cafeteriaBasePath} embedded />
+            <ParentPortal
+              basePath={cafeteriaBasePath}
+              embedded
+              initialStudentId={selectedChild?.id || selectedChildId || ''}
+              studentPortalMode={studentPortalMode}
+            />
           ) : (
             <ParentCafeteriaContent
               activeView={activeCafeteriaView}
@@ -7166,33 +7217,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         />
       ) : null}
 
-      {studentPortalMode ? (
-        <nav aria-label="Navegacion academica del alumno" className={`campus-parent-mobile__bottom-nav campus-student-academic__bottom-nav ${bottomNavClassName}`}>
-          {academicMenuItems.map((item) => (
-            <button
-              aria-label={item.title}
-              className={`campus-parent-mobile__nav-item campus-student-academic__nav-item${item.id === activeAcademicView ? ' is-active' : ''}`}
-              key={item.id}
-              onClick={() => {
-                expandBottomNav();
-                setActiveAcademicView(item.id);
-                setShowAcademicMenu(false);
-              }}
-              title={item.title}
-              type="button"
-            >
-              <span className="campus-student-academic__nav-icon">
-                <AcademicMenuIcon icon={item.icon} />
-              </span>
-              <span className="campus-student-academic__nav-label">{item.navShortTitle || item.title}</span>
-            </button>
-          ))}
-        </nav>
-      ) : null}
-
-      {!studentPortalMode && visibleParentAppSections.length > 1 && !shouldLockParentPortal ? (
-      <nav aria-label="Navegacion principal del padre" className={`campus-parent-mobile__bottom-nav ${bottomNavClassName}`}>
-        {visibleParentAppSections.map((section) => {
+      {visiblePortalAppSections.length > 1 && !shouldLockParentPortal ? (
+      <nav aria-label={studentPortalMode ? 'Navegacion principal del alumno' : 'Navegacion principal del padre'} className={`campus-parent-mobile__bottom-nav ${bottomNavClassName}`}>
+        {visiblePortalAppSections.map((section) => {
           const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);
           const isActive = section.key === activeSection || (section.key === 'nursing' && isCareSection);
 

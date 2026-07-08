@@ -214,16 +214,6 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   ), [schoolSearch, selectedSchoolId, countrySchoolOptions, filteredSchoolOptions]);
 
   useEffect(() => {
-    document.documentElement.classList.add('login-route-active');
-    document.body.classList.add('login-route-active');
-
-    return () => {
-      document.documentElement.classList.remove('login-route-active');
-      document.body.classList.remove('login-route-active');
-    };
-  }, []);
-
-  useEffect(() => {
     setSchoolSearch(selectedSchool?.label || '');
   }, [selectedSchool?.label]);
 
@@ -634,7 +624,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     }
 
     if (!forgotEmail.trim()) {
-      setForgotError('Ingresa tu correo electronico para continuar.');
+      setForgotError('Ingresa tu usuario o correo para continuar.');
       return;
     }
 
@@ -749,7 +739,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const supportsBiometric = canUseBiometricAuth();
 
   return (
-    <div className="page-center login-page login-page-auth">
+    <div className={`page-center login-page login-page-auth${isNativeAndroid ? ' login-page-auth--native-android' : ''}`}>
       <div className="login-auth-content">
       <section className="login-auth-hero" aria-label="Identidad de Comergio">
         <div className="login-auth-logo-wrap" aria-hidden="true">
@@ -1005,6 +995,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
         <span aria-hidden="true"> | </span>
         <Link to="/contact">Contacto</Link>
       </p>
+      <div aria-hidden="true" className="login-auth-bottom-spacer" />
       </div>
 
       {showForgotPasswordPopup ? (
@@ -1014,9 +1005,9 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
             {forgotStep === 'request' ? (
               <>
-                <p>Ingresa tu correo. Te enviaremos un codigo para cambiar tu contrasena.</p>
+                <p>Ingresa tu usuario o correo. Si eres alumno, enviaremos el codigo al correo del acudiente registrado.</p>
                 <input
-                  placeholder="Correo electronico"
+                  placeholder="Usuario o correo"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
                 />
@@ -1026,7 +1017,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
             {forgotStep === 'verify' ? (
               <>
-                <p>Revisa tu correo e ingresa el codigo de verificacion.</p>
+                <p>Revisa el correo del acudiente o tu bandeja e ingresa el codigo de verificacion.</p>
                 <input
                   inputMode="numeric"
                   maxLength={6}

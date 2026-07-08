@@ -520,12 +520,27 @@ router.get('/institutional/feed', roleMiddleware(institutionalViewerRoles), asyn
   }
 });
 
-router.get('/parent/records', roleMiddleware('parent', 'admin'), async (req, res) => {
+router.get('/parent/records', roleMiddleware('parent', 'admin', 'student'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
-    const parentId = role === 'admin' && req.query.parentId ? req.query.parentId : userId;
-    const links = await ParentStudentLink.find({ schoolId, parentId, status: 'active' }).select('studentId').lean();
-    const studentIds = links.map((link) => String(link.studentId));
+    let studentIds = [];
+
+    if (role === 'student') {
+      const studentUser = await User.findOne({
+        _id: userId,
+        schoolId,
+        role: 'student',
+        status: 'active',
+        deletedAt: null,
+      }).select('linkedStudentId').lean();
+      if (studentUser?.linkedStudentId) {
+        studentIds = [String(studentUser.linkedStudentId)];
+      }
+    } else {
+      const parentId = role === 'admin' && req.query.parentId ? req.query.parentId : userId;
+      const links = await ParentStudentLink.find({ schoolId, parentId, status: 'active' }).select('studentId').lean();
+      studentIds = links.map((link) => String(link.studentId));
+    }
 
     if (!studentIds.length) {
       return res.status(200).json({ cases: [] });

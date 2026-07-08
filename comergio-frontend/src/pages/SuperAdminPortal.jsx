@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LOGIN_PATH } from '../lib/authNavigation';
 import useAuthStore from '../store/auth.store';
 import { createSuperAdminSchool, deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
 
@@ -451,7 +452,7 @@ function SuperAdminPortal() {
 
   const onLogout = () => {
     logout();
-    navigate('/login', { replace: true });
+    navigate(LOGIN_PATH, { replace: true });
   };
 
   return (

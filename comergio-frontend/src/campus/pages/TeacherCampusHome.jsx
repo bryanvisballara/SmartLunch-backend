@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Select from 'react-select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { LOGIN_PATH } from '../../lib/authNavigation';
 import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests } from '../../services/hr.service';
@@ -2695,7 +2696,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const onLogout = () => {
     setShowTeacherMenu(false);
     logout();
-    navigate('/login', { replace: true });
+    navigate(LOGIN_PATH, { replace: true });
   };
 
   useEffect(() => {

@@ -5627,6 +5627,206 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   font-weight: 700;
 }
 
+.parent-student-medical-profile {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid rgba(14, 116, 144, 0.14);
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.parent-student-medical-profile__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.parent-student-medical-profile__head h3 {
+  margin: 0.2rem 0 0;
+  color: #0f172a;
+  font-size: 1.05rem;
+}
+
+.parent-student-medical-profile__head p {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.parent-student-medical-profile__edit-btn,
+.parent-student-medical-profile__save-btn,
+.parent-student-medical-profile__cancel-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.62rem 0.95rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.parent-student-medical-profile__edit-btn,
+.parent-student-medical-profile__save-btn {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.parent-student-medical-profile__cancel-btn {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.parent-student-medical-profile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.parent-student-medical-profile__feedback {
+  margin: 0;
+  padding: 0.72rem 0.85rem;
+  border-radius: 0.85rem;
+  background: rgba(240, 253, 250, 0.95);
+  color: #0f766e;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.parent-student-medical-profile__feedback.is-error {
+  background: rgba(254, 242, 242, 0.95);
+  color: #b91c1c;
+}
+
+.parent-student-medical-profile__history {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.parent-student-medical-profile__history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  border: 1px solid rgba(14, 116, 144, 0.12);
+  border-radius: 0.95rem;
+  padding: 0.78rem 0.9rem;
+  background: rgba(248, 250, 252, 0.95);
+  color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.student-medical-profile-form {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.student-medical-profile-form__field {
+  display: grid;
+  gap: 0.35rem;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.student-medical-profile-form__field input,
+.student-medical-profile-form__field select,
+.student-medical-profile-form__field textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.8rem;
+  padding: 0.68rem 0.78rem;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 500;
+}
+
+.student-medical-profile-form__field input:disabled,
+.student-medical-profile-form__field select:disabled,
+.student-medical-profile-form__field textarea:disabled {
+  background: #f8fafc;
+  color: #475569;
+}
+
+.student-medical-profile-history {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.student-medical-profile-history__empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.student-medical-profile-history__card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(14, 116, 144, 0.12);
+  border-radius: 0.95rem;
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.student-medical-profile-history__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.student-medical-profile-history__head strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.88rem;
+}
+
+.student-medical-profile-history__head span,
+.student-medical-profile-history__head time {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.student-medical-profile-history__changes {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.student-medical-profile-history__changes li {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.student-medical-profile-history__changes li > span {
+  color: #0f766e;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.student-medical-profile-history__changes p {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  color: #334155;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.student-medical-profile-history__changes del {
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+
 @media (max-width: 390px) {
   .campus-parent-mobile__nursing-status-grid {
     grid-template-columns: 1fr;

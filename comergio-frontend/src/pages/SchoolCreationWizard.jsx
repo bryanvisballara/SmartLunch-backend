@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LOGIN_PATH } from '../lib/authNavigation';
 import logoOwl from '../assets/logonuevo.png';
 import { scheduleLocalStorageJsonSave } from '../lib/nonBlockingStorage';
 import { rememberSchoolOptions } from '../lib/schools';
@@ -8184,7 +8185,7 @@ function SchoolCreationWizard() {
   return (
     <div className="school-creation-shell">
       <header className="school-creation-topbar">
-        <button className="school-creation-link-button" onClick={() => navigate('/login')} type="button">
+        <button className="school-creation-link-button" onClick={() => navigate(LOGIN_PATH)} type="button">
           Volver al login
         </button>
         <span className="school-creation-topbar-label">Comergio · Configuracion academica</span>

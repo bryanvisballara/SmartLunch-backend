@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import DismissibleNotice from '../components/DismissibleNotice';
+import { LOGIN_PATH } from '../lib/authNavigation';
 import { completeRegister } from '../services/auth.service';
-import smartLogo from '../assets/comergio.png';
+import colibriLogo from '../assets/colibrisinfondo.png';
 
 function createStudentDraft() {
   return {
@@ -10,6 +10,15 @@ function createStudentDraft() {
     lastName: '',
     grade: '',
   };
+}
+
+function RegisterField({ label, children }) {
+  return (
+    <label>
+      <span>{label}</span>
+      <div className="login-input-shell">{children}</div>
+    </label>
+  );
 }
 
 function RegisterVerifiedNext() {
@@ -87,72 +96,84 @@ function RegisterVerifiedNext() {
 
   return (
     <div className="page-center login-page login-page-auth">
-      <form className="panel login-panel register-students-panel" onSubmit={onSubmit}>
-        <img className="register-smartlogo" src={smartLogo} alt="Comergio" />
-        <h2>Completa tu registro</h2>
-        <p className="login-register-cta">Correo verificado: <strong>{profile?.email || 'no disponible'}</strong></p>
+      <div className="login-auth-content">
+        <section className="login-auth-hero" aria-label="Identidad de Comergio">
+          <div className="login-auth-logo-wrap" aria-hidden="true">
+            <img className="login-auth-colibri-image" src={colibriLogo} alt="" />
+          </div>
+          <h1 className="login-auth-brand-title">
+            <span className="login-auth-brand-comer">Comer</span>
+            <span className="login-auth-brand-gio login-auth-text-gradient">gio</span>
+          </h1>
+        </section>
 
-        <label>
-          Contrasena
-          <input
-            autoComplete="new-password"
-            minLength={6}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Minimo 6 caracteres"
-            type="password"
-            value={password}
-          />
-        </label>
+        <form className="login-panel login-auth-card register-auth-card register-students-panel" onSubmit={onSubmit}>
+          <div className="login-auth-card-head">
+            <h2>Completa tu registro</h2>
+            <p>
+              Correo verificado: <strong>{profile?.email || 'no disponible'}</strong>
+            </p>
+          </div>
 
-        <div className="register-students-section">
-          <h3>Alumnos</h3>
-          {students.map((student, index) => (
-            <div className="register-student-card" key={`student-${index + 1}`}>
-              <p>Alumno {index + 1}</p>
-              <label>
-                Nombre del alumno
-                <input
-                  onChange={(event) => onStudentChange(index, 'firstName', event.target.value)}
-                  value={student.firstName}
-                />
-              </label>
-              <label>
-                Apellido
-                <input
-                  onChange={(event) => onStudentChange(index, 'lastName', event.target.value)}
-                  value={student.lastName}
-                />
-              </label>
-              <label>
-                Grado que cursa
-                <input
-                  onChange={(event) => onStudentChange(index, 'grade', event.target.value)}
-                  value={student.grade}
-                />
-              </label>
-            </div>
-          ))}
-          <button className="register-add-student-btn" onClick={onAddStudent} type="button">
-            <span aria-hidden="true">+</span>
-            Agregar otro alumno
+          <RegisterField label="Contrasena">
+            <input
+              autoComplete="new-password"
+              minLength={6}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimo 6 caracteres"
+              type="password"
+              value={password}
+            />
+          </RegisterField>
+
+          <div className="register-students-section">
+            <h3>Alumnos</h3>
+            {students.map((student, index) => (
+              <div className="register-student-card" key={`student-${index + 1}`}>
+                <p>Alumno {index + 1}</p>
+                <RegisterField label="Nombre del alumno">
+                  <input
+                    onChange={(event) => onStudentChange(index, 'firstName', event.target.value)}
+                    value={student.firstName}
+                  />
+                </RegisterField>
+                <RegisterField label="Apellido">
+                  <input
+                    onChange={(event) => onStudentChange(index, 'lastName', event.target.value)}
+                    value={student.lastName}
+                  />
+                </RegisterField>
+                <RegisterField label="Grado que cursa">
+                  <input
+                    onChange={(event) => onStudentChange(index, 'grade', event.target.value)}
+                    value={student.grade}
+                  />
+                </RegisterField>
+              </div>
+            ))}
+            <button className="register-add-student-btn" onClick={onAddStudent} type="button">
+              <span aria-hidden="true">+</span>
+              Agregar otro alumno
+            </button>
+          </div>
+
+          <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
+          <DismissibleNotice text={info} type="info" onClose={() => setInfo('')} />
+
+          <button className="btn login-primary-btn" disabled={saving} type="submit">
+            {saving ? 'Completando registro...' : 'Completar registro'}
           </button>
-        </div>
 
-        <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
-        <DismissibleNotice text={info} type="info" onClose={() => setInfo('')} />
-
-        <button className="btn btn-primary" disabled={saving} type="submit">
-          {saving ? 'Completando registro...' : 'Completar registro'}
-        </button>
-
-        <p className="login-register-cta">
-          ¿Necesitas volver?{' '}
-          <Link className="login-inline-link" to="/register">
-            Regresar al inicio de registro
-          </Link>
-          .
-        </p>
-      </form>
+          <p className="login-register-cta">
+            ¿Necesitas volver?{' '}
+            <Link className="login-inline-link" to="/register">
+              Regresar al inicio de registro
+            </Link>
+            .
+          </p>
+        </form>
+        <div aria-hidden="true" className="login-auth-bottom-spacer" />
+      </div>
 
       {showSuccessModal ? (
         <div className="register-verification-overlay" role="dialog" aria-modal="true" aria-label="Registro completado">
@@ -160,7 +181,7 @@ function RegisterVerifiedNext() {
             <h3>Registro completado</h3>
             <p>Su registro se ha completado con exito, por favor, inicie sesion.</p>
             <div className="register-verification-actions">
-              <button className="btn btn-primary" onClick={() => navigate('/login')} type="button">
+              <button className="btn btn-primary" onClick={() => navigate(LOGIN_PATH)} type="button">
                 Ir a iniciar sesion
               </button>
             </div>

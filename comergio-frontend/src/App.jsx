@@ -9,7 +9,10 @@ import { resolveComergioAppUrl } from './lib/deepLinks';
 import { savePostLoginRedirect } from './lib/postLoginRedirect';
 import { ensurePortalPushNotifications, registerPushNotificationNavigation } from './lib/pushNotifications';
 import { getDefaultRouteByRole, INSTITUTIONAL_PLACEHOLDER_ROLES } from './lib/defaultRouteByRole';
+import { LOGIN_PATH } from './lib/authNavigation';
+import { useAndroidNavInset } from './hooks/useAndroidNavInset';
 import Login from './pages/Login';
+import StudentDevPreviewLogin from './pages/StudentDevPreviewLogin';
 import LandingPage from './pages/LandingPage';
 import POS from './pages/POS';
 import Wallet from './pages/Wallet';
@@ -43,7 +46,7 @@ import CampusUnavailable from './campus/pages/CampusUnavailable';
 
 const campusPreviewEnabled = String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
 
-function RequireAuth({ isAuthenticated, loginPath = '/login', children }) {
+function RequireAuth({ isAuthenticated, loginPath = LOGIN_PATH, children }) {
   if (!isAuthenticated) {
     return <Navigate replace to={loginPath} />;
   }
@@ -53,7 +56,7 @@ function RequireAuth({ isAuthenticated, loginPath = '/login', children }) {
 
 function RequireRole({ isAuthenticated, userRole, allowedRoles, children }) {
   if (!isAuthenticated) {
-    return <Navigate replace to="/login" />;
+    return <Navigate replace to={LOGIN_PATH} />;
   }
 
   if (!allowedRoles.includes(userRole)) {
@@ -72,24 +75,31 @@ function PublicOnly({ isAuthenticated, userRole, children }) {
 }
 
 function AppHomeEntry({ isAuthenticated, userRole }) {
-  if (Capacitor.isNativePlatform()) {
-    return <Navigate replace to={isAuthenticated ? getDefaultRouteByRole(userRole) : '/login'} />;
+  if (Capacitor.isNativePlatform() && isAuthenticated) {
+    return <Navigate replace to={getDefaultRouteByRole(userRole)} />;
   }
 
-  return <LandingPage />;
+  return (
+    <PublicOnly isAuthenticated={isAuthenticated} userRole={userRole}>
+      <Login />
+    </PublicOnly>
+  );
 }
 
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  useAndroidNavInset();
   const { token, user } = useAuthStore();
   const normalizedPathname = location.pathname !== '/'
     ? location.pathname.replace(/\/+$/, '')
     : '/';
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
-  const isLandingRoute = normalizedPathname === '/';
-  const isLoginRoute = normalizedPathname === '/login';
+  const isLandingRoute = normalizedPathname === '/landing';
+  const isLoginRoute = normalizedPathname === '/';
+  const isRegisterRoute = normalizedPathname === '/register' || normalizedPathname === '/register/next-step';
+  const isAuthFlowRoute = isLoginRoute || isRegisterRoute;
   const pushAttemptKeyRef = useRef('');
   const lastHandledAppUrlRef = useRef({ rawUrl: '', internalPath: '', handledAt: 0 });
   const isSuperAdminRoute = normalizedPathname === '/super-admin' || normalizedPathname.startsWith('/super-admin/');
@@ -107,7 +117,7 @@ function App() {
   const isStudentRoute = normalizedPathname === '/student' || normalizedPathname.startsWith('/student/');
   const isSchoolCreationRoute = normalizedPathname === '/schoolcreation';
   const isCampusLikeRoute = isCampusRoute || isCampusPreviewRoute;
-  const campusLoginPath = '/login';
+  const campusLoginPath = LOGIN_PATH;
   const isEpaycoReturnRoute = normalizedPathname === '/epayco-resultado';
   const isNativeAndroid = Capacitor.getPlatform() === 'android' && Capacitor.isNativePlatform();
   const isAndroidRootRoute = [
@@ -131,7 +141,7 @@ function App() {
   ].includes(normalizedPathname) || normalizedPathname.startsWith('/student');
   const showNavbar =
     !isLandingRoute &&
-    normalizedPathname !== '/login' &&
+    !isLoginRoute &&
     normalizedPathname !== '/cuenta-eliminada' &&
     normalizedPathname !== '/register' &&
     normalizedPathname !== '/register/next-step' &&
@@ -146,7 +156,7 @@ function App() {
     !['/privacy', '/contact'].includes(normalizedPathname);
   const hideFooter =
     isLandingRoute ||
-    normalizedPathname === '/login' ||
+    isLoginRoute ||
     normalizedPathname === '/cuenta-eliminada' ||
     normalizedPathname === '/register' ||
     normalizedPathname === '/register/next-step' ||
@@ -168,6 +178,16 @@ function App() {
       document.body.classList.remove('admissions-route-active');
     };
   }, [isAdmissionsRoute]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('login-route-active', isAuthFlowRoute);
+    document.body.classList.toggle('login-route-active', isAuthFlowRoute);
+
+    return () => {
+      document.documentElement.classList.remove('login-route-active');
+      document.body.classList.remove('login-route-active');
+    };
+  }, [isAuthFlowRoute]);
 
   useEffect(() => {
     if (!isAuthenticated || isLoginRoute) {
@@ -331,10 +351,17 @@ function App() {
       <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
-          <Route element={<Login />} path="/login" />
+          <Route element={<LandingPage />} path="/landing" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="coordinacion-preescolar" postLoginPath="/coordinacion" />} path="/login/coordinacion-preescolar" /> : null}
+          {import.meta.env.DEV ? (
+            <Route
+              element={<StudentDevPreviewLogin schoolId="comergio_demo_kns8p" studentName="oliver visbal" />}
+              path="/dev/student/oliver-visbal"
+            />
+          ) : null}
+          <Route element={<Navigate replace to={LOGIN_PATH} />} path="/login" />
           <Route
             element={(
               <RequireRole allowedRoles={['teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
@@ -590,7 +617,7 @@ function App() {
                 isAuthenticated={isAuthenticated}
                 userRole={userRole}
               >
-                <ParentCampusHome studentPortalMode />
+                <ParentCampusHome embedPortal routeBase="/student" studentPortalMode />
               </RequireRole>
             )}
             path="/student/*"
@@ -610,7 +637,7 @@ function App() {
           <Route element={<Privacy />} path="/privacy" />
           <Route element={<AccountDeletionRequest />} path="/account-deletion" />
           <Route element={<Contact />} path="/contact" />
-          <Route element={<Navigate replace to={campusPreviewEnabled ? "/campus-preview/parent" : "/login"} />} path="*" />
+          <Route element={<Navigate replace to={campusPreviewEnabled ? "/campus-preview/parent" : LOGIN_PATH} />} path="*" />
         </Routes>
       </main>
       {!hideFooter ? <AppFooter /> : null}

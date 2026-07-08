@@ -2,58 +2,19 @@ const bcrypt = require('bcryptjs');
 const User = require('../models/user.model');
 const Student = require('../models/student.model');
 const CampusMembership = require('../models/campusMembership.model');
-const { getSchoolDisplayName } = require('./schoolDisplayName');
+const { buildStudentLoginUsername, resolveStudentNameParts } = require('./studentLoginUsername');
 
 function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function slugifyEmailPart(value) {
-  return normalizeText(value)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '');
-}
-
 function splitStudentIdentity(student = {}) {
-  let firstName = normalizeText(student.firstName);
-  let lastName = normalizeText(student.lastName);
-
-  if (!firstName || !lastName) {
-    const parts = normalizeText(student.name).split(/\s+/).filter(Boolean);
-    if (!firstName) {
-      firstName = parts[0] || '';
-    }
-    if (!lastName) {
-      lastName = parts[1] || '';
-    }
-  }
-
-  return { firstName, lastName };
+  const { firstName, firstLastName } = resolveStudentNameParts(student);
+  return { firstName, lastName: firstLastName };
 }
 
-async function buildSchoolEmailDomain(schoolId) {
-  const displayName = await getSchoolDisplayName(schoolId);
-  const slug = slugifyEmailPart(displayName || schoolId);
-  return `${slug || 'colegio'}.com`;
-}
-
-async function buildStudentUsername({ schoolId, student }) {
-  const { firstName, lastName } = splitStudentIdentity(student);
-  const localPart = [slugifyEmailPart(firstName), slugifyEmailPart(lastName)].filter(Boolean).join('.');
-  const domain = await buildSchoolEmailDomain(schoolId);
-  const baseEmail = `${localPart || 'alumno'}@${domain}`;
-
-  let candidate = baseEmail;
-  let attempt = 1;
-
-  while (await User.findOne({ username: candidate }).select('_id').lean()) {
-    candidate = `${localPart || 'alumno'}.${attempt}@${domain}`;
-    attempt += 1;
-  }
-
-  return candidate;
+async function buildStudentUsername({ schoolId, student, excludeUserId = null }) {
+  return buildStudentLoginUsername({ schoolId, student, excludeUserId });
 }
 
 async function ensureStudentCampusMembership({ schoolId, userId }) {
@@ -96,12 +57,13 @@ async function upsertStudentAccount({ schoolId, student }) {
     user = await User.findOne({ schoolId, role: 'student', linkedStudentId: student._id });
   }
 
-  const username = user?.username || await buildStudentUsername({ schoolId, student });
+  const username = user?.username || await buildStudentUsername({ schoolId, student, excludeUserId: user?._id });
+  const syntheticEmail = `${username}@alumnos.local`;
   const payload = {
     schoolId,
     name: studentName,
     username,
-    email: username,
+    email: syntheticEmail,
     documentType: normalizeText(student.documentType) || 'TI',
     documentNumber,
     role: 'student',
@@ -132,7 +94,6 @@ async function upsertStudentAccount({ schoolId, student }) {
 }
 
 module.exports = {
-  buildSchoolEmailDomain,
   buildStudentUsername,
   ensureStudentCampusMembership,
   upsertStudentAccount,

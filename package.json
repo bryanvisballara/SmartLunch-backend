@@ -4,7 +4,7 @@
   "description": "Comergio backend API",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "COMERGIO_ALLOW_DEV_PREVIEW=true nodemon src/server.js",
     "start": "node src/server.js",
     "worker:notifications": "node src/workers/notification.worker.js",
     "init:collections": "node src/scripts/initCollections.js",

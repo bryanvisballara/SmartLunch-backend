@@ -7,8 +7,13 @@ const AcademicStructure = require('../models/academicStructure.model');
 const NursingVisit = require('../models/nursingVisit.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
+const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
+const {
+  serializeStudentMedicalProfile,
+  listStudentMedicalProfileRevisions,
+} = require('../services/studentMedicalProfile.service');
 
 const router = express.Router();
 
@@ -171,27 +176,7 @@ function isCompactDisplayGradeQuery(value) {
 }
 
 function serializeMedicalProfile(profile = {}) {
-  const medicationAuthorization = profile?.medicationAuthorization || {};
-  return {
-    allergies: normalizeText(profile?.allergies),
-    chronicConditions: normalizeText(profile?.chronicConditions),
-    currentMedications: normalizeText(profile?.currentMedications),
-    dietaryRestrictions: normalizeText(profile?.dietaryRestrictions),
-    healthInsurance: normalizeText(profile?.healthInsurance),
-    emergencyMedicalContactName: normalizeText(profile?.emergencyMedicalContactName),
-    emergencyMedicalContactPhone: normalizeText(profile?.emergencyMedicalContactPhone),
-    physicianName: normalizeText(profile?.physicianName),
-    physicianPhone: normalizeText(profile?.physicianPhone),
-    medicationAuthorization: {
-      status: normalizeText(medicationAuthorization.status),
-      authorizedBy: normalizeText(medicationAuthorization.authorizedBy),
-      authorizedMedications: normalizeText(medicationAuthorization.authorizedMedications),
-      instructions: normalizeText(medicationAuthorization.instructions),
-      notes: normalizeText(medicationAuthorization.notes),
-      authorizationDate: medicationAuthorization.authorizationDate || null,
-    },
-    completedAt: profile?.completedAt || null,
-  };
+  return serializeStudentMedicalProfile(profile);
 }
 
 function serializeStudent(student, { academicStructure = null } = {}) {
@@ -332,6 +317,32 @@ router.get('/students/:studentId/history', roleMiddleware(nursingStaffRoles), as
   }
 });
 
+router.get('/students/:studentId/medical-profile/history', roleMiddleware(nursingStaffRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const { studentId } = req.params;
+
+    if (!isValidObjectId(studentId)) {
+      return res.status(400).json({ message: 'Invalid student id' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('_id').lean();
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const revisions = await listStudentMedicalProfileRevisions({
+      schoolId,
+      studentId,
+      limit: req.query.limit,
+    });
+
+    return res.status(200).json({ revisions });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
@@ -420,14 +431,29 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
   }
 });
 
-router.get('/parent/records', roleMiddleware('parent', 'admin'), async (req, res) => {
+router.get('/parent/records', roleMiddleware('parent', 'admin', 'student'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
-    const parentId = role === 'admin' && req.query.parentId ? req.query.parentId : userId;
-    const requestedStudentId = normalizeText(req.query.studentId);
+    let linkedStudentIds = [];
 
-    const links = await ParentStudentLink.find({ schoolId, parentId, status: 'active' }).select('studentId').lean();
-    const linkedStudentIds = links.map((link) => String(link.studentId));
+    if (role === 'student') {
+      const studentUser = await User.findOne({
+        _id: userId,
+        schoolId,
+        role: 'student',
+        status: 'active',
+        deletedAt: null,
+      }).select('linkedStudentId').lean();
+      if (studentUser?.linkedStudentId) {
+        linkedStudentIds = [String(studentUser.linkedStudentId)];
+      }
+    } else {
+      const parentId = role === 'admin' && req.query.parentId ? req.query.parentId : userId;
+      const links = await ParentStudentLink.find({ schoolId, parentId, status: 'active' }).select('studentId').lean();
+      linkedStudentIds = links.map((link) => String(link.studentId));
+    }
+
+    const requestedStudentId = normalizeText(req.query.studentId);
 
     if (!linkedStudentIds.length) {
       return res.status(200).json({ records: [], recordsByStudentId: {}, latestByStudentId: {} });

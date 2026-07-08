@@ -1,4 +1,4 @@
-export const LOGIN_PATH = '/login';
+export const LOGIN_PATH = '/';
 export const ACCOUNT_DELETED_PATH = '/cuenta-eliminada';
 
 function redirectToPath(path) {
