@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   RECTORIA_PORTAL_NAV,
 } from './rectoriaPortalNav';
+import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
 import './RectoriaPortalSidebar.css';
 
 const NESTED_CHILD_KEYS = new Set(['team', 'students', 'admissions']);
@@ -144,7 +145,9 @@ export default function RectoriaPortalSidebar({
                 onClick={() => handleItemClick(entry.key)}
                 type="button"
               >
-                <span className="rectoria-rail__item-label">{entry.label}</span>
+                <span className="rectoria-rail__item-label">
+                  {entry.key === 'community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : entry.label}
+                </span>
               </button>
             );
           }
@@ -183,7 +186,7 @@ export default function RectoriaPortalSidebar({
                           onClick={() => handleChildClick(item.key, entry.key)}
                           type="button"
                         >
-                          <span>{label}</span>
+                          <span>{item.key === 'control_community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : label}</span>
                           {hasNestedSubnav ? <ChevronIcon expanded={isNestedOpen} /> : null}
                         </button>
                         {isNestedOpen ? (

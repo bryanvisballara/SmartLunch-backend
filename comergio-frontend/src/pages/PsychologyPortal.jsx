@@ -9,6 +9,7 @@ import {
   searchPsychologyStudents,
 } from '../services/psychology.service';
 import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
+import TeEscuchamosLabel from '../components/community/TeEscuchamosLabel';
 
 const caseTypeOptions = [
   { value: 'bullying', label: 'Bullying' },
@@ -327,7 +328,7 @@ function PsychologyPortal() {
           Casos clínicos
         </button>
         <button className={activePortalView === 'community_reports' ? 'is-active' : ''} onClick={() => setActivePortalView('community_reports')} type="button">
-          Te escuchamos
+          <TeEscuchamosLabel className="te-escuchamos-label--tab" />
         </button>
       </div>
 

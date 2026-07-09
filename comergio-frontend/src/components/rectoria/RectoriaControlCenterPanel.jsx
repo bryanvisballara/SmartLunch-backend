@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getPsychologyDashboard } from '../../services/psychology.service';
 import { getNursingSummary } from '../../services/nursing.service';
 import CommunityReportsPanel from '../community/CommunityReportsPanel';
+import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
 import './RectoriaControlCenter.css';
 
 function formatScore(value) {
@@ -208,7 +209,7 @@ export default function RectoriaControlCenterPanel({
       <header className="rectoria-control-hero">
         <div>
           <span className="rectoria-control-eyebrow">{viewMeta.eyebrow}</span>
-          <h2>{viewMeta.title}</h2>
+          <h2>{view === 'control_community_reports' ? <TeEscuchamosLabel as="span" /> : viewMeta.title}</h2>
           <p>{viewMeta.description}</p>
         </div>
         {view === 'control_levels' && overviewAcademicPerformance?.weightedAverage != null ? (

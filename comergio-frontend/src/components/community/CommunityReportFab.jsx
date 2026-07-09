@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
+import teEscuchamosIcon from '../../assets/te-escuchamos-icon.png';
 import { createCommunityReport } from '../../services/communityReport.service';
+import TeEscuchamosLabel from './TeEscuchamosLabel';
 
 const reportTypeOptions = [
   { value: 'bullying', label: 'Reportar bullying', hint: 'Situaciones de acoso o intimidación.' },
@@ -14,21 +16,6 @@ const emptyForm = {
   teacherName: '',
   isAnonymous: false,
 };
-
-function CommunityReportHeartIcon() {
-  return (
-    <svg aria-hidden="true" className="campus-parent-mobile__community-report-fab-icon" viewBox="0 0 24 24">
-      <path
-        d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"
-        fill="currentColor"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.2"
-      />
-    </svg>
-  );
-}
 
 function ParentFeedBottomSheet({ children, onClose, title }) {
   return (
@@ -118,16 +105,14 @@ export default function CommunityReportFab({
         }}
         type="button"
       >
-        <CommunityReportHeartIcon />
+        <img alt="" aria-hidden="true" className="campus-parent-mobile__community-report-fab-icon" src={teEscuchamosIcon} />
       </button>
 
       {open ? (
-        <ParentFeedBottomSheet onClose={resetAndClose} title="Te escuchamos">
+        <ParentFeedBottomSheet onClose={resetAndClose} title={<TeEscuchamosLabel className="te-escuchamos-label--sheet" as="span" />}>
           <form className="campus-parent-mobile__community-report-form" onSubmit={onSubmit}>
             <p className="campus-parent-mobile__community-report-intro">
-              {studentPortalMode
-                ? 'Comparte una preocupación o recomendación para el colegio. Puedes enviarla con tu nombre o de forma anónima.'
-                : 'Comparte una preocupación o recomendación para el colegio. Puedes enviarla con tu nombre o de forma anónima.'}
+              Tu voz cuenta. Comparte una preocupación o recomendación para el colegio. Puedes enviarla con tu nombre o de forma anónima.
             </p>
 
             <div className="campus-parent-mobile__community-report-types" role="radiogroup" aria-label="Tipo de reporte">
@@ -175,7 +160,13 @@ export default function CommunityReportFab({
               />
               <span>
                 <strong>Enviar de forma anónima</strong>
-                <small>{form.isAnonymous ? 'Tu nombre no se mostrará al equipo institucional.' : 'Tu nombre aparecerá en el reporte para facilitar el seguimiento.'}</small>
+                <small>
+                  {form.isAnonymous && form.reportType === 'depression'
+                    ? 'Para proteger tu bienestar, el equipo institucional verá tu identidad aunque marques esta opción como anónima.'
+                    : form.isAnonymous
+                      ? 'Tu nombre no se mostrará al equipo institucional.'
+                      : 'Tu nombre aparecerá en el reporte para facilitar el seguimiento.'}
+                </small>
               </span>
             </label>
 

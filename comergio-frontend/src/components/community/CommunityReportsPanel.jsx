@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCommunityReports, updateCommunityReportStatus } from '../../services/communityReport.service';
+import TeEscuchamosLabel from './TeEscuchamosLabel';
 
 const reportTypeOptions = [
   { value: '', label: 'Todos los tipos' },
@@ -90,7 +91,7 @@ export default function CommunityReportsPanel({ className = '' }) {
     <section className={`community-reports-panel${className ? ` ${className}` : ''}`}>
       <header className="community-reports-panel__hero">
         <div>
-          <span className="community-reports-panel__kicker">Te escuchamos</span>
+          <TeEscuchamosLabel className="community-reports-panel__kicker" />
           <h2>Reportes de acudientes y alumnos</h2>
           <p>Bullying, depresión, reportes de docentes y recomendaciones enviadas desde la app móvil.</p>
         </div>
@@ -138,6 +139,9 @@ export default function CommunityReportsPanel({ className = '' }) {
               <small>{formatDateTime(report.submittedAt)}</small>
             </div>
 
+            {report.anonymousPreferenceNote ? (
+              <p className="community-reports-panel__meta community-reports-panel__meta--warn">{report.anonymousPreferenceNote}</p>
+            ) : null}
             {report.studentName ? <p className="community-reports-panel__meta">Alumno vinculado: {report.studentName}</p> : null}
             {report.teacherName ? <p className="community-reports-panel__meta">Docente reportado: {report.teacherName}</p> : null}
             <p className="community-reports-panel__message">{report.message}</p>

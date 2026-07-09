@@ -35,15 +35,26 @@ function isValidObjectId(value) {
 
 function serializeCommunityReport(report = {}, { includeInternalFields = false } = {}) {
   const isAnonymous = Boolean(report.isAnonymous);
+  const reporterName = normalizeText(report.reporterName);
+  const reportType = normalizeText(report.reportType);
+  const isDepressionReport = reportType === 'depression';
+  const revealNameToInstitution = includeInternalFields && isAnonymous && isDepressionReport && reporterName;
+
   const payload = {
     id: String(report._id || ''),
-    reportType: normalizeText(report.reportType),
-    reportTypeLabel: reportTypeLabels[report.reportType] || 'Reporte comunitario',
+    reportType,
+    reportTypeLabel: reportTypeLabels[reportType] || 'Reporte comunitario',
     message: normalizeText(report.message),
     teacherName: normalizeText(report.teacherName),
     isAnonymous,
+    submittedAsAnonymous: isAnonymous,
     reporterRole: normalizeText(report.reporterRole),
-    reporterLabel: isAnonymous ? 'Anónimo' : (normalizeText(report.reporterName) || 'Usuario registrado'),
+    reporterLabel: isAnonymous && !revealNameToInstitution
+      ? 'Anónimo'
+      : (reporterName || 'Usuario registrado'),
+    anonymousPreferenceNote: revealNameToInstitution
+      ? 'El usuario marcó este reporte como anónimo, pero por seguridad se muestra su identidad al equipo institucional.'
+      : '',
     studentId: report.studentId ? String(report.studentId) : '',
     studentName: normalizeText(report.studentName),
     status: normalizeText(report.status) || 'pending',
@@ -52,9 +63,9 @@ function serializeCommunityReport(report = {}, { includeInternalFields = false }
     reviewedByName: normalizeText(report.reviewedByName),
   };
 
-  if (includeInternalFields && !isAnonymous) {
+  if (includeInternalFields) {
     payload.reporterUserId = report.reporterUserId ? String(report.reporterUserId) : '';
-    payload.reporterName = normalizeText(report.reporterName);
+    payload.reporterName = reporterName;
   }
 
   return payload;
@@ -159,7 +170,13 @@ async function notifyInstitutionalCommunityReport({ schoolId, report }) {
       .filter(Boolean),
   })).filter((target) => target.userIds.length > 0);
 
-  const reporterLabel = report.isAnonymous ? 'Un reporte anónimo' : (normalizeText(report.reporterName) || 'Un acudiente o alumno');
+  const reporterName = normalizeText(report.reporterName) || 'Un acudiente o alumno';
+  const reporterLabel = report.isAnonymous && report.reportType !== 'depression'
+    ? 'Un reporte anónimo'
+    : reporterName;
+  const anonymousNote = report.isAnonymous && report.reportType === 'depression'
+    ? ' (marcó anónimo, requiere manejo confidencial)'
+    : '';
   const typeLabel = reportTypeLabels[report.reportType] || 'Reporte comunitario';
 
   await Promise.all(notificationTargets.map((target) => queueNotificationsForParents({
@@ -167,7 +184,7 @@ async function notifyInstitutionalCommunityReport({ schoolId, report }) {
     parentIds: target.userIds,
     studentId: report.studentId,
     title: `Te escuchamos: ${typeLabel}`,
-    body: `${reporterLabel} envió un reporte para revisión institucional.`,
+    body: `${reporterLabel}${anonymousNote} envió un reporte para revisión institucional.`,
     payload: {
       type: 'community.report',
       reportId: String(report._id),
@@ -209,7 +226,7 @@ router.post('/', roleMiddleware(...reportAuthorRoles), async (req, res) => {
       teacherName: reportType === 'teacher_complaint' ? teacherName : '',
       isAnonymous,
       reporterUserId: userId,
-      reporterName: isAnonymous ? '' : reporterContext.reporterName,
+      reporterName: reporterContext.reporterName,
       reporterRole: reporterContext.reporterRole,
       studentId: reporterContext.student?._id || null,
       studentName: buildStudentDisplayName(reporterContext.student || {}),
