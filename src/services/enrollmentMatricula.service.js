@@ -242,6 +242,69 @@ async function buildContractParamsSnapshot({ schoolId, studentId, charge, billin
   };
 }
 
+async function resolveEnrollmentMatriculaDisplayNames({ schoolId, studentId, parentId }) {
+  const [student, parentUser] = await Promise.all([
+    Student.findOne({ _id: studentId, schoolId }).select('name').lean(),
+    User.findOne({ _id: parentId, schoolId }).select('name').lean(),
+  ]);
+
+  return {
+    studentName: normalizeText(student?.name) || 'Estudiante',
+    parentName: normalizeText(parentUser?.name) || 'Acudiente',
+  };
+}
+
+async function syncEnrollmentMatriculaProcessContext({
+  process,
+  schoolId,
+  parentId,
+  charge = null,
+}) {
+  const parentObjectId = toObjectId(parentId);
+  const studentId = charge?.studentId || process?.studentId;
+  if (!process || !parentObjectId || !studentId) {
+    return process;
+  }
+
+  const { studentName, parentName } = await resolveEnrollmentMatriculaDisplayNames({
+    schoolId,
+    studentId,
+    parentId: parentObjectId,
+  });
+
+  let needsSave = false;
+  if (normalizeText(process.studentName) !== studentName) {
+    process.studentName = studentName;
+    needsSave = true;
+  }
+  if (normalizeText(process.parentName) !== parentName) {
+    process.parentName = parentName;
+    needsSave = true;
+  }
+  if (String(process.parentId || '') !== String(parentObjectId)) {
+    process.parentId = parentObjectId;
+    needsSave = true;
+  }
+  if (String(process.studentId || '') !== String(studentId)) {
+    process.studentId = studentId;
+    needsSave = true;
+  }
+
+  if (needsSave) {
+    await process.save();
+  }
+
+  if (charge && String(charge.parentId || '') !== String(parentObjectId)) {
+    await AcademicCharge.updateOne(
+      { _id: charge._id, schoolId },
+      { $set: { parentId: parentObjectId } },
+    );
+    charge.parentId = parentObjectId;
+  }
+
+  return process;
+}
+
 async function getOrCreateProcessForCharge({ schoolId, parentId, chargeId, req }) {
   const chargeObjectId = toObjectId(chargeId);
   const parentObjectId = toObjectId(parentId);
@@ -249,7 +312,7 @@ async function getOrCreateProcessForCharge({ schoolId, parentId, chargeId, req }
     throw new Error('Datos invalidos para iniciar matricula.');
   }
 
-  const charge = await AcademicCharge.findOne({
+  let charge = await AcademicCharge.findOne({
     _id: chargeObjectId,
     schoolId,
     category: 'annual_tuition',
@@ -273,13 +336,14 @@ async function getOrCreateProcessForCharge({ schoolId, parentId, chargeId, req }
 
   let process = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId: chargeObjectId });
   if (!process) {
-    const [student, parentUser, billingProfile] = await Promise.all([
-      Student.findOne({ _id: charge.studentId, schoolId }).select('name').lean(),
-      User.findOne({ _id: parentObjectId, schoolId }).select('name').lean(),
-      charge.billingProfileId
-        ? StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
-        : StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean(),
-    ]);
+    const billingProfile = charge.billingProfileId
+      ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
+      : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
+    const { studentName, parentName } = await resolveEnrollmentMatriculaDisplayNames({
+      schoolId,
+      studentId: charge.studentId,
+      parentId: parentObjectId,
+    });
 
     process = await EnrollmentMatriculaProcess.create({
       schoolId,
@@ -288,8 +352,15 @@ async function getOrCreateProcessForCharge({ schoolId, parentId, chargeId, req }
       chargeId: chargeObjectId,
       academicYear: normalizeText(billingProfile?.academicYear),
       status: 'intro_pending',
-      studentName: normalizeText(student?.name) || 'Estudiante',
-      parentName: normalizeText(parentUser?.name) || 'Acudiente',
+      studentName,
+      parentName,
+    });
+  } else {
+    process = await syncEnrollmentMatriculaProcessContext({
+      process,
+      schoolId,
+      parentId: parentObjectId,
+      charge,
     });
   }
 
@@ -914,24 +985,33 @@ async function linkCarteraPaymentToEnrollmentMatricula({
     throw new Error('No se pudo vincular el pago de matricula con el acudiente.');
   }
 
-  const [student, parentUser, billingProfile] = await Promise.all([
-    Student.findOne({ _id: charge.studentId, schoolId }).select('name').lean(),
-    User.findOne({ _id: parentId, schoolId }).select('name').lean(),
-    charge.billingProfileId
-      ? StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
-      : StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean(),
-  ]);
+  const billingProfile = charge.billingProfileId
+    ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
+    : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
 
   let process = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId });
   if (!process) {
+    const { studentName, parentName } = await resolveEnrollmentMatriculaDisplayNames({
+      schoolId,
+      studentId: charge.studentId,
+      parentId,
+    });
+
     process = new EnrollmentMatriculaProcess({
       schoolId,
       studentId: charge.studentId,
       parentId,
       chargeId,
       academicYear: normalizeText(billingProfile?.academicYear),
-      studentName: normalizeText(student?.name) || 'Estudiante',
-      parentName: normalizeText(parentUser?.name) || 'Acudiente',
+      studentName,
+      parentName,
+    });
+  } else {
+    process = await syncEnrollmentMatriculaProcessContext({
+      process,
+      schoolId,
+      parentId,
+      charge,
     });
   }
 
