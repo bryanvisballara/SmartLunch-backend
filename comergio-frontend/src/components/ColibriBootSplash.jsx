@@ -7,6 +7,7 @@ export function ColibriBootSplash({
   indeterminate = false,
   embedded = false,
   minimal = false,
+  className = '',
   eyebrow = 'Portal de acudientes',
   title = 'Cargando alumnos vinculados',
   message = 'Estamos consultando la información real del acudiente y preparando tu experiencia.',
@@ -33,7 +34,7 @@ export function ColibriBootSplash({
     <div
       aria-busy="true"
       aria-label={ariaLabel}
-      className={`login-boot-splash${embedded ? ' is-embedded' : ''}${minimal ? ' is-minimal' : ''}`}
+      className={`login-boot-splash${embedded ? ' is-embedded' : ''}${minimal ? ' is-minimal' : ''}${className ? ` ${className}` : ''}`}
     >
       <div className="login-boot-video-wrap">
         <video

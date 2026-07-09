@@ -3,6 +3,7 @@ import Select from 'react-select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../../lib/authNavigation';
+import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests } from '../../services/hr.service';
@@ -15,7 +16,8 @@ import {
   getCampusTeacherDisciplineObservations,
   getCampusTeacherParentFeedRequests,
   getCampusTeacherCalendar,
-  getCampusTeacherOverview,
+  getCampusTeacherOverviewShell,
+  getCampusTeacherOverviewMetrics,
   saveCampusTeacherAttendance,
   saveCampusTeacherStudentGrades,
   uploadCampusTeacherParentFeedMedia,
@@ -141,7 +143,7 @@ function TeacherSectionIcon({ icon }) {
 }
 
 const teacherSectionOptions = [
-  { key: 'dashboard', label: 'Inicio', icon: 'home', description: 'Ver KPI clave, alertas y salud general de tus cursos.' },
+  { key: 'dashboard', label: 'Inicio', icon: 'home', description: 'Un resumen claro de tus cursos, alumnos y pendientes de hoy.' },
   { key: 'schedule', label: 'Horario', icon: 'calendar', description: 'Consultar el horario asignado desde Rectoría.' },
   { key: 'courses', label: 'Cursos', icon: 'courses', description: 'Ver todos los cursos donde dictas clase.' },
   { key: 'guidance_routine', label: 'Guidance Routine', icon: 'guidance', description: 'Tomar asistencia de la rutina de orientacion del curso asignado.' },
@@ -150,7 +152,7 @@ const teacherSectionOptions = [
   { key: 'academic_content', label: 'Contenido académico', icon: 'content', description: 'Planear los temas de estudio por grado y asignatura.' },
   { key: 'school_coexistence', label: 'Convivencia escolar', icon: 'coexistence', description: 'Registrar observaciones de comportamiento para seguimiento institucional.' },
   { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
-  { key: 'resource_requests', label: 'Recursos didácticos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
+  { key: 'resource_requests', label: 'Solicitud de recursos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
 ];
 
 const teacherResourcePriorityOptions = [
@@ -259,7 +261,7 @@ const teacherDisciplineStatusLabels = {
 
 const teacherCourseWorkspaceTabs = [
   { key: 'grading', label: 'Estructura de notas' },
-  { key: 'posts', label: 'Trabajo de clase' },
+  { key: 'posts', label: 'Asignación' },
   { key: 'gradebook', label: 'Libro de notas' },
 ];
 
@@ -806,6 +808,19 @@ function calculateWeightedAverage(items, getWeight) {
   return hasAnyValue && totalWeight > 0 ? Number((total / totalWeight).toFixed(2)) : null;
 }
 
+function parseFiniteScore(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasFiniteScore(value) {
+  return parseFiniteScore(value) !== null;
+}
+
 function buildClassDateIso(dateValue, startTime = '00:00') {
   if (!dateValue) {
     return null;
@@ -1097,8 +1112,8 @@ function aggregateUniqueStudentScores(studentEntries, gradingScale) {
       updatedAtLabel: formatDateLabel(student.updatedAt),
     };
 
-    if (Number.isFinite(Number(student.finalScore))) {
-      current.scores.push(Number(student.finalScore));
+    if (hasFiniteScore(student.finalScore)) {
+      current.scores.push(parseFiniteScore(student.finalScore));
     }
 
     const gradedPeriods = (student.periods || []).filter((period) => Number.isFinite(Number(period.periodScore)));
@@ -1124,7 +1139,7 @@ function aggregateUniqueStudentScores(studentEntries, gradingScale) {
         ? Number((student.trendDeltas.reduce((total, value) => total + value, 0) / student.trendDeltas.length).toFixed(2))
         : null,
     }))
-    .filter((student) => Number.isFinite(Number(student.finalScore)));
+    .filter((student) => hasFiniteScore(student.finalScore));
 
   return {
     studentsWithScore,
@@ -1167,10 +1182,10 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
       courseId: course.id,
       courseTitle: getCourseOptionLabel(course),
       subject: course.subject,
-      finalScore: Number(student.finalScore),
+      finalScore: parseFiniteScore(student.finalScore),
       periods: [],
       updatedAt: course?.updatedAt || null,
-    }));
+    })).filter((student) => hasFiniteScore(student.finalScore));
   });
 
   const uniqueStudentIds = new Set();
@@ -1181,11 +1196,24 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
     fallbackTotalStudents += Number(item.stats.studentCount || 0);
   });
   const totalStudents = uniqueStudentIds.size > 0 ? uniqueStudentIds.size : fallbackTotalStudents;
-  const { studentsWithScore, approvedCount, atRiskStudents } = aggregateUniqueStudentScores(studentEntries, gradingScale);
+  const { studentsWithScore, approvedCount } = aggregateUniqueStudentScores(studentEntries, gradingScale);
+  const atRiskStudents = courseSummaries.flatMap(({ course, stats }) =>
+    (Array.isArray(stats.atRiskStudents) ? stats.atRiskStudents : []).map((student) => ({
+      ...student,
+      finalScore: parseFiniteScore(student.finalScore),
+      courseTitle: getCourseOptionLabel(course),
+      subject: course.subject,
+      trendDelta: null,
+      updatedAtLabel: formatDateLabel(course?.updatedAt),
+    })).filter((student) => hasFiniteScore(student.finalScore))
+  );
   const averageScore = studentsWithScore.length > 0
     ? Number((studentsWithScore.reduce((total, student) => total + Number(student.finalScore || 0), 0) / studentsWithScore.length).toFixed(2))
     : null;
   const atRiskCount = atRiskStudents.length;
+  const pendingPostIds = new Set(
+    courseSummaries.flatMap(({ stats }) => (Array.isArray(stats?.pendingGradingPostIds) ? stats.pendingGradingPostIds : []))
+  );
   const pendingGradingCount = courseSummaries.reduce((total, item) => total + Number(item.stats.pendingGradingCount || 0), 0);
   const approvedRate = studentsWithScore.length > 0 ? Number(((approvedCount / studentsWithScore.length) * 100).toFixed(1)) : null;
   const lowPerformanceRate = studentsWithScore.length > 0 ? Number(((atRiskCount / studentsWithScore.length) * 100).toFixed(1)) : null;
@@ -1290,7 +1318,18 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
     }));
 
   const pendingGradingItems = normalizedPosts
-    .filter((post) => isEvaluativePostType(post.type) && String(post.status || '').toLowerCase() !== 'archived')
+    .filter((post) => {
+      if (!isEvaluativePostType(post.type) || String(post.status || '').toLowerCase() === 'archived') {
+        return false;
+      }
+
+      if (pendingPostIds.size > 0) {
+        return pendingPostIds.has(post.id);
+      }
+
+      const course = normalizedCourses.find((entry) => entry.id === post.courseId);
+      return course ? isPostPendingGrading(post, course, workspace) : false;
+    })
     .sort((left, right) => {
       const leftTime = new Date(left.dueAt || left.scheduledClassDate || left.updatedAt || left.createdAt || 0).getTime();
       const rightTime = new Date(right.dueAt || right.scheduledClassDate || right.updatedAt || right.createdAt || 0).getTime();
@@ -1298,6 +1337,7 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
     })
     .map((post) => ({
       id: post.id,
+      courseId: post.courseId,
       title: post.title || formatPostTypeLabel(post.type),
       typeLabel: formatPostTypeLabel(post.type),
       courseTitle: getCourseOptionLabel(normalizedCourses.find((course) => course.id === post.courseId) || { title: post.courseTitle }) || 'Curso',
@@ -1307,13 +1347,20 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
     }));
 
   const totalActivities = normalizedPosts.filter((post) => post.status !== 'archived').length;
-  const scoreHealth = averageScore === null ? 0 : (averageScore / gradingScale.maxScore) * 100;
-  const approvalHealth = approvedRate === null ? 0 : approvedRate;
-  const riskHealth = studentsWithScore.length > 0 ? Math.max(0, 100 - ((atRiskCount / studentsWithScore.length) * 100)) : 0;
-  const coverageHealth = gradingCoverageRate === null ? 0 : gradingCoverageRate;
-  const healthScore = Number((((scoreHealth * 0.42) + (approvalHealth * 0.26) + (riskHealth * 0.18) + (coverageHealth * 0.14))).toFixed(1));
-  const healthStatus = healthScore >= 75 ? 'Saludable' : healthScore >= 55 ? 'Atención' : 'Crítico';
-  const healthTone = healthScore >= 75 ? 'good' : healthScore >= 55 ? 'warn' : 'danger';
+  const hasGradeInsights = studentsWithScore.length > 0;
+  const scoreHealth = averageScore === null ? null : (averageScore / gradingScale.maxScore) * 100;
+  const approvalHealth = approvedRate === null ? null : approvedRate;
+  const riskHealth = hasGradeInsights ? Math.max(0, 100 - ((atRiskCount / studentsWithScore.length) * 100)) : null;
+  const coverageHealth = gradingCoverageRate === null ? null : gradingCoverageRate;
+  const healthScore = hasGradeInsights
+    ? Number((((scoreHealth * 0.42) + (approvalHealth * 0.26) + (riskHealth * 0.18) + (coverageHealth * 0.14))).toFixed(1))
+    : null;
+  const healthStatus = !hasGradeInsights
+    ? 'Sin calificaciones'
+    : healthScore >= 75 ? 'Saludable' : healthScore >= 55 ? 'Atención' : 'Crítico';
+  const healthTone = !hasGradeInsights
+    ? 'neutral'
+    : healthScore >= 75 ? 'good' : healthScore >= 55 ? 'warn' : 'danger';
 
   const riskAlerts = [
     droppingStudentsCount > 0 ? `${droppingStudentsCount} estudiante${droppingStudentsCount === 1 ? '' : 's'} han bajado su rendimiento recientemente.` : null,
@@ -1627,9 +1674,9 @@ function buildCourseCardStats(course, workspace) {
       .map((student) => ({
         ...student,
         studentId: String(student?.studentId || '').trim(),
-        finalScore: Number(student?.finalScore),
+        finalScore: parseFiniteScore(student?.finalScore),
       }))
-      .filter((student) => student.studentId && Number.isFinite(Number(student.finalScore)));
+      .filter((student) => student.studentId && hasFiniteScore(student.finalScore));
 
     return {
       studentCount: Number(course.stats.studentCount || 0),
@@ -1648,8 +1695,14 @@ function buildCourseCardStats(course, workspace) {
   const detail = workspace?.courseDetails?.[course?.id] || null;
   const gradingScale = normalizeCampusGradingScale(detail?.course?.gradingScale || course?.gradingScale || workspace?.gradingScale || {});
   const students = Array.isArray(detail?.students) ? detail.students : [];
-  const evaluatedStudents = students.filter((student) => Number.isFinite(Number(student.finalScore)));
+  const courseAcademicPeriods = getCourseAcademicPeriods(detail?.course || course);
+  const studentsWithPeriods = students.map((student) => ({
+    ...student,
+    periods: buildStudentPeriods(student, courseAcademicPeriods),
+  }));
+  const evaluatedStudents = studentsWithPeriods.filter((student) => hasFiniteScore(student.finalScore));
   const coursePosts = (workspace?.recentPosts || []).filter((post) => post.courseId === course?.id && isEvaluativePostType(post.type) && post.status !== 'archived');
+  const pendingGradingPosts = coursePosts.filter((post) => isPostPendingGrading(post, course, workspace));
 
   return {
     studentCount: students.length,
@@ -1660,14 +1713,18 @@ function buildCourseCardStats(course, workspace) {
       schoolCode: student?.schoolCode,
       grade: student?.grade,
       course: student?.course,
-      finalScore: Number(student.finalScore),
+      finalScore: parseFiniteScore(student.finalScore),
     })).filter((student) => student.studentId),
     evaluatedStudentCount: evaluatedStudents.length,
     averageScore: evaluatedStudents.length > 0
       ? Number((evaluatedStudents.reduce((total, student) => total + Number(student.finalScore || 0), 0) / evaluatedStudents.length).toFixed(1))
       : null,
-    atRiskCount: students.filter((student) => Number.isFinite(Number(student.finalScore)) && Number(student.finalScore) < gradingScale.passingScore).length,
-    pendingGradingCount: coursePosts.length,
+    atRiskCount: students.filter((student) => {
+      const finalScore = parseFiniteScore(student.finalScore);
+      return finalScore !== null && finalScore < gradingScale.passingScore;
+    }).length,
+    pendingGradingCount: pendingGradingPosts.length,
+    pendingGradingPostIds: pendingGradingPosts.map((post) => post.id).filter(Boolean),
   };
 }
 
@@ -1914,6 +1971,139 @@ function buildGradebookAssignmentKey(periodKey, componentKey, subcomponentKey) {
   return [periodKey, componentKey, subcomponentKey].map((part) => String(part || '')).join('::');
 }
 
+function normalizeAssignmentTitleForMatch(value) {
+  return normalizeCourseDisplayKey(
+    String(value || '')
+      .replace(/^(tarea|quiz|quices|examen|proyecto|exposicion|laboratorio|material|aviso)\s*[-–:]\s*/i, '')
+  );
+}
+
+function resolveGradebookAssignmentKeyForPostTitle(title, assignmentOptions) {
+  const options = Array.isArray(assignmentOptions) ? assignmentOptions : [];
+  if (!options.length) {
+    return '';
+  }
+
+  const normalizedTitle = normalizeCourseDisplayKey(title);
+  const strippedTitle = normalizeAssignmentTitleForMatch(title);
+
+  const exactMatch = options.find((option) => {
+    const subcomponentName = normalizeCourseDisplayKey(option.subcomponentName);
+    const strippedSubcomponent = normalizeAssignmentTitleForMatch(option.subcomponentName);
+    return subcomponentName === normalizedTitle
+      || strippedSubcomponent === strippedTitle
+      || normalizeCourseDisplayKey(option.label) === normalizedTitle;
+  });
+  if (exactMatch) {
+    return exactMatch.key;
+  }
+
+  const partialMatch = options.find((option) => {
+    const subcomponentName = normalizeCourseDisplayKey(option.subcomponentName);
+    return subcomponentName && (normalizedTitle.includes(subcomponentName) || subcomponentName.includes(strippedTitle));
+  });
+
+  return partialMatch?.key || '';
+}
+
+function countStudentsGradedForAssignment(students, assignmentKey, assignmentOptions) {
+  const roster = Array.isArray(students) ? students : [];
+  const assignment = (Array.isArray(assignmentOptions) ? assignmentOptions : []).find((option) => option.key === assignmentKey);
+  if (!assignment || roster.length === 0) {
+    return { gradedCount: 0, totalCount: roster.length };
+  }
+
+  const periodKey = String(assignment.periodKey || '');
+  const componentKey = String(assignment.componentKey || '');
+  const subcomponentKey = String(assignment.subcomponentKey || '');
+
+  let gradedCount = 0;
+  roster.forEach((student) => {
+    const period = (student.periods || []).find((entry) => String(entry.key || entry.periodKey || '') === periodKey);
+    const component = (period?.scores || []).find((entry) => String(entry.componentKey || '') === componentKey);
+    const subcomponent = (component?.subcomponents || []).find((entry) => String(entry.subcomponentKey || '') === subcomponentKey);
+    if (hasFiniteScore(subcomponent?.score)) {
+      gradedCount += 1;
+    }
+  });
+
+  return { gradedCount, totalCount: roster.length };
+}
+
+function isPostPendingGrading(post, course, workspace) {
+  if (!isEvaluativePostType(post?.type) || String(post?.status || '').toLowerCase() === 'archived') {
+    return false;
+  }
+
+  const detail = workspace?.courseDetails?.[course?.id] || null;
+  const courseAcademicPeriods = getCourseAcademicPeriods(detail?.course || course);
+  const assignmentOptions = buildGradebookAssignmentOptions(courseAcademicPeriods);
+  const students = (detail?.students || []).map((student) => ({
+    ...student,
+    periods: buildStudentPeriods(student, courseAcademicPeriods),
+  }));
+
+  if (students.length === 0) {
+    return false;
+  }
+
+  const assignmentKey = resolveGradebookAssignmentKeyForPostTitle(post?.title || '', assignmentOptions);
+  if (!assignmentKey) {
+    return true;
+  }
+
+  const { gradedCount, totalCount } = countStudentsGradedForAssignment(students, assignmentKey, assignmentOptions);
+  return gradedCount < totalCount;
+}
+
+function TeacherDashboardKpiIcon({ kind }) {
+  switch (kind) {
+    case 'students':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M16 20v-1a4 4 0 00-4-4H6a4 4 0 00-4 4v1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+          <circle cx="9" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M20 20v-1a3.5 3.5 0 00-2.5-3.36M15 4.14a3.5 3.5 0 010 6.72" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'average':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'risk':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M12 9v4M12 17h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'pending':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M9 11l3 3L22 4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+          <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'tomorrow':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <rect height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" width="16" x="4" y="5" />
+          <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'health':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M12 21s-6.5-4.35-8.8-8.1C1.4 9.8 3.4 6 6.9 6c1.9 0 3.1 1.1 3.9 2.1C11.6 7.1 12.8 6 14.7 6c3.5 0 5.5 3.8 3.7 6.9C18.5 16.65 12 21 12 21z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 function buildGradebookAssignmentOptions(periods) {
   return (periods || []).flatMap((period) => (period.gradingComponents || []).flatMap((component) => (
     (component.subcomponents || []).map((subcomponent) => ({
@@ -2130,6 +2320,28 @@ function formatDeliveryLabel(post) {
   return 'Sin límite de entrega';
 }
 
+function mergeTeacherOverviewShellAndMetrics(shell, metrics) {
+  if (!shell) {
+    return null;
+  }
+
+  const statsByCourseId = new Map(
+    (Array.isArray(metrics?.courses) ? metrics.courses : []).map((course) => [course.id, course.stats])
+  );
+
+  if (statsByCourseId.size === 0) {
+    return shell;
+  }
+
+  return {
+    ...shell,
+    courses: (shell.courses || []).map((course) => ({
+      ...course,
+      stats: statsByCourseId.get(course.id) || course.stats,
+    })),
+  };
+}
+
 function TeacherCampusHome({ forcePreview = false }) {
   const previewEnabled = campusPreviewEnabled || forcePreview;
       // --- Handlers para subcomponentes de cada componente de evaluación ---
@@ -2317,6 +2529,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [previewWorkspace, setPreviewWorkspace] = useState(() => clonePreviewWorkspace());
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [teacherAttendanceCourseId, setTeacherAttendanceCourseId] = useState('');
+  const [teacherAttendanceSubjectKey, setTeacherAttendanceSubjectKey] = useState('');
   const [teacherAttendanceType, setTeacherAttendanceType] = useState('subject_class');
   const [teacherAttendanceDate, setTeacherAttendanceDate] = useState(getTodayDateInputValue);
   const [teacherAttendanceClassSessionKey, setTeacherAttendanceClassSessionKey] = useState('');
@@ -2366,13 +2579,23 @@ function TeacherCampusHome({ forcePreview = false }) {
   const classworkUploadAppendRef = useRef(true);
   const isAttendanceLikeSection = activeTeacherSection === 'attendance' || activeTeacherSection === 'guidance_routine';
 
-  const overviewQuery = useQuery({
-    queryKey: ['campus', 'teacher', 'overview', teacherQueryScope],
-    queryFn: getCampusTeacherOverview,
+  const overviewShellQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'overview', 'shell', teacherQueryScope],
+    queryFn: getCampusTeacherOverviewShell,
     retry: false,
     staleTime: 30_000,
     enabled: !previewEnabled && Boolean(authUser?.id),
   });
+
+  const overviewMetricsQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'overview', 'metrics', teacherQueryScope],
+    queryFn: getCampusTeacherOverviewMetrics,
+    retry: false,
+    staleTime: 30_000,
+    enabled: !previewEnabled && Boolean(authUser?.id),
+  });
+
+  const isOverviewMetricsLoading = !previewEnabled && overviewShellQuery.isSuccess && overviewMetricsQuery.isLoading;
 
   const dashboardCalendarMonthKey = useMemo(
     () => `${dashboardCalendarMonth.getFullYear()}-${String(dashboardCalendarMonth.getMonth() + 1).padStart(2, '0')}`,
@@ -2589,7 +2812,10 @@ function TeacherCampusHome({ forcePreview = false }) {
       };
     }
 
-    const overviewData = overviewQuery.data;
+    const overviewData = mergeTeacherOverviewShellAndMetrics(
+      overviewShellQuery.data,
+      overviewMetricsQuery.data
+    );
     const overviewTeacherId = String(overviewData?.teacher?.userId || '');
     const authUserId = String(authUser?.id || '');
     if (overviewData && overviewTeacherId && authUserId && overviewTeacherId !== authUserId) {
@@ -2597,7 +2823,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
 
     return overviewData || emptyTeacherWorkspace;
-  }, [authUser?.id, emptyTeacherWorkspace, overviewQuery.data, previewEnabled, previewWorkspace]);
+  }, [authUser?.id, emptyTeacherWorkspace, overviewMetricsQuery.data, overviewShellQuery.data, previewEnabled, previewWorkspace]);
 
   const courses = workspace.courses || [];
   const guidanceRoutineCourses = useMemo(
@@ -2609,6 +2835,18 @@ function TeacherCampusHome({ forcePreview = false }) {
     [courses]
   );
   const attendanceCourses = activeTeacherSection === 'guidance_routine' ? guidanceRoutineCourses : academicCourses;
+  const attendanceSubjectGroups = useMemo(
+    () => groupCoursesBySubject(attendanceCourses),
+    [attendanceCourses]
+  );
+  const selectedAttendanceSubject = useMemo(
+    () => attendanceSubjectGroups.find((subject) => subject.key === teacherAttendanceSubjectKey) || null,
+    [attendanceSubjectGroups, teacherAttendanceSubjectKey]
+  );
+  const teacherAttendanceCoursesForSubject = useMemo(
+    () => (selectedAttendanceSubject ? selectedAttendanceSubject.courses : []),
+    [selectedAttendanceSubject]
+  );
   const availableTeacherSectionOptions = useMemo(
     () => teacherSectionOptions.filter((option) => option.key !== 'guidance_routine' || guidanceRoutineCourses.length > 0),
     [guidanceRoutineCourses.length]
@@ -2931,11 +3169,18 @@ function TeacherCampusHome({ forcePreview = false }) {
     })));
   };
 
+  const onTeacherAttendanceSubjectChange = (subjectKey) => {
+    setTeacherAttendanceSubjectKey(subjectKey);
+    const nextSubject = attendanceSubjectGroups.find((subject) => subject.key === subjectKey);
+    const nextCourse = nextSubject?.courses?.[0];
+    setTeacherAttendanceCourseId(nextCourse?.id || '');
+  };
+
   const onSubmitTeacherAttendance = async (event) => {
     event.preventDefault();
 
     if (!teacherAttendanceCourseId) {
-      setNotice({ type: 'error', text: 'Selecciona un curso para tomar asistencia.' });
+      setNotice({ type: 'error', text: teacherAttendanceType === 'subject_class' ? 'Selecciona asignatura y curso para tomar asistencia.' : 'Selecciona un curso para tomar asistencia.' });
       return;
     }
 
@@ -3062,10 +3307,47 @@ function TeacherCampusHome({ forcePreview = false }) {
       setTimelineCourseId(academicCourses[0].id);
     }
 
-    if (!teacherAttendanceCourseId || !attendanceCourses.some((course) => course.id === teacherAttendanceCourseId)) {
-      setTeacherAttendanceCourseId(attendanceCourses[0]?.id || '');
+    if (activeTeacherSection === 'guidance_routine') {
+      if (!teacherAttendanceCourseId || !attendanceCourses.some((course) => course.id === teacherAttendanceCourseId)) {
+        setTeacherAttendanceCourseId(attendanceCourses[0]?.id || '');
+      }
     }
-  }, [academicCourses, attendanceCourses, teacherAttendanceCourseId, timelineCourseId]);
+  }, [academicCourses, activeTeacherSection, attendanceCourses, teacherAttendanceCourseId, timelineCourseId]);
+
+  useEffect(() => {
+    if (activeTeacherSection !== 'attendance') {
+      return;
+    }
+
+    if (!attendanceSubjectGroups.length) {
+      if (teacherAttendanceSubjectKey) {
+        setTeacherAttendanceSubjectKey('');
+      }
+      return;
+    }
+
+    if (!teacherAttendanceSubjectKey || !attendanceSubjectGroups.some((subject) => subject.key === teacherAttendanceSubjectKey)) {
+      setTeacherAttendanceSubjectKey(attendanceSubjectGroups[0].key);
+    }
+  }, [activeTeacherSection, attendanceSubjectGroups, teacherAttendanceSubjectKey]);
+
+  useEffect(() => {
+    if (activeTeacherSection !== 'attendance') {
+      return;
+    }
+
+    const subjectCourses = selectedAttendanceSubject?.courses || [];
+    if (!subjectCourses.length) {
+      if (teacherAttendanceCourseId) {
+        setTeacherAttendanceCourseId('');
+      }
+      return;
+    }
+
+    if (!teacherAttendanceCourseId || !subjectCourses.some((course) => course.id === teacherAttendanceCourseId)) {
+      setTeacherAttendanceCourseId(subjectCourses[0].id);
+    }
+  }, [activeTeacherSection, selectedAttendanceSubject, teacherAttendanceCourseId]);
 
   useEffect(() => {
     if (activeTeacherSection === 'guidance_routine' && teacherAttendanceType !== 'guidance_routine') {
@@ -3488,6 +3770,30 @@ function TeacherCampusHome({ forcePreview = false }) {
     setOpenPostMenuId('');
     setShowClassworkCreateMenu(false);
     setShowAssignmentComposer(true);
+  };
+
+  const openGradebookForPendingItem = (item) => {
+    const post = recentPosts.find((entry) => entry.id === item.id);
+    const course = academicCourses.find((entry) => entry.id === (item.courseId || post?.courseId));
+    if (!course) {
+      return;
+    }
+
+    const subjectLabel = normalizeSubjectLabel(course.subject);
+    const subjectKey = slugifyComponentKey(subjectLabel) || 'subject';
+    const assignmentOptions = buildGradebookAssignmentOptions(getCourseAcademicPeriods(course));
+    const assignmentKey = resolveGradebookAssignmentKeyForPostTitle(item.title || post?.title || '', assignmentOptions);
+
+    setActiveIntegralModal('');
+    setActiveTeacherSection('academic_management');
+    setSelectedSubjectKey(subjectKey);
+    setSelectedCourseId(course.id);
+    setTimelineCourseId(course.id);
+    setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setShowSelectedCourseWorkspace(true);
+    setActiveCourseWorkspaceTab('gradebook');
+    setGradebookMode('assignment');
+    setSelectedGradebookAssignmentKey(assignmentKey || assignmentOptions[0]?.key || '');
   };
 
   const closeAssignmentComposer = () => {
@@ -4740,25 +5046,26 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
   };
 
-  if (!previewEnabled && overviewQuery.isLoading) {
+  if (!previewEnabled && overviewShellQuery.isLoading) {
     return (
-      <section className="campus-page">
-        <div className="campus-panel campus-panel--intro">
-          <span className="campus-panel__kicker">Campus Docente</span>
-          <h2>Cargando tablero docente</h2>
-          <p>Armando cursos, publicaciones y estado general del aula.</p>
-        </div>
-      </section>
+      <ColibriBootSplash
+        ariaLabel="Cargando portal docente"
+        className="is-teacher-portal"
+        eyebrow="Campus Docente"
+        indeterminate
+        message="Abrimos tu tablero con tus materias y cursos. Los indicadores académicos terminan de calcularse en segundo plano."
+        title="Entrando al portal docente"
+      />
     );
   }
 
-  if (!previewEnabled && overviewQuery.isError) {
+  if (!previewEnabled && overviewShellQuery.isError) {
     return (
       <section className="campus-page">
         <div className="campus-panel campus-panel--intro">
           <span className="campus-panel__kicker">Campus Docente</span>
           <h2>No se pudo cargar el módulo docente</h2>
-          <p>{overviewQuery.error?.message || 'Intenta de nuevo en unos segundos.'}</p>
+          <p>{overviewShellQuery.error?.message || 'Intenta de nuevo en unos segundos.'}</p>
         </div>
       </section>
     );
@@ -5689,7 +5996,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   className="campus-teacher__classwork-create-btn"
                                   disabled={courses.length === 0 || assignmentComponentOptions.length === 0}
                                   onClick={() => setShowClassworkCreateMenu((currentValue) => !currentValue)}
-                                  title={assignmentComponentOptions.length === 0 ? 'Configura componentes en Estructura de notas' : 'Crear trabajo de clase'}
+                                  title={assignmentComponentOptions.length === 0 ? 'Configura componentes en Estructura de notas' : 'Crear asignación'}
                                   type="button"
                                 >
                                   <span aria-hidden="true">+</span>
@@ -5721,7 +6028,7 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                             <div className="campus-teacher__classwork-list">
                               {selectedCourseAssignmentPosts.length === 0 ? (
-                                <p className="campus-teacher__classwork-empty">Aún no hay trabajo de clase publicado en este curso.</p>
+                                <p className="campus-teacher__classwork-empty">Aún no hay asignaciones publicadas en este curso.</p>
                               ) : (
                                 selectedCourseAssignmentPosts.map((post) => {
                                   const tone = getClassworkTypeTone(post.type);
@@ -6419,13 +6726,36 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                 <form className="campus-teacher__attendance-form" onSubmit={onSubmitTeacherAttendance}>
                   <div className="campus-teacher__attendance-controls">
-                    <label>
-                      Curso
-                      <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)}>
-                        <option value="">Seleccionar curso</option>
-                        {attendanceCourses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
-                      </select>
-                    </label>
+                    {teacherAttendanceType === 'subject_class' ? (
+                      <>
+                        <label>
+                          Asignatura
+                          <select value={teacherAttendanceSubjectKey} onChange={(event) => onTeacherAttendanceSubjectChange(event.target.value)}>
+                            <option value="">Seleccionar asignatura</option>
+                            {attendanceSubjectGroups.map((subject) => (
+                              <option key={subject.key} value={subject.key}>{subject.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Curso
+                          <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)} disabled={!teacherAttendanceCoursesForSubject.length}>
+                            <option value="">{teacherAttendanceCoursesForSubject.length ? 'Seleccionar curso' : 'Sin cursos'}</option>
+                            {teacherAttendanceCoursesForSubject.map((course) => (
+                              <option key={course.id} value={course.id}>{getCourseGroupLabel(course)}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    ) : (
+                      <label>
+                        Curso
+                        <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)}>
+                          <option value="">Seleccionar curso</option>
+                          {attendanceCourses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
+                        </select>
+                      </label>
+                    )}
                     <label>
                       Fecha
                       <input type="date" value={teacherAttendanceDate} onChange={(event) => setTeacherAttendanceDate(event.target.value)} />
@@ -6462,7 +6792,15 @@ function TeacherCampusHome({ forcePreview = false }) {
                   </div>
 
                   {teacherAttendanceQuery.isLoading ? <p className="campus-panel__meta">Cargando planilla...</p> : null}
-                  {!teacherAttendanceQuery.isLoading && teacherAttendanceRecords.length === 0 ? <p className="campus-panel__meta">{attendanceCourses.length ? 'Selecciona un curso para cargar sus alumnos.' : 'No tienes cursos asignados para esta planilla.'}</p> : null}
+                  {!teacherAttendanceQuery.isLoading && teacherAttendanceRecords.length === 0 ? (
+                    <p className="campus-panel__meta">
+                      {attendanceCourses.length
+                        ? (teacherAttendanceType === 'subject_class'
+                          ? 'Selecciona asignatura y curso para cargar sus alumnos.'
+                          : 'Selecciona un curso para cargar sus alumnos.')
+                        : 'No tienes cursos asignados para esta planilla.'}
+                    </p>
+                  ) : null}
 
                   {teacherAttendanceRecords.length > 0 ? (
                     <div className="campus-teacher__attendance-roster">
@@ -6501,7 +6839,14 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                   <div className="campus-teacher__card-actions">
                     <span className="campus-panel__meta">
-                      {selectedTeacherAttendanceCourse ? `${getCourseOptionLabel(selectedTeacherAttendanceCourse)} · ${teacherAttendanceDate || 'Sin fecha'}` : 'Selecciona curso y fecha.'}
+                      {selectedTeacherAttendanceCourse
+                        ? [
+                          teacherAttendanceType === 'subject_class'
+                            ? [selectedAttendanceSubject?.label, getCourseGroupLabel(selectedTeacherAttendanceCourse)].filter(Boolean).join(' · ')
+                            : getCourseOptionLabel(selectedTeacherAttendanceCourse),
+                          teacherAttendanceDate || 'Sin fecha',
+                        ].filter(Boolean).join(' · ')
+                        : (teacherAttendanceType === 'subject_class' ? 'Selecciona asignatura, curso y fecha.' : 'Selecciona curso y fecha.')}
                     </span>
                     {teacherAttendanceLocked ? (
                       <button className="campus-teacher__ghost-btn" onClick={() => setTeacherAttendanceLocked(false)} type="button">
@@ -6742,9 +7087,8 @@ function TeacherCampusHome({ forcePreview = false }) {
               <article className="campus-teacher__resource-panel campus-teacher__embedded-panel">
                 <div className="campus-teacher__section-head">
                   <div>
-                    <span className="campus-panel__kicker">Recursos didácticos</span>
+                    <span className="campus-panel__kicker">Solicitud de recursos</span>
                     <h3>Planner docente y requerimientos</h3>
-                    <p className="campus-panel__meta">Coordinacion recibe el planner, consolida los productos y los envia a Recursos y gestion de compras.</p>
                   </div>
                   <button
                     className="campus-teacher__ghost-btn"
@@ -6947,21 +7291,42 @@ function TeacherCampusHome({ forcePreview = false }) {
 
             {activeTeacherSection === 'dashboard' ? (
               <article className="campus-teacher__integral-panel campus-teacher__embedded-panel">
-                <div className="campus-teacher__integral-kpi-grid">
+                <div className={`campus-teacher__integral-kpi-grid${isOverviewMetricsLoading ? ' is-loading' : ''}`}>
+                  {isOverviewMetricsLoading ? Array.from({ length: 6 }, (_, index) => (
+                    <article className="campus-teacher__integral-kpi-card campus-teacher__integral-kpi-card--skeleton" key={`teacher-kpi-skeleton-${index}`} aria-hidden="true">
+                      <div className="campus-teacher__integral-kpi-skeleton-icon" />
+                      <div className="campus-teacher__integral-kpi-skeleton-copy">
+                        <span />
+                        <strong />
+                        <p />
+                      </div>
+                    </article>
+                  )) : (
+                    <>
                   <article className="campus-teacher__integral-kpi-card tone-neutral">
-                    <span className="campus-panel__kicker">Alumnos</span>
-                    <strong>{integralOverview.totalStudents}</strong>
-                    <p>Total consolidado en tus cursos activos.</p>
+                    <div aria-hidden="true" className="campus-teacher__integral-kpi-icon tone-neutral">
+                      <TeacherDashboardKpiIcon kind="students" />
+                    </div>
+                    <div className="campus-teacher__integral-kpi-copy">
+                      <span className="campus-teacher__integral-kpi-label">Alumnos</span>
+                      <strong>{integralOverview.totalStudents}</strong>
+                      <p>Total en tus cursos activos.</p>
+                    </div>
                   </article>
 
                   <article className={`campus-teacher__integral-kpi-card${integralOverview.averageTrendDelta !== null && integralOverview.averageTrendDelta < 0 ? ' tone-danger' : ' tone-good'}`}>
-                    <span className="campus-panel__kicker">Promedio consolidado</span>
-                    <strong>{integralOverview.averageScore === null ? 'Sin notas' : integralOverview.averageScore}</strong>
-                    <p>
-                      {integralOverview.averageTrendDelta === null
-                        ? 'Sin tendencia suficiente.'
-                        : `${integralOverview.averageTrendDelta >= 0 ? '↑' : '↓'} ${Math.abs(integralOverview.averageTrendDelta)} vs. primer periodo.`}
-                    </p>
+                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.averageTrendDelta !== null && integralOverview.averageTrendDelta < 0 ? ' tone-danger' : ' tone-good'}`}>
+                      <TeacherDashboardKpiIcon kind="average" />
+                    </div>
+                    <div className="campus-teacher__integral-kpi-copy">
+                      <span className="campus-teacher__integral-kpi-label">Promedio general</span>
+                      <strong>{integralOverview.averageScore === null ? 'Sin notas' : integralOverview.averageScore}</strong>
+                      <p>
+                        {integralOverview.averageTrendDelta === null
+                          ? 'Aún no hay tendencia entre periodos.'
+                          : `${integralOverview.averageTrendDelta >= 0 ? 'Subió' : 'Bajó'} ${Math.abs(integralOverview.averageTrendDelta)} pts vs. el primer periodo.`}
+                      </p>
+                    </div>
                   </article>
 
                   <button
@@ -6969,9 +7334,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                     onClick={() => setActiveIntegralModal('risk')}
                     type="button"
                   >
-                    <span className="campus-panel__kicker">En riesgo</span>
-                    <strong>{integralOverview.atRiskCount}</strong>
-                    <p>{integralOverview.lowPerformanceRate === null ? 'Sin datos suficientes.' : `${integralOverview.lowPerformanceRate}% bajo rendimiento.`}</p>
+                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.atRiskCount > 0 ? ' tone-danger' : ' tone-good'}`}>
+                      <TeacherDashboardKpiIcon kind="risk" />
+                    </div>
+                    <div className="campus-teacher__integral-kpi-copy">
+                      <span className="campus-teacher__integral-kpi-label">En riesgo</span>
+                      <strong>{integralOverview.atRiskCount}</strong>
+                      <p>{integralOverview.lowPerformanceRate === null ? 'Sin calificaciones registradas aún.' : `${integralOverview.lowPerformanceRate}% con bajo rendimiento.`}</p>
+                    </div>
                   </button>
 
                   <button
@@ -6979,9 +7349,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                     onClick={() => setActiveIntegralModal('pending')}
                     type="button"
                   >
-                    <span className="campus-panel__kicker">Por calificar</span>
-                    <strong>{integralOverview.pendingGradingCount}</strong>
-                    <p>Pendientes activas en todos tus cursos.</p>
+                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.pendingGradingCount > 0 ? ' tone-warn' : ' tone-good'}`}>
+                      <TeacherDashboardKpiIcon kind="pending" />
+                    </div>
+                    <div className="campus-teacher__integral-kpi-copy">
+                      <span className="campus-teacher__integral-kpi-label">Por calificar</span>
+                      <strong>{integralOverview.pendingGradingCount}</strong>
+                      <p>{integralOverview.pendingGradingCount > 0 ? 'Actividades esperando tu revisión.' : 'Todo al día en tus cursos.'}</p>
+                    </div>
                   </button>
 
                   <button
@@ -6989,17 +7364,33 @@ function TeacherCampusHome({ forcePreview = false }) {
                     onClick={() => setActiveIntegralModal('tomorrow')}
                     type="button"
                   >
-                    <span className="campus-panel__kicker">Actividades de mañana</span>
-                    <strong>{integralOverview.tomorrowActivitiesCount}</strong>
-                    <p>{integralOverview.tomorrowActivitiesCount > 0 ? integralOverview.tomorrowLabel : 'No hay actividades programadas.'}</p>
+                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.tomorrowActivitiesCount > 0 ? ' tone-warn' : ' tone-neutral'}`}>
+                      <TeacherDashboardKpiIcon kind="tomorrow" />
+                    </div>
+                    <div className="campus-teacher__integral-kpi-copy">
+                      <span className="campus-teacher__integral-kpi-label">Para mañana</span>
+                      <strong>{integralOverview.tomorrowActivitiesCount}</strong>
+                      <p>{integralOverview.tomorrowActivitiesCount > 0 ? integralOverview.tomorrowLabel : 'Nada programado por ahora.'}</p>
+                    </div>
                   </button>
 
                   <article className={`campus-teacher__integral-kpi-card tone-${integralOverview.healthTone}`}>
-                    <span className="campus-panel__kicker">Salud consolidada</span>
-                    <strong>{integralOverview.healthStatus}</strong>
-                    <p>Score {integralOverview.healthScore} por notas, riesgo y cobertura.</p>
+                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon tone-${integralOverview.healthTone}`}>
+                      <TeacherDashboardKpiIcon kind="health" />
+                    </div>
+                    <div className="campus-teacher__integral-kpi-copy">
+                      <span className="campus-teacher__integral-kpi-label">Estado general</span>
+                      <strong>{integralOverview.healthStatus}</strong>
+                      <p>{integralOverview.healthScore === null ? 'Aparecerá cuando registres las primeras notas.' : `Índice ${integralOverview.healthScore} según notas, riesgo y cobertura.`}</p>
+                    </div>
                   </article>
+                    </>
+                  )}
                 </div>
+
+                {isOverviewMetricsLoading ? (
+                  <p className="campus-teacher__metrics-loading-note">Calculando indicadores académicos en segundo plano...</p>
+                ) : null}
 
                 <article className="campus-teacher__integral-card campus-teacher__panel-surface campus-teacher__dashboard-calendar">
                   <div className="campus-teacher__section-head">
@@ -7055,25 +7446,24 @@ function TeacherCampusHome({ forcePreview = false }) {
                     </div>
                   </div>
                   <div className="campus-teacher__dashboard-calendar-upcoming">
-                    <div className="campus-teacher__section-head">
-                      <div>
-                        <span className="campus-panel__kicker">Próximas actividades</span>
-                        <h3>Lo que viene en este mes</h3>
-                      </div>
-                    </div>
+                    <header className="campus-teacher__integral-card-head">
+                      <span className="campus-teacher__integral-card-label">Próximas actividades</span>
+                      <h3>Lo que viene este mes</h3>
+                      <p className="campus-teacher__integral-card-lead">Tareas, quices y evaluaciones programadas en tus cursos.</p>
+                    </header>
                     <div className="campus-teacher__integral-activity-list">
                       {upcomingDashboardActivities.length > 0 ? upcomingDashboardActivities.map((item) => (
                         <article className="campus-teacher__integral-activity" key={item.id}>
-                          <div>
+                          <div className="campus-teacher__integral-activity-copy">
+                            <span className="campus-teacher__integral-activity-type">{item.typeLabel}</span>
                             <strong>{item.title}</strong>
                             <p>{item.courseTitle}</p>
                           </div>
                           <div className="campus-teacher__integral-activity-meta">
-                            <span>{item.typeLabel}</span>
                             <span>{item.dateLabel}</span>
                           </div>
                         </article>
-                      )) : <p className="campus-panel__meta">No hay actividades evaluativas próximas en este mes.</p>}
+                      )) : <p className="campus-teacher__integral-empty">No hay actividades evaluativas próximas en este mes.</p>}
                     </div>
                   </div>
                 </article>
@@ -7099,11 +7489,11 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                       <div className="campus-teacher__timeline-modal-body">
                         {integralOverview.atRiskStudents.length > 0 ? integralOverview.atRiskStudents.map((student) => (
-                          <article className="campus-teacher__timeline-modal-item is-activity" key={`${student.courseTitle}-${student.studentId}`}>
+                          <article className="campus-teacher__timeline-modal-item is-activity" key={`${student.studentId}-${student.courseTitle}`}>
                             <span className="campus-teacher__timeline-modal-item-kind">{student.grade} · {student.courseTitle}</span>
                             <strong>{student.name}</strong>
                             <span>
-                              Definitiva {student.finalScore.toFixed(2)}
+                              Definitiva {parseFiniteScore(student.finalScore)?.toFixed(2)}
                               {student.trendDelta === null ? ' · Sin tendencia suficiente' : ` · ${student.trendDelta >= 0 ? '↑' : '↓'} ${Math.abs(student.trendDelta)} vs. primer periodo`}
                             </span>
                             <p>Última actualización {student.updatedAtLabel}.</p>
@@ -7135,12 +7525,18 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                       <div className="campus-teacher__timeline-modal-body">
                         {integralOverview.pendingGradingItems.length > 0 ? integralOverview.pendingGradingItems.map((item) => (
-                          <article className="campus-teacher__timeline-modal-item is-activity" key={item.id}>
+                          <button
+                            className="campus-teacher__timeline-modal-item is-activity is-clickable"
+                            key={item.id}
+                            onClick={() => openGradebookForPendingItem(item)}
+                            type="button"
+                          >
                             <span className="campus-teacher__timeline-modal-item-kind">{item.typeLabel}</span>
                             <strong>{item.title}</strong>
                             <span>{item.courseTitle} · {item.deliveryLabel} · {item.dateLabel}</span>
                             <p>{item.description}</p>
-                          </article>
+                            <span className="campus-teacher__timeline-modal-item-action">Ir al libro de notas</span>
+                          </button>
                         )) : <p className="campus-panel__meta">No tienes actividades evaluativas pendientes por calificar.</p>}
                       </div>
                     </div>
@@ -7213,45 +7609,54 @@ function TeacherCampusHome({ forcePreview = false }) {
                   </div>
                 ) : null}
 
+                {isOverviewMetricsLoading ? (
+                  <div className="campus-teacher__integral-grid campus-teacher__integral-grid--loading">
+                    {Array.from({ length: 4 }, (_, index) => (
+                      <article className="campus-teacher__integral-card campus-teacher__integral-card--skeleton" key={`teacher-integral-skeleton-${index}`} aria-hidden="true">
+                        <div className="campus-teacher__integral-skeleton-line is-wide" />
+                        <div className="campus-teacher__integral-skeleton-line" />
+                        <div className="campus-teacher__integral-skeleton-block" />
+                      </article>
+                    ))}
+                  </div>
+                ) : (
                 <div className="campus-teacher__integral-grid">
-                  <article className="campus-teacher__integral-card campus-teacher__panel-surface">
-                    <div className="campus-teacher__section-head">
-                      <div>
-                        <span className="campus-panel__kicker">Rendimiento académico</span>
-                        <h3>El KPI principal del docente</h3>
-                      </div>
-                    </div>
-                    <div className="campus-teacher__integral-stat-list">
-                      <div>
-                        <span>Promedio consolidado</span>
+                  <article className="campus-teacher__integral-card campus-teacher__integral-card--performance">
+                    <header className="campus-teacher__integral-card-head">
+                      <span className="campus-teacher__integral-card-label">Rendimiento académico</span>
+                      <h3>Cómo van tus estudiantes</h3>
+                      <p className="campus-teacher__integral-card-lead">Promedios y tendencias con base en las notas que ya registraste.</p>
+                    </header>
+                    <div className="campus-teacher__integral-stat-grid">
+                      <div className="campus-teacher__integral-stat-tile">
+                        <span className="campus-teacher__integral-stat-label">Promedio general</span>
                         <strong>{integralOverview.averageScore === null ? 'Sin notas' : integralOverview.averageScore}</strong>
                       </div>
-                      <div>
-                        <span>Evolucion del promedio</span>
-                        <strong>{integralOverview.averageTrendDelta === null ? 'Sin tendencia' : `${integralOverview.averageTrendDelta >= 0 ? '↑' : '↓'} ${Math.abs(integralOverview.averageTrendDelta)}`}</strong>
+                      <div className="campus-teacher__integral-stat-tile">
+                        <span className="campus-teacher__integral-stat-label">Evolución del promedio</span>
+                        <strong>{integralOverview.averageTrendDelta === null ? 'Sin tendencia' : `${integralOverview.averageTrendDelta >= 0 ? 'Subió' : 'Bajó'} ${Math.abs(integralOverview.averageTrendDelta)}`}</strong>
                       </div>
-                      <div>
-                        <span>% aprobados</span>
+                      <div className="campus-teacher__integral-stat-tile">
+                        <span className="campus-teacher__integral-stat-label">Estudiantes aprobando</span>
                         <strong>{integralOverview.approvedRate === null ? 'Sin datos' : `${integralOverview.approvedRate}%`}</strong>
                       </div>
-                      <div>
-                        <span>% bajo rendimiento</span>
+                      <div className="campus-teacher__integral-stat-tile">
+                        <span className="campus-teacher__integral-stat-label">Bajo rendimiento</span>
                         <strong>{integralOverview.lowPerformanceRate === null ? 'Sin datos' : `${integralOverview.lowPerformanceRate}%`}</strong>
                       </div>
                     </div>
                   </article>
 
-                  <article className="campus-teacher__integral-card campus-teacher__panel-surface">
-                    <div className="campus-teacher__section-head">
-                      <div>
-                        <span className="campus-panel__kicker">Riesgo académico</span>
-                        <h3>Alertas automáticas</h3>
-                      </div>
-                    </div>
+                  <article className="campus-teacher__integral-card campus-teacher__integral-card--risk">
+                    <header className="campus-teacher__integral-card-head">
+                      <span className="campus-teacher__integral-card-label">Riesgo académico</span>
+                      <h3>Estudiantes que necesitan apoyo</h3>
+                      <p className="campus-teacher__integral-card-lead">Alertas que se actualizan automáticamente con cada calificación.</p>
+                    </header>
                     <div className="campus-teacher__integral-alerts">
                       <article className="campus-teacher__integral-alert-chip tone-danger">
                         <strong>{integralOverview.atRiskCount}</strong>
-                        <span>estudiantes en riesgo</span>
+                        <span>en riesgo académico</span>
                       </article>
                       <article className="campus-teacher__integral-alert-chip tone-warn">
                         <strong>{integralOverview.droppingStudentsCount}</strong>
@@ -7261,56 +7666,55 @@ function TeacherCampusHome({ forcePreview = false }) {
                     <div className="campus-teacher__integral-insights">
                       {integralOverview.riskAlerts.length > 0 ? integralOverview.riskAlerts.map((alertText) => (
                         <div className="campus-teacher__integral-insight" key={alertText}>{alertText}</div>
-                      )) : <p className="campus-panel__meta">No hay alertas críticas activas en este momento.</p>}
+                      )) : <p className="campus-teacher__integral-empty">Todo tranquilo por ahora. No hay alertas críticas activas.</p>}
                     </div>
                   </article>
 
-                  <article className="campus-teacher__integral-card campus-teacher__panel-surface">
-                    <div className="campus-teacher__section-head">
-                      <div>
-                        <span className="campus-panel__kicker">Comprensión del curso</span>
-                        <h3>Temas que requieren refuerzo</h3>
-                      </div>
-                    </div>
+                  <article className="campus-teacher__integral-card campus-teacher__integral-card--topics">
+                    <header className="campus-teacher__integral-card-head">
+                      <span className="campus-teacher__integral-card-label">Comprensión del curso</span>
+                      <h3>Temas donde conviene reforzar</h3>
+                      <p className="campus-teacher__integral-card-lead">Componentes con mayor dificultad según las calificaciones registradas.</p>
+                    </header>
                     <div className="campus-teacher__integral-topics">
                       {integralOverview.weakestTopics.length > 0 ? integralOverview.weakestTopics.map((topic) => (
                         <article className="campus-teacher__integral-topic" key={topic.key}>
-                          <div>
+                          <div className="campus-teacher__integral-topic-copy">
                             <strong>{topic.label}</strong>
-                            <p>{topic.failedRate}% con dificultad</p>
+                            <p>{topic.failedRate}% de estudiantes con dificultad</p>
                           </div>
                           <div className="campus-teacher__integral-topic-metrics">
                             <span>Promedio {topic.averageScore}</span>
                             <span>Dominio {topic.masteryRate}%</span>
                           </div>
                         </article>
-                      )) : <p className="campus-panel__meta">Aún no hay suficientes resultados para detectar temas críticos.</p>}
+                      )) : <p className="campus-teacher__integral-empty">Todavía no hay suficientes calificaciones para detectar temas críticos.</p>}
                     </div>
                   </article>
 
-                  <article className="campus-teacher__integral-card campus-teacher__panel-surface">
-                    <div className="campus-teacher__section-head">
-                      <div>
-                        <span className="campus-panel__kicker">Actividad reciente</span>
-                        <h3>Lo ultimo que paso en el aula</h3>
-                      </div>
-                    </div>
+                  <article className="campus-teacher__integral-card campus-teacher__integral-card--activity">
+                    <header className="campus-teacher__integral-card-head">
+                      <span className="campus-teacher__integral-card-label">Actividad reciente</span>
+                      <h3>Lo último en tus cursos</h3>
+                      <p className="campus-teacher__integral-card-lead">Publicaciones y evaluaciones más recientes en el aula.</p>
+                    </header>
                     <div className="campus-teacher__integral-activity-list">
                       {integralOverview.recentActivity.length > 0 ? integralOverview.recentActivity.map((item) => (
                         <article className="campus-teacher__integral-activity" key={item.id}>
-                          <div>
+                          <div className="campus-teacher__integral-activity-copy">
+                            <span className="campus-teacher__integral-activity-type">{item.typeLabel}</span>
                             <strong>{item.title}</strong>
                             <p>{item.courseTitle}</p>
                           </div>
                           <div className="campus-teacher__integral-activity-meta">
-                            <span>{item.typeLabel}</span>
                             <span>{item.dateLabel}</span>
                           </div>
                         </article>
-                      )) : <p className="campus-panel__meta">Todavía no hay eventos recientes para mostrar.</p>}
+                      )) : <p className="campus-teacher__integral-empty">Todavía no hay eventos recientes para mostrar.</p>}
                     </div>
                   </article>
                 </div>
+                )}
               </article>
             ) : null}
 

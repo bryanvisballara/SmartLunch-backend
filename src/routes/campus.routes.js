@@ -1075,6 +1075,107 @@ function calculateWeightedAverage(items, getWeight) {
   return hasAnyValue && totalWeight > 0 ? Number((total / totalWeight).toFixed(2)) : null;
 }
 
+function parseFiniteScore(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasFiniteScore(value) {
+  return parseFiniteScore(value) !== null;
+}
+
+function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
+  const entriesByStudentAndComponent = new Map();
+  for (const entry of gradeEntries) {
+    entriesByStudentAndComponent.set(
+      `${String(entry.studentId)}:${normalizeText(entry.academicPeriodKey) || 'period_1'}:${normalizeText(entry.componentKey)}`,
+      entry
+    );
+  }
+
+  return (Array.isArray(students) ? students : []).map((student) => {
+    const periodScoreItems = [];
+
+    const periods = (Array.isArray(academicPeriods) ? academicPeriods : []).map((period) => {
+      const componentScoreItems = [];
+
+      const scores = (period.gradingComponents || []).map((component) => {
+        const subcomponents = (component.subcomponents || []).map((subcomponent) => {
+          const entry = entriesByStudentAndComponent.get(
+            `${String(student._id || student.studentId)}:${period.key}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`
+          );
+
+          return {
+            subcomponentKey: subcomponent.key,
+            subcomponentName: subcomponent.name,
+            weight: Number(subcomponent.weight || 0),
+            date: normalizeText(subcomponent.date),
+            topic: normalizeText(subcomponent.topic),
+            description: normalizeText(subcomponent.description),
+            score: entry ? Number(entry.score) : null,
+            feedback: normalizeText(entry?.feedback),
+            gradedAt: entry?.gradedAt || null,
+            updatedAt: entry?.updatedAt || null,
+          };
+        });
+
+        const legacyComponentEntry = entriesByStudentAndComponent.get(`${String(student._id || student.studentId)}:${period.key}:${component.key}`);
+        const score = subcomponents.length > 0
+          ? calculateWeightedAverage(subcomponents, (subcomponent) => subcomponent.weight)
+          : (legacyComponentEntry ? Number(legacyComponentEntry.score) : null);
+
+        if (score !== null && score !== undefined) {
+          componentScoreItems.push({ score, weight: component.weight });
+        }
+
+        return {
+          academicPeriodKey: period.key,
+          academicPeriodName: period.name,
+          componentKey: component.key,
+          componentName: component.name,
+          weight: component.weight,
+          score,
+          feedback: normalizeText(legacyComponentEntry?.feedback),
+          gradedAt: legacyComponentEntry?.gradedAt || null,
+          updatedAt: legacyComponentEntry?.updatedAt || null,
+          subcomponents,
+        };
+      });
+
+      const periodScore = calculateWeightedAverage(componentScoreItems, (component) => component.weight);
+      const weightedContribution = periodScore === null ? null : Number(((periodScore * Number(period.weight || 0)) / 100).toFixed(2));
+
+      if (weightedContribution !== null) {
+        periodScoreItems.push({ score: periodScore, weight: period.weight });
+      }
+
+      return {
+        key: period.key,
+        name: period.name,
+        weight: Number(period.weight || 0),
+        periodScore,
+        weightedContribution,
+        scores,
+      };
+    });
+
+    return {
+      studentId: String(student._id || student.studentId),
+      name: normalizeText(student.name),
+      schoolCode: normalizeText(student.schoolCode),
+      grade: normalizeText(student.grade),
+      course: normalizeText(student.course),
+      finalScore: calculateWeightedAverage(periodScoreItems, (period) => period.weight),
+      periods,
+      scores: periods.flatMap((period) => period.scores),
+    };
+  });
+}
+
 function serializeArray(items, serializer) {
   return Array.isArray(items) ? items.map(serializer) : [];
 }
@@ -2492,91 +2593,7 @@ async function buildTeacherCourseDetail({ schoolId, teacherUserId, course, gradi
     }).lean()
     : [];
 
-  const entriesByStudentAndComponent = new Map();
-  for (const entry of gradeEntries) {
-    entriesByStudentAndComponent.set(
-      `${String(entry.studentId)}:${normalizeText(entry.academicPeriodKey) || 'period_1'}:${normalizeText(entry.componentKey)}`,
-      entry
-    );
-  }
-
-  const studentRows = students.map((student) => {
-    const periodScoreItems = [];
-
-    const periods = academicPeriods.map((period) => {
-      const componentScoreItems = [];
-
-      const scores = (period.gradingComponents || []).map((component) => {
-        const subcomponents = (component.subcomponents || []).map((subcomponent) => {
-          const entry = entriesByStudentAndComponent.get(
-            `${String(student._id)}:${period.key}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`
-          );
-
-          return {
-            subcomponentKey: subcomponent.key,
-            subcomponentName: subcomponent.name,
-            weight: Number(subcomponent.weight || 0),
-            date: normalizeText(subcomponent.date),
-            topic: normalizeText(subcomponent.topic),
-            description: normalizeText(subcomponent.description),
-            score: entry ? Number(entry.score) : null,
-            feedback: normalizeText(entry?.feedback),
-            gradedAt: entry?.gradedAt || null,
-            updatedAt: entry?.updatedAt || null,
-          };
-        });
-
-        const legacyComponentEntry = entriesByStudentAndComponent.get(`${String(student._id)}:${period.key}:${component.key}`);
-        const score = subcomponents.length > 0
-          ? calculateWeightedAverage(subcomponents, (subcomponent) => subcomponent.weight)
-          : (legacyComponentEntry ? Number(legacyComponentEntry.score) : null);
-
-        if (score !== null && score !== undefined) {
-          componentScoreItems.push({ score, weight: component.weight });
-        }
-
-        return {
-          academicPeriodKey: period.key,
-          academicPeriodName: period.name,
-          componentKey: component.key,
-          componentName: component.name,
-          weight: component.weight,
-          score,
-          feedback: normalizeText(legacyComponentEntry?.feedback),
-          gradedAt: legacyComponentEntry?.gradedAt || null,
-          updatedAt: legacyComponentEntry?.updatedAt || null,
-          subcomponents,
-        };
-      });
-
-      const periodScore = calculateWeightedAverage(componentScoreItems, (component) => component.weight);
-      const weightedContribution = periodScore === null ? null : Number(((periodScore * Number(period.weight || 0)) / 100).toFixed(2));
-
-      if (weightedContribution !== null) {
-        periodScoreItems.push({ score: periodScore, weight: period.weight });
-      }
-
-      return {
-        key: period.key,
-        name: period.name,
-        weight: Number(period.weight || 0),
-        periodScore,
-        weightedContribution,
-        scores,
-      };
-    });
-
-    return {
-      studentId: String(student._id),
-      name: normalizeText(student.name),
-      schoolCode: normalizeText(student.schoolCode),
-      grade: normalizeText(student.grade),
-      course: normalizeText(student.course),
-      finalScore: calculateWeightedAverage(periodScoreItems, (period) => period.weight),
-      periods,
-      scores: periods.flatMap((period) => period.scores),
-    };
-  });
+  const studentRows = buildCourseStudentRows(students, academicPeriods, gradeEntries);
 
   return {
     course: normalizedCourse,
@@ -2724,6 +2741,7 @@ function buildTeacherOverviewCourseCards({
   gradingContext,
   postsByCourseId,
   gradeEntryCountByCourseId,
+  gradeEntriesByCourseId = new Map(),
   schoolStudents,
 }) {
   return courses.map((course) => {
@@ -2735,18 +2753,13 @@ function buildTeacherOverviewCourseCards({
       : course;
     const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale: courseGradingScale });
     const courseId = String(course._id);
-    const studentRows = schoolStudents
-      .filter((student) => studentBelongsToCourse(student, course))
-      .map((student) => ({
-        studentId: String(student._id),
-        name: normalizeText(student.name),
-        schoolCode: normalizeText(student.schoolCode),
-        grade: normalizeText(student.grade),
-        course: normalizeText(student.course),
-        finalScore: null,
-        periods: [],
-        scores: [],
-      }));
+    const rosterStudents = schoolStudents.filter((student) => studentBelongsToCourse(student, course));
+    const academicPeriods = getCourseAcademicPeriods(courseForSerialization);
+    const studentRows = buildCourseStudentRows(
+      rosterStudents,
+      academicPeriods,
+      gradeEntriesByCourseId.get(courseId) || []
+    );
 
     return {
       ...normalizedCourse,
@@ -2755,33 +2768,144 @@ function buildTeacherOverviewCourseCards({
         posts: postsByCourseId.get(courseId) || [],
         gradingScale: courseGradingScale,
         hasGradeEntries: Number(gradeEntryCountByCourseId.get(courseId) || 0) > 0,
+        academicPeriods,
       }),
     };
   });
 }
 
-function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingScore: 70 }, hasGradeEntries = null }) {
+function normalizeAssignmentMatchKey(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeAssignmentTitleForMatch(value) {
+  return normalizeAssignmentMatchKey(
+    String(value || '')
+      .replace(/^(tarea|quiz|quices|examen|proyecto|exposicion|laboratorio|material|aviso)\s*[-–:]\s*/i, '')
+  );
+}
+
+function buildGradebookAssignmentOptions(periods) {
+  return (Array.isArray(periods) ? periods : []).flatMap((period) => (
+    (period.gradingComponents || []).flatMap((component) => (
+      (component.subcomponents || []).map((subcomponent) => ({
+        key: [period.key, component.key, subcomponent.key].map((part) => normalizeText(part)).join('::'),
+        periodKey: period.key,
+        componentKey: component.key,
+        subcomponentKey: subcomponent.key,
+        subcomponentName: subcomponent.name,
+        label: `${subcomponent.name || 'Asignacion sin nombre'} · ${component.name || 'Componente'}`,
+      }))
+    ))
+  ));
+}
+
+function resolveGradebookAssignmentForPostTitle(title, periods) {
+  const options = buildGradebookAssignmentOptions(periods);
+  if (!options.length) {
+    return null;
+  }
+
+  const normalizedTitle = normalizeAssignmentMatchKey(title);
+  const strippedTitle = normalizeAssignmentTitleForMatch(title);
+
+  const exactMatch = options.find((option) => {
+    const subcomponentName = normalizeAssignmentMatchKey(option.subcomponentName);
+    const strippedSubcomponent = normalizeAssignmentTitleForMatch(option.subcomponentName);
+    return subcomponentName === normalizedTitle
+      || strippedSubcomponent === strippedTitle
+      || normalizeAssignmentMatchKey(option.label) === normalizedTitle;
+  });
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const partialMatch = options.find((option) => {
+    const subcomponentName = normalizeAssignmentMatchKey(option.subcomponentName);
+    return subcomponentName && (normalizedTitle.includes(subcomponentName) || subcomponentName.includes(strippedTitle));
+  });
+
+  return partialMatch || null;
+}
+
+function countStudentsGradedForAssignment(students, assignment) {
+  const roster = Array.isArray(students) ? students : [];
+  if (!assignment || roster.length === 0) {
+    return { gradedCount: 0, totalCount: roster.length };
+  }
+
+  const periodKey = normalizeText(assignment.periodKey);
+  const componentKey = normalizeText(assignment.componentKey);
+  const subcomponentKey = normalizeText(assignment.subcomponentKey);
+
+  let gradedCount = 0;
+  roster.forEach((student) => {
+    const period = (student.periods || []).find((entry) => normalizeText(entry.key || entry.periodKey) === periodKey);
+    const component = (period?.scores || []).find((entry) => normalizeText(entry.componentKey) === componentKey);
+    const subcomponent = (component?.subcomponents || []).find((entry) => normalizeText(entry.subcomponentKey) === subcomponentKey);
+    if (hasFiniteScore(subcomponent?.score)) {
+      gradedCount += 1;
+    }
+  });
+
+  return { gradedCount, totalCount: roster.length };
+}
+
+function isPostPendingGrading(post, academicPeriods, students) {
+  if (!isEvaluativePostType(post?.type) || normalizeText(post?.status) === 'archived') {
+    return false;
+  }
+
+  const roster = Array.isArray(students) ? students : [];
+  if (roster.length === 0) {
+    return false;
+  }
+
+  const assignment = resolveGradebookAssignmentForPostTitle(post?.title, academicPeriods);
+  if (!assignment) {
+    return true;
+  }
+
+  const { gradedCount, totalCount } = countStudentsGradedForAssignment(roster, assignment);
+  return gradedCount < totalCount;
+}
+
+function getPendingGradingPosts(posts, academicPeriods, students) {
+  return (Array.isArray(posts) ? posts : []).filter((post) => isPostPendingGrading(post, academicPeriods, students));
+}
+
+function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingScore: 70 }, hasGradeEntries = null, academicPeriods = [] }) {
   const passingScore = Number(gradingScale?.passingScore ?? 70);
   const students = Array.isArray(courseDetail?.students) ? courseDetail.students : [];
   const canUseEvaluatedStudents = hasGradeEntries === null || Boolean(hasGradeEntries);
   const evaluatedStudents = canUseEvaluatedStudents
-    ? students.filter((student) => Number.isFinite(Number(student.finalScore)))
+    ? students.filter((student) => hasFiniteScore(student.finalScore))
     : [];
   const averageScore = evaluatedStudents.length > 0
-    ? Number((evaluatedStudents.reduce((total, student) => total + Number(student.finalScore || 0), 0) / evaluatedStudents.length).toFixed(2))
+    ? Number((evaluatedStudents.reduce((total, student) => total + Number(parseFiniteScore(student.finalScore) || 0), 0) / evaluatedStudents.length).toFixed(2))
     : null;
   const atRiskStudents = students
-    .filter((student) => Number.isFinite(Number(student.finalScore)) && Number(student.finalScore) < passingScore)
+    .filter((student) => {
+      const finalScore = parseFiniteScore(student.finalScore);
+      return finalScore !== null && finalScore < passingScore;
+    })
     .map((student) => ({
       studentId: student.studentId,
       name: normalizeText(student.name),
       schoolCode: normalizeText(student.schoolCode),
       grade: normalizeText(student.grade),
-      finalScore: Number(student.finalScore),
+      finalScore: parseFiniteScore(student.finalScore),
     }))
     .sort((left, right) => left.finalScore - right.finalScore || left.name.localeCompare(right.name, 'es', { sensitivity: 'base' }));
   const scoreCoverageEntries = students.flatMap((student) => (student.periods || []).flatMap((period) => period.scores || []));
   const gradedEntriesCount = scoreCoverageEntries.filter((score) => score.score !== null && score.score !== undefined && score.score !== '').length;
+
+  const pendingGradingPosts = getPendingGradingPosts(posts, academicPeriods, students);
 
   return {
     studentCount: students.length,
@@ -2792,15 +2916,16 @@ function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingSco
       schoolCode: normalizeText(student.schoolCode),
       grade: normalizeText(student.grade),
       course: normalizeText(student.course),
-      finalScore: Number(student.finalScore),
-    })).filter((student) => student.studentId),
+      finalScore: parseFiniteScore(student.finalScore),
+    })).filter((student) => student.studentId && hasFiniteScore(student.finalScore)),
     evaluatedStudentCount: evaluatedStudents.length,
     averageScore,
     atRiskCount: atRiskStudents.length,
     passingScore,
     atRiskStudents: atRiskStudents.slice(0, 8),
     gradingCoverageRate: scoreCoverageEntries.length > 0 ? Number(((gradedEntriesCount / scoreCoverageEntries.length) * 100).toFixed(1)) : null,
-    pendingGradingCount: (Array.isArray(posts) ? posts : []).filter((post) => isEvaluativePostType(post.type) && normalizeText(post.status) !== 'archived').length,
+    pendingGradingCount: pendingGradingPosts.length,
+    pendingGradingPostIds: pendingGradingPosts.map((post) => String(post._id || post.id || '')).filter(Boolean),
   };
 }
 
@@ -2827,98 +2952,218 @@ router.get('/navigation', async (req, res) => {
   }
 });
 
+function buildEmptyCourseStats() {
+  return {
+    studentCount: 0,
+    studentIds: [],
+    evaluatedStudents: [],
+    evaluatedStudentCount: 0,
+    averageScore: null,
+    atRiskCount: 0,
+    atRiskStudents: [],
+    pendingGradingCount: 0,
+    pendingGradingPostIds: [],
+    gradingCoverageRate: null,
+  };
+}
+
+async function loadStudentsForTeacherCourses(schoolId, courses) {
+  const studentMap = new Map();
+  if (!Array.isArray(courses) || courses.length === 0) {
+    return [];
+  }
+
+  const rosterResults = await Promise.all(
+    courses.map((course) => Student.find(buildTeacherCourseRosterQuery({ schoolId, course }))
+      .select('_id name schoolCode grade course status')
+      .lean())
+  );
+
+  rosterResults.flat().forEach((student) => {
+    studentMap.set(String(student._id), student);
+  });
+
+  return Array.from(studentMap.values());
+}
+
+function enrichTeacherOverviewCourses(academicStructure, teacherUserId, courses) {
+  return courses.map((course) => {
+    const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, course);
+    if (resolvedClassSessions.length > 0 && (!Array.isArray(course.classSessions) || course.classSessions.length === 0)) {
+      return { ...course, classSessions: resolvedClassSessions };
+    }
+    return course;
+  });
+}
+
+async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
+  await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId: userId });
+
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+  const [teacherUser, courses, recentPosts, gradingContext] = await Promise.all([
+    User.findOne({ _id: userId, schoolId })
+      .select('_id name username campusPhotoUrl campusPhotoThumbUrl')
+      .lean(),
+    CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
+      .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
+      .lean(),
+    CampusPost.find({ schoolId, teacherUserId: userId })
+      .populate('courseId', 'title')
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .limit(12)
+      .lean(),
+    loadCampusGradingContext(schoolId),
+  ]);
+
+  const overviewCourses = selectTeacherOverviewCourses(courses, new Map(), new Map());
+  const enrichedOverviewCourses = enrichTeacherOverviewCourses(academicStructure, userId, overviewCourses);
+  const normalizedCourses = enrichedOverviewCourses.map((course) => {
+    const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
+    return {
+      ...serializeCourse(course, { gradingScale: courseGradingScale }),
+      stats: buildEmptyCourseStats(),
+    };
+  });
+  const normalizedRecentPosts = serializeArray(recentPosts, serializePost);
+
+  return {
+    teacher: serializeTeacherProfile(teacherUser, { userId, name, username }),
+    summary: {
+      totalCourses: normalizedCourses.length,
+      activeCourses: normalizedCourses.filter((course) => course.status === 'active').length,
+      publishedPosts: normalizedRecentPosts.filter((post) => post.status === 'published').length,
+      activeAssignments: normalizedRecentPosts.filter((post) => isEvaluativePostType(post.type) && post.status !== 'archived').length,
+    },
+    courses: normalizedCourses,
+    gradingScale: gradingContext.defaultScale,
+    weeklySchedule: buildTeacherWeeklySchedule(enrichedOverviewCourses),
+    recentPosts: normalizedRecentPosts,
+  };
+}
+
+async function buildTeacherOverviewMetrics({ schoolId, userId }) {
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+  const gradingContext = await loadCampusGradingContext(schoolId);
+  const courses = await CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
+    .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
+    .lean();
+
+  const [allCoursePosts, schoolStudents] = await Promise.all([
+    CampusPost.find({ schoolId, teacherUserId: userId })
+      .select('courseId type status title')
+      .lean(),
+    loadStudentsForTeacherCourses(schoolId, courses),
+  ]);
+
+  const postsByCourseId = new Map();
+  for (const post of allCoursePosts) {
+    const courseId = String(post.courseId || '');
+    if (!courseId) {
+      continue;
+    }
+
+    const coursePosts = postsByCourseId.get(courseId) || [];
+    coursePosts.push(post);
+    postsByCourseId.set(courseId, coursePosts);
+  }
+
+  const gradeEntryCountByCourseId = new Map();
+  const gradeEntryCounts = courses.length > 0
+    ? await CampusGradeEntry.aggregate([
+      {
+        $match: {
+          schoolId,
+          teacherUserId: userId,
+          courseId: { $in: courses.map((course) => course._id) },
+        },
+      },
+      { $group: { _id: '$courseId', count: { $sum: 1 } } },
+    ])
+    : [];
+
+  gradeEntryCounts.forEach((item) => {
+    gradeEntryCountByCourseId.set(String(item._id), Number(item.count || 0));
+  });
+
+  const allGradeEntries = courses.length > 0
+    ? await CampusGradeEntry.find({
+      schoolId,
+      teacherUserId: userId,
+      courseId: { $in: courses.map((course) => course._id) },
+    }).lean()
+    : [];
+  const gradeEntriesByCourseId = new Map();
+  allGradeEntries.forEach((entry) => {
+    const courseId = String(entry.courseId || '');
+    if (!courseId) {
+      return;
+    }
+
+    const courseEntries = gradeEntriesByCourseId.get(courseId) || [];
+    courseEntries.push(entry);
+    gradeEntriesByCourseId.set(courseId, courseEntries);
+  });
+
+  const overviewCourses = selectTeacherOverviewCourses(courses, postsByCourseId, gradeEntryCountByCourseId);
+  const enrichedOverviewCourses = enrichTeacherOverviewCourses(academicStructure, userId, overviewCourses);
+  const normalizedCourses = buildTeacherOverviewCourseCards({
+    teacherUserId: userId,
+    courses: enrichedOverviewCourses,
+    academicStructure,
+    gradingContext,
+    postsByCourseId,
+    gradeEntryCountByCourseId,
+    gradeEntriesByCourseId,
+    schoolStudents,
+  });
+
+  return {
+    courses: normalizedCourses.map((course) => ({
+      id: course.id,
+      stats: course.stats,
+    })),
+  };
+}
+
+async function buildTeacherOverviewFull({ schoolId, userId, name, username }) {
+  const shell = await buildTeacherOverviewShell({ schoolId, userId, name, username });
+  const metrics = await buildTeacherOverviewMetrics({ schoolId, userId });
+  const statsByCourseId = new Map((metrics.courses || []).map((course) => [course.id, course.stats]));
+
+  return {
+    ...shell,
+    courses: (shell.courses || []).map((course) => ({
+      ...course,
+      stats: statsByCourseId.get(course.id) || course.stats,
+    })),
+  };
+}
+
 router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => {
   try {
     const { schoolId, userId, name, username } = req.user;
+    const payload = await buildTeacherOverviewFull({ schoolId, userId, name, username });
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
-    await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId: userId });
+router.get('/teacher/overview/shell', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name, username } = req.user;
+    const payload = await buildTeacherOverviewShell({ schoolId, userId, name, username });
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
 
-    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
-
-    const [teacherUser, courses, recentPosts, allCoursePosts, gradingContext, schoolStudents] = await Promise.all([
-      User.findOne({ _id: userId, schoolId })
-        .select('_id name username campusPhotoUrl campusPhotoThumbUrl')
-        .lean(),
-      CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
-        .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
-        .lean(),
-      CampusPost.find({ schoolId, teacherUserId: userId })
-        .populate('courseId', 'title')
-        .sort({ updatedAt: -1, createdAt: -1 })
-        .limit(12)
-        .lean(),
-      CampusPost.find({ schoolId, teacherUserId: userId })
-        .select('courseId type status')
-        .lean(),
-      loadCampusGradingContext(schoolId),
-      Student.find({ schoolId, deletedAt: null, status: 'active' })
-        .select('_id name schoolCode grade course status')
-        .lean(),
-    ]);
-
-    const postsByCourseId = new Map();
-    for (const post of allCoursePosts) {
-      const courseId = String(post.courseId || '');
-      if (!courseId) {
-        continue;
-      }
-
-      const coursePosts = postsByCourseId.get(courseId) || [];
-      coursePosts.push(post);
-      postsByCourseId.set(courseId, coursePosts);
-    }
-
-    const gradeEntryCountByCourseId = new Map();
-    const gradeEntryCounts = courses.length > 0
-      ? await CampusGradeEntry.aggregate([
-        {
-          $match: {
-            schoolId,
-            teacherUserId: userId,
-            courseId: { $in: courses.map((course) => course._id) },
-          },
-        },
-        { $group: { _id: '$courseId', count: { $sum: 1 } } },
-      ])
-      : [];
-
-    gradeEntryCounts.forEach((item) => {
-      gradeEntryCountByCourseId.set(String(item._id), Number(item.count || 0));
-    });
-
-    const overviewCourses = selectTeacherOverviewCourses(courses, postsByCourseId, gradeEntryCountByCourseId);
-    const enrichedOverviewCourses = overviewCourses.map((course) => {
-      const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, userId, course);
-      if (resolvedClassSessions.length > 0 && (!Array.isArray(course.classSessions) || course.classSessions.length === 0)) {
-        return { ...course, classSessions: resolvedClassSessions };
-      }
-      return course;
-    });
-
-    const normalizedCourses = buildTeacherOverviewCourseCards({
-      teacherUserId: userId,
-      courses: enrichedOverviewCourses,
-      academicStructure,
-      gradingContext,
-      postsByCourseId,
-      gradeEntryCountByCourseId,
-      schoolStudents,
-    });
-    const normalizedRecentPosts = serializeArray(recentPosts, serializePost);
-
-    return res.status(200).json({
-      teacher: serializeTeacherProfile(teacherUser, { userId, name, username }),
-      summary: {
-        totalCourses: normalizedCourses.length,
-        activeCourses: normalizedCourses.filter((course) => course.status === 'active').length,
-        publishedPosts: normalizedRecentPosts.filter((post) => post.status === 'published').length,
-        activeAssignments: normalizedRecentPosts.filter((post) => isEvaluativePostType(post.type) && post.status !== 'archived').length,
-      },
-      courses: normalizedCourses,
-      gradingScale: gradingContext.defaultScale,
-      weeklySchedule: buildTeacherWeeklySchedule(enrichedOverviewCourses),
-      recentPosts: normalizedRecentPosts,
-    });
+router.get('/teacher/overview/metrics', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const payload = await buildTeacherOverviewMetrics({ schoolId, userId });
+    return res.status(200).json(payload);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -4216,6 +4461,7 @@ router.get('/coordination/dashboard', requireCampusCoordinationAccess, async (re
       loadCampusGradingContext,
       resolveCampusGradingScaleForCourse,
       serializeCourse,
+      getCourseAcademicPeriods,
     });
     return res.status(200).json(dashboard);
   } catch (error) {
@@ -4317,6 +4563,7 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
           posts: postsByCourseId.get(String(course._id)) || [],
           gradingScale: courseGradingScale,
           hasGradeEntries: Number(gradeEntryCountByCourseId.get(String(course._id)) || 0) > 0,
+          academicPeriods: getCourseAcademicPeriods(course),
         }),
       };
     }));

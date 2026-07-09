@@ -7,11 +7,12 @@ function CampusShell({ campusContext, navigation, routeBase = '/campus' }) {
   const normalizedPathname = location.pathname !== '/' ? location.pathname.replace(/\/+$/, '') : '/';
   const isParentAppRoute = normalizedPathname === `${routeBase}/parent`;
   const isSchoolRouteAppRoute = normalizedPathname === `${routeBase}/route`;
+  const isTeacherAppRoute = normalizedPathname === `${routeBase}/teacher`;
 
-  if (isParentAppRoute || isSchoolRouteAppRoute) {
+  if (isParentAppRoute || isSchoolRouteAppRoute || isTeacherAppRoute) {
     return (
-      <div className={`campus-shell ${isParentAppRoute ? 'campus-shell--parent-app' : 'campus-shell--route-app'}`}>
-        <div className={`campus-shell__content ${isParentAppRoute ? 'campus-shell__content--parent-app' : 'campus-shell__content--route-app'}`}>
+      <div className={`campus-shell ${isParentAppRoute ? 'campus-shell--parent-app' : ''}${isSchoolRouteAppRoute ? ' campus-shell--route-app' : ''}${isTeacherAppRoute ? ' campus-shell--teacher-app' : ''}`}>
+        <div className={`campus-shell__content ${isParentAppRoute ? 'campus-shell__content--parent-app' : ''}${isSchoolRouteAppRoute ? ' campus-shell__content--route-app' : ''}${isTeacherAppRoute ? ' campus-shell__content--teacher-app' : ''}`}>
           <Outlet />
         </div>
       </div>

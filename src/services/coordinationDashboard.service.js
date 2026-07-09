@@ -344,6 +344,7 @@ async function buildCoordinationDashboard({
   loadCampusGradingContext,
   resolveCampusGradingScaleForCourse,
   serializeCourse,
+  getCourseAcademicPeriods,
 }) {
   const { scope, scopedGrades, subjects, academicStructure } = await resolveCoordinationScopeContext(schoolId, coordinationScope);
   const gradeKeys = scope.gradeKeys;
@@ -351,7 +352,7 @@ async function buildCoordinationDashboard({
   const [students, campusCourses, posts, disciplineObservations, nursingVisits, wellbeingCases, users, gradingContext] = await Promise.all([
     Student.find({ schoolId, deletedAt: null, status: 'active' }).select('name schoolCode grade course').lean(),
     CampusCourse.find({ schoolId, status: { $ne: 'archived' } }).lean(),
-    CampusPost.find({ schoolId }).select('courseId type status').lean(),
+    CampusPost.find({ schoolId }).select('courseId type status title').lean(),
     CampusDisciplineObservation.find({ schoolId }).sort({ submittedAt: -1 }).limit(40).lean(),
     NursingVisit.find({ schoolId }).sort({ attendedAt: -1 }).limit(40).lean(),
     PsychologyCase.find({ schoolId }).sort({ updatedAt: -1 }).limit(40).lean(),
@@ -391,6 +392,7 @@ async function buildCoordinationDashboard({
       courseDetail,
       posts: postsByCourseId.get(String(course._id)) || [],
       gradingScale: courseGradingScale,
+      academicPeriods: typeof getCourseAcademicPeriods === 'function' ? getCourseAcademicPeriods(course) : [],
     });
     return {
       ...serializeCourse(course, { gradingScale: courseGradingScale }),

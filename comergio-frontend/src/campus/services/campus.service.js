@@ -12,6 +12,14 @@ export function getCampusTeacherOverview() {
   return api.get('/campus/teacher/overview', { timeout: 45000 }).then((response) => response.data);
 }
 
+export function getCampusTeacherOverviewShell() {
+  return api.get('/campus/teacher/overview/shell', { timeout: 30000 }).then((response) => response.data);
+}
+
+export function getCampusTeacherOverviewMetrics() {
+  return api.get('/campus/teacher/overview/metrics', { timeout: 45000 }).then((response) => response.data);
+}
+
 export function getCampusTeacherCalendar(params = {}) {
   return api.get('/campus/teacher/calendar', { params }).then((response) => response.data);
 }
