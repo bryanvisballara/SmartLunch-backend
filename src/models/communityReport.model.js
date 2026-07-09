@@ -5,7 +5,7 @@ const communityReportSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true, trim: true },
     reportType: {
       type: String,
-      enum: ['bullying', 'teacher_complaint', 'school_recommendation'],
+      enum: ['bullying', 'teacher_complaint', 'school_recommendation', 'depression'],
       required: true,
       index: true,
     },

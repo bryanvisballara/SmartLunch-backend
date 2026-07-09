@@ -4,6 +4,7 @@ import { getCommunityReports, updateCommunityReportStatus } from '../../services
 const reportTypeOptions = [
   { value: '', label: 'Todos los tipos' },
   { value: 'bullying', label: 'Bullying' },
+  { value: 'depression', label: 'Depresión' },
   { value: 'teacher_complaint', label: 'Docente' },
   { value: 'school_recommendation', label: 'Recomendación' },
 ];
@@ -89,9 +90,9 @@ export default function CommunityReportsPanel({ className = '' }) {
     <section className={`community-reports-panel${className ? ` ${className}` : ''}`}>
       <header className="community-reports-panel__hero">
         <div>
-          <span className="community-reports-panel__kicker">Voz Colibrí</span>
+          <span className="community-reports-panel__kicker">Te escuchamos</span>
           <h2>Reportes de acudientes y alumnos</h2>
-          <p>Bullying, reportes de docentes y recomendaciones enviadas desde la app móvil.</p>
+          <p>Bullying, depresión, reportes de docentes y recomendaciones enviadas desde la app móvil.</p>
         </div>
       </header>
 

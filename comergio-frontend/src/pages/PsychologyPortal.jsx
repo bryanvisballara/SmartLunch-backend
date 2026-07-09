@@ -327,7 +327,7 @@ function PsychologyPortal() {
           Casos clínicos
         </button>
         <button className={activePortalView === 'community_reports' ? 'is-active' : ''} onClick={() => setActivePortalView('community_reports')} type="button">
-          Reportes Colibrí
+          Te escuchamos
         </button>
       </div>
 

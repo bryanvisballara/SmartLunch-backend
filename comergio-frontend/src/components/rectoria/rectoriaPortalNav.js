@@ -23,7 +23,7 @@ export const RECTORIA_PORTAL_NAV = [
       { key: 'control_wellbeing', label: 'Bienestar' },
       { key: 'control_nursing', label: 'Enfermería' },
       { key: 'control_coexistence', label: 'Convivencia' },
-      { key: 'control_community_reports', label: 'Reportes Colibrí' },
+      { key: 'control_community_reports', label: 'Te escuchamos' },
     ],
   },
   {

@@ -20,7 +20,10 @@ const reportTypeLabels = {
   bullying: 'Reporte de bullying',
   teacher_complaint: 'Reporte de docente',
   school_recommendation: 'Recomendación para el colegio',
+  depression: 'Reporte de depresión',
 };
+
+const validReportTypes = Object.keys(reportTypeLabels);
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -163,7 +166,7 @@ async function notifyInstitutionalCommunityReport({ schoolId, report }) {
     schoolId,
     parentIds: target.userIds,
     studentId: report.studentId,
-    title: `Colibrí: ${typeLabel}`,
+    title: `Te escuchamos: ${typeLabel}`,
     body: `${reporterLabel} envió un reporte para revisión institucional.`,
     payload: {
       type: 'community.report',
@@ -182,7 +185,7 @@ router.post('/', roleMiddleware(...reportAuthorRoles), async (req, res) => {
     const teacherName = normalizeText(req.body?.teacherName);
     const isAnonymous = Boolean(req.body?.isAnonymous);
 
-    if (!['bullying', 'teacher_complaint', 'school_recommendation'].includes(reportType)) {
+    if (!validReportTypes.includes(reportType)) {
       return res.status(400).json({ message: 'Tipo de reporte inválido.' });
     }
 
@@ -237,7 +240,7 @@ router.get('/', roleMiddleware(...institutionalViewerRoles), async (req, res) =>
     if (['pending', 'reviewed', 'archived'].includes(status)) {
       query.status = status;
     }
-    if (['bullying', 'teacher_complaint', 'school_recommendation'].includes(reportType)) {
+    if (validReportTypes.includes(reportType)) {
       query.reportType = reportType;
     }
 

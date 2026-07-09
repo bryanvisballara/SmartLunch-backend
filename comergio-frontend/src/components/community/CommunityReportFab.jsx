@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import colibriIcon from '../../assets/colibrisinfondo.png';
 import { createCommunityReport } from '../../services/communityReport.service';
 
 const reportTypeOptions = [
   { value: 'bullying', label: 'Reportar bullying', hint: 'Situaciones de acoso o intimidación.' },
+  { value: 'depression', label: 'Reportar depresión', hint: 'Tristeza persistente, desánimo o preocupación por el bienestar emocional.' },
   { value: 'teacher_complaint', label: 'Reportar docente', hint: 'Conducta inapropiada o preocupación con un docente.' },
   { value: 'school_recommendation', label: 'Recomendación', hint: 'Sugerencia para mejorar la experiencia escolar.' },
 ];
@@ -14,6 +14,21 @@ const emptyForm = {
   teacherName: '',
   isAnonymous: false,
 };
+
+function CommunityReportHeartIcon() {
+  return (
+    <svg aria-hidden="true" className="campus-parent-mobile__community-report-fab-icon" viewBox="0 0 24 24">
+      <path
+        d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
 
 function ParentFeedBottomSheet({ children, onClose, title }) {
   return (
@@ -95,7 +110,7 @@ export default function CommunityReportFab({
   return (
     <>
       <button
-        aria-label="Enviar reporte con Colibrí"
+        aria-label="Te escuchamos: enviar reporte"
         className="campus-parent-mobile__community-report-fab"
         onClick={() => {
           setOpen(true);
@@ -103,11 +118,11 @@ export default function CommunityReportFab({
         }}
         type="button"
       >
-        <img alt="" aria-hidden="true" className="campus-parent-mobile__community-report-fab-icon" src={colibriIcon} />
+        <CommunityReportHeartIcon />
       </button>
 
       {open ? (
-        <ParentFeedBottomSheet onClose={resetAndClose} title="Voz Colibrí">
+        <ParentFeedBottomSheet onClose={resetAndClose} title="Te escuchamos">
           <form className="campus-parent-mobile__community-report-form" onSubmit={onSubmit}>
             <p className="campus-parent-mobile__community-report-intro">
               {studentPortalMode

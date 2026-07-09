@@ -6744,19 +6744,19 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   width: 3.35rem;
   height: 3.35rem;
   padding: 0;
-  border: 1px solid rgba(148, 186, 230, 0.28);
+  border: 1px solid rgba(244, 63, 94, 0.22);
   border-radius: 999px;
-  background: linear-gradient(145deg, #ffffff 0%, #eff6ff 100%);
+  background: linear-gradient(145deg, #fff1f2 0%, #ffe4e6 100%);
+  color: #e11d48;
   box-shadow:
-    0 12px 28px rgba(15, 23, 42, 0.18),
-    0 2px 8px rgba(29, 53, 87, 0.12);
+    0 12px 28px rgba(225, 29, 72, 0.16),
+    0 2px 8px rgba(190, 18, 60, 0.1);
   cursor: pointer;
 }
 
 .campus-parent-mobile__community-report-fab-icon {
-  width: 2rem;
-  height: 2rem;
-  object-fit: contain;
+  width: 1.55rem;
+  height: 1.55rem;
 }
 
 .campus-parent-mobile__sheet--community-report {

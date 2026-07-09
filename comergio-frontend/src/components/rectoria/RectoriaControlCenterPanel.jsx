@@ -182,8 +182,8 @@ export default function RectoriaControlCenterPanel({
     },
     control_community_reports: {
       eyebrow: 'Centro de control',
-      title: 'Reportes Colibrí',
-      description: 'Reportes de bullying, docentes y recomendaciones enviados por acudientes y alumnos.',
+      title: 'Te escuchamos',
+      description: 'Reportes de bullying, depresión, docentes y recomendaciones enviados por acudientes y alumnos.',
     },
   }[view] || { eyebrow: 'Centro de control', title: 'Indicadores', description: '' };
 
