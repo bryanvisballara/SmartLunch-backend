@@ -14,6 +14,7 @@ import InstitutionalPortalHeader from '../components/InstitutionalPortalHeader';
 import '../components/InstitutionalPortalHeader.css';
 import RectoriaPortalSidebar from '../components/rectoria/RectoriaPortalSidebar';
 import RectoriaControlCenterPanel from '../components/rectoria/RectoriaControlCenterPanel';
+import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
 import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection } from '../components/rectoria/rectoriaPortalNav';
 import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
@@ -2328,7 +2329,7 @@ function RectoriaDashboard() {
   const allowedSectionKeys = useMemo(
     () => {
       if (isCoordinationPortal) {
-        return ['overview', 'communications', 'resources', 'schedule'];
+        return ['overview', 'community_reports', 'communications', 'resources', 'schedule'];
       }
       return flattenRectoriaNavKeys();
     },
@@ -7503,6 +7504,10 @@ function RectoriaDashboard() {
           teacherLabelById={teacherLabelById}
           view={activeSection}
         />
+      ) : null}
+
+      {activeSection === 'community_reports' && isCoordinationPortal ? (
+        <CommunityReportsPanel className="community-reports-panel--embedded" />
       ) : null}
 
       {activeSection === 'schedule' && isCoordinationPortal ? (

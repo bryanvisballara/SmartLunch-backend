@@ -8,6 +8,7 @@ const NESTED_CHILD_KEYS = new Set(['team', 'students', 'admissions']);
 
 const COORDINATION_NAV = [
   { type: 'item', key: 'overview', label: 'Tablero de nivel' },
+  { type: 'item', key: 'community_reports', label: 'Reportes Colibrí' },
   { type: 'item', key: 'communications', label: 'Comunicados' },
   { type: 'item', key: 'resources', label: 'Recursos y compras' },
   { type: 'item', key: 'schedule', label: 'Horario académico' },

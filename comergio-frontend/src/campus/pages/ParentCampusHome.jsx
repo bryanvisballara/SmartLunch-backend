@@ -14,6 +14,7 @@ import {
 } from '../../components/ParentPortalExperienceStates';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import ParentStudentMedicalProfilePanel from '../../components/ParentStudentMedicalProfilePanel';
+import CommunityReportFab from '../../components/community/CommunityReportFab';
 import { useParentPullToRefresh } from '../../hooks/useParentPullToRefresh';
 import { useFloatingBottomNavSize } from '../../hooks/useFloatingBottomNavSize';
 import { useStudentGamesAvailable } from '../../hooks/useStudentGamesAvailable';
@@ -7280,8 +7281,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         />
       ) : null}
 
+      {selectedChild && !shouldLockParentPortal ? (
+      <CommunityReportFab
+        disabled={shouldLockParentPortal}
+        studentId={selectedChild?.id || selectedChild?._id || ''}
+        studentPortalMode={studentPortalMode}
+      />
+      ) : null}
+
       {visiblePortalAppSections.length > 1 && !shouldLockParentPortal ? (
-      <nav aria-label={studentPortalMode ? 'Navegacion principal del alumno' : 'Navegacion principal del padre'} className={`campus-parent-mobile__bottom-nav ${bottomNavClassName}`}>
+      <nav aria-label={studentPortalMode ? 'Navegacion principal del alumno' : 'Navegacion principal del padre'} className={`campus-parent-mobile__bottom-nav ${bottomNavClassName}${showCareMenu ? ' is-care-menu-open' : ''}`}>
         {visiblePortalAppSections.map((section) => {
           const isCareSection = ['nursing', 'wellbeing', 'coexistence'].includes(activeSection);
           const isActive = section.key === activeSection || (section.key === 'nursing' && isCareSection);

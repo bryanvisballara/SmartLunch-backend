@@ -8,6 +8,7 @@ import {
   getPsychologyStudentProfile,
   searchPsychologyStudents,
 } from '../services/psychology.service';
+import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
 
 const caseTypeOptions = [
   { value: 'bullying', label: 'Bullying' },
@@ -162,6 +163,7 @@ function PsychologyPortal() {
   const [savingCase, setSavingCase] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [notice, setNotice] = useState({ type: '', text: '' });
+  const [activePortalView, setActivePortalView] = useState('cases');
 
   const cases = studentProfile?.cases || [];
   const selectedCase = cases.find((item) => item.id === noteForm.caseId) || cases[0] || null;
@@ -320,6 +322,19 @@ function PsychologyPortal() {
 
       {notice.text ? <div className={`psychology-notice ${notice.type || 'info'}`}>{notice.text}</div> : null}
 
+      <div className="psychology-portal-tabs">
+        <button className={activePortalView === 'cases' ? 'is-active' : ''} onClick={() => setActivePortalView('cases')} type="button">
+          Casos clínicos
+        </button>
+        <button className={activePortalView === 'community_reports' ? 'is-active' : ''} onClick={() => setActivePortalView('community_reports')} type="button">
+          Reportes Colibrí
+        </button>
+      </div>
+
+      {activePortalView === 'community_reports' ? (
+        <CommunityReportsPanel className="community-reports-panel--embedded" />
+      ) : (
+      <>
       <section className="psychology-kpi-grid">
         <article className="psychology-kpi-card tone-danger">
           <span>Casos urgentes</span>
@@ -523,6 +538,8 @@ function PsychologyPortal() {
           </section>
         </main>
       </div>
+      </>
+      )}
     </section>
   );
 }

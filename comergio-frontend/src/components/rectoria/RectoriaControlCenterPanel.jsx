@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getPsychologyDashboard } from '../../services/psychology.service';
 import { getNursingSummary } from '../../services/nursing.service';
+import CommunityReportsPanel from '../community/CommunityReportsPanel';
 import './RectoriaControlCenter.css';
 
 function formatScore(value) {
@@ -178,6 +179,11 @@ export default function RectoriaControlCenterPanel({
       eyebrow: 'Centro de control',
       title: 'Convivencia',
       description: 'Observaciones de comportamiento reportadas por docentes y equipo institucional.',
+    },
+    control_community_reports: {
+      eyebrow: 'Centro de control',
+      title: 'Reportes Colibrí',
+      description: 'Reportes de bullying, docentes y recomendaciones enviados por acudientes y alumnos.',
     },
   }[view] || { eyebrow: 'Centro de control', title: 'Indicadores', description: '' };
 
@@ -360,6 +366,10 @@ export default function RectoriaControlCenterPanel({
             title="Observaciones recientes"
           />
         </>
+      ) : null}
+
+      {view === 'control_community_reports' ? (
+        <CommunityReportsPanel className="community-reports-panel--embedded" />
       ) : null}
     </div>
   );

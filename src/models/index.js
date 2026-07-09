@@ -54,3 +54,4 @@ require('./admissionMarketingCampaign.model');
 require('./enrollmentMatriculaProcess.model');
 require('./enrollmentMatriculaPurgeRequest.model');
 require('./colibriGameScore.model');
+require('./communityReport.model');
