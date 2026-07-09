@@ -3,43 +3,6 @@
   gap: 20px;
 }
 
-.rectoria-hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  align-items: flex-start;
-  padding: 28px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background:
-    radial-gradient(circle at top left, rgba(0, 161, 154, 0.16), transparent 34%),
-    linear-gradient(135deg, #14213d 0%, #1f3b57 100%);
-  color: #f8fafc;
-}
-
-.rectoria-hero h1 {
-  margin: 6px 0 10px;
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  line-height: 1.05;
-}
-
-.rectoria-hero p {
-  max-width: 760px;
-  margin: 0;
-  color: rgba(248, 250, 252, 0.84);
-}
-
-.rectoria-kicker {
-  display: inline-flex;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #cbd5e1;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
 .rectoria-tabs {
   display: grid;
   gap: 8px;
@@ -52,33 +15,15 @@
 
 .rectoria-portal-layout {
   display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 16px;
   align-items: start;
-}
-
-.rectoria-sidebar {
-  position: sticky;
-  top: 18px;
-  display: grid;
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid #dbe3ef;
-  border-radius: 18px;
-  background: #ffffff;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
-}
-
-.rectoria-sidebar-eyebrow {
-  color: #64748b;
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  padding: 0 20px 20px;
 }
 
 .rectoria-content {
   min-width: 0;
+  padding: 4px 0 12px;
 }
 
 .rectoria-subtabs {
@@ -335,6 +280,201 @@
 .rectoria-overview-level-score.is-tone-neutral {
   background: linear-gradient(180deg, #64748b 0%, #475569 100%);
   color: #fff;
+}
+
+.rectoria-overview-levels-total.is-tone-info,
+.rectoria-overview-level-score.is-tone-info {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+}
+
+.rectoria-overview-levels-total.is-tone-info small,
+.rectoria-overview-level-score.is-tone-info small {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.rectoria-overview-kpi.is-clickable,
+.rectoria-overview-metric-card.is-clickable,
+.rectoria-overview-mini-card,
+.rectoria-overview-attention-item,
+.rectoria-overview-insight-item,
+.rectoria-overview-billing-family {
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.rectoria-overview-kpi.is-clickable:hover,
+.rectoria-overview-metric-card.is-clickable:hover,
+.rectoria-overview-mini-card:hover,
+.rectoria-overview-attention-item:hover,
+.rectoria-overview-insight-item:hover,
+.rectoria-overview-billing-family:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.rectoria-overview-kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rectoria-overview-kpi-link {
+  color: #2563eb;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.rectoria-overview-kpi--billing {
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 38%),
+    linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+}
+
+.rectoria-overview-billing-families {
+  display: grid;
+  gap: 8px;
+}
+
+.rectoria-overview-billing-family {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.rectoria-overview-billing-family strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.rectoria-overview-billing-family span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.rectoria-overview-empty-note--inline {
+  margin: 0;
+}
+
+.rectoria-overview-metric-card.is-clickable {
+  width: 100%;
+  text-align: left;
+}
+
+.rectoria-overview-metric-card.is-tone-info {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+}
+
+.rectoria-overview-metric-card.is-tone-warn {
+  border-color: #fed7aa;
+  background: linear-gradient(180deg, #ffffff 0%, #fff7ed 100%);
+}
+
+.rectoria-overview-metric-card.is-tone-danger {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #ffffff 0%, #fef2f2 100%);
+}
+
+.rectoria-overview-metric-card.is-tone-neutral {
+  border-color: #e2e8f0;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rectoria-overview-mini-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  text-align: left;
+}
+
+.rectoria-overview-mini-card.is-tone-danger {
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fff 0%, #fef2f2 100%);
+}
+
+.rectoria-overview-mini-card.is-tone-warn {
+  border-color: #fed7aa;
+  background: linear-gradient(180deg, #fff 0%, #fff7ed 100%);
+}
+
+.rectoria-overview-mini-card.is-tone-info {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #fff 0%, #eff6ff 100%);
+}
+
+.rectoria-overview-mini-card.is-tone-good {
+  border-color: #bbf7d0;
+  background: linear-gradient(180deg, #fff 0%, #f0fdf4 100%);
+}
+
+.rectoria-overview-attention-item,
+.rectoria-overview-insight-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.rectoria-overview-attention-item strong,
+.rectoria-overview-insight-item strong {
+  color: #0f172a;
+}
+
+.rectoria-overview-attention-item span,
+.rectoria-overview-insight-item span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.rectoria-modal-card--overview {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.rectoria-modal-card--overview.is-tone-info {
+  border-top: 4px solid #2563eb;
+}
+
+.rectoria-modal-card--overview.is-tone-warn {
+  border-top: 4px solid #ea580c;
+}
+
+.rectoria-modal-card--overview.is-tone-danger {
+  border-top: 4px solid #dc2626;
+}
+
+.rectoria-modal-card--overview.is-tone-good {
+  border-top: 4px solid #15803d;
+}
+
+.rectoria-overview-insight-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+
+.rectoria-table--overdue tr.is-focused {
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px #93c5fd;
 }
 
 .rectoria-overview-level-summary {
@@ -3624,10 +3764,6 @@ button.rectoria-team-assignment-card.is-active {
 
   .rectoria-grid--team {
     grid-template-columns: 1fr;
-  }
-
-  .rectoria-hero {
-    flex-direction: column;
   }
 
   .rectoria-billing-intro {

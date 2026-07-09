@@ -28,6 +28,7 @@ import {
   usesOfficialEnrollmentContractTemplate,
 } from '../lib/millenniumEnrollmentContracts';
 import useAuthStore from '../store/auth.store';
+import { PortalBootSplash } from '../components/PortalBootSplash';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getEnrollmentMatriculaPurgeRequestsMine } from '../services/enrollmentMatricula.service';
 import { getSchoolDisplayName } from '../lib/schools';
@@ -1571,7 +1572,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [bootstrap, setBootstrap] = useState({
     parents: [], students: [], communications: [], communicationAuthors: [], grades: [], courses: [], courseOptions: [], billing: null, communicationRequests: [], communicationRequestCounts: { pending: 0, approved: 0, rejected: 0 }, calendarAssignments: [], feeSettings: null, academicDatabase: [], academicStructure: { grades: [] },
   });
-  const [loading, setLoading] = useState(true);
+  const [shellLoading, setShellLoading] = useState(true);
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -1765,25 +1767,37 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
   useEffect(() => {
     let cancelled = false;
+    setShellLoading(true);
+
     getAcademicSecretaryBootstrap()
-      .then(async (response) => {
+      .then((response) => {
         if (cancelled) return;
         const payload = response.data || {};
-        const feeSettings = await resolveFeeSettingsForBootstrap(payload);
-        if (cancelled) return;
-        setBootstrap(buildAcademicSecretaryBootstrapState(payload, feeSettings));
+        setBootstrap(buildAcademicSecretaryBootstrapState(payload, payload.feeSettings || null));
+        setShellLoading(false);
+
+        setBackgroundLoading(true);
+        resolveFeeSettingsForBootstrap(payload)
+          .then((feeSettings) => {
+            if (cancelled) return;
+            if (feeSettings) {
+              setBootstrap(buildAcademicSecretaryBootstrapState(payload, feeSettings));
+            }
+          })
+          .finally(() => {
+            if (!cancelled) {
+              setBackgroundLoading(false);
+            }
+          });
+
         if (isBillingPortal) {
-          await loadBillingPaymentDeletionRequests();
+          loadBillingPaymentDeletionRequests();
         }
       })
       .catch((requestError) => {
         if (cancelled) return;
         setError(getAcademicSecretaryRequestMessage(requestError, isBillingPortal ? 'No se pudo cargar el portal de cartera.' : 'No se pudo cargar el portal de secretaría académica.'));
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        setShellLoading(false);
       });
 
     return () => {
@@ -3532,9 +3546,11 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     }
   };
 
-  if (loading) {
-    const loadingMessage = embedded ? 'Cargando información...' : (isBillingPortal ? 'Cargando portal de cartera...' : 'Cargando portal de secretaría académica...');
-    return <section className={`academic-secretary${embedded ? ' academic-secretary--embedded' : ''}`}><p>{loadingMessage}</p></section>;
+  if (shellLoading) {
+    const portalKey = embedded ? 'embedded' : (isBillingPortal ? 'cartera' : 'secretaria');
+    return embedded
+      ? <section className="academic-secretary academic-secretary--embedded"><PortalBootSplash embedded portal={portalKey} /></section>
+      : <PortalBootSplash portal={portalKey} />;
   }
 
   return (
@@ -3545,7 +3561,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           <h1>{isBillingPortal ? 'Portal Cartera' : 'Portal Secretaría Académica'}</h1>
           <p>{isBillingPortal ? 'Consulta obligaciones pendientes y registra el seguimiento financiero de las familias.' : 'Gestiona KPI, feed de acudientes, matrículas y aprobación de comunicados docentes desde un mismo tablero.'}</p>
         </div>
-        <button className="academic-secretary__refresh" onClick={() => window.location.reload()} type="button">Actualizar portal</button>
+        <button className="academic-secretary__refresh" onClick={() => window.location.reload()} type="button">{backgroundLoading ? 'Completando carga...' : 'Actualizar portal'}</button>
       </header> : null}
 
       {!embedded ? <nav className="academic-secretary__tabs" aria-label={isBillingPortal ? 'Secciones de cartera' : 'Secciones de secretaría académica'}>

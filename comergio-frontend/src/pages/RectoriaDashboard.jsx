@@ -9,6 +9,13 @@ import { formatEducationalGradeLabel } from '../lib/educationalGradeLabels';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import EnrollmentMatriculaAuthorizationsPanel from '../components/enrollment-matricula/EnrollmentMatriculaAuthorizationsPanel';
+import { PortalBootSplash } from '../components/PortalBootSplash';
+import InstitutionalPortalHeader from '../components/InstitutionalPortalHeader';
+import '../components/InstitutionalPortalHeader.css';
+import RectoriaPortalSidebar from '../components/rectoria/RectoriaPortalSidebar';
+import RectoriaControlCenterPanel from '../components/rectoria/RectoriaControlCenterPanel';
+import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection } from '../components/rectoria/rectoriaPortalNav';
+import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
@@ -98,18 +105,6 @@ const ROLE_OPTIONS = [
   { value: 'billing', label: 'Cartera' },
   { value: 'human_resources', label: 'Recursos y gestion de compras' },
   { value: 'school_route', label: 'Ruta escolar' },
-];
-const BASE_SECTION_OPTIONS = [
-  { key: 'overview', label: 'Resumen institucional' },
-  { key: 'admissions', label: 'Admisiones' },
-  { key: 'communications', label: 'Comunicados' },
-  { key: 'team', label: 'Cuerpo académico' },
-  { key: 'resources', label: 'Recursos y compras' },
-  { key: 'students', label: 'Gestión academica' },
-  { key: 'database', label: 'Base de datos' },
-  { key: 'fees', label: 'Costos' },
-  { key: 'enrollment_matricula', label: 'Matrículas digitales' },
-  { key: 'matricula_authorizations', label: 'Autorizaciones' },
 ];
 const ACADEMIC_MANAGEMENT_SECTION_OPTIONS = [
   { key: 'grades_courses', label: 'Grados y cursos' },
@@ -349,10 +344,11 @@ function formatRectoriaInstitutionalCourseLabel(course = {}, labelContext = {}) 
   return parts.filter(Boolean).join(' · ') || subjectLabel || 'Curso';
 }
 
-function resolveRectoriaPerformanceMeta(score, gradingScale = defaultAcademicGradingScale) {
+function resolveRectoriaPerformanceMeta(score, gradingScale = defaultAcademicGradingScale, { evaluatedCount } = {}) {
+  const hasEvaluations = Number(evaluatedCount) > 0;
   const numericScore = Number(score);
-  if (!Number.isFinite(numericScore)) {
-    return { tone: 'neutral', label: 'Sin calificaciones', color: '#64748b' };
+  if (!hasEvaluations || score == null || !Number.isFinite(numericScore)) {
+    return { tone: 'info', label: 'Aún no hay notas registradas', color: '#2563eb' };
   }
 
   const performanceLevels = Array.isArray(gradingScale?.performanceLevels) && gradingScale.performanceLevels.length > 0
@@ -431,6 +427,7 @@ function buildRectoriaInstitutionalPerformanceSnapshot({
   teacherLabelById = {},
   educationalLevelSummaries = [],
   groupedEducationalLevels = [],
+  coordinationUsersByLevelKey = {},
   courseAttentionScore = 70,
 }) {
   const passingScore = Number(gradingScale.passingScore ?? defaultAcademicGradingScale.passingScore);
@@ -537,17 +534,53 @@ function buildRectoriaInstitutionalPerformanceSnapshot({
       Number(course.averageScore) < courseAttentionScore || Number(course.atRiskCount || 0) > 0
     ));
 
+    const lowCourseGroups = Array.from(attentionCourses.reduce((accumulator, course) => {
+      const groupKey = buildRectoriaCourseGroupKey(course);
+      const current = accumulator.get(groupKey) || {
+        key: groupKey,
+        label: course.displayLabel || course.section || course.label || course.subject || 'Curso',
+        averageScore: course.averageScore,
+        atRiskCount: Number(course.atRiskCount || 0),
+        teacherUserId: course.teacherUserId,
+      };
+      current.atRiskCount = Math.max(current.atRiskCount, Number(course.atRiskCount || 0));
+      if (Number(course.averageScore) < Number(current.averageScore || 10)) {
+        current.averageScore = course.averageScore;
+      }
+      accumulator.set(groupKey, current);
+      return accumulator;
+    }, new Map()).values())
+      .sort((left, right) => Number(left.averageScore || 10) - Number(right.averageScore || 10));
+
+    const levelGrades = (groupedEducationalLevels.find((group) => group.key === level.key)?.grades || [])
+      .map((grade) => ({
+        key: grade.key,
+        label: grade.label || grade.key,
+        coursesCount: Array.isArray(grade.courses) ? grade.courses.length : 0,
+      }));
+
     return {
       ...level,
       averageScore: levelAverage,
       evaluatedStudentCount: levelStudents.length,
       atRiskCount: levelAtRisk,
-      lowCoursesCount: new Set(attentionCourses.map(buildRectoriaCourseGroupKey)).size,
+      atRiskStudents: levelStudents
+        .filter((student) => Number(student.finalScore) < passingScore)
+        .sort((left, right) => Number(left.finalScore || 0) - Number(right.finalScore || 0)),
+      lowCoursesCount: lowCourseGroups.length,
+      lowCourses: lowCourseGroups,
+      coordinators: (coordinationUsersByLevelKey[level.key] || []).map((user) => ({
+        id: String(user._id || ''),
+        name: user.name || 'Coordinador',
+        email: user.email || '',
+        scope: user.coordinationScope || level.label,
+      })),
+      grades: levelGrades,
       lowestCourses: levelCourses
         .filter((course) => Number(course.stats?.evaluatedStudentCount || 0) > 0 && Number.isFinite(Number(course.averageScore)))
         .sort((left, right) => Number(left.averageScore || 10) - Number(right.averageScore || 10))
         .slice(0, 3),
-      performanceMeta: resolveRectoriaPerformanceMeta(levelAverage, gradingScale),
+      performanceMeta: resolveRectoriaPerformanceMeta(levelAverage, gradingScale, { evaluatedCount: levelStudents.length }),
     };
   });
 
@@ -555,12 +588,13 @@ function buildRectoriaInstitutionalPerformanceSnapshot({
     coursesWithAverage,
     weightedAverage,
     evaluatedStudentCount,
+    evaluatedStudents,
     atRiskStudents,
     coursesNeedingAttention,
     teacherAttentionRows,
     levelRows,
     pendingGradingCount: courses.reduce((sum, course) => sum + Number(course.pendingGradingCount || 0), 0),
-    performanceMeta: resolveRectoriaPerformanceMeta(weightedAverage, gradingScale),
+    performanceMeta: resolveRectoriaPerformanceMeta(weightedAverage, gradingScale, { evaluatedCount: evaluatedStudentCount }),
   };
 }
 
@@ -2165,13 +2199,14 @@ function RectoriaDashboard() {
   const portalLabel = isCoordinationPortal ? 'coordinación' : (isDireccionPortal ? 'dirección' : 'rectoría');
   const portalAuthorName = portalLabel === 'rectoría' ? 'Rectoría' : (portalLabel === 'dirección' ? 'Dirección' : 'Coordinación');
   const schoolName = getSchoolDisplayName(user || localStorage.getItem('selectedSchoolId'), 'Colegio');
-  const [loading, setLoading] = useState(true);
+  const [shellLoading, setShellLoading] = useState(true);
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeSection, setActiveSection] = useState('overview');
-  const [expandedSidebarSection, setExpandedSidebarSection] = useState('');
+  const [expandedSidebarGroup, setExpandedSidebarGroup] = useState('');
   const [activeAcademicManagementSection, setActiveAcademicManagementSection] = useState('grades_courses');
   const [homeData, setHomeData] = useState(null);
   const [disciplineObservations, setDisciplineObservations] = useState([]);
@@ -2220,6 +2255,16 @@ function RectoriaDashboard() {
   const [communicationApprovalDraft, setCommunicationApprovalDraft] = useState(createInstitutionalApprovalDraft(null));
   const [createdUserModal, setCreatedUserModal] = useState({ open: false, name: '', role: '', username: '' });
   const [followUpModal, setFollowUpModal] = useState({ open: false, type: '', item: null, title: '', body: '' });
+  const [overviewInsightModal, setOverviewInsightModal] = useState({
+    open: false,
+    tone: 'info',
+    title: '',
+    subtitle: '',
+    items: [],
+    footerLabel: '',
+    footerTarget: null,
+  });
+  const [billingFocusParentId, setBillingFocusParentId] = useState('');
   const [communicationEngagementModal, setCommunicationEngagementModal] = useState({ open: false, type: 'comments', item: null });
   const [deleteAuthorModal, setDeleteAuthorModal] = useState({ open: false, author: null });
   const [deleteCommentModal, setDeleteCommentModal] = useState({ open: false, communication: null, comment: null });
@@ -2280,24 +2325,14 @@ function RectoriaDashboard() {
   const [activeAdmissionsView, setActiveAdmissionsView] = useState('dashboard');
   const [matriculaAuthorizationPendingCount, setMatriculaAuthorizationPendingCount] = useState(0);
 
-  const sectionOptions = useMemo(
+  const allowedSectionKeys = useMemo(
     () => {
       if (isCoordinationPortal) {
-        return [
-          { key: 'overview', label: 'Tablero de nivel' },
-          { key: 'communications', label: 'Comunicados' },
-          { key: 'resources', label: 'Recursos y compras' },
-          { key: 'schedule', label: 'Horario académico' },
-        ];
+        return ['overview', 'communications', 'resources', 'schedule'];
       }
-
-      return BASE_SECTION_OPTIONS.flatMap((option) => (
-        option.key === 'fees'
-          ? [{ key: 'billing', label: 'Cartera' }, option]
-          : [option]
-      ));
+      return flattenRectoriaNavKeys();
     },
-    [isCoordinationPortal]
+    [isCoordinationPortal],
   );
   const communicationAuthors = useMemo(() => (billingBootstrap.communicationAuthors || []).filter((author) => author && author._id), [billingBootstrap.communicationAuthors]);
   const defaultCommunicationAuthor = communicationAuthors.find((author) => author.isDefault) || null;
@@ -2308,16 +2343,33 @@ function RectoriaDashboard() {
     || communicationAuthors.some((author) => String(author._id) !== String(selectedCommunicationAuthor._id))
   );
 
-  const onSidebarSectionClick = (sectionKey) => {
-    setActiveSection(sectionKey);
-    setExpandedSidebarSection((previous) => (previous === sectionKey ? '' : sectionKey));
-  };
+  useEffect(() => {
+    if (!allowedSectionKeys.includes(activeSection)) {
+      setActiveSection(allowedSectionKeys[0] || 'overview');
+    }
+  }, [activeSection, allowedSectionKeys]);
 
   useEffect(() => {
-    if (!sectionOptions.some((section) => section.key === activeSection)) {
-      setActiveSection(sectionOptions[0]?.key || 'overview');
+    if (isCoordinationPortal) {
+      return;
     }
-  }, [activeSection, sectionOptions]);
+    const groupKey = findRectoriaNavGroupForSection(activeSection);
+    if (groupKey) {
+      setExpandedSidebarGroup(groupKey);
+    }
+  }, [activeSection, isCoordinationPortal]);
+
+  useEffect(() => {
+    if (activeSection !== 'billing' || !billingFocusParentId) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      document.querySelector('.rectoria-table--overdue tr.is-focused')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [activeSection, billingFocusParentId]);
 
   const clearMessages = () => {
     setError('');
@@ -2615,24 +2667,129 @@ function RectoriaDashboard() {
     }
   };
 
-  const loadPortal = async ({ silent = false } = {}) => {
-    if (silent) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
+  const loadOverviewShell = async () => {
+    const requestResults = await Promise.allSettled([
+      isCoordinationPortal ? getCampusCoordinationTeachers() : getAdminUsers(),
+      getStudents(),
+      getAcademicSecretaryBootstrap(),
+      getCampusCoordinationCourses(),
+      isCoordinationPortal ? getCampusCoordinationDashboard() : Promise.resolve(null),
+    ]);
+
+    const [
+      usersResult,
+      studentsResult,
+      billingBootstrapResult,
+      campusCoursesResult,
+      coordinationDashboardResult,
+    ] = requestResults;
+
+    const failedSections = [];
+    if (!isCoordinationPortal && usersResult.status === 'rejected') failedSections.push('cuerpo académico');
+    if (studentsResult.status === 'rejected') failedSections.push('gestión académica');
+    if (!isCoordinationPortal && billingBootstrapResult?.status === 'rejected') failedSections.push('cartera');
+    if (isCoordinationPortal && coordinationDashboardResult.status === 'rejected') {
+      const dashboardStatus = coordinationDashboardResult.reason?.response?.status;
+      if (dashboardStatus === 404) {
+        failedSections.push('tablero de coordinación (reinicia el backend local para cargar la ruta nueva)');
+      } else {
+        const dashboardMessage = coordinationDashboardResult.reason?.response?.data?.message;
+        failedSections.push(dashboardMessage ? `tablero de coordinación (${dashboardMessage})` : 'tablero de coordinación');
+      }
     }
-    clearMessages();
+
+    const nextUsers = usersResult.status === 'fulfilled'
+      ? (isCoordinationPortal
+        ? (usersResult.value?.teachers || []).map((teacher) => ({
+          _id: teacher.userId,
+          name: teacher.name,
+          username: teacher.username,
+          role: 'teacher',
+          status: 'active',
+          assignedSubjects: [],
+        }))
+        : (Array.isArray(usersResult.value?.data) ? usersResult.value.data : users))
+      : users;
+    let nextStudents = studentsResult.status === 'fulfilled' && Array.isArray(studentsResult.value?.data)
+      ? studentsResult.value.data
+      : students;
+    const syncedCampusCourses = campusCoursesResult.status === 'fulfilled'
+      ? (campusCoursesResult.value?.courses || []).map(normalizeCampusCourseForAcademicContent).filter((course) => course.key)
+      : [];
+    let nextBillingBootstrap = billingBootstrapResult?.status === 'fulfilled'
+      ? {
+        parents: billingBootstrapResult.value?.data?.parents || [],
+        students: billingBootstrapResult.value?.data?.students || [],
+        communications: billingBootstrapResult.value?.data?.communications || [],
+        communicationAuthors: billingBootstrapResult.value?.data?.communicationAuthors || [],
+        communicationRequests: billingBootstrapResult.value?.data?.communicationRequests || [],
+        communicationRequestCounts: billingBootstrapResult.value?.data?.communicationRequestCounts || { pending: 0, approved: 0, rejected: 0 },
+        calendarAssignments: billingBootstrapResult.value?.data?.calendarAssignments || [],
+        grades: billingBootstrapResult.value?.data?.grades || [],
+        courses: billingBootstrapResult.value?.data?.courses || [],
+        campusCourses: syncedCampusCourses.length > 0
+          ? syncedCampusCourses
+          : (billingBootstrapResult.value?.data?.campusCourses || [])
+            .map(normalizeCampusCourseForAcademicContent)
+            .filter((course) => course.key),
+        academicDatabase: billingBootstrapResult.value?.data?.academicDatabase || [],
+        academicStructure: billingBootstrapResult.value?.data?.academicStructure || null,
+        billing: billingBootstrapResult.value?.data?.billing || null,
+      }
+      : billingBootstrap;
+    let nextAcademicStructure = billingBootstrapResult?.status === 'fulfilled'
+      ? normalizeAcademicStructureDraftWithBootstrap(billingBootstrapResult.value?.data?.academicStructure || {}, nextBillingBootstrap)
+      : academicStructureDraft;
+    const coordinationLevelKeys = isCoordinationPortal
+      ? resolveCoordinationLevelKeys(nextAcademicStructure, coordinationScope)
+      : new Set();
+    const coordinationGradeKeys = coordinationLevelKeys.size > 0
+      ? new Set(nextAcademicStructure.grades
+        .filter((grade) => coordinationLevelKeys.has(String(grade.levelKey || '').trim()))
+        .map((grade) => String(grade.key || '').trim())
+        .filter(Boolean))
+      : new Set();
+
+    if (isCoordinationPortal) {
+      nextAcademicStructure = filterAcademicStructureByLevelKeys(nextAcademicStructure, coordinationLevelKeys);
+      nextStudents = filterStudentsByGradeKeys(nextStudents, coordinationGradeKeys);
+      nextBillingBootstrap = filterBillingBootstrapByGradeKeys(nextBillingBootstrap, coordinationGradeKeys);
+    }
+
+    if (isCoordinationPortal) {
+      setCoordinationDashboard(
+        coordinationDashboardResult.status === 'fulfilled'
+          ? (coordinationDashboardResult.value || null)
+          : coordinationDashboard
+      );
+    }
+    setUsers(nextUsers);
+    setStudents(nextStudents);
+    setBillingBootstrap(nextBillingBootstrap);
+    setAcademicStructureDraft(nextAcademicStructure);
+    if (studentsResult.status === 'fulfilled') {
+      setStudentDrafts(
+        nextStudents.reduce((accumulator, student) => {
+          accumulator[String(student._id)] = {
+            grade: String(student.grade || '').trim(),
+            course: String(student.course || '').trim(),
+          };
+          return accumulator;
+        }, {})
+      );
+    }
+
+    return { failedSections, nextAcademicStructure };
+  };
+
+  const loadPortalBackground = async ({ academicStructure = academicStructureDraft } = {}) => {
+    setBackgroundLoading(true);
 
     try {
       const requestResults = await Promise.allSettled([
         isCoordinationPortal ? Promise.resolve({ data: null }) : getAdminHomepage(),
-        isCoordinationPortal ? getCampusCoordinationTeachers() : getAdminUsers(),
-        getStudents(),
         isCoordinationPortal ? Promise.resolve({ data: {} }) : getAcademicSecretaryFeeSettings(),
-        getAcademicSecretaryBootstrap(),
-        getCampusCoordinationCourses(),
         getCampusDisciplineObservations({ limit: 30 }),
-        isCoordinationPortal ? getCampusCoordinationDashboard() : Promise.resolve(null),
         isCoordinationPortal ? Promise.resolve({ data: null }) : getHrDashboard(),
         getHrSupplyItems({ status: 'active' }),
         getHrPlannerCycles({ status: 'active' }),
@@ -2642,13 +2799,8 @@ function RectoriaDashboard() {
 
       const [
         homeResult,
-        usersResult,
-        studentsResult,
         feeSettingsResult,
-        billingBootstrapResult,
-        campusCoursesResult,
         disciplineObservationsResult,
-        coordinationDashboardResult,
         resourceDashboardResult,
         resourceItemsResult,
         resourcePlannerCyclesResult,
@@ -2658,117 +2810,47 @@ function RectoriaDashboard() {
 
       const failedSections = [];
       if (!isCoordinationPortal && homeResult.status === 'rejected') failedSections.push('resumen institucional');
-      if (!isCoordinationPortal && usersResult.status === 'rejected') failedSections.push('cuerpo académico');
-      if (studentsResult.status === 'rejected') failedSections.push('gestión academica');
       if (!isCoordinationPortal && feeSettingsResult.status === 'rejected') failedSections.push('costos por grado');
-      if (!isCoordinationPortal && billingBootstrapResult?.status === 'rejected') failedSections.push('cartera');
-      if (campusCoursesResult.status === 'rejected') failedSections.push('contenido académico');
       if (disciplineObservationsResult.status === 'rejected') failedSections.push('convivencia escolar');
-      if (isCoordinationPortal && coordinationDashboardResult.status === 'rejected') {
-        const dashboardStatus = coordinationDashboardResult.reason?.response?.status;
-        if (dashboardStatus === 404) {
-          failedSections.push('tablero de coordinación (reinicia el backend local para cargar la ruta nueva)');
-        } else {
-          const dashboardMessage = coordinationDashboardResult.reason?.response?.data?.message;
-          failedSections.push(dashboardMessage ? `tablero de coordinación (${dashboardMessage})` : 'tablero de coordinación');
-        }
-      }
       if (!isCoordinationPortal && resourceDashboardResult.status === 'rejected') failedSections.push('resumen de recursos');
-      if (resourceItemsResult.status === 'rejected' || resourcePlannerCyclesResult.status === 'rejected' || resourcePlannerRequestsResult.status === 'rejected' || resourceRequestsResult.status === 'rejected') failedSections.push('recursos y compras');
+      if (resourceItemsResult.status === 'rejected' || resourcePlannerCyclesResult.status === 'rejected' || resourcePlannerRequestsResult.status === 'rejected' || resourceRequestsResult.status === 'rejected') {
+        failedSections.push('recursos y compras');
+      }
 
       const nextHomeData = homeResult.status === 'fulfilled' ? (homeResult.value?.data || null) : homeData;
-      const nextUsers = usersResult.status === 'fulfilled'
-        ? (isCoordinationPortal
-          ? (usersResult.value?.teachers || []).map((teacher) => ({
-            _id: teacher.userId,
-            name: teacher.name,
-            username: teacher.username,
-            role: 'teacher',
-            status: 'active',
-            assignedSubjects: [],
-          }))
-          : (Array.isArray(usersResult.value?.data) ? usersResult.value.data : users))
-        : users;
-      let nextStudents = studentsResult.status === 'fulfilled' && Array.isArray(studentsResult.value?.data)
-        ? studentsResult.value.data
-        : students;
-      const syncedCampusCourses = campusCoursesResult.status === 'fulfilled'
-        ? (campusCoursesResult.value?.courses || []).map(normalizeCampusCourseForAcademicContent).filter((course) => course.key)
-        : [];
-      let nextBillingBootstrap = billingBootstrapResult?.status === 'fulfilled'
-        ? {
-          parents: billingBootstrapResult.value?.data?.parents || [],
-          students: billingBootstrapResult.value?.data?.students || [],
-          communications: billingBootstrapResult.value?.data?.communications || [],
-          communicationAuthors: billingBootstrapResult.value?.data?.communicationAuthors || [],
-          communicationRequests: billingBootstrapResult.value?.data?.communicationRequests || [],
-          communicationRequestCounts: billingBootstrapResult.value?.data?.communicationRequestCounts || { pending: 0, approved: 0, rejected: 0 },
-          calendarAssignments: billingBootstrapResult.value?.data?.calendarAssignments || [],
-          grades: billingBootstrapResult.value?.data?.grades || [],
-          courses: billingBootstrapResult.value?.data?.courses || [],
-          campusCourses: syncedCampusCourses.length > 0
-            ? syncedCampusCourses
-            : (billingBootstrapResult.value?.data?.campusCourses || []).map(normalizeCampusCourseForAcademicContent).filter((course) => course.key),
-          academicDatabase: billingBootstrapResult.value?.data?.academicDatabase || [],
-          academicStructure: billingBootstrapResult.value?.data?.academicStructure || null,
-          billing: billingBootstrapResult.value?.data?.billing || null,
-        }
-        : {
-          ...billingBootstrap,
-          campusCourses: syncedCampusCourses.length > 0 ? syncedCampusCourses : billingBootstrap.campusCourses,
-        };
-      let nextAcademicStructure = billingBootstrapResult?.status === 'fulfilled'
-        ? normalizeAcademicStructureDraftWithBootstrap(billingBootstrapResult.value?.data?.academicStructure || {}, nextBillingBootstrap)
-        : academicStructureDraft;
-      const coordinationLevelKeys = isCoordinationPortal
-        ? resolveCoordinationLevelKeys(nextAcademicStructure, coordinationScope)
-        : new Set();
-      const coordinationGradeKeys = coordinationLevelKeys.size > 0
-        ? new Set(nextAcademicStructure.grades
-          .filter((grade) => coordinationLevelKeys.has(String(grade.levelKey || '').trim()))
-          .map((grade) => String(grade.key || '').trim())
-          .filter(Boolean))
-        : new Set();
-
-      if (isCoordinationPortal) {
-        nextAcademicStructure = filterAcademicStructureByLevelKeys(nextAcademicStructure, coordinationLevelKeys);
-        nextStudents = filterStudentsByGradeKeys(nextStudents, coordinationGradeKeys);
-        nextBillingBootstrap = filterBillingBootstrapByGradeKeys(nextBillingBootstrap, coordinationGradeKeys);
-      }
       const nextFeeSettings = feeSettingsResult.status === 'fulfilled'
-        ? normalizeFeeSettingsDraft(feeSettingsResult.value?.data || {}, nextAcademicStructure.grades, nextAcademicStructure.levels)
-        : normalizeFeeSettingsDraft(feeSettingsDraft, nextAcademicStructure.grades, nextAcademicStructure.levels);
+        ? normalizeFeeSettingsDraft(feeSettingsResult.value?.data || {}, academicStructure.grades, academicStructure.levels)
+        : normalizeFeeSettingsDraft(feeSettingsDraft, academicStructure.grades, academicStructure.levels);
 
       setHomeData(nextHomeData);
       setDisciplineObservations(disciplineObservationsResult.status === 'fulfilled' ? (disciplineObservationsResult.value?.observations || []) : disciplineObservations);
-      if (isCoordinationPortal) {
-        setCoordinationDashboard(
-          coordinationDashboardResult.status === 'fulfilled'
-            ? (coordinationDashboardResult.value || null)
-            : coordinationDashboard
-        );
-      }
       setResourceDashboard(resourceDashboardResult.status === 'fulfilled' ? (resourceDashboardResult.value?.data || null) : resourceDashboard);
       setResourceItems(resourceItemsResult.status === 'fulfilled' ? (resourceItemsResult.value?.data?.items || []) : resourceItems);
       setResourcePlannerCycles(resourcePlannerCyclesResult.status === 'fulfilled' ? (resourcePlannerCyclesResult.value?.data?.cycles || []) : resourcePlannerCycles);
       setResourcePlannerRequests(resourcePlannerRequestsResult.status === 'fulfilled' ? (resourcePlannerRequestsResult.value?.data?.requests || []) : resourcePlannerRequests);
       setResourceRequests(resourceRequestsResult.status === 'fulfilled' ? (resourceRequestsResult.value?.data?.requests || []) : resourceRequests);
-      setUsers(nextUsers);
-      setStudents(nextStudents);
       setFeeSettingsDraft(nextFeeSettings);
-      setBillingBootstrap(nextBillingBootstrap);
-      setAcademicStructureDraft(nextAcademicStructure);
-      if (studentsResult.status === 'fulfilled') {
-        setStudentDrafts(
-          nextStudents.reduce((accumulator, student) => {
-            accumulator[String(student._id)] = {
-              grade: String(student.grade || '').trim(),
-              course: String(student.course || '').trim(),
-            };
-            return accumulator;
-          }, {})
-        );
-      }
+
+      await refreshMatriculaAuthorizationSummary();
+
+      return failedSections;
+    } finally {
+      setBackgroundLoading(false);
+    }
+  };
+
+  const loadPortal = async ({ silent = false } = {}) => {
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setShellLoading(true);
+    }
+    clearMessages();
+
+    try {
+      const { failedSections: shellFailures, nextAcademicStructure } = await loadOverviewShell();
+      const backgroundFailures = await loadPortalBackground({ academicStructure: nextAcademicStructure });
+      const failedSections = [...shellFailures, ...backgroundFailures];
 
       if (failedSections.length > 0) {
         setError(`No se pudo actualizar: ${failedSections.join(', ')}. El resto del portal sigue mostrando la ultima informacion disponible.`);
@@ -2776,14 +2858,35 @@ function RectoriaDashboard() {
     } catch (requestError) {
       setError(requestError?.response?.data?.message || `No se pudo cargar el portal de ${portalLabel}.`);
     } finally {
-      await refreshMatriculaAuthorizationSummary();
-      setLoading(false);
+      setShellLoading(false);
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadPortal();
+    let cancelled = false;
+    clearMessages();
+    setShellLoading(true);
+
+    (async () => {
+      try {
+        const { failedSections, nextAcademicStructure } = await loadOverviewShell();
+        if (cancelled) return;
+        if (failedSections.length > 0) {
+          setError(`No se pudo cargar el resumen: ${failedSections.join(', ')}.`);
+        }
+        setShellLoading(false);
+        loadPortalBackground({ academicStructure: nextAcademicStructure });
+      } catch (requestError) {
+        if (cancelled) return;
+        setError(requestError?.response?.data?.message || `No se pudo cargar el portal de ${portalLabel}.`);
+        setShellLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -4150,9 +4253,10 @@ function RectoriaDashboard() {
       teacherLabelById,
       educationalLevelSummaries,
       groupedEducationalLevels,
+      coordinationUsersByLevelKey,
       courseAttentionScore,
     }),
-    [academicGradingScale, campusPerformanceCourses, courseAttentionScore, educationalLevelSummaries, groupedEducationalLevels, teacherLabelById]
+    [academicGradingScale, campusPerformanceCourses, coordinationUsersByLevelKey, courseAttentionScore, educationalLevelSummaries, groupedEducationalLevels, teacherLabelById]
   );
 
   const overviewAcademicLevelKpi = useMemo(() => {
@@ -4173,12 +4277,14 @@ function RectoriaDashboard() {
 
   const overviewBillingKpis = useMemo(() => {
     const overdueCriticalFamilies = overdueFamilyRows.filter((item) => item.overdueDays >= 30).length;
+    const familiesInMora = overdueFamilyRows.filter((item) => item.statusLabel === 'En mora' || (item.amount > 0 && item.overdueDays > 0));
     return {
       pendingAmount: Number(billing.kpis?.pendingAmount || 0),
       paidThisMonth: Number(billing.kpis?.paidThisMonth || 0),
       totalPendingCharges: Number(billing.kpis?.totalPendingCharges || 0),
-      overdueFamilies: overdueFamilyRows.length,
+      overdueFamilies: familiesInMora.length,
       overdueCriticalFamilies,
+      familiesInMora,
     };
   }, [billing.kpis, overdueFamilyRows]);
 
@@ -6971,6 +7077,139 @@ function RectoriaDashboard() {
     });
   };
 
+  const closeOverviewInsightModal = () => {
+    setOverviewInsightModal({
+      open: false,
+      tone: 'info',
+      title: '',
+      subtitle: '',
+      items: [],
+      footerLabel: '',
+      footerTarget: null,
+    });
+  };
+
+  const navigateFromOverview = (target = {}) => {
+    closeOverviewInsightModal();
+    if (target.section) {
+      setActiveSection(target.section);
+    }
+    if (target.academicSection) {
+      setActiveAcademicManagementSection(target.academicSection);
+    }
+    if (target.teamRole) {
+      setSelectedTeamRole(target.teamRole);
+    }
+    if (target.billingParentId) {
+      setBillingFocusParentId(String(target.billingParentId));
+    }
+  };
+
+  const openOverviewInsightModal = ({
+    tone = 'info',
+    title = '',
+    subtitle = '',
+    items = [],
+    footerLabel = '',
+    footerTarget = null,
+  }) => {
+    setOverviewInsightModal({
+      open: true,
+      tone,
+      title,
+      subtitle,
+      items,
+      footerLabel,
+      footerTarget,
+    });
+  };
+
+  const openLevelOverviewInsight = (level, kind) => {
+    if (kind === 'at_risk') {
+      openOverviewInsightModal({
+        tone: 'danger',
+        title: `Estudiantes en riesgo · ${level.label}`,
+        subtitle: `Alumnos con promedio consolidado bajo ${passingScoreLabel} en ${level.label}.`,
+        items: (level.atRiskStudents || []).map((student) => ({
+          key: student.studentId || student.schoolCode || student.name,
+          title: student.name || 'Alumno',
+          meta: `${formatAcademicScore(student.finalScore)} · ${student.courseLabel}`,
+          target: { section: 'database' },
+        })),
+        footerLabel: 'Ver base de datos académica',
+        footerTarget: { section: 'database' },
+      });
+      return;
+    }
+
+    if (kind === 'low_courses') {
+      openOverviewInsightModal({
+        tone: 'warn',
+        title: `Cursos bajos · ${level.label}`,
+        subtitle: 'Cursos con promedio bajo o alumnos en riesgo dentro del nivel.',
+        items: (level.lowCourses || []).map((course) => ({
+          key: course.key,
+          title: course.label,
+          meta: `Promedio ${formatAcademicScore(course.averageScore)} · ${course.atRiskCount} en riesgo · ${teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}`,
+          target: { section: 'students', academicSection: 'grades_courses' },
+        })),
+        footerLabel: 'Ir a grados y cursos',
+        footerTarget: { section: 'students', academicSection: 'grades_courses' },
+      });
+      return;
+    }
+
+    if (kind === 'coordinators') {
+      openOverviewInsightModal({
+        tone: 'info',
+        title: `Coordinadores · ${level.label}`,
+        subtitle: 'Equipo de coordinación asignado a este nivel académico.',
+        items: (level.coordinators || []).map((coordinator) => ({
+          key: coordinator.id || coordinator.name,
+          title: coordinator.name,
+          meta: coordinator.email || coordinator.scope || 'Sin correo registrado',
+          target: { section: 'team', teamRole: 'coordination' },
+        })),
+        footerLabel: 'Ver cuerpo académico',
+        footerTarget: { section: 'team', teamRole: 'coordination' },
+      });
+      return;
+    }
+
+    openOverviewInsightModal({
+      tone: 'good',
+      title: `Grados · ${level.label}`,
+      subtitle: 'Grados configurados dentro del nivel académico.',
+      items: (level.grades || []).map((grade) => ({
+        key: grade.key,
+        title: grade.label,
+        meta: `${grade.coursesCount} curso${grade.coursesCount === 1 ? '' : 's'} configurado${grade.coursesCount === 1 ? '' : 's'}`,
+        target: { section: 'students', academicSection: 'grades_courses' },
+      })),
+      footerLabel: 'Ir a grados y cursos',
+      footerTarget: { section: 'students', academicSection: 'grades_courses' },
+    });
+  };
+
+  const openBillingOverviewInsight = () => {
+    const families = overviewBillingKpis.familiesInMora || [];
+    openOverviewInsightModal({
+      tone: families.length > 0 ? 'warn' : 'good',
+      title: 'Cartera por cobrar',
+      subtitle: families.length > 0
+        ? `${families.length} familia${families.length === 1 ? '' : 's'} con mora activa.`
+        : 'No hay familias en mora en este momento.',
+      items: families.map((family) => ({
+        key: family.parentId,
+        title: family.parentName,
+        meta: `${formatCurrency(family.amount)} · ${family.students.join(', ') || 'Sin alumnos'} · ${family.overdueDays} día${family.overdueDays === 1 ? '' : 's'} en mora`,
+        target: { section: 'billing', billingParentId: family.parentId },
+      })),
+      footerLabel: 'Ir a cartera',
+      footerTarget: { section: 'billing' },
+    });
+  };
+
   const closeFollowUpModal = () => {
     setFollowUpModal({ open: false, type: '', item: null, title: '', body: '' });
   };
@@ -7143,98 +7382,127 @@ function RectoriaDashboard() {
     }
   };
 
-  if (loading) {
-    return <section className="rectoria-shell"><p>{`Cargando portal de ${portalLabel}...`}</p></section>;
+  const institutionalHeaderConfig = useMemo(() => {
+    if (isCoordinationPortal) {
+      return {
+        portalKicker: 'Coordinación',
+        logoSrc: '/campus/comergio-coordinacion-colibri.png',
+        logoAlt: 'Comergio Coordinación',
+        helperText: coordinationScope || schoolName,
+      };
+    }
+
+    if (isDireccionPortal) {
+      return {
+        portalKicker: 'Dirección',
+        logoSrc: '/campus/comergio-direccion-colibri.png',
+        logoAlt: 'Comergio Dirección',
+        helperText: schoolName,
+      };
+    }
+
+    return {
+      portalKicker: 'Rectoría',
+      logoSrc: '/campus/comergio-rectoria-colibri.png',
+      logoAlt: 'Comergio Rectoría',
+      helperText: schoolName,
+    };
+  }, [coordinationScope, isCoordinationPortal, isDireccionPortal, schoolName]);
+
+  const institutionalUserName = useMemo(() => formatInstitutionalUserLabel(user), [user]);
+  const institutionalRefreshLabel = refreshing
+    ? 'Actualizando...'
+    : (backgroundLoading ? 'Completando carga...' : 'Actualizar portal');
+
+  if (shellLoading) {
+    const portalKey = isCoordinationPortal ? 'coordinacion' : (isDireccionPortal ? 'direccion' : 'rectoria');
+    return <PortalBootSplash portal={portalKey} />;
   }
 
   return (
     <section className="rectoria-shell">
-      <header className="rectoria-hero panel">
-        <div>
-          <span className="rectoria-kicker">{isCoordinationPortal ? 'Portal de coordinación' : (isDireccionPortal ? 'Portal de dirección' : 'Portal de rectoría')}</span>
-          <h1>{isCoordinationPortal ? `Coordinación ${coordinationScope || schoolName}` : (isDireccionPortal ? `Dirección institucional de ${schoolName}` : `Rectoría ${schoolName}`)}</h1>
-          <p>
-            {isCoordinationPortal
-              ? 'Tablero operativo del nivel, comunicados, recursos y horarios académicos del nivel asignado.'
-              : 'Controla el equipo académico, el mapa de alumnos por curso, los costos por grado y los puntos críticos de la operación institucional.'}
-          </p>
-        </div>
-        <button className="btn btn-primary" onClick={() => loadPortal({ silent: true })} type="button" disabled={refreshing || busy}>
-          {refreshing ? 'Actualizando...' : 'Actualizar portal'}
-        </button>
-      </header>
+      <InstitutionalPortalHeader
+        helperText={institutionalHeaderConfig.helperText}
+        logoAlt={institutionalHeaderConfig.logoAlt}
+        logoSrc={institutionalHeaderConfig.logoSrc}
+        onRefresh={() => loadPortal({ silent: true })}
+        portalKicker={institutionalHeaderConfig.portalKicker}
+        refreshDisabled={refreshing || backgroundLoading || busy}
+        refreshLabel={institutionalRefreshLabel}
+        userName={institutionalUserName}
+      />
 
       <div className="rectoria-portal-layout">
-        <aside className="rectoria-sidebar" aria-label="Navegación de rectoría">
-          <span className="rectoria-sidebar-eyebrow">Portal</span>
-          <nav className="rectoria-tabs">
-            {sectionOptions.map((section) => (
-              <div className={`rectoria-sidebar-section${expandedSidebarSection === section.key ? ' is-open' : ''}`} key={section.key}>
+        <RectoriaPortalSidebar
+          activeSection={activeSection}
+          admissionsSubnav={(
+            <div className="rectoria-sidebar-subnav" aria-label="Secciones de admisiones">
+              {ADMISSIONS_SECTION_OPTIONS.map((option) => (
                 <button
-                  className={`rectoria-tab ${activeSection === section.key ? 'is-active' : ''}`}
-                  onClick={() => onSidebarSectionClick(section.key)}
+                  key={option.key}
+                  className={`rectoria-sidebar-subitem${activeAdmissionsView === option.key ? ' is-active' : ''}`}
                   type="button"
+                  onClick={() => setActiveAdmissionsView(option.key)}
                 >
-                  <span>
-                    {section.key === 'matricula_authorizations' && matriculaAuthorizationPendingCount > 0
-                      ? `${section.label} (${matriculaAuthorizationPendingCount})`
-                      : section.label}
-                  </span>
+                  <span>{option.label}</span>
                 </button>
-                {expandedSidebarSection === section.key && section.key === 'team' ? (
-                  <div className="rectoria-sidebar-subnav" aria-label="Roles institucionales">
-                    {roleSummary.map((group) => (
-                      <button
-                        key={group.value}
-                        className={`rectoria-sidebar-subitem${selectedTeamRole === group.value ? ' is-active' : ''}`}
-                        type="button"
-                        onClick={() => setSelectedTeamRole(group.value)}
-                      >
-                        <span>{group.label}</span>
-                        <strong>{group.count}</strong>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {expandedSidebarSection === section.key && section.key === 'admissions' ? (
-                  <div className="rectoria-sidebar-subnav" aria-label="Secciones de admisiones">
-                    {ADMISSIONS_SECTION_OPTIONS.map((option) => (
-                      <button
-                        key={option.key}
-                        className={`rectoria-sidebar-subitem${activeAdmissionsView === option.key ? ' is-active' : ''}`}
-                        type="button"
-                        onClick={() => {
-                          setActiveSection('admissions');
-                          setActiveAdmissionsView(option.key);
-                        }}
-                      >
-                        <span>{option.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                {expandedSidebarSection === section.key && section.key === 'students' ? (
-                  <div className="rectoria-sidebar-subnav" aria-label="Bloques de gestión académica">
-                    {ACADEMIC_MANAGEMENT_SECTION_OPTIONS.map((option) => (
-                        <button
-                          key={option.key}
-                          className={`rectoria-sidebar-subitem${activeAcademicManagementSection === option.key ? ' is-active' : ''}`}
-                          type="button"
-                          onClick={() => setActiveAcademicManagementSection(option.key)}
-                        >
-                          <span>{option.label}</span>
-                        </button>
-                      ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </nav>
-        </aside>
+              ))}
+            </div>
+          )}
+          academicManagementSubnav={(
+            <div className="rectoria-sidebar-subnav" aria-label="Bloques de gestión académica">
+              {ACADEMIC_MANAGEMENT_SECTION_OPTIONS.map((option) => (
+                <button
+                  key={option.key}
+                  className={`rectoria-sidebar-subitem${activeAcademicManagementSection === option.key ? ' is-active' : ''}`}
+                  type="button"
+                  onClick={() => setActiveAcademicManagementSection(option.key)}
+                >
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          expandedGroup={expandedSidebarGroup}
+          isCoordinationPortal={isCoordinationPortal}
+          matriculaAuthorizationPendingCount={matriculaAuthorizationPendingCount}
+          onExpandedGroupChange={setExpandedSidebarGroup}
+          onSectionChange={setActiveSection}
+          teamSubnav={(
+            <div className="rectoria-sidebar-subnav" aria-label="Roles institucionales">
+              {roleSummary.map((group) => (
+                <button
+                  key={group.value}
+                  className={`rectoria-sidebar-subitem${selectedTeamRole === group.value ? ' is-active' : ''}`}
+                  type="button"
+                  onClick={() => setSelectedTeamRole(group.value)}
+                >
+                  <span>{group.label}</span>
+                  <strong>{group.count}</strong>
+                </button>
+              ))}
+            </div>
+          )}
+        />
 
         <main className="rectoria-content">
       {activeSection === 'admissions' ? (
         <AdmissionsDashboard activeView={activeAdmissionsView} embedded />
+      ) : null}
+
+      {!isCoordinationPortal && RECTORIA_CONTROL_CENTER_KEYS.includes(activeSection) ? (
+        <RectoriaControlCenterPanel
+          academicStructureDraft={academicStructureDraft}
+          campusPerformanceCourses={campusPerformanceCourses}
+          disciplineObservations={disciplineObservations}
+          educationalLevelSummaries={educationalLevelSummaries}
+          overviewAcademicLevelKpi={overviewAcademicLevelKpi}
+          overviewAcademicPerformance={overviewAcademicPerformance}
+          passingScoreLabel={passingScoreLabel}
+          students={students}
+          teacherLabelById={teacherLabelById}
+          view={activeSection}
+        />
       ) : null}
 
       {activeSection === 'schedule' && isCoordinationPortal ? (
@@ -7252,30 +7520,80 @@ function RectoriaDashboard() {
         isCoordinationPortal ? (
           <CoordinationLevelDashboard
             dashboard={coordinationDashboard}
-            loading={loading || (refreshing && !coordinationDashboard)}
+            loading={shellLoading || (refreshing && !coordinationDashboard)}
             onRefresh={() => loadPortal({ silent: true })}
           />
         ) : (
         <div className="rectoria-stack rectoria-stack--overview">
           <div className="rectoria-overview-command-grid">
-            {!isCoordinationPortal ? <article className="rectoria-overview-kpi rectoria-overview-kpi--billing">
-              <span>Cartera por cobrar</span>
-              <strong>{formatCurrency(overviewBillingKpis.pendingAmount)}</strong>
-              <p>{overviewBillingKpis.totalPendingCharges} cargos pendientes · {overviewBillingKpis.overdueFamilies} familias en mora</p>
-              <div className="rectoria-overview-kpi-strip">
-                <div>
-                  <span>Pagado este mes</span>
-                  <strong>{formatCurrency(overviewBillingKpis.paidThisMonth)}</strong>
+            {!isCoordinationPortal ? (
+              <article
+                className="rectoria-overview-kpi rectoria-overview-kpi--billing is-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={openBillingOverviewInsight}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openBillingOverviewInsight();
+                  }
+                }}
+              >
+                <div className="rectoria-overview-kpi-head">
+                  <span>Cartera por cobrar</span>
+                  <small className="rectoria-overview-kpi-link">Ver detalle</small>
                 </div>
-                <div>
-                  <span>Mora crítica</span>
-                  <strong>{overviewBillingKpis.overdueCriticalFamilies}</strong>
+                <strong>{formatCurrency(overviewBillingKpis.pendingAmount)}</strong>
+                <p>{overviewBillingKpis.totalPendingCharges} cargos pendientes · {overviewBillingKpis.overdueFamilies} familia{overviewBillingKpis.overdueFamilies === 1 ? '' : 's'} en mora</p>
+                {overviewBillingKpis.familiesInMora?.length > 0 ? (
+                  <div className="rectoria-overview-billing-families">
+                    {(overviewBillingKpis.familiesInMora || []).slice(0, 3).map((family) => (
+                      <button
+                        className="rectoria-overview-billing-family"
+                        key={family.parentId}
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          navigateFromOverview({ section: 'billing', billingParentId: family.parentId });
+                        }}
+                      >
+                        <strong>{family.parentName}</strong>
+                        <span>{formatCurrency(family.amount)} · {family.overdueDays} días</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rectoria-overview-empty-note rectoria-overview-empty-note--inline">Sin familias en mora por ahora.</p>
+                )}
+                <div className="rectoria-overview-kpi-strip">
+                  <div>
+                    <span>Pagado este mes</span>
+                    <strong>{formatCurrency(overviewBillingKpis.paidThisMonth)}</strong>
+                  </div>
+                  <div>
+                    <span>Mora crítica</span>
+                    <strong>{overviewBillingKpis.overdueCriticalFamilies}</strong>
+                  </div>
                 </div>
-              </div>
-            </article> : null}
+              </article>
+            ) : null}
 
-            <article className="rectoria-overview-kpi">
-              <span>{isCoordinationPortal ? 'Estudiantes del nivel asignado' : 'Total estudiantes matriculados'}</span>
+            <article
+              className="rectoria-overview-kpi is-clickable"
+              role="button"
+              tabIndex={0}
+              onClick={() => navigateFromOverview({ section: 'database' })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  navigateFromOverview({ section: 'database' });
+                }
+              }}
+            >
+              <div className="rectoria-overview-kpi-head">
+                <span>{isCoordinationPortal ? 'Estudiantes del nivel asignado' : 'Total estudiantes matriculados'}</span>
+                <small className="rectoria-overview-kpi-link">Ver alumnos</small>
+              </div>
               <strong>{students.length}</strong>
               <p>{overviewAcademicLevelKpi.assignedStudents} con curso asignado · {overviewAcademicLevelKpi.pendingStudents} pendientes por curso</p>
             </article>
@@ -7296,26 +7614,96 @@ function RectoriaDashboard() {
               </div>
             </div>
             <div className="rectoria-overview-level-summary">
-              <div className="rectoria-overview-metric-card">
+              <button
+                className="rectoria-overview-metric-card is-clickable is-tone-info"
+                type="button"
+                onClick={() => openOverviewInsightModal({
+                  tone: 'info',
+                  title: 'Estudiantes evaluados',
+                  subtitle: 'Alumnos con al menos una nota publicada en algún curso.',
+                  items: overviewAcademicPerformance.evaluatedStudentCount > 0
+                    ? overviewAcademicPerformance.evaluatedStudents.slice(0, 12).map((student) => ({
+                        key: student.studentId || student.schoolCode || student.name,
+                        title: student.name || 'Alumno',
+                        meta: `${formatAcademicScore(student.finalScore)} · ${student.courseLabel}`,
+                        target: { section: 'database' },
+                      }))
+                    : [],
+                  footerLabel: overviewAcademicPerformance.evaluatedStudentCount > 0 ? 'Ver base de datos' : 'Ir a periodos y calificaciones',
+                  footerTarget: overviewAcademicPerformance.evaluatedStudentCount > 0
+                    ? { section: 'database' }
+                    : { section: 'students', academicSection: 'periods' },
+                })}
+              >
                 <span>Estudiantes evaluados</span>
                 <strong>{overviewAcademicPerformance.evaluatedStudentCount}</strong>
                 <small>Con notas publicadas en al menos un curso</small>
-              </div>
-              <div className="rectoria-overview-metric-card">
+              </button>
+              <button
+                className="rectoria-overview-metric-card is-clickable is-tone-warn"
+                type="button"
+                onClick={() => openOverviewInsightModal({
+                  tone: 'warn',
+                  title: 'Cursos en atención',
+                  subtitle: 'Cursos con promedio bajo o alumnos en riesgo.',
+                  items: overviewAcademicPerformance.coursesNeedingAttention.map((course) => ({
+                    key: course.key,
+                    title: course.displayLabel || course.label || course.subject || 'Curso',
+                    meta: `Promedio ${formatAcademicScore(course.averageScore)} · ${course.atRiskCount} en riesgo`,
+                    target: { section: 'students', academicSection: 'grades_courses' },
+                  })),
+                  footerLabel: 'Ir a grados y cursos',
+                  footerTarget: { section: 'students', academicSection: 'grades_courses' },
+                })}
+              >
                 <span>Cursos en atención</span>
                 <strong>{overviewAcademicPerformance.coursesNeedingAttention.length}</strong>
                 <small>Promedio bajo o alumnos en riesgo</small>
-              </div>
-              <div className="rectoria-overview-metric-card">
+              </button>
+              <button
+                className="rectoria-overview-metric-card is-clickable is-tone-danger"
+                type="button"
+                onClick={() => openOverviewInsightModal({
+                  tone: 'danger',
+                  title: `Estudiantes bajo ${passingScoreLabel}`,
+                  subtitle: 'Promedio consolidado por alumno en todos sus cursos.',
+                  items: overviewAcademicPerformance.atRiskStudents.map((student) => ({
+                    key: student.studentId || student.schoolCode || student.name,
+                    title: student.name || 'Alumno',
+                    meta: `${formatAcademicScore(student.finalScore)} · ${student.courseLabel} · ${student.teacherLabel}`,
+                    target: { section: 'database' },
+                  })),
+                  footerLabel: 'Ver base de datos académica',
+                  footerTarget: { section: 'database' },
+                })}
+              >
                 <span>Estudiantes bajo {passingScoreLabel}</span>
                 <strong>{overviewAcademicPerformance.atRiskStudents.length}</strong>
                 <small>Promedio consolidado por alumno</small>
-              </div>
-              <div className="rectoria-overview-metric-card">
+              </button>
+              <button
+                className="rectoria-overview-metric-card is-clickable is-tone-neutral"
+                type="button"
+                onClick={() => openOverviewInsightModal({
+                  tone: 'neutral',
+                  title: 'Pendientes por calificar',
+                  subtitle: 'Actividades evaluativas activas sin calificación completa.',
+                  items: campusPerformanceCourses
+                    .filter((course) => Number(course.pendingGradingCount || 0) > 0)
+                    .map((course) => ({
+                      key: course.id || course.key || course.label,
+                      title: course.displayLabel || course.label || 'Curso',
+                      meta: `${course.pendingGradingCount} actividad${course.pendingGradingCount === 1 ? '' : 'es'} pendiente${course.pendingGradingCount === 1 ? '' : 's'}`,
+                      target: { section: 'students', academicSection: 'assignments' },
+                    })),
+                  footerLabel: 'Ir a asignaciones',
+                  footerTarget: { section: 'students', academicSection: 'assignments' },
+                })}
+              >
                 <span>Pendientes por calificar</span>
                 <strong>{overviewAcademicPerformance.pendingGradingCount}</strong>
                 <small>Actividades evaluativas activas</small>
-              </div>
+              </button>
             </div>
             {overviewAcademicPerformance.levelRows.length === 0 ? <p className="rectoria-overview-empty-note">No hay niveles académicos configurados todavía.</p> : null}
             <div className="rectoria-overview-level-grid">
@@ -7332,21 +7720,44 @@ function RectoriaDashboard() {
                     </div>
                   </div>
                   <div className="rectoria-overview-mini-grid">
-                    <div><span>En riesgo</span><strong>{level.atRiskCount}</strong></div>
-                    <div><span>Cursos bajos</span><strong>{level.lowCoursesCount}</strong></div>
-                    <div><span>Coordinadores</span><strong>{level.coordinatorCount}</strong></div>
-                    <div><span>Grados</span><strong>{level.gradesCount || 0}</strong></div>
+                    <button className="rectoria-overview-mini-card is-tone-danger" type="button" onClick={() => openLevelOverviewInsight(level, 'at_risk')}>
+                      <span>En riesgo</span>
+                      <strong>{level.atRiskCount}</strong>
+                    </button>
+                    <button className="rectoria-overview-mini-card is-tone-warn" type="button" onClick={() => openLevelOverviewInsight(level, 'low_courses')}>
+                      <span>Cursos bajos</span>
+                      <strong>{level.lowCoursesCount}</strong>
+                    </button>
+                    <button className="rectoria-overview-mini-card is-tone-info" type="button" onClick={() => openLevelOverviewInsight(level, 'coordinators')}>
+                      <span>Coordinadores</span>
+                      <strong>{level.coordinatorCount}</strong>
+                    </button>
+                    <button className="rectoria-overview-mini-card is-tone-good" type="button" onClick={() => openLevelOverviewInsight(level, 'grades')}>
+                      <span>Grados</span>
+                      <strong>{level.gradesCount || 0}</strong>
+                    </button>
                   </div>
                   {level.lowestCourses.length > 0 ? (
                     <div className="rectoria-overview-attention-list">
                       {level.lowestCourses.map((course) => (
-                        <p key={`${level.key}-${course.key || course.id || course.label}`}>
+                        <button
+                          className="rectoria-overview-attention-item"
+                          key={`${level.key}-${course.key || course.id || course.label}`}
+                          type="button"
+                          onClick={() => navigateFromOverview({ section: 'students', academicSection: 'grades_courses' })}
+                        >
                           <strong>{course.displayLabel || formatRectoriaInstitutionalCourseLabel(course, institutionalCourseLabelContext)}</strong>
                           <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} estudiantes bajo {passingScoreLabel}</span>
-                        </p>
+                        </button>
                       ))}
                     </div>
-                  ) : <p className="rectoria-overview-empty-note">Sin cursos con calificaciones en este nivel.</p>}
+                  ) : (
+                    <p className="rectoria-overview-empty-note">
+                      {level.evaluatedStudentCount > 0
+                        ? 'Sin cursos críticos en este nivel por ahora.'
+                        : 'Aún no hay notas registradas en este nivel.'}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -7356,30 +7767,45 @@ function RectoriaDashboard() {
                 <h4>Estudiantes con promedios bajos</h4>
                 {overviewAcademicPerformance.atRiskStudents.length === 0 ? <p className="rectoria-overview-empty-note">No hay estudiantes bajo {passingScoreLabel} con calificaciones registradas.</p> : null}
                 {overviewAcademicPerformance.atRiskStudents.slice(0, 6).map((student) => (
-                  <p key={`${student.studentId || student.schoolCode || student.name}`}>
+                  <button
+                    className="rectoria-overview-attention-item"
+                    key={`${student.studentId || student.schoolCode || student.name}`}
+                    type="button"
+                    onClick={() => navigateFromOverview({ section: 'database' })}
+                  >
                     <strong>{student.name || 'Alumno'}</strong>
                     <span>{formatAcademicScore(student.finalScore)} · {student.courseLabel} · {student.teacherLabel}</span>
-                  </p>
+                  </button>
                 ))}
               </article>
               <article>
                 <h4>Cursos con promedios bajos</h4>
                 {overviewAcademicPerformance.coursesNeedingAttention.length === 0 ? <p className="rectoria-overview-empty-note">No hay cursos por debajo del umbral de atención.</p> : null}
                 {overviewAcademicPerformance.coursesNeedingAttention.slice(0, 6).map((course) => (
-                  <p key={course.key}>
+                  <button
+                    className="rectoria-overview-attention-item"
+                    key={course.key}
+                    type="button"
+                    onClick={() => navigateFromOverview({ section: 'students', academicSection: 'grades_courses' })}
+                  >
                     <strong>{course.displayLabel || course.label || course.subject || 'Curso'}</strong>
                     <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} bajo {passingScoreLabel} · {teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}</span>
-                  </p>
+                  </button>
                 ))}
               </article>
               <article>
                 <h4>Docentes a revisar</h4>
                 {overviewAcademicPerformance.teacherAttentionRows.length === 0 ? <p className="rectoria-overview-empty-note">No hay suficientes calificaciones para priorizar docentes.</p> : null}
                 {overviewAcademicPerformance.teacherAttentionRows.slice(0, 6).map((teacher) => (
-                  <p key={teacher.key}>
+                  <button
+                    className="rectoria-overview-attention-item"
+                    key={teacher.key}
+                    type="button"
+                    onClick={() => navigateFromOverview({ section: 'team', teamRole: 'teacher' })}
+                  >
                     <strong>{teacher.label}</strong>
                     <span>Promedio {formatAcademicScore(teacher.averageScore)} · {teacher.atRiskCount} estudiantes en riesgo · {teacher.coursesCount} cursos</span>
-                  </p>
+                  </button>
                 ))}
               </article>
             </div>
@@ -10224,7 +10650,10 @@ function RectoriaDashboard() {
                       <td colSpan="8">No hay familias con cargos académicos.</td>
                     </tr>
                   ) : overdueFamilyRows.map((item) => (
-                    <tr key={item.parentId}>
+                    <tr
+                      className={billingFocusParentId && String(item.parentId) === String(billingFocusParentId) ? 'is-focused' : ''}
+                      key={item.parentId}
+                    >
                       <td>
                         <strong>{item.parentName}</strong>
                       </td>
@@ -10435,6 +10864,48 @@ function RectoriaDashboard() {
 
         </main>
       </div>
+
+      {overviewInsightModal.open ? (
+        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label={overviewInsightModal.title}>
+          <div className={`rectoria-modal-card rectoria-modal-card--overview is-tone-${overviewInsightModal.tone || 'info'}`}>
+            <div className="rectoria-modal-head">
+              <div>
+                <span className="rectoria-modal-eyebrow">Resumen institucional</span>
+                <h3>{overviewInsightModal.title}</h3>
+                <p>{overviewInsightModal.subtitle}</p>
+              </div>
+              <button className="rectoria-modal-close" type="button" onClick={closeOverviewInsightModal}>Cerrar</button>
+            </div>
+            <div className="rectoria-overview-insight-list">
+              {overviewInsightModal.items.length === 0 ? (
+                <p className="rectoria-overview-empty-note">No hay registros para mostrar todavía.</p>
+              ) : overviewInsightModal.items.map((item) => (
+                <button
+                  className="rectoria-overview-insight-item"
+                  key={item.key}
+                  type="button"
+                  onClick={() => item.target && navigateFromOverview(item.target)}
+                >
+                  <strong>{item.title}</strong>
+                  {item.meta ? <span>{item.meta}</span> : null}
+                </button>
+              ))}
+            </div>
+            {overviewInsightModal.footerLabel ? (
+              <div className="rectoria-modal-actions">
+                <button className="btn" type="button" onClick={closeOverviewInsightModal}>Cerrar</button>
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={() => navigateFromOverview(overviewInsightModal.footerTarget || { section: 'overview' })}
+                >
+                  {overviewInsightModal.footerLabel}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {followUpModal.open ? (
         <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label={followUpModal.type === 'manual_note' ? 'Registrar nota manual' : 'Enviar push y correo'}>

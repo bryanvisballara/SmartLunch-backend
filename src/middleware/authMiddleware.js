@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 
-const User = require('../models/user.model');
+const { runWithSchoolContext } = require('../config/db');
+const { findActiveUserForAuth } = require('../utils/authUserResolver');
 
 async function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
@@ -12,12 +13,10 @@ async function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const activeUser = await User.findOne({
-      _id: decoded.userId,
+    const activeUser = await findActiveUserForAuth({
+      userId: decoded.userId,
       schoolId: decoded.schoolId,
-      status: 'active',
-      deletedAt: null,
-    }).select('schoolId role name username coordinationScope linkedStudentId');
+    });
 
     if (!activeUser) {
       return res.status(401).json({ message: 'Invalid token' });
@@ -33,7 +32,8 @@ async function authMiddleware(req, res, next) {
       coordinationScope: String(activeUser.coordinationScope || '').trim(),
       linkedStudentId: activeUser.linkedStudentId ? String(activeUser.linkedStudentId) : '',
     };
-    return next();
+
+    return runWithSchoolContext(activeUser.schoolId, next);
   } catch (error) {
     return res.status(401).json({ message: 'Invalid token' });
   }

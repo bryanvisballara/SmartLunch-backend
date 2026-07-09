@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import './CoordinationLevelDashboard.css';
 import CoordinationGradesScoresTable from './CoordinationGradesScoresTable';
+import { PortalBootSplash } from './PortalBootSplash';
 
 function formatScore(value) {
   if (!Number.isFinite(Number(value))) return 'Sin nota';
@@ -55,7 +56,7 @@ export default function CoordinationLevelDashboard({ dashboard, loading = false,
   ]), [summary, performance.passingScore]);
 
   if (loading) {
-    return <section className="coordination-dashboard"><p>Cargando tablero de coordinación...</p></section>;
+    return <PortalBootSplash embedded portal="coordinacion" />;
   }
 
   if (!dashboard) {

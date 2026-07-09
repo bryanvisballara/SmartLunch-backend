@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../lib/authNavigation';
 import useAuthStore from '../store/auth.store';
 import { createSuperAdminSchool, deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
+import { PortalBootSplash } from '../components/PortalBootSplash';
 
 const featureOptions = [
   { key: 'home', label: 'Inicio' },
@@ -454,6 +455,10 @@ function SuperAdminPortal() {
     logout();
     navigate(LOGIN_PATH, { replace: true });
   };
+
+  if (loading && !(summary.schools || []).length) {
+    return <PortalBootSplash portal="super-admin" />;
+  }
 
   return (
     <section className="super-admin-page">

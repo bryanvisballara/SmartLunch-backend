@@ -5308,15 +5308,64 @@ async function findExistingEnrollmentStudent({ schoolId, rawStudent, linkedParen
   return matchingCandidates.find((student) => String(student._id) === String(linkedCandidate.studentId)) || null;
 }
 
+function hasParentIdentityConflict(existingUser, parentData) {
+  if (!existingUser) {
+    return false;
+  }
+
+  const existingName = normalizeAcademicStudentIdentity(normalizeText(existingUser.name));
+  const incomingName = normalizeAcademicStudentIdentity(normalizeText(parentData?.name));
+  const existingDocumentNumber = normalizeText(existingUser.documentNumber);
+  const incomingDocumentNumber = normalizeText(parentData?.documentNumber);
+
+  if (existingDocumentNumber && incomingDocumentNumber && existingDocumentNumber !== incomingDocumentNumber) {
+    return true;
+  }
+
+  if (existingName && incomingName && existingName !== incomingName) {
+    return true;
+  }
+
+  return false;
+}
+
 async function upsertParentAccount({ schoolId, parentData, relationship, matchByLooseIdentity = false }) {
   const name = normalizeText(parentData?.name);
   const email = normalizeEmail(parentData?.email);
   const documentNumber = normalizeText(parentData?.documentNumber);
   const phone = normalizeText(parentData?.phone);
   const requestedPassword = String(parentData?.password || '').trim();
+  const explicitParentId = toObjectId(parentData?._id || parentData?.id);
 
-  if (!name && !email && !documentNumber) {
+  if (!name && !email && !documentNumber && !explicitParentId) {
     return null;
+  }
+
+  const payload = {
+    schoolId,
+    name: name || relationship,
+    email,
+    phone,
+    address: normalizeText(parentData?.address),
+    documentType: normalizeText(parentData?.documentType),
+    documentNumber,
+    role: 'parent',
+    status: 'active',
+    deletedAt: null,
+  };
+
+  if (explicitParentId) {
+    const explicitUser = await User.findOne({ _id: explicitParentId, schoolId, role: 'parent', deletedAt: null });
+    if (explicitUser) {
+      if (!hasParentIdentityConflict(explicitUser, parentData)) {
+        Object.assign(explicitUser, payload);
+        if (requestedPassword) {
+          explicitUser.passwordHash = await bcrypt.hash(requestedPassword, 10);
+        }
+        await explicitUser.save();
+        return { user: explicitUser, created: false, temporaryPassword: requestedPassword || '' };
+      }
+    }
   }
 
   let user = null;
@@ -5335,18 +5384,9 @@ async function upsertParentAccount({ schoolId, parentData, relationship, matchBy
     });
   }
 
-  const payload = {
-    schoolId,
-    name: name || relationship,
-    email,
-    phone,
-    address: normalizeText(parentData?.address),
-    documentType: normalizeText(parentData?.documentType),
-    documentNumber,
-    role: 'parent',
-    status: 'active',
-    deletedAt: null,
-  };
+  if (user && hasParentIdentityConflict(user, parentData)) {
+    user = null;
+  }
 
   if (user) {
     Object.assign(user, payload);
@@ -7289,13 +7329,42 @@ router.patch('/database/:studentId', async (req, res) => {
       if (parentId) {
         const parent = await User.findOne({ _id: parentId, schoolId, role: 'parent', deletedAt: null });
         if (parent) {
-          parent.name = parentPayload.name || parent.name;
-          parent.documentType = parentPayload.documentType;
-          parent.documentNumber = parentPayload.documentNumber;
-          parent.phone = parentPayload.phone;
-          parent.email = parentPayload.email;
-          parent.address = parentPayload.address;
-          await parent.save();
+          const parentLinkedToOthers = await ParentStudentLink.exists({
+            schoolId,
+            parentId,
+            studentId: { $ne: student._id },
+            status: 'active',
+          });
+
+          if (parentLinkedToOthers && hasParentIdentityConflict(parent, parentPayload)) {
+            const parentResult = await upsertParentAccount({
+              schoolId,
+              parentData: parentPayload,
+              relationship: config.relationship,
+            });
+
+            if (parentResult?.user?._id) {
+              await ParentStudentLink.findOneAndUpdate(
+                { schoolId, studentId: student._id, relationship: config.relationship },
+                {
+                  schoolId,
+                  parentId: parentResult.user._id,
+                  studentId: student._id,
+                  relationship: config.relationship,
+                  status: 'active',
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+              );
+            }
+          } else {
+            parent.name = parentPayload.name || parent.name;
+            parent.documentType = parentPayload.documentType;
+            parent.documentNumber = parentPayload.documentNumber;
+            parent.phone = parentPayload.phone;
+            parent.email = parentPayload.email;
+            parent.address = parentPayload.address;
+            await parent.save();
+          }
         }
       } else if (hasValues && parentPayload.name) {
         const parentResult = await upsertParentAccount({

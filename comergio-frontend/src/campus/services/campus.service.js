@@ -40,7 +40,7 @@ export function getCampusCoordinationTeachers() {
 }
 
 export function getCampusCoordinationCourses() {
-  return api.get('/campus/coordination/courses').then((response) => response.data);
+  return api.get('/campus/coordination/courses', { timeout: 45000 }).then((response) => response.data);
 }
 
 export function getCampusCoordinationDashboard() {

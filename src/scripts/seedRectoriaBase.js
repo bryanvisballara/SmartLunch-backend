@@ -3,10 +3,10 @@ require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 
-const { connectDB } = require('../config/db');
+const { connectDB, runWithSchoolContext } = require('../config/db');
 const User = require('../models/user.model');
 
-const SCHOOL_ID = String(process.env.SEED_RECTORIA_SCHOOL_ID || 'comergio-demo').trim();
+const SCHOOL_ID = String(process.env.SEED_RECTORIA_SCHOOL_ID || 'comergio_demo_kns8p').trim();
 const DEFAULT_PASSWORD = String(process.env.SEED_RECTORIA_PASSWORD || 'Comergio2026!').trim();
 
 const STAFF_FIXTURES = [
@@ -34,22 +34,24 @@ async function seedRectoriaBase() {
         continue;
       }
 
-      await User.findOneAndUpdate(
-        { schoolId: SCHOOL_ID, username: normalizedUsername },
-        {
-          schoolId: SCHOOL_ID,
-          name: fixture.name,
-          username: normalizedUsername,
-          phone: fixture.phone || '',
-          role: fixture.role,
-          coordinationScope: fixture.role === 'coordination' ? fixture.coordinationScope || '' : '',
-          assignedSubjects: fixture.role === 'teacher' ? fixture.assignedSubjects || [] : [],
-          passwordHash,
-          status: 'active',
-          deletedAt: null,
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
+      await runWithSchoolContext(SCHOOL_ID, async () => {
+        await User.findOneAndUpdate(
+          { schoolId: SCHOOL_ID, username: normalizedUsername },
+          {
+            schoolId: SCHOOL_ID,
+            name: fixture.name,
+            username: normalizedUsername,
+            phone: fixture.phone || '',
+            role: fixture.role,
+            coordinationScope: fixture.role === 'coordination' ? fixture.coordinationScope || '' : '',
+            assignedSubjects: fixture.role === 'teacher' ? fixture.assignedSubjects || [] : [],
+            passwordHash,
+            status: 'active',
+            deletedAt: null,
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      });
     }
 
     console.log(`Seed de rectoria listo para ${SCHOOL_ID}.`);

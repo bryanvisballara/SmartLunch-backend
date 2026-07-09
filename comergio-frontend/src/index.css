@@ -1938,20 +1938,24 @@ body.login-boot-active main.container {
   box-shadow: 0 0 12px rgba(0, 102, 255, 0.45);
 }
 
-.login-boot-splash.is-teacher-portal {
+.login-boot-splash.is-teacher-portal,
+.login-boot-splash.is-institutional-portal {
   background: #ffffff;
 }
 
-.login-boot-splash.is-teacher-portal .login-boot-video-wrap {
+.login-boot-splash.is-teacher-portal .login-boot-video-wrap,
+.login-boot-splash.is-institutional-portal .login-boot-video-wrap {
   width: min(300px, 72vw);
   background: #ffffff;
 }
 
-.login-boot-splash.is-teacher-portal .login-boot-video {
+.login-boot-splash.is-teacher-portal .login-boot-video,
+.login-boot-splash.is-institutional-portal .login-boot-video {
   background: #ffffff;
 }
 
-.login-boot-splash.is-teacher-portal .login-boot-card {
+.login-boot-splash.is-teacher-portal .login-boot-card,
+.login-boot-splash.is-institutional-portal .login-boot-card {
   border-color: rgba(46, 196, 232, 0.22);
   background:
     radial-gradient(circle at 88% 12%, rgba(46, 196, 232, 0.18) 0%, rgba(46, 196, 232, 0) 38%),
@@ -1960,12 +1964,14 @@ body.login-boot-active main.container {
   box-shadow: 0 18px 42px rgba(10, 53, 82, 0.24);
 }
 
-.login-boot-splash.is-teacher-portal .login-boot-card-eyebrow {
+.login-boot-splash.is-teacher-portal .login-boot-card-eyebrow,
+.login-boot-splash.is-institutional-portal .login-boot-card-eyebrow {
   background: rgba(46, 196, 232, 0.18);
   color: #b8f0ff;
 }
 
-.login-boot-splash.is-teacher-portal .login-boot-progress-bar {
+.login-boot-splash.is-teacher-portal .login-boot-progress-bar,
+.login-boot-splash.is-institutional-portal .login-boot-progress-bar {
   background: linear-gradient(90deg, #2ec4e8 0%, #14856f 100%);
   box-shadow: 0 0 12px rgba(46, 196, 232, 0.42);
 }

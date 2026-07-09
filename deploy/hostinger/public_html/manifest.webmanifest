@@ -8,12 +8,12 @@
   "theme_color": "#102739",
   "icons": [
     {
-      "src": "/logonuevo.png",
-      "sizes": "942x640",
+      "src": "/favicon.png",
+      "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "/logonuevo.png",
+      "src": "/favicon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"

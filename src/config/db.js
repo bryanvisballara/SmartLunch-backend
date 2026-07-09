@@ -65,6 +65,10 @@ function runWithSchoolContext(schoolId, callback) {
   return schoolContextStorage.run({ schoolId: normalizedSchoolId }, callback);
 }
 
+function runInControlDb(callback) {
+  return schoolContextStorage.run({}, callback);
+}
+
 function extractSchoolIdFromBearerToken(req) {
   const header = String(req?.headers?.authorization || '').trim();
   const [, token] = header.split(' ');
@@ -377,6 +381,7 @@ module.exports = {
   registerSchoolScopedModel,
   resolveRegisteredModel,
   resolveSchoolDbName,
+  runInControlDb,
   runWithSchoolContext,
   slugifySchoolId,
 };

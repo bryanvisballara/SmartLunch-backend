@@ -431,6 +431,42 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
   }
 });
 
+router.get('/summary', roleMiddleware(nursingStaffRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const now = new Date();
+    const startOfWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+
+    const [totalVisits, visitsThisWeek, studentsWithVisits, recentVisits] = await Promise.all([
+      NursingVisit.countDocuments({ schoolId }),
+      NursingVisit.countDocuments({ schoolId, attendedAt: { $gte: startOfWeek } }),
+      NursingVisit.distinct('studentId', { schoolId }),
+      NursingVisit.find({ schoolId })
+        .sort({ attendedAt: -1, createdAt: -1 })
+        .limit(8)
+        .lean(),
+    ]);
+
+    return res.status(200).json({
+      summary: {
+        totalVisits,
+        visitsThisWeek,
+        studentsAttended: studentsWithVisits.length,
+      },
+      recentVisits: recentVisits.map((visit) => ({
+        id: String(visit._id),
+        studentId: String(visit.studentId || ''),
+        studentName: normalizeText(visit.studentName) || 'Alumno',
+        reason: normalizeText(visit.reason) || 'Atención',
+        attendedAt: visit.attendedAt || visit.createdAt,
+        status: normalizeText(visit.status) || 'registered',
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/parent/records', roleMiddleware('parent', 'admin', 'student'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;

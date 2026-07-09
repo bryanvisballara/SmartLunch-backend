@@ -103,7 +103,8 @@ function App() {
   const pushAttemptKeyRef = useRef('');
   const lastHandledAppUrlRef = useRef({ rawUrl: '', internalPath: '', handledAt: 0 });
   const isSuperAdminRoute = normalizedPathname === '/super-admin' || normalizedPathname.startsWith('/super-admin/');
-  const isAdminRoute = normalizedPathname.startsWith('/admin') || normalizedPathname.startsWith('/rectoria') || normalizedPathname.startsWith('/direccion') || normalizedPathname.startsWith('/coordinacion');
+  const isInstitutionalPortalRoute = normalizedPathname.startsWith('/rectoria') || normalizedPathname.startsWith('/direccion') || normalizedPathname.startsWith('/coordinacion');
+  const isAdminRoute = normalizedPathname.startsWith('/admin') || isInstitutionalPortalRoute;
   const isAdmissionsRoute = normalizedPathname === '/academic-secretary/admissions' || normalizedPathname.startsWith('/academic-secretary/admissions/');
   const isAcademicSecretaryRoute = normalizedPathname === '/academic-secretary' || normalizedPathname.startsWith('/academic-secretary/');
   const isBillingRoute = normalizedPathname === '/cartera' || normalizedPathname.startsWith('/cartera/');
@@ -150,6 +151,7 @@ function App() {
     !isEpaycoReturnRoute &&
     !isAdmissionsRoute &&
     !isSuperAdminRoute &&
+    !isInstitutionalPortalRoute &&
     !isCampusLikeRoute &&
     !normalizedPathname.startsWith('/parent') &&
     !normalizedPathname.startsWith('/student') &&
@@ -348,7 +350,7 @@ function App() {
   return (
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
+      <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute || isInstitutionalPortalRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<LandingPage />} path="/landing" />

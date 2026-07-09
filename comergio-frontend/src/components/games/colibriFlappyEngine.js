@@ -913,24 +913,44 @@ export function createColibriFlappyGame(root, options = {}) {
     }
   }
 
+  function getHudTopInset() {
+    const canvasTop = canvas.getBoundingClientRect().top;
+    const backTop = backButton.getBoundingClientRect().top;
+    const inferredSafeTop = Math.max(0, backTop - canvasTop - 12);
+    const viewportTop = Math.max(0, window.visualViewport?.offsetTop || 0);
+
+    return Math.max(inferredSafeTop, viewportTop, 44);
+  }
+
+  function getHudLayout() {
+    const topInset = getHudTopInset();
+    const scoreY = topInset + 52;
+    const recordY = scoreY + 24;
+    const campusY = recordY + 22;
+    const hintY = campusY + 22;
+
+    return { scoreY, recordY, campusY, hintY };
+  }
+
   function drawHud(layer) {
     const totalScore = getTotalScore();
     const nextChangeIn = 20 - (totalScore % 20 || 20);
+    const { scoreY, recordY, campusY, hintY } = getHudLayout();
 
     ctx.fillStyle = '#ffffff';
     ctx.font = '800 42px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(String(totalScore), width / 2, 72);
+    ctx.fillText(String(totalScore), width / 2, scoreY);
 
     ctx.font = '600 13px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.72)';
-    ctx.fillText(`RÉCORD ${state.best}`, width / 2, 96);
-    ctx.fillText(layer.name, width / 2, 118);
+    ctx.fillText(`RÉCORD ${state.best}`, width / 2, recordY);
+    ctx.fillText(layer.name, width / 2, campusY);
 
     if (state.mode === 'playing' && nextChangeIn <= 6) {
       ctx.font = '600 12px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(46, 196, 232, 0.92)';
-      ctx.fillText(`Nuevo mundo en ${nextChangeIn}`, width / 2, 140);
+      ctx.fillText(`Nuevo mundo en ${nextChangeIn}`, width / 2, hintY);
     }
 
     if (state.mode === 'ready') {

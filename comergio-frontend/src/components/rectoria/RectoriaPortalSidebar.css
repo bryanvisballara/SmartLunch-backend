@@ -1,0 +1,129 @@
+.rectoria-rail {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #dadce0;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.rectoria-rail__nav {
+  display: grid;
+  gap: 4px;
+}
+
+.rectoria-rail__item,
+.rectoria-rail__group-toggle,
+.rectoria-rail__child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #3c4043;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rectoria-rail__item,
+.rectoria-rail__group-toggle {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-weight: 500;
+}
+
+.rectoria-rail__item:hover,
+.rectoria-rail__item:focus-visible,
+.rectoria-rail__group-toggle:hover,
+.rectoria-rail__group-toggle:focus-visible,
+.rectoria-rail__child:hover,
+.rectoria-rail__child:focus-visible {
+  background: #f1f3f4;
+}
+
+.rectoria-rail__item.is-active,
+.rectoria-rail__group-toggle.is-active {
+  background: #e8f4fc;
+  color: #0f5f78;
+}
+
+.rectoria-rail__item-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.rectoria-rail__chevron {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #5f6368;
+}
+
+.rectoria-rail__group.is-open .rectoria-rail__group-toggle.is-active .rectoria-rail__chevron,
+.rectoria-rail__group.has-active-child .rectoria-rail__group-toggle.is-active .rectoria-rail__chevron {
+  color: #0f5f78;
+}
+
+.rectoria-rail__children {
+  display: grid;
+  gap: 2px;
+  padding: 2px 0 4px 10px;
+  margin-left: 8px;
+  border-left: 1px solid #e8eaed;
+}
+
+.rectoria-rail__child-block {
+  display: grid;
+  gap: 2px;
+}
+
+.rectoria-rail__child {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.rectoria-rail__child--expandable {
+  justify-content: space-between;
+}
+
+.rectoria-rail__child--expandable span {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.rectoria-rail__child--expandable .rectoria-rail__chevron {
+  width: 16px;
+  height: 16px;
+}
+
+.rectoria-rail__child.is-active {
+  background: #e8f4fc;
+  color: #0f5f78;
+}
+
+.rectoria-rail__nested {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 4px 8px;
+  padding-left: 10px;
+  border-left: 1px solid #e8eaed;
+}
+
+.rectoria-rail__nested .rectoria-sidebar-subitem {
+  border-radius: 10px;
+}
+
+@media (max-width: 900px) {
+  .rectoria-rail {
+    position: static;
+  }
+}

@@ -12,6 +12,7 @@ import {
   submitHrSupplyRequestForApproval,
 } from '../services/hr.service';
 import useAuthStore from '../store/auth.store';
+import { PortalBootSplash } from '../components/PortalBootSplash';
 
 const categoryOptions = [
   { value: 'stationery', label: 'Papeleria' },
@@ -99,33 +100,87 @@ function HumanResourcesPortal() {
   const [requestItems, setRequestItems] = useState([]);
   const [selectedStatus, setSelectedStatus] = useState('');
   const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [shellLoading, setShellLoading] = useState(true);
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const lowStockItems = useMemo(() => items.filter((item) => item.lowStock), [items]);
   const activeItems = useMemo(() => items.filter((item) => item.status === 'active'), [items]);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const [itemsResponse, requestsResponse, dashboardResponse] = await Promise.all([
-        getHrSupplyItems({ status: 'active' }),
-        getHrSupplyRequests(selectedStatus ? { status: selectedStatus } : {}),
-        isManager ? getHrDashboard() : Promise.resolve({ data: null }),
-      ]);
+  const loadOverviewShell = async () => {
+    const [itemsResponse, dashboardResponse] = await Promise.all([
+      getHrSupplyItems({ status: 'active' }),
+      isManager ? getHrDashboard() : Promise.resolve({ data: null }),
+    ]);
 
-      setItems(itemsResponse.data?.items || []);
-      setRequests(requestsResponse.data?.requests || []);
-      setDashboard(dashboardResponse.data || null);
+    setItems(itemsResponse.data?.items || []);
+    setDashboard(dashboardResponse.data || null);
+  };
+
+  const loadRequests = async () => {
+    const requestsResponse = await getHrSupplyRequests(selectedStatus ? { status: selectedStatus } : {});
+    setRequests(requestsResponse.data?.requests || []);
+  };
+
+  const loadData = async ({ refreshAll = true } = {}) => {
+    if (refreshAll) {
+      setShellLoading(true);
+    } else {
+      setBackgroundLoading(true);
+    }
+
+    try {
+      if (refreshAll) {
+        await loadOverviewShell();
+      }
+      await loadRequests();
     } catch (error) {
       setMessage(error?.response?.data?.message || 'No se pudo cargar recursos y gestion de compras.');
     } finally {
-      setLoading(false);
+      setShellLoading(false);
+      setBackgroundLoading(false);
+      setHasLoadedOnce(true);
     }
   };
 
   useEffect(() => {
-    loadData();
+    let cancelled = false;
+
+    loadOverviewShell()
+      .then(() => {
+        if (cancelled) return;
+        setShellLoading(false);
+        setHasLoadedOnce(true);
+        setBackgroundLoading(true);
+        return loadRequests();
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMessage(error?.response?.data?.message || 'No se pudo cargar recursos y gestion de compras.');
+        setShellLoading(false);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBackgroundLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedOnce) return;
+    setBackgroundLoading(true);
+    loadRequests()
+      .catch((error) => {
+        setMessage(error?.response?.data?.message || 'No se pudo cargar las solicitudes.');
+      })
+      .finally(() => {
+        setBackgroundLoading(false);
+      });
   }, [selectedStatus]);
 
   const onCreateItem = async (event) => {
@@ -281,6 +336,10 @@ function HumanResourcesPortal() {
     }
   };
 
+  if (shellLoading && !hasLoadedOnce) {
+    return <PortalBootSplash portal="recursos-humanos" />;
+  }
+
   return (
     <div className="hr-portal">
       <header className="hr-portal__header">
@@ -292,7 +351,7 @@ function HumanResourcesPortal() {
           </p>
         </div>
         <div className="hr-portal__header-actions">
-          <button type="button" onClick={loadData} disabled={loading}>Actualizar</button>
+          <button type="button" onClick={() => loadData()} disabled={shellLoading || backgroundLoading}>{backgroundLoading ? 'Completando carga...' : 'Actualizar'}</button>
         </div>
       </header>
 
