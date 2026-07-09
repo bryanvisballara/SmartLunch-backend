@@ -438,6 +438,32 @@
   color: rgba(255, 255, 255, 0.82);
 }
 
+.matricula-flow-student-select {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.matricula-flow-student-select select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 14px;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.matricula-flow-note--student {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .matricula-flow-primary,
 .matricula-flow-secondary {
   width: 100%;

@@ -366,9 +366,11 @@ function MatriculaEnrollmentFlow({
   charge,
   schoolName,
   schoolId = '',
+  paymentOptions = [],
   onClose,
   onLogout,
   onProcessUpdated,
+  onPaymentStudentChange,
   startAtIntro = true,
   pendingSignatureResume = false,
   blocking = false,
@@ -377,6 +379,7 @@ function MatriculaEnrollmentFlow({
   const [showIntro, setShowIntro] = useState(startAtIntro);
   const [consentChecked, setConsentChecked] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [switchingStudent, setSwitchingStudent] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [signatureImage, setSignatureImage] = useState('');
   const [contractAccepted, setContractAccepted] = useState(false);
@@ -506,6 +509,27 @@ function MatriculaEnrollmentFlow({
       setErrorMessage(error?.response?.data?.message || 'No se pudo registrar el consentimiento.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const selectedPaymentChargeId = String(process?.chargeId || charge?._id || charge?.id || '');
+  const hasMultiplePaymentStudents = paymentOptions.length > 1;
+
+  const onSelectPaymentStudent = async (event) => {
+    const nextChargeId = String(event.target.value || '').trim();
+    if (!nextChargeId || nextChargeId === selectedPaymentChargeId || !onPaymentStudentChange) {
+      return;
+    }
+
+    setSwitchingStudent(true);
+    setErrorMessage('');
+    setWompiCheckoutConfig(null);
+    try {
+      await onPaymentStudentChange(nextChargeId);
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo cambiar el estudiante.');
+    } finally {
+      setSwitchingStudent(false);
     }
   };
 
@@ -725,8 +749,28 @@ function MatriculaEnrollmentFlow({
 
             {activeStep === 'payment' ? (
               <section className="matricula-flow-panel">
+                {hasMultiplePaymentStudents && process.payment?.status !== 'PAID' ? (
+                  <label className="matricula-flow-student-select">
+                    <span>Estudiante a matricular</span>
+                    <select
+                      disabled={loading || switchingStudent || wompiCheckoutLoading}
+                      onChange={onSelectPaymentStudent}
+                      value={selectedPaymentChargeId}
+                    >
+                      {paymentOptions.map((option) => (
+                        <option key={option.chargeId} value={option.chargeId}>
+                          {option.studentName}
+                          {option.hasDiscount ? ' · con beneficio' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <div className="matricula-flow-payment-card">
                   <span>Pago de matrícula</span>
+                  <p className="matricula-flow-note matricula-flow-note--student">
+                    {process.studentName || 'Estudiante'}
+                  </p>
                   {hideEnrollmentPaymentAmount ? (
                     <p className="matricula-flow-note">El valor se mostrará en la pasarela de pago.</p>
                   ) : (
@@ -750,8 +794,8 @@ function MatriculaEnrollmentFlow({
                   </button>
                 ) : (
                   <>
-                    <button className="matricula-flow-primary" disabled={loading || wompiCheckoutLoading} onClick={onStartPayment} type="button">
-                      {loading || wompiCheckoutLoading ? 'Abriendo Wompi...' : 'Pagar matrícula con Wompi'}
+                    <button className="matricula-flow-primary" disabled={loading || wompiCheckoutLoading || switchingStudent} onClick={onStartPayment} type="button">
+                      {loading || wompiCheckoutLoading || switchingStudent ? 'Abriendo Wompi...' : 'Pagar matrícula con Wompi'}
                     </button>
                     {wompiCheckoutConfig?.reference ? (
                       <button className="matricula-flow-secondary" disabled={loading} onClick={refreshProcess} type="button">

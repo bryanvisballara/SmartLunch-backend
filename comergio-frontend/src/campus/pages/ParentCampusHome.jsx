@@ -5840,7 +5840,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     setMatriculaAccessGate('checking');
 
     try {
-      await getParentAcademicBilling().catch(() => null);
+      const billingResponse = await getParentAcademicBilling().catch(() => null);
+      if (billingResponse?.data) {
+        setAcademicBilling(billingResponse.data);
+      }
 
       const [requirementResponse, pendingSignature] = await Promise.all([
         getEnrollmentMatriculaRequirement(),
@@ -6213,6 +6216,44 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
     return resolveParentPricingGuide(academicBilling.pricingGuides, selectedChild, financeCharges);
   }, [academicBilling.pricingGuides, financeCharges, selectedChild]);
+
+  const matriculaPaymentOptions = useMemo(() => {
+    if (!isMillenniumParent) {
+      return [];
+    }
+
+    const pendingCharges = (academicBilling.charges || []).filter((item) => (
+      String(item.category || '').toLowerCase() === 'annual_tuition'
+      && ['pending', 'overdue'].includes(String(item.status || '').toLowerCase())
+    ));
+
+    return pendingCharges.map((item) => {
+      const amount = Number(item.amount || 0);
+      const originalAmount = Number(item.originalAmount || item.chargeAmount || item.amount || 0);
+      return {
+        chargeId: String(item._id || item.id || ''),
+        studentId: String(item.studentId?._id || item.studentId || ''),
+        studentName: item.studentName || item.student?.name || 'Estudiante',
+        concept: item.concept || 'Matrícula anual',
+        amount,
+        originalAmount,
+        hasDiscount: originalAmount > amount && amount > 0,
+      };
+    }).filter((item) => item.chargeId);
+  }, [academicBilling.charges, isMillenniumParent]);
+
+  const onMatriculaPaymentStudentChange = useCallback(async (chargeId) => {
+    const response = await getEnrollmentMatriculaProcess(chargeId);
+    const nextProcess = response.data?.process;
+    if (!nextProcess) {
+      throw new Error('No se pudo cargar el proceso de matrícula para ese estudiante.');
+    }
+
+    setMatriculaProcess(nextProcess);
+    setMatriculaFlowCharge(nextProcess.charge || null);
+    setMatriculaFlowPendingResume(false);
+    setMatriculaAccessGate('blocked');
+  }, []);
 
   const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
   const shouldLockParentPortal = isMillenniumParent && (
@@ -7271,6 +7312,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               refreshMatriculaPendingSignatures();
             }
           }}
+          onPaymentStudentChange={onMatriculaPaymentStudentChange}
+          paymentOptions={matriculaPaymentOptions}
           blocking={isBlockingMatriculaFlow}
           open={matriculaFlowOpen}
           pendingSignatureResume={matriculaFlowPendingResume}
