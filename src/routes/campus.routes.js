@@ -1922,6 +1922,7 @@ function resolveTeacherCourseClassSessionsFromStructure(academicStructure, teach
 
 async function findExistingTeacherCourseForCandidate({ schoolId, teacherUserId, candidate }) {
   const candidateCourseType = candidate.courseType || 'subject';
+  const candidateSection = normalizeText(candidate.section);
   const baseQuery = {
     schoolId,
     teacherUserId,
@@ -1935,24 +1936,40 @@ async function findExistingTeacherCourseForCandidate({ schoolId, teacherUserId, 
     candidate.sourceCourseKey
       ? { sourceCourseKey: candidate.sourceCourseKey, subject: candidate.subject, studentGradeKey: candidate.studentGradeKey }
       : null,
-    candidate.section
+    candidateSection
       ? { subject: candidate.subject, studentGradeKey: candidate.studentGradeKey, section: candidate.section }
       : null,
-    candidate.section
+    candidateSection
       ? { subject: candidate.subject, gradeLevel: candidate.gradeLevel, section: candidate.section }
       : null,
-    candidate.section
+    candidateSection
       ? { title: candidate.title, studentGradeKey: candidate.studentGradeKey, section: candidate.section }
       : null,
-    { title: candidate.title, studentGradeKey: candidate.studentGradeKey },
-    { subject: candidate.subject, studentGradeKey: candidate.studentGradeKey },
+    !candidateSection ? { title: candidate.title, studentGradeKey: candidate.studentGradeKey } : null,
+    !candidateSection ? { subject: candidate.subject, studentGradeKey: candidate.studentGradeKey } : null,
   ].filter(Boolean);
 
   for (const matcher of attempts) {
     const existingCourse = await CampusCourse.findOne({ ...baseQuery, ...matcher });
-    if (existingCourse) {
-      return existingCourse;
+    if (!existingCourse) {
+      continue;
     }
+
+    if (candidateSection && normalizeText(existingCourse.section)) {
+      const existingSectionIdentity = buildTeacherCourseSectionIdentity(existingCourse);
+      const candidateSectionIdentity = buildTeacherCourseSectionIdentity({
+        section: candidate.section,
+        studentGradeKey: candidate.studentGradeKey,
+        gradeLevel: candidate.gradeLevel,
+        sourceCourseKey: candidate.sourceCourseKey,
+      });
+
+      if (existingSectionIdentity && candidateSectionIdentity && existingSectionIdentity !== candidateSectionIdentity) {
+        continue;
+      }
+    }
+
+    return existingCourse;
   }
 
   return null;
@@ -2700,6 +2717,49 @@ function resolveCampusGradingScaleForCourse(gradingContext, course) {
   return (gradingContext?.gradingScalesByLevel instanceof Map && levelKey && gradingContext.gradingScalesByLevel.get(levelKey)) || defaultScale;
 }
 
+function buildTeacherOverviewCourseCards({
+  teacherUserId,
+  courses,
+  academicStructure,
+  gradingContext,
+  postsByCourseId,
+  gradeEntryCountByCourseId,
+  schoolStudents,
+}) {
+  return courses.map((course) => {
+    const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
+    const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, course);
+    const courseForSerialization = resolvedClassSessions.length > 0
+      && (!Array.isArray(course.classSessions) || course.classSessions.length === 0)
+      ? { ...course, classSessions: resolvedClassSessions }
+      : course;
+    const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale: courseGradingScale });
+    const courseId = String(course._id);
+    const studentRows = schoolStudents
+      .filter((student) => studentBelongsToCourse(student, course))
+      .map((student) => ({
+        studentId: String(student._id),
+        name: normalizeText(student.name),
+        schoolCode: normalizeText(student.schoolCode),
+        grade: normalizeText(student.grade),
+        course: normalizeText(student.course),
+        finalScore: null,
+        periods: [],
+        scores: [],
+      }));
+
+    return {
+      ...normalizedCourse,
+      stats: buildCourseCardStats({
+        courseDetail: { students: studentRows },
+        posts: postsByCourseId.get(courseId) || [],
+        gradingScale: courseGradingScale,
+        hasGradeEntries: Number(gradeEntryCountByCourseId.get(courseId) || 0) > 0,
+      }),
+    };
+  });
+}
+
 function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingScore: 70 }, hasGradeEntries = null }) {
   const passingScore = Number(gradingScale?.passingScore ?? 70);
   const students = Array.isArray(courseDetail?.students) ? courseDetail.students : [];
@@ -2775,7 +2835,7 @@ router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => 
 
     const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
 
-    const [teacherUser, courses, recentPosts, allCoursePosts, gradingContext] = await Promise.all([
+    const [teacherUser, courses, recentPosts, allCoursePosts, gradingContext, schoolStudents] = await Promise.all([
       User.findOne({ _id: userId, schoolId })
         .select('_id name username campusPhotoUrl campusPhotoThumbUrl')
         .lean(),
@@ -2791,6 +2851,9 @@ router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => 
         .select('courseId type status')
         .lean(),
       loadCampusGradingContext(schoolId),
+      Student.find({ schoolId, deletedAt: null, status: 'active' })
+        .select('_id name schoolCode grade course status')
+        .lean(),
     ]);
 
     const postsByCourseId = new Map();
@@ -2832,25 +2895,15 @@ router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => 
       return course;
     });
 
-    const normalizedCourses = await Promise.all(enrichedOverviewCourses.map(async (course) => {
-      const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
-      const courseDetail = await buildTeacherCourseDetail({
-        schoolId,
-        teacherUserId: userId,
-        course,
-        gradingScale: courseGradingScale,
-        academicStructure,
-      });
-      return {
-        ...courseDetail.course,
-        stats: buildCourseCardStats({
-          courseDetail,
-          posts: postsByCourseId.get(String(course._id)) || [],
-          gradingScale: courseGradingScale,
-          hasGradeEntries: Number(gradeEntryCountByCourseId.get(String(course._id)) || 0) > 0,
-        }),
-      };
-    }));
+    const normalizedCourses = buildTeacherOverviewCourseCards({
+      teacherUserId: userId,
+      courses: enrichedOverviewCourses,
+      academicStructure,
+      gradingContext,
+      postsByCourseId,
+      gradeEntryCountByCourseId,
+      schoolStudents,
+    });
     const normalizedRecentPosts = serializeArray(recentPosts, serializePost);
 
     return res.status(200).json({

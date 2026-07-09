@@ -36,17 +36,121 @@ const weekdayShortLabels = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
 const weekdayLongLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const maxMaterialFileBytes = 25 * 1024 * 1024;
 const maxMaterialFileCount = 6;
+
+const teacherNavGroups = [
+  { id: 'main', label: null, keys: ['dashboard', 'schedule', 'courses'] },
+  {
+    id: 'teaching',
+    label: 'Enseñanza',
+    keys: [
+      'guidance_routine',
+      'attendance',
+      'academic_management',
+      'academic_content',
+      'school_coexistence',
+      'social_publications',
+      'resource_requests',
+    ],
+  },
+];
+
+function TeacherSectionIcon({ icon }) {
+  const common = {
+    fill: 'none',
+    viewBox: '0 0 24 24',
+    xmlns: 'http://www.w3.org/2000/svg',
+    'aria-hidden': true,
+  };
+
+  switch (icon) {
+    case 'home':
+      return (
+        <svg {...common}>
+          <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'calendar':
+      return (
+        <svg {...common}>
+          <path d="M7 3v2M17 3v2M4.5 9h15M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'courses':
+      return (
+        <svg {...common}>
+          <path d="M4 7.5 12 3l8 4.5-8 4.5-8-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M4 12.5 12 17l8-4.5M4 17.5 12 22l8-4.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'guidance':
+      return (
+        <svg {...common}>
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M9 12h6M9 16h6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'attendance':
+      return (
+        <svg {...common}>
+          <path d="M9 11l2 2 4-4M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'academic':
+      return (
+        <svg {...common}>
+          <path d="M12 3v18M8 7.5 12 5.5l4 2M8 12.5 12 10.5l4 2M8 17.5 12 15.5l4 2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'content':
+      return (
+        <svg {...common}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M14 2v6h6M8 13h8M8 17h8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'coexistence':
+      return (
+        <svg {...common}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'publications':
+      return (
+        <svg {...common}>
+          <path d="M4 16l4.586-4.586a2 2 0 0 1 2.828 0L16 16M14 14l1.586-1.586a2 2 0 0 1 2.828 0L22 18" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M3 20h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'resources':
+      return (
+        <svg {...common}>
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+        </svg>
+      );
+  }
+}
+
 const teacherSectionOptions = [
-  { key: 'dashboard', label: 'Dashboard', description: 'Ver KPI clave, alertas y salud general de tus cursos.' },
-  { key: 'schedule', label: 'Horario', description: 'Consultar el horario asignado desde Rectoría.' },
-  { key: 'courses', label: 'Cursos', description: 'Ver todos los cursos donde dictas clase.' },
-  { key: 'guidance_routine', label: 'Guidance Routine', description: 'Tomar asistencia de la rutina de orientacion del curso asignado.' },
-  { key: 'attendance', label: 'Asistencia a clase', description: 'Registrar si el alumno entró a tiempo, llegó tarde o no asistió a tu clase.' },
-  { key: 'academic_management', label: 'Gestión académica', description: 'Definir evaluación y crear contenido académico por materia.' },
-  { key: 'academic_content', label: 'Contenido académico', description: 'Planear los temas de estudio por grado y asignatura.' },
-  { key: 'school_coexistence', label: 'Convivencia escolar', description: 'Registrar observaciones de comportamiento para seguimiento institucional.' },
-  { key: 'social_publications', label: 'Publicaciones', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
-  { key: 'resource_requests', label: 'Recursos didácticos', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
+  { key: 'dashboard', label: 'Inicio', icon: 'home', description: 'Ver KPI clave, alertas y salud general de tus cursos.' },
+  { key: 'schedule', label: 'Horario', icon: 'calendar', description: 'Consultar el horario asignado desde Rectoría.' },
+  { key: 'courses', label: 'Cursos', icon: 'courses', description: 'Ver todos los cursos donde dictas clase.' },
+  { key: 'guidance_routine', label: 'Guidance Routine', icon: 'guidance', description: 'Tomar asistencia de la rutina de orientacion del curso asignado.' },
+  { key: 'attendance', label: 'Asistencia a clase', icon: 'attendance', description: 'Registrar si el alumno entró a tiempo, llegó tarde o no asistió a tu clase.' },
+  { key: 'academic_management', label: 'Gestión académica', icon: 'academic', description: 'Definir evaluación y crear contenido académico por materia.' },
+  { key: 'academic_content', label: 'Contenido académico', icon: 'content', description: 'Planear los temas de estudio por grado y asignatura.' },
+  { key: 'school_coexistence', label: 'Convivencia escolar', icon: 'coexistence', description: 'Registrar observaciones de comportamiento para seguimiento institucional.' },
+  { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
+  { key: 'resource_requests', label: 'Recursos didácticos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
 ];
 
 const teacherResourcePriorityOptions = [
@@ -154,9 +258,33 @@ const teacherDisciplineStatusLabels = {
 };
 
 const teacherCourseWorkspaceTabs = [
-  { key: 'posts', label: 'Asignaciones' },
   { key: 'grading', label: 'Estructura de notas' },
+  { key: 'posts', label: 'Trabajo de clase' },
   { key: 'gradebook', label: 'Libro de notas' },
+];
+
+const classworkAttachOptions = [
+  {
+    key: 'drive',
+    label: 'Archivo',
+    accept: '.pdf,image/*,video/*,audio/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip',
+  },
+  { key: 'youtube', label: 'YouTube', action: 'youtube' },
+  {
+    key: 'document',
+    label: 'Documento',
+    accept: '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt',
+  },
+  {
+    key: 'upload',
+    label: 'Subir',
+    accept: '.pdf,image/*,video/*,audio/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip',
+    append: false,
+  },
+  { key: 'link', label: 'Enlace', action: 'link' },
+  { key: 'image', label: 'Imagen', accept: 'image/*' },
+  { key: 'video', label: 'Video', accept: 'video/*' },
+  { key: 'audio', label: 'Audio', accept: 'audio/*' },
 ];
 
 const teacherAttendanceStatusOptions = [
@@ -177,6 +305,8 @@ function createPostDraft(courseId = '') {
     dueAt: '',
     scheduledClassDate: '',
     scheduledClassSessionKey: '',
+    targetType: 'course',
+    targetStudentIds: [],
     addToGradebook: false,
     gradebookPeriodKey: '',
     gradebookComponentKey: '',
@@ -258,26 +388,35 @@ function createAcademicContentTopicDraft(index = 0) {
 
 function buildAssignmentComponentOptions(periods = []) {
   const normalizedPeriods = Array.isArray(periods) ? periods : [];
-  const showPeriodPrefix = normalizedPeriods.length > 1;
+  const seenNames = new Set();
+  const options = [];
 
-  return normalizedPeriods.flatMap((period, periodIndex) => (
+  normalizedPeriods.forEach((period, periodIndex) => {
     (period.gradingComponents || [])
       .filter((component) => String(component.name || '').trim())
-      .map((component, componentIndex) => {
+      .forEach((component, componentIndex) => {
         const name = String(component.name || '').trim();
+        const dedupeKey = normalizePostType(name).toLowerCase();
+        if (seenNames.has(dedupeKey)) {
+          return;
+        }
+
+        seenNames.add(dedupeKey);
         const key = slugifyComponentKey(component.key || name || `component_${componentIndex + 1}`);
         const periodKey = slugifyComponentKey(period.key || period.name || `period_${periodIndex + 1}`);
         const periodName = String(period.name || '').trim() || `Periodo ${periodIndex + 1}`;
 
-        return {
+        options.push({
           key,
           name,
           periodKey,
           periodName,
-          label: showPeriodPrefix ? `${periodName} · ${name}` : name,
-        };
-      })
-  ));
+          label: name,
+        });
+      });
+  });
+
+  return options;
 }
 
 function normalizePostType(value) {
@@ -287,6 +426,152 @@ function normalizePostType(value) {
 function isEvaluativePostType(value) {
   const normalizedType = normalizePostType(value).toLowerCase();
   return Boolean(normalizedType) && !['aviso', 'announcement', 'material'].includes(normalizedType);
+}
+
+function formatPostedDate(post) {
+  const rawDate = post?.publishedAt || post?.createdAt || post?.updatedAt;
+  if (!rawDate) {
+    return 'Sin fecha';
+  }
+
+  const parsed = new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Sin fecha';
+  }
+
+  return parsed.toLocaleDateString('es', { month: 'short', day: 'numeric' });
+}
+
+function getClassworkTypeTone(type) {
+  const normalized = normalizePostType(type).toLowerCase();
+  if (normalized.includes('quiz')) {
+    return 'quiz';
+  }
+  if (normalized.includes('material') || normalized.includes('cuaderno')) {
+    return 'material';
+  }
+  if (normalized.includes('aviso') || normalized.includes('announcement') || normalized.includes('pregunta')) {
+    return 'question';
+  }
+  if (normalized.includes('examen') || normalized.includes('expos')) {
+    return 'quiz';
+  }
+  return 'assignment';
+}
+
+function ClassworkTypeIcon({ type }) {
+  const tone = getClassworkTypeTone(type);
+  const common = {
+    fill: 'none',
+    viewBox: '0 0 24 24',
+    xmlns: 'http://www.w3.org/2000/svg',
+    'aria-hidden': true,
+  };
+
+  if (tone === 'quiz') {
+    return (
+      <svg {...common}>
+        <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12h6M9 16h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+
+  if (tone === 'material') {
+    return (
+      <svg {...common}>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+
+  if (tone === 'question') {
+    return (
+      <svg {...common}>
+        <path d="M8 10a4 4 0 1 1 8 0c0 2-2 2.5-3 3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        <circle cx="12" cy="18" r="1" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...common}>
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12h6M9 16h6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function ClassworkAttachIcon({ kind }) {
+  const common = {
+    fill: 'none',
+    viewBox: '0 0 24 24',
+    xmlns: 'http://www.w3.org/2000/svg',
+    'aria-hidden': true,
+  };
+
+  switch (kind) {
+    case 'youtube':
+      return (
+        <svg {...common}>
+          <rect fill="#FF0000" height="14" rx="3" width="20" x="2" y="5" />
+          <path d="M10 9.5v5l5-2.5-5-2.5Z" fill="#ffffff" />
+        </svg>
+      );
+    case 'image':
+      return (
+        <svg {...common}>
+          <rect fill="#34A853" height="16" rx="2" width="16" x="4" y="4" />
+          <circle cx="9" cy="9" fill="#ffffff" r="1.5" />
+          <path d="m6 16 4-4 3 3 2-2 3 3" stroke="#ffffff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+        </svg>
+      );
+    case 'video':
+      return (
+        <svg {...common}>
+          <rect fill="#EA4335" height="14" rx="2" width="18" x="3" y="5" />
+          <path d="M11 9.5v5l4.5-2.5L11 9.5Z" fill="#ffffff" />
+        </svg>
+      );
+    case 'document':
+      return (
+        <svg {...common}>
+          <path d="M8 3h6l4 4v14H8V3Z" fill="#4285F4" />
+          <path d="M14 3v4h4" fill="#8AB4F8" />
+          <path d="M10 13h6M10 16h6" stroke="#ffffff" strokeLinecap="round" strokeWidth="1.5" />
+        </svg>
+      );
+    case 'audio':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" fill="#9334E6" r="9" />
+          <path d="M9 9.5v5M12 8v8M15 10v4" stroke="#ffffff" strokeLinecap="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'link':
+      return (
+        <svg {...common}>
+          <path d="M10 13a3.5 3.5 0 0 0 5 0l2-2a3.5 3.5 0 0 0-5-5l-1 1" stroke="#1A73E8" strokeLinecap="round" strokeWidth="1.8" />
+          <path d="M14 11a3.5 3.5 0 0 0-5 0l-2 2a3.5 3.5 0 0 0 5 5l1-1" stroke="#1A73E8" strokeLinecap="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'drive':
+      return (
+        <svg {...common}>
+          <path d="m6.5 16 3.5-6h8l3.5 6H6.5Z" fill="#FBBC04" />
+          <path d="m4 16 4-7h6l-2 7H4Z" fill="#34A853" />
+          <path d="M12 9 15 16h6l-3-7h-6Z" fill="#4285F4" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <path d="M12 16V8m0 0 3.5 3.5M12 8 8.5 11.5" stroke="#5F6368" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+          <path d="M6 19h12" stroke="#5F6368" strokeLinecap="round" strokeWidth="1.8" />
+        </svg>
+      );
+  }
 }
 
 function formatPostTypeLabel(value) {
@@ -574,6 +859,8 @@ function buildPostDraftFromPost(post, fallbackCourseId = '') {
     dueAt: toDateTimeLocalValue(post?.dueAt),
     scheduledClassDate: toDateInputValue(post?.scheduledClassDate),
     scheduledClassSessionKey: scheduledSession ? buildSessionKey(scheduledSession) : '',
+    targetType: post?.targetType || 'course',
+    targetStudentIds: Array.isArray(post?.targetStudentIds) ? post.targetStudentIds : [],
     addToGradebook: false,
     gradebookPeriodKey: '',
     gradebookComponentKey: '',
@@ -1149,14 +1436,14 @@ function getCourseGradeLabel(course) {
 }
 
 function getCourseGradeGroupLabel(course) {
-  const educationalLabel = resolveEducationalGradeLabel(course);
-  if (educationalLabel) {
-    return educationalLabel;
-  }
-
   const subjectLabel = normalizeCourseDisplayText(course?.subject);
   const gradeLabel = getCourseGradeLabel(course);
-  return [subjectLabel, gradeLabel].filter(Boolean).join(' · ') || getCourseDisplayTitle(course);
+
+  if (subjectLabel && gradeLabel) {
+    return `${subjectLabel} · ${gradeLabel}`;
+  }
+
+  return gradeLabel || subjectLabel || getCourseDisplayTitle(course);
 }
 
 function buildGradeAliasSet(course, groupLabel) {
@@ -2037,7 +2324,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [activeTeacherSection, setActiveTeacherSection] = useState('dashboard');
   const [selectedSubjectKey, setSelectedSubjectKey] = useState('');
   const [selectedPortalGradeKey, setSelectedPortalGradeKey] = useState('');
-  const [activeCourseWorkspaceTab, setActiveCourseWorkspaceTab] = useState('posts');
+  const [activeCourseWorkspaceTab, setActiveCourseWorkspaceTab] = useState('grading');
   const [showSelectedCourseWorkspace, setShowSelectedCourseWorkspace] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [timelineMonth, setTimelineMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -2049,9 +2336,13 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [showPostSuccessModal, setShowPostSuccessModal] = useState(false);
   const [gradebookSaveModal, setGradebookSaveModal] = useState(null);
   const [editingPostId, setEditingPostId] = useState('');
+  const [showAssignmentComposer, setShowAssignmentComposer] = useState(false);
+  const [showClassworkCreateMenu, setShowClassworkCreateMenu] = useState(false);
+  const [openPostMenuId, setOpenPostMenuId] = useState('');
   const [postDraft, setPostDraft] = useState(createPostDraft(''));
   const [materialLinks, setMaterialLinks] = useState([createMaterialLinkDraft()]);
   const [materialFiles, setMaterialFiles] = useState([]);
+  const [showAttachLinkPanel, setShowAttachLinkPanel] = useState(false);
   const [classScheduleDraft, setClassScheduleDraft] = useState([]);
   const [academicPeriodDrafts, setAcademicPeriodDrafts] = useState([]);
   const [academicContentDrafts, setAcademicContentDrafts] = useState([]);
@@ -2070,6 +2361,9 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [teacherAttendanceSaveModal, setTeacherAttendanceSaveModal] = useState(null);
   const teacherPhotoInputRef = useRef(null);
   const teacherMenuRef = useRef(null);
+  const classworkCreateMenuRef = useRef(null);
+  const classworkUploadInputRef = useRef(null);
+  const classworkUploadAppendRef = useRef(true);
   const isAttendanceLikeSection = activeTeacherSection === 'attendance' || activeTeacherSection === 'guidance_routine';
 
   const overviewQuery = useQuery({
@@ -2726,6 +3020,32 @@ function TeacherCampusHome({ forcePreview = false }) {
   }, [showTeacherMenu]);
 
   useEffect(() => {
+    if (!showClassworkCreateMenu || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (classworkCreateMenuRef.current && !classworkCreateMenuRef.current.contains(event.target)) {
+        setShowClassworkCreateMenu(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setShowClassworkCreateMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showClassworkCreateMenu]);
+
+  useEffect(() => {
     setSelectedTimelineDate('');
   }, [timelineCourseId, timelineMonth]);
 
@@ -3055,12 +3375,12 @@ function TeacherCampusHome({ forcePreview = false }) {
     });
   };
 
-  const onMaterialFilesChange = (event) => {
+  const onMaterialFilesChange = (event, { append = false } = {}) => {
     const incomingFiles = Array.from(event.target.files || []);
     const acceptedFiles = [];
     const rejectedFiles = [];
 
-    incomingFiles.slice(0, maxMaterialFileCount).forEach((file) => {
+    incomingFiles.forEach((file) => {
       if (Number(file.size || 0) > maxMaterialFileBytes) {
         rejectedFiles.push(file.name);
         return;
@@ -3069,7 +3389,14 @@ function TeacherCampusHome({ forcePreview = false }) {
       acceptedFiles.push(file);
     });
 
-    setMaterialFiles(acceptedFiles);
+    setMaterialFiles((currentFiles) => {
+      const mergedFiles = append ? [...currentFiles, ...acceptedFiles] : acceptedFiles;
+      return mergedFiles.slice(0, maxMaterialFileCount);
+    });
+
+    if (event.target) {
+      event.target.value = '';
+    }
 
     if (rejectedFiles.length > 0) {
       setNotice({
@@ -3077,6 +3404,100 @@ function TeacherCampusHome({ forcePreview = false }) {
         text: `Estos archivos exceden ${Math.round(maxMaterialFileBytes / (1024 * 1024))} MB por archivo: ${rejectedFiles.join(', ')}`,
       });
     }
+  };
+
+  const onPickMaterialFiles = (accept, { append = true } = {}) => {
+    if (!classworkUploadInputRef.current) {
+      return;
+    }
+
+    classworkUploadAppendRef.current = append;
+    classworkUploadInputRef.current.accept = accept;
+    classworkUploadInputRef.current.click();
+  };
+
+  const onRemoveMaterialFile = (fileIndex) => {
+    setMaterialFiles((currentFiles) => currentFiles.filter((_, index) => index !== fileIndex));
+  };
+
+  const onAddWebLink = () => {
+    setShowAttachLinkPanel(true);
+    onAddMaterialLink();
+  };
+
+  const onAddYoutubeLink = () => {
+    setShowAttachLinkPanel(true);
+    setMaterialLinks((currentLinks) => {
+      const nextLinks = [...currentLinks];
+      const emptyIndex = nextLinks.findIndex((link) => !String(link.url || '').trim() && !String(link.title || '').trim());
+      const youtubeDraft = { title: 'Video de YouTube', url: 'https://www.youtube.com/watch?v=' };
+
+      if (emptyIndex >= 0) {
+        nextLinks[emptyIndex] = youtubeDraft;
+        return nextLinks;
+      }
+
+      return [...nextLinks, youtubeDraft];
+    });
+  };
+
+  const onAttachOptionClick = (option) => {
+    if (option.action === 'link') {
+      onAddWebLink();
+      return;
+    }
+
+    if (option.action === 'youtube') {
+      onAddYoutubeLink();
+      return;
+    }
+
+    if (option.accept) {
+      onPickMaterialFiles(option.accept, { append: option.append !== false });
+    }
+  };
+
+  const openAssignmentComposer = (componentOption = null) => {
+    const courseId = selectedCourse?.id || postDraft.courseId || '';
+    const nextDraft = createPostDraft(courseId);
+    const matchingOption = componentOption && typeof componentOption === 'object'
+      ? componentOption
+      : assignmentComponentOptions.find((option) => {
+        const optionName = normalizePostType(option.name).toLowerCase();
+        const preferred = normalizePostType(componentOption).toLowerCase();
+        return optionName === preferred || optionName.includes(preferred) || preferred.includes(optionName);
+      });
+
+    if (matchingOption) {
+      nextDraft.type = matchingOption.name;
+      nextDraft.gradebookPeriodKey = matchingOption.periodKey;
+      nextDraft.gradebookComponentKey = matchingOption.key;
+      nextDraft.addToGradebook = true;
+    } else if (assignmentComponentOptions[0]) {
+      nextDraft.type = assignmentComponentOptions[0].name;
+      nextDraft.gradebookPeriodKey = assignmentComponentOptions[0].periodKey;
+      nextDraft.gradebookComponentKey = assignmentComponentOptions[0].key;
+      nextDraft.addToGradebook = true;
+    }
+
+    setEditingPostId('');
+    setPostDraft(nextDraft);
+    setMaterialLinks([createMaterialLinkDraft()]);
+    setMaterialFiles([]);
+    setShowAttachLinkPanel(false);
+    setOpenPostMenuId('');
+    setShowClassworkCreateMenu(false);
+    setShowAssignmentComposer(true);
+  };
+
+  const closeAssignmentComposer = () => {
+    setEditingPostId('');
+    setPostDraft(createPostDraft(selectedCourse?.id || ''));
+    setMaterialLinks([createMaterialLinkDraft()]);
+    setMaterialFiles([]);
+    setShowAttachLinkPanel(false);
+    setShowAssignmentComposer(false);
+    setOpenPostMenuId('');
   };
 
   const onCreatePost = async (event) => {
@@ -3264,6 +3685,8 @@ function TeacherCampusHome({ forcePreview = false }) {
       setPostDraft(createPostDraft(payload.courseId));
       setMaterialLinks([createMaterialLinkDraft()]);
       setMaterialFiles([]);
+      setShowAttachLinkPanel(false);
+      setShowAssignmentComposer(false);
 
       if (wasEditing) {
         setNotice({ type: 'success', text: 'Asignacion actualizada.' });
@@ -3282,10 +3705,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onCancelEditPost = () => {
-    setEditingPostId('');
-    setPostDraft(createPostDraft(selectedCourse?.id || ''));
-    setMaterialLinks([createMaterialLinkDraft()]);
-    setMaterialFiles([]);
+    closeAssignmentComposer();
   };
 
   const onEditPost = (post) => {
@@ -3293,6 +3713,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     setPostDraft(buildPostDraftFromPost(post, selectedCourse?.id || ''));
     setMaterialLinks(buildMaterialLinksFromPost(post));
     setMaterialFiles([]);
+    setShowAssignmentComposer(true);
+    setOpenPostMenuId('');
 
     if (post.scheduledClassDate) {
       const parsedDate = new Date(post.scheduledClassDate);
@@ -4423,7 +4845,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         </div>
 
         <div className="campus-teacher__hero-brand">
-          <img alt="Comergio Campus Docentes" className="campus-teacher__hero-brand-image" src="/campus/comergiodocentes2.png" />
+          <img alt="Comergio Campus Docentes" className="campus-teacher__hero-brand-image" src="/campus/comergio-docentes-colibri.png" />
         </div>
 
         <div className="campus-teacher__hero-side campus-teacher__hero-side--right">
@@ -4458,83 +4880,100 @@ function TeacherCampusHome({ forcePreview = false }) {
       </header>
 
       <div className="campus-teacher__frame">
-        <aside className="campus-teacher__sidebar">
-          <article className="campus-teacher__sidebar-card campus-teacher__panel-surface">
-            <span className="campus-teacher__sidebar-title">Resumen rapido</span>
-            <div className="campus-teacher__sidebar-metrics">
-              <div>
-                <strong>{summary.totalCourses}</strong>
-                <span>Cursos</span>
-              </div>
-              <div>
-                <strong>{summary.totalStudents}</strong>
-                <span>Alumnos</span>
-              </div>
-            </div>
-          </article>
+        <aside className="campus-teacher__sidebar campus-teacher__rail">
+          <nav aria-label="Portal docente" className="campus-teacher__rail-nav">
+            {teacherNavGroups.map((group) => {
+              const groupOptions = group.keys
+                .map((key) => availableTeacherSectionOptions.find((option) => option.key === key))
+                .filter(Boolean);
 
-          <article className="campus-teacher__sidebar-card campus-teacher__panel-surface">
-            <span className="campus-teacher__sidebar-title">Opciones del portal</span>
-            <div className="campus-teacher__nav-list">
-              {availableTeacherSectionOptions.map((option) => {
-                const isActive = activeTeacherSection === option.key;
+              if (!groupOptions.length) {
+                return null;
+              }
 
-                if (option.key === 'academic_management' || option.key === 'academic_content') {
-                  return (
-                    <div className={`campus-teacher__nav-item campus-teacher__nav-item--expandable${isActive ? ' is-active' : ''}`} key={option.key}>
-                      <button
-                        className="campus-teacher__nav-item-toggle"
-                        onClick={() => {
-                          setActiveTeacherSection((currentSection) => (currentSection === option.key ? 'dashboard' : option.key));
-                        }}
-                        type="button"
-                      >
-                        <strong>{option.label}</strong>
-                        <span>{option.description}</span>
-                      </button>
+              return (
+                <div className="campus-teacher__rail-group" key={group.id}>
+                  {group.label ? <p className="campus-teacher__rail-group-label">{group.label}</p> : null}
+                  <div className="campus-teacher__nav-list">
+                    {groupOptions.map((option) => {
+                      const isActive = activeTeacherSection === option.key;
+                      const isExpandable = option.key === 'academic_management' || option.key === 'academic_content';
 
-                      {isActive ? (
-                        <div className="campus-teacher__subject-list campus-teacher__subject-list--embedded">
-                          {subjectGroups.map((subject) => {
-                            const isSelected = selectedSubjectKey === subject.key;
-                            return (
-                              <button
-                                className={`campus-teacher__subject-item${isSelected ? ' is-active' : ''}`}
-                                key={subject.key}
-                                onClick={() => {
-                                  setSelectedSubjectKey(subject.key);
-                                  setShowSelectedCourseWorkspace(false);
-                                }}
-                                type="button"
-                              >
-                                <strong>{subject.label}</strong>
-                                <span>{subject.courses.length} curso{subject.courses.length === 1 ? '' : 's'}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                }
+                      if (isExpandable) {
+                        return (
+                          <div className={`campus-teacher__nav-item campus-teacher__nav-item--expandable${isActive ? ' is-active' : ''}`} key={option.key}>
+                            <button
+                              aria-expanded={isActive}
+                              className="campus-teacher__nav-item-toggle"
+                              onClick={() => {
+                                setActiveTeacherSection((currentSection) => (currentSection === option.key ? 'dashboard' : option.key));
+                              }}
+                              type="button"
+                            >
+                              <span className="campus-teacher__nav-item-icon">
+                                <TeacherSectionIcon icon={option.icon} />
+                              </span>
+                              <span className="campus-teacher__nav-item-label">{option.label}</span>
+                              <svg aria-hidden="true" className="campus-teacher__nav-item-chevron" fill="none" viewBox="0 0 24 24">
+                                <path d={isActive ? 'M6 15l6-6 6 6' : 'M9 6l6 6-6 6'} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                              </svg>
+                            </button>
 
-                return (
-                  <button
-                    className={`campus-teacher__nav-item${isActive ? ' is-active' : ''}`}
-                    key={option.key}
-                    onClick={() => {
-                      setShowSelectedCourseWorkspace(false);
-                      setActiveTeacherSection(option.key);
-                    }}
-                    type="button"
-                  >
-                    <strong>{option.label}</strong>
-                    <span>{option.description}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </article>
+                            {isActive ? (
+                              <div className="campus-teacher__subject-list campus-teacher__subject-list--embedded">
+                                {subjectGroups.map((subject) => {
+                                  const isSelected = selectedSubjectKey === subject.key;
+                                  return (
+                                    <button
+                                      className={`campus-teacher__subject-item${isSelected ? ' is-active' : ''}`}
+                                      key={subject.key}
+                                      onClick={() => {
+                                        setSelectedSubjectKey(subject.key);
+                                        setShowSelectedCourseWorkspace(false);
+                                      }}
+                                      type="button"
+                                    >
+                                      <span className="campus-teacher__subject-item-label">{subject.label}</span>
+                                      <span className="campus-teacher__subject-item-meta">
+                                        {subject.courses.length} curso{subject.courses.length === 1 ? '' : 's'}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <button
+                          className={`campus-teacher__nav-item${isActive ? ' is-active' : ''}`}
+                          key={option.key}
+                          onClick={() => {
+                            setShowSelectedCourseWorkspace(false);
+                            setActiveTeacherSection(option.key);
+                          }}
+                          type="button"
+                        >
+                          <span className="campus-teacher__nav-item-icon">
+                            <TeacherSectionIcon icon={option.icon} />
+                          </span>
+                          <span className="campus-teacher__nav-item-label">{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </nav>
+
+          <div className="campus-teacher__rail-footer">
+            <span>{summary.totalCourses} cursos</span>
+            <span aria-hidden="true">·</span>
+            <span>{summary.totalStudents} alumnos</span>
+          </div>
         </aside>
 
         <div className="campus-teacher__workspace">
@@ -4565,7 +5004,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                               setSelectedCourseId(firstCourse.id);
                               setTimelineCourseId(firstCourse.id);
                             }
-                            setActiveCourseWorkspaceTab('posts');
+                            setActiveCourseWorkspaceTab('grading');
                             setTimelineMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
                             setShowSelectedCourseWorkspace(activeTeacherSection === 'academic_content' && Boolean(firstCourse));
                           }}
@@ -4632,7 +5071,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           onChange={(event) => {
                             setSelectedCourseId(event.target.value);
                             setTimelineCourseId(event.target.value);
-                            setActiveCourseWorkspaceTab('posts');
+                            setActiveCourseWorkspaceTab('grading');
                             setShowSelectedCourseWorkspace(Boolean(event.target.value));
                           }}
                           value=""
@@ -4855,7 +5294,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                       </div>
                     ) : null}
 
-                    <div className="campus-teacher__subnav">
+                    <div className="campus-teacher__subnav campus-teacher__subnav--classroom">
                       {teacherCourseWorkspaceTabs.map((tab) => {
                         const isActive = activeCourseWorkspaceTab === tab.key;
                         return (
@@ -4872,431 +5311,486 @@ function TeacherCampusHome({ forcePreview = false }) {
                     </div>
 
                     {activeCourseWorkspaceTab === 'posts' ? (
-                      <>
-                      <form className="campus-teacher__composer campus-teacher__embedded-panel" onSubmit={onCreatePost}>
-                        {editingPostId ? (
-                          <div className="campus-teacher__section-head">
-                            <div>
-                              <span className="campus-panel__kicker">Edicion</span>
-                              <h2>Modificar asignacion</h2>
-                              <p className="campus-panel__meta">Los archivos adjuntos originales se conservan. Para cambiarlos, elimina esta asignacion y crea una nueva.</p>
-                            </div>
-                            <button className="campus-teacher__ghost-btn" onClick={onCancelEditPost} type="button">
-                              Cancelar edicion
-                            </button>
-                          </div>
-                        ) : null}
-                        <div className="campus-teacher__form-grid">
-                          <label className="campus-teacher__form-grid--full">
-                            Destinatarios
-                            <select
-                              value={postDraft.targetType || 'course'}
-                              onChange={e => setPostDraft(currentDraft => ({ ...currentDraft, targetType: e.target.value, targetStudentIds: [] }))}
-                            >
-                              <option value="course">Todo el curso</option>
-                              <option value="students">Seleccionar alumnos</option>
-                            </select>
-                          </label>
-                          {postDraft.targetType === 'students' && selectedCourseDetail?.students?.length > 0 && (
-                            <label className="campus-teacher__form-grid--full">
-                              Selecciona alumnos
-                              <Select
-                                isMulti
-                                options={selectedCourseDetail.students.map(student => ({
-                                  value: student.studentId,
-                                  label: student.name,
-                                }))}
-                                value={(postDraft.targetStudentIds || []).map(id => {
-                                  const student = selectedCourseDetail.students.find(s => s.studentId === id);
-                                  return student ? { value: student.studentId, label: student.name } : null;
-                                }).filter(Boolean)}
-                                onChange={selectedOptions => {
-                                  setPostDraft(currentDraft => ({
-                                    ...currentDraft,
-                                    targetStudentIds: selectedOptions.map(opt => opt.value),
-                                  }));
-                                }}
-                                placeholder="Selecciona uno o más alumnos..."
-                                classNamePrefix="react-select"
-                              />
-                            </label>
-                          )}
-                          <label>
-                            Curso
-                            <select value={postDraft.courseId} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, courseId: event.target.value }))}>
-                              <option value="">Selecciona un curso</option>
-                              {courses.map((course) => (
-                                <option key={course.id} value={course.id}>
-                                  {getCourseDisplayTitle(course)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label>
-                            Tipo
-                            <select
-                              disabled={assignmentComponentOptions.length === 0}
-                              value={postDraft.type}
-                              onChange={(event) => {
-                                const nextType = event.target.value;
-                                const matchingOption = assignmentComponentOptions.find((option) => option.name === nextType);
+                      <div className="campus-teacher__classwork">
+                        {showAssignmentComposer ? (
+                          <form className="campus-teacher__classwork-composer" onSubmit={onCreatePost}>
+                            <header className="campus-teacher__classwork-composer-header">
+                              <button aria-label="Cerrar" className="campus-teacher__classwork-close" onClick={onCancelEditPost} type="button">
+                                <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                                  <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+                                </svg>
+                              </button>
+                              <div className="campus-teacher__classwork-composer-title">
+                                <span className={`campus-teacher__classwork-type-icon is-${getClassworkTypeTone(postDraft.type)}`}>
+                                  <ClassworkTypeIcon type={postDraft.type} />
+                                </span>
+                                <strong>{editingPostId ? 'Editar' : 'Nueva'} {formatPostTypeLabel(postDraft.type) || 'asignación'}</strong>
+                              </div>
+                              <button className="campus-teacher__classwork-assign-btn" disabled={isBusy || courses.length === 0} type="submit">
+                                {editingPostId
+                                  ? (updatePostMutation.isPending ? 'Guardando...' : 'Guardar')
+                                  : (createPostMutation.isPending ? 'Publicando...' : 'Asignar')}
+                              </button>
+                            </header>
 
-                                setPostDraft((currentDraft) => ({
-                                  ...currentDraft,
-                                  type: nextType,
-                                  ...(matchingOption
-                                    ? {
-                                      gradebookPeriodKey: matchingOption.periodKey,
-                                      gradebookComponentKey: matchingOption.key,
-                                    }
-                                    : {}),
-                                }));
-                              }}
-                            >
-                              {assignmentComponentOptions.length === 0 ? (
-                                <option value="">Configura componentes en Estructura de notas</option>
-                              ) : (
-                                <>
-                                  {!assignmentComponentOptions.some((option) => option.name === postDraft.type) && postDraft.type ? (
-                                    <option value={postDraft.type}>{postDraft.type}</option>
-                                  ) : null}
-                                  {assignmentComponentOptions.map((option) => (
-                                    <option key={`${option.periodKey}-${option.key}`} value={option.name}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </>
-                              )}
-                            </select>
-                          </label>
-                          <label>
-                            Tipo de entrega
-                            <select value={postDraft.deliveryMode} onChange={(event) => setPostDraft((currentDraft) => ({
-                              ...currentDraft,
-                              deliveryMode: event.target.value,
-                              dueAt: '',
-                              scheduledClassDate: '',
-                              scheduledClassSessionKey: '',
-                            }))}>
-                              <option value="date">Entrega por fecha</option>
-                              <option value="class">Entrega por clase</option>
-                            </select>
-                          </label>
+                            <div className="campus-teacher__classwork-composer-body">
+                              <div className="campus-teacher__classwork-composer-main">
+                                <input
+                                  className="campus-teacher__classwork-title-input"
+                                  placeholder="Título*"
+                                  required
+                                  value={postDraft.title}
+                                  onChange={(event) => {
+                                    const nextTitle = event.target.value;
+                                    setPostDraft((currentDraft) => ({
+                                      ...currentDraft,
+                                      title: nextTitle,
+                                      ...(currentDraft.addToGradebook ? { gradebookSubcomponentTitle: nextTitle } : {}),
+                                    }));
+                                  }}
+                                />
+                                <textarea
+                                  className="campus-teacher__classwork-instructions"
+                                  placeholder="Instrucciones (opcional)"
+                                  rows={8}
+                                  value={postDraft.body}
+                                  onChange={(event) => {
+                                    const nextBody = event.target.value;
+                                    setPostDraft((currentDraft) => ({
+                                      ...currentDraft,
+                                      body: nextBody,
+                                      ...(currentDraft.addToGradebook ? { gradebookSubcomponentDescription: nextBody } : {}),
+                                    }));
+                                  }}
+                                />
+                                {editingPostId ? (
+                                  <p className="campus-teacher__classwork-edit-note">Los archivos adjuntos originales se conservan. Para cambiarlos, elimina esta asignación y crea una nueva.</p>
+                                ) : null}
 
-                          {postDraft.deliveryMode === 'date' ? (
-                            <label className="campus-teacher__form-grid--full">
-                              Límite de entrega
-                              <input type="datetime-local" value={postDraft.dueAt} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, dueAt: event.target.value }))} />
-                            </label>
-                          ) : (
-                            <div className="campus-teacher__form-grid--full campus-teacher__delivery-panel campus-teacher__delivery-panel--portal">
-                              {isPostFormScheduleLoading ? <p className="campus-panel__meta">Cargando horario del curso...</p> : null}
-                              {!isPostFormScheduleLoading && postFormClassSchedule.length === 0 ? <p className="campus-panel__meta">Primero coordinación debe asignar el horario del curso para poder publicar por clase.</p> : null}
-                              {!isPostFormScheduleLoading && postFormClassSchedule.length > 0 ? (
-                                <>
-                                  <div className="campus-teacher__calendar-head">
-                                    <button className="campus-teacher__ghost-btn" onClick={() => setCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} type="button">
-                                      Mes anterior
-                                    </button>
-                                    <strong>{formatMonthLabel(calendarMonth)}</strong>
-                                    <button className="campus-teacher__ghost-btn" onClick={() => setCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} type="button">
-                                      Mes siguiente
-                                    </button>
-                                  </div>
-                                  <div className="campus-teacher__calendar-grid">
-                                    {weekdayShortLabels.map((label) => (
-                                      <div className="campus-teacher__calendar-weekday" key={label}>{label}</div>
-                                    ))}
-                                    {classCalendar.map((cell) => (
-                                      cell.empty ? (
-                                        <div className="campus-teacher__calendar-day is-empty" key={cell.key} />
-                                      ) : (
+                                <section className="campus-teacher__classwork-attach">
+                                  <div className="campus-teacher__classwork-attach-panel">
+                                    <h3>Adjuntar</h3>
+                                    <div className="campus-teacher__classwork-attach-actions">
+                                      {classworkAttachOptions.map((option) => (
                                         <button
-                                          className={`campus-teacher__calendar-day${cell.hasClass ? ' has-class' : ''}${cell.isSelected ? ' is-selected' : ''}${cell.isToday ? ' is-today' : ''}`}
-                                          disabled={!cell.hasClass}
-                                          key={cell.key}
-                                          onClick={() => setPostDraft((currentDraft) => ({ ...currentDraft, scheduledClassDate: cell.dateValue, scheduledClassSessionKey: '' }))}
+                                          className={`campus-teacher__classwork-attach-btn is-${option.key}`}
+                                          key={option.key}
+                                          onClick={() => onAttachOptionClick(option)}
                                           type="button"
                                         >
-                                          <span>{cell.dayNumber}</span>
-                                          {cell.hasClass ? <small>{cell.sessionCount} clase{cell.sessionCount > 1 ? 's' : ''}</small> : null}
+                                          <span className="campus-teacher__classwork-attach-icon">
+                                            <ClassworkAttachIcon kind={option.key} />
+                                          </span>
+                                          <small>{option.label}</small>
                                         </button>
-                                      )
-                                    ))}
+                                      ))}
+                                    </div>
                                   </div>
-                                  {postDraft.scheduledClassDate ? (
-                                    <div className="campus-teacher__session-picker">
-                                      <p className="campus-panel__meta">Clase seleccionada para {formatDateLabel(postDraft.scheduledClassDate)}</p>
-                                      <div className="campus-shell__badges">
-                                        {selectedClassSessions.map((session) => {
-                                          const sessionKey = buildSessionKey(session);
-                                          const isActive = postDraft.scheduledClassSessionKey === sessionKey;
-                                          return (
-                                            <button
-                                              className={`campus-teacher__session-chip${isActive ? ' is-selected' : ''}`}
-                                              key={sessionKey}
-                                              onClick={() => setPostDraft((currentDraft) => ({ ...currentDraft, scheduledClassSessionKey: sessionKey }))}
-                                              type="button"
-                                            >
-                                              {session.label || weekdayLongLabels[Number(session.weekday)]} · {formatTimeRange(session.startTime, session.endTime)}
+                                  <input
+                                    accept=".pdf,image/*,video/*,audio/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                                    className="campus-teacher__hero-file-input"
+                                    multiple
+                                    onChange={(event) => onMaterialFilesChange(event, { append: classworkUploadAppendRef.current })}
+                                    ref={classworkUploadInputRef}
+                                    type="file"
+                                  />
+                                  <p className="campus-teacher__classwork-attach-hint">PDF, video, audio, foto o documentos. Máximo {maxMaterialFileCount} archivos de {Math.round(maxMaterialFileBytes / (1024 * 1024))} MB.</p>
+                                  {materialFiles.length > 0 ? (
+                                    <div className="campus-teacher__classwork-attach-files">
+                                      {materialFiles.map((file, fileIndex) => (
+                                        <div className="campus-teacher__classwork-attach-file" key={`${file.name}-${file.size}-${fileIndex}`}>
+                                          <span className="campus-teacher__classwork-attach-file-icon">
+                                            <ClassworkAttachIcon kind={file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document'} />
+                                          </span>
+                                          <div className="campus-teacher__classwork-attach-file-copy">
+                                            <strong>{file.name}</strong>
+                                            <span>{(Number(file.size || 0) / (1024 * 1024)).toFixed(1)} MB</span>
+                                          </div>
+                                          <button className="campus-teacher__classwork-attach-file-remove" onClick={() => onRemoveMaterialFile(fileIndex)} type="button">
+                                            ×
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  {showAttachLinkPanel || materialLinks.some((link) => String(link.url || '').trim()) || materialLinks.length > 1 ? (
+                                    <div className="campus-teacher__classwork-attach-links">
+                                      <div className="campus-teacher__classwork-attach-links-head">
+                                        <strong>Enlaces web</strong>
+                                        <button className="campus-teacher__ghost-btn" onClick={onAddWebLink} type="button">
+                                          + Agregar enlace
+                                        </button>
+                                      </div>
+                                      <div className="campus-teacher__link-stack">
+                                        {materialLinks.map((link, index) => (
+                                          <div className="campus-teacher__link-row" key={`material-link-${index + 1}`}>
+                                            <label>
+                                              Título
+                                              <input value={link.title} onChange={(event) => onChangeMaterialLink(index, 'title', event.target.value)} />
+                                            </label>
+                                            <label>
+                                              URL
+                                              <input placeholder="https://..." value={link.url} onChange={(event) => onChangeMaterialLink(index, 'url', event.target.value)} />
+                                            </label>
+                                            <button className="campus-teacher__ghost-btn" onClick={() => onRemoveMaterialLink(index)} type="button">
+                                              Quitar
                                             </button>
-                                          );
-                                        })}
+                                          </div>
+                                        ))}
                                       </div>
                                     </div>
                                   ) : null}
-                                </>
-                              ) : null}
-                            </div>
-                          )}
-
-                          <label className="campus-teacher__form-grid--full">
-                            Título
-                            <input
-                              value={postDraft.title}
-                              onChange={(event) => {
-                                const nextTitle = event.target.value;
-                                setPostDraft((currentDraft) => ({
-                                  ...currentDraft,
-                                  title: nextTitle,
-                                  ...(currentDraft.addToGradebook ? { gradebookSubcomponentTitle: nextTitle } : {}),
-                                }));
-                              }}
-                            />
-                          </label>
-                          <label className="campus-teacher__form-grid--full">
-                            Descripción o instrucciones
-                            <textarea
-                              rows={5}
-                              value={postDraft.body}
-                              onChange={(event) => {
-                                const nextBody = event.target.value;
-                                setPostDraft((currentDraft) => ({
-                                  ...currentDraft,
-                                  body: nextBody,
-                                  ...(currentDraft.addToGradebook ? { gradebookSubcomponentDescription: nextBody } : {}),
-                                }));
-                              }}
-                            />
-                          </label>
-                          <div className="campus-teacher__form-grid--full campus-teacher__materials-panel campus-teacher__materials-panel--portal">
-                            <p className="campus-panel__meta">Puedes adjuntar PDF, video, audio, foto, enlaces web u otros archivos de apoyo. Máximo {maxMaterialFileCount} archivos de {Math.round(maxMaterialFileBytes / (1024 * 1024))} MB cada uno.</p>
-                            <label className="campus-teacher__file-field">
-                              Archivos de apoyo
-                              <input accept=".pdf,image/*,video/*,audio/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip" multiple onChange={onMaterialFilesChange} type="file" />
-                            </label>
-                            {materialFiles.length > 0 ? (
-                              <div className="campus-teacher__material-list">
-                                {materialFiles.map((file) => (
-                                  <div className="campus-teacher__material-item" key={`${file.name}-${file.size}`}>
-                                    <strong>{file.name}</strong>
-                                    <span>{(Number(file.size || 0) / (1024 * 1024)).toFixed(1)} MB</span>
-                                  </div>
-                                ))}
+                                </section>
                               </div>
-                            ) : null}
-                            <div className="campus-teacher__link-stack">
-                              {materialLinks.map((link, index) => (
-                                <div className="campus-teacher__link-row" key={`material-link-${index + 1}`}>
-                                  <label>
-                                    Título del enlace
-                                    <input value={link.title} onChange={(event) => onChangeMaterialLink(index, 'title', event.target.value)} />
-                                  </label>
-                                  <label>
-                                    URL
-                                    <input placeholder="https://..." value={link.url} onChange={(event) => onChangeMaterialLink(index, 'url', event.target.value)} />
-                                  </label>
-                                  <button className="campus-teacher__ghost-btn" onClick={() => onRemoveMaterialLink(index)} type="button">
-                                    Quitar
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                            <button className="campus-teacher__ghost-btn" onClick={onAddMaterialLink} type="button">
-                              Agregar link web
-                            </button>
-                          </div>
-                          <div className="campus-teacher__form-grid--full campus-teacher__delivery-panel campus-teacher__delivery-panel--portal">
-                            {!editingPostId ? (
-                            <label className="campus-teacher__checkbox-row">
-                              <input
-                                checked={Boolean(postDraft.addToGradebook)}
-                                onChange={(event) => setPostDraft((currentDraft) => ({
-                                  ...currentDraft,
-                                  addToGradebook: event.target.checked,
-                                  gradebookPeriodKey: event.target.checked ? (currentDraft.gradebookPeriodKey || selectedPostGradebookPeriod?.key || '') : currentDraft.gradebookPeriodKey,
-                                  gradebookComponentKey: event.target.checked ? (currentDraft.gradebookComponentKey || selectedPostGradebookComponent?.key || '') : currentDraft.gradebookComponentKey,
-                                  gradebookSubcomponentTitle: event.target.checked ? (currentDraft.gradebookSubcomponentTitle || currentDraft.title || '') : currentDraft.gradebookSubcomponentTitle,
-                                  gradebookSubcomponentDescription: event.target.checked ? (currentDraft.gradebookSubcomponentDescription || currentDraft.body || '') : currentDraft.gradebookSubcomponentDescription,
-                                }))}
-                                type="checkbox"
-                              />
-                              Agregar esta asignacion al libro de notas
-                            </label>
-                            ) : null}
-                            {postDraft.addToGradebook && !editingPostId ? (
-                              <div className="campus-teacher__form-grid">
-                                <label>
-                                  Periodo
-                                  <select
-                                    value={postDraft.gradebookPeriodKey || selectedPostGradebookPeriod?.key || ''}
-                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookPeriodKey: event.target.value, gradebookComponentKey: '' }))}
-                                  >
-                                    {postGradebookPeriodOptions.map((period) => (
-                                      <option key={period.key} value={period.key}>{period.name || period.key}</option>
+
+                              <aside className="campus-teacher__classwork-composer-rail">
+                                <label className="campus-teacher__classwork-rail-field">
+                                  <span>Para</span>
+                                  <select value={postDraft.courseId} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, courseId: event.target.value }))}>
+                                    <option value="">Selecciona un curso</option>
+                                    {courses.map((course) => (
+                                      <option key={course.id} value={course.id}>
+                                        {getCourseDisplayTitle(course)}
+                                      </option>
                                     ))}
                                   </select>
                                 </label>
-                                <label>
-                                  Componente
+
+                                <label className="campus-teacher__classwork-rail-field">
+                                  <span>Asignar a</span>
                                   <select
-                                    value={postDraft.gradebookComponentKey || selectedPostGradebookComponent?.key || ''}
-                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookComponentKey: event.target.value }))}
+                                    value={postDraft.targetType || 'course'}
+                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, targetType: event.target.value, targetStudentIds: [] }))}
                                   >
-                                    {postGradebookComponentOptions.map((component) => (
-                                      <option key={component.key} value={component.key}>{component.name || component.key}</option>
-                                    ))}
+                                    <option value="course">Todos los alumnos</option>
+                                    <option value="students">Alumnos seleccionados</option>
                                   </select>
                                 </label>
-                                <label>
-                                  % del componente
-                                  <input
-                                    max={selectedPostGradebookComponentWeightAvailable || 100}
-                                    min="0"
-                                    step="0.1"
-                                    type="number"
-                                    value={postDraft.gradebookWeight}
-                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookWeight: event.target.value }))}
-                                  />
+
+                                {postDraft.targetType === 'students' && selectedCourseDetail?.students?.length > 0 ? (
+                                  <div className="campus-teacher__classwork-rail-field">
+                                    <span>Alumnos</span>
+                                    <Select
+                                      isMulti
+                                      options={selectedCourseDetail.students.map((student) => ({
+                                        value: student.studentId,
+                                        label: student.name,
+                                      }))}
+                                      value={(postDraft.targetStudentIds || []).map((id) => {
+                                        const student = selectedCourseDetail.students.find((entry) => entry.studentId === id);
+                                        return student ? { value: student.studentId, label: student.name } : null;
+                                      }).filter(Boolean)}
+                                      onChange={(selectedOptions) => {
+                                        setPostDraft((currentDraft) => ({
+                                          ...currentDraft,
+                                          targetStudentIds: selectedOptions.map((opt) => opt.value),
+                                        }));
+                                      }}
+                                      placeholder="Selecciona alumnos..."
+                                      classNamePrefix="react-select"
+                                    />
+                                  </div>
+                                ) : null}
+
+                                <label className="campus-teacher__classwork-rail-field">
+                                  <span>Tipo</span>
+                                  <select
+                                    disabled={assignmentComponentOptions.length === 0}
+                                    value={postDraft.type}
+                                    onChange={(event) => {
+                                      const nextType = event.target.value;
+                                      const matchingOption = assignmentComponentOptions.find((option) => option.name === nextType);
+                                      setPostDraft((currentDraft) => ({
+                                        ...currentDraft,
+                                        type: nextType,
+                                        ...(matchingOption
+                                          ? {
+                                            gradebookPeriodKey: matchingOption.periodKey,
+                                            gradebookComponentKey: matchingOption.key,
+                                          }
+                                          : {}),
+                                      }));
+                                    }}
+                                  >
+                                    {assignmentComponentOptions.length === 0 ? (
+                                      <option value="">Configura Estructura de notas</option>
+                                    ) : (
+                                      <>
+                                        {!assignmentComponentOptions.some((option) => option.name === postDraft.type) && postDraft.type ? (
+                                          <option value={postDraft.type}>{postDraft.type}</option>
+                                        ) : null}
+                                        {assignmentComponentOptions.map((option) => (
+                                          <option key={`${option.periodKey}-${option.key}`} value={option.name}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </>
+                                    )}
+                                  </select>
                                 </label>
-                                <label className="campus-teacher__form-grid--full">
-                                  Titulo del subcomponente
-                                  <input
-                                    placeholder="Se rellena con el titulo de la asignacion"
-                                    value={postDraft.gradebookSubcomponentTitle}
-                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookSubcomponentTitle: event.target.value }))}
-                                  />
+
+                                <label className="campus-teacher__classwork-rail-field">
+                                  <span>Entrega</span>
+                                  <select
+                                    value={postDraft.deliveryMode}
+                                    onChange={(event) => setPostDraft((currentDraft) => ({
+                                      ...currentDraft,
+                                      deliveryMode: event.target.value,
+                                      dueAt: '',
+                                      scheduledClassDate: '',
+                                      scheduledClassSessionKey: '',
+                                    }))}
+                                  >
+                                    <option value="date">Por fecha</option>
+                                    <option value="class">Por clase</option>
+                                  </select>
                                 </label>
-                                <label className="campus-teacher__form-grid--full">
-                                  Descripcion del subcomponente
-                                  <textarea
-                                    placeholder="Se rellena con la descripcion de la asignacion"
-                                    rows={3}
-                                    value={postDraft.gradebookSubcomponentDescription}
-                                    onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookSubcomponentDescription: event.target.value }))}
-                                  />
-                                </label>
-                                <label>
-                                  Tematica
+
+                                {postDraft.deliveryMode === 'date' ? (
+                                  <label className="campus-teacher__classwork-rail-field">
+                                    <span>Fecha límite</span>
+                                    <input type="datetime-local" value={postDraft.dueAt} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, dueAt: event.target.value }))} />
+                                  </label>
+                                ) : (
+                                  <div className="campus-teacher__classwork-rail-field campus-teacher__classwork-rail-field--wide">
+                                    <span>Clase programada</span>
+                                    {isPostFormScheduleLoading ? <p className="campus-panel__meta">Cargando horario...</p> : null}
+                                    {!isPostFormScheduleLoading && postFormClassSchedule.length === 0 ? <p className="campus-panel__meta">Coordinación debe asignar el horario del curso.</p> : null}
+                                    {!isPostFormScheduleLoading && postFormClassSchedule.length > 0 ? (
+                                      <>
+                                        <div className="campus-teacher__calendar-head">
+                                          <button className="campus-teacher__ghost-btn" onClick={() => setCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} type="button">
+                                            ‹
+                                          </button>
+                                          <strong>{formatMonthLabel(calendarMonth)}</strong>
+                                          <button className="campus-teacher__ghost-btn" onClick={() => setCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} type="button">
+                                            ›
+                                          </button>
+                                        </div>
+                                        <div className="campus-teacher__calendar-grid campus-teacher__calendar-grid--compact">
+                                          {weekdayShortLabels.map((label) => (
+                                            <div className="campus-teacher__calendar-weekday" key={label}>{label}</div>
+                                          ))}
+                                          {classCalendar.map((cell) => (
+                                            cell.empty ? (
+                                              <div className="campus-teacher__calendar-day is-empty" key={cell.key} />
+                                            ) : (
+                                              <button
+                                                className={`campus-teacher__calendar-day${cell.hasClass ? ' has-class' : ''}${cell.isSelected ? ' is-selected' : ''}${cell.isToday ? ' is-today' : ''}`}
+                                                disabled={!cell.hasClass}
+                                                key={cell.key}
+                                                onClick={() => setPostDraft((currentDraft) => ({ ...currentDraft, scheduledClassDate: cell.dateValue, scheduledClassSessionKey: '' }))}
+                                                type="button"
+                                              >
+                                                <span>{cell.dayNumber}</span>
+                                              </button>
+                                            )
+                                          ))}
+                                        </div>
+                                        {postDraft.scheduledClassDate ? (
+                                          <div className="campus-teacher__session-picker">
+                                            <div className="campus-shell__badges">
+                                              {selectedClassSessions.map((session) => {
+                                                const sessionKey = buildSessionKey(session);
+                                                const isActive = postDraft.scheduledClassSessionKey === sessionKey;
+                                                return (
+                                                  <button
+                                                    className={`campus-teacher__session-chip${isActive ? ' is-selected' : ''}`}
+                                                    key={sessionKey}
+                                                    onClick={() => setPostDraft((currentDraft) => ({ ...currentDraft, scheduledClassSessionKey: sessionKey }))}
+                                                    type="button"
+                                                  >
+                                                    {session.label || weekdayLongLabels[Number(session.weekday)]} · {formatTimeRange(session.startTime, session.endTime)}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    ) : null}
+                                  </div>
+                                )}
+
+                                <label className="campus-teacher__classwork-rail-field">
+                                  <span>Tema</span>
                                   <input
-                                    placeholder="Tema o unidad"
+                                    placeholder="Sin tema"
                                     value={postDraft.gradebookTopic}
                                     onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookTopic: event.target.value }))}
                                   />
                                 </label>
-                                <p className="campus-panel__meta campus-teacher__form-grid--full">
-                                  Se creara un subcomponente con el titulo y la descripcion indicados. El componente seleccionado tiene {selectedPostGradebookComponentWeightAvailable}% disponible.
-                                </p>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                        <button className="campus-teacher__action-btn campus-teacher__action-btn--wide" disabled={isBusy || courses.length === 0} type="submit">
-                          {editingPostId
-                            ? (updatePostMutation.isPending ? 'Guardando...' : 'Guardar cambios')
-                            : (createPostMutation.isPending ? 'Publicando...' : 'Guardar publicación')}
-                        </button>
-                      </form>
 
-                      <article className="campus-teacher__posts-panel campus-teacher__embedded-panel">
-                        <div className="campus-teacher__section-head">
-                          <div>
-                            <span className="campus-panel__kicker">Publicadas</span>
-                            <h2>Asignaciones del curso</h2>
-                            <p className="campus-panel__meta">Edita o elimina las asignaciones que ya publicaste en este curso.</p>
-                          </div>
-                        </div>
-                        {selectedCourseAssignmentPosts.length === 0 ? (
-                          <p className="campus-panel__meta">Aun no hay asignaciones publicadas en este curso.</p>
-                        ) : (
-                          <div className="campus-teacher__grading-stack">
-                            {selectedCourseAssignmentPosts.map((post) => {
-                              const statusClass = post.status === 'published'
-                                ? 'is-published'
-                                : (post.status === 'draft' ? 'is-draft' : 'is-archived');
-                              const statusLabel = post.status === 'published'
-                                ? 'Publicada'
-                                : (post.status === 'draft' ? 'Borrador' : 'Archivada');
+                                {!editingPostId ? (
+                                  <label className="campus-teacher__classwork-rail-checkbox">
+                                    <input
+                                      checked={Boolean(postDraft.addToGradebook)}
+                                      onChange={(event) => setPostDraft((currentDraft) => ({
+                                        ...currentDraft,
+                                        addToGradebook: event.target.checked,
+                                        gradebookPeriodKey: event.target.checked ? (currentDraft.gradebookPeriodKey || selectedPostGradebookPeriod?.key || '') : currentDraft.gradebookPeriodKey,
+                                        gradebookComponentKey: event.target.checked ? (currentDraft.gradebookComponentKey || selectedPostGradebookComponent?.key || '') : currentDraft.gradebookComponentKey,
+                                        gradebookSubcomponentTitle: event.target.checked ? (currentDraft.gradebookSubcomponentTitle || currentDraft.title || '') : currentDraft.gradebookSubcomponentTitle,
+                                        gradebookSubcomponentDescription: event.target.checked ? (currentDraft.gradebookSubcomponentDescription || currentDraft.body || '') : currentDraft.gradebookSubcomponentDescription,
+                                      }))}
+                                      type="checkbox"
+                                    />
+                                    <span>Agregar al libro de notas</span>
+                                  </label>
+                                ) : null}
 
-                              return (
-                                <div className="campus-teacher__post-card campus-teacher__post-card--portal" key={post.id}>
-                                  <div className="campus-teacher__post-top">
-                                    <div>
-                                      <span className={`campus-teacher__status-pill ${statusClass}`}>{statusLabel}</span>
-                                      <h4>{post.title || 'Sin titulo'}</h4>
-                                      <p className="campus-panel__meta">{formatPostTypeLabel(post.type)} · {formatDeliveryLabel(post)}</p>
-                                    </div>
-                                    <div className="campus-teacher__card-actions">
-                                      <button
-                                        className={editingPostId === post.id ? 'campus-teacher__action-btn' : 'campus-teacher__ghost-btn'}
-                                        disabled={isBusy}
-                                        onClick={() => onEditPost(post)}
-                                        type="button"
+                                {postDraft.addToGradebook && !editingPostId ? (
+                                  <div className="campus-teacher__classwork-gradebook-panel">
+                                    <label className="campus-teacher__classwork-rail-field">
+                                      <span>Periodo</span>
+                                      <select
+                                        value={postDraft.gradebookPeriodKey || selectedPostGradebookPeriod?.key || ''}
+                                        onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookPeriodKey: event.target.value, gradebookComponentKey: '' }))}
                                       >
-                                        {editingPostId === post.id ? 'Editando' : 'Editar'}
-                                      </button>
-                                      <button
-                                        className="campus-teacher__ghost-btn"
-                                        disabled={isBusy}
-                                        onClick={() => onArchivePost(post)}
-                                        type="button"
+                                        {postGradebookPeriodOptions.map((period) => (
+                                          <option key={period.key} value={period.key}>{period.name || period.key}</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label className="campus-teacher__classwork-rail-field">
+                                      <span>Componente</span>
+                                      <select
+                                        value={postDraft.gradebookComponentKey || selectedPostGradebookComponent?.key || ''}
+                                        onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookComponentKey: event.target.value }))}
                                       >
-                                        Eliminar
-                                      </button>
-                                    </div>
+                                        {postGradebookComponentOptions.map((component) => (
+                                          <option key={component.key} value={component.key}>{component.name || component.key}</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label className="campus-teacher__classwork-rail-field">
+                                      <span>Puntos (%)</span>
+                                      <input
+                                        max={selectedPostGradebookComponentWeightAvailable || 100}
+                                        min="0"
+                                        step="0.1"
+                                        type="number"
+                                        value={postDraft.gradebookWeight}
+                                        onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookWeight: event.target.value }))}
+                                      />
+                                    </label>
+                                    <p className="campus-panel__meta">Disponible: {selectedPostGradebookComponentWeightAvailable}%</p>
                                   </div>
-                                  {post.body ? <p>{post.body}</p> : null}
-                                  {(post.attachments || []).length > 0 ? (
-                                    <p className="campus-panel__meta">{(post.attachments || []).length} archivo(s) o enlace(s) adjunto(s)</p>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </article>
-                      </>
-                    ) : null}
+                                ) : null}
+                              </aside>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div className="campus-teacher__classwork-toolbar">
+                              <div className="campus-teacher__classwork-create" ref={classworkCreateMenuRef}>
+                                <button
+                                  aria-expanded={showClassworkCreateMenu}
+                                  className="campus-teacher__classwork-create-btn"
+                                  disabled={courses.length === 0 || assignmentComponentOptions.length === 0}
+                                  onClick={() => setShowClassworkCreateMenu((currentValue) => !currentValue)}
+                                  title={assignmentComponentOptions.length === 0 ? 'Configura componentes en Estructura de notas' : 'Crear trabajo de clase'}
+                                  type="button"
+                                >
+                                  <span aria-hidden="true">+</span>
+                                  Crear
+                                </button>
+                                {showClassworkCreateMenu && assignmentComponentOptions.length > 0 ? (
+                                  <div className="campus-teacher__classwork-create-menu" role="menu">
+                                    {assignmentComponentOptions.map((option) => (
+                                      <button
+                                        className="campus-teacher__classwork-create-option"
+                                        key={`${option.periodKey}-${option.key}`}
+                                        onClick={() => openAssignmentComposer(option)}
+                                        role="menuitem"
+                                        type="button"
+                                      >
+                                        <span className={`campus-teacher__classwork-type-icon is-${getClassworkTypeTone(option.name)}`}>
+                                          <ClassworkTypeIcon type={option.name} />
+                                        </span>
+                                        {option.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                {assignmentComponentOptions.length === 0 ? (
+                                  <p className="campus-teacher__classwork-create-hint">Define los componentes en <strong>Estructura de notas</strong> para habilitar Crear.</p>
+                                ) : null}
+                              </div>
+                            </div>
 
+                            <div className="campus-teacher__classwork-list">
+                              {selectedCourseAssignmentPosts.length === 0 ? (
+                                <p className="campus-teacher__classwork-empty">Aún no hay trabajo de clase publicado en este curso.</p>
+                              ) : (
+                                selectedCourseAssignmentPosts.map((post) => {
+                                  const tone = getClassworkTypeTone(post.type);
+                                  const isMenuOpen = openPostMenuId === post.id;
+                                  return (
+                                    <article className="campus-teacher__classwork-item" key={post.id}>
+                                      <span className={`campus-teacher__classwork-type-icon is-${tone}`}>
+                                        <ClassworkTypeIcon type={post.type} />
+                                      </span>
+                                      <div className="campus-teacher__classwork-item-copy">
+                                        <strong>{post.title || 'Sin título'}</strong>
+                                        <span>{formatPostTypeLabel(post.type)} · {formatDeliveryLabel(post)}</span>
+                                      </div>
+                                      <span className="campus-teacher__classwork-item-date">Publicado {formatPostedDate(post)}</span>
+                                      <div className="campus-teacher__classwork-item-menu">
+                                        <button
+                                          aria-expanded={isMenuOpen}
+                                          aria-label="Opciones"
+                                          className="campus-teacher__classwork-item-menu-btn"
+                                          onClick={() => setOpenPostMenuId((currentValue) => (currentValue === post.id ? '' : post.id))}
+                                          type="button"
+                                        >
+                                          ⋮
+                                        </button>
+                                        {isMenuOpen ? (
+                                          <div className="campus-teacher__classwork-item-dropdown" role="menu">
+                                            <button onClick={() => onEditPost(post)} role="menuitem" type="button">Editar</button>
+                                            <button onClick={() => { setOpenPostMenuId(''); onArchivePost(post); }} role="menuitem" type="button">Eliminar</button>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    </article>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ) : null}
                     {activeCourseWorkspaceTab === 'grading' ? (
-                      <article className="campus-teacher__grading-editor campus-teacher__embedded-panel">
-                        <div className="campus-teacher__section-head">
+                      <article className="campus-teacher__grading-editor campus-teacher__grading-editor--classroom campus-teacher__embedded-panel">
+                        <div className="campus-teacher__classroom-head">
                           <div>
-                            <span className="campus-panel__kicker">Estructura academica</span>
-                            <h2>{gradingCourseTitle}</h2>
+                            <h2 className="campus-teacher__classroom-title">{gradingCourseTitle}</h2>
+                            <p className="campus-teacher__classroom-subtitle">Configura periodos, componentes y subcomponentes de evaluación.</p>
                           </div>
                         </div>
                         <div className="campus-teacher__grading-stack">
                           {!selectedCourse ? <p className="campus-panel__meta">Selecciona un curso para editar la estructura de notas.</p> : null}
                           {selectedCourse && gradingPeriods.length === 0 ? <p className="campus-panel__meta">Este curso aun no tiene periodos configurados.</p> : null}
                           {gradingPeriods.map((period, periodIndex) => (
-                            <div className="campus-teacher__delivery-panel campus-teacher__delivery-panel--portal" key={`${period.key || 'period'}-${periodIndex}`}>
-                              <div className="campus-teacher__section-head">
+                            <div className="campus-teacher__grading-period-card" key={`${period.key || 'period'}-${periodIndex}`}>
+                              <div className="campus-teacher__grading-period-head">
                                 <div>
-                                  <span className="campus-panel__kicker">Período académico</span>
+                                  <span className="campus-teacher__classroom-kicker">Período académico</span>
                                   <h3>{period.name || `Periodo ${periodIndex + 1}`}</h3>
                                   <p className="campus-panel__meta">{formatPeriodDateRange(period.startDate, period.endDate)}</p>
                                 </div>
+                                <span className="campus-teacher__grading-period-weight">{period.weight}%</span>
                               </div>
                               <div className="campus-teacher__grading-row campus-teacher__grading-row--portal">
                                 <label>
                                   Nombre del periodo
                                   <input className="campus-teacher__readonly-input" readOnly value={period.name} />
                                 </label>
-                                {/* Clave oculta para el docente, se mantiene en el objeto pero no editable ni visible */}
-                                <label style={{ display: 'flex', flexDirection: 'column' }}>
+                                <label>
                                   % de la asignatura
-                                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                                  <div className="campus-teacher__percent-field">
                                     <input
                                       className="campus-teacher__readonly-input"
                                       min="0"
@@ -5304,14 +5798,13 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       step="0.1"
                                       type="number"
                                       value={period.weight}
-                                      style={{ width: '5.5em', marginRight: '0.3em' }}
                                     />
-                                    <span style={{ fontWeight: 600 }}>%</span>
-                                  </span>
+                                    <span>%</span>
+                                  </div>
                                 </label>
                               </div>
                               <div className="campus-teacher__grading-period-title">
-                                <strong className="campus-teacher__grading-period-title-text">Componentes {period.name || `periodo ${periodIndex + 1}`}</strong>
+                                <strong className="campus-teacher__grading-period-title-text">Componentes</strong>
                               </div>
                               <div className="campus-teacher__grading-stack">
                                 {(period.gradingComponents || []).map((component, componentIndex) => (
@@ -5328,32 +5821,30 @@ function TeacherCampusHome({ forcePreview = false }) {
                                         Nombre
                                         <input value={component.name} onChange={(event) => onChangePeriodComponent(periodIndex, componentIndex, 'name', event.target.value)} />
                                       </label>
-                                      {/* Clave oculta para el docente, se mantiene en el objeto pero no editable ni visible */}
-                                      <label style={{ display: 'flex', flexDirection: 'column' }}>
+                                      <label>
                                         % de periodo
-                                        <span style={{ display: 'flex', alignItems: 'center' }}>
+                                        <div className="campus-teacher__percent-field">
                                           <input
                                             min="0"
                                             step="0.1"
                                             type="number"
                                             value={component.weight}
                                             onChange={(event) => onChangePeriodComponent(periodIndex, componentIndex, 'weight', event.target.value)}
-                                            style={{ width: '5.5em', marginRight: '0.3em' }}
                                           />
-                                          <span style={{ fontWeight: 600 }}>%</span>
-                                        </span>
+                                          <span>%</span>
+                                        </div>
                                       </label>
                                     </div>
                                     <div className="campus-teacher__grading-component-actions">
                                       <button
-                                        className="campus-teacher__action-btn"
+                                        className="campus-teacher__action-btn campus-teacher__action-btn--compact"
                                         disabled={isBusy}
                                         onClick={() => onSaveComponent(periodIndex, componentIndex)}
                                         type="button"
                                       >
-                                        {updateGradingSchemeMutation.isPending ? 'Guardando...' : 'Guardar componente'}
+                                        {updateGradingSchemeMutation.isPending ? 'Guardando...' : 'Guardar'}
                                       </button>
-                                      <button className="campus-teacher__ghost-btn" onClick={() => onRemovePeriodComponent(periodIndex, componentIndex)} type="button">
+                                      <button className="campus-teacher__ghost-btn campus-teacher__ghost-btn--compact" onClick={() => onRemovePeriodComponent(periodIndex, componentIndex)} type="button">
                                         Quitar
                                       </button>
                                     </div>
@@ -5399,8 +5890,8 @@ function TeacherCampusHome({ forcePreview = false }) {
                                             onChange={(event) => onChangeSubcomponentDraft(periodIndex, componentIndex, 'topic', event.target.value)}
                                           />
                                         </label>
-                                        <button className="campus-teacher__action-btn" onClick={() => onSaveSubcomponent(periodIndex, componentIndex)} type="button">
-                                          Guardar subcomponente
+                                        <button className="campus-teacher__action-btn campus-teacher__action-btn--compact" onClick={() => onSaveSubcomponent(periodIndex, componentIndex)} type="button">
+                                          Agregar subcomponente
                                         </button>
                                       </div>
                                       {(component.subcomponents || []).length ? (
@@ -5454,56 +5945,62 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     })()}
                                   </div>
                                 ))}
-                                <button style={{marginTop: '1rem'}} className="campus-teacher__ghost-btn" onClick={() => onAddPeriodComponent(periodIndex)} type="button">
-                                  Agregar componente
+                                <button className="campus-teacher__ghost-btn campus-teacher__ghost-btn--compact campus-teacher__grading-add-btn" onClick={() => onAddPeriodComponent(periodIndex)} type="button">
+                                  + Agregar componente
                                 </button>
                               </div>
-                              <div className="campus-teacher__card-actions">
-                                <span className="campus-panel__meta">Componentes del periodo: {(period.gradingComponents || []).reduce((total, component) => total + (Number(component.weight) || 0), 0).toFixed(1)}%</span>
+                              <div className="campus-teacher__grading-period-footer">
+                                <span className="campus-panel__meta">Total componentes: {(period.gradingComponents || []).reduce((total, component) => total + (Number(component.weight) || 0), 0).toFixed(1)}%</span>
                               </div>
                             </div>
                           ))}
                         </div>
-                        <div className="campus-teacher__card-actions">
+                        <div className="campus-teacher__classroom-footer">
                           <span className="campus-panel__meta">Total periodos {gradingPeriods.reduce((total, period) => total + (Number(period.weight) || 0), 0).toFixed(1)}%</span>
-                          <button className="campus-teacher__action-btn" disabled={isBusy} onClick={onSaveGradingScheme} type="button">
-                            {updateGradingSchemeMutation.isPending ? 'Guardando...' : 'Guardar ponderacion'}
+                          <button className="campus-teacher__action-btn campus-teacher__action-btn--compact" disabled={isBusy} onClick={onSaveGradingScheme} type="button">
+                            {updateGradingSchemeMutation.isPending ? 'Guardando...' : 'Guardar ponderación'}
                           </button>
                         </div>
                       </article>
                     ) : null}
 
                     {activeCourseWorkspaceTab === 'gradebook' ? (
-                      <article className="campus-teacher__gradebook-panel campus-teacher__embedded-panel">
+                      <article className="campus-teacher__gradebook-panel campus-teacher__gradebook-panel--classroom campus-teacher__embedded-panel">
+                        <div className="campus-teacher__classroom-head">
+                          <div>
+                            <h2 className="campus-teacher__classroom-title">{gradingCourseTitle}</h2>
+                            <p className="campus-teacher__classroom-subtitle">Consulta y registra calificaciones por alumno o por asignación.</p>
+                          </div>
+                        </div>
                         {!previewEnabled && selectedCourse && courseDetailQuery.isLoading ? <p className="campus-panel__meta">Cargando estudiantes y notas del curso...</p> : null}
                         {!previewEnabled && selectedCourse && courseDetailQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el detalle del curso.</p> : null}
                         {selectedCourseDetail?.students?.length ? (
-                          <div>
+                          <div className="campus-teacher__gradebook-shell">
                             <input
-                              type="text"
+                              className="campus-teacher__gradebook-search"
+                              onChange={(event) => setGradebookSearch(event.target.value)}
                               placeholder="Buscar alumno por nombre..."
+                              type="text"
                               value={gradebookSearch || ''}
-                              onChange={e => setGradebookSearch(e.target.value)}
-                              style={{ marginBottom: '1rem', width: '100%', maxWidth: 400 }}
                             />
-                            <div className="campus-teacher__gradebook-mode-switch" role="group" aria-label="Modo de calificacion">
+                            <div className="campus-teacher__subnav campus-teacher__subnav--classroom campus-teacher__gradebook-mode-switch" role="group" aria-label="Modo de calificacion">
                               <button
-                                className={gradebookMode === 'student' ? 'campus-teacher__action-btn' : 'campus-teacher__ghost-btn'}
+                                className={`campus-teacher__subnav-item${gradebookMode === 'student' ? ' is-active' : ''}`}
                                 onClick={() => setGradebookMode('student')}
                                 type="button"
                               >
                                 Por alumno
                               </button>
                               <button
-                                className={gradebookMode === 'assignment' ? 'campus-teacher__action-btn' : 'campus-teacher__ghost-btn'}
+                                className={`campus-teacher__subnav-item${gradebookMode === 'assignment' ? ' is-active' : ''}`}
                                 onClick={() => setGradebookMode('assignment')}
                                 type="button"
                               >
-                                Por asignacion
+                                Por asignación
                               </button>
                             </div>
                             {gradebookMode === 'student' ? (
-                            <div className="campus-teacher__gradebook-stack">
+                            <div className="campus-teacher__gradebook-stack campus-teacher__gradebook-stack--classroom">
                               {selectedCourseDetail.students
                                 .filter(student => !gradebookSearch || student.name.toLowerCase().includes(gradebookSearch.toLowerCase()))
                                 .map((student) => {
@@ -5514,27 +6011,21 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   const studentFinalScore = calculateFinalScore(studentPeriods);
 
                                   return (
-                                  <div key={student.studentId} style={{ borderBottom: '1px solid #e5e7eb', marginBottom: 0 }}>
-                                    <div
-                                      className="campus-teacher__student-row campus-teacher__student-row--portal"
-                                      style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '0.7rem 0' }}
+                                  <div className="campus-teacher__gradebook-student-item" key={student.studentId}>
+                                    <button
+                                      className="campus-teacher__gradebook-student-row"
                                       onClick={() => setOpenGradebookRows((open) => ({ ...open, [student.studentId]: !open[student.studentId] }))}
+                                      type="button"
                                     >
-                                      <div style={{ flex: 2, fontWeight: 600 }}>{student.name}</div>
-                                      <div style={{ flex: 1 }}>{student.grade}</div>
-                                      <div style={{ flex: 1 }}>{studentFinalScore === null || studentFinalScore === undefined ? 'Sin definitiva' : `Definitiva ${studentFinalScore}`}</div>
-                                      <div style={{ flex: 'none', marginLeft: 8 }}>
-                                        <button
-                                          className="campus-teacher__ghost-btn"
-                                          tabIndex={-1}
-                                          style={{ fontSize: 18, padding: 0, background: 'none', border: 'none' }}
-                                          onClick={e => { e.stopPropagation(); setOpenGradebookRows((open) => ({ ...open, [student.studentId]: !open[student.studentId] })); }}
-                                          aria-label={openGradebookRows?.[student.studentId] ? 'Cerrar detalles' : 'Abrir detalles'}
-                                        >
-                                          {openGradebookRows?.[student.studentId] ? '▲' : '▼'}
-                                        </button>
+                                      <div className="campus-teacher__gradebook-student-name">{student.name}</div>
+                                      <div className="campus-teacher__gradebook-student-grade">{student.grade}</div>
+                                      <div className="campus-teacher__gradebook-student-score">
+                                        {studentFinalScore === null || studentFinalScore === undefined ? 'Sin definitiva' : `Definitiva ${studentFinalScore}`}
                                       </div>
-                                    </div>
+                                      <span aria-hidden="true" className="campus-teacher__gradebook-student-chevron">
+                                        {openGradebookRows?.[student.studentId] ? '▲' : '▼'}
+                                      </span>
+                                    </button>
                                     {openGradebookRows?.[student.studentId] ? (
                                       <div className="campus-teacher__gradebook-student-detail">
                                         <div className="campus-teacher__gradebook-period-stack">
@@ -5543,7 +6034,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                             const isPeriodOpen = Boolean(openGradebookPeriods?.[periodRowKey]);
 
                                             return (
-                                              <section className="campus-teacher__gradebook-period-card campus-teacher__delivery-panel campus-teacher__delivery-panel--portal" key={`${student.studentId}-${period.key}`}>
+                                              <section className="campus-teacher__gradebook-period-card" key={`${student.studentId}-${period.key}`}>
                                                 <button
                                                   className="campus-teacher__gradebook-toggle"
                                                   onClick={() => setOpenGradebookPeriods((currentValue) => ({ ...currentValue, [periodRowKey]: !currentValue[periodRowKey] }))}
@@ -5682,9 +6173,9 @@ function TeacherCampusHome({ forcePreview = false }) {
                                             );
                                           })}
                                         </div>
-                                        <div className="campus-teacher__card-actions">
+                                        <div className="campus-teacher__classroom-footer">
                                           <span className="campus-panel__meta">Última actualización {formatDateLabel(selectedCourseDetail.course.updatedAt)}</span>
-                                          <button className="campus-teacher__action-btn" disabled={isBusy} onClick={() => onSaveStudentGrades(student)} type="button">
+                                          <button className="campus-teacher__action-btn campus-teacher__action-btn--compact" disabled={isBusy} onClick={() => onSaveStudentGrades(student)} type="button">
                                             {saveGradesMutation.isPending ? 'Guardando...' : 'Guardar notas'}
                                           </button>
                                         </div>
@@ -5792,10 +6283,10 @@ function TeacherCampusHome({ forcePreview = false }) {
                                         </tbody>
                                       </table>
                                     </div>
-                                    <div className="campus-teacher__card-actions campus-teacher__assignment-save-row">
-                                      <span className="campus-panel__meta">Se guardaran las filas que tengan nota digitada.</span>
-                                      <button className="campus-teacher__action-btn" disabled={isBusy || !selectedGradebookAssignment} onClick={onSaveAssignmentGrades} type="button">
-                                        {saveGradesMutation.isPending ? 'Guardando...' : 'Guardar asignacion'}
+                                    <div className="campus-teacher__classroom-footer">
+                                      <span className="campus-panel__meta">Se guardarán las filas que tengan nota digitada.</span>
+                                      <button className="campus-teacher__action-btn campus-teacher__action-btn--compact" disabled={isBusy || !selectedGradebookAssignment} onClick={onSaveAssignmentGrades} type="button">
+                                        {saveGradesMutation.isPending ? 'Guardando...' : 'Guardar asignación'}
                                       </button>
                                     </div>
                                   </>

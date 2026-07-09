@@ -9,7 +9,7 @@ export function getCampusNavigation() {
 }
 
 export function getCampusTeacherOverview() {
-  return api.get('/campus/teacher/overview').then((response) => response.data);
+  return api.get('/campus/teacher/overview', { timeout: 45000 }).then((response) => response.data);
 }
 
 export function getCampusTeacherCalendar(params = {}) {
