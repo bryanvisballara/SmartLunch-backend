@@ -7,6 +7,10 @@ const { queueNotificationsForParents } = require('./notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { findGradeFeeSetting, getFeeGradeAliases } = require('../utils/feeGradeMatching');
 const {
+  resolveParentAnnualTuitionPricing,
+} = require('./academicBenefitPricing.service');
+const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
+const {
   applyMonthlyTuitionAdditionalDiscount,
   normalizeAdditionalPensionDiscount,
 } = require('../utils/academicAdditionalPensionDiscount');
@@ -596,6 +600,7 @@ async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate 
   const studentIdFilter = new Set(studentIds.map((item) => String(item)).filter(Boolean));
   const profileCache = new Map();
   let refreshedCharges = 0;
+  const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
 
   const pendingMonthlyQuery = {
     schoolId,
@@ -662,12 +667,10 @@ async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate 
       continue;
     }
 
+    const pricing = resolveParentAnnualTuitionPricing(profile, feeConfiguration || {}, referenceDate);
     const installmentCount = normalizeInstallmentCount(profile.annualTuitionInstallments, 1);
-    const installmentAmounts = splitAmountIntoInstallments(profile.annualTuitionAmount, installmentCount);
-    const baseInstallmentAmounts = splitAmountIntoInstallments(
-      Math.max(0, Number(profile.annualTuitionBaseAmount || profile.annualTuitionAmount || 0)),
-      installmentCount,
-    );
+    const installmentAmounts = splitAmountIntoInstallments(pricing.effectiveAmount, installmentCount);
+    const baseInstallmentAmounts = splitAmountIntoInstallments(pricing.baseAmount, installmentCount);
 
     for (const [index, charge] of charges.entries()) {
       const amount = installmentAmounts[index] ?? installmentAmounts[installmentAmounts.length - 1] ?? 0;

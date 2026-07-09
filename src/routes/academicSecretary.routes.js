@@ -3093,25 +3093,15 @@ function normalizeAcademicSchoolYearLevelSettings(levelSettings = []) {
     return true;
   }
 
-  function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], entryDateValue = null, grade = '') {
-    const entryDate = parseAcademicCalendarDate(entryDateValue);
-    if (!entryDate) {
-      return null;
-    }
+  function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], referenceDateValue = null, grade = '') {
+    const {
+      getApplicableEnrollmentBenefitRule: resolveEnrollmentBenefitRule,
+    } = require('../services/academicBenefitPricing.service');
+    const referenceDate = referenceDateValue instanceof Date
+      ? referenceDateValue
+      : (parseAcademicCalendarDate(referenceDateValue) || new Date());
 
-    return (Array.isArray(enrollmentBenefitRules) ? enrollmentBenefitRules : []).find((rule) => {
-      if (!doesEnrollmentBenefitRuleApplyToGrade(rule, grade)) {
-        return false;
-      }
-
-      const startDate = parseAcademicCalendarDate(rule?.startDate);
-      const endDate = parseAcademicCalendarDate(rule?.endDate);
-      if (!startDate || !endDate) {
-        return false;
-      }
-
-      return entryDate.getTime() >= startDate.getTime() && entryDate.getTime() <= endDate.getTime();
-    }) || null;
+    return resolveEnrollmentBenefitRule(enrollmentBenefitRules, referenceDate, grade);
   }
 
   function resolveActiveEnrollmentBenefitDueDate(configuration = {}, grade = '', referenceDate = new Date()) {
@@ -3206,7 +3196,11 @@ function normalizeAcademicSchoolYearLevelSettings(levelSettings = []) {
     const baseAmount = Math.round((safeAnnualAmount * remainingMonths) / schoolYearConfiguration.totalMonths);
     const lateEnrollmentSurchargeAmount = resolveAcademicLateEnrollmentSurchargeAmount(baseAmount, elapsedMonths, schoolYearConfiguration);
     const amountBeforeDiscount = baseAmount + lateEnrollmentSurchargeAmount;
-    const enrollmentBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, parsedEntryDate, grade);
+    const enrollmentBenefitRule = getApplicableEnrollmentBenefitRule(
+      schoolYearConfiguration.enrollmentBenefitRules,
+      new Date(),
+      grade,
+    );
     const enrollmentBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(amountBeforeDiscount, enrollmentBenefitRule, grade);
 
     return {
@@ -3653,8 +3647,8 @@ async function ensureAcademicFeeConfiguration(schoolId, grades = []) {
 }
 
 function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date()) {
-  const currentDay = new Date(referenceDate).getUTCDate();
-  return (benefitRules || []).find((rule) => currentDay >= Number(rule.startDay || 0) && currentDay <= Number(rule.endDay || 0)) || null;
+  const { getApplicableMonthlyBenefitRule } = require('../services/academicBenefitPricing.service');
+  return getApplicableMonthlyBenefitRule(benefitRules, referenceDate);
 }
 
 function getAcademicPaymentPlanBenefitDueDay(billingProfile = {}) {

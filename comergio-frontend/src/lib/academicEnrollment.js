@@ -29,7 +29,7 @@ function parseAcademicDateValue(value) {
   }
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
   }
 
   const normalized = normalizeText(value);
@@ -39,7 +39,7 @@ function parseAcademicDateValue(value) {
 
   const isoDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
   if (isoDateMatch) {
-    return new Date(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3]));
+    return new Date(Date.UTC(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3])));
   }
 
   const parsed = new Date(normalized);
@@ -47,7 +47,7 @@ function parseAcademicDateValue(value) {
     return null;
   }
 
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
 function formatDate(value) {
@@ -56,7 +56,12 @@ function formatDate(value) {
     return 'Sin definir';
   }
 
-  return new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'long', year: 'numeric' }).format(parsed);
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(parsed);
 }
 
 function normalizeText(value) {
@@ -64,15 +69,15 @@ function normalizeText(value) {
 }
 
 function startOfAcademicMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
 function addAcademicMonths(date, monthCount = 0) {
-  return new Date(date.getFullYear(), date.getMonth() + Number(monthCount || 0), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + Number(monthCount || 0), 1));
 }
 
 function getAcademicMonthDiff(startDate, endDate) {
-  return ((endDate.getFullYear() - startDate.getFullYear()) * 12) + (endDate.getMonth() - startDate.getMonth());
+  return ((endDate.getUTCFullYear() - startDate.getUTCFullYear()) * 12) + (endDate.getUTCMonth() - startDate.getUTCMonth());
 }
 
 function normalizeAcademicLateEnrollmentSurchargeType(value) {
@@ -132,7 +137,7 @@ function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '', o
 }
 
 function formatAcademicMonthLabel(date) {
-  return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 export function normalizeAcademicSchoolYearConfiguration(configuration = {}, grade = '', options = {}) {
@@ -330,7 +335,7 @@ export function calculateAcademicProratedEnrollmentFee(annualAmount, entryDateVa
   const amountBeforeDiscount = baseAmount + lateEnrollmentSurchargeAmount;
   const enrollmentBenefitRule = getApplicableEnrollmentBenefitRule(schoolYearConfiguration.enrollmentBenefitRules, parsedDate, grade);
   const enrollmentBenefitDiscountAmount = resolveAcademicEnrollmentBenefitDiscountAmount(amountBeforeDiscount, enrollmentBenefitRule, grade);
-  const monthIndex = parsedDate.getMonth();
+  const monthIndex = parsedDate.getUTCMonth();
   return {
     amount: Math.max(0, amountBeforeDiscount - enrollmentBenefitDiscountAmount),
     baseAmount,
@@ -353,8 +358,8 @@ export function buildAcademicEnrollmentProrationTable(annualAmount, configuratio
   return Array.from({ length: schoolYearConfiguration.totalMonths }, (_, index) => {
     const monthDate = addAcademicMonths(startMonth, index);
     return {
-      key: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`,
-      value: monthDate.getMonth(),
+      key: `${monthDate.getUTCFullYear()}-${String(monthDate.getUTCMonth() + 1).padStart(2, '0')}`,
+      value: monthDate.getUTCMonth(),
       label: formatAcademicMonthLabel(monthDate),
       ...calculateAcademicProratedEnrollmentFee(annualAmount, monthDate, schoolYearConfiguration, grade),
     };

@@ -319,15 +319,21 @@ function resolveEnrollmentGradeValueForSelector(item = {}, gradeOptions = []) {
 }
 
 function formatDate(value) {
-  if (!value) return 'Sin fecha';
-  return new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value));
+  const parsed = parseAcademicSimulationDate(value);
+  if (!parsed) return 'Sin fecha';
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(parsed);
 }
 
 function formatDateInputValue(value) {
   const date = parseAcademicSimulationDate(value);
   if (!date) return '';
 
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
 function formatDateTime(value) {
@@ -481,7 +487,7 @@ function calculateInstallmentAmount(baseAmount, installmentCount) {
 function parseAcademicSimulationDate(value) {
   if (!value) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
   }
 
   const normalized = String(value || '').trim();
@@ -489,7 +495,7 @@ function parseAcademicSimulationDate(value) {
 
   const isoDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
   if (isoDateMatch) {
-    return new Date(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3]));
+    return new Date(Date.UTC(Number(isoDateMatch[1]), Number(isoDateMatch[2]) - 1, Number(isoDateMatch[3])));
   }
 
   const parsed = new Date(normalized);
@@ -497,23 +503,23 @@ function parseAcademicSimulationDate(value) {
     return null;
   }
 
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
 function startOfAcademicSimulationMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
 function addAcademicSimulationMonths(date, monthCount = 0) {
-  return new Date(date.getFullYear(), date.getMonth() + Number(monthCount || 0), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + Number(monthCount || 0), 1));
 }
 
 function getAcademicSimulationMonthDiff(startDate, endDate) {
-  return ((endDate.getFullYear() - startDate.getFullYear()) * 12) + (endDate.getMonth() - startDate.getMonth());
+  return ((endDate.getUTCFullYear() - startDate.getUTCFullYear()) * 12) + (endDate.getUTCMonth() - startDate.getUTCMonth());
 }
 
 function formatAcademicSimulationMonth(date) {
-  return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 function splitAcademicSimulationAmount(baseAmount, installmentCount) {
@@ -552,7 +558,7 @@ function buildAcademicMonthlyPaymentSchedule({
   const currentYear = new Date().getFullYear();
   const normalizedAcademicYear = Number.parseInt(String(academicYear || currentYear), 10) || currentYear;
   const parsedEntryDate = parseAcademicSimulationDate(entryDate);
-  const fallbackYear = parsedEntryDate?.getFullYear?.() || normalizedAcademicYear;
+  const fallbackYear = parsedEntryDate?.getUTCFullYear?.() || normalizedAcademicYear;
   const schoolYearConfiguration = normalizeAcademicSchoolYearConfiguration(
     feeSettings || {
       schoolYearStartDate,
@@ -561,8 +567,8 @@ function buildAcademicMonthlyPaymentSchedule({
     grade,
     { academicGrades },
   );
-  const parsedSchoolYearStartDate = schoolYearConfiguration.startDate || new Date(fallbackYear, 0, 1);
-  const parsedSchoolYearEndDate = schoolYearConfiguration.endDate || new Date(fallbackYear, 11, 31);
+  const parsedSchoolYearStartDate = schoolYearConfiguration.startDate || new Date(Date.UTC(fallbackYear, 0, 1));
+  const parsedSchoolYearEndDate = schoolYearConfiguration.endDate || new Date(Date.UTC(fallbackYear, 11, 31));
 
   const schoolYearStartMonth = startOfAcademicSimulationMonth(parsedSchoolYearStartDate);
   const schoolYearEndMonth = startOfAcademicSimulationMonth(parsedSchoolYearEndDate);
@@ -589,7 +595,7 @@ function buildAcademicMonthlyPaymentSchedule({
     const enrollmentBonusInstallmentAmount = bonusInstallmentAmounts[index] || 0;
     const enrollmentInstallmentAmount = installmentAmounts[index] || 0;
     return {
-      key: `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`,
+      key: `${monthDate.getUTCFullYear()}-${String(monthDate.getUTCMonth() + 1).padStart(2, '0')}`,
       monthLabel: formatAcademicSimulationMonth(monthDate),
       monthlyTuitionAmount: appliedMonthlyTuitionAmount,
       enrollmentBonusInstallmentAmount,

@@ -102,8 +102,41 @@ async function loadLinkedParents({ schoolId, studentId }) {
   };
 }
 
-function resolveChargeAmount(charge, billingProfile) {
+const { resolveParentAnnualTuitionPricing } = require('./academicBenefitPricing.service');
+
+function splitMatriculaInstallmentAmounts(totalAmount, installmentCount) {
+  const safeTotal = Math.max(0, Math.round(Number(totalAmount || 0)));
+  const safeCount = Math.max(1, Math.round(Number(installmentCount || 1)));
+  const base = Math.floor(safeTotal / safeCount);
+  let remainder = safeTotal % safeCount;
+
+  return Array.from({ length: safeCount }, () => {
+    const next = base + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) {
+      remainder -= 1;
+    }
+    return next;
+  });
+}
+
+function resolveChargeAmount(charge, billingProfile, feeConfiguration = null, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (String(charge?.category || '') === 'annual_tuition' && billingProfile && feeConfiguration) {
+    const pricing = resolveParentAnnualTuitionPricing(billingProfile, feeConfiguration, referenceDate);
+    const installmentCount = Math.max(1, Number(billingProfile.annualTuitionInstallments || 1));
+    if (installmentCount <= 1) {
+      return { baseAmount: pricing.baseAmount, effectiveAmount: pricing.effectiveAmount };
+    }
+
+    const installmentAmounts = splitMatriculaInstallmentAmounts(pricing.effectiveAmount, installmentCount);
+    const matchedIndex = installmentAmounts.findIndex((amount) => Math.abs(amount - Number(charge?.amount || 0)) <= 1);
+
+    return {
+      baseAmount: pricing.baseAmount,
+      effectiveAmount: installmentAmounts[matchedIndex >= 0 ? matchedIndex : 0] || Math.max(0, Number(charge?.amount || baseAmount)),
+    };
+  }
+
   const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
   return { baseAmount, effectiveAmount };
 }
@@ -502,7 +535,8 @@ async function completeMatriculaDirectPayment({ processId, schoolId, parentId })
     ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
     : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
 
-  const { effectiveAmount } = resolveChargeAmount(charge, billingProfile);
+  const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+  const { effectiveAmount } = resolveChargeAmount(charge, billingProfile, feeConfiguration, new Date());
   const reference = `MAT-${Date.now()}-${Math.floor(Math.random() * 1e6).toString().padStart(6, '0')}`;
 
   return finalizeMatriculaPaidProcess({
@@ -548,7 +582,8 @@ async function completeMatriculaGatewayPayment(paymentRecord, providerPayload, s
     ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId: charge.schoolId }).session(session).lean()
     : await StudentBillingProfile.findOne({ schoolId: charge.schoolId, studentId: charge.studentId, active: true }).session(session).lean();
 
-  const { effectiveAmount } = resolveChargeAmount(charge, billingProfile);
+  const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId: charge.schoolId }).session(session).lean();
+  const { effectiveAmount } = resolveChargeAmount(charge, billingProfile, feeConfiguration, new Date());
   const paidAmount = Math.max(0, Number(paymentRecord.amount || effectiveAmount || 0));
 
   paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
@@ -999,7 +1034,13 @@ async function ensureAnnualTuitionChargesForMatriculaGate({ schoolId, parentId, 
       continue;
     }
 
-    const amount = Math.max(0, Math.round(Number(profile.annualTuitionAmount || profile.annualTuitionBaseAmount || 0)));
+    const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+    const pricing = resolveParentAnnualTuitionPricing(profile, feeConfiguration || {}, now);
+    const installmentCount = Math.max(1, Number(profile.annualTuitionInstallments || 1));
+    const installmentAmounts = splitMatriculaInstallmentAmounts(pricing.effectiveAmount, installmentCount);
+    const baseInstallmentAmounts = splitMatriculaInstallmentAmounts(pricing.baseAmount, installmentCount);
+    const amount = installmentAmounts[0] || 0;
+    const originalAmount = baseInstallmentAmounts[0] || amount;
     if (amount <= 0) {
       continue;
     }
@@ -1018,7 +1059,7 @@ async function ensureAnnualTuitionChargesForMatriculaGate({ schoolId, parentId, 
       concept: `Matrícula anual ${safeDueDate.getFullYear()}`,
       description: 'Cargo de matrícula anual generado para el proceso de matrícula.',
       amount,
-      originalAmount: amount,
+      originalAmount,
       dueDate: safeDueDate,
       audienceType: 'individual',
       targetGrade: profile.grade || '',
@@ -1065,6 +1106,9 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     parentId: parentObjectId,
     studentIds,
   });
+
+  const { refreshPendingIndividualTuitionCharges } = require('./academicConsolidatedBilling.service');
+  await refreshPendingIndividualTuitionCharges({ schoolId, referenceDate: new Date(), studentIds });
 
   const unpaidCharge = await AcademicCharge.findOne({
     schoolId,

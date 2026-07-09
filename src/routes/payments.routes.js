@@ -2635,6 +2635,7 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
     const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
     const AcademicCharge = require('../models/academicCharge.model');
     const StudentBillingProfile = require('../models/studentBillingProfile.model');
+    const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
     const { markPaymentPending, resolveChargeAmount } = require('../services/enrollmentMatricula.service');
 
     const process = await EnrollmentMatriculaProcess.findOne({
@@ -2674,7 +2675,8 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
     const billingProfile = charge.billingProfileId
       ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
       : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
-    const { effectiveAmount } = resolveChargeAmount(charge, billingProfile);
+    const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+    const { effectiveAmount } = resolveChargeAmount(charge, billingProfile, feeConfiguration, new Date());
     const amountInCents = Math.max(1, Math.round(Number(effectiveAmount || 0) * 100));
     if (!Number.isFinite(amountInCents) || amountInCents < 100) {
       return res.status(400).json({ message: 'Monto de matricula invalido.' });
