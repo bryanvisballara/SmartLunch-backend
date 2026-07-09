@@ -724,6 +724,44 @@ function hasEnrollmentSignedDocuments(process = {}) {
   );
 }
 
+function applyConsentClearToProcess(process) {
+  process.consent = {
+    accepted: false,
+    acceptedAt: null,
+    ipAddress: '',
+    device: '',
+    userAgent: '',
+    userId: null,
+    studentId: process.studentId,
+    version: CONSENT_VERSION,
+  };
+  process.introAcknowledgedAt = null;
+
+  if (hasEnrollmentSignedDocuments(process)) {
+    // Keep signature flow status when only consent evidence is removed.
+  } else if (hasEnrollmentPaymentConfirmed(process)) {
+    process.status = process.contractMode === 'digital' ? 'office_payment_confirmed' : 'payment_confirmed';
+  } else {
+    process.status = 'intro_pending';
+  }
+}
+
+async function clearConsentForRectoria({ schoolId, processId }) {
+  const process = await EnrollmentMatriculaProcess.findOne({
+    _id: processId,
+    schoolId,
+    'consent.accepted': true,
+  });
+
+  if (!process) {
+    throw new Error('Consentimiento no encontrado o ya fue eliminado.');
+  }
+
+  applyConsentClearToProcess(process);
+  await process.save();
+  return { updated: 1 };
+}
+
 async function clearAllConsentsForRectoria({ schoolId }) {
   const processes = await EnrollmentMatriculaProcess.find({
     schoolId,
@@ -732,26 +770,7 @@ async function clearAllConsentsForRectoria({ schoolId }) {
 
   let updated = 0;
   for (const process of processes) {
-    process.consent = {
-      accepted: false,
-      acceptedAt: null,
-      ipAddress: '',
-      device: '',
-      userAgent: '',
-      userId: null,
-      studentId: process.studentId,
-      version: CONSENT_VERSION,
-    };
-    process.introAcknowledgedAt = null;
-
-    if (hasEnrollmentSignedDocuments(process)) {
-      // Keep signature flow status when only consent evidence is removed.
-    } else if (hasEnrollmentPaymentConfirmed(process)) {
-      process.status = process.contractMode === 'digital' ? 'office_payment_confirmed' : 'payment_confirmed';
-    } else {
-      process.status = 'intro_pending';
-    }
-
+    applyConsentClearToProcess(process);
     await process.save();
     updated += 1;
   }
@@ -1162,6 +1181,7 @@ module.exports = {
   buildContractParamsSnapshot,
   buildSignedDocumentsZipForRectoria,
   clearAllConsentsForRectoria,
+  clearConsentForRectoria,
   clearAllSignedDocumentsForRectoria,
   completeMatriculaDirectPayment,
   completeMatriculaGatewayPayment,

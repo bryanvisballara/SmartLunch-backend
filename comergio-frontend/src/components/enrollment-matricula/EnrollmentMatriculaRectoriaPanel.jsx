@@ -94,6 +94,15 @@ function EnrollmentMatriculaRectoriaPanel() {
     () => myRequests.find((item) => item.actionType === 'clear_consents' && item.status === 'pending'),
     [myRequests]
   );
+  const pendingConsentRequestByProcessId = useMemo(() => {
+    const map = new Map();
+    myRequests.forEach((item) => {
+      if (item.actionType === 'clear_consent' && item.status === 'pending' && item.processId) {
+        map.set(String(item.processId), item);
+      }
+    });
+    return map;
+  }, [myRequests]);
   const pendingSignatureRequest = useMemo(
     () => myRequests.find((item) => item.actionType === 'clear_signatures' && item.status === 'pending'),
     [myRequests]
@@ -124,12 +133,15 @@ function EnrollmentMatriculaRectoriaPanel() {
     }
   };
 
-  const onRequestPurge = async (actionType) => {
-    setActionLoading(actionType);
+  const onRequestPurge = async (actionType, processId = '') => {
+    setActionLoading(processId ? `clear_consent:${processId}` : actionType);
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      const response = await createEnrollmentMatriculaPurgeRequest({ actionType });
+      const payload = processId
+        ? { actionType: 'clear_consent', processId }
+        : { actionType };
+      const response = await createEnrollmentMatriculaPurgeRequest(payload);
       setSuccessMessage(response.data?.message || 'Solicitud enviada a Rectoría.');
       await loadRecords();
     } catch (error) {
@@ -184,7 +196,7 @@ function EnrollmentMatriculaRectoriaPanel() {
               onClick={() => onRequestPurge('clear_consents')}
               type="button"
             >
-              {actionLoading === 'clear_consents' ? 'Enviando...' : 'Solicitar borrado a Rectoría'}
+              {actionLoading === 'clear_consents' ? 'Enviando...' : 'Solicitar borrado masivo'}
             </button>
           </div>
           <div className="enrollment-matricula-rectoria__table-wrap">
@@ -196,10 +208,15 @@ function EnrollmentMatriculaRectoriaPanel() {
                   <th>Fecha y hora</th>
                   <th>Evidencia</th>
                   <th>Estado</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {consents.length ? consents.map((item) => (
+                {consents.length ? consents.map((item) => {
+                  const pendingIndividual = pendingConsentRequestByProcessId.get(String(item._id));
+                  const isSubmitting = actionLoading === `clear_consent:${item._id}`;
+
+                  return (
                   <tr key={item._id}>
                     <td>{item.studentName || '—'}</td>
                     <td>{item.parentName || '—'}</td>
@@ -212,10 +229,27 @@ function EnrollmentMatriculaRectoriaPanel() {
                       </div>
                     </td>
                     <td>{formatEnrollmentMatriculaConsentStatus(item)}</td>
+                    <td>
+                      {pendingIndividual ? (
+                        <span className="enrollment-matricula-rectoria__pending-note">
+                          Pendiente desde {formatDateTime(pendingIndividual.submittedAt)}
+                        </span>
+                      ) : (
+                        <button
+                          className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
+                          disabled={Boolean(isSubmitting)}
+                          onClick={() => onRequestPurge('clear_consent', item._id)}
+                          type="button"
+                        >
+                          {isSubmitting ? 'Enviando...' : 'Solicitar borrado'}
+                        </button>
+                      )}
+                    </td>
                   </tr>
-                )) : (
+                  );
+                }) : (
                   <tr>
-                    <td colSpan={5}>Aún no hay consentimientos registrados.</td>
+                    <td colSpan={6}>Aún no hay consentimientos registrados.</td>
                   </tr>
                 )}
               </tbody>

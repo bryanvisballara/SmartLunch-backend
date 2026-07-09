@@ -5,7 +5,7 @@ const enrollmentMatriculaPurgeRequestSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     actionType: {
       type: String,
-      enum: ['clear_consents', 'clear_signatures', 'delete_billing_payment'],
+      enum: ['clear_consents', 'clear_consent', 'clear_signatures', 'delete_billing_payment'],
       required: true,
       index: true,
     },
@@ -20,6 +20,8 @@ const enrollmentMatriculaPurgeRequestSchema = new mongoose.Schema(
     requestedByRole: { type: String, trim: true, default: '' },
     recordCount: { type: Number, min: 0, default: 0 },
     paymentId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicChargePayment', default: null, index: true },
+    processId: { type: mongoose.Schema.Types.ObjectId, ref: 'EnrollmentMatriculaProcess', default: null, index: true },
+    parentName: { type: String, trim: true, default: '' },
     chargeId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicCharge', default: null, index: true },
     studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null, index: true },
     studentName: { type: String, trim: true, default: '' },
@@ -55,6 +57,16 @@ enrollmentMatriculaPurgeRequestSchema.index(
     partialFilterExpression: {
       status: 'pending',
       actionType: 'delete_billing_payment',
+    },
+  }
+);
+enrollmentMatriculaPurgeRequestSchema.index(
+  { schoolId: 1, processId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: 'pending',
+      actionType: 'clear_consent',
     },
   }
 );

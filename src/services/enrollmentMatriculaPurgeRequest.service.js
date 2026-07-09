@@ -7,6 +7,7 @@ const User = require('../models/user.model');
 const {
   clearAllConsentsForRectoria,
   clearAllSignedDocumentsForRectoria,
+  clearConsentForRectoria,
 } = require('./enrollmentMatricula.service');
 const {
   executeBillingPaymentDeletion,
@@ -17,6 +18,7 @@ const {
 
 const ACTION_LABELS = {
   clear_consents: 'Borrar consentimientos de matrícula',
+  clear_consent: 'Borrar consentimiento individual',
   clear_signatures: 'Borrar documentos firmados de matrícula',
   delete_billing_payment: 'Anular pago de cartera',
 };
@@ -58,6 +60,57 @@ async function countRecordsForPurgeAction({ schoolId, actionType }) {
   }
 
   throw createHttpError('Tipo de solicitud inválido.');
+}
+
+async function createIndividualConsentPurgeRequest({
+  schoolId,
+  userId,
+  userRole,
+  userName,
+  processId,
+}) {
+  if (!processId) {
+    throw createHttpError('Proceso de matrícula inválido.');
+  }
+
+  const process = await EnrollmentMatriculaProcess.findOne({
+    _id: processId,
+    schoolId,
+    'consent.accepted': true,
+  }).select('studentId studentName parentName chargeId').lean();
+
+  if (!process) {
+    throw createHttpError('No se encontró el consentimiento a eliminar.', 404);
+  }
+
+  const existingPending = await EnrollmentMatriculaPurgeRequest.findOne({
+    schoolId,
+    actionType: 'clear_consent',
+    processId,
+    status: 'pending',
+  }).lean();
+
+  if (existingPending) {
+    throw createHttpError('Ya existe una solicitud pendiente para este consentimiento.', 409);
+  }
+
+  const request = await EnrollmentMatriculaPurgeRequest.create({
+    schoolId,
+    actionType: 'clear_consent',
+    status: 'pending',
+    requestedByUserId: userId,
+    requestedByName: normalizeText(userName) || 'Usuario',
+    requestedByRole: normalizeText(userRole),
+    recordCount: 1,
+    processId,
+    chargeId: process.chargeId || null,
+    studentId: process.studentId || null,
+    studentName: normalizeText(process.studentName) || '',
+    parentName: normalizeText(process.parentName) || '',
+    submittedAt: new Date(),
+  });
+
+  return serializePurgeRequest(request);
 }
 
 async function createMatriculaPurgeRequest({
@@ -224,6 +277,11 @@ async function approveMatriculaPurgeRequest({
       paymentId: request.paymentId,
       allowGateway: false,
     });
+  } else if (request.actionType === 'clear_consent') {
+    result = await clearConsentForRectoria({
+      schoolId,
+      processId: request.processId,
+    });
   } else {
     result = request.actionType === 'clear_consents'
       ? await clearAllConsentsForRectoria({ schoolId })
@@ -235,6 +293,7 @@ async function approveMatriculaPurgeRequest({
   request.reviewedByUserId = reviewerUserId;
   request.reviewedByName = normalizeText(reviewerName) || 'Rectoría';
   request.executedCount = request.actionType === 'delete_billing_payment'
+    || request.actionType === 'clear_consent'
     ? 1
     : Number(result?.updated || 0);
   await request.save();
@@ -287,6 +346,7 @@ module.exports = {
   ACTION_LABELS,
   approveMatriculaPurgeRequest,
   createBillingPaymentDeletionRequest,
+  createIndividualConsentPurgeRequest,
   createMatriculaPurgeRequest,
   getMatriculaPurgeRequestSummary,
   listMatriculaPurgeRequestsForRequester,

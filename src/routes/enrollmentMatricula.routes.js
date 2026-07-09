@@ -20,6 +20,7 @@ const {
 const {
   approveMatriculaPurgeRequest,
   createMatriculaPurgeRequest,
+  createIndividualConsentPurgeRequest,
   getMatriculaPurgeRequestSummary,
   listMatriculaPurgeRequestsForRequester,
   listMatriculaPurgeRequestsForReviewer,
@@ -268,13 +269,24 @@ rectoriaRouter.get('/purge-requests/mine', async (req, res) => {
 
 rectoriaRouter.post('/purge-requests', async (req, res) => {
   try {
-    const request = await createMatriculaPurgeRequest({
-      schoolId: req.user.schoolId,
-      userId: req.user.userId,
-      userRole: req.user.role,
-      userName: req.user.name,
-      actionType: req.body?.actionType,
-    });
+    const actionType = normalizeText(req.body?.actionType);
+    const processId = req.body?.processId;
+
+    const request = actionType === 'clear_consent'
+      ? await createIndividualConsentPurgeRequest({
+        schoolId: req.user.schoolId,
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: req.user.name,
+        processId,
+      })
+      : await createMatriculaPurgeRequest({
+        schoolId: req.user.schoolId,
+        userId: req.user.userId,
+        userRole: req.user.role,
+        userName: req.user.name,
+        actionType,
+      });
 
     return res.status(201).json({
       message: 'Solicitud enviada a Rectoría para autorización.',

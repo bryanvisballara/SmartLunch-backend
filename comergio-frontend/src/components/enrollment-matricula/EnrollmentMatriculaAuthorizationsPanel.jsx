@@ -33,6 +33,15 @@ function resolveRequestDetail(item = {}) {
     );
   }
 
+  if (item.actionType === 'clear_consent') {
+    return (
+      <div className="enrollment-matricula-rectoria__evidence">
+        <span>{item.studentName || '—'}</span>
+        <span>{item.parentName || 'Acudiente'}</span>
+      </div>
+    );
+  }
+
   return item.recordCount || 0;
 }
 
