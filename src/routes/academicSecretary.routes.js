@@ -722,6 +722,39 @@ async function buildBillingFollowUpSummary(schoolId) {
   return entries.map(serializeBillingFollowUp);
 }
 
+function sortParentLinksForPrimarySelection(links = []) {
+  return [...links].sort((left, right) => {
+    const leftUpdated = new Date(left.updatedAt || left.createdAt || 0).getTime();
+    const rightUpdated = new Date(right.updatedAt || right.createdAt || 0).getTime();
+    return rightUpdated - leftUpdated;
+  });
+}
+
+function pickPrimaryParentLink(studentLinks = []) {
+  const sortedLinks = sortParentLinksForPrimarySelection(studentLinks);
+  const explicitPrimaries = sortedLinks.filter((link) => link.isPrimaryContact);
+  const motherLinks = sortedLinks.filter((link) => ['mother', 'madre'].includes(normalizeText(link.relationship).toLowerCase()));
+  const fatherLinks = sortedLinks.filter((link) => ['father', 'padre'].includes(normalizeText(link.relationship).toLowerCase()));
+
+  if (explicitPrimaries.length === 1) {
+    return explicitPrimaries[0];
+  }
+
+  if (explicitPrimaries.length > 1) {
+    return explicitPrimaries.find((link) => ['mother', 'madre'].includes(normalizeText(link.relationship).toLowerCase()))
+      || explicitPrimaries[0];
+  }
+
+  return motherLinks[0] || fatherLinks[0] || sortedLinks[0] || null;
+}
+
+function formatGuardianDisplayName(parents = []) {
+  const names = parents
+    .map((parent) => normalizeText(parent?.name))
+    .filter(Boolean);
+  return [...new Set(names)].join(' / ') || 'Sin acudiente principal';
+}
+
 async function resolvePrimaryParentContacts(schoolId) {
   const links = await ParentStudentLink.find({ schoolId, status: 'active' }).lean();
   const studentBuckets = new Map();
@@ -741,23 +774,28 @@ async function resolvePrimaryParentContacts(schoolId) {
 
   const bulkOperations = [];
   const primaryLinkByStudentId = new Map();
+  const guardianLinksByStudentId = new Map();
   const selectedParentIds = new Set();
 
   studentBuckets.forEach((studentLinks, studentId) => {
-    const explicitPrimary = studentLinks.find((link) => link.isPrimaryContact);
-    const motherLink = studentLinks.find((link) => ['mother', 'madre'].includes(normalizeText(link.relationship).toLowerCase()));
-    const fatherLink = studentLinks.find((link) => ['father', 'padre'].includes(normalizeText(link.relationship).toLowerCase()));
-    const fallbackLink = studentLinks[0] || null;
-    const selectedLink = explicitPrimary || motherLink || fatherLink || fallbackLink;
-
+    const selectedLink = pickPrimaryParentLink(studentLinks);
     if (!selectedLink) {
       return;
     }
 
     primaryLinkByStudentId.set(studentId, selectedLink);
+    guardianLinksByStudentId.set(studentId, sortParentLinksForPrimarySelection(studentLinks));
     selectedParentIds.add(String(selectedLink.parentId));
+    studentLinks.forEach((link) => {
+      if (link.parentId) {
+        selectedParentIds.add(String(link.parentId));
+      }
+    });
 
-    if (!explicitPrimary) {
+    const hasConflictingPrimary = studentLinks.filter((link) => link.isPrimaryContact).length !== 1
+      || !studentLinks.some((link) => link.isPrimaryContact && String(link._id) === String(selectedLink._id));
+
+    if (hasConflictingPrimary) {
       bulkOperations.push({
         updateMany: {
           filter: { schoolId, studentId: selectedLink.studentId },
@@ -792,12 +830,23 @@ async function resolvePrimaryParentContacts(schoolId) {
       return;
     }
 
+    const guardianParents = (guardianLinksByStudentId.get(studentId) || [])
+      .map((guardianLink) => parentById.get(String(guardianLink.parentId)))
+      .filter(Boolean);
+
     primaryParentByStudentId.set(studentId, {
       _id: parent._id,
       name: parent.name || 'Acudiente',
+      displayName: formatGuardianDisplayName(guardianParents.length ? guardianParents : [parent]),
       email: parent.email || '',
       phone: parent.phone || '',
       relationship: link.relationship || 'parent',
+      guardians: guardianParents.map((guardian) => ({
+        _id: guardian._id,
+        name: guardian.name || 'Acudiente',
+        email: guardian.email || '',
+        phone: guardian.phone || '',
+      })),
     });
   });
 
@@ -4896,7 +4945,7 @@ async function buildBillingSummary(schoolId) {
       fixedDiscountAmount: pricing.fixedDiscountAmount,
       benefitLabel: pricing.benefitLabel,
       parentId: displayParentId || charge.parentId,
-      parentName: primaryParent?.name || charge.parentId?.name || 'Acudiente',
+      parentName: primaryParent?.displayName || primaryParent?.name || charge.parentId?.name || 'Acudiente',
       parentPhone: primaryParent?.phone || charge.parentId?.phone || '',
       studentName: charge.studentId?.name || 'Familia',
       grade: charge.studentId?.grade || charge.targetGrade || '',
@@ -4967,9 +5016,10 @@ async function buildBillingSummary(schoolId) {
       grade: student.grade || '',
       course: student.course || '',
       parentId: primaryParent?._id || '',
-      parentName: primaryParent?.name || 'Sin acudiente principal',
+      parentName: primaryParent?.displayName || primaryParent?.name || 'Sin acudiente principal',
       parentPhone: primaryParent?.phone || '',
       parentEmail: primaryParent?.email || '',
+      guardians: primaryParent?.guardians || [],
       billingProfileId: billingProfile?._id || '',
       monthlyTuitionAdditionalDiscountType: billingProfile?.monthlyTuitionAdditionalDiscountType || 'percent',
       monthlyTuitionAdditionalDiscountPercent: Number(billingProfile?.monthlyTuitionAdditionalDiscountPercent || 0),
@@ -7319,6 +7369,7 @@ router.patch('/database/:studentId', async (req, res) => {
         address: normalizeText(req.body?.address),
       };
       const hasValues = Object.values(parentPayload).some(Boolean);
+      let resolvedParentId = null;
 
       if (parentId) {
         const parent = await User.findOne({ _id: parentId, schoolId, role: 'parent', deletedAt: null });
@@ -7336,20 +7387,7 @@ router.patch('/database/:studentId', async (req, res) => {
               parentData: parentPayload,
               relationship: config.relationship,
             });
-
-            if (parentResult?.user?._id) {
-              await ParentStudentLink.findOneAndUpdate(
-                { schoolId, studentId: student._id, relationship: config.relationship },
-                {
-                  schoolId,
-                  parentId: parentResult.user._id,
-                  studentId: student._id,
-                  relationship: config.relationship,
-                  status: 'active',
-                },
-                { upsert: true, new: true, setDefaultsOnInsert: true }
-              );
-            }
+            resolvedParentId = parentResult?.user?._id || null;
           } else {
             parent.name = parentPayload.name || parent.name;
             parent.documentType = parentPayload.documentType;
@@ -7358,6 +7396,7 @@ router.patch('/database/:studentId', async (req, res) => {
             parent.email = parentPayload.email;
             parent.address = parentPayload.address;
             await parent.save();
+            resolvedParentId = parent._id;
           }
         }
       } else if (hasValues && parentPayload.name) {
@@ -7367,20 +7406,52 @@ router.patch('/database/:studentId', async (req, res) => {
           relationship: config.relationship,
           matchByLooseIdentity: true,
         });
+        resolvedParentId = parentResult?.user?._id || null;
+      }
 
-        if (parentResult?.user?._id) {
-          await ParentStudentLink.findOneAndUpdate(
-            { schoolId, parentId: parentResult.user._id, studentId: student._id },
-            {
-              schoolId,
-              parentId: parentResult.user._id,
-              studentId: student._id,
-              relationship: config.relationship,
-              status: 'active',
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-          );
-        }
+      if (resolvedParentId) {
+        await ParentStudentLink.updateMany(
+          {
+            schoolId,
+            studentId: student._id,
+            relationship: config.relationship,
+            parentId: { $ne: resolvedParentId },
+            status: 'active',
+          },
+          { $set: { status: 'inactive', isPrimaryContact: false } }
+        );
+
+        await ParentStudentLink.findOneAndUpdate(
+          { schoolId, parentId: resolvedParentId, studentId: student._id },
+          {
+            schoolId,
+            parentId: resolvedParentId,
+            studentId: student._id,
+            relationship: config.relationship,
+            status: 'active',
+            isPrimaryContact: config.relationship === 'mother',
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      }
+    }
+
+    const activeParentLinks = await ParentStudentLink.find({
+      schoolId,
+      studentId: student._id,
+      status: 'active',
+    }).lean();
+    if (activeParentLinks.length) {
+      const preferredPrimary = pickPrimaryParentLink(activeParentLinks);
+      await ParentStudentLink.updateMany(
+        { schoolId, studentId: student._id, status: 'active' },
+        { $set: { isPrimaryContact: false } }
+      );
+      if (preferredPrimary?._id) {
+        await ParentStudentLink.updateOne(
+          { _id: preferredPrimary._id, schoolId },
+          { $set: { isPrimaryContact: true } }
+        );
       }
     }
 
@@ -8434,6 +8505,17 @@ router.post('/enrollments', async (req, res) => {
       const resolvedPrimaryParent = linkedParents.find((item) => item.relationship === primaryRelationship) || linkedParents[0];
 
       for (const parentRecord of linkedParents) {
+        await ParentStudentLink.updateMany(
+          {
+            schoolId,
+            studentId: student._id,
+            relationship: parentRecord.relationship,
+            parentId: { $ne: parentRecord.user._id },
+            status: 'active',
+          },
+          { $set: { status: 'inactive', isPrimaryContact: false } }
+        );
+
         await ParentStudentLink.findOneAndUpdate(
           { schoolId, parentId: parentRecord.user._id, studentId: student._id },
           {
@@ -8908,7 +8990,7 @@ router.get('/billing/payments', async (req, res) => {
           grade: payment.studentId?.grade || '',
           course: payment.studentId?.course || '',
           parentId: primaryParent?._id || payment.parentId?._id || payment.parentId || null,
-          parentName: primaryParent?.name || payment.parentId?.name || 'Acudiente',
+          parentName: primaryParent?.displayName || primaryParent?.name || payment.parentId?.name || 'Acudiente',
           parentPhone: primaryParent?.phone || payment.parentId?.phone || '',
           concept: payment.chargeId?.concept || payment.notes || 'Pago académico',
           category: payment.chargeId?.category || '',
