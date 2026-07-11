@@ -23,6 +23,7 @@ import { getDefaultRouteByRole } from '../lib/defaultRouteByRole';
 import {
   SCHOOL_OPTIONS,
   DEFAULT_SCHOOL_ID,
+  areSchoolIdsCompatible,
   getSchoolOptionsByCountry,
   normalizeSchoolOptions,
   rememberSchoolOptions,
@@ -357,8 +358,15 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   }, [navigate]);
 
   const finalizeAuth = useCallback(async (authResponse, normalizedUsername, preferredPath = '', schoolIdOverride = '') => {
+    const authenticatedSchoolId = String(authResponse?.user?.schoolId || '').trim();
+    const requestedSchoolId = String(schoolIdOverride || selectedSchoolId || '').trim();
+
+    if (requestedSchoolId && authenticatedSchoolId && !areSchoolIdsCompatible(requestedSchoolId, authenticatedSchoolId)) {
+      throw new Error('Correo, contraseña o colegio incorrectos. Verifica que el colegio seleccionado sea el correcto.');
+    }
+
     setAuth(authResponse);
-    localStorage.setItem('selectedSchoolId', schoolIdOverride || selectedSchoolId);
+    localStorage.setItem('selectedSchoolId', authenticatedSchoolId || requestedSchoolId || selectedSchoolId);
 
     if (authResponse?.user?.role === 'parent') {
       localStorage.setItem('lastParentUsername', normalizedUsername);
@@ -566,9 +574,16 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
         authenticationResponse,
       });
 
+      if (
+        verifyResponse.data?.user?.schoolId
+        && !areSchoolIdsCompatible(resolvedSchoolId, verifyResponse.data.user.schoolId)
+      ) {
+        throw new Error('Correo, contraseña o colegio incorrectos. Verifica que el colegio seleccionado sea el correcto.');
+      }
+
       setAuth(verifyResponse.data);
       localStorage.setItem('lastParentUsername', normalizedUsername);
-      localStorage.setItem('selectedSchoolId', resolvedSchoolId);
+      localStorage.setItem('selectedSchoolId', verifyResponse.data?.user?.schoolId || resolvedSchoolId);
       if (verifyResponse.data?.user?.role === 'parent' && !isNativeAndroid) {
         setupPushIfPossible();
       }

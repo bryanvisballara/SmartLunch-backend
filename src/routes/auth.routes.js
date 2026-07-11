@@ -139,48 +139,6 @@ async function findUserWithSchoolCandidates({ schoolId, filter, populateAssigned
   return null;
 }
 
-async function findLoginMatchesWithoutSchoolId(identifierFilter, populateAssignedStore = false) {
-  const matches = [];
-  const seenUserIds = new Set();
-
-  const rememberMatch = (user) => {
-    if (!user) {
-      return;
-    }
-
-    const userId = String(user._id);
-    if (seenUserIds.has(userId)) {
-      return;
-    }
-
-    seenUserIds.add(userId);
-    matches.push(user);
-  };
-
-  ensureStoreModelForSchool('');
-  let controlQuery = User.find(identifierFilter);
-  if (populateAssignedStore) {
-    controlQuery = controlQuery.populate('assignedStoreId', 'name status');
-  }
-
-  (await controlQuery.limit(10)).forEach(rememberMatch);
-
-  const tenantContexts = await listTenantSchoolContexts();
-  for (const tenantContext of tenantContexts) {
-    const user = await runWithSchoolContext(tenantContext.schoolId, async () => {
-      ensureStoreModelForSchool(tenantContext.schoolId);
-      let query = User.findOne(identifierFilter);
-      if (populateAssignedStore) {
-        query = query.populate('assignedStoreId', 'name status');
-      }
-      return query;
-    });
-    rememberMatch(user);
-  }
-
-  return matches;
-}
-
 async function findPasswordResetCodeWithSchoolCandidates({ schoolId, filter, sort = { createdAt: -1 } }) {
   for (const candidateSchoolId of resolveLoginSchoolIdCandidates(schoolId)) {
     const resetDoc = await runWithSchoolContext(candidateSchoolId, () => (
@@ -630,9 +588,15 @@ router.post('/register/email/send-code', async (req, res) => {
       return res.status(400).json({ message: 'Please provide valid registration data' });
     }
 
-    const existingUser = await User.findOne({ username: normalizedEmail, deletedAt: null });
+    const existingUser = await findUserWithSchoolCandidates({
+      schoolId: normalizedSchoolId,
+      filter: {
+        deletedAt: null,
+        $or: [{ username: normalizedEmail }, { email: normalizedEmail }],
+      },
+    });
     if (existingUser) {
-      return res.status(409).json({ message: 'Este correo ya se encuentra registrado.' });
+      return res.status(409).json({ message: 'Este correo ya se encuentra registrado en este colegio.' });
     }
 
     await EmailVerification.updateMany(
@@ -801,9 +765,15 @@ router.post('/register/complete', async (req, res) => {
       return res.status(400).json({ message: 'La verificacion expiro. Solicita un nuevo codigo.' });
     }
 
-    const existingUser = await User.findOne({ username: normalizedEmail, deletedAt: null });
+    const existingUser = await findUserWithSchoolCandidates({
+      schoolId: normalizedSchoolId,
+      filter: {
+        deletedAt: null,
+        $or: [{ username: normalizedEmail }, { email: normalizedEmail }],
+      },
+    });
     if (existingUser) {
-      return res.status(409).json({ message: 'Este correo ya se encuentra registrado.' });
+      return res.status(409).json({ message: 'Este correo ya se encuentra registrado en este colegio.' });
     }
 
     const parentName = `${String(verification.firstName || '').trim()} ${String(verification.lastName || '').trim()}`.trim();
@@ -1007,13 +977,19 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'schoolId, name, username and password are required' });
     }
 
-    const existingUser = await User.findOne({ username: normalizedUsername, deletedAt: null });
+    const existingUser = await findUserWithSchoolCandidates({
+      schoolId: normalizedSchoolId,
+      filter: {
+        username: normalizedUsername,
+        deletedAt: null,
+      },
+    });
     if (existingUser) {
       return res.status(409).json({ message: 'Username already exists' });
     }
 
     const passwordHash = await bcrypt.hash(String(password), 10);
-    const user = await User.create({
+    const user = await runWithSchoolContext(normalizedSchoolId, () => User.create({
       schoolId: normalizedSchoolId,
       name: normalizedName,
       username: normalizedUsername,
@@ -1022,7 +998,7 @@ router.post('/register', async (req, res) => {
       status: 'active',
       email: String(email || '').trim().toLowerCase(),
       phone: String(phone || '').trim(),
-    });
+    }));
 
     return res.status(201).json(await issueAuthResponse(user));
   } catch (error) {
@@ -1048,31 +1024,22 @@ router.post('/login', async (req, res) => {
       return res.status(200).json(await issueAuthResponse(superAdminUser));
     }
 
+    if (!normalizedSchoolId) {
+      return res.status(400).json({ message: 'schoolId is required' });
+    }
+
     const identifierFilter = {
       status: 'active',
       deletedAt: null,
       $or: [{ username: normalizedIdentifier }, { email: normalizedIdentifier }],
     };
 
-    let user = null;
-
-    if (normalizedSchoolId) {
-      user = await findUserWithSchoolCandidates({
-        schoolId: normalizedSchoolId,
-        filter: identifierFilter,
-        populateAssignedStore: true,
-      });
-    }
-
-    if (!user) {
-      const matches = await findLoginMatchesWithoutSchoolId(identifierFilter, true);
-
-      if (matches.length > 1) {
-        return res.status(400).json({ message: 'schoolId is required when identifier exists in multiple schools' });
-      }
-
-      user = matches[0] || null;
-    }
+    // Credentials are school-scoped: never fall back to another tenant when schoolId is provided.
+    const user = await findUserWithSchoolCandidates({
+      schoolId: normalizedSchoolId,
+      filter: identifierFilter,
+      populateAssignedStore: true,
+    });
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -1275,11 +1242,13 @@ router.post('/biometric/login/options', async (req, res) => {
 
     const normalizedUsername = normalizeUsername(username);
     const normalizedSchoolId = normalizeSchoolId(schoolId);
-    const user = await User.findOne({
-      username: normalizedUsername,
+    const user = await findUserWithSchoolCandidates({
       schoolId: normalizedSchoolId,
-      status: 'active',
-      deletedAt: null,
+      filter: {
+        username: normalizedUsername,
+        status: 'active',
+        deletedAt: null,
+      },
     });
     if (!user || user.role !== 'parent') {
       return res.status(404).json({ message: 'No biometric credentials found for this account.' });
@@ -1301,9 +1270,11 @@ router.post('/biometric/login/options', async (req, res) => {
       })),
     });
 
-    user.webauthn = user.webauthn || {};
-    user.webauthn.authenticationChallenge = options.challenge;
-    await user.save();
+    await runWithSchoolContext(user.schoolId, async () => {
+      user.webauthn = user.webauthn || {};
+      user.webauthn.authenticationChallenge = options.challenge;
+      await user.save();
+    });
 
     return res.status(200).json(options);
   } catch (error) {
@@ -1321,11 +1292,13 @@ router.post('/biometric/login/verify', async (req, res) => {
 
     const normalizedUsername = normalizeUsername(username);
     const normalizedSchoolId = normalizeSchoolId(schoolId);
-    const user = await User.findOne({
-      username: normalizedUsername,
+    const user = await findUserWithSchoolCandidates({
       schoolId: normalizedSchoolId,
-      status: 'active',
-      deletedAt: null,
+      filter: {
+        username: normalizedUsername,
+        status: 'active',
+        deletedAt: null,
+      },
     });
     if (!user || user.role !== 'parent') {
       return res.status(401).json({ message: 'Biometric login failed.' });
@@ -1361,10 +1334,12 @@ router.post('/biometric/login/verify', async (req, res) => {
     }
 
     const nextCounter = verification.authenticationInfo?.newCounter;
-    user.webauthn.authenticationChallenge = null;
-    authenticator.counter = Number(nextCounter || authenticator.counter || 0);
-    authenticator.lastUsedAt = new Date();
-    await user.save();
+    await runWithSchoolContext(user.schoolId, async () => {
+      user.webauthn.authenticationChallenge = null;
+      authenticator.counter = Number(nextCounter || authenticator.counter || 0);
+      authenticator.lastUsedAt = new Date();
+      await user.save();
+    });
 
     return res.status(200).json(await issueAuthResponse(user));
   } catch (error) {

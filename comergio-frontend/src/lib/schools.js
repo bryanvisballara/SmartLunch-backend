@@ -38,6 +38,40 @@ const STORED_SCHOOL_ID_ALIASES = {
   millennium: MILLENNIUM_SCHOOL_ID,
 };
 
+function getSchoolAliasGroup(schoolId = '') {
+  const normalized = String(schoolId || '').trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const key = normalized.toLowerCase();
+  const aliasMap = {
+    'comergio-demo': [DEFAULT_SCHOOL_ID, 'comergio-demo', 'comergio_demo'],
+    comergio_demo: [DEFAULT_SCHOOL_ID, 'comergio-demo', 'comergio_demo'],
+    [DEFAULT_SCHOOL_ID.toLowerCase()]: [DEFAULT_SCHOOL_ID, 'comergio-demo', 'comergio_demo'],
+    [MILLENNIUM_SCHOOL_ID.toLowerCase()]: [MILLENNIUM_SCHOOL_ID, 'discovery_t3a0h'],
+    discovery_t3a0h: [MILLENNIUM_SCHOOL_ID, 'discovery_t3a0h'],
+    millennium: [MILLENNIUM_SCHOOL_ID, 'discovery_t3a0h'],
+  };
+
+  return [...new Set((aliasMap[key] || [normalized]).map((value) => String(value).trim()).filter(Boolean))];
+}
+
+export function areSchoolIdsCompatible(leftSchoolId = '', rightSchoolId = '') {
+  const left = String(leftSchoolId || '').trim();
+  const right = String(rightSchoolId || '').trim();
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  const leftGroup = new Set(getSchoolAliasGroup(left).map((value) => value.toLowerCase()));
+  return getSchoolAliasGroup(right).some((value) => leftGroup.has(value.toLowerCase()));
+}
+
 export function resolveStoredSchoolId(storedSchoolId = '', options = SCHOOL_OPTIONS) {
   const normalizedOptions = normalizeSchoolOptions(options);
   const rawStoredId = String(storedSchoolId || '').trim();
