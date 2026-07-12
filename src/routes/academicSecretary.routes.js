@@ -104,9 +104,11 @@ router.use((req, res, next) => {
     || (req.path === '/billing/charges' && method === 'POST')
     || (/^\/billing\/charges\/[^/]+\/pay$/.test(req.path) && method === 'POST')
     || (/^\/billing\/payments\/[^/]+$/.test(req.path) && method === 'DELETE')
+    || (/^\/billing\/payments\/[^/]+\/deletion-request$/.test(req.path) && method === 'POST')
     || (/^\/billing\/students\/[^/]+\/pension-discount$/.test(req.path) && method === 'PATCH')
     || (req.path === '/billing/reminders' && method === 'POST')
-    || (req.path === '/billing/follow-ups' && method === 'POST');
+    || (req.path === '/billing/follow-ups' && method === 'POST')
+    || (req.path === '/billing/charge-adjustment-requests' && method === 'POST');
 
   if (isFeeSettingsRoute && method === 'GET') {
     return roleMiddleware([...ACADEMIC_SECRETARY_FEE_SETTINGS_ROLES, ...ACADEMIC_ADMISSIONS_READ_ROLES])(req, res, next);
