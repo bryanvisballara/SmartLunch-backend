@@ -255,6 +255,24 @@ rectoriaRouter.get('/purge-requests/pending', async (req, res) => {
   }
 });
 
+rectoriaRouter.get('/purge-requests/history', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const items = await listMatriculaPurgeRequestsForReviewer({
+      schoolId: req.user.schoolId,
+      statuses: ['approved', 'rejected'],
+      limit: 80,
+    });
+    return res.status(200).json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 rectoriaRouter.get('/purge-requests/mine', async (req, res) => {
   try {
     const items = await listMatriculaPurgeRequestsForRequester({
@@ -373,6 +391,26 @@ rectoriaRouter.get('/charge-adjustment-requests/pending', async (req, res) => {
       listPendingChargeAdjustmentRequests,
     } = require('../services/academicChargeAdjustment.service');
     const items = await listPendingChargeAdjustmentRequests({ schoolId: req.user.schoolId });
+    return res.status(200).json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.get('/charge-adjustment-requests/history', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const {
+      listResolvedChargeAdjustmentRequests,
+    } = require('../services/academicChargeAdjustment.service');
+    const items = await listResolvedChargeAdjustmentRequests({
+      schoolId: req.user.schoolId,
+      limit: 80,
+    });
     return res.status(200).json({ items });
   } catch (error) {
     return res.status(500).json({ message: error.message });

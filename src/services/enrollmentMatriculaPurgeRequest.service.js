@@ -217,15 +217,26 @@ async function createBillingPaymentDeletionRequest({
   return serializePurgeRequest(request);
 }
 
-async function listMatriculaPurgeRequestsForReviewer({ schoolId, status = 'pending' }) {
+async function listMatriculaPurgeRequestsForReviewer({
+  schoolId,
+  status = 'pending',
+  statuses = null,
+  limit = 50,
+}) {
   const filter = { schoolId };
-  if (status) {
+  if (Array.isArray(statuses) && statuses.length) {
+    filter.status = { $in: statuses };
+  } else if (status) {
     filter.status = status;
   }
 
+  const sort = statuses
+    ? { reviewedAt: -1, submittedAt: -1, createdAt: -1 }
+    : { submittedAt: -1, createdAt: -1 };
+
   const items = await EnrollmentMatriculaPurgeRequest.find(filter)
-    .sort({ submittedAt: -1, createdAt: -1 })
-    .limit(50)
+    .sort(sort)
+    .limit(Math.max(1, Math.min(200, Number(limit) || 50)))
     .lean();
 
   return items.map(serializePurgeRequest);

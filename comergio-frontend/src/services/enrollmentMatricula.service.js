@@ -17,6 +17,7 @@ export const getRectoriaEnrollmentConsents = () => api.get('/enrollment-matricul
 export const getRectoriaEnrollmentSignatures = () => api.get('/enrollment-matricula/signatures');
 export const getEnrollmentMatriculaPurgeRequestsMine = () => api.get('/enrollment-matricula/purge-requests/mine');
 export const getEnrollmentMatriculaPurgeRequestsPending = () => api.get('/enrollment-matricula/purge-requests/pending');
+export const getEnrollmentMatriculaPurgeRequestsHistory = () => api.get('/enrollment-matricula/purge-requests/history');
 export const getEnrollmentMatriculaPurgeRequestSummary = () => api.get('/enrollment-matricula/purge-requests/summary');
 export const createEnrollmentMatriculaPurgeRequest = (data = {}) => api.post('/enrollment-matricula/purge-requests', data);
 export const approveEnrollmentMatriculaPurgeRequest = (requestId) =>
@@ -25,6 +26,8 @@ export const rejectEnrollmentMatriculaPurgeRequest = (requestId, data = {}) =>
   api.post(`/enrollment-matricula/purge-requests/${requestId}/reject`, data);
 export const getChargeAdjustmentRequestsPending = () =>
   api.get('/enrollment-matricula/charge-adjustment-requests/pending');
+export const getChargeAdjustmentRequestsHistory = () =>
+  api.get('/enrollment-matricula/charge-adjustment-requests/history');
 export const approveChargeAdjustmentRequest = (requestId, data = {}) =>
   api.post(`/enrollment-matricula/charge-adjustment-requests/${requestId}/approve`, data);
 export const rejectChargeAdjustmentRequest = (requestId, data = {}) =>

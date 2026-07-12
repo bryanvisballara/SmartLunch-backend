@@ -186,6 +186,17 @@ async function listPendingChargeAdjustmentRequests({ schoolId }) {
   return items.map(serializeAdjustmentRequest);
 }
 
+async function listResolvedChargeAdjustmentRequests({ schoolId, limit = 50 }) {
+  const items = await AcademicChargeAdjustmentRequest.find({
+    schoolId,
+    status: { $in: ['approved', 'rejected'] },
+  })
+    .sort({ reviewedAt: -1, submittedAt: -1 })
+    .limit(Math.max(1, Math.min(200, Number(limit) || 50)))
+    .lean();
+  return items.map(serializeAdjustmentRequest);
+}
+
 async function listChargeAdjustmentRequestSummary({ schoolId }) {
   const [pending, approved, rejected] = await Promise.all([
     AcademicChargeAdjustmentRequest.countDocuments({ schoolId, status: 'pending' }),
@@ -318,6 +329,7 @@ async function rejectChargeAdjustmentRequest({
 module.exports = {
   createChargeAdjustmentRequest,
   listPendingChargeAdjustmentRequests,
+  listResolvedChargeAdjustmentRequests,
   listChargeAdjustmentRequestSummary,
   approveChargeAdjustmentRequest,
   rejectChargeAdjustmentRequest,

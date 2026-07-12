@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   approveChargeAdjustmentRequest,
   approveEnrollmentMatriculaPurgeRequest,
+  getChargeAdjustmentRequestsHistory,
   getChargeAdjustmentRequestsPending,
+  getEnrollmentMatriculaPurgeRequestsHistory,
   getEnrollmentMatriculaPurgeRequestsPending,
   rejectChargeAdjustmentRequest,
   rejectEnrollmentMatriculaPurgeRequest,
@@ -23,6 +25,21 @@ function formatCurrency(value = 0) {
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(Number(value || 0));
+}
+
+function resolveRequestMotive(item = {}) {
+  if (item.actionType === 'adjust_charge_amount') {
+    return String(item.notes || '').trim() || '—';
+  }
+  return String(item.notes || item.reason || item.requestNotes || '').trim() || '—';
+}
+
+function resolveStatusLabel(status = '') {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'approved') return 'Aprobada';
+  if (normalized === 'rejected') return 'Rechazada';
+  if (normalized === 'pending') return 'Pendiente';
+  return status || '—';
 }
 
 function resolveRequestDetail(item = {}) {
@@ -61,8 +78,13 @@ function resolveRequestDetail(item = {}) {
   return item.recordCount || 0;
 }
 
+function sortByNewest(left, right, dateKey = 'submittedAt') {
+  return new Date(right?.[dateKey] || right?.submittedAt || 0) - new Date(left?.[dateKey] || left?.submittedAt || 0);
+}
+
 function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
   const [requests, setRequests] = useState([]);
+  const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -72,15 +94,30 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
     setLoading(true);
     setErrorMessage('');
     try {
-      const [purgeResponse, adjustmentResponse] = await Promise.all([
+      const [
+        purgePendingResponse,
+        adjustmentPendingResponse,
+        purgeHistoryResponse,
+        adjustmentHistoryResponse,
+      ] = await Promise.all([
         getEnrollmentMatriculaPurgeRequestsPending(),
         getChargeAdjustmentRequestsPending().catch(() => ({ data: { items: [] } })),
+        getEnrollmentMatriculaPurgeRequestsHistory().catch(() => ({ data: { items: [] } })),
+        getChargeAdjustmentRequestsHistory().catch(() => ({ data: { items: [] } })),
       ]);
-      const merged = [
-        ...(purgeResponse.data?.items || []),
-        ...(adjustmentResponse.data?.items || []),
-      ].sort((left, right) => new Date(right.submittedAt || 0) - new Date(left.submittedAt || 0));
-      setRequests(merged);
+
+      const pending = [
+        ...(purgePendingResponse.data?.items || []),
+        ...(adjustmentPendingResponse.data?.items || []),
+      ].sort((left, right) => sortByNewest(left, right, 'submittedAt'));
+
+      const resolved = [
+        ...(purgeHistoryResponse.data?.items || []),
+        ...(adjustmentHistoryResponse.data?.items || []),
+      ].sort((left, right) => sortByNewest(left, right, 'reviewedAt'));
+
+      setRequests(pending);
+      setHistory(resolved);
     } catch (error) {
       setErrorMessage(error?.response?.data?.message || 'No se pudieron cargar las autorizaciones pendientes.');
     } finally {
@@ -138,67 +175,122 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
       {loading ? <p>Cargando autorizaciones pendientes...</p> : null}
 
       {!loading ? (
-        <section className="enrollment-matricula-rectoria__section">
-          <div className="enrollment-matricula-rectoria__section-head">
-            <div>
-              <h3>Solicitudes pendientes</h3>
-              <p>Autoriza o rechaza borrados, anulaciones de pagos y ajustes de valor solicitados desde cartera.</p>
+        <>
+          <section className="enrollment-matricula-rectoria__section">
+            <div className="enrollment-matricula-rectoria__section-head">
+              <div>
+                <h3>Solicitudes pendientes</h3>
+                <p>Autoriza o rechaza borrados, anulaciones de pagos y ajustes de valor solicitados desde cartera.</p>
+              </div>
             </div>
-          </div>
 
-          <div className="enrollment-matricula-rectoria__table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Solicitud</th>
-                  <th>Solicitante</th>
-                  <th>Detalle</th>
-                  <th>Fecha</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {requests.length ? requests.map((item) => (
-                  <tr key={`${item.actionType || 'request'}-${item._id}`}>
-                    <td>{item.actionLabel || item.actionType}</td>
-                    <td>
-                      <div className="enrollment-matricula-rectoria__evidence">
-                        <span>{item.requestedByName || '—'}</span>
-                        <span>{item.requestedByRole || '—'}</span>
-                      </div>
-                    </td>
-                    <td>{resolveRequestDetail(item)}</td>
-                    <td>{formatDateTime(item.submittedAt)}</td>
-                    <td>
-                      <div className="enrollment-matricula-rectoria__actions">
-                        <button
-                          className="enrollment-matricula-rectoria__action"
-                          disabled={Boolean(actionLoading)}
-                          onClick={() => onApprove(item)}
-                          type="button"
-                        >
-                          {actionLoading === `approve:${item._id}` ? 'Autorizando...' : 'Autorizar'}
-                        </button>
-                        <button
-                          className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
-                          disabled={Boolean(actionLoading)}
-                          onClick={() => onReject(item)}
-                          type="button"
-                        >
-                          {actionLoading === `reject:${item._id}` ? 'Rechazando...' : 'Rechazar'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )) : (
+            <div className="enrollment-matricula-rectoria__table-wrap">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={5}>No hay autorizaciones pendientes.</td>
+                    <th>Solicitud</th>
+                    <th>Solicitante</th>
+                    <th>Detalle</th>
+                    <th>Motivo</th>
+                    <th>Fecha</th>
+                    <th>Acciones</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {requests.length ? requests.map((item) => (
+                    <tr key={`${item.actionType || 'request'}-${item._id}`}>
+                      <td>{item.actionLabel || item.actionType}</td>
+                      <td>
+                        <div className="enrollment-matricula-rectoria__evidence">
+                          <span>{item.requestedByName || '—'}</span>
+                          <span>{item.requestedByRole || '—'}</span>
+                        </div>
+                      </td>
+                      <td>{resolveRequestDetail(item)}</td>
+                      <td>{resolveRequestMotive(item)}</td>
+                      <td>{formatDateTime(item.submittedAt)}</td>
+                      <td>
+                        <div className="enrollment-matricula-rectoria__actions">
+                          <button
+                            className="enrollment-matricula-rectoria__action"
+                            disabled={Boolean(actionLoading)}
+                            onClick={() => onApprove(item)}
+                            type="button"
+                          >
+                            {actionLoading === `approve:${item._id}` ? 'Autorizando...' : 'Autorizar'}
+                          </button>
+                          <button
+                            className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
+                            disabled={Boolean(actionLoading)}
+                            onClick={() => onReject(item)}
+                            type="button"
+                          >
+                            {actionLoading === `reject:${item._id}` ? 'Rechazando...' : 'Rechazar'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={6}>No hay autorizaciones pendientes.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="enrollment-matricula-rectoria__section">
+            <div className="enrollment-matricula-rectoria__section-head">
+              <div>
+                <h3>Historial de solicitudes</h3>
+                <p>Quedan registradas las solicitudes aprobadas o rechazadas.</p>
+              </div>
+            </div>
+
+            <div className="enrollment-matricula-rectoria__table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Solicitud</th>
+                    <th>Solicitante</th>
+                    <th>Detalle</th>
+                    <th>Motivo</th>
+                    <th>Estado</th>
+                    <th>Revisado por</th>
+                    <th>Fecha</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.length ? history.map((item) => (
+                    <tr key={`history-${item.actionType || 'request'}-${item._id}`}>
+                      <td>{item.actionLabel || item.actionType}</td>
+                      <td>
+                        <div className="enrollment-matricula-rectoria__evidence">
+                          <span>{item.requestedByName || '—'}</span>
+                          <span>{item.requestedByRole || '—'}</span>
+                        </div>
+                      </td>
+                      <td>{resolveRequestDetail(item)}</td>
+                      <td>{resolveRequestMotive(item)}</td>
+                      <td>
+                        <span className={`enrollment-matricula-rectoria__status is-${item.status || 'unknown'}`}>
+                          {resolveStatusLabel(item.status)}
+                        </span>
+                      </td>
+                      <td>{item.reviewedByName || '—'}</td>
+                      <td>{formatDateTime(item.reviewedAt || item.submittedAt)}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={7}>Todavía no hay solicitudes en el historial.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
       ) : null}
     </div>
   );

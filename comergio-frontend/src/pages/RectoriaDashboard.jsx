@@ -10267,7 +10267,7 @@ function RectoriaDashboard() {
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
               <div>
-                <h3>Autorizaciones de matrícula</h3>
+                <h3>Solicitudes</h3>
                 <p>Aprueba o rechaza solicitudes de borrado y ajustes de valor enviados desde cartera.</p>
               </div>
             </div>

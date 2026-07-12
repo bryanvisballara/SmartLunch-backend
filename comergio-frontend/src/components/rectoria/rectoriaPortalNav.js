@@ -46,6 +46,7 @@ export const RECTORIA_PORTAL_NAV = [
       { key: 'database', label: 'Base de datos' },
       { key: 'billing', label: 'Cartera' },
       { key: 'enrollment_matricula', label: 'Matrículas digitales' },
+      { key: 'matricula_authorizations', label: 'Solicitudes' },
     ],
   },
 ];
