@@ -23,6 +23,12 @@ export const approveEnrollmentMatriculaPurgeRequest = (requestId) =>
   api.post(`/enrollment-matricula/purge-requests/${requestId}/approve`);
 export const rejectEnrollmentMatriculaPurgeRequest = (requestId, data = {}) =>
   api.post(`/enrollment-matricula/purge-requests/${requestId}/reject`, data);
+export const getChargeAdjustmentRequestsPending = () =>
+  api.get('/enrollment-matricula/charge-adjustment-requests/pending');
+export const approveChargeAdjustmentRequest = (requestId, data = {}) =>
+  api.post(`/enrollment-matricula/charge-adjustment-requests/${requestId}/approve`, data);
+export const rejectChargeAdjustmentRequest = (requestId, data = {}) =>
+  api.post(`/enrollment-matricula/charge-adjustment-requests/${requestId}/reject`, data);
 export const downloadRectoriaEnrollmentDocumentsZip = () =>
   api.get('/enrollment-matricula/signatures/download-zip', { responseType: 'blob' });
 export const downloadRectoriaEnrollmentDocument = (processId, documentType) =>

@@ -77,6 +77,7 @@ export const removeAcademicSecretarySchoolRouteStop = (driverUserId, stopId) => 
 export const createAcademicSecretaryCharge = (data) => api.post('/academic-secretary/billing/charges', data);
 export const registerAcademicSecretaryChargePayment = (chargeId, data) => api.post(`/academic-secretary/billing/charges/${chargeId}/pay`, data);
 export const updateAcademicSecretaryPensionDiscount = (studentId, data) => api.patch(`/academic-secretary/billing/students/${studentId}/pension-discount`, data);
+export const createAcademicSecretaryChargeAdjustmentRequest = (data) => api.post('/academic-secretary/billing/charge-adjustment-requests', data);
 export const sendAcademicSecretaryReminder = (data) => api.post('/academic-secretary/billing/reminders', data);
 export const createAcademicSecretaryBillingFollowUp = (data) => api.post('/academic-secretary/billing/follow-ups', data);
 export const createAcademicManagementLevel = (data) => api.post('/academic-secretary/academic-management/levels', data);

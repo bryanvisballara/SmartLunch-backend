@@ -362,6 +362,85 @@ rectoriaRouter.post('/purge-requests/:requestId/reject', async (req, res) => {
   }
 });
 
+rectoriaRouter.get('/charge-adjustment-requests/pending', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const {
+      listPendingChargeAdjustmentRequests,
+    } = require('../services/academicChargeAdjustment.service');
+    const items = await listPendingChargeAdjustmentRequests({ schoolId: req.user.schoolId });
+    return res.status(200).json({ items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.post('/charge-adjustment-requests/:requestId/approve', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const {
+      approveChargeAdjustmentRequest,
+    } = require('../services/academicChargeAdjustment.service');
+    const reviewerName = await resolveReviewerName({
+      schoolId: req.user.schoolId,
+      userId: req.user.userId,
+    });
+    const result = await approveChargeAdjustmentRequest({
+      schoolId: req.user.schoolId,
+      requestId: req.params.requestId,
+      reviewerUserId: req.user.userId,
+      reviewerName,
+      reviewNotes: req.body?.reviewNotes,
+    });
+
+    return res.status(200).json({
+      message: 'Ajuste de valor autorizado. El acudiente verá el nuevo monto al pagar.',
+      ...result,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.post('/charge-adjustment-requests/:requestId/reject', async (req, res) => {
+  try {
+    const access = assertRectoriaApproverRole(req.user.role);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const {
+      rejectChargeAdjustmentRequest,
+    } = require('../services/academicChargeAdjustment.service');
+    const reviewerName = await resolveReviewerName({
+      schoolId: req.user.schoolId,
+      userId: req.user.userId,
+    });
+    const request = await rejectChargeAdjustmentRequest({
+      schoolId: req.user.schoolId,
+      requestId: req.params.requestId,
+      reviewerUserId: req.user.userId,
+      reviewerName,
+      reviewNotes: req.body?.reviewNotes,
+    });
+
+    return res.status(200).json({
+      message: 'Solicitud de ajuste rechazada.',
+      request,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ message: error.message });
+  }
+});
+
 rectoriaRouter.get('/signatures/download-zip', async (req, res) => {
   try {
     const { buffer, fileCount } = await buildSignedDocumentsZipForRectoria({ schoolId: req.user.schoolId });

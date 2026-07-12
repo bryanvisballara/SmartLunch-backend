@@ -10268,7 +10268,7 @@ function RectoriaDashboard() {
             <div className="rectoria-section-header">
               <div>
                 <h3>Autorizaciones de matrícula</h3>
-                <p>Aprueba o rechaza solicitudes de borrado enviadas desde cartera.</p>
+                <p>Aprueba o rechaza solicitudes de borrado y ajustes de valor enviados desde cartera.</p>
               </div>
             </div>
             <EnrollmentMatriculaAuthorizationsPanel onUpdated={refreshMatriculaAuthorizationSummary} />

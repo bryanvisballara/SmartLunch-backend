@@ -53,5 +53,6 @@ require('./admissionMarketingAsset.model');
 require('./admissionMarketingCampaign.model');
 require('./enrollmentMatriculaProcess.model');
 require('./enrollmentMatriculaPurgeRequest.model');
+require('./academicChargeAdjustmentRequest.model');
 require('./colibriGameScore.model');
 require('./communityReport.model');

@@ -3864,6 +3864,20 @@ function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date(), feeConfiguration = null) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (charge?.amountLocked) {
+    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
+    return {
+      baseAmount,
+      effectiveAmount,
+      discountPercent: 0,
+      fixedDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
+      benefitLabel: normalizeText(charge?.amountAdjustmentNote) || 'Valor ajustado',
+      benefitWindowLabel: '',
+      category: charge?.category || '',
+      activeAnnualBenefitDiscountAmount: 0,
+      activeAnnualAdditionalDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
+    };
+  }
   if (charge?.category === 'monthly_statement') {
     const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
     return {
@@ -4168,12 +4182,22 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       const paidReferenceDate = latestPayment?.paidAt || existingCharge?.paidAt || dueDate;
       const chargeIsPaid = String(existingCharge?.status || '') === 'paid';
       const benefitDueDateHasExpired = dueDate.getTime() < now.getTime();
-      const pricing = !chargeIsPaid && benefitDueDateHasExpired
-        ? buildAcademicMonthlyPricingAfterBenefitDueDate(monthlyBaseAmount, effectiveBillingProfile)
-        : resolveAcademicChargeAmounts({ category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount }, effectiveBillingProfile, chargeIsPaid ? paidReferenceDate : dueDate);
+      const pricing = existingCharge?.amountLocked
+        ? resolveAcademicChargeAmounts(existingCharge, effectiveBillingProfile, chargeIsPaid ? paidReferenceDate : dueDate)
+        : (!chargeIsPaid && benefitDueDateHasExpired
+          ? buildAcademicMonthlyPricingAfterBenefitDueDate(monthlyBaseAmount, effectiveBillingProfile)
+          : resolveAcademicChargeAmounts(
+            existingCharge || { category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount },
+            effectiveBillingProfile,
+            chargeIsPaid ? paidReferenceDate : dueDate
+          ));
       const effectiveAmount = chargeIsPaid
         ? Number(rawPaidAmount || existingCharge?.chargeAmount || existingCharge?.amount || pricing.effectiveAmount || 0)
-        : Number(pricing.effectiveAmount || 0);
+        : Number(
+          existingCharge?.amountLocked
+            ? (existingCharge?.amount || pricing.effectiveAmount || 0)
+            : (pricing.effectiveAmount || 0)
+        );
       const paidAmount = chargeIsPaid
         ? Number(rawPaidAmount || effectiveAmount || 0)
         : Math.min(effectiveAmount, rawPaidAmount || 0);
@@ -9088,6 +9112,30 @@ router.post('/billing/reminders', async (req, res) => {
     return res.status(200).json({ delivery, parentsNotified: parents.length });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/billing/charge-adjustment-requests', async (req, res) => {
+  try {
+    const { schoolId, userId, role, name } = req.user;
+    const {
+      createChargeAdjustmentRequest,
+    } = require('../services/academicChargeAdjustment.service');
+
+    const request = await createChargeAdjustmentRequest({
+      schoolId,
+      userId,
+      userRole: role,
+      userName: name,
+      payload: req.body || {},
+    });
+
+    return res.status(201).json({
+      message: 'Solicitud de ajuste enviada a Rectoría para aprobación.',
+      request,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ message: error.message });
   }
 });
 

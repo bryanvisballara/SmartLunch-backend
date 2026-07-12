@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  approveChargeAdjustmentRequest,
   approveEnrollmentMatriculaPurgeRequest,
+  getChargeAdjustmentRequestsPending,
   getEnrollmentMatriculaPurgeRequestsPending,
+  rejectChargeAdjustmentRequest,
   rejectEnrollmentMatriculaPurgeRequest,
 } from '../../services/enrollmentMatricula.service';
 import './MatriculaEnrollmentFlow.css';
@@ -23,6 +26,19 @@ function formatCurrency(value = 0) {
 }
 
 function resolveRequestDetail(item = {}) {
+  if (item.actionType === 'adjust_charge_amount') {
+    return (
+      <div className="enrollment-matricula-rectoria__evidence">
+        <span>{item.studentName || '—'}</span>
+        <span>{item.concept || 'Cobro académico'}</span>
+        <span>
+          {formatCurrency(item.currentAmount)} → {formatCurrency(item.proposedAmount)}
+          {item.adjustmentModeLabel ? ` · ${item.adjustmentModeLabel}` : ''}
+        </span>
+      </div>
+    );
+  }
+
   if (item.actionType === 'delete_billing_payment') {
     return (
       <div className="enrollment-matricula-rectoria__evidence">
@@ -56,8 +72,15 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
     setLoading(true);
     setErrorMessage('');
     try {
-      const response = await getEnrollmentMatriculaPurgeRequestsPending();
-      setRequests(response.data?.items || []);
+      const [purgeResponse, adjustmentResponse] = await Promise.all([
+        getEnrollmentMatriculaPurgeRequestsPending(),
+        getChargeAdjustmentRequestsPending().catch(() => ({ data: { items: [] } })),
+      ]);
+      const merged = [
+        ...(purgeResponse.data?.items || []),
+        ...(adjustmentResponse.data?.items || []),
+      ].sort((left, right) => new Date(right.submittedAt || 0) - new Date(left.submittedAt || 0));
+      setRequests(merged);
     } catch (error) {
       setErrorMessage(error?.response?.data?.message || 'No se pudieron cargar las autorizaciones pendientes.');
     } finally {
@@ -69,12 +92,14 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
     loadRequests();
   }, [loadRequests]);
 
-  const onApprove = async (requestId) => {
-    setActionLoading(`approve:${requestId}`);
+  const onApprove = async (item) => {
+    setActionLoading(`approve:${item._id}`);
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      const response = await approveEnrollmentMatriculaPurgeRequest(requestId);
+      const response = item.actionType === 'adjust_charge_amount'
+        ? await approveChargeAdjustmentRequest(item._id)
+        : await approveEnrollmentMatriculaPurgeRequest(item._id);
       setSuccessMessage(response.data?.message || 'Solicitud autorizada.');
       await loadRequests();
       onUpdated?.();
@@ -85,15 +110,17 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
     }
   };
 
-  const onReject = async (requestId) => {
+  const onReject = async (item) => {
     const confirmed = window.confirm('¿Rechazar esta solicitud?');
     if (!confirmed) return;
 
-    setActionLoading(`reject:${requestId}`);
+    setActionLoading(`reject:${item._id}`);
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      const response = await rejectEnrollmentMatriculaPurgeRequest(requestId);
+      const response = item.actionType === 'adjust_charge_amount'
+        ? await rejectChargeAdjustmentRequest(item._id)
+        : await rejectEnrollmentMatriculaPurgeRequest(item._id);
       setSuccessMessage(response.data?.message || 'Solicitud rechazada.');
       await loadRequests();
       onUpdated?.();
@@ -115,7 +142,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
           <div className="enrollment-matricula-rectoria__section-head">
             <div>
               <h3>Solicitudes pendientes</h3>
-              <p>Autoriza o rechaza los borrados de consentimientos, documentos firmados y anulaciones de pagos solicitados desde cartera.</p>
+              <p>Autoriza o rechaza borrados, anulaciones de pagos y ajustes de valor solicitados desde cartera.</p>
             </div>
           </div>
 
@@ -132,7 +159,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
               </thead>
               <tbody>
                 {requests.length ? requests.map((item) => (
-                  <tr key={item._id}>
+                  <tr key={`${item.actionType || 'request'}-${item._id}`}>
                     <td>{item.actionLabel || item.actionType}</td>
                     <td>
                       <div className="enrollment-matricula-rectoria__evidence">
@@ -147,7 +174,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
                         <button
                           className="enrollment-matricula-rectoria__action"
                           disabled={Boolean(actionLoading)}
-                          onClick={() => onApprove(item._id)}
+                          onClick={() => onApprove(item)}
                           type="button"
                         >
                           {actionLoading === `approve:${item._id}` ? 'Autorizando...' : 'Autorizar'}
@@ -155,7 +182,7 @@ function EnrollmentMatriculaAuthorizationsPanel({ onUpdated }) {
                         <button
                           className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
                           disabled={Boolean(actionLoading)}
-                          onClick={() => onReject(item._id)}
+                          onClick={() => onReject(item)}
                           type="button"
                         >
                           {actionLoading === `reject:${item._id}` ? 'Rechazando...' : 'Rechazar'}

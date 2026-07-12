@@ -121,6 +121,12 @@ function splitMatriculaInstallmentAmounts(totalAmount, installmentCount) {
 
 function resolveChargeAmount(charge, billingProfile, feeConfiguration = null, referenceDate = new Date()) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (charge?.amountLocked) {
+    return {
+      baseAmount,
+      effectiveAmount: Math.max(0, Number(charge?.amount || baseAmount || 0)),
+    };
+  }
   if (String(charge?.category || '') === 'annual_tuition' && billingProfile && feeConfiguration) {
     const pricing = resolveParentAnnualTuitionPricing(billingProfile, feeConfiguration, referenceDate);
     const installmentCount = Math.max(1, Number(billingProfile.annualTuitionInstallments || 1));

@@ -613,6 +613,9 @@ async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate 
 
   const pendingMonthlyCharges = await AcademicCharge.find(pendingMonthlyQuery).lean();
   for (const charge of pendingMonthlyCharges) {
+    if (charge.amountLocked) {
+      continue;
+    }
     const profile = await loadBillingProfileForCharge({ schoolId, charge, profileCache });
     if (!profile || Number(profile.monthlyTuitionAmount || 0) <= 0) {
       continue;
@@ -673,6 +676,9 @@ async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate 
     const baseInstallmentAmounts = splitAmountIntoInstallments(pricing.baseAmount, installmentCount);
 
     for (const [index, charge] of charges.entries()) {
+      if (charge.amountLocked) {
+        continue;
+      }
       const amount = installmentAmounts[index] ?? installmentAmounts[installmentAmounts.length - 1] ?? 0;
       const originalAmount = baseInstallmentAmounts[index]
         ?? baseInstallmentAmounts[baseInstallmentAmounts.length - 1]

@@ -1074,6 +1074,16 @@ function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = ne
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date(), feeConfiguration = null) {
   const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  if (charge?.amountLocked) {
+    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
+    return {
+      baseAmount,
+      effectiveAmount,
+      discountPercent: 0,
+      fixedDiscountAmount: Math.max(0, baseAmount - effectiveAmount),
+      benefitLabel: String(charge?.amountAdjustmentNote || 'Valor ajustado').trim(),
+    };
+  }
   if (String(charge?.category || '') === 'monthly_statement') {
     const { recalculateConsolidatedStatementPricing } = require('../services/academicConsolidatedBilling.service');
     const repriced = billingProfile && String(charge?.status || '') !== 'paid'
