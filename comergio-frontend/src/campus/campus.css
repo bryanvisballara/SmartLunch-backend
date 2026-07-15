@@ -1102,6 +1102,8 @@ button.campus-coordination__selected-item.is-selected {
 .campus-parent-mobile-app.is-matricula-locked .campus-parent-mobile__portal-shell {
   pointer-events: none;
   user-select: none;
+  filter: grayscale(0.15);
+  opacity: 0.42;
 }
 
 .campus-parent-mobile-app.has-parent-portal-header {

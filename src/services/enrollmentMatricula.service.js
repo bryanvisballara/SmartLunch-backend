@@ -490,7 +490,7 @@ async function markPaymentPending({ process, paymentTransaction, amount, method 
 }
 
 async function refreshContractParamsSnapshotIfNeeded(process) {
-  if (!process || !['contract_pending', 'pagare_pending', 'payment_confirmed'].includes(process.status)) {
+  if (!process || !['contract_pending', 'pagare_pending', 'payment_confirmed', 'office_payment_confirmed'].includes(process.status)) {
     return process;
   }
 
@@ -739,14 +739,38 @@ async function signDocument({
   return process;
 }
 
+const MATRICULA_SIGNATURE_REQUIRED_STATUSES = [
+  'payment_confirmed',
+  'contract_pending',
+  'pagare_pending',
+  'office_payment_confirmed',
+];
+
 async function listPendingSignaturesForParent({ schoolId, parentId }) {
+  const parentObjectId = toObjectId(parentId);
+  if (!parentObjectId) {
+    return [];
+  }
+
+  const links = await ParentStudentLink.find({
+    schoolId,
+    parentId: parentObjectId,
+    status: 'active',
+  })
+    .select('studentId')
+    .lean();
+  const studentIds = [...new Set(links.map((link) => link.studentId).filter(Boolean))];
+
   const processes = await EnrollmentMatriculaProcess.find({
     schoolId,
-    parentId,
-    status: { $in: ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'] },
+    status: { $in: MATRICULA_SIGNATURE_REQUIRED_STATUSES },
+    $or: [
+      { parentId: parentObjectId },
+      ...(studentIds.length ? [{ studentId: { $in: studentIds } }] : []),
+    ],
   })
     .sort({ updatedAt: -1 })
-    .select('studentName parentName status chargeId studentId parentId consent payment contract pagare contractParamsSnapshot academicYear')
+    .select('studentName parentName status chargeId studentId parentId consent payment contract pagare contractParamsSnapshot academicYear contractMode')
     .lean();
 
   return processes.map((item) => serializeProcess(item));
@@ -1215,6 +1239,28 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
   const { refreshPendingIndividualTuitionCharges } = require('./academicConsolidatedBilling.service');
   await refreshPendingIndividualTuitionCharges({ schoolId, referenceDate: new Date(), studentIds });
 
+  // Paid matrícula with an unsigned digital/office process must still block the app.
+  const unsignedPaidProcess = await EnrollmentMatriculaProcess.findOne({
+    schoolId,
+    studentId: { $in: studentIds },
+    status: { $in: MATRICULA_SIGNATURE_REQUIRED_STATUSES },
+  })
+    .sort({ updatedAt: -1 })
+    .lean();
+
+  if (unsignedPaidProcess) {
+    const charge = unsignedPaidProcess.chargeId
+      ? await AcademicCharge.findOne({ _id: unsignedPaidProcess.chargeId, schoolId }).lean()
+      : null;
+    return {
+      required: true,
+      blocking: true,
+      reason: 'signature_pending',
+      process: serializeProcess(unsignedPaidProcess, charge),
+      charge,
+    };
+  }
+
   const unpaidCharge = await AcademicCharge.findOne({
     schoolId,
     studentId: { $in: studentIds },
@@ -1235,7 +1281,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
   });
 
   const paymentConfirmed = normalizeText(process?.payment?.status).includes('PAID') || Boolean(process?.payment?.chargePaymentId);
-  const requiresSignature = ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(process.status);
+  const requiresSignature = MATRICULA_SIGNATURE_REQUIRED_STATUSES.includes(process.status);
 
   if (requiresSignature) {
     return {
@@ -1247,8 +1293,18 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     };
   }
 
-  if (paymentConfirmed || process.status === 'completed') {
+  if (process.status === 'completed') {
     return { required: false, blocking: false };
+  }
+
+  if (paymentConfirmed) {
+    return {
+      required: true,
+      blocking: true,
+      reason: 'signature_pending',
+      process: serializeProcess(process, charge),
+      charge,
+    };
   }
 
   return {

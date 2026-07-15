@@ -5454,7 +5454,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [matriculaProcess, setMatriculaProcess] = useState(null);
   const [matriculaFlowCharge, setMatriculaFlowCharge] = useState(null);
   const [matriculaPendingSignature, setMatriculaPendingSignature] = useState(null);
+  // Idle + checking keep Millennium locked until the first gate resolution finishes.
   const [matriculaAccessGate, setMatriculaAccessGate] = useState('idle');
+  const matriculaAccessRequestRef = useRef(0);
   const [showFinanceConceptsSheet, setShowFinanceConceptsSheet] = useState(false);
   const [financePaymentsPage, setFinancePaymentsPage] = useState(1);
   const [feedLikesSheetId, setFeedLikesSheetId] = useState('');
@@ -5863,10 +5865,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       return;
     }
 
+    const requestId = matriculaAccessRequestRef.current + 1;
+    matriculaAccessRequestRef.current = requestId;
     setMatriculaAccessGate('checking');
 
     try {
       const billingResponse = await getParentAcademicBilling().catch(() => null);
+      if (requestId !== matriculaAccessRequestRef.current) {
+        return;
+      }
       if (billingResponse?.data) {
         setAcademicBilling(billingResponse.data);
       }
@@ -5876,22 +5883,39 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         refreshMatriculaPendingSignatures(),
       ]);
 
-      const requirement = requirementResponse.data || {};
+      if (requestId !== matriculaAccessRequestRef.current) {
+        return;
+      }
 
-      if (requirement.required && requirement.process) {
+      const requirement = requirementResponse.data || {};
+      const blockingProcess = (
+        (requirement.required && requirement.process)
+          ? requirement.process
+          : null
+      ) || (
+        pendingSignature?.requiresSignature || ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(String(pendingSignature?.status || ''))
+          ? pendingSignature
+          : null
+      );
+
+      if (blockingProcess && !blockingProcess.isCompleted) {
+        const isSignaturePending = requirement.reason === 'signature_pending'
+          || Boolean(blockingProcess.requiresSignature)
+          || ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(String(blockingProcess.status || ''));
+
         openMatriculaFlowFromProcess(
-          requirement.process,
-          requirement.charge || requirement.process.charge || null,
+          blockingProcess,
+          requirement.charge || blockingProcess.charge || null,
           {
-            pendingResume: requirement.reason === 'signature_pending' || Boolean(requirement.process.requiresSignature),
-            pendingSignature: requirement.reason === 'signature_pending' ? requirement.process : null,
+            pendingResume: isSignaturePending,
+            pendingSignature: isSignaturePending ? blockingProcess : null,
           },
         );
         setMatriculaAccessGate('blocked');
         return;
       }
 
-      if (pendingSignature?._id) {
+      if (pendingSignature?._id && !pendingSignature.isCompleted) {
         setMatriculaPendingSignature(pendingSignature);
 
         if (pendingSignature.requiresSignature) {
@@ -5906,11 +5930,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
         try {
           const statusResponse = await getEnrollmentMatriculaPaymentStatus(pendingSignature._id);
+          if (requestId !== matriculaAccessRequestRef.current) {
+            return;
+          }
           const nextProcess = statusResponse.data?.process;
-          if (nextProcess?.requiresSignature) {
-            openMatriculaFlowFromProcess(nextProcess, nextProcess.charge || null, {
+          if (nextProcess?.requiresSignature || !nextProcess?.isCompleted) {
+            openMatriculaFlowFromProcess(nextProcess || pendingSignature, nextProcess?.charge || pendingSignature.charge || null, {
               pendingResume: true,
-              pendingSignature: nextProcess,
+              pendingSignature: nextProcess || pendingSignature,
             });
             setMatriculaAccessGate('blocked');
             return;
@@ -5931,6 +5958,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       setMatriculaFlowPendingResume(false);
       setMatriculaAccessGate('open');
     } catch (error) {
+      if (requestId !== matriculaAccessRequestRef.current) {
+        return;
+      }
       setMatriculaAccessGate('blocked');
       setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo validar el estado de matrícula.');
     }
@@ -5939,6 +5969,34 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   useEffect(() => {
     evaluateMatriculaAccess();
   }, [evaluateMatriculaAccess, user?.id]);
+
+  useEffect(() => {
+    if (!isMillenniumParent || matriculaAccessGate !== 'blocked' || matriculaFlowOpen) {
+      return undefined;
+    }
+
+    const resumeProcess = (matriculaProcess && !matriculaProcess.isCompleted)
+      ? matriculaProcess
+      : (matriculaPendingSignature && !matriculaPendingSignature.isCompleted ? matriculaPendingSignature : null);
+
+    if (!resumeProcess) {
+      return undefined;
+    }
+
+    openMatriculaFlowFromProcess(resumeProcess, resumeProcess.charge || matriculaFlowCharge || null, {
+      pendingResume: true,
+      pendingSignature: resumeProcess,
+    });
+    return undefined;
+  }, [
+    isMillenniumParent,
+    matriculaAccessGate,
+    matriculaFlowCharge,
+    matriculaFlowOpen,
+    matriculaPendingSignature,
+    matriculaProcess,
+    openMatriculaFlowFromProcess,
+  ]);
 
   useEffect(() => {
     if (!isMillenniumParent) {
@@ -6283,11 +6341,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
   const shouldLockParentPortal = isMillenniumParent && (
-    matriculaAccessGate === 'checking'
+    matriculaAccessGate === 'idle'
+    || matriculaAccessGate === 'checking'
     || (matriculaAccessGate === 'blocked' && !(matriculaProcess?.isCompleted))
   );
   const isBlockingMatriculaFlow = Boolean(
-    shouldLockParentPortal && matriculaFlowOpen && matriculaProcess && !matriculaProcess.isCompleted,
+    shouldLockParentPortal
+    && (matriculaFlowOpen || matriculaAccessGate === 'blocked')
+    && matriculaProcess
+    && !matriculaProcess.isCompleted,
   );
   const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
   const selectedFinanceConceptsTotal = selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
@@ -6742,7 +6804,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     expandBottomNav();
   }, [activeSection, activeAcademicView, expandBottomNav]);
 
-  if (isMillenniumParent && matriculaAccessGate === 'checking') {
+  if (isMillenniumParent && (matriculaAccessGate === 'checking' || matriculaAccessGate === 'idle')) {
     return (
       <ColibriBootSplash
         ariaLabel="Validando matrícula"

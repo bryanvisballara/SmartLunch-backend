@@ -391,6 +391,10 @@ function MatriculaEnrollmentFlow({
     setProcess(initialProcess);
   }, [initialProcess]);
 
+  useEffect(() => {
+    setShowIntro(Boolean(startAtIntro));
+  }, [startAtIntro, initialProcess?._id, pendingSignatureResume]);
+
   const activeStep = useMemo(() => resolveActiveStep(process), [process]);
 
   useEffect(() => {

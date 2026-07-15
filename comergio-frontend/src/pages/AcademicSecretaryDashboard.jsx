@@ -5195,7 +5195,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     <option value="digital">Contrato digital</option>
                   </select>
                   <small className="academic-secretary__field-hint">
-                    Físico: contrato firmado en oficina. Digital: pago registrado en cartera; el acudiente no debe firmar en la app si ya pagó aquí.
+                    Físico: el contrato y pagaré ya se firmaron en la oficina (no pedirá firma en la app). Digital: solo registra el pago; el acudiente debe firmar el contrato y el pagaré en la app para poder entrar.
                   </small>
                 </label>
               ) : null}
