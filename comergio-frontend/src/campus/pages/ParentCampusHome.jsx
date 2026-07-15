@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
+import ParentNotificationCenter from '../../components/parent/ParentNotificationCenter';
 import { LOGIN_PATH } from '../../lib/authNavigation';
 import { ComergioBrandTitle } from '../../components/ComergioBrandTitle';
 import femImage from '../../assets/fem.png';
@@ -2720,11 +2721,13 @@ function ParentCafeteriaContent({
   children,
   guardianName,
   onLogout,
+  onNotificationNavigate = null,
   onSelectChild,
   onSelectView,
   onToggleChildOptions,
   onToggleMenu,
   onToggleUserMenu,
+  preferStudentNotifications = false,
   selectedChild,
   showChildOptions,
   showMenu,
@@ -2762,30 +2765,36 @@ function ParentCafeteriaContent({
           <h1>{`Hola, ${parentFirstName}!`}</h1>
         </div>
 
-        <div className="parent-profile-wrap" ref={userMenuRef}>
-          <button
-            aria-expanded={showUserMenu}
-            aria-haspopup="menu"
-            aria-label="Abrir opciones de perfil"
-            className="parent-avatar parent-avatar-btn"
-            onClick={onToggleUserMenu}
-            type="button"
-          >
-            {parentInitial}
-          </button>
+        <div className="parent-topbar-actions">
+          <ParentNotificationCenter
+            navigationHandler={onNotificationNavigate}
+            preferStudent={preferStudentNotifications}
+          />
+          <div className="parent-profile-wrap" ref={userMenuRef}>
+            <button
+              aria-expanded={showUserMenu}
+              aria-haspopup="menu"
+              aria-label="Abrir opciones de perfil"
+              className="parent-avatar parent-avatar-btn"
+              onClick={onToggleUserMenu}
+              type="button"
+            >
+              {parentInitial}
+            </button>
 
-          {showUserMenu ? (
-            <div className="parent-profile-menu" role="menu">
-              <button className="logout" onClick={onLogout} type="button">
-                <span className="icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2 1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
-                  </svg>
-                </span>
-                <span>Cerrar sesión</span>
-              </button>
-            </div>
-          ) : null}
+            {showUserMenu ? (
+              <div className="parent-profile-menu" role="menu">
+                <button className="logout" onClick={onLogout} type="button">
+                  <span className="icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2 1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+                    </svg>
+                  </span>
+                  <span>Cerrar sesión</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -3479,7 +3488,18 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
   );
 }
 
-function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpen, onLogout, onToggleMenu, onToggleUserMenu, showUserMenu, userMenuRef }) {
+function ParentMobilePortalHeader({
+  canOpenMenu = false,
+  guardianName,
+  isMenuOpen,
+  onLogout,
+  onNotificationNavigate = null,
+  onToggleMenu,
+  onToggleUserMenu,
+  preferStudentNotifications = false,
+  showUserMenu,
+  userMenuRef,
+}) {
   const parentFirstName = String(guardianName || 'Padre').split(' ')[0] || 'Padre';
   const parentInitial = String(guardianName || 'P').charAt(0).toUpperCase();
 
@@ -3498,30 +3518,36 @@ function ParentMobilePortalHeader({ canOpenMenu = false, guardianName, isMenuOpe
         <h1>{`Hola, ${parentFirstName}!`}</h1>
       </div>
 
-      <div className="parent-profile-wrap" ref={userMenuRef}>
-        <button
-          aria-expanded={showUserMenu}
-          aria-haspopup="menu"
-          aria-label="Abrir opciones de perfil"
-          className="parent-avatar parent-avatar-btn"
-          onClick={onToggleUserMenu}
-          type="button"
-        >
-          {parentInitial}
-        </button>
+      <div className="parent-topbar-actions">
+        <ParentNotificationCenter
+          navigationHandler={onNotificationNavigate}
+          preferStudent={preferStudentNotifications}
+        />
+        <div className="parent-profile-wrap" ref={userMenuRef}>
+          <button
+            aria-expanded={showUserMenu}
+            aria-haspopup="menu"
+            aria-label="Abrir opciones de perfil"
+            className="parent-avatar parent-avatar-btn"
+            onClick={onToggleUserMenu}
+            type="button"
+          >
+            {parentInitial}
+          </button>
 
-        {showUserMenu ? (
-          <div className="parent-profile-menu" role="menu">
-            <button className="logout" onClick={onLogout} type="button">
-              <span className="icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
-                </svg>
-              </span>
-              <span>Cerrar sesión</span>
-            </button>
-          </div>
-        ) : null}
+          {showUserMenu ? (
+            <div className="parent-profile-menu" role="menu">
+              <button className="logout" onClick={onLogout} type="button">
+                <span className="icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+                  </svg>
+                </span>
+                <span>Cerrar sesión</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );
@@ -6295,6 +6321,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           : (primaryPendingCharge.concept || 'Tienes un cobro académico pendiente'))
         : 'No tienes pagos pendientes este mes';
 
+  const handleNotificationNavigate = useCallback((path) => {
+    const nextPath = String(path || '').trim();
+    if (!nextPath) {
+      return;
+    }
+    navigate(nextPath);
+  }, [navigate]);
+
   const onLogout = () => {
     setShowUserMenu(false);
     logout();
@@ -6973,12 +7007,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             guardianName={studentPortalMode ? (selectedChild?.name || user?.name) : workspace.guardian.name}
             isMenuOpen={activeSection === 'academic' ? showAcademicMenu : false}
             onLogout={onLogout}
+            onNotificationNavigate={handleNotificationNavigate}
             onToggleMenu={() => {
               if (activeSection === 'academic') {
                 setShowAcademicMenu((currentValue) => !currentValue);
               }
             }}
             onToggleUserMenu={() => setShowUserMenu((currentValue) => !currentValue)}
+            preferStudentNotifications={studentPortalMode}
             showUserMenu={showUserMenu}
             userMenuRef={userMenuRef}
           />
@@ -7170,6 +7206,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               children={workspace.children}
               guardianName={workspace.guardian.name}
               onLogout={onLogout}
+              onNotificationNavigate={handleNotificationNavigate}
               onSelectChild={(childId) => {
                 setSelectedChildId(childId);
                 setShowFinanceChildOptions(false);
@@ -7181,6 +7218,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               onToggleChildOptions={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
               onToggleMenu={() => setShowCafeteriaMenu((currentValue) => !currentValue)}
               onToggleUserMenu={() => setShowUserMenu((currentValue) => !currentValue)}
+              preferStudentNotifications={studentPortalMode}
               selectedChild={selectedChild}
               showChildOptions={showFinanceChildOptions}
               showMenu={showCafeteriaMenu}

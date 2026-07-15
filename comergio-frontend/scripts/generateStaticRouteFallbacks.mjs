@@ -147,16 +147,25 @@ async function main() {
   await writeLegacyBrokenEntryAliases(DIST_DEPLOY_DIR);
   await copyBerckleyTourDeploy([DIST_DIR, DIST_DEPLOY_DIR]);
 
+  // Hostinger/app deploy zip stays lean: omit marketing landing assets.
+  await fs.rm(path.join(DIST_DEPLOY_DIR, 'landing'), { recursive: true, force: true });
+
   const zipPath = path.join(process.cwd(), 'dist-deploy.zip');
   await fs.rm(zipPath, { force: true });
   execSync(
-    'zip -rq dist-deploy.zip dist-deploy -x "dist-deploy/tourvirtualberckley/*" "dist-deploy/tourvirtualberckley/**/*"',
+    [
+      'zip -rq dist-deploy.zip dist-deploy',
+      '-x "dist-deploy/tourvirtualberckley/*"',
+      '-x "dist-deploy/tourvirtualberckley/**/*"',
+      '-x "dist-deploy/landing/*"',
+      '-x "dist-deploy/landing/**/*"',
+    ].join(' '),
     { cwd: process.cwd(), stdio: 'inherit' },
   );
 
   console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);
   console.log(`[route-fallbacks] aliased ${LEGACY_BROKEN_ENTRY_ALIASES.length} stale entry bundles to the current build`);
-  console.log('[route-fallbacks] packaged dist-deploy.zip (tourvirtualberckley excluded)');
+  console.log('[route-fallbacks] packaged dist-deploy.zip (tourvirtualberckley and landing excluded)');
 }
 
 main().catch((error) => {

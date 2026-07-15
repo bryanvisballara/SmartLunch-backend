@@ -11,12 +11,16 @@ const notificationSchema = new mongoose.Schema(
     payload: { type: Object, default: {} },
     status: { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending' },
     sentAt: { type: Date, default: null },
+    readAt: { type: Date, default: null },
+    dismissedAt: { type: Date, default: null },
     lastError: { type: String, default: null },
   },
   { timestamps: true }
 );
 
 notificationSchema.index({ parentId: 1, createdAt: -1 });
+notificationSchema.index({ parentId: 1, dismissedAt: 1, createdAt: -1 });
+notificationSchema.index({ parentId: 1, readAt: 1, dismissedAt: 1 });
 notificationSchema.index({ schoolId: 1, createdAt: -1 });
 
 module.exports = registerSchoolScopedModel('Notification', notificationSchema);

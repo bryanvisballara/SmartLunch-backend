@@ -47,6 +47,7 @@ import pseLogo from '../assets/PSE.png';
 import warningLogo from '../assets/warning.png';
 import { ComergioBrandTitle } from '../components/ComergioBrandTitle';
 import { ColibriBootSplash } from '../components/ColibriBootSplash';
+import ParentNotificationCenter from '../components/parent/ParentNotificationCenter';
 import { isBerckleySchool } from '../lib/schools';
 
 function formatCurrency(value) {
@@ -1545,6 +1546,14 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
     autoTopupRechargeAmount,
   ]);
 
+  const handleNotificationNavigate = useCallback((path) => {
+    const nextPath = String(path || '').trim();
+    if (!nextPath) {
+      return;
+    }
+    navigate(nextPath);
+  }, [navigate]);
+
   const onLogout = () => {
     logout();
     redirectToLoginPage();
@@ -2880,30 +2889,36 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
             <h1>Cafetería</h1>
           </div>
 
-          <div className="parent-profile-wrap">
-            <button
-              aria-expanded={profileMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Abrir opciones de perfil"
-              className="parent-avatar parent-avatar-btn"
-              onClick={() => setProfileMenuOpen((prev) => !prev)}
-              type="button"
-            >
-              {parentInitial}
-            </button>
+          <div className="parent-topbar-actions">
+            <ParentNotificationCenter
+              navigationHandler={handleNotificationNavigate}
+              preferStudent={studentPortalMode}
+            />
+            <div className="parent-profile-wrap">
+              <button
+                aria-expanded={profileMenuOpen}
+                aria-haspopup="menu"
+                aria-label="Abrir opciones de perfil"
+                className="parent-avatar parent-avatar-btn"
+                onClick={() => setProfileMenuOpen((prev) => !prev)}
+                type="button"
+              >
+                {parentInitial}
+              </button>
 
-            {profileMenuOpen ? (
-              <div className="parent-profile-menu" role="menu">
-                <button className="logout" onClick={onLogout} type="button">
-                  <span className="icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
-                    </svg>
-                  </span>
-                  <span>Cerrar sesión</span>
-                </button>
-              </div>
-            ) : null}
+              {profileMenuOpen ? (
+                <div className="parent-profile-menu" role="menu">
+                  <button className="logout" onClick={onLogout} type="button">
+                    <span className="icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <span>Cerrar sesión</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
       ) : (
@@ -2919,30 +2934,36 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
             <h1>Hola, {headerName}!</h1>
           </div>
 
-          <div className="parent-profile-wrap">
-            <button
-              aria-expanded={profileMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Abrir opciones de perfil"
-              className="parent-avatar parent-avatar-btn"
-              onClick={() => setProfileMenuOpen((prev) => !prev)}
-              type="button"
-            >
-              {parentInitial}
-            </button>
+          <div className="parent-topbar-actions">
+            <ParentNotificationCenter
+              navigationHandler={handleNotificationNavigate}
+              preferStudent={studentPortalMode}
+            />
+            <div className="parent-profile-wrap">
+              <button
+                aria-expanded={profileMenuOpen}
+                aria-haspopup="menu"
+                aria-label="Abrir opciones de perfil"
+                className="parent-avatar parent-avatar-btn"
+                onClick={() => setProfileMenuOpen((prev) => !prev)}
+                type="button"
+              >
+                {parentInitial}
+              </button>
 
-            {profileMenuOpen ? (
-              <div className="parent-profile-menu" role="menu">
-                <button className="logout" onClick={onLogout} type="button">
-                  <span className="icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
-                    </svg>
-                  </span>
-                  <span>Cerrar sesión</span>
-                </button>
-              </div>
-            ) : null}
+              {profileMenuOpen ? (
+                <div className="parent-profile-menu" role="menu">
+                  <button className="logout" onClick={onLogout} type="button">
+                    <span className="icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5v-2H5V5h5V3Zm7.6 4.6L16.2 9l2.6 2H9v2h9.8l-2.6 2l1.4 1.4L23 12l-5.4-4.4Z" fill="currentColor"/>
+                      </svg>
+                    </span>
+                    <span>Cerrar sesión</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
       )}

@@ -40,6 +40,21 @@ export function resolveStudentNotificationPath(payload = {}) {
     case 'academic.course_assigned':
       return '/student?academicView=academic-performance';
 
+    case 'order.created':
+    case 'wallet.recharge':
+    case 'wallet.low_balance':
+    case 'meriendas.tutor_comment':
+      return '/student/cafeteria';
+
+    case 'nursing.visit':
+      return '/student/enfermeria';
+
+    case 'psychology.case_note':
+      return '/student/wellbeing';
+
+    case 'campus.discipline_observation_parent':
+      return '/student/coexistence';
+
     default:
       return '/student';
   }
@@ -47,7 +62,8 @@ export function resolveStudentNotificationPath(payload = {}) {
 
 export function resolveNotificationPath(payload = {}, options = {}) {
   const audience = normalizeText(payload.audience || options.audience);
-  if (audience === 'student') {
+  const preferStudent = Boolean(options.preferStudent) || audience === 'student';
+  if (preferStudent) {
     return resolveStudentNotificationPath(payload);
   }
 
@@ -110,6 +126,12 @@ export function resolveParentNotificationPath(payload = {}) {
     case 'school_route.picked_up':
     case 'school_route.skipped':
       return withStudent(buildParentNotificationSectionPath('transport'));
+
+    case 'order.created':
+    case 'wallet.recharge':
+    case 'wallet.low_balance':
+    case 'meriendas.tutor_comment':
+      return withStudent(buildParentNotificationSectionPath('cafeteria'));
 
     default:
       return withStudent('/parent');

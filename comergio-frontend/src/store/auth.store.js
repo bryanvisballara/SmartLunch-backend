@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { clearAppBadgeCount } from '../lib/appBadge.js';
 import { resetQueryCache } from '../lib/queryClient.js';
 
 function safeParse(rawValue, fallback = null) {
@@ -52,6 +53,7 @@ const useAuthStore = create((set) => ({
   },
   logout: () => {
     resetQueryCache();
+    clearAppBadgeCount();
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('user');

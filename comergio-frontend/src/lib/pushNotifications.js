@@ -2,8 +2,9 @@ import { Capacitor } from '@capacitor/core';
 import { FirebaseMessaging } from '@capacitor-firebase/messaging';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { registerDeviceToken } from '../services/notifications.service';
+import { getNotificationsUnreadCount, registerDeviceToken } from '../services/notifications.service';
 import { resolveNotificationPath } from './parentNotificationNavigation';
+import { setAppBadgeCount } from './appBadge';
 
 const PUSH_TOKEN_STORAGE_KEY = 'comergioPushToken';
 const PENDING_PUSH_NAVIGATION_KEY = 'comergioPendingPushNavigation';
@@ -131,6 +132,15 @@ function resolveForegroundNotification(event) {
   return { title, body, data };
 }
 
+async function refreshNativeAppBadge() {
+  try {
+    const result = await getNotificationsUnreadCount();
+    await setAppBadgeCount(Number(result?.count || 0));
+  } catch (error) {
+    console.warn('[APP_BADGE_REFRESH_FAILED]', error);
+  }
+}
+
 async function ensureNativeForegroundPresentation() {
   if (nativeForegroundListenerPromise) {
     return nativeForegroundListenerPromise;
@@ -151,6 +161,7 @@ async function ensureNativeForegroundPresentation() {
 
     await FirebaseMessaging.addListener('notificationReceived', async (event) => {
       const { title, body, data } = resolveForegroundNotification(event);
+      refreshNativeAppBadge();
 
       if (!title && !body) {
         return;

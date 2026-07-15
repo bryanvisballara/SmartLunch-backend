@@ -193,14 +193,77 @@ router.get('/audit', roleMiddleware('admin'), async (req, res) => {
   }
 });
 
-router.get('/', roleMiddleware('parent', 'admin'), async (req, res) => {
+router.get('/unread-count', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const count = await Notification.countDocuments({
+      schoolId,
+      parentId: userId,
+      dismissedAt: null,
+      readAt: null,
+    });
+    return res.status(200).json({ count });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/:id/dismiss', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(String(id))) {
+      return res.status(400).json({ message: 'id is invalid' });
+    }
+
+    const updated = await Notification.findOneAndUpdate(
+      { _id: id, schoolId, parentId: userId, dismissedAt: null },
+      { $set: { dismissedAt: new Date(), readAt: new Date() } },
+      { new: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    const unreadCount = await Notification.countDocuments({
+      schoolId,
+      parentId: userId,
+      dismissedAt: null,
+      readAt: null,
+    });
+
+    return res.status(200).json({ notification: updated, unreadCount });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/read-all', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const now = new Date();
+    await Notification.updateMany(
+      { schoolId, parentId: userId, dismissedAt: null, readAt: null },
+      { $set: { readAt: now } },
+    );
+    return res.status(200).json({ unreadCount: 0 });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
     const { parentId } = req.query;
 
-    const filter = { schoolId };
+    const filter = {
+      schoolId,
+      dismissedAt: null,
+    };
 
-    if (role === 'parent') {
+    if (role === 'parent' || role === 'student') {
       filter.parentId = userId;
     }
 
@@ -208,8 +271,25 @@ router.get('/', roleMiddleware('parent', 'admin'), async (req, res) => {
       filter.parentId = parentId;
     }
 
+    if (role === 'admin' && !parentId) {
+      // Admin without parent filter keeps previous audit-oriented listing.
+      delete filter.dismissedAt;
+    }
+
     const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(100);
-    return res.status(200).json(notifications);
+    const unreadCount = role === 'admin' && !parentId
+      ? 0
+      : await Notification.countDocuments({
+        schoolId,
+        parentId: filter.parentId || userId,
+        dismissedAt: null,
+        readAt: null,
+      });
+
+    return res.status(200).json({
+      items: notifications,
+      unreadCount,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

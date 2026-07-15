@@ -55,39 +55,45 @@ async function queueOrderCreatedNotifications({ schoolId, student, order }) {
       status: 'active',
     }).select('parentId');
 
-    if (!parentLinks.length) {
-      return { notificationsCreated: 0, tokensFound: 0 };
-    }
-
     const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).select('balance');
     const remainingBalance = wallet?.balance || 0;
-
     const childName = firstName(student.name);
-    const title = `${childName} ha realizado una compra`;
     const body = buildPurchaseBody({
       items: order.items,
       total: order.total,
       remainingBalance,
     });
-
-    const parentIds = parentLinks.map((link) => link.parentId);
-
-    return queueNotificationsForParents({
-      schoolId,
-      parentIds,
-      studentId: student._id,
+    const payload = {
+      type: 'order.created',
       orderId: order._id,
-      title,
-      body,
-      payload: {
-        type: 'order.created',
-        orderId: order._id,
+      studentId: student._id,
+      total: order.total,
+      remainingBalance,
+      paymentMethod: order.paymentMethod,
+    };
+
+    const results = [];
+    if (parentLinks.length) {
+      results.push(await queueNotificationsForParents({
+        schoolId,
+        parentIds: parentLinks.map((link) => link.parentId),
         studentId: student._id,
-        total: order.total,
-        remainingBalance,
-        paymentMethod: order.paymentMethod,
-      },
-    });
+        orderId: order._id,
+        title: `${childName} ha realizado una compra`,
+        body,
+        payload,
+      }));
+    }
+
+    results.push(await queueStudentUserNotification({
+      schoolId,
+      studentId: student._id,
+      title: 'Compra en cafetería',
+      body,
+      payload,
+    }));
+
+    return summarizeNotificationResults(results);
   });
 }
 
@@ -500,6 +506,21 @@ async function queueAutoDebitRechargeNotification({ schoolId, studentId, amount,
         balance: newBalance,
         method,
       },
+    }).then(async (parentResult) => {
+      const studentResult = await queueStudentUserNotification({
+        schoolId,
+        studentId,
+        title: 'Recarga exitosa!',
+        body: `Se acreditaron $${formatCurrency(rechargeAmount)} a tu saldo.`,
+        payload: {
+          type: 'wallet.recharge',
+          studentId,
+          amount: rechargeAmount,
+          balance: newBalance,
+          method,
+        },
+      });
+      return summarizeNotificationResults([parentResult, studentResult]);
     });
   });
 }
