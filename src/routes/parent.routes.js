@@ -2405,19 +2405,31 @@ async function buildParentAcademicGradebook({ schoolId, studentId, courses = [],
     `${String(entry.courseId)}:${normalizeText(entry.academicPeriodKey)}:${normalizeText(entry.componentKey)}`,
     entry,
   ]));
+  const entriesByCourseId = new Map();
+  entries.forEach((entry) => {
+    const courseId = String(entry.courseId || '');
+    if (!courseId) return;
+    const courseEntries = entriesByCourseId.get(courseId) || [];
+    courseEntries.push(entry);
+    entriesByCourseId.set(courseId, courseEntries);
+  });
   const teachersById = new Map(teachers.map((teacher) => [String(teacher._id), normalizeText(teacher.name || teacher.username)]));
 
   return normalizedCourses.map((course) => {
+    const courseId = String(course._id);
+    const courseEntries = entriesByCourseId.get(courseId) || [];
+
     const periods = getParentCoursePeriods(course)
       .map((period, periodIndex) => {
+        const periodKey = normalizeText(period.key) || 'period_1';
         const components = (Array.isArray(period.gradingComponents) ? period.gradingComponents : [])
           .map((component, componentIndex) => {
             const subcomponents = Array.isArray(component.subcomponents) ? component.subcomponents : [];
-            const evaluations = subcomponents.length > 0
+            let evaluations = subcomponents.length > 0
               ? subcomponents.map((subcomponent, subcomponentIndex) => {
-                const entry = entriesByCoursePeriodComponent.get(`${String(course._id)}:${normalizeText(period.key)}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`);
+                const entry = entriesByCoursePeriodComponent.get(`${courseId}:${periodKey}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`);
                 return {
-                  id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}-${normalizeText(component.key) || componentIndex}-${normalizeText(subcomponent.key) || subcomponentIndex}`,
+                  id: `${courseId}-${periodKey || periodIndex}-${normalizeText(component.key) || componentIndex}-${normalizeText(subcomponent.key) || subcomponentIndex}`,
                   title: normalizeText(subcomponent.name) || `Subcomponente ${subcomponentIndex + 1}`,
                   date: normalizeText(subcomponent.date),
                   topic: normalizeText(subcomponent.topic) || 'Sin tematica',
@@ -2428,9 +2440,9 @@ async function buildParentAcademicGradebook({ schoolId, studentId, courses = [],
                 };
               })
               : (() => {
-                const entry = entriesByCoursePeriodComponent.get(`${String(course._id)}:${normalizeText(period.key)}:${normalizeText(component.key)}`);
+                const entry = entriesByCoursePeriodComponent.get(`${courseId}:${periodKey}:${normalizeText(component.key)}`);
                 return entry ? [{
-                  id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}-${normalizeText(component.key) || componentIndex}`,
+                  id: `${courseId}-${periodKey || periodIndex}-${normalizeText(component.key) || componentIndex}`,
                   title: normalizeText(component.name) || `Componente ${componentIndex + 1}`,
                   date: entry.gradedAt || entry.updatedAt || '',
                   topic: normalizeText(course.subject) || 'Sin tematica',
@@ -2440,13 +2452,53 @@ async function buildParentAcademicGradebook({ schoolId, studentId, courses = [],
                   gradedAt: entry.gradedAt || null,
                 }] : [];
               })();
+
+            // Recover composite keys (quizzes::quiz_of_animals) when the
+            // section course gradebook still has empty subcomponents.
+            const hasVisibleEvaluation = evaluations.some((evaluation) => isParentVisibleScore(evaluation.score, gradingScale));
+            if (!hasVisibleEvaluation) {
+              const componentKey = normalizeText(component.key);
+              const componentPrefix = `${componentKey}::`;
+              const matchingEntries = courseEntries.filter((entry) => {
+                if ((normalizeText(entry.academicPeriodKey) || 'period_1') !== periodKey) {
+                  return false;
+                }
+                const entryKey = normalizeText(entry.componentKey);
+                return entryKey === componentKey || entryKey.startsWith(componentPrefix);
+              });
+              if (matchingEntries.length > 0) {
+                evaluations = matchingEntries.map((entry, entryIndex) => {
+                  const entryKey = normalizeText(entry.componentKey);
+                  const subLabel = entryKey.includes('::')
+                    ? entryKey.split('::').slice(1).join('::')
+                    : (normalizeText(component.name) || `Evaluacion ${entryIndex + 1}`);
+                  return {
+                    id: `${courseId}-${periodKey}-${componentKey || componentIndex}-${entryIndex}`,
+                    title: subLabel.replace(/_/g, ' ') || `Evaluacion ${entryIndex + 1}`,
+                    date: entry.gradedAt || entry.updatedAt || '',
+                    topic: normalizeText(course.subject) || 'Sin tematica',
+                    weight: Number(component.weight || 0) / matchingEntries.length,
+                    score: Number(entry.score),
+                    feedback: normalizeText(entry.feedback),
+                    gradedAt: entry.gradedAt || null,
+                  };
+                });
+              }
+            }
+
             const visibleEvaluations = evaluations.filter((evaluation) => isParentVisibleScore(evaluation.score, gradingScale));
-            const average = subcomponents.length > 0
+            let average = subcomponents.length > 0
               ? calculateWeightedAverage(visibleEvaluations, (evaluation) => evaluation.weight)
               : (visibleEvaluations[0]?.score ?? null);
+            if (!isParentVisibleScore(average, gradingScale) && visibleEvaluations.length > 0) {
+              average = Number((
+                visibleEvaluations.reduce((sum, evaluation) => sum + Number(evaluation.score || 0), 0)
+                / visibleEvaluations.length
+              ).toFixed(2));
+            }
 
             return {
-              id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}-${normalizeText(component.key) || componentIndex}`,
+              id: `${courseId}-${periodKey || periodIndex}-${normalizeText(component.key) || componentIndex}`,
               key: normalizeText(component.key),
               label: normalizeText(component.name) || `Componente ${componentIndex + 1}`,
               weight: Number(component.weight || 0),
@@ -2455,22 +2507,41 @@ async function buildParentAcademicGradebook({ schoolId, studentId, courses = [],
             };
           })
           .filter((component) => component.label && isParentVisibleScore(component.average, gradingScale));
-        const average = calculateWeightedAverage(components, (component) => component.weight);
+        let average = calculateWeightedAverage(components, (component) => component.weight);
+        if (!isParentVisibleScore(average, gradingScale) && components.length > 0) {
+          average = Number((
+            components.reduce((sum, component) => sum + Number(component.average || 0), 0)
+            / components.length
+          ).toFixed(2));
+        }
 
         return {
-          id: `${String(course._id)}-${normalizeText(period.key) || periodIndex}`,
-          key: normalizeText(period.key),
+          id: `${courseId}-${periodKey || periodIndex}`,
+          key: periodKey,
           label: normalizeText(period.name) || `Periodo ${periodIndex + 1}`,
           weight: Number(period.weight || 0),
           average,
           components,
         };
       });
-    const finalAverage = calculateWeightedAverage(periods, (period) => period.weight);
+    let finalAverage = calculateWeightedAverage(periods, (period) => period.weight);
+
+    // If grade rows exist but the current gradebook structure does not match
+    // (common after migrating entries onto section courses), fall back to the
+    // plain average of stored scores so the parent app still shows them.
+    if (!isParentVisibleScore(finalAverage, gradingScale) && courseEntries.length > 0) {
+      const rawScores = courseEntries
+        .map((entry) => Number(entry.score))
+        .filter((score) => Number.isFinite(score) && isParentVisibleScore(score, gradingScale));
+      if (rawScores.length > 0) {
+        finalAverage = Number((rawScores.reduce((sum, score) => sum + score, 0) / rawScores.length).toFixed(2));
+      }
+    }
+
     const performanceLevel = resolveParentPerformanceLevel(finalAverage, gradingScale);
 
     return {
-      id: String(course._id),
+      id: courseId,
       name: normalizeText(course.subject || course.title) || 'Materia',
       teacher: teachersById.get(normalizeText(course.teacherUserId)) || 'Docente',
       finalAverage,
@@ -3546,10 +3617,10 @@ router.get('/portal/overview', async (req, res) => {
     const academicGradeEntryCourses = gradeEntryCourseIds.length > 0
       ? await CampusCourse.find({
         schoolId,
-        status: 'active',
+        status: { $in: ['active', 'archived'] },
         _id: { $in: gradeEntryCourseIds },
       })
-        .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+        .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods status')
         .sort({ title: 1 })
         .lean()
       : [];

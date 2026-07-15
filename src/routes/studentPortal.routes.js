@@ -174,10 +174,10 @@ router.get('/portal/overview', async (req, res) => {
     const academicGradeEntryCourses = gradeEntryCourseIds.length
       ? await CampusCourse.find({
         schoolId,
-        status: 'active',
+        status: { $in: ['active', 'archived'] },
         _id: { $in: gradeEntryCourseIds },
       })
-        .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+        .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods status')
         .sort({ title: 1 })
         .lean()
       : [];
