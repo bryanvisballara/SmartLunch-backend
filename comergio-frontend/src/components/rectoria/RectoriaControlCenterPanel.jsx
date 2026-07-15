@@ -101,49 +101,104 @@ export default function RectoriaControlCenterPanel({
 
   const subjectRows = useMemo(() => {
     const subjects = Array.isArray(academicStructureDraft?.subjects) ? academicStructureDraft.subjects : [];
-    const buckets = campusPerformanceCourses.reduce((accumulator, course) => {
-      const subjectKey = String(course.subject || course.subjectKey || 'sin-asignatura').trim();
-      const current = accumulator.get(subjectKey) || {
-        key: subjectKey,
-        label: subjectKey,
-        courses: 0,
-        evaluatedStudents: 0,
-        scoreTotal: 0,
-        scoreCount: 0,
-        atRisk: 0,
-      };
-      current.courses += 1;
-      current.evaluatedStudents += Number(course.evaluatedStudentCount || 0);
-      if (Number.isFinite(Number(course.averageScore))) {
-        current.scoreTotal += Number(course.averageScore);
-        current.scoreCount += 1;
+
+    const normalizeSubjectIdentity = (value = '') => String(value || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+
+    const resolveCanonicalSubject = (rawValue = '') => {
+      const slug = normalizeSubjectIdentity(rawValue);
+      if (!slug) {
+        return { key: 'sin-asignatura', label: 'Sin asignatura' };
       }
-      current.atRisk += Number(course.atRiskCount || 0);
-      accumulator.set(subjectKey, current);
-      return accumulator;
-    }, new Map());
+      const matched = subjects.find((subject) => (
+        normalizeSubjectIdentity(subject.key) === slug
+        || normalizeSubjectIdentity(subject.label) === slug
+      ));
+      if (matched) {
+        return {
+          key: String(matched.key || matched.label || slug).trim(),
+          label: String(matched.label || matched.key || rawValue).trim(),
+        };
+      }
+      return {
+        key: slug,
+        label: String(rawValue || slug).trim(),
+      };
+    };
+
+    const resolveCourseIdentity = (course = {}) => [
+      String(course.teacherUserId || '').trim(),
+      String(course.gradeKey || course.studentGradeKey || '').trim(),
+      String(course.sourceCourseKey || course.section || course.key || '').trim().toLowerCase(),
+    ].join('::');
+
+    const buckets = new Map();
+    const ensureBucket = (canonical) => {
+      if (!buckets.has(canonical.key)) {
+        buckets.set(canonical.key, {
+          key: canonical.key,
+          label: canonical.label,
+          courseIdentities: new Set(),
+          evaluatedStudents: 0,
+          scoreTotal: 0,
+          scoreCount: 0,
+          atRisk: 0,
+        });
+      }
+      return buckets.get(canonical.key);
+    };
 
     subjects.forEach((subject) => {
       const key = String(subject.key || subject.label || '').trim();
-      if (!key || buckets.has(key)) return;
-      buckets.set(key, {
+      if (!key) return;
+      ensureBucket({
         key,
-        label: subject.label || key,
-        courses: 0,
-        evaluatedStudents: 0,
-        scoreTotal: 0,
-        scoreCount: 0,
-        atRisk: 0,
+        label: String(subject.label || subject.key || key).trim(),
       });
+    });
+
+    campusPerformanceCourses.forEach((course) => {
+      const canonical = resolveCanonicalSubject(course.subject || course.subjectKey || '');
+      const bucket = ensureBucket(canonical);
+      const courseIdentity = resolveCourseIdentity(course);
+      if (!bucket.courseIdentities.has(courseIdentity)) {
+        bucket.courseIdentities.add(courseIdentity);
+        bucket.evaluatedStudents += Number(course.evaluatedStudentCount || 0);
+        if (Number.isFinite(Number(course.averageScore))) {
+          bucket.scoreTotal += Number(course.averageScore);
+          bucket.scoreCount += 1;
+        }
+        bucket.atRisk += Number(course.atRiskCount || 0);
+      }
     });
 
     return Array.from(buckets.values())
       .map((row) => ({
-        ...row,
+        key: row.key,
+        label: row.label,
+        courses: row.courseIdentities.size,
+        evaluatedStudents: row.evaluatedStudents,
+        atRisk: row.atRisk,
         averageScore: row.scoreCount > 0 ? Number((row.scoreTotal / row.scoreCount).toFixed(2)) : null,
       }))
-      .sort((left, right) => Number(left.averageScore || 10) - Number(right.averageScore || 10));
+      .sort((left, right) => Number(left.averageScore ?? 10) - Number(right.averageScore ?? 10));
   }, [academicStructureDraft?.subjects, campusPerformanceCourses]);
+
+  const uniqueCampusCourseCount = useMemo(() => {
+    const identities = new Set(
+      campusPerformanceCourses.map((course) => [
+        String(course.teacherUserId || '').trim(),
+        String(course.gradeKey || course.studentGradeKey || '').trim(),
+        String(course.subject || course.subjectKey || '').trim().toLowerCase(),
+        String(course.sourceCourseKey || course.section || course.key || '').trim().toLowerCase(),
+      ].join('::')),
+    );
+    return identities.size;
+  }, [campusPerformanceCourses]);
 
   const viewMeta = {
     control_levels: {
@@ -248,7 +303,7 @@ export default function RectoriaControlCenterPanel({
         <>
           <ControlKpiGrid items={[
             { key: 'subjects', label: 'Asignaturas', value: subjectRows.length, helper: 'Configuradas en el colegio' },
-            { key: 'courses', label: 'Cursos campus', value: campusPerformanceCourses.length, helper: 'Con seguimiento académico' },
+            { key: 'courses', label: 'Cursos campus', value: uniqueCampusCourseCount, helper: 'Con seguimiento académico' },
             { key: 'evaluated', label: 'Evaluaciones', value: overviewAcademicPerformance?.evaluatedStudentCount || 0, helper: 'Estudiantes con notas' },
             { key: 'attention', label: 'Cursos en atención', value: overviewAcademicPerformance?.coursesNeedingAttention?.length || 0, helper: 'Bajo umbral o en riesgo', tone: (overviewAcademicPerformance?.coursesNeedingAttention?.length || 0) > 0 ? 'warn' : '' },
           ]} />
@@ -283,7 +338,7 @@ export default function RectoriaControlCenterPanel({
         <>
           <ControlKpiGrid items={[
             { key: 'teachers', label: 'Docentes', value: teacherRows.length || educationalLevelSummaries.reduce((sum, level) => sum + Number(level.coordinatorCount || 0), 0), helper: 'Con datos de calificación' },
-            { key: 'courses', label: 'Cursos monitoreados', value: campusPerformanceCourses.length, helper: 'En campus docente' },
+            { key: 'courses', label: 'Cursos monitoreados', value: uniqueCampusCourseCount, helper: 'En campus docente' },
             { key: 'pending', label: 'Por calificar', value: overviewAcademicPerformance?.pendingGradingCount || 0, helper: 'Actividades pendientes' },
             { key: 'risk', label: 'Alumnos en riesgo', value: overviewAcademicPerformance?.atRiskStudents?.length || 0, helper: 'Consolidado por alumno' },
           ]} />

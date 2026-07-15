@@ -1949,12 +1949,9 @@ function buildTeacherAcademicCourseCandidates({ academicStructure, teacherUserId
   (Array.isArray(academicStructure.gradeSchedules) ? academicStructure.gradeSchedules : []).forEach((gradeSchedule) => {
     const gradeKey = normalizeText(gradeSchedule?.gradeKey);
     const courseKey = normalizeText(gradeSchedule?.courseKey);
-    const grade = gradesByKey.get(gradeKey) || null;
-    const courseKeysForLoad = courseKey
-      ? [courseKey]
-      : (Array.isArray(grade?.courses) && grade.courses.length > 0
-        ? grade.courses.map((course) => normalizeText(course?.key)).filter(Boolean)
-        : ['']);
+    // Grade-level schedules (no courseKey) map to one campus course for that grade.
+    // Expanding into every section of the grade was creating inflated subjects (Arte × 100+).
+    const courseKeysForLoad = courseKey ? [courseKey] : [''];
 
     (Array.isArray(gradeSchedule?.subjectLoads) ? gradeSchedule.subjectLoads : []).forEach((load) => {
       if (normalizeText(load?.teacherUserId) === normalizedTeacherUserId) {
@@ -1987,25 +1984,9 @@ function buildTeacherAcademicCourseCandidates({ academicStructure, teacherUserId
     });
   });
 
-  Array.from(candidatesByKey.values()).forEach((candidate) => {
-    const grade = gradesByKey.get(candidate.studentGradeKey) || null;
-    const gradeCourses = (Array.isArray(grade?.courses) ? grade.courses : [])
-      .filter((course) => normalizeText(course?.status || 'active') !== 'archived')
-      .map((course) => normalizeText(course?.key))
-      .filter(Boolean);
-
-    if (candidate.courseType === 'guidance_routine' || !candidate.subject || !candidate.studentGradeKey || gradeCourses.length === 0) {
-      return;
-    }
-
-    gradeCourses.forEach((courseKey) => {
-      ensureCandidate({
-        gradeKey: candidate.studentGradeKey,
-        courseKey,
-        subjectKey: candidate.subjectKey || candidate.subject,
-      });
-    });
-  });
+  // Do not expand every subject candidate into every course of the grade.
+  // courseKeysForLoad already resolves schedule courseKey vs all grade courses when needed.
+  // A previous fan-out here created duplicate campus courses (e.g. Arte × every section).
 
   return Array.from(candidatesByKey.values());
 }
@@ -2019,6 +2000,20 @@ function resolveTeacherCourseClassSessionsFromStructure(academicStructure, teach
   return Array.isArray(course?.classSessions)
     ? course.classSessions.filter((session) => session && typeof session === 'object')
     : [];
+}
+
+function buildTeacherCampusCourseIdentity(course = {}) {
+  const subjectPart = normalizeText(course.subject || course.subjectKey)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+  const gradePart = normalizeText(course.studentGradeKey || course.gradeKey || '');
+  const sectionPart = normalizeText(course.sourceCourseKey || course.section || '').toLowerCase();
+  if (!subjectPart || !gradePart) {
+    return '';
+  }
+  return `${subjectPart}::${gradePart}::${sectionPart}`;
 }
 
 async function findExistingTeacherCourseForCandidate({ schoolId, teacherUserId, candidate }) {
@@ -2140,6 +2135,11 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
     );
   }
 
+  const matchedCourseIds = new Set();
+  const candidateIdentities = new Set(
+    candidates.map((candidate) => buildTeacherCampusCourseIdentity(candidate)).filter(Boolean),
+  );
+
   for (const candidate of candidates) {
     const candidateCourseType = candidate.courseType || 'subject';
     const existingCourse = await findExistingTeacherCourseForCandidate({ schoolId, teacherUserId, candidate });
@@ -2171,10 +2171,11 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
         : (existingCourse.gradingComponents || []);
       existingCourse.status = 'active';
       await existingCourse.save();
+      matchedCourseIds.add(String(existingCourse._id));
       continue;
     }
 
-    await CampusCourse.create({
+    const createdCourse = await CampusCourse.create({
       schoolId,
       teacherUserId,
       courseType: candidateCourseType,
@@ -2190,6 +2191,31 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       gradingComponents: candidate.courseType === 'guidance_routine' ? [] : (academicPeriods[0]?.gradingComponents || buildDefaultGradingComponents()),
       status: 'active',
     });
+    matchedCourseIds.add(String(createdCourse._id));
+  }
+
+  // Archive leftover inflations from older syncs (subject expanded into every grade section).
+  const activeTeacherCourses = await CampusCourse.find({
+    schoolId,
+    teacherUserId,
+    status: 'active',
+  }).select('_id subject subjectKey studentGradeKey gradeKey sourceCourseKey section courseType').lean();
+
+  const orphanIds = activeTeacherCourses
+    .filter((course) => {
+      if (matchedCourseIds.has(String(course._id))) {
+        return false;
+      }
+      const identity = buildTeacherCampusCourseIdentity(course);
+      return identity && !candidateIdentities.has(identity);
+    })
+    .map((course) => course._id);
+
+  if (orphanIds.length > 0) {
+    await CampusCourse.updateMany(
+      { _id: { $in: orphanIds }, schoolId, teacherUserId, status: 'active' },
+      { $set: { status: 'archived' } },
+    );
   }
 }
 
@@ -4506,12 +4532,31 @@ router.get('/coordination/teachers', requireCampusCoordinationAccess, async (req
 router.get('/coordination/courses', requireCampusCoordinationAccess, async (req, res) => {
   try {
     const { schoolId } = req.user;
+    const shouldResync = ['1', 'true', 'yes'].includes(String(req.query?.resync || '').trim().toLowerCase());
+    if (shouldResync) {
+      const teacherIds = await CampusCourse.distinct('teacherUserId', {
+        schoolId,
+        status: { $in: ['active', 'archived'] },
+      });
+      for (const teacherUserId of teacherIds) {
+        if (!teacherUserId) continue;
+        try {
+          await syncTeacherCoursesFromAcademicStructure({
+            schoolId,
+            teacherUserId,
+          });
+        } catch (syncError) {
+          console.warn(`[campus] course resync failed for teacher ${teacherUserId}:`, syncError.message);
+        }
+      }
+    }
+
     const isAcademicCoordination = normalizeText(req.user?.role) === 'coordination' && Boolean(normalizeText(req.user?.coordinationScope));
     const coordinationGradeKeys = isAcademicCoordination
       ? await resolveCampusCoordinationGradeKeys(schoolId, req.user.coordinationScope)
       : null;
     const [courses, posts, gradingContext] = await Promise.all([
-      CampusCourse.find({ schoolId }).sort({ updatedAt: -1, createdAt: -1 }).lean(),
+      CampusCourse.find({ schoolId, status: 'active' }).sort({ updatedAt: -1, createdAt: -1 }).lean(),
       CampusPost.find({ schoolId }).select('courseId type status').lean(),
       loadCampusGradingContext(schoolId),
     ]);

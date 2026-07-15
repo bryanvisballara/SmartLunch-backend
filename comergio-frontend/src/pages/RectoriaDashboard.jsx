@@ -2673,7 +2673,7 @@ function RectoriaDashboard() {
       isCoordinationPortal ? getCampusCoordinationTeachers() : getAdminUsers(),
       getStudents(),
       getAcademicSecretaryBootstrap(),
-      getCampusCoordinationCourses(),
+      getCampusCoordinationCourses({ resync: !isCoordinationPortal }),
       isCoordinationPortal ? getCampusCoordinationDashboard() : Promise.resolve(null),
     ]);
 

@@ -39,8 +39,11 @@ export function getCampusCoordinationTeachers() {
   return api.get('/campus/coordination/teachers').then((response) => response.data);
 }
 
-export function getCampusCoordinationCourses() {
-  return api.get('/campus/coordination/courses', { timeout: 45000 }).then((response) => response.data);
+export function getCampusCoordinationCourses({ resync = false } = {}) {
+  return api.get('/campus/coordination/courses', {
+    params: resync ? { resync: 1 } : undefined,
+    timeout: resync ? 120000 : 45000,
+  }).then((response) => response.data);
 }
 
 export function getCampusCoordinationDashboard() {
