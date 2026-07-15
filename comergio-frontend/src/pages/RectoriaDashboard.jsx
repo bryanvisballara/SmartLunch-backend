@@ -77,7 +77,7 @@ import {
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import CoordinationLevelDashboard from '../components/CoordinationLevelDashboard';
 import CoordinationSchedulePanel from '../components/CoordinationSchedulePanel';
-import { getCampusCoordinationCourses, getCampusCoordinationDashboard, getCampusCoordinationTeachers, getCampusDisciplineObservations } from '../campus/services/campus.service';
+import { getCampusCoordinationCourses, getCampusCoordinationDashboard, getCampusCoordinationTeachers, getCampusDisciplineObservations, resyncCampusCoordinationCourses } from '../campus/services/campus.service';
 import {
   approveHrSupplyRequest,
   consolidateHrPlannerRequests,
@@ -315,16 +315,18 @@ function formatRectoriaInstitutionalCourseLabel(course = {}, labelContext = {}) 
   const courseKeyCandidate = sourceCourseKey || sectionValue;
   let courseGroupLabel = courseKeyCandidate ? getCourseLabel(courseKeyCandidate) : '';
 
-  if (
+  // Keep real section labels (1A / 1B / A) — never collapse them to bare grade "1".
+  if (/^\d+[A-Z]$/i.test(sectionValue)) {
+    courseGroupLabel = sectionValue.toUpperCase();
+  } else if (/^[A-Z]$/i.test(sectionValue) && gradeLabel) {
+    courseGroupLabel = `${gradeLabel}${sectionValue.toUpperCase()}`;
+  } else if (/^\d+[A-Z]$/i.test(courseGroupLabel)) {
+    courseGroupLabel = courseGroupLabel.toUpperCase();
+  } else if (
     !courseGroupLabel
-    || courseGroupLabel === courseKeyCandidate
     || looksLikeTechnicalCourseKey(courseGroupLabel)
   ) {
-    if (/^[A-Z]$/i.test(sectionValue) && gradeLabel) {
-      courseGroupLabel = `${gradeLabel}${sectionValue.toUpperCase()}`;
-    } else {
-      courseGroupLabel = gradeLabel;
-    }
+    courseGroupLabel = gradeLabel;
   }
 
   const parts = [];
@@ -2673,7 +2675,7 @@ function RectoriaDashboard() {
       isCoordinationPortal ? getCampusCoordinationTeachers() : getAdminUsers(),
       getStudents(),
       getAcademicSecretaryBootstrap(),
-      getCampusCoordinationCourses({ resync: !isCoordinationPortal }),
+      getCampusCoordinationCourses(),
       isCoordinationPortal ? getCampusCoordinationDashboard() : Promise.resolve(null),
     ]);
 
@@ -2783,6 +2785,47 @@ function RectoriaDashboard() {
     return { failedSections, nextAcademicStructure };
   };
 
+  const refreshCampusCoursesInBackground = () => {
+    if (isCoordinationPortal) {
+      return;
+    }
+
+    // Fast refresh first so migrated section grades appear without waiting for full resync.
+    getCampusCoordinationCourses({ resync: false })
+      .then((payload) => {
+        const nextCourses = (payload?.courses || [])
+          .map(normalizeCampusCourseForAcademicContent)
+          .filter((course) => course.key);
+        if (!nextCourses.length) {
+          return;
+        }
+        setBillingBootstrap((previous) => ({
+          ...previous,
+          campusCourses: nextCourses,
+        }));
+      })
+      .catch(() => {
+        // Soft cleanup; the portal already loaded with the active course snapshot.
+      });
+
+    resyncCampusCoordinationCourses()
+      .then((payload) => {
+        const nextCourses = (payload?.courses || [])
+          .map(normalizeCampusCourseForAcademicContent)
+          .filter((course) => course.key);
+        if (!nextCourses.length) {
+          return;
+        }
+        setBillingBootstrap((previous) => ({
+          ...previous,
+          campusCourses: nextCourses,
+        }));
+      })
+      .catch(() => {
+        // Soft cleanup; the portal already loaded with the active course snapshot.
+      });
+  };
+
   const loadPortalBackground = async ({ academicStructure = academicStructureDraft } = {}) => {
     setBackgroundLoading(true);
 
@@ -2850,6 +2893,7 @@ function RectoriaDashboard() {
 
     try {
       const { failedSections: shellFailures, nextAcademicStructure } = await loadOverviewShell();
+      refreshCampusCoursesInBackground();
       const backgroundFailures = await loadPortalBackground({ academicStructure: nextAcademicStructure });
       const failedSections = [...shellFailures, ...backgroundFailures];
 
@@ -2877,6 +2921,7 @@ function RectoriaDashboard() {
           setError(`No se pudo cargar el resumen: ${failedSections.join(', ')}.`);
         }
         setShellLoading(false);
+        refreshCampusCoursesInBackground();
         loadPortalBackground({ academicStructure: nextAcademicStructure });
       } catch (requestError) {
         if (cancelled) return;
@@ -4217,23 +4262,62 @@ function RectoriaDashboard() {
   );
 
   const campusPerformanceCourses = useMemo(
-    () => (billingBootstrap.campusCourses || [])
-      .map((course) => {
-        const normalizedCourse = normalizeCampusCourseForAcademicContent(course);
-        return {
-          ...normalizedCourse,
-          displayLabel: formatRectoriaInstitutionalCourseLabel(normalizedCourse, institutionalCourseLabelContext),
-          averageScore: Number.isFinite(Number(course.stats?.averageScore)) ? Number(course.stats.averageScore) : null,
-          studentCount: Number(course.stats?.studentCount || 0),
-          evaluatedStudentCount: Number(course.stats?.evaluatedStudentCount || 0),
-          atRiskCount: Number(course.stats?.atRiskCount || 0),
-          pendingGradingCount: Number(course.stats?.pendingGradingCount || 0),
-          gradingCoverageRate: Number.isFinite(Number(course.stats?.gradingCoverageRate)) ? Number(course.stats.gradingCoverageRate) : null,
-          atRiskStudents: Array.isArray(course.stats?.atRiskStudents) ? course.stats.atRiskStudents : [],
-          stats: course.stats,
-        };
-      })
-      .filter((course) => course.stats),
+    () => {
+      const mapped = (billingBootstrap.campusCourses || [])
+        .map((course) => {
+          const normalizedCourse = normalizeCampusCourseForAcademicContent(course);
+          const evaluatedStudents = Array.isArray(course.stats?.evaluatedStudents) ? course.stats.evaluatedStudents : [];
+          const evaluatedScores = evaluatedStudents
+            .map((student) => (student?.finalScore == null || student?.finalScore === '' ? null : Number(student.finalScore)))
+            .filter((score) => Number.isFinite(score));
+          const rawAverage = course.stats?.averageScore;
+          let averageScore = rawAverage == null || rawAverage === ''
+            ? null
+            : (Number.isFinite(Number(rawAverage)) ? Number(rawAverage) : null);
+          if (averageScore == null && evaluatedScores.length > 0) {
+            averageScore = Number((evaluatedScores.reduce((sum, score) => sum + score, 0) / evaluatedScores.length).toFixed(2));
+          }
+          const evaluatedStudentCount = evaluatedScores.length > 0
+            ? evaluatedScores.length
+            : Number(course.stats?.evaluatedStudentCount || 0);
+          return {
+            ...normalizedCourse,
+            displayLabel: formatRectoriaInstitutionalCourseLabel(normalizedCourse, institutionalCourseLabelContext),
+            averageScore,
+            studentCount: Number(course.stats?.studentCount || 0),
+            evaluatedStudentCount,
+            atRiskCount: Number(course.stats?.atRiskCount || 0),
+            pendingGradingCount: Number(course.stats?.pendingGradingCount || 0),
+            gradingCoverageRate: Number.isFinite(Number(course.stats?.gradingCoverageRate)) ? Number(course.stats.gradingCoverageRate) : null,
+            atRiskStudents: Array.isArray(course.stats?.atRiskStudents) ? course.stats.atRiskStudents : [],
+            evaluatedStudents,
+            studentIds: Array.isArray(course.stats?.studentIds) ? course.stats.studentIds.map(String) : [],
+            stats: course.stats,
+          };
+        })
+        .filter((course) => course.stats);
+
+      // Prefer section courses (1A / 1B) over grade-wide shells labeled only as "1".
+      // Grade averages are recomputed later by grouping 1A/1B together in Docentes.
+      const sectionedSubjectGradeKeys = new Set();
+      mapped.forEach((course) => {
+        const section = String(course.section || course.sourceCourseKey || '').trim();
+        if (!section) return;
+        const subject = String(course.subject || course.subjectKey || '').trim().toLowerCase();
+        const grade = String(course.gradeKey || course.studentGradeKey || '').trim().toLowerCase();
+        if (subject && grade) {
+          sectionedSubjectGradeKeys.add(`${subject}::${grade}`);
+        }
+      });
+
+      return mapped.filter((course) => {
+        const section = String(course.section || course.sourceCourseKey || '').trim();
+        if (section) return true;
+        const subject = String(course.subject || course.subjectKey || '').trim().toLowerCase();
+        const grade = String(course.gradeKey || course.studentGradeKey || '').trim().toLowerCase();
+        return !sectionedSubjectGradeKeys.has(`${subject}::${grade}`);
+      });
+    },
     [billingBootstrap.campusCourses, institutionalCourseLabelContext]
   );
 
@@ -7493,6 +7577,7 @@ function RectoriaDashboard() {
 
       {!isCoordinationPortal && RECTORIA_CONTROL_CENTER_KEYS.includes(activeSection) ? (
         <RectoriaControlCenterPanel
+          academicGradingScale={academicGradingScale}
           academicStructureDraft={academicStructureDraft}
           campusPerformanceCourses={campusPerformanceCourses}
           disciplineObservations={disciplineObservations}

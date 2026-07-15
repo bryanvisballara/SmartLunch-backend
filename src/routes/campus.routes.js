@@ -384,6 +384,72 @@ function selectTeacherOverviewCourses(courses, postsByCourseId = new Map(), grad
   return Array.from(buckets.values()).map((bucket) => bucket.course);
 }
 
+async function migrateSectionlessGradesToSectionCourses({
+  schoolId,
+  teacherUserId,
+  sectionlessCourse,
+  sectionedCourses = [],
+}) {
+  if (!sectionlessCourse?._id || !Array.isArray(sectionedCourses) || sectionedCourses.length === 0) {
+    return { migrated: 0, remaining: 0 };
+  }
+
+  const entries = await CampusGradeEntry.find({
+    schoolId,
+    courseId: sectionlessCourse._id,
+  }).lean();
+
+  if (!entries.length) {
+    return { migrated: 0, remaining: 0 };
+  }
+
+  const studentIds = Array.from(new Set(entries.map((entry) => String(entry.studentId || '')).filter(Boolean)));
+  const students = studentIds.length > 0
+    ? await Student.find({ schoolId, _id: { $in: studentIds } }).select('_id grade course').lean()
+    : [];
+  const studentById = new Map(students.map((student) => [String(student._id), student]));
+
+  let migrated = 0;
+  for (const entry of entries) {
+    const student = studentById.get(String(entry.studentId || ''));
+    if (!student) {
+      continue;
+    }
+
+    const targetCourse = sectionedCourses.find((course) => studentBelongsToCourse(student, course));
+    if (!targetCourse?._id) {
+      continue;
+    }
+
+    const duplicate = await CampusGradeEntry.findOne({
+      schoolId,
+      courseId: targetCourse._id,
+      studentId: entry.studentId,
+      academicPeriodKey: entry.academicPeriodKey,
+      componentKey: entry.componentKey,
+    }).select('_id').lean();
+
+    if (duplicate) {
+      await CampusGradeEntry.deleteOne({ _id: entry._id, schoolId });
+      migrated += 1;
+      continue;
+    }
+
+    await CampusGradeEntry.updateOne(
+      { _id: entry._id, schoolId },
+      { $set: { courseId: targetCourse._id, teacherUserId: teacherUserId || entry.teacherUserId } },
+    );
+    migrated += 1;
+  }
+
+  const remaining = await CampusGradeEntry.countDocuments({
+    schoolId,
+    courseId: sectionlessCourse._id,
+  });
+
+  return { migrated, remaining };
+}
+
 function normalizePostType(value) {
   return normalizeText(value).replace(/\s+/g, ' ').slice(0, 60);
 }
@@ -1090,15 +1156,26 @@ function hasFiniteScore(value) {
 
 function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
   const entriesByStudentAndComponent = new Map();
+  const entriesByStudentId = new Map();
   for (const entry of gradeEntries) {
+    const studentId = String(entry.studentId || '');
+    if (!studentId) {
+      continue;
+    }
+
     entriesByStudentAndComponent.set(
-      `${String(entry.studentId)}:${normalizeText(entry.academicPeriodKey) || 'period_1'}:${normalizeText(entry.componentKey)}`,
+      `${studentId}:${normalizeText(entry.academicPeriodKey) || 'period_1'}:${normalizeText(entry.componentKey)}`,
       entry
     );
+
+    const studentEntries = entriesByStudentId.get(studentId) || [];
+    studentEntries.push(entry);
+    entriesByStudentId.set(studentId, studentEntries);
   }
 
   return (Array.isArray(students) ? students : []).map((student) => {
     const periodScoreItems = [];
+    const studentId = String(student._id || student.studentId || '');
 
     const periods = (Array.isArray(academicPeriods) ? academicPeriods : []).map((period) => {
       const componentScoreItems = [];
@@ -1106,7 +1183,7 @@ function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
       const scores = (period.gradingComponents || []).map((component) => {
         const subcomponents = (component.subcomponents || []).map((subcomponent) => {
           const entry = entriesByStudentAndComponent.get(
-            `${String(student._id || student.studentId)}:${period.key}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`
+            `${studentId}:${period.key}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`
           );
 
           return {
@@ -1123,10 +1200,30 @@ function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
           };
         });
 
-        const legacyComponentEntry = entriesByStudentAndComponent.get(`${String(student._id || student.studentId)}:${period.key}:${component.key}`);
-        const score = subcomponents.length > 0
+        const legacyComponentEntry = entriesByStudentAndComponent.get(`${studentId}:${period.key}:${component.key}`);
+        let score = subcomponents.length > 0
           ? calculateWeightedAverage(subcomponents, (subcomponent) => subcomponent.weight)
           : (legacyComponentEntry ? Number(legacyComponentEntry.score) : null);
+
+        // Entries migrated from grade-wide courses often keep composite keys
+        // like "quizzes::quiz_of_animals" while the section course still has an
+        // empty quizzes component. Recover those scores by prefix match.
+        if (!hasFiniteScore(score)) {
+          const componentPrefix = `${normalizeText(component.key)}::`;
+          const matchingEntries = (entriesByStudentId.get(studentId) || []).filter((entry) => {
+            if ((normalizeText(entry.academicPeriodKey) || 'period_1') !== period.key) {
+              return false;
+            }
+            const entryKey = normalizeText(entry.componentKey);
+            return entryKey === normalizeText(component.key) || entryKey.startsWith(componentPrefix);
+          });
+          const rawScores = matchingEntries
+            .map((entry) => Number(entry.score))
+            .filter((value) => Number.isFinite(value));
+          if (rawScores.length > 0) {
+            score = Number((rawScores.reduce((sum, value) => sum + value, 0) / rawScores.length).toFixed(2));
+          }
+        }
 
         if (score !== null && score !== undefined) {
           componentScoreItems.push({ score, weight: component.weight });
@@ -1163,13 +1260,27 @@ function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
       };
     });
 
+    let finalScore = calculateWeightedAverage(periodScoreItems, (period) => period.weight);
+
+    // If grade rows exist but don't match the current gradebook structure
+    // (common after migrating entries onto a section course), fall back to
+    // the plain average of stored scores so Campus/Rectoría still show them.
+    if (!hasFiniteScore(finalScore)) {
+      const rawScores = (entriesByStudentId.get(studentId) || [])
+        .map((entry) => Number(entry.score))
+        .filter((score) => Number.isFinite(score));
+      if (rawScores.length > 0) {
+        finalScore = Number((rawScores.reduce((sum, score) => sum + score, 0) / rawScores.length).toFixed(2));
+      }
+    }
+
     return {
-      studentId: String(student._id || student.studentId),
+      studentId,
       name: normalizeText(student.name),
       schoolCode: normalizeText(student.schoolCode),
       grade: normalizeText(student.grade),
       course: normalizeText(student.course),
-      finalScore: calculateWeightedAverage(periodScoreItems, (period) => period.weight),
+      finalScore,
       periods,
       scores: periods.flatMap((period) => period.scores),
     };
@@ -1949,9 +2060,14 @@ function buildTeacherAcademicCourseCandidates({ academicStructure, teacherUserId
   (Array.isArray(academicStructure.gradeSchedules) ? academicStructure.gradeSchedules : []).forEach((gradeSchedule) => {
     const gradeKey = normalizeText(gradeSchedule?.gradeKey);
     const courseKey = normalizeText(gradeSchedule?.courseKey);
-    // Grade-level schedules (no courseKey) map to one campus course for that grade.
-    // Expanding into every section of the grade was creating inflated subjects (Arte × 100+).
-    const courseKeysForLoad = courseKey ? [courseKey] : [''];
+    const grade = gradesByKey.get(gradeKey) || null;
+    // When the schedule is grade-wide (no courseKey), keep one campus course per section
+    // of that grade so existing sectioned courses with grades (6A, 6B, ...) still match.
+    const courseKeysForLoad = courseKey
+      ? [courseKey]
+      : (Array.isArray(grade?.courses) && grade.courses.length > 0
+        ? grade.courses.map((course) => normalizeText(course?.key)).filter(Boolean)
+        : ['']);
 
     (Array.isArray(gradeSchedule?.subjectLoads) ? gradeSchedule.subjectLoads : []).forEach((load) => {
       if (normalizeText(load?.teacherUserId) === normalizedTeacherUserId) {
@@ -1984,9 +2100,8 @@ function buildTeacherAcademicCourseCandidates({ academicStructure, teacherUserId
     });
   });
 
-  // Do not expand every subject candidate into every course of the grade.
-  // courseKeysForLoad already resolves schedule courseKey vs all grade courses when needed.
-  // A previous fan-out here created duplicate campus courses (e.g. Arte × every section).
+  // Do not expand every subject candidate into every course of the grade a second time.
+  // That previous fan-out created duplicate campus courses (e.g. Arte × every section).
 
   return Array.from(candidatesByKey.values());
 }
@@ -2117,24 +2232,6 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
     .filter((candidate) => normalizeText(candidate.section))
     .map((candidate) => `${candidate.subject}::${candidate.studentGradeKey}`));
 
-  for (const sectionedKey of sectionedCandidateKeys) {
-    const [subject, studentGradeKey] = sectionedKey.split('::');
-    await CampusCourse.updateMany(
-      {
-        schoolId,
-        teacherUserId,
-        subject,
-        studentGradeKey,
-        status: 'active',
-        $or: [
-          { section: '' },
-          { section: { $exists: false } },
-        ],
-      },
-      { $set: { status: 'archived' } }
-    );
-  }
-
   const matchedCourseIds = new Set();
   const candidateIdentities = new Set(
     candidates.map((candidate) => buildTeacherCampusCourseIdentity(candidate)).filter(Boolean),
@@ -2142,15 +2239,35 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
 
   for (const candidate of candidates) {
     const candidateCourseType = candidate.courseType || 'subject';
-    const existingCourse = await findExistingTeacherCourseForCandidate({ schoolId, teacherUserId, candidate });
+    let existingCourse = await findExistingTeacherCourseForCandidate({ schoolId, teacherUserId, candidate });
+
+    // Prefer reactivating a graded archived course over creating an empty clone.
+    if (!existingCourse) {
+      const archivedMatch = await CampusCourse.findOne({
+        schoolId,
+        teacherUserId,
+        status: 'archived',
+        subject: candidate.subject,
+        studentGradeKey: candidate.studentGradeKey,
+        ...(normalizeText(candidate.section)
+          ? { section: candidate.section }
+          : { $or: [{ section: '' }, { section: { $exists: false } }] }),
+      });
+      if (archivedMatch) {
+        const hasGrades = await CampusGradeEntry.exists({ schoolId, courseId: archivedMatch._id });
+        if (hasGrades || !normalizeText(archivedMatch.section) || normalizeText(archivedMatch.section) === normalizeText(candidate.section)) {
+          existingCourse = archivedMatch;
+        }
+      }
+    }
 
     if (existingCourse) {
       existingCourse.courseType = candidateCourseType;
-      existingCourse.sourceCourseKey = candidate.sourceCourseKey || '';
+      existingCourse.sourceCourseKey = candidate.sourceCourseKey || existingCourse.sourceCourseKey || '';
       existingCourse.title = candidate.title;
       existingCourse.subject = candidate.subject;
       existingCourse.gradeLevel = candidate.gradeLevel;
-      existingCourse.section = candidate.section;
+      existingCourse.section = candidate.section || existingCourse.section || '';
       const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, {
         subject: existingCourse.subject || candidate.subject,
         studentGradeKey: existingCourse.studentGradeKey || candidate.studentGradeKey,
@@ -2194,14 +2311,72 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
     matchedCourseIds.add(String(createdCourse._id));
   }
 
-  // Archive leftover inflations from older syncs (subject expanded into every grade section).
+  // After section courses exist, move gradebook rows off grade-wide courses (e.g. "1")
+  // onto the student's real section (1A / 1B), then archive empty sectionless shells.
+  for (const sectionedKey of sectionedCandidateKeys) {
+    const [subject, studentGradeKey] = sectionedKey.split('::');
+    const sectionlessCourses = await CampusCourse.find({
+      schoolId,
+      teacherUserId,
+      subject,
+      studentGradeKey,
+      status: 'active',
+      $or: [
+        { section: '' },
+        { section: { $exists: false } },
+      ],
+    }).select('_id subject studentGradeKey section sourceCourseKey gradeLevel').lean();
+
+    if (!sectionlessCourses.length) {
+      continue;
+    }
+
+    const sectionedCourses = await CampusCourse.find({
+      schoolId,
+      teacherUserId,
+      subject,
+      studentGradeKey,
+      status: 'active',
+      section: { $exists: true, $nin: ['', null] },
+    }).lean();
+
+    const sectionlessIdsToArchive = [];
+    for (const sectionlessCourse of sectionlessCourses) {
+      if (sectionedCourses.length > 0) {
+        await migrateSectionlessGradesToSectionCourses({
+          schoolId,
+          teacherUserId,
+          sectionlessCourse,
+          sectionedCourses,
+        });
+      }
+
+      const remainingGrades = await CampusGradeEntry.countDocuments({
+        schoolId,
+        courseId: sectionlessCourse._id,
+      });
+      if (remainingGrades === 0) {
+        sectionlessIdsToArchive.push(sectionlessCourse._id);
+      }
+    }
+
+    if (sectionlessIdsToArchive.length > 0) {
+      await CampusCourse.updateMany(
+        { _id: { $in: sectionlessIdsToArchive }, schoolId, teacherUserId, status: 'active' },
+        { $set: { status: 'archived' } },
+      );
+      sectionlessIdsToArchive.forEach((id) => matchedCourseIds.delete(String(id)));
+    }
+  }
+
+  // Never archive courses that still hold gradebook data.
   const activeTeacherCourses = await CampusCourse.find({
     schoolId,
     teacherUserId,
     status: 'active',
   }).select('_id subject subjectKey studentGradeKey gradeKey sourceCourseKey section courseType').lean();
 
-  const orphanIds = activeTeacherCourses
+  const unmatchedIds = activeTeacherCourses
     .filter((course) => {
       if (matchedCourseIds.has(String(course._id))) {
         return false;
@@ -2211,11 +2386,20 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
     })
     .map((course) => course._id);
 
-  if (orphanIds.length > 0) {
-    await CampusCourse.updateMany(
-      { _id: { $in: orphanIds }, schoolId, teacherUserId, status: 'active' },
-      { $set: { status: 'archived' } },
-    );
+  if (unmatchedIds.length > 0) {
+    const gradedUnmatchedIds = await CampusGradeEntry.distinct('courseId', {
+      schoolId,
+      courseId: { $in: unmatchedIds },
+    });
+    const gradedIdSet = new Set(gradedUnmatchedIds.map((id) => String(id)));
+    const orphanIds = unmatchedIds.filter((id) => !gradedIdSet.has(String(id)));
+
+    if (orphanIds.length > 0) {
+      await CampusCourse.updateMany(
+        { _id: { $in: orphanIds }, schoolId, teacherUserId, status: 'active' },
+        { $set: { status: 'archived' } },
+      );
+    }
   }
 }
 
@@ -2614,7 +2798,6 @@ async function buildTeacherCourseDetail({ schoolId, teacherUserId, course, gradi
     ? await CampusGradeEntry.find({
       schoolId,
       courseId: course._id,
-      teacherUserId,
       studentId: { $in: studentIds },
     }).lean()
     : [];
@@ -2908,10 +3091,9 @@ function getPendingGradingPosts(posts, academicPeriods, students) {
 function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingScore: 70 }, hasGradeEntries = null, academicPeriods = [] }) {
   const passingScore = Number(gradingScale?.passingScore ?? 70);
   const students = Array.isArray(courseDetail?.students) ? courseDetail.students : [];
-  const canUseEvaluatedStudents = hasGradeEntries === null || Boolean(hasGradeEntries);
-  const evaluatedStudents = canUseEvaluatedStudents
-    ? students.filter((student) => hasFiniteScore(student.finalScore))
-    : [];
+  // Prefer students with a computed finalScore. Do not wipe them when hasGradeEntries
+  // is false/stale — that hid migrated notes after moving entries onto section courses.
+  const evaluatedStudents = students.filter((student) => hasFiniteScore(student.finalScore));
   const averageScore = evaluatedStudents.length > 0
     ? Number((evaluatedStudents.reduce((total, student) => total + Number(parseFiniteScore(student.finalScore) || 0), 0) / evaluatedStudents.length).toFixed(2))
     : null;
@@ -4563,8 +4745,7 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
     const visibleCourses = coordinationGradeKeys instanceof Set
       ? courses.filter((course) => coordinationGradeKeys.has(normalizeCampusGradeKey(course.studentGradeKey || course.gradeLevel)))
       : courses;
-    const visibleCourseIds = new Set(visibleCourses.map((course) => String(course._id)));
-    const gradeEntryCounts = visibleCourses.length > 0
+    const gradeEntryCountsPreview = visibleCourses.length > 0
       ? await CampusGradeEntry.aggregate([
         {
           $match: {
@@ -4575,6 +4756,14 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
         { $group: { _id: '$courseId', count: { $sum: 1 } } },
       ])
       : [];
+    const gradeEntryCountByCourseIdPreview = new Map();
+    gradeEntryCountsPreview.forEach((item) => {
+      gradeEntryCountByCourseIdPreview.set(String(item._id), Number(item.count || 0));
+    });
+    const preferredCourses = selectTeacherOverviewCourses(visibleCourses, new Map(), gradeEntryCountByCourseIdPreview);
+    const preferredCourseIds = new Set(preferredCourses.map((course) => String(course._id)));
+    const visibleCourseIds = preferredCourseIds;
+    const gradeEntryCounts = gradeEntryCountsPreview.filter((item) => preferredCourseIds.has(String(item._id)));
     const gradeEntryCountByCourseId = new Map();
     gradeEntryCounts.forEach((item) => {
       gradeEntryCountByCourseId.set(String(item._id), Number(item.count || 0));
@@ -4592,7 +4781,7 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
       postsByCourseId.set(courseId, coursePosts);
     }
 
-    const normalizedCourses = await Promise.all(visibleCourses.map(async (course) => {
+    const normalizedCourses = await Promise.all(preferredCourses.map(async (course) => {
       const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
       const courseDetail = await buildTeacherCourseDetail({
         schoolId,

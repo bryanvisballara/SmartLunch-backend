@@ -46,6 +46,10 @@ export function getCampusCoordinationCourses({ resync = false } = {}) {
   }).then((response) => response.data);
 }
 
+export function resyncCampusCoordinationCourses() {
+  return getCampusCoordinationCourses({ resync: true });
+}
+
 export function getCampusCoordinationDashboard() {
   return api.get('/campus/coordination/dashboard').then((response) => response.data);
 }

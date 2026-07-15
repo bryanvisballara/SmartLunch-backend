@@ -115,6 +115,18 @@
   background: #ffffff;
 }
 
+.rectoria-control-level-card--button {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rectoria-control-level-card--button:hover {
+  border-color: #c5d4e8;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
 .rectoria-control-level-card-head {
   display: flex;
   align-items: flex-start;
@@ -182,6 +194,77 @@
   font-size: 1.15rem;
 }
 
+.rectoria-control-levels-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.rectoria-control-levels-breadcrumb__sep {
+  color: #94a3b8;
+}
+
+.rectoria-control-levels-breadcrumb__link {
+  border: 0;
+  background: transparent;
+  color: #1967d2;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.rectoria-control-levels-breadcrumb strong {
+  color: #202124;
+}
+
+.rectoria-control-level-row {
+  width: 100%;
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  background: #f8f9fa;
+}
+
+.rectoria-control-level-row:hover {
+  background: #ffffff;
+  border-color: #c5d4e8;
+}
+
+.rectoria-control-level-course-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.rectoria-control-level-mode-tabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f1f5f9;
+}
+
+.rectoria-control-level-mode-tab {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.86rem;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.rectoria-control-level-mode-tab.is-active {
+  background: #ffffff;
+  color: #202124;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
 .rectoria-control-list-panel {
   padding: 18px;
   border: 1px solid #e8eaed;
@@ -218,6 +301,267 @@
   margin-top: 3px;
   color: #5f6368;
   font-size: 0.8rem;
+}
+
+.rectoria-control-subject-card {
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  background: #f8f9fa;
+  overflow: hidden;
+}
+
+.rectoria-control-subject-card.is-expanded {
+  background: #ffffff;
+  border-color: #c5d4e8;
+}
+
+.rectoria-control-subject-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rectoria-control-subject-toggle__main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rectoria-control-subject-toggle__main strong {
+  color: #202124;
+  font-size: 0.92rem;
+}
+
+.rectoria-control-subject-toggle__main span {
+  color: #5f6368;
+  font-size: 0.8rem;
+}
+
+.rectoria-control-subject-toggle__chevron {
+  color: #5f6368;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.rectoria-control-subject-courses {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.rectoria-control-subject-course {
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.rectoria-control-subject-course.is-expanded {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+.rectoria-control-subject-course-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rectoria-control-subject-students {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.rectoria-control-teacher-courses {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.rectoria-control-teacher-course {
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.rectoria-control-teacher-course.is-expanded {
+  border-color: #cbd5e1;
+}
+
+.rectoria-control-subject-student {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+}
+
+.rectoria-control-subject-student strong {
+  color: #202124;
+  font-size: 0.82rem;
+}
+
+.rectoria-control-subject-student span {
+  color: #475569;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.rectoria-control-students-head {
+  margin-bottom: 14px;
+}
+
+.rectoria-control-students-head h3 {
+  margin: 0 0 4px;
+}
+
+.rectoria-control-students-head p {
+  margin: 0;
+  color: #5f6368;
+  font-size: 0.86rem;
+}
+
+.rectoria-control-students-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.rectoria-control-students-filters label {
+  display: grid;
+  gap: 6px;
+  color: #5f6368;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.rectoria-control-students-filters input,
+.rectoria-control-students-filters select {
+  width: 100%;
+  border: 1px solid #dadce0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #202124;
+  font-size: 0.9rem;
+}
+
+.rectoria-control-students-table-wrap {
+  overflow: auto;
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+}
+
+.rectoria-control-students-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.rectoria-control-students-table th,
+.rectoria-control-students-table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid #eef2f7;
+  vertical-align: top;
+}
+
+.rectoria-control-students-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rectoria-control-students-row {
+  cursor: pointer;
+}
+
+.rectoria-control-students-row:hover,
+.rectoria-control-students-row.is-expanded {
+  background: #f8fbff;
+}
+
+.rectoria-control-students-table td strong {
+  display: block;
+  color: #202124;
+}
+
+.rectoria-control-students-table td small {
+  display: block;
+  margin-top: 2px;
+  color: #94a3b8;
+}
+
+.rectoria-control-performance-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.rectoria-control-students-detail-row td {
+  background: #fbfcfe;
+}
+
+.rectoria-control-student-subjects {
+  display: grid;
+  gap: 8px;
+}
+
+.rectoria-control-student-subject {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.rectoria-control-student-subject strong {
+  display: block;
+  color: #202124;
+  font-size: 0.86rem;
+}
+
+.rectoria-control-student-subject span {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.rectoria-control-student-subject-score,
+.rectoria-control-score-text {
+  font-style: normal;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .rectoria-control-students-filters {
+    grid-template-columns: 1fr;
+  }
 }
 
 .rectoria-control-empty {
