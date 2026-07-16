@@ -239,7 +239,9 @@ function buildAppointmentPayload(body = {}) {
   const time = normalizeText(body.appointment?.time || body.appointmentTime);
   const guardianEmail = normalizeEmail(body.appointment?.guardianEmail || body.guardianEmail);
 
-  if (!type && !date && !time && !guardianEmail) {
+  // Only treat as an appointment draft when type/date/time are present.
+  // guardianEmail alone is often sent with unrelated events (e.g. E6 result).
+  if (!type && !date && !time) {
     return { type: '', label: '', date: '', time: '', guardianEmail: '', scheduledAt: null };
   }
 

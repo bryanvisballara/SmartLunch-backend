@@ -750,6 +750,15 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     if (!showResultFields) {
       payload = { ...payload, admissionResult: '', notAdmittedReason: '' };
     }
+    if (!hasAppointmentDraft) {
+      payload = {
+        ...payload,
+        appointmentType: '',
+        appointmentDate: '',
+        appointmentTime: '',
+        guardianEmail: '',
+      };
+    }
     await runApplicantAction(
       () => wasEditingEvent ? updateAdmissionEvent(selectedApplicantId, editingEventId, payload) : createAdmissionEvent(selectedApplicantId, payload),
       wasEditingEvent
