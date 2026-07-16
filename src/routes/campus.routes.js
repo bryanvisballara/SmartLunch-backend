@@ -2714,6 +2714,103 @@ async function hasAssignedTeacherCourses(user) {
   return Boolean(assignedCourse);
 }
 
+function normalizeRequestCourseId(value) {
+  if (Array.isArray(value)) {
+    return normalizeText(value[0]);
+  }
+  return normalizeText(value);
+}
+
+async function resolveTeacherAssignedCourse({
+  schoolId,
+  teacherUserId,
+  courseId,
+  sync = false,
+  allowInactive = false,
+} = {}) {
+  const normalizedSchoolId = normalizeText(schoolId);
+  const normalizedTeacherUserId = normalizeText(teacherUserId);
+  const normalizedCourseId = normalizeRequestCourseId(courseId);
+
+  if (!normalizedSchoolId || !normalizedTeacherUserId || !isValidObjectId(normalizedCourseId)) {
+    return null;
+  }
+
+  if (sync) {
+    try {
+      await syncTeacherCoursesFromAcademicStructure({
+        schoolId: normalizedSchoolId,
+        teacherUserId: normalizedTeacherUserId,
+      });
+    } catch (error) {
+      console.warn(`[CAMPUS_TEACHER_COURSE_SYNC_WARNING] teacher=${normalizedTeacherUserId} error=${error.message}`);
+    }
+  }
+
+  let course = await CampusCourse.findOne({
+    _id: normalizedCourseId,
+    schoolId: normalizedSchoolId,
+    teacherUserId: normalizedTeacherUserId,
+    status: 'active',
+  });
+  if (course) {
+    return course;
+  }
+
+  const ownedCourse = await CampusCourse.findOne({
+    _id: normalizedCourseId,
+    schoolId: normalizedSchoolId,
+  });
+
+  if (!ownedCourse || normalizeText(ownedCourse.teacherUserId) !== normalizedTeacherUserId) {
+    return null;
+  }
+
+  if (normalizeText(ownedCourse.status) === 'active') {
+    if (String(ownedCourse.teacherUserId) !== normalizedTeacherUserId) {
+      ownedCourse.teacherUserId = normalizedTeacherUserId;
+      await ownedCourse.save();
+    }
+    return ownedCourse;
+  }
+
+  if (allowInactive) {
+    return ownedCourse;
+  }
+
+  const subject = normalizeText(ownedCourse.subject);
+  const studentGradeKey = normalizeText(ownedCourse.studentGradeKey);
+  const section = normalizeText(ownedCourse.section);
+  const sourceCourseKey = normalizeText(ownedCourse.sourceCourseKey);
+  const courseType = normalizeText(ownedCourse.courseType) || 'subject';
+  const baseReplacementQuery = {
+    schoolId: normalizedSchoolId,
+    teacherUserId: normalizedTeacherUserId,
+    status: 'active',
+    ...(courseType === 'subject'
+      ? { $or: [{ courseType: 'subject' }, { courseType: { $exists: false } }, { courseType: '' }] }
+      : { courseType }),
+  };
+
+  const replacementAttempts = [
+    sourceCourseKey ? { sourceCourseKey, subject, studentGradeKey } : null,
+    section ? { subject, studentGradeKey, section } : null,
+    subject && studentGradeKey
+      ? { subject, studentGradeKey, section: { $exists: true, $nin: ['', null] } }
+      : null,
+    subject && studentGradeKey ? { subject, studentGradeKey } : null,
+  ].filter(Boolean);
+
+  for (const matcher of replacementAttempts) {
+    const replacement = await CampusCourse.findOne({ ...baseReplacementQuery, ...matcher }).sort({ updatedAt: -1 });
+    if (replacement) {
+      return replacement;
+    }
+  }
+
+  return null;
+}
+
 async function requireCampusTeacherAccess(req, res, next) {
   try {
     const role = normalizeText(req.user?.role);
@@ -3472,7 +3569,13 @@ router.get('/teacher/courses/:id', requireCampusTeacherAccess, async (req, res) 
       return res.status(400).json({ message: 'Invalid course id' });
     }
 
-    const course = await CampusCourse.findOne({ _id: id, schoolId, teacherUserId: userId });
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId: id,
+      sync: true,
+      allowInactive: true,
+    });
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
     }
@@ -3513,7 +3616,12 @@ router.get('/teacher/attendance', requireCampusTeacherAccess, async (req, res) =
       return res.status(400).json({ message: 'Selecciona una fecha valida.' });
     }
 
-    const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId: userId, status: 'active' });
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId,
+      sync: true,
+    });
     if (!course) {
       return res.status(404).json({ message: 'Curso no encontrado.' });
     }
@@ -3559,7 +3667,12 @@ router.post('/teacher/attendance', requireCampusTeacherAccess, async (req, res) 
       return res.status(400).json({ message: 'Selecciona una fecha valida.' });
     }
 
-    const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId: userId, status: 'active' });
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId,
+      sync: true,
+    });
     if (!course) {
       return res.status(404).json({ message: 'Curso no encontrado.' });
     }
@@ -3858,7 +3971,7 @@ router.post('/teacher/courses/:courseId/students/:studentId/grades', requireCamp
 router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
-    const courseId = normalizeText(req.body.courseId);
+    const courseId = normalizeRequestCourseId(req.body.courseId);
     const title = normalizeText(req.body.title);
     const type = normalizePostType(req.body.type) || 'Aviso';
     const status = normalizeText(req.body.status) || 'published';
@@ -3891,7 +4004,12 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
       return res.status(400).json({ message: 'Invalid due date' });
     }
 
-    const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId: userId, status: 'active' });
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId,
+      sync: true,
+    });
     if (!course) {
       return res.status(404).json({ message: 'Assigned course not found' });
     }
@@ -4110,9 +4228,12 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
         return res.status(400).json({ message: 'Invalid course id' });
       }
 
-      linkedCourse = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId: userId, status: 'active' })
-        .select('title subject studentGradeKey')
-        .lean();
+      linkedCourse = await resolveTeacherAssignedCourse({
+        schoolId,
+        teacherUserId: userId,
+        courseId,
+        sync: true,
+      });
 
       if (!linkedCourse) {
         return res.status(404).json({ message: 'Assigned course not found' });
@@ -4477,9 +4598,12 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
       return res.status(400).json({ message: 'La observacion debe tener al menos 8 caracteres.' });
     }
 
-    const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId: userId, status: 'active' })
-      .select('title subject studentGradeKey gradeLevel section sourceCourseKey')
-      .lean();
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId,
+      sync: true,
+    });
     if (!course) {
       return res.status(404).json({ message: 'Curso asignado no encontrado.' });
     }
@@ -4559,12 +4683,18 @@ router.patch('/teacher/posts/:id', requireCampusTeacherAccess, async (req, res) 
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'courseId')) {
-      const courseId = normalizeText(req.body.courseId);
+      const courseId = normalizeRequestCourseId(req.body.courseId);
       if (!isValidObjectId(courseId)) {
         return res.status(400).json({ message: 'Invalid course id' });
       }
 
-      const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId: userId });
+      const course = await resolveTeacherAssignedCourse({
+        schoolId,
+        teacherUserId: userId,
+        courseId,
+        sync: true,
+        allowInactive: true,
+      });
       if (!course) {
         return res.status(404).json({ message: 'Assigned course not found' });
       }
