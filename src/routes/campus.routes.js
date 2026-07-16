@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 
 const authMiddleware = require('../middleware/authMiddleware');
+const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -2721,94 +2722,182 @@ function normalizeRequestCourseId(value) {
   return normalizeText(value);
 }
 
+function buildTeacherCourseOwnershipFilter(teacherUserId) {
+  const normalizedTeacherUserId = normalizeText(teacherUserId);
+  return {
+    $or: [
+      { teacherUserId: normalizedTeacherUserId },
+      { teacherUserId: String(teacherUserId || '') },
+    ],
+  };
+}
+
+async function findActiveTeacherCourseByMetadata({
+  schoolId,
+  teacherUserId,
+  sourceCourseKey = '',
+  section = '',
+  subject = '',
+  studentGradeKey = '',
+  title = '',
+} = {}) {
+  const normalizedSchoolId = normalizeText(schoolId);
+  const normalizedTeacherUserId = normalizeText(teacherUserId);
+  const normalizedSourceCourseKey = normalizeText(sourceCourseKey);
+  const normalizedSection = normalizeText(section);
+  const normalizedSubject = normalizeText(subject);
+  const normalizedStudentGradeKey = normalizeText(studentGradeKey);
+  const normalizedTitle = normalizeText(title);
+
+  if (!normalizedSchoolId || !normalizedTeacherUserId) {
+    return null;
+  }
+
+  const baseQuery = {
+    schoolId: normalizedSchoolId,
+    status: 'active',
+    ...buildTeacherCourseOwnershipFilter(normalizedTeacherUserId),
+  };
+
+  const attempts = [
+    normalizedSourceCourseKey && normalizedSubject
+      ? { sourceCourseKey: normalizedSourceCourseKey, subject: normalizedSubject, ...(normalizedStudentGradeKey ? { studentGradeKey: normalizedStudentGradeKey } : {}) }
+      : null,
+    normalizedSubject && normalizedSection
+      ? { subject: normalizedSubject, section: normalizedSection, ...(normalizedStudentGradeKey ? { studentGradeKey: normalizedStudentGradeKey } : {}) }
+      : null,
+    normalizedTitle
+      ? { title: normalizedTitle }
+      : null,
+    normalizedSubject && normalizedStudentGradeKey
+      ? { subject: normalizedSubject, studentGradeKey: normalizedStudentGradeKey, section: { $exists: true, $nin: ['', null] } }
+      : null,
+  ].filter(Boolean);
+
+  for (const matcher of attempts) {
+    const course = await CampusCourse.findOne({ ...baseQuery, ...matcher }).sort({ updatedAt: -1 });
+    if (course) {
+      return course;
+    }
+  }
+
+  return null;
+}
+
 async function resolveTeacherAssignedCourse({
   schoolId,
   teacherUserId,
   courseId,
   sync = false,
   allowInactive = false,
+  sourceCourseKey = '',
+  section = '',
+  subject = '',
+  studentGradeKey = '',
+  title = '',
 } = {}) {
   const normalizedSchoolId = normalizeText(schoolId);
   const normalizedTeacherUserId = normalizeText(teacherUserId);
   const normalizedCourseId = normalizeRequestCourseId(courseId);
 
-  if (!normalizedSchoolId || !normalizedTeacherUserId || !isValidObjectId(normalizedCourseId)) {
+  if (!normalizedSchoolId || !normalizedTeacherUserId) {
     return null;
   }
 
-  if (sync) {
-    try {
-      await syncTeacherCoursesFromAcademicStructure({
+  return runWithSchoolContext(normalizedSchoolId, async () => {
+    if (sync) {
+      try {
+        await syncTeacherCoursesFromAcademicStructure({
+          schoolId: normalizedSchoolId,
+          teacherUserId: normalizedTeacherUserId,
+        });
+      } catch (error) {
+        console.warn(`[CAMPUS_TEACHER_COURSE_SYNC_WARNING] teacher=${normalizedTeacherUserId} error=${error.message}`);
+      }
+    }
+
+    if (normalizedCourseId && isValidObjectId(normalizedCourseId)) {
+      let course = await CampusCourse.findOne({
+        _id: normalizedCourseId,
         schoolId: normalizedSchoolId,
-        teacherUserId: normalizedTeacherUserId,
+        status: 'active',
+        ...buildTeacherCourseOwnershipFilter(normalizedTeacherUserId),
       });
-    } catch (error) {
-      console.warn(`[CAMPUS_TEACHER_COURSE_SYNC_WARNING] teacher=${normalizedTeacherUserId} error=${error.message}`);
+      if (course) {
+        return course;
+      }
+
+      // Connection is school-scoped; retry without schoolId field in case of legacy docs.
+      course = await CampusCourse.findOne({
+        _id: normalizedCourseId,
+        status: 'active',
+        ...buildTeacherCourseOwnershipFilter(normalizedTeacherUserId),
+      });
+      if (course) {
+        if (normalizeText(course.schoolId) !== normalizedSchoolId) {
+          course.schoolId = normalizedSchoolId;
+        }
+        if (String(course.teacherUserId) !== normalizedTeacherUserId) {
+          course.teacherUserId = normalizedTeacherUserId;
+        }
+        await course.save();
+        return course;
+      }
+
+      const ownedCourse = await CampusCourse.findOne({ _id: normalizedCourseId });
+      if (ownedCourse && normalizeText(ownedCourse.teacherUserId) === normalizedTeacherUserId) {
+        if (normalizeText(ownedCourse.status) === 'active') {
+          if (normalizeText(ownedCourse.schoolId) !== normalizedSchoolId) {
+            ownedCourse.schoolId = normalizedSchoolId;
+          }
+          if (String(ownedCourse.teacherUserId) !== normalizedTeacherUserId) {
+            ownedCourse.teacherUserId = normalizedTeacherUserId;
+          }
+          await ownedCourse.save();
+          return ownedCourse;
+        }
+
+        if (allowInactive) {
+          return ownedCourse;
+        }
+
+        const replacement = await findActiveTeacherCourseByMetadata({
+          schoolId: normalizedSchoolId,
+          teacherUserId: normalizedTeacherUserId,
+          sourceCourseKey: sourceCourseKey || ownedCourse.sourceCourseKey,
+          section: section || ownedCourse.section,
+          subject: subject || ownedCourse.subject,
+          studentGradeKey: studentGradeKey || ownedCourse.studentGradeKey,
+          title: title || ownedCourse.title,
+        });
+        if (replacement) {
+          return replacement;
+        }
+      }
     }
-  }
 
-  let course = await CampusCourse.findOne({
-    _id: normalizedCourseId,
-    schoolId: normalizedSchoolId,
-    teacherUserId: normalizedTeacherUserId,
-    status: 'active',
+    return findActiveTeacherCourseByMetadata({
+      schoolId: normalizedSchoolId,
+      teacherUserId: normalizedTeacherUserId,
+      sourceCourseKey,
+      section,
+      subject,
+      studentGradeKey,
+      title,
+    });
   });
-  if (course) {
-    return course;
-  }
+}
 
-  const ownedCourse = await CampusCourse.findOne({
-    _id: normalizedCourseId,
-    schoolId: normalizedSchoolId,
-  });
-
-  if (!ownedCourse || normalizeText(ownedCourse.teacherUserId) !== normalizedTeacherUserId) {
-    return null;
-  }
-
-  if (normalizeText(ownedCourse.status) === 'active') {
-    if (String(ownedCourse.teacherUserId) !== normalizedTeacherUserId) {
-      ownedCourse.teacherUserId = normalizedTeacherUserId;
-      await ownedCourse.save();
-    }
-    return ownedCourse;
-  }
-
-  if (allowInactive) {
-    return ownedCourse;
-  }
-
-  const subject = normalizeText(ownedCourse.subject);
-  const studentGradeKey = normalizeText(ownedCourse.studentGradeKey);
-  const section = normalizeText(ownedCourse.section);
-  const sourceCourseKey = normalizeText(ownedCourse.sourceCourseKey);
-  const courseType = normalizeText(ownedCourse.courseType) || 'subject';
-  const baseReplacementQuery = {
-    schoolId: normalizedSchoolId,
-    teacherUserId: normalizedTeacherUserId,
-    status: 'active',
-    ...(courseType === 'subject'
-      ? { $or: [{ courseType: 'subject' }, { courseType: { $exists: false } }, { courseType: '' }] }
-      : { courseType }),
+function readTeacherCourseLookupFromRequest(req = {}) {
+  const body = req.body || {};
+  return {
+    courseId: normalizeRequestCourseId(body.courseId || req.query?.courseId || req.headers?.['x-course-id']),
+    sourceCourseKey: normalizeText(body.sourceCourseKey || req.query?.sourceCourseKey),
+    section: normalizeText(body.section || req.query?.section),
+    subject: normalizeText(body.subject || req.query?.subject),
+    studentGradeKey: normalizeText(body.studentGradeKey || req.query?.studentGradeKey),
+    title: normalizeText(body.courseTitle || body.title || req.query?.courseTitle),
   };
-
-  const replacementAttempts = [
-    sourceCourseKey ? { sourceCourseKey, subject, studentGradeKey } : null,
-    section ? { subject, studentGradeKey, section } : null,
-    subject && studentGradeKey
-      ? { subject, studentGradeKey, section: { $exists: true, $nin: ['', null] } }
-      : null,
-    subject && studentGradeKey ? { subject, studentGradeKey } : null,
-  ].filter(Boolean);
-
-  for (const matcher of replacementAttempts) {
-    const replacement = await CampusCourse.findOne({ ...baseReplacementQuery, ...matcher }).sort({ updatedAt: -1 });
-    if (replacement) {
-      return replacement;
-    }
-  }
-
-  return null;
 }
 
 async function requireCampusTeacherAccess(req, res, next) {
@@ -3971,7 +4060,7 @@ router.post('/teacher/courses/:courseId/students/:studentId/grades', requireCamp
 router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
-    const courseId = normalizeRequestCourseId(req.body.courseId);
+    const courseLookup = readTeacherCourseLookupFromRequest(req);
     const title = normalizeText(req.body.title);
     const type = normalizePostType(req.body.type) || 'Aviso';
     const status = normalizeText(req.body.status) || 'published';
@@ -3980,7 +4069,11 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
     const scheduledClassDate = parseOptionalDate(req.body.scheduledClassDate);
     const scheduledClassSession = normalizeScheduledClassSession(req.body.scheduledClassSession);
 
-    if (!isValidObjectId(courseId)) {
+    if (!courseLookup.courseId && !courseLookup.sourceCourseKey && !(courseLookup.subject && (courseLookup.section || courseLookup.studentGradeKey))) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+
+    if (courseLookup.courseId && !isValidObjectId(courseLookup.courseId) && !courseLookup.sourceCourseKey && !(courseLookup.subject && (courseLookup.section || courseLookup.studentGradeKey))) {
       return res.status(400).json({ message: 'Invalid course id' });
     }
 
@@ -4007,11 +4100,22 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
     const course = await resolveTeacherAssignedCourse({
       schoolId,
       teacherUserId: userId,
-      courseId,
-      sync: true,
+      courseId: courseLookup.courseId,
+      sourceCourseKey: courseLookup.sourceCourseKey,
+      section: courseLookup.section,
+      subject: courseLookup.subject,
+      studentGradeKey: courseLookup.studentGradeKey,
+      title: courseLookup.title,
+      sync: false,
     });
     if (!course) {
-      return res.status(404).json({ message: 'Assigned course not found' });
+      return res.status(404).json({
+        message: 'Assigned course not found',
+        courseId: courseLookup.courseId || null,
+        sourceCourseKey: courseLookup.sourceCourseKey || null,
+        section: courseLookup.section || null,
+        subject: courseLookup.subject || null,
+      });
     }
 
     if (deliveryMode === 'class') {
@@ -4054,23 +4158,25 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
       await course.save();
     }
 
-    const post = await CampusPost.create({
-      schoolId,
-      teacherUserId: userId,
-      courseId: course._id,
-      type,
-      title,
-      body: normalizeText(req.body.body),
-      deliveryMode,
-      dueAt: deliveryMode === 'date' ? dueAt : null,
-      scheduledClassDate: deliveryMode === 'class' ? scheduledClassDate : null,
-      scheduledClassSession: deliveryMode === 'class' ? scheduledClassSession : null,
-      attachments,
-      status,
-      publishedAt: status === 'published' ? new Date() : null,
+    const post = await runWithSchoolContext(schoolId, async () => {
+      const createdPost = await CampusPost.create({
+        schoolId,
+        teacherUserId: userId,
+        courseId: course._id,
+        type,
+        title,
+        body: normalizeText(req.body.body),
+        deliveryMode,
+        dueAt: deliveryMode === 'date' ? dueAt : null,
+        scheduledClassDate: deliveryMode === 'class' ? scheduledClassDate : null,
+        scheduledClassSession: deliveryMode === 'class' ? scheduledClassSession : null,
+        attachments,
+        status,
+        publishedAt: status === 'published' ? new Date() : null,
+      });
+      await createdPost.populate('courseId', 'title');
+      return createdPost;
     });
-
-    await post.populate('courseId', 'title');
 
     if (status === 'published') {
       buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course })

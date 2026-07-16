@@ -87,6 +87,13 @@ export function saveCampusTeacherStudentGrades(courseId, studentId, payload) {
 }
 
 export function createCampusTeacherPost(payload) {
+  const hasFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  if (hasFormData) {
+    const courseId = String(payload.get('courseId') || '').trim();
+    const query = courseId ? `?courseId=${encodeURIComponent(courseId)}` : '';
+    return api.post(`/campus/teacher/posts${query}`, payload).then((response) => response.data);
+  }
+
   return api.post('/campus/teacher/posts', payload).then((response) => response.data);
 }
 

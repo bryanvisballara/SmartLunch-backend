@@ -3949,41 +3949,89 @@ function TeacherCampusHome({ forcePreview = false }) {
 
         await updatePostMutation.mutateAsync({ postId: editingPostId, payload: updatePayload });
       } else {
-        const formData = new FormData();
-        formData.append('courseId', payload.courseId);
-        formData.append('type', payload.type);
-        formData.append('title', payload.title);
-        formData.append('body', payload.body);
-        formData.append('status', payload.status);
-        formData.append('deliveryMode', payload.deliveryMode);
-        formData.append('materialLinks', JSON.stringify(normalizedLinks));
-        formData.append('targetType', payload.targetType);
-        formData.append('targetStudentIds', JSON.stringify(payload.targetStudentIds));
+        const selectedCourseForPost = courses.find((course) => course.id === payload.courseId) || selectedCourse || null;
+        const hasFiles = Array.isArray(materialFiles) && materialFiles.length > 0;
 
-        if (shouldAddToGradebook) {
-          formData.append('gradebookAssignment', JSON.stringify({
-            enabled: true,
-            academicPeriodKey: selectedPostGradebookPeriod.key,
-            componentKey: selectedPostGradebookComponent.key,
-            weight: gradebookWeight,
-            topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
-            subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
-            subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
-          }));
-        }
+        if (hasFiles) {
+          const formData = new FormData();
+          formData.append('courseId', payload.courseId);
+          formData.append('type', payload.type);
+          formData.append('title', payload.title);
+          formData.append('body', payload.body);
+          formData.append('status', payload.status);
+          formData.append('deliveryMode', payload.deliveryMode);
+          formData.append('materialLinks', JSON.stringify(normalizedLinks));
+          formData.append('targetType', payload.targetType);
+          formData.append('targetStudentIds', JSON.stringify(payload.targetStudentIds));
+          formData.append('sourceCourseKey', selectedCourseForPost?.sourceCourseKey || '');
+          formData.append('section', selectedCourseForPost?.section || '');
+          formData.append('subject', selectedCourseForPost?.subject || '');
+          formData.append('studentGradeKey', selectedCourseForPost?.studentGradeKey || '');
+          formData.append('courseTitle', selectedCourseForPost?.title || '');
 
-        if (payload.deliveryMode === 'date') {
-          formData.append('dueAt', payload.dueAt ? new Date(payload.dueAt).toISOString() : '');
+          if (shouldAddToGradebook) {
+            formData.append('gradebookAssignment', JSON.stringify({
+              enabled: true,
+              academicPeriodKey: selectedPostGradebookPeriod.key,
+              componentKey: selectedPostGradebookComponent.key,
+              weight: gradebookWeight,
+              topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
+              subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
+              subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
+            }));
+          }
+
+          if (payload.deliveryMode === 'date') {
+            formData.append('dueAt', payload.dueAt ? new Date(payload.dueAt).toISOString() : '');
+          } else {
+            formData.append('scheduledClassDate', payload.scheduledClassDate || '');
+            formData.append('scheduledClassSession', JSON.stringify(payload.scheduledClassSession || {}));
+          }
+
+          materialFiles.forEach((file) => {
+            formData.append('files', file);
+          });
+
+          await createPostMutation.mutateAsync(formData);
         } else {
-          formData.append('scheduledClassDate', payload.scheduledClassDate || '');
-          formData.append('scheduledClassSession', JSON.stringify(payload.scheduledClassSession || {}));
+          const jsonPayload = {
+            courseId: payload.courseId,
+            type: payload.type,
+            title: payload.title,
+            body: payload.body,
+            status: payload.status,
+            deliveryMode: payload.deliveryMode,
+            materialLinks: normalizedLinks,
+            targetType: payload.targetType,
+            targetStudentIds: payload.targetStudentIds,
+            sourceCourseKey: selectedCourseForPost?.sourceCourseKey || '',
+            section: selectedCourseForPost?.section || '',
+            subject: selectedCourseForPost?.subject || '',
+            studentGradeKey: selectedCourseForPost?.studentGradeKey || '',
+            courseTitle: selectedCourseForPost?.title || '',
+          };
+
+          if (shouldAddToGradebook) {
+            jsonPayload.gradebookAssignment = {
+              enabled: true,
+              academicPeriodKey: selectedPostGradebookPeriod.key,
+              componentKey: selectedPostGradebookComponent.key,
+              weight: gradebookWeight,
+              topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
+              subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
+              subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
+            };
+          }
+
+          if (payload.deliveryMode === 'date') {
+            jsonPayload.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
+          } else {
+            jsonPayload.scheduledClassDate = payload.scheduledClassDate || null;
+            jsonPayload.scheduledClassSession = payload.scheduledClassSession || null;
+          }
+
+          await createPostMutation.mutateAsync(jsonPayload);
         }
-
-        materialFiles.forEach((file) => {
-          formData.append('files', file);
-        });
-
-        await createPostMutation.mutateAsync(formData);
       }
 
       const wasEditing = Boolean(editingPostId);
