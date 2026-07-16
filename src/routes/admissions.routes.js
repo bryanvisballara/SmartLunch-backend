@@ -310,6 +310,9 @@ function normalizeStatus(value, stageKey = 'interesados') {
   if (['withdrawn', 'desistido', 'desistida', 'desistidos', 'desistidas'].includes(rawStatus)) {
     return 'withdrawn';
   }
+  if (['not_admitted', 'no_admitido', 'no-admitido', 'noadmitido', 'no-admitidos', 'no_admitidos', 'noadmitidos'].includes(rawStatus)) {
+    return 'not_admitted';
+  }
   if (stageKey === 'matriculados') {
     return ['enrolled', 'matriculado', 'matriculada'].includes(rawStatus) ? 'enrolled' : 'in_process';
   }
@@ -317,6 +320,13 @@ function normalizeStatus(value, stageKey = 'interesados') {
     return 'interested';
   }
   return 'in_process';
+}
+
+function normalizeAdmissionResult(value) {
+  const raw = normalizeText(value).toLowerCase();
+  if (['admitted', 'admitido', 'admitida'].includes(raw)) return 'admitted';
+  if (['not_admitted', 'no_admitido', 'no-admitido', 'noadmitido'].includes(raw)) return 'not_admitted';
+  return '';
 }
 
 function getStudentName(applicant = {}) {
@@ -374,6 +384,12 @@ function buildApplicantPayload(body = {}, existingApplicant = null) {
   const student = body.student && typeof body.student === 'object' ? body.student : body;
   const guardian = body.guardian && typeof body.guardian === 'object' ? body.guardian : body;
   const currentStageKey = normalizeStageKey(body.currentStageKey || existing.currentStageKey || 'interesados');
+  const requestedStatus = normalizeText(body.status).toLowerCase();
+  const nextStatus = ['active', 'activo', 'activos'].includes(requestedStatus)
+    ? normalizeStatus('in_process', currentStageKey)
+    : normalizeStatus(body.status || existing.status, currentStageKey);
+  const clearingClosedStatus = ['withdrawn', 'not_admitted'].includes(normalizeStatus(existing.status, existing.currentStageKey))
+    && !['withdrawn', 'not_admitted'].includes(nextStatus);
 
   return {
     student: {
@@ -394,7 +410,8 @@ function buildApplicantPayload(body = {}, existingApplicant = null) {
       referenceOrigin: normalizeAdmissionText(body.source?.referenceOrigin || body.referenceOrigin || existing.source?.referenceOrigin),
     },
     currentStageKey,
-    status: normalizeStatus(body.status || existing.status, currentStageKey),
+    status: nextStatus,
+    ...(clearingClosedStatus ? { admissionDecision: { result: '', reason: '', decidedAt: null } } : {}),
   };
 }
 
@@ -451,9 +468,14 @@ function buildQuery(req) {
     query.currentStageKey = normalizeStageKey(stage);
   }
   if (status) {
-    const normalizedStatus = normalizeStatus(status);
-    if (['active', 'enrolled', 'withdrawn'].includes(normalizedStatus)) {
-      query.status = normalizedStatus === 'active' ? { $ne: 'withdrawn' } : normalizedStatus;
+    const rawStatus = normalizeText(status).toLowerCase();
+    if (['active', 'activo', 'activos', 'aspirantes'].includes(rawStatus)) {
+      query.status = { $nin: ['withdrawn', 'not_admitted'] };
+    } else {
+      const normalizedStatus = normalizeStatus(status);
+      if (['enrolled', 'withdrawn', 'not_admitted'].includes(normalizedStatus)) {
+        query.status = normalizedStatus;
+      }
     }
   }
   if (from || to) {
@@ -488,17 +510,18 @@ function getApplicantEvents(applicant) {
 async function buildAdmissionSummary(schoolId) {
   const applicants = await AdmissionApplicant.find({ schoolId, deletedAt: null }).sort({ updatedAt: -1 }).limit(500).lean();
   const stageCounts = admissionStageTemplates.reduce((accumulator, stage) => ({ ...accumulator, [stage.key]: 0 }), {});
-  const metrics = { total: applicants.length, inProcess: 0, enrolled: 0, withdrawn: 0 };
+  const metrics = { total: applicants.length, inProcess: 0, enrolled: 0, withdrawn: 0, notAdmitted: 0 };
 
   applicants.forEach((applicant) => {
     const status = normalizeStatus(applicant.status, applicant.currentStageKey);
-    if (status !== 'withdrawn' && stageCounts[applicant.currentStageKey] !== undefined) {
+    if (!['withdrawn', 'not_admitted'].includes(status) && stageCounts[applicant.currentStageKey] !== undefined) {
       stageCounts[applicant.currentStageKey] += 1;
     }
     if (status === 'enrolled') metrics.enrolled += 1;
     if (status === 'withdrawn') metrics.withdrawn += 1;
+    if (status === 'not_admitted') metrics.notAdmitted += 1;
     const stageIndex = getStageIndex(applicant.currentStageKey);
-    if (stageIndex >= 1 && stageIndex <= 5 && !['enrolled', 'withdrawn'].includes(status)) {
+    if (stageIndex >= 1 && stageIndex <= 5 && !['enrolled', 'withdrawn', 'not_admitted'].includes(status)) {
       metrics.inProcess += 1;
     }
   });
@@ -840,13 +863,52 @@ router.post('/:applicantId/events', async (req, res) => {
   try {
     const applicant = await findApplicant(req, res);
     if (!applicant) return null;
-    const eventPayload = buildEventPayload(req.body, req);
+    const admissionResult = normalizeAdmissionResult(req.body.admissionResult);
+    const notAdmittedReason = normalizeAdmissionText(req.body.notAdmittedReason || req.body.notes || req.body.description);
+    let eventPayload = buildEventPayload(req.body, req);
+
+    if (admissionResult === 'not_admitted') {
+      if (!notAdmittedReason) {
+        return res.status(400).json({ message: 'Describe por qué no fue admitido.' });
+      }
+      eventPayload = {
+        ...eventPayload,
+        title: eventPayload.title || 'NO ADMITIDO',
+        notes: notAdmittedReason,
+        stageKey: eventPayload.stageKey || 'resultados',
+        stageLabel: getStageTemplate(eventPayload.stageKey || 'resultados').label,
+      };
+    } else if (admissionResult === 'admitted') {
+      eventPayload = {
+        ...eventPayload,
+        title: eventPayload.title || 'ADMITIDO',
+        stageKey: eventPayload.stageKey || 'resultados',
+        stageLabel: getStageTemplate(eventPayload.stageKey || 'resultados').label,
+      };
+    }
+
     if (!eventPayload.title) {
       return res.status(400).json({ message: 'El título del evento es requerido.' });
     }
     applicant.admissionEvents.push(eventPayload);
     applicant.currentStageKey = eventPayload.stageKey;
-    applicant.status = normalizeStatus(applicant.status, eventPayload.stageKey);
+    if (admissionResult === 'not_admitted') {
+      applicant.status = 'not_admitted';
+      applicant.admissionDecision = {
+        result: 'not_admitted',
+        reason: notAdmittedReason,
+        decidedAt: new Date(),
+      };
+    } else if (admissionResult === 'admitted') {
+      applicant.status = normalizeStatus('in_process', eventPayload.stageKey);
+      applicant.admissionDecision = {
+        result: 'admitted',
+        reason: '',
+        decidedAt: new Date(),
+      };
+    } else {
+      applicant.status = normalizeStatus(applicant.status, eventPayload.stageKey);
+    }
     applicant.admissionStages = buildDefaultStages(eventPayload.stageKey, applicant.admissionStages);
     await applicant.save();
     try {

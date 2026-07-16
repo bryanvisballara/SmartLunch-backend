@@ -119,6 +119,7 @@ const ADMISSIONS_SECTION_OPTIONS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'aspirantes', label: 'Aspirantes' },
   { key: 'desistidos', label: 'Desistidos' },
+  { key: 'no-admitidos', label: 'No admitidos' },
   { key: 'matriculas_digitales', label: 'Matrículas digitales' },
 ];
 const ACADEMIC_SCHEDULE_WEEKDAYS = [

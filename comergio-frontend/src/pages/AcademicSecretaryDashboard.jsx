@@ -1238,6 +1238,7 @@ function getMarketingStageLabel(stageTemplates = [], stageKey = '') {
 function getMarketingStatusLabel(value = '') {
   const status = String(value || '').trim().toLowerCase();
   if (status === 'withdrawn') return 'Desistido';
+  if (status === 'not_admitted') return 'No admitido';
   if (status === 'enrolled') return 'Matriculado';
   if (status === 'interested') return 'Interesado';
   if (status === 'in_process') return 'En proceso';
@@ -4357,7 +4358,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               <label>Buscar<input value={marketingFilters.search} onChange={(event) => setMarketingFilters((previous) => ({ ...previous, search: event.target.value }))} placeholder="Aspirante, acudiente o correo" /></label>
               <label>Etapa<select value={marketingFilters.stage} onChange={(event) => setMarketingFilters((previous) => ({ ...previous, stage: event.target.value }))}><option value="">Todas</option>{marketingStageOptions.map((stage) => <option key={stage.key} value={stage.key}>{stage.label}</option>)}</select></label>
               <label>Grado<select value={marketingFilters.grade} onChange={(event) => setMarketingFilters((previous) => ({ ...previous, grade: event.target.value }))}><option value="">Todos</option>{marketingGradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label>
-              <label>Estado<select value={marketingFilters.status} onChange={(event) => setMarketingFilters((previous) => ({ ...previous, status: event.target.value }))}><option value="">Todos</option><option value="interested">Interesado</option><option value="in_process">En proceso</option><option value="enrolled">Matriculado</option><option value="withdrawn">Desistido</option></select></label>
+              <label>Estado<select value={marketingFilters.status} onChange={(event) => setMarketingFilters((previous) => ({ ...previous, status: event.target.value }))}><option value="">Todos</option><option value="interested">Interesado</option><option value="in_process">En proceso</option><option value="enrolled">Matriculado</option><option value="withdrawn">Desistido</option><option value="not_admitted">No admitido</option></select></label>
             </div>
             <div className="academic-secretary__actions">
               <button className="btn" disabled={!eligibleMarketingApplicantIds.length} onClick={toggleAllFilteredMarketingApplicants} type="button">{allFilteredMarketingApplicantsSelected ? 'Quitar filtrados' : 'Seleccionar filtrados'}</button>

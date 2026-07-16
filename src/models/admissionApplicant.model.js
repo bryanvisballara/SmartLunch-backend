@@ -69,9 +69,14 @@ const admissionApplicantSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['interested', 'in_process', 'enrolled', 'withdrawn'],
+    enum: ['interested', 'in_process', 'enrolled', 'withdrawn', 'not_admitted'],
     default: 'interested',
     index: true,
+  },
+  admissionDecision: {
+    result: { type: String, enum: ['', 'admitted', 'not_admitted'], default: '', trim: true },
+    reason: { type: String, default: '', trim: true },
+    decidedAt: { type: Date, default: null },
   },
   currentStageKey: { type: String, default: 'interesados', index: true, trim: true },
   admissionStages: { type: [admissionStageSchema], default: [] },

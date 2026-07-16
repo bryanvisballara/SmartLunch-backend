@@ -47,6 +47,8 @@ const emptyEventForm = {
   appointmentTime: '',
   guardianEmail: '',
   clientVisible: false,
+  admissionResult: '',
+  notAdmittedReason: '',
 };
 
 const emptyDocumentForm = {
@@ -61,10 +63,16 @@ const ADMISSIONS_VIEW_OPTIONS = [
   { key: 'agenda', label: 'Agenda', status: '', empty: '' },
   { key: 'aspirantes', label: 'Aspirantes', status: 'active', empty: 'No hay aspirantes con esos filtros.' },
   { key: 'desistidos', label: 'Desistidos', status: 'withdrawn', empty: 'No hay desistidos con esos filtros.' },
+  { key: 'no-admitidos', label: 'No admitidos', status: 'not_admitted', empty: 'No hay no admitidos con esos filtros.' },
   { key: 'costos', label: 'Costos', status: '', empty: '' },
   { key: 'marketing', label: 'Marketing', status: '', empty: '' },
   { key: 'matricula', label: 'Matrícula', status: '', empty: '' },
   { key: 'matriculas_digitales', label: 'Matrículas digitales', status: '', empty: '' },
+];
+
+const ADMISSION_RESULT_OPTIONS = [
+  { value: 'admitted', label: 'Admitido' },
+  { value: 'not_admitted', label: 'No admitido' },
 ];
 
 const APPOINTMENT_TYPE_OPTIONS = [
@@ -80,7 +88,7 @@ function toAdmissionUpper(value) {
 }
 
 function keepTechnicalValue(key, value) {
-  return ['stage', 'status', 'grade', 'from', 'to', 'birthDate', 'guardianEmail', 'clientVisible', 'files', 'type', 'appointmentType', 'appointmentDate', 'appointmentTime'].includes(key) ? value : toAdmissionUpper(value);
+  return ['stage', 'status', 'grade', 'from', 'to', 'birthDate', 'guardianEmail', 'clientVisible', 'files', 'type', 'appointmentType', 'appointmentDate', 'appointmentTime', 'admissionResult'].includes(key) ? value : toAdmissionUpper(value);
 }
 
 function normalizeAdmissionGradeOptions(gradeOptions = []) {
@@ -187,6 +195,7 @@ function getStageLabel(stageTemplates, stageKey) {
 
 function getApplicantStatusLabel(applicant) {
   if (applicant?.status === 'withdrawn') return 'Desistido';
+  if (applicant?.status === 'not_admitted') return 'No admitido';
   if (applicant?.status === 'enrolled') return 'Matriculado';
   return 'En proceso';
 }
@@ -320,7 +329,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const [internalView, setInternalView] = useState(queryParams.get('view') || 'dashboard');
   const currentView = ADMISSIONS_VIEW_OPTIONS.some((option) => option.key === (activeView || internalView)) ? (activeView || internalView) : 'dashboard';
   const currentViewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === currentView) || ADMISSIONS_VIEW_OPTIONS[0];
-  const isWorklistView = ['aspirantes', 'desistidos'].includes(currentView);
+  const isWorklistView = ['aspirantes', 'desistidos', 'no-admitidos'].includes(currentView);
   const schoolDisplayName = getSchoolDisplayName(user, 'Colegio');
   const userDisplayName = user?.name || user?.username || 'Usuario';
   const [loading, setLoading] = useState(true);
@@ -332,7 +341,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const [stageTemplates, setStageTemplates] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);
   const [admissionGradeOptions, setAdmissionGradeOptions] = useState([]);
-  const [metrics, setMetrics] = useState({ total: 0, inProcess: 0, enrolled: 0, withdrawn: 0 });
+  const [metrics, setMetrics] = useState({ total: 0, inProcess: 0, enrolled: 0, withdrawn: 0, notAdmitted: 0 });
   const [stageCounts, setStageCounts] = useState({});
   const [globalEvents, setGlobalEvents] = useState([]);
   const [scheduledEvents, setScheduledEvents] = useState([]);
@@ -389,7 +398,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       setStageTemplates(data.stageTemplates || []);
       setDocumentTypes(normalizeDocumentTypes(data.documentTypes || {}));
       setAdmissionGradeOptions(normalizeAdmissionGradeOptions(data.gradeOptions || []));
-      setMetrics(data.metrics || { total: 0, inProcess: 0, enrolled: 0, withdrawn: 0 });
+      setMetrics(data.metrics || { total: 0, inProcess: 0, enrolled: 0, withdrawn: 0, notAdmitted: 0 });
       setStageCounts(data.stageCounts || {});
       setGlobalEvents(data.globalEvents || []);
       setScheduledEvents(data.scheduledEvents || []);
@@ -583,7 +592,11 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       ];
     });
 
-    const fileBaseName = currentView === 'desistidos' ? 'admisiones-desistidos' : 'admisiones-aspirantes';
+    const fileBaseName = currentView === 'desistidos'
+      ? 'admisiones-desistidos'
+      : currentView === 'no-admitidos'
+        ? 'admisiones-no-admitidos'
+        : 'admisiones-aspirantes';
     downloadExcelWorkbook(currentViewConfig.label, ADMISSION_WORKLIST_EXPORT_HEADERS, rows, fileBaseName);
   };
 
@@ -701,7 +714,10 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const submitEvent = async (event) => {
     event.preventDefault();
     if (!selectedApplicantId) return;
+    const wasEditingEvent = Boolean(editingEventId);
     let payload = { ...eventForm, stageKey: eventForm.stageKey || activeStageKey };
+    const relatedStageKey = payload.stageKey || activeStageKey;
+    const showResultFields = relatedStageKey === 'resultados';
     const hasAppointmentDraft = Boolean(payload.appointmentType || payload.appointmentDate || payload.appointmentTime);
     if (hasAppointmentDraft && (!payload.appointmentType || !payload.appointmentDate || !payload.appointmentTime)) {
       setError('Completa tipo, fecha y hora para agendar la cita.');
@@ -711,18 +727,43 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       setError('Completa el correo del acudiente para enviar la cita.');
       return;
     }
+    if (showResultFields && payload.admissionResult === 'not_admitted' && !String(payload.notAdmittedReason || '').trim()) {
+      setError('Describe por qué no fue admitido.');
+      return;
+    }
     if (payload.stageKey === 'agendamiento' && hasAppointmentDraft) {
       payload = { ...payload, ...buildAppointmentEventDefaults(payload) };
     }
     if (payload.stageKey === 'agendamiento' && !payload.title) {
       payload = { ...payload, title: 'EVENTO REGISTRADO' };
     }
+    if (showResultFields && payload.admissionResult === 'admitted' && !payload.title) {
+      payload = { ...payload, title: 'ADMITIDO' };
+    }
+    if (showResultFields && payload.admissionResult === 'not_admitted') {
+      payload = {
+        ...payload,
+        title: payload.title || 'NO ADMITIDO',
+        notes: payload.notAdmittedReason || payload.notes,
+      };
+    }
+    if (!showResultFields) {
+      payload = { ...payload, admissionResult: '', notAdmittedReason: '' };
+    }
     await runApplicantAction(
-      () => editingEventId ? updateAdmissionEvent(selectedApplicantId, editingEventId, payload) : createAdmissionEvent(selectedApplicantId, payload),
-      editingEventId ? 'Evento actualizado.' : 'Evento registrado.'
+      () => wasEditingEvent ? updateAdmissionEvent(selectedApplicantId, editingEventId, payload) : createAdmissionEvent(selectedApplicantId, payload),
+      wasEditingEvent
+        ? 'Evento actualizado.'
+        : payload.admissionResult === 'not_admitted'
+          ? 'Aspirante registrado como no admitido.'
+          : 'Evento registrado.'
     );
     setEventForm({ ...emptyEventForm, guardianEmail: selectedApplicantGuardianEmail });
     setEditingEventId('');
+    if (!wasEditingEvent && payload.admissionResult === 'not_admitted') {
+      openPortalView('no-admitidos');
+      return;
+    }
     await refreshSelectedApplicant();
   };
 
@@ -738,6 +779,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       appointmentTime: eventItem.appointment?.time || '',
       guardianEmail: normalizeAdmissionEmail(eventItem.appointment?.guardianEmail || selectedApplicantGuardianEmail),
       clientVisible: Boolean(eventItem.clientVisible),
+      admissionResult: '',
+      notAdmittedReason: '',
     });
   };
 
@@ -769,6 +812,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const currentStageIndex = stageTemplates.findIndex((stage) => stage.key === activeStageKey);
   const isFinalStage = activeStageKey === 'matriculados' && selectedApplicant?.status === 'enrolled';
   const isWithdrawn = selectedApplicant?.status === 'withdrawn';
+  const isNotAdmitted = selectedApplicant?.status === 'not_admitted';
+  const isClosedApplicant = isWithdrawn || isNotAdmitted;
   const showApplicantDetail = Boolean(selectedApplicant);
   const canCreateApplicant = !showApplicantDetail && ['dashboard', 'aspirantes'].includes(currentView);
   const canShowApplicantForm = !showApplicantDetail && (canCreateApplicant || Boolean(editingApplicantId));
@@ -808,6 +853,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0));
   const activeStageDisplay = `${getStageCode(stageTemplates, activeStageKey)} - ${getStageLabel(stageTemplates, activeStageKey)}`;
   const showAppointmentScheduler = activeStageKey === 'agendamiento' || eventForm.stageKey === 'agendamiento';
+  const relatedEventStageKey = eventForm.stageKey || activeStageKey;
+  const showAdmissionResultSelector = !isClosedApplicant && !editingEventId && relatedEventStageKey === 'resultados';
 
   const clearEventForm = () => {
     setEditingEventId('');
@@ -965,6 +1012,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                 <article className="metric-card admin-metric-card"><span>En proceso</span><strong>{metrics.inProcess || 0}</strong><p>E2 a E6 activos.</p></article>
                 <article className="metric-card admin-metric-card"><span>Matriculados</span><strong>{metrics.enrolled || 0}</strong><p>Proceso finalizado.</p></article>
                 <article className="metric-card admin-metric-card"><span>Desistidos</span><strong>{metrics.withdrawn || 0}</strong><p>Procesos cerrados.</p></article>
+                <article className="metric-card admin-metric-card"><span>No admitidos</span><strong>{metrics.notAdmitted || 0}</strong><p>Resultado negativo en E6.</p></article>
               </section>
 
               <section className="dashboard-card admin-distribution-card">
@@ -1208,7 +1256,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             </section>
           ) : null}
 
-          {!['dashboard', 'agenda', 'aspirantes', 'desistidos', 'costos', 'matricula', 'matriculas_digitales'].includes(currentView) && !showApplicantDetail ? (
+          {!['dashboard', 'agenda', 'aspirantes', 'desistidos', 'no-admitidos', 'costos', 'matricula', 'matriculas_digitales', 'marketing'].includes(currentView) && !showApplicantDetail ? (
             <section className="dashboard-card admissions-placeholder-card">
               <span>{currentViewConfig.label}</span>
               <h2>{currentViewConfig.label}</h2>
@@ -1238,6 +1286,9 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                     <div><span>Teléfono</span><strong>{selectedApplicant.guardian?.phone || '-'}</strong></div>
                     <div><span>Correo</span><strong>{selectedApplicant.guardian?.email || '-'}</strong></div>
                     <div><span>Año</span><strong>{selectedApplicant.academicYear || '-'}</strong></div>
+                    {selectedApplicant.status === 'not_admitted' && selectedApplicant.admissionDecision?.reason ? (
+                      <div><span>Motivo no admisión</span><strong>{selectedApplicant.admissionDecision.reason}</strong></div>
+                    ) : null}
                   </div>
                 </article>
 
@@ -1245,12 +1296,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                   <h2>Transición de etapa</h2>
                   <div className="admissions-detail-transition-actions">
                     <button className="secondary-button" disabled={busy || currentStageIndex <= 0} onClick={() => moveStage('previous')} type="button">← Anterior</button>
-                    <button className="secondary-button" disabled={busy || isFinalStage || isWithdrawn} onClick={() => moveStage('next')} type="button">Siguiente →</button>
+                    <button className="secondary-button" disabled={busy || isFinalStage || isClosedApplicant} onClick={() => moveStage('next')} type="button">Siguiente →</button>
                   </div>
                   <p>Puedes avanzar o retroceder libremente. La etapa actual queda en proceso.</p>
                   <div className="admissions-detail-secondary-actions">
-                    <button className="primary-button" disabled={busy || isFinalStage || isWithdrawn} onClick={finalizeEnrollment} type="button">Finalizar matrícula</button>
-                    {isWithdrawn ? (
+                    <button className="primary-button" disabled={busy || isFinalStage || isClosedApplicant} onClick={finalizeEnrollment} type="button">Finalizar matrícula</button>
+                    {isClosedApplicant ? (
                       <button className="secondary-button" disabled={busy} onClick={reactivateApplicant} type="button">Reactivar</button>
                     ) : (
                       <button className="secondary-button admissions-danger-button" disabled={busy || isFinalStage} onClick={markApplicantWithdrawn} type="button">Marcar desistido</button>
@@ -1295,9 +1346,33 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
 
                 <form className="dashboard-card admissions-detail-new-event-card" onSubmit={submitEvent}>
                   <h2>Nuevo evento</h2>
-                  <label><span>Título</span><input placeholder="Título" required={!showAppointmentScheduler} value={eventForm.title} onChange={(event) => updateEventForm('title', event.target.value)} /></label>
+                  <label><span>Título</span><input placeholder="Título" required={!showAppointmentScheduler && !eventForm.admissionResult} value={eventForm.title} onChange={(event) => updateEventForm('title', event.target.value)} /></label>
                   <label><span>Descripción</span><textarea placeholder="Descripción" value={eventForm.notes} onChange={(event) => updateEventForm('notes', event.target.value)} /></label>
-                  <label><span>Etapa relacionada</span><select value={eventForm.stageKey || activeStageKey} onChange={(event) => updateEventForm('stageKey', event.target.value)}>{stageTemplates.map((stage) => <option key={stage.key} value={stage.key}>{getStageCode(stageTemplates, stage.key)} - {stage.label}</option>)}</select></label>
+                  <label><span>Etapa relacionada</span><select value={eventForm.stageKey || activeStageKey} onChange={(event) => {
+                    const nextStageKey = event.target.value;
+                    setEventForm((previous) => ({
+                      ...previous,
+                      stageKey: nextStageKey,
+                      ...(nextStageKey === 'resultados' ? {} : { admissionResult: '', notAdmittedReason: '' }),
+                    }));
+                  }}>{stageTemplates.map((stage) => <option key={stage.key} value={stage.key}>{getStageCode(stageTemplates, stage.key)} - {stage.label}</option>)}</select></label>
+                  {showAdmissionResultSelector ? (
+                    <>
+                      <label>
+                        <span>Resultado de admision</span>
+                        <select value={eventForm.admissionResult} onChange={(event) => updateEventForm('admissionResult', event.target.value)}>
+                          <option value="">Selecciona una opción</option>
+                          {ADMISSION_RESULT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      {eventForm.admissionResult === 'not_admitted' ? (
+                        <label>
+                          <span>Motivo de no admisión</span>
+                          <textarea required placeholder="Describe por qué no fue admitido" value={eventForm.notAdmittedReason} onChange={(event) => updateEventForm('notAdmittedReason', event.target.value)} />
+                        </label>
+                      ) : null}
+                    </>
+                  ) : null}
                   {showAppointmentScheduler ? (
                     <fieldset className="admissions-appointment-fieldset">
                       <legend>Agendar cita</legend>
