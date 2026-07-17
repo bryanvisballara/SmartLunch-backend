@@ -601,15 +601,21 @@ function formatDateLabel(value) {
     return 'Sin fecha';
   }
 
-  const parsedDate = new Date(value);
+  const raw = String(value);
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const parsedDate = dateOnlyMatch
+    ? new Date(Date.UTC(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]), 12, 0, 0))
+    : new Date(value);
   if (Number.isNaN(parsedDate.getTime())) {
     return 'Sin fecha';
   }
 
+  // Planner deadlines are calendar dates; use UTC so YYYY-MM-DD midnight does not shift a day in Colombia.
   return parsedDate.toLocaleDateString('es-CO', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 

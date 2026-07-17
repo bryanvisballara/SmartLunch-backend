@@ -28,6 +28,30 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+/** Calendar dates from <input type="date"> (YYYY-MM-DD) must not use Date(string) UTC midnight. */
+function parsePlannerCalendarDate(value) {
+  const raw = normalizeText(value);
+  if (!raw) {
+    return null;
+  }
+
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1]);
+    const month = Number(dateOnlyMatch[2]);
+    const day = Number(dateOnlyMatch[3]);
+    // Noon UTC keeps the calendar day stable in Colombia (UTC-5) and similar zones.
+    return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 12, 0, 0, 0));
+}
+
 function escapeRegex(value) {
   return normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -339,20 +363,19 @@ router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, re
   try {
     const { schoolId, userId } = req.user;
     const title = normalizeText(req.body.title);
-    const submissionDeadline = normalizeText(req.body.submissionDeadline);
-    const parsedDeadline = submissionDeadline ? new Date(submissionDeadline) : null;
+    const parsedDeadline = parsePlannerCalendarDate(req.body.submissionDeadline);
 
-    if (!title || !parsedDeadline || Number.isNaN(parsedDeadline.getTime())) {
+    if (!title || !parsedDeadline) {
       return res.status(400).json({ message: 'title and submissionDeadline are required' });
     }
 
-    const startDate = normalizeText(req.body.startDate) ? new Date(req.body.startDate) : null;
-    const endDate = normalizeText(req.body.endDate) ? new Date(req.body.endDate) : null;
+    const startDate = parsePlannerCalendarDate(req.body.startDate);
+    const endDate = parsePlannerCalendarDate(req.body.endDate);
     const cycle = await HrPlannerCycle.create({
       schoolId,
       title,
-      startDate: startDate && !Number.isNaN(startDate.getTime()) ? startDate : null,
-      endDate: endDate && !Number.isNaN(endDate.getTime()) ? endDate : null,
+      startDate,
+      endDate,
       submissionDeadline: parsedDeadline,
       instructions: normalizeText(req.body.instructions),
       status: safeEnum(req.body.status, ['active', 'closed'], 'active'),
@@ -375,21 +398,20 @@ router.patch('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), asyn
     }
 
     const title = normalizeText(req.body.title);
-    const submissionDeadline = normalizeText(req.body.submissionDeadline);
-    const parsedDeadline = submissionDeadline ? new Date(submissionDeadline) : null;
-    if (!title || !parsedDeadline || Number.isNaN(parsedDeadline.getTime())) {
+    const parsedDeadline = parsePlannerCalendarDate(req.body.submissionDeadline);
+    if (!title || !parsedDeadline) {
       return res.status(400).json({ message: 'Título y fecha límite son requeridos.' });
     }
 
-    const startDate = normalizeText(req.body.startDate) ? new Date(req.body.startDate) : null;
-    const endDate = normalizeText(req.body.endDate) ? new Date(req.body.endDate) : null;
+    const startDate = parsePlannerCalendarDate(req.body.startDate);
+    const endDate = parsePlannerCalendarDate(req.body.endDate);
     const cycle = await HrPlannerCycle.findOneAndUpdate(
       { _id: cycleId, schoolId },
       {
         $set: {
           title,
-          startDate: startDate && !Number.isNaN(startDate.getTime()) ? startDate : null,
-          endDate: endDate && !Number.isNaN(endDate.getTime()) ? endDate : null,
+          startDate,
+          endDate,
           submissionDeadline: parsedDeadline,
           instructions: normalizeText(req.body.instructions),
           status: safeEnum(req.body.status, ['active', 'closed'], 'active'),

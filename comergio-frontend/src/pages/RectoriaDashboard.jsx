@@ -749,9 +749,13 @@ function createEmptyResourcePlannerCycleDraft() {
 
 function formatResourceDate(value) {
   if (!value) return 'Sin fecha';
-  const parsed = new Date(value);
+  const raw = String(value);
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const parsed = dateOnlyMatch
+    ? new Date(Date.UTC(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]), 12, 0, 0))
+    : new Date(value);
   if (Number.isNaN(parsed.getTime())) return 'Sin fecha';
-  return parsed.toLocaleDateString('es-CO', { dateStyle: 'medium' });
+  return parsed.toLocaleDateString('es-CO', { dateStyle: 'medium', timeZone: 'UTC' });
 }
 
 function getResourceRequestItemsLabel(request) {
