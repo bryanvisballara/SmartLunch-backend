@@ -19,10 +19,54 @@ function getRecordingMimeType() {
 }
 
 function getExtensionFromMimeType(mimeType, fallback = 'webm') {
-  if (/mp4/i.test(mimeType)) return 'mp4';
+  if (/mp4|m4v|quicktime|mov/i.test(mimeType)) return 'mp4';
+  if (/webm/i.test(mimeType)) return 'webm';
   if (/jpeg/i.test(mimeType)) return 'jpg';
   if (/png/i.test(mimeType)) return 'png';
   return fallback;
+}
+
+function normalizeMediaMimeType(mimeType = '', fileName = '') {
+  const raw = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  if (raw.startsWith('image/') || raw.startsWith('video/')) {
+    return raw;
+  }
+
+  const name = String(fileName || '').toLowerCase();
+  if (/\.(png)$/i.test(name)) return 'image/png';
+  if (/\.(gif)$/i.test(name)) return 'image/gif';
+  if (/\.(webp)$/i.test(name)) return 'image/webp';
+  if (/\.(jpe?g|heic|heif)$/i.test(name)) return 'image/jpeg';
+  if (/\.(webm)$/i.test(name)) return 'video/webm';
+  if (/\.(mov)$/i.test(name)) return 'video/quicktime';
+  if (/\.(mp4|m4v)$/i.test(name)) return 'video/mp4';
+  return raw;
+}
+
+function ensureMediaFile(file, fallbackName = 'media.bin') {
+  if (!file) {
+    return null;
+  }
+
+  const name = String(file.name || fallbackName).trim() || fallbackName;
+  const type = normalizeMediaMimeType(file.type, name);
+  if (!type) {
+    return file;
+  }
+
+  if (type === String(file.type || '').trim()) {
+    return file;
+  }
+
+  return new File([file], name, {
+    type,
+    lastModified: file.lastModified || Date.now(),
+  });
+}
+
+function isSupportedMediaFile(file) {
+  const type = normalizeMediaMimeType(file?.type, file?.name);
+  return type.startsWith('image/') || type.startsWith('video/');
 }
 
 export default function TeacherCameraCapture({
@@ -129,11 +173,16 @@ export default function TeacherCameraCapture({
   }, [isOpen, startCamera, stopCamera]);
 
   const deliverFiles = async (files) => {
-    const selectedFiles = Array.from(files || []).filter((file) => (
-      String(file?.type || '').startsWith('image/')
-      || String(file?.type || '').startsWith('video/')
-    ));
-    if (!selectedFiles.length || typeof onFilesReady !== 'function') {
+    const selectedFiles = Array.from(files || [])
+      .map((file, index) => ensureMediaFile(file, `media-${Date.now()}-${index}.bin`))
+      .filter((file) => isSupportedMediaFile(file));
+
+    if (!selectedFiles.length) {
+      setError('Solo se pueden usar fotos o videos para la publicación.');
+      return;
+    }
+
+    if (typeof onFilesReady !== 'function') {
       return;
     }
 
@@ -214,16 +263,22 @@ export default function TeacherCameraCapture({
           recordingChunksRef.current = [];
           return;
         }
-        const resolvedType = recorder.mimeType || mimeType || 'video/webm';
+        const resolvedType = normalizeMediaMimeType(
+          recorder.mimeType || mimeType || 'video/mp4',
+          'video.mp4'
+        ) || 'video/mp4';
         const blob = new Blob(recordingChunksRef.current, { type: resolvedType });
         recordingChunksRef.current = [];
         if (!blob.size) {
           setError('No se pudo guardar el video.');
           return;
         }
-        const extension = getExtensionFromMimeType(resolvedType);
+        const extension = getExtensionFromMimeType(resolvedType, 'mp4');
         deliverFiles([
-          new File([blob], `video-docente-${Date.now()}.${extension}`, { type: resolvedType }),
+          ensureMediaFile(
+            new File([blob], `video-docente-${Date.now()}.${extension}`, { type: resolvedType }),
+            `video-docente-${Date.now()}.mp4`
+          ),
         ]);
       };
       recorder.start(250);
@@ -300,7 +355,10 @@ export default function TeacherCameraCapture({
         <div className="teacher-camera__message is-error">
           <strong>No pudimos continuar</strong>
           <span>{error}</span>
-          {cameraState === 'error' ? <button onClick={startCamera} type="button">Intentar nuevamente</button> : null}
+          <div className="teacher-camera__message-actions">
+            {cameraState === 'error' ? <button onClick={startCamera} type="button">Intentar nuevamente</button> : null}
+            <button onClick={() => setError('')} type="button">Entendido</button>
+          </div>
         </div>
       ) : null}
       {isPreparing ? (

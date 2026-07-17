@@ -77,6 +77,7 @@ const {
   MAX_CAMPUS_MATERIAL_FILES,
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
+  resolveUploadMimeType,
 } = require('../utils/campusMaterialUpload');
 const { isCloudinaryEnabled } = require('../utils/imageUpload');
 
@@ -3921,6 +3922,13 @@ router.post('/portal/community-publications/media', uploadCampusMaterialsMiddlew
     if (!incomingFiles.length) {
       return res.status(400).json({ message: 'No se recibió ningún archivo.' });
     }
+
+    incomingFiles.forEach((file) => {
+      const resolvedMimeType = resolveUploadMimeType(file);
+      if (resolvedMimeType) {
+        file.mimetype = resolvedMimeType;
+      }
+    });
 
     const hasUnsupportedFile = incomingFiles.some((file) => {
       const mimeType = normalizeText(file?.mimetype).toLowerCase();

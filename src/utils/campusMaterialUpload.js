@@ -84,26 +84,77 @@ function buildPublicUrl(folder, filename) {
 }
 
 function detectMaterialKind(file) {
-  const mimeType = String(file?.mimetype || '').toLowerCase();
+  const mimeType = String(file?.mimetype || '').toLowerCase().split(';')[0].trim();
+  const fileName = String(file?.originalname || file?.name || '').toLowerCase();
 
-  if (mimeType === 'application/pdf') {
+  if (mimeType === 'application/pdf' || fileName.endsWith('.pdf')) {
     return 'pdf';
   }
-  if (mimeType.startsWith('video/')) {
+  if (
+    mimeType.startsWith('video/')
+    || /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(fileName)
+  ) {
     return 'video';
   }
-  if (mimeType.startsWith('audio/')) {
+  if (mimeType.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg)$/i.test(fileName)) {
     return 'audio';
   }
-  if (mimeType.startsWith('image/')) {
+  if (
+    mimeType.startsWith('image/')
+    || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(fileName)
+  ) {
     return 'image';
   }
 
   return 'file';
 }
 
+function resolveUploadMimeType(file) {
+  const rawMime = String(file?.mimetype || '').split(';')[0].trim().toLowerCase();
+  if (rawMime.startsWith('image/') || rawMime.startsWith('video/') || rawMime.startsWith('audio/')) {
+    return rawMime;
+  }
+
+  const kind = detectMaterialKind(file);
+  if (kind === 'video') {
+    const fileName = String(file?.originalname || '').toLowerCase();
+    if (fileName.endsWith('.webm')) return 'video/webm';
+    if (fileName.endsWith('.mov')) return 'video/quicktime';
+    return 'video/mp4';
+  }
+  if (kind === 'image') {
+    const fileName = String(file?.originalname || '').toLowerCase();
+    if (fileName.endsWith('.png')) return 'image/png';
+    if (fileName.endsWith('.webp')) return 'image/webp';
+    if (fileName.endsWith('.gif')) return 'image/gif';
+    return 'image/jpeg';
+  }
+  if (kind === 'audio') {
+    return rawMime || 'audio/mpeg';
+  }
+  if (kind === 'pdf') {
+    return 'application/pdf';
+  }
+  return rawMime;
+}
+
+function isAllowedMaterialFile(file) {
+  const mimeType = resolveUploadMimeType(file);
+  const kind = detectMaterialKind({ ...file, mimetype: mimeType });
+  return (
+    kind === 'image'
+    || kind === 'video'
+    || kind === 'audio'
+    || kind === 'pdf'
+    || mimeType.startsWith('image/')
+    || mimeType.startsWith('video/')
+    || mimeType.startsWith('audio/')
+    || allowedMimeTypes.has(mimeType)
+  );
+}
+
 async function normalizeCampusImageFile(file) {
-  const mimeType = String(file?.mimetype || '').toLowerCase();
+  const mimeType = resolveUploadMimeType(file);
   if (!mimeType.startsWith('image/')) {
     return null;
   }
@@ -119,16 +170,6 @@ async function normalizeCampusImageFile(file) {
     mimeType: 'image/jpeg',
     sizeBytes: buffer.length,
   };
-}
-
-function isAllowedMaterialFile(file) {
-  const mimeType = String(file?.mimetype || '').toLowerCase();
-  return (
-    mimeType.startsWith('image/') ||
-    mimeType.startsWith('video/') ||
-    mimeType.startsWith('audio/') ||
-    allowedMimeTypes.has(mimeType)
-  );
 }
 
 function uploadBufferToCloudinary(buffer, { publicId, extension }) {
@@ -169,11 +210,28 @@ const uploadCampusMaterialsMiddleware = multer({
 });
 
 function shouldPersistAcademicCommunicationAssetsToDatabase({ folder, useDatabaseInProduction }) {
-  if (!useDatabaseInProduction || process.env.NODE_ENV !== 'production' || isCloudinaryEnabled()) {
+  const safeFolder = sanitizeFolder(folder);
+  const persistableFolders = new Set([
+    'academic-communications',
+    'campus-materials',
+    'campus-student-submissions',
+  ]);
+
+  if (!persistableFolders.has(safeFolder)) {
     return false;
   }
 
-  return sanitizeFolder(folder) === 'academic-communications';
+  // Prefer Cloudinary when configured; otherwise store in Mongo so multi-tenant
+  // APIs (e.g. Render) can still serve files uploaded from local/dev.
+  if (isCloudinaryEnabled()) {
+    return false;
+  }
+
+  if (safeFolder === 'academic-communications') {
+    return useDatabaseInProduction === true || process.env.NODE_ENV === 'production';
+  }
+
+  return true;
 }
 
 async function persistAcademicCommunicationAsset({
@@ -240,6 +298,10 @@ async function processStoredCampusMaterialFiles(files, {
 
   const processedFiles = [];
   for (const file of normalizedFiles) {
+    const resolvedMimeType = resolveUploadMimeType(file);
+    if (resolvedMimeType && resolvedMimeType !== file.mimetype) {
+      file.mimetype = resolvedMimeType;
+    }
     const materialKind = detectMaterialKind(file);
     const normalizedImage = await normalizeCampusImageFile(file);
     const originalExtension = normalizedImage?.extension || sanitizeExtension(path.extname(String(file.originalname || '')).replace(/^\./, '')) || 'bin';
@@ -329,12 +391,12 @@ async function processStoredCampusMaterialFiles(files, {
 }
 
 function detectAcademicCommunicationMediaKind(file) {
-  const mimeType = String(file?.mimetype || '').toLowerCase();
-  if (mimeType.startsWith('video/')) {
-    return 'video';
-  }
-  if (mimeType.startsWith('image/')) {
-    return 'image';
+  const kind = detectMaterialKind({
+    ...file,
+    mimetype: resolveUploadMimeType(file),
+  });
+  if (kind === 'video' || kind === 'image') {
+    return kind;
   }
   return 'file';
 }
@@ -396,4 +458,6 @@ module.exports = {
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
   processAcademicCommunicationMediaFile,
+  resolveUploadMimeType,
+  detectMaterialKind,
 };

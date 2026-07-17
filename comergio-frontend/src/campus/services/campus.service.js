@@ -132,7 +132,10 @@ export function toggleCampusTeacherFamilyFeedCommentLike(communicationId, commen
 
 export function uploadCampusTeacherParentFeedMedia(files) {
   const formData = new FormData();
-  Array.from(files || []).forEach((file) => formData.append('files', file));
+  Array.from(files || []).forEach((file, index) => {
+    const fileName = String(file?.name || `media-${Date.now()}-${index}.bin`);
+    formData.append('files', file, fileName);
+  });
   return api.post('/campus/teacher/parent-feed-requests/media', formData).then((response) => response.data);
 }
 

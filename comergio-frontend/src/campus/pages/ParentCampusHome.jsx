@@ -6827,11 +6827,43 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   };
 
   const uploadCommunityMediaFiles = async (files, { fromCamera = false } = {}) => {
-    const selectedFiles = Array.from(files || []).filter((file) => (
-      String(file?.type || '').startsWith('image/')
-      || String(file?.type || '').startsWith('video/')
-    ));
+    const selectedFiles = Array.from(files || []).filter((file) => {
+      const mimeType = String(file?.type || '').split(';')[0].trim().toLowerCase();
+      const fileName = String(file?.name || '').toLowerCase();
+      return (
+        mimeType.startsWith('image/')
+        || mimeType.startsWith('video/')
+        || /\.(jpe?g|png|gif|webp|heic|heif|mp4|m4v|mov|webm)$/i.test(fileName)
+      );
+    }).map((file) => {
+      const mimeType = String(file?.type || '').split(';')[0].trim().toLowerCase();
+      if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
+        return mimeType === file.type
+          ? file
+          : new File([file], file.name, { type: mimeType, lastModified: file.lastModified || Date.now() });
+      }
+      const fileName = String(file?.name || '').toLowerCase();
+      const inferredType = /\.(png)$/i.test(fileName)
+        ? 'image/png'
+        : /\.(webp)$/i.test(fileName)
+          ? 'image/webp'
+          : /\.(gif)$/i.test(fileName)
+            ? 'image/gif'
+            : /\.(webm)$/i.test(fileName)
+              ? 'video/webm'
+              : /\.(mov)$/i.test(fileName)
+                ? 'video/quicktime'
+                : /\.(mp4|m4v)$/i.test(fileName)
+                  ? 'video/mp4'
+                  : /\.(jpe?g|heic|heif)$/i.test(fileName)
+                    ? 'image/jpeg'
+                    : '';
+      return inferredType
+        ? new File([file], file.name || `media-${Date.now()}.bin`, { type: inferredType, lastModified: file.lastModified || Date.now() })
+        : file;
+    });
     if (!selectedFiles.length) {
+      setFeedActionMessage('Solo se pueden subir fotos o videos.');
       return;
     }
 
@@ -6995,11 +7027,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       const deltaX = touch.clientX - start.x;
       const deltaY = touch.clientY - start.y;
       const elapsed = Date.now() - start.time;
-      const isSwipeLeft = deltaX <= -82
+      const isSwipeRight = deltaX >= 82
         && Math.abs(deltaX) >= Math.abs(deltaY) * 1.35
         && elapsed <= 900;
 
-      if (isSwipeLeft) {
+      if (isSwipeRight) {
         setShowUserMenu(false);
         setShowAcademicMenu(false);
         setShowCareMenu(false);

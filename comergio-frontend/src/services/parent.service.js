@@ -32,8 +32,9 @@ export const uploadParentPortalStudentPhoto = (studentId, formData) =>
 	});
 export const uploadCommunityPublicationMedia = (files = []) => {
 	const formData = new FormData();
-	Array.from(files || []).forEach((file) => {
-		formData.append('files', file);
+	Array.from(files || []).forEach((file, index) => {
+		const fileName = String(file?.name || `media-${Date.now()}-${index}.bin`);
+		formData.append('files', file, fileName);
 	});
 	return api.post('/parent/portal/community-publications/media', formData, {
 		headers: { 'Content-Type': 'multipart/form-data' },

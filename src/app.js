@@ -250,6 +250,49 @@ app.use(['/assets/academic-communications/:fileName', '/uploads/academic-communi
     return next(error);
   }
 });
+app.use([
+  '/assets/campus-materials/:fileName',
+  '/uploads/campus-materials/:fileName',
+  '/assets/campus-student-submissions/:fileName',
+  '/uploads/campus-student-submissions/:fileName',
+], async (req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  if (!['GET', 'HEAD'].includes(method)) {
+    return next();
+  }
+
+  const fileName = String(req.params?.fileName || '').trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(fileName)) {
+    return res.status(400).json({ message: 'Invalid asset path' });
+  }
+
+  try {
+    let asset = await AcademicCommunicationAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec();
+    if (!asset) {
+      const tenantAsset = await findOneAcrossTenantSchoolDbs(() => (
+        AcademicCommunicationAsset.findOne({ fileName }).select('data mimeType sizeBytes').exec()
+      ));
+      asset = tenantAsset?.doc || null;
+    }
+    if (!asset?.data) {
+      return next();
+    }
+
+    const fileBuffer = Buffer.from(asset.data);
+    res.setHeader('Content-Type', asset.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', String(fileBuffer.length));
+    res.setHeader('Content-Disposition', `inline; filename="${fileName.replace(/"/g, '')}"`);
+    setStaticAssetHeaders(res);
+
+    if (method === 'HEAD') {
+      return res.end();
+    }
+
+    return res.send(fileBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
 app.use(['/assets', '/uploads'], async (req, res, next) => {
   const method = String(req.method || '').toUpperCase();
   const wantsJpeg = ['jpg', 'jpeg'].includes(String(req.query?.format || '').toLowerCase());

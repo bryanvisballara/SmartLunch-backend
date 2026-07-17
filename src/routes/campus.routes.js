@@ -28,6 +28,7 @@ const {
   MAX_CAMPUS_MATERIAL_FILES,
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
+  resolveUploadMimeType,
 } = require('../utils/campusMaterialUpload');
 const { buildCoordinationDashboard } = require('../services/coordinationDashboard.service');
 const {
@@ -4320,7 +4321,12 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
       return res.status(400).json({ message: linksResult.message });
     }
 
-    const uploadedAttachments = await processStoredCampusMaterialFiles(req.files, { folder: 'campus-materials' });
+    const uploadedAttachments = await processStoredCampusMaterialFiles(req.files, {
+      folder: 'campus-materials',
+      schoolId,
+      createdByUserId: userId,
+      requireCloudinary: isCloudinaryEnabled(),
+    });
     const attachments = [...linksResult.links, ...uploadedAttachments];
     const gradebookAssignmentResult = buildPostGradebookAssignmentUpdate(
       req.body.gradebookAssignment,
@@ -4580,6 +4586,13 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
     if (!incomingFiles.length) {
       return res.status(400).json({ message: 'No se recibio ningun archivo.' });
     }
+
+    incomingFiles.forEach((file) => {
+      const resolvedMimeType = resolveUploadMimeType(file);
+      if (resolvedMimeType) {
+        file.mimetype = resolvedMimeType;
+      }
+    });
 
     const hasUnsupportedFile = incomingFiles.some((file) => {
       const mimeType = normalizeText(file?.mimetype).toLowerCase();
@@ -5303,7 +5316,12 @@ router.patch('/teacher/posts/:id', requireCampusTeacherAccess, (req, res) => {
             nextLinkAttachments = linksResult.links;
           }
 
-          const uploadedAttachments = await processStoredCampusMaterialFiles(uploadedFiles, { folder: 'campus-materials' });
+          const uploadedAttachments = await processStoredCampusMaterialFiles(uploadedFiles, {
+            folder: 'campus-materials',
+            schoolId,
+            createdByUserId: userId,
+            requireCloudinary: isCloudinaryEnabled(),
+          });
           post.attachments = [...nextLinkAttachments, ...existingFileAttachments, ...uploadedAttachments];
         }
 

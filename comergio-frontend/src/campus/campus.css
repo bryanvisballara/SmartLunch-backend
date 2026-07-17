@@ -11759,6 +11759,16 @@ body.teacher-camera-open {
   overflow: hidden;
 }
 
+@keyframes teacher-camera-enter-ltr {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
 .teacher-camera {
   position: fixed;
   inset: 0;
@@ -11769,6 +11779,7 @@ body.teacher-camera-open {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  animation: teacher-camera-enter-ltr 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .teacher-camera__preview {
@@ -11896,6 +11907,13 @@ body.teacher-camera-open {
   color: #111827;
   font: inherit;
   font-weight: 800;
+}
+
+.teacher-camera__message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: center;
 }
 
 .teacher-camera__message.is-error {

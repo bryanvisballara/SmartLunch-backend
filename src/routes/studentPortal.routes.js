@@ -31,6 +31,7 @@ const {
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
 } = require('../utils/campusMaterialUpload');
+const { isCloudinaryEnabled } = require('../utils/imageUpload');
 const parentRoutes = require('./parent.routes');
 
 const router = express.Router();
@@ -788,6 +789,9 @@ router.post('/portal/assignments/:id/submissions', uploadCampusMaterialsMiddlewa
 
       const uploadedAttachments = await processStoredCampusMaterialFiles(req.files, {
         folder: 'campus-student-submissions',
+        schoolId,
+        createdByUserId: userId,
+        requireCloudinary: isCloudinaryEnabled(),
       });
       const attachments = [...linksResult.links, ...uploadedAttachments];
       const note = normalizeStudentPortalText(req.body.note);
