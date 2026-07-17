@@ -365,6 +365,76 @@ router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, re
   }
 });
 
+router.patch('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const { cycleId } = req.params;
+
+    if (!isValidObjectId(cycleId)) {
+      return res.status(400).json({ message: 'Planner inválido.' });
+    }
+
+    const title = normalizeText(req.body.title);
+    const submissionDeadline = normalizeText(req.body.submissionDeadline);
+    const parsedDeadline = submissionDeadline ? new Date(submissionDeadline) : null;
+    if (!title || !parsedDeadline || Number.isNaN(parsedDeadline.getTime())) {
+      return res.status(400).json({ message: 'Título y fecha límite son requeridos.' });
+    }
+
+    const startDate = normalizeText(req.body.startDate) ? new Date(req.body.startDate) : null;
+    const endDate = normalizeText(req.body.endDate) ? new Date(req.body.endDate) : null;
+    const cycle = await HrPlannerCycle.findOneAndUpdate(
+      { _id: cycleId, schoolId },
+      {
+        $set: {
+          title,
+          startDate: startDate && !Number.isNaN(startDate.getTime()) ? startDate : null,
+          endDate: endDate && !Number.isNaN(endDate.getTime()) ? endDate : null,
+          submissionDeadline: parsedDeadline,
+          instructions: normalizeText(req.body.instructions),
+          status: safeEnum(req.body.status, ['active', 'closed'], 'active'),
+        },
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!cycle) {
+      return res.status(404).json({ message: 'Planner no encontrado.' });
+    }
+
+    return res.status(200).json({ cycle: serializePlannerCycle(cycle) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const { cycleId } = req.params;
+
+    if (!isValidObjectId(cycleId)) {
+      return res.status(400).json({ message: 'Planner inválido.' });
+    }
+
+    const hasResponses = await HrSupplyRequest.exists({ schoolId, plannerCycleId: cycleId });
+    if (hasResponses) {
+      return res.status(409).json({
+        message: 'No puedes eliminar este planner porque ya tiene respuestas de docentes. Puedes editarlo o cerrarlo.',
+      });
+    }
+
+    const deletedCycle = await HrPlannerCycle.findOneAndDelete({ _id: cycleId, schoolId });
+    if (!deletedCycle) {
+      return res.status(404).json({ message: 'Planner no encontrado.' });
+    }
+
+    return res.status(200).json({ message: 'Planner eliminado.' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/items', roleMiddleware(hrManagerRoles), async (req, res) => {
   try {
     const { schoolId } = req.user;

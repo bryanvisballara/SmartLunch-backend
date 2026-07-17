@@ -82,12 +82,14 @@ import {
   approveHrSupplyRequest,
   consolidateHrPlannerRequests,
   createHrPlannerCycle,
+  deleteHrPlannerCycle,
   getHrCoordinationPlannerRequests,
   getHrDashboard,
   getHrPlannerCycles,
   getHrSupplyItems,
   getHrSupplyRequests,
   rejectHrSupplyRequest,
+  updateHrPlannerCycle,
 } from '../services/hr.service';
 import { getStudents } from '../services/students.service';
 
@@ -2222,6 +2224,7 @@ function RectoriaDashboard() {
   const [resourceRequests, setResourceRequests] = useState([]);
   const [resourceStatusFilter, setResourceStatusFilter] = useState('');
   const [resourcePlannerCycleDraft, setResourcePlannerCycleDraft] = useState(createEmptyResourcePlannerCycleDraft);
+  const [editingResourcePlannerCycleId, setEditingResourcePlannerCycleId] = useState('');
   const [selectedResourcePlannerRequestIds, setSelectedResourcePlannerRequestIds] = useState([]);
   const [resourcePlannerConsolidationNote, setResourcePlannerConsolidationNote] = useState('');
   const [users, setUsers] = useState([]);
@@ -4610,7 +4613,7 @@ function RectoriaDashboard() {
     setResourcePlannerCycleDraft((prev) => ({ ...prev, [field]: value }));
   };
 
-  const onCreateResourcePlannerCycle = async (event) => {
+  const onSaveResourcePlannerCycle = async (event) => {
     event.preventDefault();
     clearMessages();
 
@@ -4621,12 +4624,54 @@ function RectoriaDashboard() {
 
     setBusy(true);
     try {
-      await createHrPlannerCycle(resourcePlannerCycleDraft);
+      if (editingResourcePlannerCycleId) {
+        await updateHrPlannerCycle(editingResourcePlannerCycleId, resourcePlannerCycleDraft);
+      } else {
+        await createHrPlannerCycle(resourcePlannerCycleDraft);
+      }
       setResourcePlannerCycleDraft(createEmptyResourcePlannerCycleDraft());
-      setSuccess('Planner docente creado para los profesores.');
+      setEditingResourcePlannerCycleId('');
+      setSuccess(editingResourcePlannerCycleId ? 'Planner docente actualizado.' : 'Planner docente creado para los profesores.');
       await loadPortal({ silent: true });
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'No se pudo crear el planner docente.');
+      setError(requestError?.response?.data?.message || 'No se pudo guardar el planner docente.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onEditResourcePlannerCycle = (cycle) => {
+    clearMessages();
+    setEditingResourcePlannerCycleId(cycle.id);
+    setResourcePlannerCycleDraft({
+      title: cycle.title || '',
+      startDate: formatDateInputValue(cycle.startDate),
+      endDate: formatDateInputValue(cycle.endDate),
+      submissionDeadline: formatDateInputValue(cycle.submissionDeadline),
+      instructions: cycle.instructions || '',
+      status: cycle.status || 'active',
+    });
+  };
+
+  const onCancelEditResourcePlannerCycle = () => {
+    setEditingResourcePlannerCycleId('');
+    setResourcePlannerCycleDraft(createEmptyResourcePlannerCycleDraft());
+  };
+
+  const onDeleteResourcePlannerCycle = async (cycle) => {
+    if (!window.confirm(`¿Eliminar el planner "${cycle.title}"?`)) return;
+
+    clearMessages();
+    setBusy(true);
+    try {
+      await deleteHrPlannerCycle(cycle.id);
+      if (editingResourcePlannerCycleId === cycle.id) {
+        onCancelEditResourcePlannerCycle();
+      }
+      setSuccess('Planner docente eliminado.');
+      await loadPortal({ silent: true });
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo eliminar el planner docente.');
     } finally {
       setBusy(false);
     }
@@ -8505,7 +8550,7 @@ function RectoriaDashboard() {
               </div>
             </div>
 
-            <form className="rectoria-billing-form" onSubmit={onCreateResourcePlannerCycle}>
+            <form className="rectoria-billing-form" onSubmit={onSaveResourcePlannerCycle}>
               <div className="rectoria-billing-grid rectoria-billing-grid--headline">
                 <label>
                   Título
@@ -8529,7 +8574,12 @@ function RectoriaDashboard() {
                 <textarea value={resourcePlannerCycleDraft.instructions} onChange={(event) => onResourcePlannerCycleChange('instructions', event.target.value)} />
               </label>
               <div className="rectoria-fee-actions">
-                <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Guardando...' : 'Definir planner'}</button>
+                <button className="btn btn-primary" type="submit" disabled={busy}>
+                  {busy ? 'Guardando...' : editingResourcePlannerCycleId ? 'Guardar cambios' : 'Definir planner'}
+                </button>
+                {editingResourcePlannerCycleId ? (
+                  <button className="btn" type="button" onClick={onCancelEditResourcePlannerCycle} disabled={busy}>Cancelar</button>
+                ) : null}
               </div>
             </form>
 
@@ -8542,7 +8592,11 @@ function RectoriaDashboard() {
                     <p>Límite: {formatResourceDate(cycle.submissionDeadline)}</p>
                     {cycle.instructions ? <p>{cycle.instructions}</p> : null}
                   </div>
-                  <span className="rectoria-pill">{cycle.status || 'active'}</span>
+                  <div className="rectoria-fee-actions">
+                    <span className="rectoria-pill">{cycle.status || 'active'}</span>
+                    <button className="btn" type="button" onClick={() => onEditResourcePlannerCycle(cycle)} disabled={busy}>Editar</button>
+                    <button className="btn btn-danger" type="button" onClick={() => onDeleteResourcePlannerCycle(cycle)} disabled={busy}>Eliminar</button>
+                  </div>
                 </article>
               ))}
             </div>

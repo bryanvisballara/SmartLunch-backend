@@ -6,6 +6,8 @@ export const createHrSupplyItem = (data) => api.post('/hr/items', data);
 export const updateHrSupplyItem = (itemId, data) => api.patch(`/hr/items/${itemId}`, data);
 export const getHrPlannerCycles = (params = {}) => api.get('/hr/planner-cycles', { params });
 export const createHrPlannerCycle = (data) => api.post('/hr/planner-cycles', data);
+export const updateHrPlannerCycle = (cycleId, data) => api.patch(`/hr/planner-cycles/${cycleId}`, data);
+export const deleteHrPlannerCycle = (cycleId) => api.delete(`/hr/planner-cycles/${cycleId}`);
 export const getHrSupplyRequests = (params = {}) => api.get('/hr/requests', { params });
 export const getHrCoordinationPlannerRequests = (params = {}) => api.get('/hr/coordination/planner-requests', { params });
 export const createHrSupplyRequest = (data) => api.post('/hr/requests', data);
