@@ -7,6 +7,7 @@ import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests } from '../../services/hr.service';
+import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../../components/staff-announcements/StaffAnnouncementsPanel';
 import {
   createCampusTeacherPost,
   createCampusTeacherDisciplineObservation,
@@ -52,6 +53,7 @@ const teacherNavGroups = [
       'school_coexistence',
       'social_publications',
       'resource_requests',
+      'staff_announcements',
     ],
   },
 ];
@@ -133,6 +135,13 @@ function TeacherSectionIcon({ icon }) {
           <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
         </svg>
       );
+    case 'announcements':
+      return (
+        <svg {...common}>
+          <path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M15.5 8.5a4.5 4.5 0 0 1 0 7M18 6a8 8 0 0 1 0 12" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
     default:
       return (
         <svg {...common}>
@@ -153,6 +162,7 @@ const teacherSectionOptions = [
   { key: 'school_coexistence', label: 'Convivencia escolar', icon: 'coexistence', description: 'Registrar observaciones de comportamiento para seguimiento institucional.' },
   { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
   { key: 'resource_requests', label: 'Solicitud de recursos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
+  { key: 'staff_announcements', label: 'Comunicados', icon: 'announcements', description: 'Recibe y confirma comunicados de rectoría y coordinación.' },
 ];
 
 const teacherResourcePriorityOptions = [
@@ -2531,6 +2541,12 @@ function TeacherCampusHome({ forcePreview = false }) {
   const logout = useAuthStore((state) => state.logout);
   const authUser = useAuthStore((state) => state.user);
   const teacherQueryScope = authUser?.id || 'anonymous';
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(!previewEnabled);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
   const [notice, setNotice] = useState({ type: 'info', text: '' });
   const [previewWorkspace, setPreviewWorkspace] = useState(() => clonePreviewWorkspace());
   const [selectedCourseId, setSelectedCourseId] = useState('');
@@ -5320,7 +5336,12 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <span className="campus-teacher__nav-item-icon">
                             <TeacherSectionIcon icon={option.icon} />
                           </span>
-                          <span className="campus-teacher__nav-item-label">{option.label}</span>
+                          <span className="campus-teacher__nav-item-label">
+                            {option.label}
+                            {option.key === 'staff_announcements' ? (
+                              <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+                            ) : null}
+                          </span>
                         </button>
                       );
                     })}
@@ -7340,6 +7361,16 @@ function TeacherCampusHome({ forcePreview = false }) {
                     </article>
                   ))}
                 </div>
+              </article>
+            ) : null}
+
+            {activeTeacherSection === 'staff_announcements' ? (
+              <article className="campus-teacher__resource-panel campus-teacher__embedded-panel">
+                <StaffAnnouncementsPanel
+                  description="Consulta los comunicados de rectoría y coordinación, y confirma cuando los hayas leído."
+                  mode="inbox"
+                  title="Comunicados"
+                />
               </article>
             ) : null}
 

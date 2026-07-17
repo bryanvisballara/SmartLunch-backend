@@ -69,10 +69,12 @@ import {
 import { getAdmissionMarketingHistory, getAdmissions, sendAdmissionMarketingCampaign, uploadAdmissionMarketingImage } from '../services/admissions.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
+import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 
 const SECTION_OPTIONS = [
   { key: 'overview', label: 'Dashboard KPI' },
-  { key: 'communications', label: 'Comunicados' },
+  { key: 'staff_announcements', label: 'Comunicados' },
+  { key: 'communications', label: 'Comunicados a familias' },
   { key: 'costs', label: 'Costos' },
   { key: 'marketing', label: 'Marketing' },
   { key: 'enrollments', label: 'Matrículas' },
@@ -84,6 +86,7 @@ const SECTION_OPTIONS = [
 
 const BILLING_SECTION_OPTIONS = [
   { key: 'overview', label: 'Alumnos' },
+  { key: 'staff_announcements', label: 'Comunicados' },
   { key: 'enrollments', label: 'Matrículas' },
   { key: 'pensions', label: 'Pensiones' },
   { key: 'payment-history', label: 'Historial de pagos' },
@@ -1291,11 +1294,19 @@ function createApprovalDraft(request) {
   };
 }
 
-function buildSectionLabel(sectionKey, pendingApprovals, sections = SECTION_OPTIONS) {
+function buildSectionLabel(sectionKey, pendingApprovals, sections = SECTION_OPTIONS, staffUnreadCount = 0) {
   const section = sections.find((item) => item.key === sectionKey);
   if (!section) return '';
   if (sectionKey === 'approvals' && pendingApprovals > 0) {
     return `${section.label} (${pendingApprovals})`;
+  }
+  if (sectionKey === 'staff_announcements') {
+    return (
+      <>
+        {section.label}
+        <StaffAnnouncementsUnreadBadge count={staffUnreadCount} />
+      </>
+    );
   }
   return section.label;
 }
@@ -1611,6 +1622,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeSection, setActiveSection] = useState(normalizedInitialSection);
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
   const [editingAcademicRowId, setEditingAcademicRowId] = useState('');
   const [academicDatabaseDrafts, setAcademicDatabaseDrafts] = useState({});
   const [academicDatabaseFilters, setAcademicDatabaseFilters] = useState({
@@ -3658,7 +3675,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
       {!embedded ? <nav className="academic-secretary__tabs" aria-label={isBillingPortal ? 'Secciones de cartera' : 'Secciones de secretaría académica'}>
         {portalSections.map((item) => (
-          <button className={`academic-secretary__tab${activeSection === item.key ? ' is-active' : ''}`} key={item.key} onClick={() => setActiveSection(item.key)} type="button">{buildSectionLabel(item.key, pendingApprovalCount, portalSections)}</button>
+          <button className={`academic-secretary__tab${activeSection === item.key ? ' is-active' : ''}`} key={item.key} onClick={() => setActiveSection(item.key)} type="button">{buildSectionLabel(item.key, pendingApprovalCount, portalSections, staffAnnouncementsUnreadCount)}</button>
         ))}
       </nav> : null}
 
@@ -4203,6 +4220,18 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
             </article>
           </section>
         </>
+      ) : null}
+
+      {activeSection === 'staff_announcements' ? (
+        <section className="academic-secretary__grid academic-secretary__grid--content">
+          <article className="academic-secretary__panel">
+            <StaffAnnouncementsPanel
+              description="Comunicados internos de rectoría y coordinación. Confirma la lectura para registrar el acuse."
+              mode="inbox"
+              title="Comunicados"
+            />
+          </article>
+        </section>
       ) : null}
 
       {activeSection === 'communications' ? (

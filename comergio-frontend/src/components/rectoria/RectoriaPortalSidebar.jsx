@@ -3,6 +3,7 @@ import {
   RECTORIA_PORTAL_NAV,
 } from './rectoriaPortalNav';
 import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
+import { StaffAnnouncementsUnreadBadge } from '../staff-announcements/StaffAnnouncementsPanel';
 import './RectoriaPortalSidebar.css';
 
 const NESTED_CHILD_KEYS = new Set(['team', 'students', 'admissions']);
@@ -10,7 +11,8 @@ const NESTED_CHILD_KEYS = new Set(['team', 'students', 'admissions']);
 const COORDINATION_NAV = [
   { type: 'item', key: 'overview', label: 'Tablero de nivel' },
   { type: 'item', key: 'community_reports', label: 'Te escuchamos' },
-  { type: 'item', key: 'communications', label: 'Comunicados' },
+  { type: 'item', key: 'communications', label: 'Comunicados a familias' },
+  { type: 'item', key: 'staff_announcements', label: 'Comunicados' },
   { type: 'item', key: 'resources', label: 'Recursos y compras' },
   { type: 'item', key: 'schedule', label: 'Horario académico' },
 ];
@@ -34,6 +36,7 @@ export default function RectoriaPortalSidebar({
   expandedGroup,
   isCoordinationPortal = false,
   matriculaAuthorizationPendingCount = 0,
+  staffAnnouncementsUnreadCount = 0,
   onSectionChange,
   onExpandedGroupChange,
   teamSubnav = null,
@@ -147,6 +150,9 @@ export default function RectoriaPortalSidebar({
               >
                 <span className="rectoria-rail__item-label">
                   {entry.key === 'community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : entry.label}
+                  {entry.key === 'staff_announcements' ? (
+                    <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+                  ) : null}
                 </span>
               </button>
             );

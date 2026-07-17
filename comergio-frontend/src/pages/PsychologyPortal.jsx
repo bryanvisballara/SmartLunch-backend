@@ -10,6 +10,7 @@ import {
 } from '../services/psychology.service';
 import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
 import TeEscuchamosLabel from '../components/community/TeEscuchamosLabel';
+import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 
 const caseTypeOptions = [
   { value: 'bullying', label: 'Bullying' },
@@ -165,6 +166,12 @@ function PsychologyPortal() {
   const [savingNote, setSavingNote] = useState(false);
   const [notice, setNotice] = useState({ type: '', text: '' });
   const [activePortalView, setActivePortalView] = useState('cases');
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
 
   const cases = studentProfile?.cases || [];
   const selectedCase = cases.find((item) => item.id === noteForm.caseId) || cases[0] || null;
@@ -330,11 +337,26 @@ function PsychologyPortal() {
         <button className={activePortalView === 'community_reports' ? 'is-active' : ''} onClick={() => setActivePortalView('community_reports')} type="button">
           <TeEscuchamosLabel className="te-escuchamos-label--tab" />
         </button>
+        <button className={activePortalView === 'staff_announcements' ? 'is-active' : ''} onClick={() => setActivePortalView('staff_announcements')} type="button">
+          Comunicados
+          <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+        </button>
       </div>
+
+      {activePortalView === 'staff_announcements' ? (
+        <StaffAnnouncementsPanel
+          className="psychology-panel"
+          description="Comunicados de rectoría y coordinación. Confirma la lectura para que quede registrado."
+          mode="inbox"
+          title="Comunicados"
+        />
+      ) : null}
 
       {activePortalView === 'community_reports' ? (
         <CommunityReportsPanel className="community-reports-panel--embedded" />
-      ) : (
+      ) : null}
+
+      {activePortalView === 'cases' ? (
       <>
       <section className="psychology-kpi-grid">
         <article className="psychology-kpi-card tone-danger">
@@ -540,7 +562,7 @@ function PsychologyPortal() {
         </main>
       </div>
       </>
-      )}
+      ) : null}
     </section>
   );
 }

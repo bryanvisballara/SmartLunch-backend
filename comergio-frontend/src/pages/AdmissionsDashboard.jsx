@@ -7,6 +7,7 @@ import { getSchoolDisplayName } from '../lib/schools';
 import useAuthStore from '../store/auth.store';
 import AcademicSecretaryDashboard from './AcademicSecretaryDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
+import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import {
   createAdmissionApplicant,
   createAdmissionEvent,
@@ -60,6 +61,7 @@ const emptyDocumentForm = {
 
 const ADMISSIONS_VIEW_OPTIONS = [
   { key: 'dashboard', label: 'Dashboard', status: '', empty: '' },
+  { key: 'staff_announcements', label: 'Comunicados', status: '', empty: '' },
   { key: 'agenda', label: 'Agenda', status: '', empty: '' },
   { key: 'aspirantes', label: 'Aspirantes', status: 'active', empty: 'No hay aspirantes con esos filtros.' },
   { key: 'desistidos', label: 'Desistidos', status: 'withdrawn', empty: 'No hay desistidos con esos filtros.' },
@@ -330,6 +332,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const currentView = ADMISSIONS_VIEW_OPTIONS.some((option) => option.key === (activeView || internalView)) ? (activeView || internalView) : 'dashboard';
   const currentViewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === currentView) || ADMISSIONS_VIEW_OPTIONS[0];
   const isWorklistView = ['aspirantes', 'desistidos', 'no-admitidos'].includes(currentView);
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
   const schoolDisplayName = getSchoolDisplayName(user, 'Colegio');
   const userDisplayName = user?.name || user?.username || 'Usuario';
   const [loading, setLoading] = useState(true);
@@ -915,7 +923,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
           <aside className="admissions-sidebar" aria-label="Navegación de admisiones">
             {ADMISSIONS_VIEW_OPTIONS.map((option) => (
               <button key={option.key} className={`admissions-sidebar-item${currentView === option.key ? ' is-active' : ''}`} type="button" onClick={() => openPortalView(option.key)}>
-                <span>{option.label}</span>
+                <span>
+                  {option.label}
+                  {option.key === 'staff_announcements' ? (
+                    <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+                  ) : null}
+                </span>
               </button>
             ))}
           </aside>
@@ -1189,6 +1202,16 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             <AcademicSecretaryDashboard embedded initialSection="costs" />
           ) : null}
 
+          {currentView === 'staff_announcements' && !showApplicantDetail ? (
+            <section className="dashboard-card">
+              <StaffAnnouncementsPanel
+                description="Comunicados de rectoría y coordinación. Confirma la lectura para registrar el acuse de recibo."
+                mode="inbox"
+                title="Comunicados"
+              />
+            </section>
+          ) : null}
+
           {currentView === 'marketing' && !showApplicantDetail ? (
             <AcademicSecretaryDashboard embedded initialSection="marketing" />
           ) : null}
@@ -1265,7 +1288,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             </section>
           ) : null}
 
-          {!['dashboard', 'agenda', 'aspirantes', 'desistidos', 'no-admitidos', 'costos', 'matricula', 'matriculas_digitales', 'marketing'].includes(currentView) && !showApplicantDetail ? (
+          {!['dashboard', 'agenda', 'aspirantes', 'desistidos', 'no-admitidos', 'costos', 'matricula', 'matriculas_digitales', 'marketing', 'staff_announcements'].includes(currentView) && !showApplicantDetail ? (
             <section className="dashboard-card admissions-placeholder-card">
               <span>{currentViewConfig.label}</span>
               <h2>{currentViewConfig.label}</h2>

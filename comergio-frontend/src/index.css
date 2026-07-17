@@ -882,12 +882,44 @@ body {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
 }
 
+.platform-ios .login-page-auth.register-page-auth {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem);
+}
+
 .platform-ios .login-page-auth .login-auth-content {
   padding-bottom: 0;
 }
 
 .platform-ios .login-auth-bottom-spacer {
   display: none;
+}
+
+.platform-ios .register-page-auth .register-auth-bottom-spacer {
+  display: block;
+  width: 100%;
+  height: calc(env(safe-area-inset-bottom, 0px) + 2.75rem);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.platform-ios .register-page-auth .login-auth-logo-wrap {
+  width: min(180px, 46vw);
+}
+
+.platform-ios .register-page-auth .login-auth-brand-title {
+  font-size: clamp(1.55rem, 6.5vw, 2rem);
+}
+
+.platform-ios .register-page-auth .login-auth-hero {
+  padding-bottom: 0.35rem;
+}
+
+.platform-ios .register-page-auth .login-panel.login-auth-card {
+  padding-bottom: calc(1.15rem + env(safe-area-inset-bottom, 0px) * 0.15);
 }
 
 .platform-ios body.login-route-active:not(.login-boot-active),
@@ -2387,6 +2419,53 @@ body.login-boot-active main.container {
 
 .login-page-auth .register-auth-card {
   width: 100%;
+}
+
+.register-page-auth.login-page-auth {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+.register-page-auth .register-back-login {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  margin: 0 0 0.35rem;
+  padding: 0.35rem 0.15rem;
+  color: rgba(214, 233, 255, 0.95);
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-decoration: none;
+  line-height: 1.2;
+}
+
+.register-page-auth .register-back-login:hover,
+.register-page-auth .register-back-login:focus-visible {
+  color: #ffffff;
+  outline: none;
+}
+
+.register-page-auth .register-verify-btn {
+  margin-top: 0.35rem;
+  margin-bottom: 0.15rem;
+}
+
+.register-page-auth .login-register-cta {
+  margin-top: 0.65rem;
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.25rem;
+  line-height: 1.5;
+}
+
+.register-page-auth .register-auth-bottom-spacer {
+  display: block;
+  width: 100%;
+  height: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 .login-page-auth .register-auth-card .login-auth-card-head p strong {
@@ -9353,6 +9432,10 @@ body.login-boot-active main.container {
   border-color: rgba(37, 99, 235, 0.35);
   background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
   color: #1d4ed8;
+}
+
+.nursing-portal-tabs {
+  margin: 0 0 1rem;
 }
 
 .community-reports-panel {

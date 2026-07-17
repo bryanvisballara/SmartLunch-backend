@@ -951,6 +951,19 @@
   color: #0f172a;
 }
 
+.rectoria-checkbox-field {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-checkbox-field input {
+  margin-top: 0.2rem;
+  width: auto;
+}
+
 .rectoria-billing-form textarea {
   min-height: 96px;
   resize: vertical;

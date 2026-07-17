@@ -8,6 +8,7 @@ const HrSupplyItem = require('../models/hrSupplyItem.model');
 const HrSupplyRequest = require('../models/hrSupplyRequest.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
+const { publishPlannerAsStaffAnnouncement } = require('../services/staffAnnouncement.service');
 
 const router = express.Router();
 
@@ -361,7 +362,7 @@ router.get('/planner-cycles', roleMiddleware(requesterRoles), async (req, res) =
 
 router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const title = normalizeText(req.body.title);
     const parsedDeadline = parsePlannerCalendarDate(req.body.submissionDeadline);
 
@@ -382,7 +383,27 @@ router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, re
       createdByUserId: userId,
     });
 
-    return res.status(201).json({ cycle: serializePlannerCycle(cycle) });
+    let staffAnnouncement = null;
+    const publishAsAnnouncement = req.body.publishAsAnnouncement === true
+      || req.body.publishAsAnnouncement === 'true'
+      || req.body.publishAsAnnouncement === 1
+      || req.body.publishAsAnnouncement === '1';
+
+    if (publishAsAnnouncement) {
+      const sender = await User.findOne({ _id: userId, schoolId }).select('name username role').lean();
+      staffAnnouncement = await publishPlannerAsStaffAnnouncement({
+        schoolId,
+        senderUserId: userId,
+        senderName: normalizeText(sender?.name) || normalizeText(sender?.username) || 'Equipo directivo',
+        senderRole: normalizeText(sender?.role) || normalizeText(role),
+        cycle,
+      });
+    }
+
+    return res.status(201).json({
+      cycle: serializePlannerCycle(cycle),
+      staffAnnouncementId: staffAnnouncement ? String(staffAnnouncement._id) : null,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

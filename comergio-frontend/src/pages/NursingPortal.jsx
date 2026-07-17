@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../store/auth.store';
 import { createNursingVisit, getNursingStudentHistory, getNursingStudentMedicalProfileHistory, searchNursingStudents } from '../services/nursing.service';
 import StudentMedicalProfileHistory from '../components/StudentMedicalProfileHistory';
+import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 
 const dispositionOptions = [
   { value: 'observation', label: 'Queda en observación' },
@@ -86,6 +87,13 @@ function NursingPortal() {
   const [loadingMedicalProfileHistory, setLoadingMedicalProfileHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState({ type: '', text: '' });
+  const [activePortalView, setActivePortalView] = useState('attention');
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
 
   const latestVisit = history[0] || null;
   const canSave = Boolean(selectedStudent?.id && form.symptoms.trim() && form.treatment.trim() && !saving);
@@ -245,6 +253,24 @@ function NursingPortal() {
 
       {notice.text ? <div className={`nursing-notice ${notice.type || 'info'}`}>{notice.text}</div> : null}
 
+      <div className="nursing-portal-tabs psychology-portal-tabs">
+        <button className={activePortalView === 'attention' ? 'is-active' : ''} onClick={() => setActivePortalView('attention')} type="button">
+          Atención
+        </button>
+        <button className={activePortalView === 'staff_announcements' ? 'is-active' : ''} onClick={() => setActivePortalView('staff_announcements')} type="button">
+          Comunicados
+          <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+        </button>
+      </div>
+
+      {activePortalView === 'staff_announcements' ? (
+        <StaffAnnouncementsPanel
+          className="nursing-panel"
+          description="Comunicados de rectoría y coordinación. Confirma cuando los hayas leído."
+          mode="inbox"
+          title="Comunicados"
+        />
+      ) : (
       <div className="nursing-layout">
         <aside className="nursing-panel nursing-student-search">
           <div className="nursing-panel-head">
@@ -426,6 +452,7 @@ function NursingPortal() {
           </section>
         </main>
       </div>
+      )}
     </section>
   );
 }

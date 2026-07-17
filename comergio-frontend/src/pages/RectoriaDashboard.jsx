@@ -15,6 +15,7 @@ import '../components/InstitutionalPortalHeader.css';
 import RectoriaPortalSidebar from '../components/rectoria/RectoriaPortalSidebar';
 import RectoriaControlCenterPanel from '../components/rectoria/RectoriaControlCenterPanel';
 import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
+import StaffAnnouncementsPanel, { useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection } from '../components/rectoria/rectoriaPortalNav';
 import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
@@ -744,6 +745,7 @@ function createEmptyResourcePlannerCycleDraft() {
     endDate: '',
     submissionDeadline: '',
     instructions: '',
+    publishAsAnnouncement: true,
   };
 }
 
@@ -2229,6 +2231,12 @@ function RectoriaDashboard() {
   const [resourceStatusFilter, setResourceStatusFilter] = useState('');
   const [resourcePlannerCycleDraft, setResourcePlannerCycleDraft] = useState(createEmptyResourcePlannerCycleDraft);
   const [editingResourcePlannerCycleId, setEditingResourcePlannerCycleId] = useState('');
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
   const [selectedResourcePlannerRequestIds, setSelectedResourcePlannerRequestIds] = useState([]);
   const [resourcePlannerConsolidationNote, setResourcePlannerConsolidationNote] = useState('');
   const [users, setUsers] = useState([]);
@@ -2339,7 +2347,7 @@ function RectoriaDashboard() {
   const allowedSectionKeys = useMemo(
     () => {
       if (isCoordinationPortal) {
-        return ['overview', 'community_reports', 'communications', 'resources', 'schedule'];
+        return ['overview', 'community_reports', 'communications', 'staff_announcements', 'resources', 'schedule'];
       }
       return flattenRectoriaNavKeys();
     },
@@ -4635,7 +4643,13 @@ function RectoriaDashboard() {
       }
       setResourcePlannerCycleDraft(createEmptyResourcePlannerCycleDraft());
       setEditingResourcePlannerCycleId('');
-      setSuccess(editingResourcePlannerCycleId ? 'Planner docente actualizado.' : 'Planner docente creado para los profesores.');
+      setSuccess(
+        editingResourcePlannerCycleId
+          ? 'Planner docente actualizado.'
+          : (resourcePlannerCycleDraft.publishAsAnnouncement
+            ? 'Planner creado y publicado en Comunicados para docentes.'
+            : 'Planner docente creado para los profesores.')
+      );
       await loadPortal({ silent: true });
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo guardar el planner docente.');
@@ -4654,6 +4668,7 @@ function RectoriaDashboard() {
       submissionDeadline: formatDateInputValue(cycle.submissionDeadline),
       instructions: cycle.instructions || '',
       status: cycle.status || 'active',
+      publishAsAnnouncement: false,
     });
   };
 
@@ -7601,6 +7616,7 @@ function RectoriaDashboard() {
           expandedGroup={expandedSidebarGroup}
           isCoordinationPortal={isCoordinationPortal}
           matriculaAuthorizationPendingCount={matriculaAuthorizationPendingCount}
+          staffAnnouncementsUnreadCount={staffAnnouncementsUnreadCount}
           onExpandedGroupChange={setExpandedSidebarGroup}
           onSectionChange={setActiveSection}
           teamSubnav={(
@@ -7968,6 +7984,20 @@ function RectoriaDashboard() {
           </div>
         </div>
         )
+      ) : null}
+
+      {activeSection === 'staff_announcements' ? (
+        <div className="rectoria-stack">
+          <section className="panel rectoria-panel">
+            <StaffAnnouncementsPanel
+              description={isCoordinationPortal
+                ? 'Publica comunicados al equipo, recibe los de rectoría y revisa quién ya confirmó la lectura.'
+                : 'Publica comunicados al equipo institucional y revisa quién ya confirmó la lectura.'}
+              mode="manage"
+              title="Comunicados"
+            />
+          </section>
+        </div>
       ) : null}
 
       {activeSection === 'communications' ? (
@@ -8577,6 +8607,16 @@ function RectoriaDashboard() {
                 Indicaciones
                 <textarea value={resourcePlannerCycleDraft.instructions} onChange={(event) => onResourcePlannerCycleChange('instructions', event.target.value)} />
               </label>
+              {!editingResourcePlannerCycleId ? (
+                <label className="rectoria-checkbox-field">
+                  <input
+                    checked={Boolean(resourcePlannerCycleDraft.publishAsAnnouncement)}
+                    onChange={(event) => onResourcePlannerCycleChange('publishAsAnnouncement', event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>También publicar en Comunicados para que los docentes lo vean y confirmen lectura</span>
+                </label>
+              ) : null}
               <div className="rectoria-fee-actions">
                 <button className="btn btn-primary" type="submit" disabled={busy}>
                   {busy ? 'Guardando...' : editingResourcePlannerCycleId ? 'Guardar cambios' : 'Definir planner'}

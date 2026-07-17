@@ -77,6 +77,7 @@ function createPlannerCycleDraft() {
     endDate: '',
     submissionDeadline: '',
     instructions: '',
+    publishAsAnnouncement: true,
   };
 }
 
@@ -518,6 +519,16 @@ function CoordinationCampusHome() {
             <label className="campus-coordination__field">
               <span>Indicaciones</span>
               <textarea value={plannerCycleDraft.instructions} onChange={(event) => setPlannerCycleDraft((draft) => ({ ...draft, instructions: event.target.value }))} rows={3} />
+            </label>
+            <label className="campus-coordination__field campus-coordination__field--checkbox">
+              <span>
+                <input
+                  checked={Boolean(plannerCycleDraft.publishAsAnnouncement)}
+                  onChange={(event) => setPlannerCycleDraft((draft) => ({ ...draft, publishAsAnnouncement: event.target.checked }))}
+                  type="checkbox"
+                />
+                {' '}También publicar en Comunicados para docentes
+              </span>
             </label>
             <button className="campus-coordination__save-button" disabled={createPlannerCycleMutation.isPending} type="submit">
               {createPlannerCycleMutation.isPending ? 'Creando...' : 'Definir planner'}

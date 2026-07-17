@@ -36,6 +36,8 @@ require('./psychologyCase.model');
 require('./hrSupplyItem.model');
 require('./hrPlannerCycle.model');
 require('./hrSupplyRequest.model');
+require('./staffAnnouncement.model');
+require('./staffAnnouncementRecipient.model');
 require('./academicCommunication.model');
 require('./academicCommunicationAsset.model');
 require('./academicCommunicationRequest.model');

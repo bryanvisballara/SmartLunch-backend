@@ -11,6 +11,7 @@ export const RECTORIA_CONTROL_CENTER_KEYS = [
 
 export const RECTORIA_PORTAL_NAV = [
   { type: 'item', key: 'overview', label: 'Resumen institucional' },
+  { type: 'item', key: 'staff_announcements', label: 'Comunicados' },
   {
     type: 'group',
     key: 'control_center',
