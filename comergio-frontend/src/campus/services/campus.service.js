@@ -32,7 +32,7 @@ export function uploadCampusTeacherProfilePhoto(file, preferredName = '') {
     formData.append('preferredName', preferredName);
   }
 
-  return api.post('/campus/teacher/profile-photo', formData).then((response) => response.data);
+  return api.post('/campus/teacher/profile-photo', formData, { timeout: 120000 }).then((response) => response.data);
 }
 
 export function getCampusCoordinationTeachers() {
@@ -91,18 +91,43 @@ export function createCampusTeacherPost(payload) {
   if (hasFormData) {
     const courseId = String(payload.get('courseId') || '').trim();
     const query = courseId ? `?courseId=${encodeURIComponent(courseId)}` : '';
-    return api.post(`/campus/teacher/posts${query}`, payload).then((response) => response.data);
+    return api.post(`/campus/teacher/posts${query}`, payload, { timeout: 120000 }).then((response) => response.data);
   }
 
   return api.post('/campus/teacher/posts', payload).then((response) => response.data);
 }
 
 export function updateCampusTeacherPost(postId, payload) {
+  const hasFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  if (hasFormData) {
+    return api.patch(`/campus/teacher/posts/${postId}`, payload, { timeout: 120000 }).then((response) => response.data);
+  }
+
   return api.patch(`/campus/teacher/posts/${postId}`, payload).then((response) => response.data);
 }
 
 export function getCampusTeacherParentFeedRequests() {
   return api.get('/campus/teacher/parent-feed-requests').then((response) => response.data);
+}
+
+export function getCampusTeacherFamilyFeed() {
+  return api.get('/campus/teacher/family-feed').then((response) => response.data);
+}
+
+export function toggleCampusTeacherFamilyFeedLike(communicationId) {
+  return api.post(`/campus/teacher/family-feed/${communicationId}/like`).then((response) => response.data);
+}
+
+export function createCampusTeacherFamilyFeedComment(communicationId, data) {
+  return api.post(`/campus/teacher/family-feed/${communicationId}/comments`, data).then((response) => response.data);
+}
+
+export function deleteCampusTeacherFamilyFeedComment(communicationId, commentId) {
+  return api.delete(`/campus/teacher/family-feed/${communicationId}/comments/${commentId}`).then((response) => response.data);
+}
+
+export function toggleCampusTeacherFamilyFeedCommentLike(communicationId, commentId) {
+  return api.post(`/campus/teacher/family-feed/${communicationId}/comments/${commentId}/like`).then((response) => response.data);
 }
 
 export function uploadCampusTeacherParentFeedMedia(files) {

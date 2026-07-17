@@ -338,7 +338,7 @@ function PsychologyPortal() {
           <TeEscuchamosLabel className="te-escuchamos-label--tab" />
         </button>
         <button className={activePortalView === 'staff_announcements' ? 'is-active' : ''} onClick={() => setActivePortalView('staff_announcements')} type="button">
-          Comunicados
+          Comunicados internos
           <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
         </button>
       </div>
@@ -346,9 +346,9 @@ function PsychologyPortal() {
       {activePortalView === 'staff_announcements' ? (
         <StaffAnnouncementsPanel
           className="psychology-panel"
-          description="Comunicados de rectoría y coordinación. Confirma la lectura para que quede registrado."
+          description="Mensajes internos de rectoría y coordinación. Confirma la lectura para que quede registrado."
           mode="inbox"
-          title="Comunicados"
+          title="Comunicados internos"
         />
       ) : null}
 

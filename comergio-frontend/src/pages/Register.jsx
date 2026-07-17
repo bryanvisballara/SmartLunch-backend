@@ -186,7 +186,7 @@ function Register() {
   };
 
   return (
-    <div className="page-center login-page login-page-auth">
+    <div className="page-center login-page login-page-auth register-page-auth">
       <div className="login-auth-content">
         <section className="login-auth-hero" aria-label="Identidad de Comergio">
           <div className="login-auth-logo-wrap" aria-hidden="true">
@@ -199,6 +199,13 @@ function Register() {
         </section>
 
         <form className="login-panel login-auth-card register-auth-card" onSubmit={onSendCode}>
+          <Link className="register-back-login" to={LOGIN_PATH}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18">
+              <path d="M15 18 9 12l6-6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+            </svg>
+            Volver al login
+          </Link>
+
           <div className="login-auth-card-head">
             <h2>Crea tu cuenta</h2>
             <p>Completa tus datos para verificar tu correo y continuar el registro.</p>
@@ -243,7 +250,7 @@ function Register() {
           <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
           <DismissibleNotice text={info} type="info" onClose={() => setInfo('')} />
 
-          <button className="btn login-primary-btn" disabled={sendingCode || verifyingCode} type="submit">
+          <button className="btn login-primary-btn register-verify-btn" disabled={sendingCode || verifyingCode} type="submit">
             {sendingCode ? 'Enviando codigo...' : 'Verificar correo electronico'}
           </button>
 
@@ -252,10 +259,9 @@ function Register() {
             <Link className="login-inline-link" to={LOGIN_PATH}>
               Inicia sesión
             </Link>
-            .
           </p>
         </form>
-        <div aria-hidden="true" className="login-auth-bottom-spacer" />
+        <div aria-hidden="true" className="login-auth-bottom-spacer register-auth-bottom-spacer" />
       </div>
 
       {showVerificationPopup ? (

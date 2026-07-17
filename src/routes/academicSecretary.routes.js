@@ -44,6 +44,7 @@ const {
   unlinkCarteraPaymentFromEnrollmentMatricula,
 } = require('../services/enrollmentMatricula.service');
 const { createBillingPaymentDeletionRequest } = require('../services/enrollmentMatriculaPurgeRequest.service');
+const { ensureStudentCohortMembership } = require('../services/communityFeed.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   normalizeStoredImageUrl,
@@ -356,12 +357,27 @@ function buildAcademicCourseDisplayLabel(grade = {}, course = {}, siblingCourses
 }
 
 function buildTeacherCommunicationAuthorName(request = {}) {
+  const publisherRole = normalizeText(request.publisherRole) || 'teacher';
+  if (publisherRole === 'parent') {
+    return normalizeText(request.teacherName) || 'Acudiente';
+  }
+  if (publisherRole === 'student') {
+    return normalizeText(request.teacherName) || 'Alumno';
+  }
+
   const teacherName = normalizeText(request.teacherUserId?.name || request.teacherName || request.teacherUserId?.username) || 'Docente';
   const subjectLabel = normalizeText(request.courseId?.subject)
     || normalizeText(request.courseTitle).split(' - ')[0]
     || normalizeText(request.courseTitle);
 
   return subjectLabel ? `${teacherName} - ${subjectLabel}` : teacherName;
+}
+
+function getCommunicationRequestPublisherLabel(request = {}) {
+  const publisherRole = normalizeText(request.publisherRole) || 'teacher';
+  if (publisherRole === 'parent') return 'Acudiente';
+  if (publisherRole === 'student') return 'Alumno';
+  return 'Docente';
 }
 
 function buildAcademicStructureCourseOptions(serializedAcademicStructure = { grades: [] }) {
@@ -4712,10 +4728,19 @@ function serializeCommunicationRequest(request) {
     return null;
   }
 
+  const publisherRole = normalizeText(request.publisherRole) || 'teacher';
+  const requesterName = request.teacherName
+    || request.teacherUserId?.name
+    || (publisherRole === 'parent' ? 'Acudiente' : publisherRole === 'student' ? 'Alumno' : 'Docente');
+
   return {
     _id: request._id,
+    publisherRole,
+    publisherLabel: getCommunicationRequestPublisherLabel(request),
     teacherUserId: request.teacherUserId?._id || request.teacherUserId || null,
-    teacherName: request.teacherName || request.teacherUserId?.name || 'Docente',
+    teacherName: requesterName,
+    requesterUserId: request.requesterUserId?._id || request.requesterUserId || request.teacherUserId?._id || request.teacherUserId || null,
+    authorStudentId: request.authorStudentId?._id || request.authorStudentId || null,
     courseId: request.courseId?._id || request.courseId || null,
     courseTitle: request.courseTitle || request.courseId?.title || '',
     title: request.title || '',
@@ -4726,6 +4751,8 @@ function serializeCommunicationRequest(request) {
     courseTargets: Array.isArray(request.courseTargets) ? request.courseTargets : [],
     parentTargets: Array.isArray(request.parentTargets) ? request.parentTargets.map((item) => String(item)) : [],
     studentTargets: Array.isArray(request.studentTargets) ? request.studentTargets.map((item) => String(item)) : [],
+    cohortKey: request.cohortKey || '',
+    academicYear: request.academicYear || '',
     media: Array.isArray(request.media) ? request.media : [],
     channels: {
       push: request.channels?.push !== false,
@@ -7378,6 +7405,7 @@ router.patch('/database/:studentId', async (req, res) => {
       student.medicalProfile = normalizeAcademicStudentMedicalProfile(req.body?.medicalProfile);
     }
     await student.save();
+    await ensureStudentCohortMembership(student, schoolId);
 
     const parentConfigs = [
       { key: 'mother', relationship: 'mother' },
@@ -8283,13 +8311,24 @@ router.post('/communication-requests/:id/approve', async (req, res) => {
       return res.status(400).json({ message: 'No se encontraron acudientes para publicar esta solicitud.' });
     }
 
+    const publisherRole = normalizeText(pendingRequest.publisherRole) || 'teacher';
+    const authorName = buildTeacherCommunicationAuthorName(pendingRequest);
+    const authorPhotoUrl = publisherRole === 'teacher'
+      ? normalizeText(pendingRequest.teacherUserId?.campusPhotoUrl)
+      : normalizeText(pendingRequest.authorPhotoUrl);
+    const authorThumbUrl = publisherRole === 'teacher'
+      ? normalizeText(pendingRequest.teacherUserId?.campusPhotoThumbUrl || pendingRequest.teacherUserId?.campusPhotoUrl)
+      : normalizeText(pendingRequest.authorThumbUrl || pendingRequest.authorPhotoUrl);
+
     const communication = await AcademicCommunication.create({
       schoolId,
       createdByUserId: userId,
       createdByName: name,
-      authorName: buildTeacherCommunicationAuthorName(pendingRequest),
-      authorPhotoUrl: normalizeText(pendingRequest.teacherUserId?.campusPhotoUrl),
-      authorThumbUrl: normalizeText(pendingRequest.teacherUserId?.campusPhotoThumbUrl || pendingRequest.teacherUserId?.campusPhotoUrl),
+      authorName,
+      authorPhotoUrl,
+      authorThumbUrl,
+      authorStudentId: pendingRequest.authorStudentId || null,
+      publisherRole,
       title: nextTitle,
       body: nextBody,
       audienceType: nextAudienceType,
@@ -8299,6 +8338,8 @@ router.post('/communication-requests/:id/approve', async (req, res) => {
       studentTargets: audience.studentIds,
       recipientParentIds: audience.parentIds,
       recipientStudentIds: audience.studentIds,
+      cohortKey: normalizeText(pendingRequest.cohortKey),
+      academicYear: normalizeText(pendingRequest.academicYear),
       emailSubject: nextEmailSubject,
       media: normalizedMedia,
       channels: {

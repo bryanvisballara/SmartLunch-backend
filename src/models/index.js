@@ -29,6 +29,7 @@ require('./campusMembership.model');
 require('./campusCourse.model');
 require('./campusAttendanceSession.model');
 require('./campusPost.model');
+require('./campusPostSubmission.model');
 require('./campusGradeEntry.model');
 require('./nursingVisit.model');
 require('./studentMedicalProfileRevision.model');

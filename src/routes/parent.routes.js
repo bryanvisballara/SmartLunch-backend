@@ -65,6 +65,20 @@ const {
   listStudentMedicalProfileRevisions,
   applyStudentMedicalProfileUpdate,
 } = require('../services/studentMedicalProfile.service');
+const {
+  buildParentCommunityFeedQuery,
+  buildStudentCommunityFeedQuery,
+  ensureStudentCohortMembership,
+  ensureStudentsCohortMembership,
+  findAccessibleCommunityCommunication,
+  submitCommunityPublication,
+} = require('../services/communityFeed.service');
+const {
+  MAX_CAMPUS_MATERIAL_FILES,
+  uploadCampusMaterialsMiddleware,
+  processStoredCampusMaterialFiles,
+} = require('../utils/campusMaterialUpload');
+const { isCloudinaryEnabled } = require('../utils/imageUpload');
 
 const router = express.Router();
 const uploadParentStudentPhoto = uploadImageMiddleware.single('image');
@@ -1025,10 +1039,22 @@ function serializeAcademicFeedItem(item = {}, currentUserId = '', req = null) {
   };
 }
 
-async function findParentAcademicCommunication({ schoolId, communicationId, parentUserId }) {
+async function findParentAcademicCommunication({ schoolId, communicationId, parentUserId, role = 'parent', student = null, children = [] }) {
   const communicationObjectId = toObjectId(communicationId);
   if (!communicationObjectId || !parentUserId) {
     return null;
+  }
+
+  const accessible = await findAccessibleCommunityCommunication({
+    schoolId,
+    communicationId: communicationObjectId,
+    userId: parentUserId,
+    role: role === 'student' ? 'student' : 'parent',
+    student,
+    children,
+  });
+  if (accessible) {
+    return accessible;
   }
 
   return AcademicCommunication.findOne({
@@ -1036,6 +1062,62 @@ async function findParentAcademicCommunication({ schoolId, communicationId, pare
     schoolId,
     recipientParentIds: parentUserId,
   });
+}
+
+async function resolveLinkedStudentsForParent(schoolId, parentUserId) {
+  const links = await ParentStudentLink.find({
+    schoolId,
+    parentId: parentUserId,
+    status: 'active',
+  })
+    .select('studentId')
+    .lean();
+  const studentIds = links.map((link) => link.studentId).filter(Boolean);
+  if (!studentIds.length) {
+    return [];
+  }
+  const students = await Student.find({
+    schoolId,
+    _id: { $in: studentIds },
+    status: 'active',
+    deletedAt: null,
+  });
+  return ensureStudentsCohortMembership(students, schoolId);
+}
+
+async function resolveStudentActorForCommunity(req) {
+  const { schoolId, role, userId } = req.user;
+  if (role !== 'student') {
+    return null;
+  }
+
+  const user = await User.findOne({
+    _id: userId,
+    schoolId,
+    role: 'student',
+    status: 'active',
+    deletedAt: null,
+  })
+    .select('linkedStudentId name campusPhotoUrl campusPhotoThumbUrl')
+    .lean();
+
+  if (!user?.linkedStudentId) {
+    return null;
+  }
+
+  const student = await Student.findOne({
+    _id: user.linkedStudentId,
+    schoolId,
+    status: 'active',
+    deletedAt: null,
+  });
+
+  if (!student) {
+    return null;
+  }
+
+  await ensureStudentCohortMembership(student, schoolId);
+  return { student, user };
 }
 
 const {
@@ -1975,6 +2057,7 @@ function serializeParentAcademicCalendarPost(post = {}) {
       fileName: normalizeText(attachment.fileName),
       mimeType: normalizeText(attachment.mimeType),
     })) : [],
+    allowStudentSubmission: Boolean(post.allowStudentSubmission),
   };
 }
 
@@ -3413,14 +3496,13 @@ router.get('/portal/overview', async (req, res) => {
       return res.status(400).json({ message: 'Invalid student id' });
     }
 
-    const [students, wallets, meriendaSubscriptions, psychologyCases, coexistenceObservations] = await Promise.all([
+    const [studentsRaw, wallets, meriendaSubscriptions, psychologyCases, coexistenceObservations] = await Promise.all([
       Student.find({
         schoolId,
         _id: { $in: studentIds },
         deletedAt: null,
       })
-        .sort({ name: 1 })
-        .lean(),
+        .sort({ name: 1 }),
       Wallet.find({
         schoolId,
         studentId: { $in: studentIds },
@@ -3449,6 +3531,7 @@ router.get('/portal/overview', async (req, res) => {
         .limit(100)
         .lean(),
     ]);
+    const students = await ensureStudentsCohortMembership(studentsRaw, schoolId);
 
     const blockedProductIds = Array.from(new Set(students.flatMap((student) => (
       Array.isArray(student.blockedProducts) ? student.blockedProducts.map((id) => String(id)).filter(Boolean) : []
@@ -3487,6 +3570,7 @@ router.get('/portal/overview', async (req, res) => {
         schoolCode: student.schoolCode || '',
         grade: student.grade || '',
         course: student.course || '',
+        cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
         ...serializeStudentPhotoFields(student),
         dailyLimit: Number(student.dailyLimit || 0),
         blockedProductsCount: Array.isArray(student.blockedProducts) ? student.blockedProducts.length : 0,
@@ -3793,42 +3877,227 @@ router.get('/portal/overview', async (req, res) => {
 router.get('/portal/academic-feed', async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
-    const requestedParentUserId = role === 'admin' ? req.query.parentUserId : userId;
-    const parentUserId = toObjectId(requestedParentUserId);
+    const actorUserId = toObjectId(role === 'admin' ? (req.query.parentUserId || userId) : userId);
 
-    if (!parentUserId) {
-      return res.status(400).json({ message: 'Invalid parent user id' });
+    if (!actorUserId) {
+      return res.status(400).json({ message: 'Invalid user id' });
     }
 
-    const feed = await AcademicCommunication.find({ schoolId, recipientParentIds: parentUserId })
+    let feedQuery = { schoolId, recipientParentIds: actorUserId };
+
+    if (role === 'student') {
+      const studentActor = await resolveStudentActorForCommunity(req);
+      if (!studentActor?.student) {
+        return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+      }
+      feedQuery = buildStudentCommunityFeedQuery({
+        schoolId,
+        userId: actorUserId,
+        student: studentActor.student,
+      });
+    } else {
+      const children = await resolveLinkedStudentsForParent(schoolId, actorUserId);
+      feedQuery = buildParentCommunityFeedQuery({
+        schoolId,
+        parentUserId: actorUserId,
+        children,
+      });
+    }
+
+    const feed = await AcademicCommunication.find(feedQuery)
       .sort({ sentAt: -1, createdAt: -1 })
       .limit(50)
       .lean();
 
-    return res.status(200).json(feed.map((item) => serializeAcademicFeedItem(item, parentUserId, req)));
+    return res.status(200).json(feed.map((item) => serializeAcademicFeedItem(item, actorUserId, req)));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
 });
 
+router.post('/portal/community-publications/media', uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
+  try {
+    const incomingFiles = Array.isArray(req.files) ? req.files : [];
+    if (!incomingFiles.length) {
+      return res.status(400).json({ message: 'No se recibió ningún archivo.' });
+    }
+
+    const hasUnsupportedFile = incomingFiles.some((file) => {
+      const mimeType = normalizeText(file?.mimetype).toLowerCase();
+      return !mimeType.startsWith('image/') && !mimeType.startsWith('video/');
+    });
+    if (hasUnsupportedFile) {
+      return res.status(400).json({ message: 'Solo se pueden subir fotos o videos.' });
+    }
+
+    const uploadedFiles = [];
+    for (const file of incomingFiles) {
+      const mimeType = normalizeText(file?.mimetype).toLowerCase();
+      const preferredName = normalizeText(req.body?.preferredName) || normalizeText(file.originalname) || 'publicacion-comunidad';
+      const requireCloudinary = isCloudinaryEnabled();
+
+      if (mimeType.startsWith('video/')) {
+        const [saved] = await processStoredCampusMaterialFiles([file], {
+          folder: 'academic-communications',
+          requireCloudinary,
+        });
+        if (!saved?.url) {
+          throw new Error('No se pudo guardar el video.');
+        }
+        uploadedFiles.push({
+          kind: 'video',
+          src: saved.url,
+          thumbUrl: '',
+          alt: normalizeText(file.originalname) || 'Video',
+        });
+        continue;
+      }
+
+      const saved = await processAndStoreUploadedImage({
+        file,
+        folder: 'academic-communications',
+        preferredName,
+        requireCloudinary,
+      });
+      if (!saved?.url) {
+        throw new Error('No se pudo guardar la imagen.');
+      }
+      uploadedFiles.push({
+        kind: 'image',
+        src: saved.url,
+        thumbUrl: saved.thumbUrl || saved.url,
+        alt: normalizeText(file.originalname) || 'Imagen',
+      });
+    }
+
+    return res.status(201).json({ media: uploadedFiles });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'No se pudieron subir los archivos.' });
+  }
+});
+
+router.post('/portal/community-publications', async (req, res) => {
+  try {
+    const { schoolId, role, userId, name } = req.user;
+
+    if (role === 'student') {
+      const studentActor = await resolveStudentActorForCommunity(req);
+      if (!studentActor?.student) {
+        return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+      }
+
+      const audienceType = normalizeText(req.body?.audienceType) || 'general';
+      const student = studentActor.student;
+      const result = await submitCommunityPublication({
+        schoolId,
+        userId,
+        userName: normalizeText(name) || normalizeText(student.name) || 'Alumno',
+        publisherRole: 'student',
+        audienceType,
+        title: req.body?.title,
+        body: req.body?.body,
+        media: Array.isArray(req.body?.media) ? req.body.media : [],
+        authorPhotoUrl: studentActor.user?.campusPhotoUrl || student.imageUrl || '',
+        authorThumbUrl: studentActor.user?.campusPhotoThumbUrl || student.thumbUrl || student.imageUrl || '',
+        authorStudentId: student._id,
+        grade: student.grade,
+        course: student.course || student.grade,
+      });
+
+      if (result.kind === 'request') {
+        return res.status(201).json({
+          status: 'pending',
+          kind: 'request',
+          requestId: result.request?._id,
+          message: 'Tu publicación del colegio quedó en revisión. Rectoría, coordinación, dirección o secretaría académica la autorizarán.',
+        });
+      }
+
+      return res.status(201).json(serializeAcademicFeedItem(result.communication.toObject(), userId, req));
+    }
+
+    if (role !== 'parent' && role !== 'admin') {
+      return res.status(403).json({ message: 'No tienes permiso para publicar.' });
+    }
+
+    const children = await resolveLinkedStudentsForParent(schoolId, userId);
+    const selectedChildId = toObjectId(req.body?.studentId);
+    const selectedChild = selectedChildId
+      ? children.find((child) => String(child._id) === String(selectedChildId))
+      : children[0];
+
+    const parentUser = await User.findOne({ _id: userId, schoolId }).select('name campusPhotoUrl campusPhotoThumbUrl').lean();
+    const result = await submitCommunityPublication({
+      schoolId,
+      userId,
+      userName: normalizeText(name) || normalizeText(parentUser?.name) || 'Acudiente',
+      publisherRole: 'parent',
+      audienceType: 'general',
+      title: req.body?.title,
+      body: req.body?.body,
+      media: Array.isArray(req.body?.media) ? req.body.media : [],
+      authorPhotoUrl: parentUser?.campusPhotoUrl || '',
+      authorThumbUrl: parentUser?.campusPhotoThumbUrl || parentUser?.campusPhotoUrl || '',
+      grade: selectedChild?.grade || '',
+      course: selectedChild?.course || selectedChild?.grade || '',
+    });
+
+    if (result.kind === 'request') {
+      return res.status(201).json({
+        status: 'pending',
+        kind: 'request',
+        requestId: result.request?._id,
+        message: 'Tu publicación quedó en revisión. Rectoría, coordinación, dirección o secretaría académica la autorizarán.',
+      });
+    }
+
+    return res.status(201).json(serializeAcademicFeedItem(result.communication.toObject(), userId, req));
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'No se pudo crear la publicación.' });
+  }
+});
+
 router.post('/portal/academic-feed/:communicationId/like', async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
-    const parentUserId = toObjectId(userId);
+    const { schoolId, role, userId } = req.user;
+    const actorUserId = toObjectId(userId);
     const communicationId = toObjectId(req.params.communicationId);
 
-    if (!parentUserId || !communicationId) {
+    if (!actorUserId || !communicationId) {
       return res.status(400).json({ message: 'Invalid communication id' });
     }
 
-    const query = { _id: communicationId, schoolId, recipientParentIds: parentUserId };
+    let children = [];
+    let student = null;
+    if (role === 'student') {
+      const studentActor = await resolveStudentActorForCommunity(req);
+      student = studentActor?.student || null;
+      if (!student) {
+        return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+      }
+    } else {
+      children = await resolveLinkedStudentsForParent(schoolId, actorUserId);
+    }
+
+    const accessible = await findAccessibleCommunityCommunication({
+      schoolId,
+      communicationId,
+      userId: actorUserId,
+      role: role === 'student' ? 'student' : 'parent',
+      student,
+      children,
+    });
+    if (!accessible) {
+      return res.status(404).json({ message: 'Comunicado no encontrado.' });
+    }
+
     const updatedCommunication = await AcademicCommunication.findOneAndUpdate(
-      query,
+      { _id: communicationId, schoolId },
       [
         {
           $set: {
-            likes: buildToggledAcademicFeedLikesExpression('$likes', parentUserId, {
-              userId: parentUserId,
+            likes: buildToggledAcademicFeedLikesExpression('$likes', actorUserId, {
+              userId: actorUserId,
               name: getActorName(req.user),
               createdAt: new Date(),
             }),
@@ -3841,7 +4110,7 @@ router.post('/portal/academic-feed/:communicationId/like', async (req, res) => {
       return res.status(404).json({ message: 'Comunicado no encontrado.' });
     }
 
-    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId, req));
+    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), actorUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3849,18 +4118,33 @@ router.post('/portal/academic-feed/:communicationId/like', async (req, res) => {
 
 router.post('/portal/academic-feed/:communicationId/comments', async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
-    const parentUserId = toObjectId(userId);
+    const { schoolId, role, userId } = req.user;
+    const actorUserId = toObjectId(userId);
     const body = String(req.body?.body || '').trim();
 
     if (!body) {
       return res.status(400).json({ message: 'Escribe un comentario.' });
     }
 
+    let children = [];
+    let student = null;
+    if (role === 'student') {
+      const studentActor = await resolveStudentActorForCommunity(req);
+      student = studentActor?.student || null;
+      if (!student) {
+        return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+      }
+    } else {
+      children = await resolveLinkedStudentsForParent(schoolId, actorUserId);
+    }
+
     const communication = await findParentAcademicCommunication({
       schoolId,
       communicationId: req.params.communicationId,
-      parentUserId,
+      parentUserId: actorUserId,
+      role,
+      student,
+      children,
     });
 
     if (!communication) {
@@ -3868,7 +4152,7 @@ router.post('/portal/academic-feed/:communicationId/comments', async (req, res) 
     }
 
     communication.comments.push({
-      userId: parentUserId,
+      userId: actorUserId,
       name: getActorName(req.user),
       body: body.slice(0, 800),
       likes: [],
@@ -3877,7 +4161,7 @@ router.post('/portal/academic-feed/:communicationId/comments', async (req, res) 
     });
 
     await communication.save();
-    return res.status(201).json(serializeAcademicFeedItem(communication.toObject(), parentUserId, req));
+    return res.status(201).json(serializeAcademicFeedItem(communication.toObject(), actorUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3885,12 +4169,24 @@ router.post('/portal/academic-feed/:communicationId/comments', async (req, res) 
 
 router.delete('/portal/academic-feed/:communicationId/comments/:commentId', async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
-    const parentUserId = toObjectId(userId);
+    const { schoolId, role, userId } = req.user;
+    const actorUserId = toObjectId(userId);
+    let children = [];
+    let student = null;
+    if (role === 'student') {
+      const studentActor = await resolveStudentActorForCommunity(req);
+      student = studentActor?.student || null;
+    } else {
+      children = await resolveLinkedStudentsForParent(schoolId, actorUserId);
+    }
+
     const communication = await findParentAcademicCommunication({
       schoolId,
       communicationId: req.params.communicationId,
-      parentUserId,
+      parentUserId: actorUserId,
+      role,
+      student,
+      children,
     });
 
     if (!communication) {
@@ -3902,13 +4198,13 @@ router.delete('/portal/academic-feed/:communicationId/comments/:commentId', asyn
       return res.status(404).json({ message: 'Comentario no encontrado.' });
     }
 
-    if (!sameObjectId(comment.userId, parentUserId)) {
+    if (!sameObjectId(comment.userId, actorUserId)) {
       return res.status(403).json({ message: 'Solo puedes borrar tus comentarios.' });
     }
 
     comment.deleteOne();
     await communication.save();
-    return res.status(200).json(serializeAcademicFeedItem(communication.toObject(), parentUserId, req));
+    return res.status(200).json(serializeAcademicFeedItem(communication.toObject(), actorUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -3916,23 +4212,42 @@ router.delete('/portal/academic-feed/:communicationId/comments/:commentId', asyn
 
 router.post('/portal/academic-feed/:communicationId/comments/:commentId/like', async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
-    const parentUserId = toObjectId(userId);
+    const { schoolId, role, userId } = req.user;
+    const actorUserId = toObjectId(userId);
     const communicationId = toObjectId(req.params.communicationId);
     const commentId = toObjectId(req.params.commentId);
 
-    if (!parentUserId || !communicationId || !commentId) {
+    if (!actorUserId || !communicationId || !commentId) {
       return res.status(400).json({ message: 'Invalid comment id' });
     }
 
-    const query = {
-      _id: communicationId,
+    let children = [];
+    let student = null;
+    if (role === 'student') {
+      const studentActor = await resolveStudentActorForCommunity(req);
+      student = studentActor?.student || null;
+      if (!student) {
+        return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+      }
+    } else {
+      children = await resolveLinkedStudentsForParent(schoolId, actorUserId);
+    }
+
+    const accessible = await findAccessibleCommunityCommunication({
       schoolId,
-      recipientParentIds: parentUserId,
-    };
-    const nextCommentLike = { userId: parentUserId, name: getActorName(req.user), createdAt: new Date() };
+      communicationId,
+      userId: actorUserId,
+      role: role === 'student' ? 'student' : 'parent',
+      student,
+      children,
+    });
+    if (!accessible) {
+      return res.status(404).json({ message: 'Comunicado no encontrado.' });
+    }
+
+    const nextCommentLike = { userId: actorUserId, name: getActorName(req.user), createdAt: new Date() };
     const updatedCommunication = await AcademicCommunication.findOneAndUpdate(
-      { ...query, 'comments._id': commentId },
+      { _id: communicationId, schoolId, 'comments._id': commentId },
       [
         {
           $set: {
@@ -3947,7 +4262,7 @@ router.post('/portal/academic-feed/:communicationId/comments/:commentId/like', a
                       $mergeObjects: [
                         '$$comment',
                         {
-                          likes: buildToggledAcademicFeedLikesExpression('$$comment.likes', parentUserId, nextCommentLike),
+                          likes: buildToggledAcademicFeedLikesExpression('$$comment.likes', actorUserId, nextCommentLike),
                         },
                       ],
                     },
@@ -3965,7 +4280,7 @@ router.post('/portal/academic-feed/:communicationId/comments/:commentId/like', a
       return res.status(404).json({ message: 'Comunicado no encontrado.' });
     }
 
-    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), parentUserId, req));
+    return res.status(200).json(serializeAcademicFeedItem(updatedCommunication.toObject(), actorUserId, req));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -5921,16 +6236,19 @@ router.patch('/portal/students/:studentId/grade', async (req, res) => {
       {
         new: true,
       }
-    ).lean();
+    );
 
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
 
+    await ensureStudentCohortMembership(student, schoolId);
+
     return res.status(200).json({
       student: {
         _id: student._id,
         grade: student.grade || '',
+        cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
       },
     });
   } catch (error) {
@@ -6501,6 +6819,7 @@ router.academicPortalHelpers = {
   serializeParentAcademicCalendarAssignment,
   isParentEvaluativePostType,
   resolveParentUpcomingAssignmentCourseIds,
+  buildParentUpcomingAssignments,
 };
 
 module.exports = router;

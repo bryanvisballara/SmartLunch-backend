@@ -9,6 +9,7 @@ const AcademicStructure = require('../models/academicStructure.model');
 const AcademicCalendarAssignment = require('../models/academicCalendarAssignment.model');
 const CampusCourse = require('../models/campusCourse.model');
 const CampusPost = require('../models/campusPost.model');
+const CampusPostSubmission = require('../models/campusPostSubmission.model');
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
@@ -16,10 +17,20 @@ const {
   loadGlobalColibriLeaderboard,
   submitColibriGameScoreForUser,
 } = require('../services/colibriGame.service');
+const {
+  buildStudentCommunityFeedQuery,
+  ensureStudentCohortMembership,
+} = require('../services/communityFeed.service');
 const PsychologyCase = require('../models/psychologyCase.model');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const Wallet = require('../models/wallet.model');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
+const { runWithSchoolContext } = require('../config/db');
+const {
+  MAX_CAMPUS_MATERIAL_FILES,
+  uploadCampusMaterialsMiddleware,
+  processStoredCampusMaterialFiles,
+} = require('../utils/campusMaterialUpload');
 const parentRoutes = require('./parent.routes');
 
 const router = express.Router();
@@ -53,6 +64,12 @@ function serializeStudentFeedItem(item = {}, currentUserId = '') {
     likedByMe: likes.some((like) => String(like.userId || '') === String(currentUserId || '')),
     commentsCount: comments.length,
     audienceType: item.audienceType || 'general',
+    cohortKey: item.cohortKey || '',
+    academicYear: item.academicYear || '',
+    publisherRole: item.publisherRole || '',
+    gradeTargets: Array.isArray(item.gradeTargets) ? item.gradeTargets : [],
+    courseTargets: Array.isArray(item.courseTargets) ? item.courseTargets : [],
+    recipientStudentIds: Array.isArray(item.recipientStudentIds) ? item.recipientStudentIds : [],
   };
 }
 
@@ -114,13 +131,31 @@ async function resolveStudentForPortal(req) {
     schoolId,
     deletedAt: null,
     status: 'active',
-  }).lean();
+  });
+}
+
+async function resolveStudentDocumentForPortal(req) {
+  const student = await resolveStudentForPortal(req);
+  if (!student) {
+    return null;
+  }
+
+  const studentDoc = student.save
+    ? student
+    : await Student.findOne({ _id: student._id, schoolId: req.user.schoolId, deletedAt: null, status: 'active' });
+
+  if (!studentDoc) {
+    return null;
+  }
+
+  await ensureStudentCohortMembership(studentDoc, req.user.schoolId);
+  return studentDoc;
 }
 
 router.get('/portal/overview', async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const student = await resolveStudentForPortal(req);
+    const student = await resolveStudentDocumentForPortal(req);
 
     if (!student) {
       return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
@@ -218,6 +253,16 @@ router.get('/portal/overview', async (req, res) => {
       currentAverage: overallAverage,
       gradingScale,
     });
+    const upcomingAssignments = typeof H.buildParentUpcomingAssignments === 'function'
+      ? await H.buildParentUpcomingAssignments({
+        schoolId,
+        courses: parentGradebookCourses,
+        gradebook,
+        gradeValues,
+        courseValues,
+        courseTitleValues,
+      })
+      : [];
 
     return res.status(200).json({
       student: {
@@ -227,6 +272,7 @@ router.get('/portal/overview', async (req, res) => {
         course: student.course || '',
         displayGrade: resolveStudentDisplayGrade(student, academicStructure),
         schoolCode: student.schoolCode || '',
+        cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
       },
       parentAppFeatures: STUDENT_PORTAL_FEATURES,
       psychologyCases: psychologyCases.map(serializeStudentPsychologyCase),
@@ -238,6 +284,7 @@ router.get('/portal/overview', async (req, res) => {
         ranking,
         overallAverage,
         gradingScale,
+        upcomingAssignments,
       },
     });
   } catch (error) {
@@ -248,26 +295,18 @@ router.get('/portal/overview', async (req, res) => {
 router.get('/portal/academic-feed', async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
-    const student = await resolveStudentForPortal(req);
+    const student = await resolveStudentDocumentForPortal(req);
 
     if (!student) {
       return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
     }
 
-    const { gradeValues } = H.buildParentStudentAcademicMatchValues(student);
-    const audienceFilters = [
-      { audienceType: 'general' },
-      { recipientStudentIds: student._id },
-    ];
-
-    if (gradeValues.length) {
-      audienceFilters.push({ audienceType: 'grade', gradeTargets: { $in: gradeValues } });
-    }
-
-    const feed = await AcademicCommunication.find({
+    const feedQuery = buildStudentCommunityFeedQuery({
       schoolId,
-      $or: audienceFilters,
-    })
+      userId,
+      student,
+    });
+    const feed = await AcademicCommunication.find(feedQuery)
       .sort({ sentAt: -1, createdAt: -1 })
       .limit(50)
       .lean();
@@ -501,6 +540,295 @@ router.post('/portal/colibri-game/scores', async (req, res) => {
   } catch (error) {
     const statusCode = Number(error.statusCode) || 500;
     return res.status(statusCode).json({ message: error.message || 'No se pudo guardar el puntaje' });
+  }
+});
+
+function normalizeStudentPortalText(value) {
+  return String(value || '').trim();
+}
+
+function parseStudentSubmissionLinks(rawLinks) {
+  let input = rawLinks;
+  if (typeof rawLinks === 'string') {
+    try {
+      input = JSON.parse(rawLinks);
+    } catch (_error) {
+      input = [];
+    }
+  }
+
+  const links = Array.isArray(input) ? input : [];
+  const normalized = [];
+
+  for (const link of links) {
+    const url = normalizeStudentPortalText(link?.url);
+    const title = normalizeStudentPortalText(link?.title) || url;
+    if (!url) continue;
+    if (!/^https?:\/\//i.test(url)) {
+      return { ok: false, message: 'Cada enlace debe empezar por http:// o https://.' };
+    }
+    normalized.push({
+      sourceType: 'link',
+      kind: 'link',
+      title: title.slice(0, 120),
+      url,
+      fileName: '',
+      mimeType: 'text/uri-list',
+      sizeBytes: 0,
+      extension: '',
+      storage: 'external',
+    });
+  }
+
+  return { ok: true, links: normalized.slice(0, 12) };
+}
+
+function serializeStudentSubmission(submission = null) {
+  if (!submission) {
+    return null;
+  }
+
+  return {
+    id: String(submission._id || submission.id || ''),
+    note: normalizeStudentPortalText(submission.note),
+    status: normalizeStudentPortalText(submission.status) || 'submitted',
+    submittedAt: submission.submittedAt || submission.createdAt || null,
+    attachments: Array.isArray(submission.attachments)
+      ? submission.attachments.map((attachment) => ({
+        sourceType: normalizeStudentPortalText(attachment.sourceType) || 'file',
+        kind: normalizeStudentPortalText(attachment.kind) || 'file',
+        title: normalizeStudentPortalText(attachment.title),
+        url: normalizeStudentPortalText(attachment.url),
+        fileName: normalizeStudentPortalText(attachment.fileName),
+        mimeType: normalizeStudentPortalText(attachment.mimeType),
+        sizeBytes: Number(attachment.sizeBytes || 0),
+        extension: normalizeStudentPortalText(attachment.extension),
+        storage: normalizeStudentPortalText(attachment.storage),
+      }))
+      : [],
+  };
+}
+
+async function resolveStudentAssignmentCourseIds(schoolId, student) {
+  const {
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+  } = H.buildParentStudentAcademicMatchValues(student);
+
+  const academicGradeCourses = gradeValues.length
+    ? await CampusCourse.find({
+      schoolId,
+      status: 'active',
+      studentGradeKey: { $in: gradeValues },
+    })
+      .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+      .sort({ title: 1 })
+      .lean()
+    : [];
+
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).lean();
+  const parentGradebookCourses = H.buildParentGradebookCoursesFromStructure({
+    academicStructure,
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+    courses: academicGradeCourses,
+    gradeEntryCourseIds: new Set(),
+  });
+
+  return H.resolveParentUpcomingAssignmentCourseIds({
+    schoolId,
+    courses: parentGradebookCourses,
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+  });
+}
+
+router.get('/portal/assignments', async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const student = await resolveStudentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    const courseIds = await resolveStudentAssignmentCourseIds(schoolId, student);
+    if (!courseIds.length) {
+      return res.status(200).json({ assignments: [] });
+    }
+
+    const posts = await CampusPost.find({
+      schoolId,
+      courseId: { $in: courseIds },
+      status: 'published',
+    })
+      .populate('courseId', 'title subject section studentGradeKey')
+      .sort({ scheduledClassDate: 1, dueAt: 1, publishedAt: -1, createdAt: -1 })
+      .lean();
+
+    const evaluativePosts = posts.filter((post) => H.isParentEvaluativePostType(post.type));
+    const postIds = evaluativePosts.map((post) => post._id);
+    const submissions = postIds.length
+      ? await CampusPostSubmission.find({
+        schoolId,
+        studentId: student._id,
+        postId: { $in: postIds },
+      }).lean()
+      : [];
+    const submissionByPostId = new Map(
+      submissions.map((submission) => [String(submission.postId), submission])
+    );
+
+    return res.status(200).json({
+      assignments: evaluativePosts.map((post) => {
+        const serialized = H.serializeParentAcademicCalendarPost(post);
+        const submission = submissionByPostId.get(String(post._id));
+        return {
+          ...serialized,
+          body: normalizeStudentPortalText(post.body),
+          allowStudentSubmission: Boolean(post.allowStudentSubmission),
+          submission: serializeStudentSubmission(submission),
+          hasSubmission: Boolean(submission),
+        };
+      }),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/assignments/:id', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const { id } = req.params;
+    const student = await resolveStudentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(id || ''))) {
+      return res.status(400).json({ message: 'Invalid assignment id' });
+    }
+
+    const courseIds = await resolveStudentAssignmentCourseIds(schoolId, student);
+    const post = await CampusPost.findOne({
+      _id: id,
+      schoolId,
+      status: 'published',
+      courseId: { $in: courseIds },
+    })
+      .populate('courseId', 'title subject section studentGradeKey')
+      .lean();
+
+    if (!post || !H.isParentEvaluativePostType(post.type)) {
+      return res.status(404).json({ message: 'Asignación no encontrada.' });
+    }
+
+    const submission = await CampusPostSubmission.findOne({
+      schoolId,
+      postId: post._id,
+      studentId: student._id,
+    }).lean();
+
+    const serialized = H.serializeParentAcademicCalendarPost(post);
+
+    return res.status(200).json({
+      assignment: {
+        ...serialized,
+        body: normalizeStudentPortalText(post.body),
+        allowStudentSubmission: Boolean(post.allowStudentSubmission),
+        submission: serializeStudentSubmission(submission),
+        hasSubmission: Boolean(submission),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/assignments/:id/submissions', uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+    const student = await resolveStudentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(id || ''))) {
+      return res.status(400).json({ message: 'Invalid assignment id' });
+    }
+
+    return await runWithSchoolContext(schoolId, async () => {
+      const courseIds = await resolveStudentAssignmentCourseIds(schoolId, student);
+      const post = await CampusPost.findOne({
+        _id: id,
+        schoolId,
+        status: 'published',
+        courseId: { $in: courseIds },
+      });
+
+      if (!post || !H.isParentEvaluativePostType(post.type)) {
+        return res.status(404).json({ message: 'Asignación no encontrada.' });
+      }
+
+      if (!post.allowStudentSubmission) {
+        return res.status(403).json({ message: 'El docente no habilitó entregas para esta asignación.' });
+      }
+
+      const linksResult = parseStudentSubmissionLinks(req.body.materialLinks);
+      if (!linksResult.ok) {
+        return res.status(400).json({ message: linksResult.message });
+      }
+
+      const uploadedAttachments = await processStoredCampusMaterialFiles(req.files, {
+        folder: 'campus-student-submissions',
+      });
+      const attachments = [...linksResult.links, ...uploadedAttachments];
+      const note = normalizeStudentPortalText(req.body.note);
+
+      if (!attachments.length && !note) {
+        return res.status(400).json({ message: 'Agrega un archivo, un enlace o una nota para entregar.' });
+      }
+
+      const submission = await CampusPostSubmission.findOneAndUpdate(
+        {
+          schoolId,
+          postId: post._id,
+          studentId: student._id,
+        },
+        {
+          $set: {
+            schoolId,
+            postId: post._id,
+            courseId: post.courseId,
+            studentId: student._id,
+            studentUserId: String(userId || ''),
+            note,
+            attachments,
+            status: 'submitted',
+            submittedAt: new Date(),
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        }
+      );
+
+      return res.status(200).json({
+        message: 'Entrega guardada.',
+        submission: serializeStudentSubmission(submission),
+      });
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
   }
 });
 

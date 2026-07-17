@@ -30,6 +30,17 @@ export const uploadParentPortalStudentPhoto = (studentId, formData) =>
 	api.post(`/parent/portal/students/${studentId}/photo`, formData, {
 		headers: { 'Content-Type': 'multipart/form-data' },
 	});
+export const uploadCommunityPublicationMedia = (files = []) => {
+	const formData = new FormData();
+	Array.from(files || []).forEach((file) => {
+		formData.append('files', file);
+	});
+	return api.post('/parent/portal/community-publications/media', formData, {
+		headers: { 'Content-Type': 'multipart/form-data' },
+	}).then((response) => response.data);
+};
+export const createCommunityPublication = (data) =>
+	api.post('/parent/portal/community-publications', data).then((response) => response.data);
 export const updateParentPortalStudentAutoDebit = (studentId, data) =>
 	api.patch(`/parent/portal/students/${studentId}/auto-debit`, data);
 export const createParentCardPaymentMethod = (data) => api.post('/parent/portal/payment-methods/cards', data);

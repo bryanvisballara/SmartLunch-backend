@@ -38,6 +38,7 @@ const {
 } = require('../utils/imageUpload');
 const { upsertStudentAccount } = require('../utils/studentAccount');
 const { invalidateSchoolMenuCache } = require('../services/menuCache.service');
+const { ensureStudentCohortMembership } = require('../services/communityFeed.service');
 
 const router = express.Router();
 
@@ -364,6 +365,7 @@ router.post('/academic-grade-promotions/:id/approve', async (req, res) => {
 
       student.grade = nextGrade;
       await student.save();
+      await ensureStudentCohortMembership(student, schoolId);
       appliedStudents += 1;
 
       const billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
@@ -2104,6 +2106,12 @@ router.patch('/students/:id', async (req, res) => {
     }
 
     await student.save();
+    if (
+      Object.prototype.hasOwnProperty.call(req.body, 'grade')
+      || Object.prototype.hasOwnProperty.call(req.body, 'course')
+    ) {
+      await ensureStudentCohortMembership(student, schoolId);
+    }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'parentId')) {
       if (parentId) {

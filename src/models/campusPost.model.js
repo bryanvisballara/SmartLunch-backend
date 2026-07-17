@@ -38,6 +38,7 @@ const campusPostSchema = new mongoose.Schema(
     scheduledClassDate: { type: Date, default: null },
     scheduledClassSession: { type: campusScheduledClassSessionSchema, default: null },
     attachments: { type: [campusMaterialAttachmentSchema], default: [] },
+    allowStudentSubmission: { type: Boolean, default: false },
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'published' },
     publishedAt: { type: Date, default: null },
   },

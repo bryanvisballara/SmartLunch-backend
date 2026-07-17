@@ -258,7 +258,7 @@ function NursingPortal() {
           Atención
         </button>
         <button className={activePortalView === 'staff_announcements' ? 'is-active' : ''} onClick={() => setActivePortalView('staff_announcements')} type="button">
-          Comunicados
+          Comunicados internos
           <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
         </button>
       </div>
@@ -266,9 +266,9 @@ function NursingPortal() {
       {activePortalView === 'staff_announcements' ? (
         <StaffAnnouncementsPanel
           className="nursing-panel"
-          description="Comunicados de rectoría y coordinación. Confirma cuando los hayas leído."
+          description="Mensajes internos de rectoría y coordinación. Confirma cuando los hayas leído."
           mode="inbox"
-          title="Comunicados"
+          title="Comunicados internos"
         />
       ) : (
       <div className="nursing-layout">

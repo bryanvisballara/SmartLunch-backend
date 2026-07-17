@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
+const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
 const CampusCourse = require('../models/campusCourse.model');
@@ -63,6 +64,143 @@ function isValidObjectId(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function sameCampusObjectId(left, right) {
+  return String(left || '') === String(right || '');
+}
+
+function getCampusActorName(user = {}) {
+  return normalizeText(user.name || user.fullName || user.username || user.email) || 'Docente';
+}
+
+function normalizeCampusFeedLikes(rawLikes = []) {
+  const likesByUserId = new Map();
+  for (const like of Array.isArray(rawLikes) ? rawLikes : []) {
+    const userId = String(like?.userId || '').trim();
+    if (!userId || likesByUserId.has(userId)) {
+      continue;
+    }
+    likesByUserId.set(userId, {
+      userId,
+      name: normalizeText(like?.name) || 'Usuario',
+      createdAt: like?.createdAt || null,
+    });
+  }
+  return [...likesByUserId.values()];
+}
+
+function buildToggledCampusFeedLikesExpression(likesExpression, userId, nextLike) {
+  return {
+    $let: {
+      vars: {
+        currentLikes: { $ifNull: [likesExpression, []] },
+      },
+      in: {
+        $cond: [
+          {
+            $in: [
+              userId,
+              { $map: { input: '$$currentLikes', as: 'like', in: '$$like.userId' } },
+            ],
+          },
+          {
+            $filter: {
+              input: '$$currentLikes',
+              as: 'like',
+              cond: { $ne: ['$$like.userId', userId] },
+            },
+          },
+          { $concatArrays: ['$$currentLikes', [nextLike]] },
+        ],
+      },
+    },
+  };
+}
+
+function serializeTeacherFamilyFeedComment(comment = {}, currentUserId = '') {
+  const likes = normalizeCampusFeedLikes(comment.likes);
+  return {
+    id: String(comment._id || comment.id || ''),
+    userId: String(comment.userId || ''),
+    name: normalizeText(comment.name) || 'Usuario',
+    body: normalizeText(comment.body),
+    createdAt: comment.createdAt || null,
+    likedByMe: likes.some((like) => sameCampusObjectId(like.userId, currentUserId)),
+    likesCount: likes.length,
+    canDelete: sameCampusObjectId(comment.userId, currentUserId),
+  };
+}
+
+function serializeTeacherFamilyFeedItem(item = {}, currentUserId = '') {
+  const likes = normalizeCampusFeedLikes(item.likes);
+  const comments = Array.isArray(item.comments)
+    ? item.comments
+      .map((comment) => serializeTeacherFamilyFeedComment(comment, currentUserId))
+      .filter((comment) => comment.id && comment.body)
+    : [];
+
+  return {
+    id: String(item._id || ''),
+    title: normalizeText(item.title),
+    body: normalizeText(item.body),
+    authorName: normalizeText(item.authorName || item.createdByName) || 'Secretaría académica',
+    authorPhotoUrl: normalizeText(item.authorThumbUrl || item.authorPhotoUrl),
+    audienceType: normalizeText(item.audienceType) || 'general',
+    gradeTargets: Array.isArray(item.gradeTargets) ? item.gradeTargets : [],
+    courseTargets: Array.isArray(item.courseTargets) ? item.courseTargets : [],
+    media: (Array.isArray(item.media) ? item.media : []).map((mediaItem, index) => ({
+      id: String(mediaItem?._id || `${item._id || 'media'}-${index + 1}`),
+      kind: normalizeText(mediaItem?.kind) === 'video' ? 'video' : 'image',
+      src: normalizeText(mediaItem?.src),
+      thumbUrl: normalizeText(mediaItem?.thumbUrl),
+      alt: normalizeText(mediaItem?.alt),
+    })).filter((mediaItem) => mediaItem.src),
+    likedByMe: likes.some((like) => sameCampusObjectId(like.userId, currentUserId)),
+    likesCount: likes.length,
+    commentsCount: comments.length,
+    comments,
+    sentAt: item.sentAt || item.createdAt || null,
+  };
+}
+
+async function resolveTeacherOwnPublishedCommunicationIds(schoolId, teacherUserId) {
+  const ownApprovedRequests = await AcademicCommunicationRequest.find({
+    schoolId,
+    teacherUserId,
+    status: 'approved',
+    publishedCommunicationId: { $ne: null },
+  })
+    .select('publishedCommunicationId')
+    .lean();
+
+  return ownApprovedRequests
+    .map((request) => request.publishedCommunicationId)
+    .filter(Boolean);
+}
+
+async function buildTeacherFamilyFeedAccessQuery(schoolId, teacherUserId) {
+  const ownPublishedCommunicationIds = await resolveTeacherOwnPublishedCommunicationIds(schoolId, teacherUserId);
+  return {
+    schoolId,
+    sentAt: { $ne: null },
+    $or: [
+      { audienceType: 'general' },
+      { _id: { $in: ownPublishedCommunicationIds } },
+    ],
+  };
+}
+
+async function findTeacherAccessibleFamilyFeedCommunication({ schoolId, teacherUserId, communicationId }) {
+  if (!isValidObjectId(communicationId)) {
+    return null;
+  }
+
+  const accessQuery = await buildTeacherFamilyFeedAccessQuery(schoolId, teacherUserId);
+  return AcademicCommunication.findOne({
+    ...accessQuery,
+    _id: communicationId,
+  });
 }
 
 function normalizeCampusScopeMatch(value) {
@@ -1085,6 +1223,7 @@ function serializeTeacherCalendarPost(post = {}) {
     accent: getTeacherCalendarAccent(type),
     title: normalizeText(post.title) || type,
     detail: normalizeText(post.body) || 'Actividad publicada para el curso.',
+    body: normalizeText(post.body),
     courseId: String(course._id || post.courseId || ''),
     courseTitle,
     subject,
@@ -1094,6 +1233,19 @@ function serializeTeacherCalendarPost(post = {}) {
     scheduledClassSession: post.scheduledClassSession || null,
     publishedAt: post.publishedAt || null,
     status: normalizeText(post.status) || 'published',
+    attachments: Array.isArray(post.attachments)
+      ? post.attachments.map((attachment) => ({
+        sourceType: normalizeText(attachment.sourceType) || 'file',
+        kind: normalizeText(attachment.kind) || 'file',
+        title: normalizeText(attachment.title),
+        url: normalizeText(attachment.url),
+        fileName: normalizeText(attachment.fileName),
+        mimeType: normalizeText(attachment.mimeType),
+        sizeBytes: Number(attachment.sizeBytes || 0),
+        extension: normalizeText(attachment.extension),
+        storage: normalizeText(attachment.storage),
+      }))
+      : [],
   };
 }
 
@@ -2436,6 +2588,7 @@ function serializePost(post) {
         storage: normalizeText(attachment.storage),
       }))
       : [],
+    allowStudentSubmission: Boolean(post.allowStudentSubmission),
     status: normalizeText(post.status) || 'published',
     publishedAt: post.publishedAt || null,
     createdAt: post.createdAt,
@@ -2575,7 +2728,8 @@ async function notifyCampusPostPublished({ schoolId, course, post, students }) {
   const courseLabel = normalizeText(course?.subject) || normalizeText(course?.title) || 'clase';
   const postType = normalizePostType(post?.type) || 'Publicación';
   const postCategoryLabel = getCampusPostCategoryLabel(postType);
-  const isAssignmentLike = isEvaluativePostType(postType);
+  // Assignments: evaluative types OR posts that request a student submission.
+  const isAssignmentLike = isEvaluativePostType(postType) || Boolean(post?.allowStudentSubmission);
 
   const [parentResult] = await Promise.all([
     queueStudentParentNotifications({
@@ -2623,6 +2777,17 @@ async function notifyCampusPostPublished({ schoolId, course, post, students }) {
   ]);
 
   return parentResult;
+}
+
+async function queueCampusPostPublishedNotifications({ schoolId, teacherUserId, course, post }) {
+  return runWithSchoolContext(schoolId, async () => {
+    const detail = await buildTeacherCourseDetail({ schoolId, teacherUserId, course });
+    const students = Array.isArray(detail?.students) ? detail.students : [];
+    if (!students.length) {
+      console.warn(`[CAMPUS_POST_NOTIFY_WARNING] post=${post?._id || ''} course=${course?._id || ''} empty_roster`);
+    }
+    return notifyCampusPostPublished({ schoolId, course, post, students });
+  });
 }
 
 async function notifyDisciplineObservation({ schoolId, observation }) {
@@ -2948,52 +3113,54 @@ async function requireCampusCoordinationAccess(req, res, next) {
 }
 
 async function buildTeacherCourseDetail({ schoolId, teacherUserId, course, gradingScale = null, academicStructure = null }) {
-  const structure = academicStructure || await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
-  const resolvedClassSessions = resolveTeacherCourseClassSessionsFromStructure(structure, teacherUserId, course);
-  const courseForSerialization = resolvedClassSessions.length > 0
-    && (!Array.isArray(course?.classSessions) || course.classSessions.length === 0)
-    ? { ...course, classSessions: resolvedClassSessions }
-    : course;
-  const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale });
-  const academicPeriods = Array.isArray(normalizedCourse.academicPeriods) ? normalizedCourse.academicPeriods : [];
-  let students = await Student.find(buildTeacherCourseRosterQuery({ schoolId, course }))
-    .select('name schoolCode grade course status')
-    .sort({ name: 1 })
-    .lean();
+  return runWithSchoolContext(schoolId, async () => {
+    const structure = academicStructure || await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+    const resolvedClassSessions = resolveTeacherCourseClassSessionsFromStructure(structure, teacherUserId, course);
+    const courseForSerialization = resolvedClassSessions.length > 0
+      && (!Array.isArray(course?.classSessions) || course.classSessions.length === 0)
+      ? { ...course, classSessions: resolvedClassSessions }
+      : course;
+    const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale });
+    const academicPeriods = Array.isArray(normalizedCourse.academicPeriods) ? normalizedCourse.academicPeriods : [];
+    let students = await Student.find(buildTeacherCourseRosterQuery({ schoolId, course }))
+      .select('name schoolCode grade course status')
+      .sort({ name: 1 })
+      .lean();
 
-  if (students.length === 0 && getCourseSectionAliases(course).length > 0) {
-    const gradeConditions = buildFieldMatchConditions('grade', getCourseGradeAliases(course));
-    if (gradeConditions.length > 0) {
-      students = await Student.find({
-        schoolId,
-        deletedAt: null,
-        status: 'active',
-        $and: [
-          { $or: gradeConditions },
-          { $or: [{ course: '' }, { course: null }, { course: { $exists: false } }] },
-        ],
-      })
-        .select('name schoolCode grade course status')
-        .sort({ name: 1 })
-        .lean();
+    if (students.length === 0 && getCourseSectionAliases(course).length > 0) {
+      const gradeConditions = buildFieldMatchConditions('grade', getCourseGradeAliases(course));
+      if (gradeConditions.length > 0) {
+        students = await Student.find({
+          schoolId,
+          deletedAt: null,
+          status: 'active',
+          $and: [
+            { $or: gradeConditions },
+            { $or: [{ course: '' }, { course: null }, { course: { $exists: false } }] },
+          ],
+        })
+          .select('name schoolCode grade course status')
+          .sort({ name: 1 })
+          .lean();
+      }
     }
-  }
 
-  const studentIds = students.map((student) => student._id);
-  const gradeEntries = studentIds.length > 0
-    ? await CampusGradeEntry.find({
-      schoolId,
-      courseId: course._id,
-      studentId: { $in: studentIds },
-    }).lean()
-    : [];
+    const studentIds = students.map((student) => student._id);
+    const gradeEntries = studentIds.length > 0
+      ? await CampusGradeEntry.find({
+        schoolId,
+        courseId: course._id,
+        studentId: { $in: studentIds },
+      }).lean()
+      : [];
 
-  const studentRows = buildCourseStudentRows(students, academicPeriods, gradeEntries);
+    const studentRows = buildCourseStudentRows(students, academicPeriods, gradeEntries);
 
-  return {
-    course: normalizedCourse,
-    students: studentRows,
-  };
+    return {
+      course: normalizedCourse,
+      students: studentRows,
+    };
+  });
 }
 
 function normalizeCampusGradingScale(rawScale = {}) {
@@ -3616,30 +3783,41 @@ router.post('/teacher/profile-photo', requireCampusTeacherAccess, (req, res) => 
     try {
       const { schoolId, userId, name, username } = req.user;
 
-      const teacherUser = await User.findOne({ _id: userId, schoolId });
-      if (!teacherUser) {
-        return res.status(404).json({ message: 'Docente no encontrado.' });
+      if (!req.file) {
+        return res.status(400).json({ message: 'Selecciona una imagen para la foto de perfil.' });
       }
 
-      const saved = await processAndStoreUploadedImage({
-        file: req.file,
-        folder: 'campus-teachers',
-        preferredName: req.body?.preferredName || teacherUser.name || name || username || req.file?.originalname,
-        requireCloudinary: true,
-      });
+      return await runWithSchoolContext(schoolId, async () => {
+        let teacherUser = await User.findOne({ _id: userId, schoolId });
+        if (!teacherUser) {
+          teacherUser = await User.findOne({ _id: userId });
+        }
 
-      if (saved.storage !== 'cloudinary') {
-        return res.status(503).json({
-          message: 'La foto del docente solo se puede guardar en Cloudinary.',
+        if (!teacherUser) {
+          return res.status(404).json({ message: 'Docente no encontrado.' });
+        }
+
+        const cloudinaryEnabled = isCloudinaryEnabled();
+        const saved = await processAndStoreUploadedImage({
+          file: req.file,
+          folder: 'campus-teachers',
+          preferredName: req.body?.preferredName || teacherUser.name || name || username || req.file?.originalname,
+          requireCloudinary: cloudinaryEnabled,
         });
-      }
 
-      teacherUser.campusPhotoUrl = normalizeStoredImageUrl(saved.url);
-      teacherUser.campusPhotoThumbUrl = normalizeStoredImageUrl(saved.thumbUrl);
-      await teacherUser.save();
+        if (cloudinaryEnabled && saved.storage !== 'cloudinary') {
+          return res.status(503).json({
+            message: 'La foto del docente solo se puede guardar en Cloudinary.',
+          });
+        }
 
-      return res.status(200).json({
-        teacher: serializeTeacherProfile(teacherUser),
+        teacherUser.campusPhotoUrl = normalizeStoredImageUrl(saved.url);
+        teacherUser.campusPhotoThumbUrl = normalizeStoredImageUrl(saved.thumbUrl);
+        await teacherUser.save();
+
+        return res.status(200).json({
+          teacher: serializeTeacherProfile(teacherUser),
+        });
       });
     } catch (processingError) {
       return res.status(400).json({
@@ -4068,6 +4246,8 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
     const dueAt = parseOptionalDate(req.body.dueAt);
     const scheduledClassDate = parseOptionalDate(req.body.scheduledClassDate);
     const scheduledClassSession = normalizeScheduledClassSession(req.body.scheduledClassSession);
+    const allowStudentSubmission = req.body.allowStudentSubmission === true
+      || ['true', '1', 'yes', 'on'].includes(String(req.body.allowStudentSubmission || '').trim().toLowerCase());
 
     if (!courseLookup.courseId && !courseLookup.sourceCourseKey && !(courseLookup.subject && (courseLookup.section || courseLookup.studentGradeKey))) {
       return res.status(400).json({ message: 'Invalid course id' });
@@ -4171,6 +4351,7 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
         scheduledClassDate: deliveryMode === 'class' ? scheduledClassDate : null,
         scheduledClassSession: deliveryMode === 'class' ? scheduledClassSession : null,
         attachments,
+        allowStudentSubmission,
         status,
         publishedAt: status === 'published' ? new Date() : null,
       });
@@ -4179,8 +4360,7 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
     });
 
     if (status === 'published') {
-      buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course })
-        .then((detail) => notifyCampusPostPublished({ schoolId, course, post, students: detail.students || [] }))
+      queueCampusPostPublishedNotifications({ schoolId, teacherUserId: userId, course, post })
         .catch((error) => console.warn(`[CAMPUS_POST_NOTIFY_WARNING] post=${post._id} error=${error.message}`));
     }
 
@@ -4213,6 +4393,181 @@ router.get('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (r
       submittedAt: request.submittedAt || request.createdAt,
       reviewedAt: request.reviewedAt || null,
     })));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/teacher/family-feed', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const accessQuery = await buildTeacherFamilyFeedAccessQuery(schoolId, userId);
+    const communications = await AcademicCommunication.find(accessQuery)
+      .sort({ sentAt: -1, createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return res.status(200).json(communications.map((item) => serializeTeacherFamilyFeedItem(item, userId)));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/teacher/family-feed/:communicationId/like', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const teacherUserId = new mongoose.Types.ObjectId(String(userId));
+    const communicationId = String(req.params.communicationId || '').trim();
+
+    if (!isValidObjectId(communicationId)) {
+      return res.status(400).json({ message: 'Invalid communication id' });
+    }
+
+    const accessQuery = await buildTeacherFamilyFeedAccessQuery(schoolId, userId);
+    const updatedCommunication = await AcademicCommunication.findOneAndUpdate(
+      { ...accessQuery, _id: communicationId },
+      [
+        {
+          $set: {
+            likes: buildToggledCampusFeedLikesExpression('$likes', teacherUserId, {
+              userId: teacherUserId,
+              name: getCampusActorName(req.user),
+              createdAt: new Date(),
+            }),
+          },
+        },
+      ],
+      { new: true }
+    );
+
+    if (!updatedCommunication) {
+      return res.status(404).json({ message: 'Publicación no encontrada.' });
+    }
+
+    return res.status(200).json(serializeTeacherFamilyFeedItem(updatedCommunication.toObject(), userId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/teacher/family-feed/:communicationId/comments', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const body = normalizeText(req.body?.body);
+
+    if (!body) {
+      return res.status(400).json({ message: 'Escribe un comentario.' });
+    }
+
+    const communication = await findTeacherAccessibleFamilyFeedCommunication({
+      schoolId,
+      teacherUserId: userId,
+      communicationId: req.params.communicationId,
+    });
+
+    if (!communication) {
+      return res.status(404).json({ message: 'Publicación no encontrada.' });
+    }
+
+    communication.comments.push({
+      userId,
+      name: getCampusActorName(req.user),
+      body: body.slice(0, 800),
+      likes: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await communication.save();
+    return res.status(201).json(serializeTeacherFamilyFeedItem(communication.toObject(), userId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/teacher/family-feed/:communicationId/comments/:commentId', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const communication = await findTeacherAccessibleFamilyFeedCommunication({
+      schoolId,
+      teacherUserId: userId,
+      communicationId: req.params.communicationId,
+    });
+
+    if (!communication) {
+      return res.status(404).json({ message: 'Publicación no encontrada.' });
+    }
+
+    const comment = communication.comments.id(req.params.commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Comentario no encontrado.' });
+    }
+
+    if (!sameCampusObjectId(comment.userId, userId)) {
+      return res.status(403).json({ message: 'Solo puedes borrar tus comentarios.' });
+    }
+
+    comment.deleteOne();
+    await communication.save();
+    return res.status(200).json(serializeTeacherFamilyFeedItem(communication.toObject(), userId));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/teacher/family-feed/:communicationId/comments/:commentId/like', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const teacherUserId = new mongoose.Types.ObjectId(String(userId));
+    const communicationId = String(req.params.communicationId || '').trim();
+    const commentId = String(req.params.commentId || '').trim();
+
+    if (!isValidObjectId(communicationId) || !isValidObjectId(commentId)) {
+      return res.status(400).json({ message: 'Invalid comment id' });
+    }
+
+    const accessQuery = await buildTeacherFamilyFeedAccessQuery(schoolId, userId);
+    const nextCommentLike = {
+      userId: teacherUserId,
+      name: getCampusActorName(req.user),
+      createdAt: new Date(),
+    };
+    const updatedCommunication = await AcademicCommunication.findOneAndUpdate(
+      { ...accessQuery, _id: communicationId, 'comments._id': new mongoose.Types.ObjectId(commentId) },
+      [
+        {
+          $set: {
+            comments: {
+              $map: {
+                input: { $ifNull: ['$comments', []] },
+                as: 'comment',
+                in: {
+                  $cond: [
+                    { $eq: ['$$comment._id', new mongoose.Types.ObjectId(commentId)] },
+                    {
+                      $mergeObjects: [
+                        '$$comment',
+                        {
+                          likes: buildToggledCampusFeedLikesExpression('$$comment.likes', teacherUserId, nextCommentLike),
+                        },
+                      ],
+                    },
+                    '$$comment',
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+      { new: true }
+    );
+
+    if (!updatedCommunication) {
+      return res.status(404).json({ message: 'Publicación no encontrada.' });
+    }
+
+    return res.status(200).json(serializeTeacherFamilyFeedItem(updatedCommunication.toObject(), userId));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -4348,8 +4703,10 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
 
     const request = await AcademicCommunicationRequest.create({
       schoolId,
+      publisherRole: 'teacher',
       teacherUserId: userId,
       teacherName: name,
+      requesterUserId: userId,
       courseId: linkedCourse?._id || null,
       courseTitle: normalizeText(linkedCourse?.title),
       title,
@@ -4367,6 +4724,9 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
       },
       status: 'pending',
       submittedAt: new Date(),
+      originalTitle: title,
+      originalBody: body,
+      originalEmailSubject: emailSubject || title,
     });
 
     return res.status(201).json({
@@ -4774,123 +5134,188 @@ router.get('/discipline-observations', async (req, res) => {
   }
 });
 
-router.patch('/teacher/posts/:id', requireCampusTeacherAccess, async (req, res) => {
-  try {
-    const { schoolId, userId } = req.user;
-    const { id } = req.params;
-
-    if (!isValidObjectId(id)) {
-      return res.status(400).json({ message: 'Invalid post id' });
-    }
-
-    const post = await CampusPost.findOne({ _id: id, schoolId, teacherUserId: userId }).populate('courseId', 'title');
-    if (!post) {
-      return res.status(404).json({ message: 'Post not found' });
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'courseId')) {
-      const courseId = normalizeRequestCourseId(req.body.courseId);
-      if (!isValidObjectId(courseId)) {
-        return res.status(400).json({ message: 'Invalid course id' });
-      }
-
-      const course = await resolveTeacherAssignedCourse({
-        schoolId,
-        teacherUserId: userId,
-        courseId,
-        sync: true,
-        allowInactive: true,
+router.patch('/teacher/posts/:id', requireCampusTeacherAccess, (req, res) => {
+  uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES)(req, res, async (uploadError) => {
+    if (uploadError) {
+      const statusCode = uploadError?.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(statusCode).json({
+        message: uploadError.message || 'No se pudieron procesar los archivos adjuntos.',
       });
-      if (!course) {
-        return res.status(404).json({ message: 'Assigned course not found' });
-      }
-
-      post.courseId = course._id;
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, 'title')) {
-      const title = normalizeText(req.body.title);
-      if (!title) {
-        return res.status(400).json({ message: 'title cannot be empty' });
-      }
-      post.title = title;
-    }
+    try {
+      const { schoolId, userId } = req.user;
+      const { id } = req.params;
 
-    if (Object.prototype.hasOwnProperty.call(req.body, 'body')) {
-      post.body = normalizeText(req.body.body);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'type')) {
-      const type = normalizePostType(req.body.type);
-      if (!type) {
-        return res.status(400).json({ message: 'type cannot be empty' });
-      }
-      post.type = type;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'deliveryMode')) {
-      const deliveryMode = normalizeText(req.body.deliveryMode);
-      if (!['date', 'class'].includes(deliveryMode)) {
-        return res.status(400).json({ message: 'Invalid delivery mode' });
-      }
-      post.deliveryMode = deliveryMode;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
-      const previousStatus = normalizeText(post.status);
-      const status = normalizeText(req.body.status);
-      if (!['draft', 'published', 'archived'].includes(status)) {
-        return res.status(400).json({ message: 'Invalid post status' });
-      }
-      post.status = status;
-      if (status === 'published' && !post.publishedAt) {
-        post.publishedAt = new Date();
-      }
-      if (status === 'draft') {
-        post.publishedAt = null;
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({ message: 'Invalid post id' });
       }
 
-      if (status === 'published' && previousStatus !== 'published') {
-        const course = await CampusCourse.findOne({ _id: post.courseId, schoolId }).lean();
-        if (course) {
-          buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course })
-            .then((detail) => notifyCampusPostPublished({ schoolId, course, post, students: detail.students || [] }))
-            .catch((error) => console.warn(`[CAMPUS_POST_NOTIFY_WARNING] post=${post._id} error=${error.message}`));
+      return await runWithSchoolContext(schoolId, async () => {
+        let post = await CampusPost.findOne({
+          _id: id,
+          schoolId,
+          teacherUserId: String(userId),
+        }).populate('courseId', 'title');
+
+        if (!post) {
+          const candidate = await CampusPost.findOne({ _id: id, schoolId }).populate('courseId', 'title');
+          if (candidate) {
+            const courseId = String(candidate.courseId?._id || candidate.courseId || '');
+            const assignedCourse = courseId
+              ? await resolveTeacherAssignedCourse({
+                schoolId,
+                teacherUserId: userId,
+                courseId,
+                sync: false,
+                allowInactive: true,
+              })
+              : null;
+            if (assignedCourse) {
+              post = candidate;
+            }
+          }
         }
-      }
+
+        if (!post) {
+          return res.status(404).json({ message: 'Post not found' });
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'courseId')) {
+          const courseId = normalizeRequestCourseId(req.body.courseId);
+          if (!isValidObjectId(courseId)) {
+            return res.status(400).json({ message: 'Invalid course id' });
+          }
+
+          const course = await resolveTeacherAssignedCourse({
+            schoolId,
+            teacherUserId: userId,
+            courseId,
+            sync: true,
+            allowInactive: true,
+          });
+          if (!course) {
+            return res.status(404).json({ message: 'Assigned course not found' });
+          }
+
+          post.courseId = course._id;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'title')) {
+          const title = normalizeText(req.body.title);
+          if (!title) {
+            return res.status(400).json({ message: 'title cannot be empty' });
+          }
+          post.title = title;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'body')) {
+          post.body = normalizeText(req.body.body);
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'allowStudentSubmission')) {
+          post.allowStudentSubmission = req.body.allowStudentSubmission === true
+            || ['true', '1', 'yes', 'on'].includes(String(req.body.allowStudentSubmission || '').trim().toLowerCase());
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'type')) {
+          const type = normalizePostType(req.body.type);
+          if (!type) {
+            return res.status(400).json({ message: 'type cannot be empty' });
+          }
+          post.type = type;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'deliveryMode')) {
+          const deliveryMode = normalizeText(req.body.deliveryMode);
+          if (!['date', 'class'].includes(deliveryMode)) {
+            return res.status(400).json({ message: 'Invalid delivery mode' });
+          }
+          post.deliveryMode = deliveryMode;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
+          const previousStatus = normalizeText(post.status);
+          const status = normalizeText(req.body.status);
+          if (!['draft', 'published', 'archived'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid post status' });
+          }
+          post.status = status;
+          if (status === 'published' && !post.publishedAt) {
+            post.publishedAt = new Date();
+          }
+          if (status === 'draft') {
+            post.publishedAt = null;
+          }
+
+          if (status === 'published' && previousStatus !== 'published') {
+            const course = await CampusCourse.findOne({ _id: post.courseId, schoolId }).lean();
+            if (course) {
+              queueCampusPostPublishedNotifications({ schoolId, teacherUserId: userId, course, post })
+                .catch((error) => console.warn(`[CAMPUS_POST_NOTIFY_WARNING] post=${post._id} error=${error.message}`));
+            }
+          }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'dueAt')) {
+          const dueAt = parseOptionalDate(req.body.dueAt);
+          if (dueAt === 'invalid') {
+            return res.status(400).json({ message: 'Invalid due date' });
+          }
+          post.dueAt = dueAt;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'scheduledClassDate')) {
+          const scheduledClassDate = parseOptionalDate(req.body.scheduledClassDate);
+          if (scheduledClassDate === 'invalid') {
+            return res.status(400).json({ message: 'Invalid class date' });
+          }
+          post.scheduledClassDate = scheduledClassDate;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(req.body, 'scheduledClassSession')) {
+          const scheduledClassSession = normalizeScheduledClassSession(req.body.scheduledClassSession);
+          if (!scheduledClassSession) {
+            return res.status(400).json({ message: 'Invalid class session' });
+          }
+          post.scheduledClassSession = scheduledClassSession;
+        }
+
+        const hasMaterialLinksField = Object.prototype.hasOwnProperty.call(req.body, 'materialLinks');
+        const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+        if (hasMaterialLinksField || uploadedFiles.length > 0) {
+          const existingAttachments = Array.isArray(post.attachments) ? post.attachments : [];
+          const existingFileAttachments = existingAttachments.filter((attachment) => {
+            const sourceType = normalizeText(attachment?.sourceType).toLowerCase();
+            return sourceType !== 'link';
+          });
+
+          let nextLinkAttachments = existingAttachments.filter((attachment) => {
+            const sourceType = normalizeText(attachment?.sourceType).toLowerCase();
+            return sourceType === 'link';
+          });
+
+          if (hasMaterialLinksField) {
+            const linksResult = normalizeMaterialLinks(req.body.materialLinks);
+            if (!linksResult.ok) {
+              return res.status(400).json({ message: linksResult.message });
+            }
+            nextLinkAttachments = linksResult.links;
+          }
+
+          const uploadedAttachments = await processStoredCampusMaterialFiles(uploadedFiles, { folder: 'campus-materials' });
+          post.attachments = [...nextLinkAttachments, ...existingFileAttachments, ...uploadedAttachments];
+        }
+
+        await post.save();
+        await post.populate('courseId', 'title');
+
+        return res.status(200).json(serializePost(post));
+      });
+    } catch (error) {
+      return res.status(500).json({ message: error.message });
     }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'dueAt')) {
-      const dueAt = parseOptionalDate(req.body.dueAt);
-      if (dueAt === 'invalid') {
-        return res.status(400).json({ message: 'Invalid due date' });
-      }
-      post.dueAt = dueAt;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'scheduledClassDate')) {
-      const scheduledClassDate = parseOptionalDate(req.body.scheduledClassDate);
-      if (scheduledClassDate === 'invalid') {
-        return res.status(400).json({ message: 'Invalid class date' });
-      }
-      post.scheduledClassDate = scheduledClassDate;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'scheduledClassSession')) {
-      const scheduledClassSession = normalizeScheduledClassSession(req.body.scheduledClassSession);
-      if (!scheduledClassSession) {
-        return res.status(400).json({ message: 'Invalid class session' });
-      }
-      post.scheduledClassSession = scheduledClassSession;
-    }
-
-    await post.save();
-    await post.populate('courseId', 'title');
-
-    return res.status(200).json(serializePost(post));
-  } catch (error) {
-    return res.status(500).json({ message: error.message });
-  }
+  });
 });
 
 router.get('/coordination/dashboard', requireCampusCoordinationAccess, async (req, res) => {

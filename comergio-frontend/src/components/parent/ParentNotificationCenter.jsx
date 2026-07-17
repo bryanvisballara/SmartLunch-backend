@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   dismissNotification,
   getNotifications,
@@ -18,6 +19,13 @@ function formatNotificationTime(value) {
   } catch (error) {
     return '';
   }
+}
+
+function resolveNotificationCopy(item = {}) {
+  const payload = item.payload && typeof item.payload === 'object' ? item.payload : {};
+  const title = String(item.title || payload.title || 'Notificación').trim() || 'Notificación';
+  const body = String(item.body || payload.body || '').trim();
+  return { title, body };
 }
 
 function NotificationBellIcon() {
@@ -46,6 +54,8 @@ function NotificationListItem({
   const [isDragging, setIsDragging] = useState(false);
   const startXRef = useRef(0);
   const currentOffsetRef = useRef(0);
+  const dragMovedRef = useRef(false);
+  const { title, body } = resolveNotificationCopy(item);
 
   const reset = () => {
     setOffsetX(0);
@@ -54,12 +64,16 @@ function NotificationListItem({
 
   const beginDrag = (clientX) => {
     startXRef.current = clientX;
+    dragMovedRef.current = false;
     setIsDragging(true);
   };
 
   const moveDrag = (clientX) => {
     if (!isDragging) return;
     const delta = clientX - startXRef.current;
+    if (Math.abs(delta) > 6) {
+      dragMovedRef.current = true;
+    }
     const next = Math.min(0, Math.max(-96, delta + (currentOffsetRef.current < -40 ? -72 : 0)));
     setOffsetX(next);
   };
@@ -79,16 +93,20 @@ function NotificationListItem({
       <div className="parent-notification-item__actions" aria-hidden={offsetX > -40}>
         <button
           className="parent-notification-item__delete"
-          onClick={() => onDismiss(item)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDismiss(item);
+          }}
           type="button"
         >
           Eliminar
         </button>
       </div>
-      <button
+
+      <div
         className="parent-notification-item__content"
         onClick={() => {
-          if (offsetX < -40) {
+          if (dragMovedRef.current || offsetX < -40) {
             reset();
             return;
           }
@@ -101,13 +119,33 @@ function NotificationListItem({
         }}
         onPointerMove={(event) => moveDrag(event.clientX)}
         onPointerUp={endDrag}
+        role="button"
         style={{ transform: `translateX(${offsetX}px)` }}
-        type="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpen(item);
+          }
+        }}
       >
-        <strong>{item.title || 'Notificación'}</strong>
-        <span>{item.body || ''}</span>
-        <small>{formatNotificationTime(item.createdAt)}</small>
-      </button>
+        <div className="parent-notification-item__copy">
+          <p className="parent-notification-item__title">{title}</p>
+          {body ? <p className="parent-notification-item__body">{body}</p> : null}
+          <p className="parent-notification-item__time">{formatNotificationTime(item.createdAt)}</p>
+        </div>
+        <button
+          aria-label="Eliminar notificación"
+          className="parent-notification-item__close"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDismiss(item);
+          }}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
     </article>
   );
 }
@@ -121,6 +159,9 @@ export default function ParentNotificationCenter({
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [panelStyle, setPanelStyle] = useState({});
+  const rootRef = useRef(null);
+  const bellRef = useRef(null);
   const panelRef = useRef(null);
 
   const syncBadge = useCallback(async (count) => {
@@ -168,18 +209,52 @@ export default function ParentNotificationCenter({
     };
   }, [enabled, refreshNotifications]);
 
+  useLayoutEffect(() => {
+    if (!isOpen || !bellRef.current) return undefined;
+
+    const placePanel = () => {
+      const rect = bellRef.current.getBoundingClientRect();
+      const width = Math.min(360, window.innerWidth - 24);
+      const right = Math.max(12, window.innerWidth - rect.right);
+      const top = Math.min(rect.bottom + 10, window.innerHeight - 120);
+      setPanelStyle({
+        position: 'fixed',
+        top: `${top}px`,
+        right: `${right}px`,
+        width: `${width}px`,
+        maxHeight: `${Math.max(180, window.innerHeight - top - 16)}px`,
+      });
+    };
+
+    placePanel();
+    window.addEventListener('resize', placePanel);
+    window.addEventListener('scroll', placePanel, true);
+    return () => {
+      window.removeEventListener('resize', placePanel);
+      window.removeEventListener('scroll', placePanel, true);
+    };
+  }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) return undefined;
     const onPointerDown = (event) => {
-      if (!panelRef.current) return;
-      if (panelRef.current.contains(event.target)) return;
+      const target = event.target;
+      if (rootRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
       setIsOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('touchstart', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('touchstart', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [isOpen]);
 
@@ -217,8 +292,51 @@ export default function ParentNotificationCenter({
     return null;
   }
 
+  const panel = isOpen ? createPortal(
+    <div
+      aria-label="Notificaciones"
+      className="parent-notification-panel"
+      ref={panelRef}
+      role="dialog"
+      style={panelStyle}
+    >
+      <div className="parent-notification-panel__head">
+        <strong>Notificaciones</strong>
+        <button
+          className="parent-notification-panel__close"
+          onClick={() => setIsOpen(false)}
+          type="button"
+        >
+          Cerrar
+        </button>
+      </div>
+
+      {loading && items.length === 0 ? (
+        <p className="parent-notification-empty">Cargando...</p>
+      ) : null}
+
+      {!loading && items.length === 0 ? (
+        <p className="parent-notification-empty">No tienes notificaciones.</p>
+      ) : null}
+
+      {items.length > 0 ? (
+        <div className="parent-notification-list">
+          {items.map((item) => (
+            <NotificationListItem
+              key={String(item.id || item._id)}
+              item={item}
+              onDismiss={handleDismiss}
+              onOpen={handleOpen}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>,
+    document.body,
+  ) : null;
+
   return (
-    <div className="parent-notification-center" ref={panelRef}>
+    <div className="parent-notification-center" ref={rootRef}>
       <button
         aria-expanded={isOpen}
         aria-label={`Notificaciones${unreadCount > 0 ? `, ${unreadCount} sin leer` : ''}`}
@@ -230,6 +348,7 @@ export default function ParentNotificationCenter({
           }
           openPanel();
         }}
+        ref={bellRef}
         type="button"
       >
         <NotificationBellIcon />
@@ -239,37 +358,7 @@ export default function ParentNotificationCenter({
           </span>
         ) : null}
       </button>
-
-      {isOpen ? (
-        <div className="parent-notification-panel" role="dialog" aria-label="Notificaciones">
-          <div className="parent-notification-panel__head">
-            <strong>Notificaciones</strong>
-            <button
-              className="parent-notification-panel__close"
-              onClick={() => setIsOpen(false)}
-              type="button"
-            >
-              Cerrar
-            </button>
-          </div>
-          {loading && items.length === 0 ? (
-            <p className="parent-notification-empty">Cargando...</p>
-          ) : null}
-          {!loading && items.length === 0 ? (
-            <p className="parent-notification-empty">No tienes notificaciones.</p>
-          ) : null}
-          <div className="parent-notification-list">
-            {items.map((item) => (
-              <NotificationListItem
-                key={String(item.id || item._id)}
-                item={item}
-                onDismiss={handleDismiss}
-                onOpen={handleOpen}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {panel}
     </div>
   );
 }

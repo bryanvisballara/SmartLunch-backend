@@ -1,11 +1,43 @@
 .staff-announcements-panel {
   display: grid;
-  gap: 1.25rem;
+  gap: 1.5rem;
+}
+
+.staff-announcements-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.2rem 0.15rem;
+}
+
+.staff-announcements-panel__head-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 3.25rem;
+  border-radius: 16px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  box-shadow: 0 10px 24px rgb(37 99 235 / 22%);
+}
+
+.staff-announcements-panel__head-icon svg {
+  width: 1.65rem;
+  height: 1.65rem;
 }
 
 .staff-announcements-panel__head h2 {
-  margin: 0.2rem 0;
-  font-size: 1.35rem;
+  margin: 0.12rem 0 0.2rem;
+  font-size: clamp(1.45rem, 2vw, 1.8rem);
+  color: #0f172a;
+  letter-spacing: -0.025em;
+}
+
+.staff-announcements-panel__head p {
+  margin: 0;
+  line-height: 1.5;
 }
 
 .staff-announcements-panel__head p,
@@ -17,9 +49,11 @@
 
 .staff-announcements-panel__kicker {
   display: inline-block;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
+  color: #2563eb;
 }
 
 .staff-announcements-panel__notice {
@@ -45,62 +79,236 @@
 .staff-announcements-card {
   background: #fff;
   border: 1px solid #e5e9f0;
-  border-radius: 14px;
-  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  padding: 1.25rem;
 }
 
 .staff-announcements-compose,
 .staff-announcements-list,
 .staff-announcements-sent {
   display: grid;
-  gap: 0.85rem;
+  gap: 1.15rem;
+}
+
+.staff-announcements-compose {
+  overflow: hidden;
+  padding: 0;
+  border-color: #dbe4f0;
+  box-shadow: 0 12px 35px rgb(15 23 42 / 6%);
+}
+
+.staff-announcements-compose__head {
+  padding: 1.35rem 1.5rem;
+  background:
+    radial-gradient(circle at 95% 10%, rgb(99 102 241 / 12%), transparent 32%),
+    linear-gradient(135deg, #f8fbff 0%, #f4f7ff 100%);
+  border-bottom: 1px solid #e7edf7;
+}
+
+.staff-announcements-compose__head h3 {
+  margin: 0.2rem 0 0.3rem;
+  color: #0f172a;
+  font-size: 1.18rem;
+}
+
+.staff-announcements-compose__head p,
+.staff-announcements-roles__head p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.staff-announcements-compose__step {
+  color: #2563eb;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.staff-announcements-compose__fields {
+  display: grid;
+  gap: 1rem;
+  padding: 0 1.5rem;
 }
 
 .staff-announcements-compose label,
 .staff-announcements-roles {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.5rem;
   font-size: 0.92rem;
+  font-weight: 650;
   color: #334155;
 }
 
 .staff-announcements-compose input,
 .staff-announcements-compose textarea {
   width: 100%;
-  border: 1px solid #d7dee8;
-  border-radius: 10px;
-  padding: 0.7rem 0.8rem;
+  border: 1px solid #cfd8e6;
+  border-radius: 12px;
+  padding: 0.82rem 0.9rem;
   font: inherit;
+  font-weight: 400;
+  color: #0f172a;
+  background: #fbfdff;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.staff-announcements-compose textarea {
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.staff-announcements-compose input:focus,
+.staff-announcements-compose textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgb(59 130 246 / 11%);
 }
 
 .staff-announcements-roles {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1.15rem;
+  margin: 0 1.5rem;
+  background: #f8fafc;
+}
+
+.staff-announcements-roles__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.staff-announcements-roles__head h4 {
+  margin: 0 0 0.15rem;
+  color: #0f172a;
+  font-size: 0.98rem;
+  font-weight: 750;
+}
+
+.staff-announcements-roles__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.staff-announcements-roles__actions span {
+  margin-right: 0.25rem;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.staff-announcements-roles__actions button {
   border: 0;
-  padding: 0;
-  margin: 0;
+  padding: 0.25rem 0.4rem;
+  color: #2563eb;
+  background: transparent;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .staff-announcements-roles__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 0.45rem 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 0.65rem;
 }
 
 .staff-announcements-roles__grid label {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  position: relative;
+  gap: 0.65rem;
+  min-height: 48px;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.staff-announcements-roles__grid label:hover {
+  border-color: #93c5fd;
+  transform: translateY(-1px);
+}
+
+.staff-announcements-roles__grid label:has(input:checked) {
+  border-color: #60a5fa;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.staff-announcements-roles__grid input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.staff-announcements-roles__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: 0 0 1.35rem;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 6px;
+  color: transparent;
+  background: #fff;
+  font-size: 0.76rem;
+}
+
+.staff-announcements-roles__grid input:checked + .staff-announcements-roles__check {
+  border-color: #2563eb;
+  color: #fff;
+  background: #2563eb;
+}
+
+.staff-announcements-compose__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.5rem;
+  border-top: 1px solid #e8edf5;
+  background: #fbfcfe;
+}
+
+.staff-announcements-compose__footer > span {
+  color: #64748b;
+  font-size: 0.82rem;
 }
 
 .staff-announcements-btn {
-  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
   border: 0;
-  border-radius: 10px;
-  background: #2563eb;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
   color: #fff;
   font: inherit;
-  font-weight: 600;
-  padding: 0.7rem 1rem;
+  font-weight: 700;
+  padding: 0.78rem 1.05rem;
+  box-shadow: 0 7px 16px rgb(37 99 235 / 20%);
   cursor: pointer;
+}
+
+.staff-announcements-btn svg {
+  width: 1.15rem;
+  height: 1.15rem;
 }
 
 .staff-announcements-btn:disabled {
@@ -242,6 +450,42 @@
 
 @media (max-width: 860px) {
   .staff-announcements-sent__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-announcements-roles__head,
+  .staff-announcements-compose__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .staff-announcements-roles__actions {
+    justify-content: flex-start;
+  }
+
+  .staff-announcements-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 540px) {
+  .staff-announcements-panel__head {
+    align-items: flex-start;
+  }
+
+  .staff-announcements-compose__head,
+  .staff-announcements-compose__fields,
+  .staff-announcements-compose__footer {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .staff-announcements-roles {
+    margin-right: 1rem;
+    margin-left: 1rem;
+  }
+
+  .staff-announcements-roles__grid {
     grid-template-columns: 1fr;
   }
 }

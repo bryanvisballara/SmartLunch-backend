@@ -527,7 +527,7 @@ function CoordinationCampusHome() {
                   onChange={(event) => setPlannerCycleDraft((draft) => ({ ...draft, publishAsAnnouncement: event.target.checked }))}
                   type="checkbox"
                 />
-                {' '}También publicar en Comunicados para docentes
+                {' '}También publicar en Comunicados internos para docentes
               </span>
             </label>
             <button className="campus-coordination__save-button" disabled={createPlannerCycleMutation.isPending} type="submit">

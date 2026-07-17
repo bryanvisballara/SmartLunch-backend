@@ -37,6 +37,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Comergio necesita acceso a la cámara para tomar fotos y grabar videos para publicaciones escolares.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Comergio necesita acceso al micrófono para grabar el audio de los videos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Comergio necesita acceso a tus fotos y videos para adjuntarlos a publicaciones escolares.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

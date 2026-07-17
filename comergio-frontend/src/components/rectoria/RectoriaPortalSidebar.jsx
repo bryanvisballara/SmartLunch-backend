@@ -12,7 +12,7 @@ const COORDINATION_NAV = [
   { type: 'item', key: 'overview', label: 'Tablero de nivel' },
   { type: 'item', key: 'community_reports', label: 'Te escuchamos' },
   { type: 'item', key: 'communications', label: 'Comunicados a familias' },
-  { type: 'item', key: 'staff_announcements', label: 'Comunicados' },
+  { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
   { type: 'item', key: 'resources', label: 'Recursos y compras' },
   { type: 'item', key: 'schedule', label: 'Horario académico' },
 ];

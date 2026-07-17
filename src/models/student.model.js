@@ -39,6 +39,18 @@ const studentSchema = new mongoose.Schema(
     schoolCode: { type: String, trim: true },
     grade: { type: String, trim: true },
     course: { type: String, trim: true, default: '' },
+    cohortHistory: {
+      type: [
+        {
+          key: { type: String, trim: true, required: true },
+          academicYear: { type: String, trim: true, default: '' },
+          grade: { type: String, trim: true, default: '' },
+          course: { type: String, trim: true, default: '' },
+          joinedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     gender: { type: String, enum: ['female', 'male', 'other', ''], default: '' },
     documentType: { type: String, enum: ['CC', 'TI', 'CE', 'PP', 'NIT', ''], default: '' },
     documentNumber: { type: String, trim: true, default: '' },

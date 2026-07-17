@@ -61,7 +61,7 @@ const emptyDocumentForm = {
 
 const ADMISSIONS_VIEW_OPTIONS = [
   { key: 'dashboard', label: 'Dashboard', status: '', empty: '' },
-  { key: 'staff_announcements', label: 'Comunicados', status: '', empty: '' },
+  { key: 'staff_announcements', label: 'Comunicados internos', status: '', empty: '' },
   { key: 'agenda', label: 'Agenda', status: '', empty: '' },
   { key: 'aspirantes', label: 'Aspirantes', status: 'active', empty: 'No hay aspirantes con esos filtros.' },
   { key: 'desistidos', label: 'Desistidos', status: 'withdrawn', empty: 'No hay desistidos con esos filtros.' },
@@ -1205,9 +1205,9 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
           {currentView === 'staff_announcements' && !showApplicantDetail ? (
             <section className="dashboard-card">
               <StaffAnnouncementsPanel
-                description="Comunicados de rectoría y coordinación. Confirma la lectura para registrar el acuse de recibo."
+                description="Mensajes internos de rectoría y coordinación. Confirma la lectura para registrar el acuse de recibo."
                 mode="inbox"
-                title="Comunicados"
+                title="Comunicados internos"
               />
             </section>
           ) : null}

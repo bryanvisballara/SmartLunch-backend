@@ -22,6 +22,7 @@ import { useStudentGamesAvailable } from '../../hooks/useStudentGamesAvailable';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
 import {
+  createCommunityPublication,
   createParentAcademicFeedComment,
   deleteParentAcademicFeedComment,
   getParentAcademicAttendance,
@@ -32,7 +33,10 @@ import {
   payParentAcademicCharge,
   toggleParentAcademicFeedCommentLike,
   toggleParentAcademicFeedLike,
+  uploadCommunityPublicationMedia,
 } from '../../services/parent.service';
+import StudentAssignmentsPanel from '../components/StudentAssignmentsPanel';
+import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import { getParentNursingRecords } from '../../services/nursing.service';
 import { getParentPsychologyRecords } from '../../services/psychology.service';
 import { getSchoolDisplayName } from '../../lib/schools';
@@ -56,7 +60,7 @@ import {
   getWompiMatriculaPaymentStatus,
 } from '../../services/enrollmentMatricula.service';
 import { isMillenniumSchool, shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
-import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance, getStudentAcademicFeed } from '../../services/studentPortal.service';
+import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance } from '../../services/studentPortal.service';
 import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
 import ColibriFlappyGame from '../../components/games/ColibriFlappyGame';
 import colibriGameCover from '../../assets/colibrisinfondo.png';
@@ -210,6 +214,13 @@ const academicMenuItems = [
     navShortTitle: 'Desempeño',
     description: 'Dashboard académico, promedio general, rendimiento por materia, evolución y ranking en el curso.',
     icon: 'performance',
+  },
+  {
+    id: 'academic-assignments',
+    title: 'Asignaciones',
+    navShortTitle: 'Asignaciones',
+    description: 'Tareas y actividades publicadas por tus docentes, con materiales y entregas.',
+    icon: 'tasks',
   },
   {
     id: 'academic-attendance',
@@ -1145,18 +1156,49 @@ function academicFeedItemMatchesChild(item, child) {
   const childGradeKey = normalizeLookupKey(child?.grade);
   const childCourseKey = normalizeLookupKey(child?.course || child?.grade);
   const audienceType = normalizeLookupKey(item?.audienceType);
-  const studentTargets = Array.isArray(item?.studentTargets) ? item.studentTargets.map((target) => String(target?._id || target)) : [];
+  const cohortKey = String(item?.cohortKey || '').trim();
+  const childCohortKeys = new Set(
+    (Array.isArray(child?.cohortHistory) ? child.cohortHistory : [])
+      .map((entry) => String(entry?.key || '').trim())
+      .filter(Boolean)
+  );
+  const studentTargets = Array.isArray(item?.studentTargets)
+    ? item.studentTargets.map((target) => String(target?._id || target))
+    : [];
+  const recipientStudentIds = Array.isArray(item?.recipientStudentIds)
+    ? item.recipientStudentIds.map((target) => String(target?._id || target))
+    : [];
   const gradeTargets = Array.isArray(item?.gradeTargets) ? item.gradeTargets.map(normalizeLookupKey) : [];
   const courseTargets = Array.isArray(item?.courseTargets) ? item.courseTargets.map(normalizeLookupKey) : [];
 
-  if (audienceType === 'general' || (!studentTargets.length && !gradeTargets.length && !courseTargets.length)) {
+  if (audienceType === 'general' || audienceType === '') {
     return true;
   }
 
-  return (childId && studentTargets.includes(childId))
+  if (audienceType === 'course_students') {
+    return Boolean(
+      (childId && (recipientStudentIds.includes(childId) || studentTargets.includes(childId)))
+      || (cohortKey && childCohortKeys.has(cohortKey))
+    );
+  }
+
+  if (cohortKey && childCohortKeys.has(cohortKey)) {
+    return true;
+  }
+
+  return (childId && (recipientStudentIds.includes(childId) || studentTargets.includes(childId)))
     || (childGradeKey && gradeTargets.includes(childGradeKey))
     || (childCourseKey && courseTargets.includes(childCourseKey))
     || (childGradeKey && courseTargets.includes(childGradeKey));
+}
+
+function getCommunityAudienceLabel(audienceType = '') {
+  const normalized = normalizeLookupKey(audienceType);
+  if (normalized === 'course_students') return 'Curso · solo alumnos';
+  if (normalized === 'course') return 'Curso · familias';
+  if (normalized === 'grade') return 'Grado';
+  if (normalized === 'individual') return 'Individual';
+  return 'Colegio';
 }
 
 function createEmptyParentAttendanceSummary() {
@@ -3833,13 +3875,16 @@ function ParentAcademicContent({
   isPerformanceLoading = false,
   studentPortalMode = false,
   onSelectAcademicView = null,
+  onOpenAssignment = null,
+  focusedAssignmentId = '',
+  onClearFocusedAssignment = null,
 }) {
   const academicWorkspace = useMemo(() => (
     selectedChild?.isRealParentChild
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
       : buildAcademicWorkspace(selectedChild)
   ), [selectedChild]);
-  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance'].includes(activeView)
+  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance', 'academic-assignments'].includes(activeView)
     ? 'academic-performance'
     : activeView;
   const weeklyClassSchedule = useMemo(() => {
@@ -4272,7 +4317,7 @@ function ParentAcademicContent({
             {typeof onSelectAcademicView === 'function' ? (
               <button
                 className="campus-parent-mobile__assignments-link"
-                onClick={() => onSelectAcademicView('academic-calendar')}
+                onClick={() => onSelectAcademicView(studentPortalMode ? 'academic-assignments' : 'academic-calendar')}
                 type="button"
               >
                 Ver todas
@@ -4283,29 +4328,41 @@ function ParentAcademicContent({
           {parentAcademicCalendar.isLoading ? <p className="campus-parent-mobile__academic-calendar-status">Cargando calendario académico...</p> : null}
           {parentAcademicCalendar.error ? <p className="campus-parent-mobile__academic-calendar-status is-error">{parentAcademicCalendar.error}</p> : null}
           <div className="campus-parent-mobile__assignments-list">
-            {weeklyAssignedActivities.length ? weeklyAssignedActivities.slice(0, 5).map((activity) => (
-              <article className="campus-parent-mobile__assignment-card" key={activity.id}>
-                <span className={`campus-parent-mobile__assignment-card-icon is-${activity.accent || 'task'}`} aria-hidden="true">
-                  <ParentAssignmentTypeIcon variant={activity.iconVariant || 'task'} />
-                </span>
-                <div className="campus-parent-mobile__assignment-card-copy">
-                  <span className={`campus-parent-mobile__assignment-card-type is-${activity.accent || 'task'}`}>
-                    {activity.typeLabel || 'TAREA'}
+            {weeklyAssignedActivities.length ? weeklyAssignedActivities.slice(0, 5).map((activity) => {
+              const canOpenAssignment = studentPortalMode
+                && activity.id
+                && typeof onOpenAssignment === 'function';
+              const CardTag = canOpenAssignment ? 'button' : 'article';
+
+              return (
+                <CardTag
+                  className={`campus-parent-mobile__assignment-card${canOpenAssignment ? ' is-clickable' : ''}`}
+                  key={activity.id}
+                  onClick={canOpenAssignment ? () => onOpenAssignment(activity.id) : undefined}
+                  type={canOpenAssignment ? 'button' : undefined}
+                >
+                  <span className={`campus-parent-mobile__assignment-card-icon is-${activity.accent || 'task'}`} aria-hidden="true">
+                    <ParentAssignmentTypeIcon variant={activity.iconVariant || 'task'} />
                   </span>
-                  <strong>{activity.title}</strong>
-                  <small>{activity.subtitle}</small>
-                </div>
-                <div className="campus-parent-mobile__assignment-card-due">
-                  <span className="campus-parent-mobile__assignment-card-date">
-                    <ParentAssignmentCalendarIcon />
-                    {activity.meta || 'Sin fecha'}
-                  </span>
-                  {activity.remainingLabel ? (
-                    <span className="campus-parent-mobile__assignment-card-remaining">{activity.remainingLabel}</span>
-                  ) : null}
-                </div>
-              </article>
-            )) : (
+                  <div className="campus-parent-mobile__assignment-card-copy">
+                    <span className={`campus-parent-mobile__assignment-card-type is-${activity.accent || 'task'}`}>
+                      {activity.typeLabel || 'TAREA'}
+                    </span>
+                    <strong>{activity.title}</strong>
+                    <small>{activity.subtitle}</small>
+                  </div>
+                  <div className="campus-parent-mobile__assignment-card-due">
+                    <span className="campus-parent-mobile__assignment-card-date">
+                      <ParentAssignmentCalendarIcon />
+                      {activity.meta || 'Sin fecha'}
+                    </span>
+                    {activity.remainingLabel ? (
+                      <span className="campus-parent-mobile__assignment-card-remaining">{activity.remainingLabel}</span>
+                    ) : null}
+                  </div>
+                </CardTag>
+              );
+            }) : (
               <article className="campus-parent-mobile__performance-empty-card">
                 <strong>Sin asignaciones próximas</strong>
                 <span>Las tareas, quices, talleres o exámenes aparecerán cuando el colegio los publique.</span>
@@ -4624,6 +4681,30 @@ function ParentAcademicContent({
             </div>
           </div>
         ) : null}
+      </section>
+    );
+  }
+
+  if (effectiveActiveView === 'academic-assignments') {
+    if (!studentPortalMode) {
+      return (
+        <section className="campus-parent-mobile__academic-page">
+          <section className="campus-parent-mobile__academic-section">
+            <article className="campus-parent-mobile__performance-empty-card">
+              <strong>Asignaciones</strong>
+              <span>Esta sección está disponible en el portal del alumno.</span>
+            </article>
+          </section>
+        </section>
+      );
+    }
+
+    return (
+      <section className="campus-parent-mobile__academic-page">
+        <StudentAssignmentsPanel
+          initialAssignmentId={focusedAssignmentId}
+          onClearInitialAssignment={onClearFocusedAssignment}
+        />
       </section>
     );
   }
@@ -5423,9 +5504,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [parentOverview, setParentOverview] = useState(null);
   const [parentAppFeatures, setParentAppFeatures] = useState(defaultParentAppFeatures);
   const [parentOverviewLoading, setParentOverviewLoading] = useState(true);
+  const [studentPortalLoadError, setStudentPortalLoadError] = useState('');
+  const [studentPortalRetryCount, setStudentPortalRetryCount] = useState(0);
   const [selectedChildId, setSelectedChildId] = useState('');
   const [localActiveSection, setLocalActiveSection] = useState('home');
   const [activeAcademicView, setActiveAcademicView] = useState('academic-performance');
+  const [focusedAssignmentId, setFocusedAssignmentId] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showFinanceChildOptions, setShowFinanceChildOptions] = useState(false);
   const [showAcademicMenu, setShowAcademicMenu] = useState(false);
@@ -5467,8 +5551,19 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [pendingFeedCommentLikeKeys, setPendingFeedCommentLikeKeys] = useState([]);
   const [feedRefreshCount, setFeedRefreshCount] = useState(0);
   const [academicRefreshCount, setAcademicRefreshCount] = useState(0);
+  const [showCommunityCamera, setShowCommunityCamera] = useState(false);
+  const [showCommunityComposer, setShowCommunityComposer] = useState(false);
+  const [communityMediaUploading, setCommunityMediaUploading] = useState(false);
+  const [communityPublishing, setCommunityPublishing] = useState(false);
+  const [communityDraft, setCommunityDraft] = useState({
+    title: '',
+    body: '',
+    audienceType: 'general',
+    media: [],
+  });
   const pendingFeedLikeIdsRef = useRef(new Set());
   const pendingFeedCommentLikeKeysRef = useRef(new Set());
+  const communitySwipeStartRef = useRef(null);
   const userMenuRef = useRef(null);
   const normalizedRouteBase = useMemo(() => normalizeRouteBase(routeBase), [routeBase]);
   const usesRoutedSections = Boolean(normalizedRouteBase);
@@ -5573,6 +5668,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     () => parentCareMenuItems.filter((item) => parentAppFeatures[item.id] !== false),
     [parentAppFeatures]
   );
+  const visibleAcademicMenuItems = useMemo(
+    () => (studentPortalMode
+      ? academicMenuItems
+      : academicMenuItems.filter((item) => item.id !== 'academic-assignments')),
+    [studentPortalMode]
+  );
 
   const realParentChildren = useMemo(
     () => (parentOverview?.children || []).map((child) => buildParentChildFromOverview(child, parentOverview)),
@@ -5625,6 +5726,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     setParentOverviewLoading(true);
 
     if (studentPortalMode) {
+      setStudentPortalLoadError('');
       getStudentPortalOverview()
         .then((response) => {
           if (cancelled) {
@@ -5633,11 +5735,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
           setParentOverview(mappedOverview);
           setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
+          setStudentPortalLoadError('');
         })
-        .catch(() => {
+        .catch((error) => {
           if (!cancelled) {
             setParentOverview({ children: [] });
             setParentAppFeatures({ ...defaultParentAppFeatures, academic: true, games: true });
+            setStudentPortalLoadError(
+              error?.response?.data?.message
+              || 'No se pudo cargar el portal del alumno. Intenta de nuevo.'
+            );
           }
         })
         .finally(() => {
@@ -5676,7 +5783,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     return () => {
       cancelled = true;
     };
-  }, [selectedChildId, studentPortalMode, user]);
+  }, [selectedChildId, studentPortalMode, studentPortalRetryCount, user]);
 
   useEffect(() => {
     if (!workspace.children.length) {
@@ -5727,9 +5834,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     let cancelled = false;
     setAcademicLoading(true);
 
-    const feedRequest = studentPortalMode
-      ? getStudentAcademicFeed()
-      : getParentAcademicFeed();
+    const feedRequest = getParentAcademicFeed();
     const billingRequest = studentPortalMode
       ? Promise.resolve({ data: null })
       : getParentAcademicBilling();
@@ -6082,7 +6187,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       if (['home', 'academic'].includes(activeSection)) {
         setAcademicLoading(true);
         refreshTasks.push(
-          getStudentAcademicFeed()
+          getParentAcademicFeed()
             .then((response) => setAcademicFeed(response.data || []))
             .catch(() => setFeedActionMessage('No se pudo actualizar el feed.'))
             .finally(() => setAcademicLoading(false))
@@ -6254,6 +6359,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   useEffect(() => {
     setFinancePaymentsPage(1);
+  }, [selectedChildId]);
+
+  useEffect(() => {
+    setFocusedAssignmentId('');
   }, [selectedChildId]);
 
   const selectedFinanceSummary = useMemo(() => {
@@ -6587,12 +6696,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       return workspace.announcements;
     }
 
-    const matchedItems = academicFeed.filter((item) => {
-      if (isAllChildrenFeedSelected) {
-        return workspace.children.some((child) => academicFeedItemMatchesChild(item, child));
-      }
-      return academicFeedItemMatchesChild(item, selectedChild);
-    });
+    const matchedItems = studentPortalMode
+      ? academicFeed
+      : academicFeed.filter((item) => {
+        if (isAllChildrenFeedSelected) {
+          return workspace.children.some((child) => academicFeedItemMatchesChild(item, child));
+        }
+        return academicFeedItemMatchesChild(item, selectedChild);
+      });
     const uniqueItems = Array.from(matchedItems.reduce((accumulator, item) => {
       const itemKey = getAcademicFeedItemKey(item);
       const fallbackKey = `${normalizeLookupKey(item.title)}:${normalizeLookupKey(item.body)}:${item.sentAt || item.createdAt || ''}`;
@@ -6609,7 +6720,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       authorName: item.authorName || item.createdByName || 'Secretaría académica',
       authorPhotoUrl: resolveIosCompatibleImageUrl(item.authorThumbUrl || item.authorPhotoUrl || ''),
       publishedAt: item.publishedAtLabel || '',
-      category: 'Secretaría académica',
+      category: getCommunityAudienceLabel(item.audienceType),
+      audienceType: item.audienceType || 'general',
       imageLabel: item.title || 'Comunicado académico',
       media: Array.isArray(item.media) ? item.media : [],
       captionTitle: item.title || '',
@@ -6620,7 +6732,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       commentsCount: Number(item.commentsCount || 0),
       comments: Array.isArray(item.comments) ? item.comments : [],
     }));
-  }, [academicFeed, isAllChildrenFeedSelected, selectedChild, workspace.announcements, workspace.children]);
+  }, [academicFeed, isAllChildrenFeedSelected, selectedChild, studentPortalMode, workspace.announcements, workspace.children]);
 
   const selectedLikesAnnouncement = feedAnnouncements.find((announcement) => announcement.id === feedLikesSheetId) || null;
   const selectedCommentsAnnouncement = feedAnnouncements.find((announcement) => announcement.id === feedCommentsSheetId) || null;
@@ -6704,6 +6816,218 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       setPendingFeedCommentLikeKeys((previous) => previous.filter((key) => key !== pendingKey));
     }
   };
+
+  const resetCommunityDraft = () => {
+    setCommunityDraft({
+      title: '',
+      body: '',
+      audienceType: 'general',
+      media: [],
+    });
+  };
+
+  const uploadCommunityMediaFiles = async (files, { fromCamera = false } = {}) => {
+    const selectedFiles = Array.from(files || []).filter((file) => (
+      String(file?.type || '').startsWith('image/')
+      || String(file?.type || '').startsWith('video/')
+    ));
+    if (!selectedFiles.length) {
+      return;
+    }
+
+    if ((communityDraft.media || []).length + selectedFiles.length > 8) {
+      setFeedActionMessage('Puedes adjuntar hasta 8 fotos o videos por publicación.');
+      return;
+    }
+
+    setCommunityMediaUploading(true);
+    setFeedActionMessage('');
+    try {
+      const uploadedMedia = [];
+      for (let startIndex = 0; startIndex < selectedFiles.length; startIndex += 6) {
+        const response = await uploadCommunityPublicationMedia(selectedFiles.slice(startIndex, startIndex + 6));
+        uploadedMedia.push(...(response.media || []));
+      }
+      setCommunityDraft((currentDraft) => ({
+        ...currentDraft,
+        media: [...(currentDraft.media || []), ...uploadedMedia].slice(0, 8),
+      }));
+      setShowCommunityComposer(true);
+      if (fromCamera) {
+        setShowCommunityCamera(false);
+      }
+      setFeedActionMessage(
+        selectedFiles.length === 1
+          ? 'Contenido listo para publicar.'
+          : `${selectedFiles.length} archivos listos para publicar.`
+      );
+    } catch (error) {
+      setFeedActionMessage(error?.response?.data?.message || error?.message || 'No se pudo subir el archivo.');
+    } finally {
+      setCommunityMediaUploading(false);
+    }
+  };
+
+  const onCommunityMediaSelected = async (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+    await uploadCommunityMediaFiles(selectedFiles);
+  };
+
+  const onRemoveCommunityMedia = (mediaIndex) => {
+    setCommunityDraft((currentDraft) => ({
+      ...currentDraft,
+      media: (currentDraft.media || []).filter((_, index) => index !== mediaIndex),
+    }));
+  };
+
+  const onSubmitCommunityPublication = async (event) => {
+    event.preventDefault();
+    const title = String(communityDraft.title || '').trim();
+    const body = String(communityDraft.body || '').trim();
+    if (!title || !body) {
+      setFeedActionMessage('Escribe un título y una descripción para publicar.');
+      return;
+    }
+
+    setCommunityPublishing(true);
+    setFeedActionMessage('');
+    try {
+      const payload = {
+        title,
+        body,
+        media: communityDraft.media || [],
+        audienceType: studentPortalMode
+          ? (communityDraft.audienceType || 'general')
+          : 'general',
+        studentId: selectedChild?.id || selectedChild?._id || undefined,
+      };
+      const created = await createCommunityPublication(payload);
+      if (created?.status === 'pending' || created?.kind === 'request') {
+        resetCommunityDraft();
+        setShowCommunityComposer(false);
+        setFeedActionMessage(
+          created?.message
+          || 'Tu publicación quedó en revisión. Rectoría, coordinación, dirección o secretaría académica la autorizarán.'
+        );
+        return;
+      }
+      if (created?._id) {
+        setAcademicFeed((previous) => [created, ...(previous || [])]);
+      } else {
+        setFeedRefreshCount((count) => count + 1);
+      }
+      resetCommunityDraft();
+      setShowCommunityComposer(false);
+      setFeedActionMessage('Tu publicación ya está visible en el feed.');
+    } catch (error) {
+      setFeedActionMessage(error?.response?.data?.message || error?.message || 'No se pudo publicar.');
+    } finally {
+      setCommunityPublishing(false);
+    }
+  };
+
+  useEffect(() => {
+    const isTouchDevice = window.matchMedia?.('(max-width: 960px)')?.matches
+      && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    if (
+      !isTouchDevice
+      || activeSection !== 'home'
+      || showCommunityCamera
+      || showCommunityComposer
+      || pullRefreshActive
+      || pullRefreshing
+    ) {
+      return undefined;
+    }
+
+    const isInteractiveTarget = (target) => Boolean(target?.closest?.(
+      [
+        'input',
+        'textarea',
+        'select',
+        'button',
+        'a',
+        'video',
+        '[contenteditable="true"]',
+        '[role="dialog"]',
+        '.campus-parent-mobile__post-gallery',
+        '.campus-parent-mobile__post-media',
+        '.campus-parent-community-composer-layer',
+        '.teacher-camera',
+        '.campus-parent-mobile__bottom-nav',
+      ].join(', ')
+    ));
+
+    const onTouchStart = (event) => {
+      if (
+        showUserMenu
+        || showAcademicMenu
+        || showCareMenu
+        || showFinanceChildOptions
+        || feedLikesSheetId
+        || feedCommentsSheetId
+        || communityMediaUploading
+        || communityPublishing
+        || event.touches?.length !== 1
+        || isInteractiveTarget(event.target)
+      ) {
+        communitySwipeStartRef.current = null;
+        return;
+      }
+
+      const touch = event.touches[0];
+      communitySwipeStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        time: Date.now(),
+      };
+    };
+
+    const onTouchEnd = (event) => {
+      const start = communitySwipeStartRef.current;
+      communitySwipeStartRef.current = null;
+      const touch = event.changedTouches?.[0];
+      if (!start || !touch) {
+        return;
+      }
+
+      const deltaX = touch.clientX - start.x;
+      const deltaY = touch.clientY - start.y;
+      const elapsed = Date.now() - start.time;
+      const isSwipeLeft = deltaX <= -82
+        && Math.abs(deltaX) >= Math.abs(deltaY) * 1.35
+        && elapsed <= 900;
+
+      if (isSwipeLeft) {
+        setShowUserMenu(false);
+        setShowAcademicMenu(false);
+        setShowCareMenu(false);
+        setShowCommunityCamera(true);
+      }
+    };
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [
+    activeSection,
+    communityMediaUploading,
+    communityPublishing,
+    feedCommentsSheetId,
+    feedLikesSheetId,
+    pullRefreshActive,
+    pullRefreshing,
+    showAcademicMenu,
+    showCareMenu,
+    showCommunityCamera,
+    showCommunityComposer,
+    showFinanceChildOptions,
+    showUserMenu,
+  ]);
 
   useEffect(() => {
     if (!usesRoutedSections) {
@@ -6831,7 +7155,44 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       );
     }
 
-    return <ParentPortalEmptyStudentsState onLogout={onLogout} />;
+    if (studentPortalMode && studentPortalLoadError) {
+      return (
+        <section className="campus-page campus-parent-mobile-app parent-portal-state parent-portal-state--empty">
+          <header className="campus-parent-mobile__app-header">
+            <div className="campus-parent-mobile__app-brand">
+              <ComergioBrandTitle />
+            </div>
+            <div className="campus-parent-mobile__app-title-wrap">
+              <span className="campus-parent-mobile__app-school-name">Portal del alumno</span>
+            </div>
+            <button className="campus-parent-mobile__app-logout-button" onClick={onLogout} type="button">
+              Salir
+            </button>
+          </header>
+          <div className="parent-portal-state__body">
+            <article className="parent-portal-state__card">
+              <div className="parent-portal-state__copy">
+                <span className="parent-portal-state__eyebrow">No se pudo cargar</span>
+                <h2>Error al abrir tu portal</h2>
+                <p>{studentPortalLoadError}</p>
+              </div>
+              <button
+                className="campus-parent-mobile__app-logout-button"
+                onClick={() => {
+                  setParentOverviewLoading(true);
+                  setStudentPortalRetryCount((count) => count + 1);
+                }}
+                type="button"
+              >
+                Reintentar
+              </button>
+            </article>
+          </div>
+        </section>
+      );
+    }
+
+    return <ParentPortalEmptyStudentsState onLogout={onLogout} studentPortalMode={studentPortalMode} />;
   }
 
   const isHomeFeedLoading = parentOverviewLoading || academicLoading;
@@ -7102,7 +7463,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   return (
     <section
-      className={`campus-page campus-parent-mobile-app${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${activeSection === 'games' ? ' is-games-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}${shouldLockParentPortal ? ' is-matricula-locked' : ''}`}
+      className={`campus-page campus-parent-mobile-app${studentPortalMode ? ' is-student-portal' : ''}${shouldUsePortalHeader ? '' : ' has-parent-portal-header'}${activeSection === 'home' ? ' is-home-section' : ''}${activeSection === 'finance' ? ' is-finance-section' : ''}${activeSection === 'academic' ? ' is-academic-section' : ''}${activeSection === 'cafeteria' ? ' is-cafeteria-section' : ''}${activeSection === 'games' ? ' is-games-section' : ''}${isStackedPortalSection ? ' is-stacked-portal-section' : ''}${isCareSection ? ' is-care-section' : ''}${pullRefreshActive ? ' parent-mobile-page-pull-ready' : ''}${pullRefreshing ? ' parent-mobile-page-refreshing' : ''}${shouldLockParentPortal ? ' is-matricula-locked' : ''}`}
       {...pullRefreshTouchHandlers}
     >
       <ParentPullToRefreshIndicator
@@ -7111,6 +7472,161 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         isRefreshing={pullRefreshing}
         threshold={pullRefreshThreshold}
       />
+      <TeacherCameraCapture
+        isOpen={showCommunityCamera}
+        onClose={() => setShowCommunityCamera(false)}
+        onFilesReady={(files) => uploadCommunityMediaFiles(files, { fromCamera: true })}
+      />
+      {showCommunityComposer ? (
+        <div
+          className="campus-parent-community-composer-layer"
+          onClick={() => {
+            if (!communityPublishing && !communityMediaUploading) {
+              setShowCommunityComposer(false);
+            }
+          }}
+          role="presentation"
+        >
+          <form
+            aria-label={studentPortalMode ? 'Publicar en el colegio' : 'Publicar para el colegio'}
+            className="campus-parent-community-composer"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={onSubmitCommunityPublication}
+          >
+            <header className="campus-parent-community-composer__head">
+              <div>
+                <span>{studentPortalMode ? 'Nueva publicación' : 'Publicar en el colegio'}</span>
+                <strong>
+                  {studentPortalMode
+                    ? (communityDraft.audienceType === 'general'
+                      ? 'Colegio · requiere autorización'
+                      : 'Se publica al instante')
+                    : 'Requiere autorización institucional'}
+                </strong>
+              </div>
+              <button
+                disabled={communityPublishing || communityMediaUploading}
+                onClick={() => setShowCommunityComposer(false)}
+                type="button"
+              >
+                Cerrar
+              </button>
+            </header>
+
+            {studentPortalMode ? (
+              <fieldset className="campus-parent-community-composer__audience">
+                <legend>¿Quién puede verlo?</legend>
+                <label className={communityDraft.audienceType === 'general' ? 'is-active' : ''}>
+                  <input
+                    checked={communityDraft.audienceType === 'general'}
+                    name="community-audience"
+                    onChange={() => setCommunityDraft((current) => ({ ...current, audienceType: 'general' }))}
+                    type="radio"
+                    value="general"
+                  />
+                  <span>
+                    <strong>Colegio</strong>
+                    <small>Todo el colegio · pasa por autorización</small>
+                  </span>
+                </label>
+                <label className={communityDraft.audienceType === 'course' ? 'is-active' : ''}>
+                  <input
+                    checked={communityDraft.audienceType === 'course'}
+                    name="community-audience"
+                    onChange={() => setCommunityDraft((current) => ({ ...current, audienceType: 'course' }))}
+                    type="radio"
+                    value="course"
+                  />
+                  <span>
+                    <strong>Mi curso</strong>
+                    <small>Alumnos y acudientes · se publica al instante</small>
+                  </span>
+                </label>
+                <label className={communityDraft.audienceType === 'course_students' ? 'is-active' : ''}>
+                  <input
+                    checked={communityDraft.audienceType === 'course_students'}
+                    name="community-audience"
+                    onChange={() => setCommunityDraft((current) => ({ ...current, audienceType: 'course_students' }))}
+                    type="radio"
+                    value="course_students"
+                  />
+                  <span>
+                    <strong>Curso privado</strong>
+                    <small>Solo estudiantes · se publica al instante</small>
+                  </span>
+                </label>
+              </fieldset>
+            ) : null}
+
+            <label className="campus-parent-community-composer__field">
+              Título
+              <input
+                maxLength={120}
+                onChange={(event) => setCommunityDraft((current) => ({ ...current, title: event.target.value }))}
+                placeholder="¿Qué quieres compartir?"
+                value={communityDraft.title}
+              />
+            </label>
+            <label className="campus-parent-community-composer__field">
+              Descripción
+              <textarea
+                maxLength={2000}
+                onChange={(event) => setCommunityDraft((current) => ({ ...current, body: event.target.value }))}
+                placeholder="Cuenta el momento con tus palabras."
+                rows={4}
+                value={communityDraft.body}
+              />
+            </label>
+
+            <div className="campus-parent-community-composer__media">
+              <label className="campus-parent-community-composer__upload">
+                Agregar fotos o videos
+                <input
+                  accept="image/*,video/*"
+                  disabled={communityMediaUploading || (communityDraft.media || []).length >= 8}
+                  multiple
+                  onChange={onCommunityMediaSelected}
+                  type="file"
+                />
+              </label>
+              {(communityDraft.media || []).length ? (
+                <div className="campus-parent-community-composer__media-grid">
+                  {(communityDraft.media || []).map((item, index) => (
+                    <article key={`${item.kind}-${item.src}-${index}`}>
+                      {item.kind === 'video'
+                        ? <video controls playsInline src={item.src} />
+                        : <img alt={item.alt || `Adjunto ${index + 1}`} src={item.thumbUrl || item.src} />}
+                      <button onClick={() => onRemoveCommunityMedia(index)} type="button">Quitar</button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p>También puedes deslizar a la izquierda para abrir la cámara.</p>
+              )}
+            </div>
+
+            <div className="campus-parent-community-composer__actions">
+              <button
+                disabled={communityPublishing || communityMediaUploading}
+                onClick={() => {
+                  setShowCommunityComposer(false);
+                  setShowCommunityCamera(true);
+                }}
+                type="button"
+              >
+                Cámara
+              </button>
+              <button disabled={communityPublishing || communityMediaUploading} type="submit">
+                {communityPublishing
+                  ? 'Enviando…'
+                  : (!studentPortalMode || communityDraft.audienceType === 'general'
+                    ? 'Enviar a revisión'
+                    : 'Publicar')}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       {activeSection !== 'games' ? parentSectionChrome : null}
 
       {activeSection === 'academic' && showAcademicMenu ? (
@@ -7125,11 +7641,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               <span>{selectedChild.name} · {getParentStudentGradeLabel(selectedChild)}</span>
             </div>
             <nav className="campus-parent-mobile__academic-drawer-nav">
-              {academicMenuItems.map((item) => (
+              {visibleAcademicMenuItems.map((item) => (
                 <button
                   className={`campus-parent-mobile__academic-drawer-item${item.id === activeAcademicView ? ' is-active' : ''}`}
                   key={item.id}
                   onClick={() => {
+                    setFocusedAssignmentId('');
                     setActiveAcademicView(item.id);
                     setShowAcademicMenu(false);
                   }}
@@ -7150,7 +7667,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
       {!isStackedPortalSection ? (
       <div
-        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'home' ? ' is-home' : ''}${activeSection === 'games' ? ' is-games' : ''}`}
+        className={`campus-parent-mobile__content${activeSection === 'finance' ? ' is-finance' : ''}${activeSection === 'academic' ? ' is-academic' : ''}${activeSection === 'home' ? ' is-home' : ''}${activeSection === 'games' ? ' is-games' : ''}`}
         style={{ transform: activeSection === 'games' || !canUseCampusPullRefresh ? undefined : `translateY(${pullRefreshContentOffset}px)` }}
       >
         {activeSection === 'home' ? (
@@ -7182,7 +7699,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                       </div>
                       <div className="campus-parent-mobile__post-author-block">
                         <strong>{announcement.authorName}</strong>
-                        <span>{announcement.publishedAt}</span>
+                        <span>
+                          {announcement.publishedAt}
+                          {announcement.category ? ` · ${announcement.category}` : ''}
+                        </span>
                       </div>
                     </div>
                     <ParentAnnouncementMedia announcement={announcement} onLike={() => onToggleFeedLike(announcement.id)} />
@@ -7242,8 +7762,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             <ParentAcademicContent
               academicSchedule={resolvedAcademicSchedule}
               activeView={activeAcademicView}
+              focusedAssignmentId={focusedAssignmentId}
               isPerformanceLoading={parentOverviewLoading}
+              onClearFocusedAssignment={() => setFocusedAssignmentId('')}
+              onOpenAssignment={(assignmentId) => {
+                setFocusedAssignmentId(String(assignmentId || ''));
+                setActiveAcademicView('academic-assignments');
+                setShowAcademicMenu(false);
+              }}
               onSelectAcademicView={(viewId) => {
+                setFocusedAssignmentId('');
                 setActiveAcademicView(viewId);
                 setShowAcademicMenu(false);
               }}

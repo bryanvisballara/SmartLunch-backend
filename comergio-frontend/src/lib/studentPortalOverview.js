@@ -10,6 +10,7 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
     course: student.course || '',
     displayGrade: student.displayGrade || '',
     schoolCode: student.schoolCode || '',
+    cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
     isRealParentChild: true,
     walletBalance: Number(data?.walletBalance || 0),
   } : null;

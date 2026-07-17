@@ -11,9 +11,13 @@ const academicCommunicationSchema = new mongoose.Schema(
     authorThumbUrl: { type: String, trim: true, default: '' },
     title: { type: String, required: true, trim: true },
     body: { type: String, required: true, trim: true },
-    audienceType: { type: String, enum: ['general', 'grade', 'course', 'individual'], required: true, index: true },
+    audienceType: { type: String, enum: ['general', 'grade', 'course', 'course_students', 'individual'], required: true, index: true },
     gradeTargets: { type: [String], default: [] },
     courseTargets: { type: [String], default: [] },
+    cohortKey: { type: String, trim: true, default: '', index: true },
+    academicYear: { type: String, trim: true, default: '' },
+    publisherRole: { type: String, enum: ['secretary', 'teacher', 'parent', 'student', ''], default: '', index: true },
+    authorStudentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null, index: true },
     parentTargets: { type: [mongoose.Schema.Types.ObjectId], ref: 'User', default: [] },
     studentTargets: { type: [mongoose.Schema.Types.ObjectId], ref: 'Student', default: [] },
     recipientParentIds: { type: [mongoose.Schema.Types.ObjectId], ref: 'User', default: [] },
@@ -74,5 +78,8 @@ const academicCommunicationSchema = new mongoose.Schema(
 
 academicCommunicationSchema.index({ schoolId: 1, recipientParentIds: 1, sentAt: -1 });
 academicCommunicationSchema.index({ schoolId: 1, audienceType: 1, createdAt: -1 });
+academicCommunicationSchema.index({ schoolId: 1, cohortKey: 1, sentAt: -1 });
+academicCommunicationSchema.index({ schoolId: 1, authorStudentId: 1, sentAt: -1 });
+academicCommunicationSchema.index({ schoolId: 1, publisherRole: 1, sentAt: -1 });
 
 module.exports = registerSchoolScopedModel('AcademicCommunication', academicCommunicationSchema);

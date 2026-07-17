@@ -54,10 +54,19 @@ export function StaffAnnouncementsUnreadBadge({ count = 0 }) {
   return <span className="staff-announcements-badge">{safeCount > 99 ? '99+' : safeCount}</span>;
 }
 
+function AnnouncementIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4.5 13.5h3l7 4V6.5l-7 4h-3v3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M17.5 9a4 4 0 0 1 0 6M7.5 13.5l1 5h3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 export default function StaffAnnouncementsPanel({
   mode = 'inbox',
-  title = 'Comunicados',
-  description = 'Comunicados institucionales de rectoría y coordinación.',
+  title = 'Comunicados internos',
+  description = 'Mensajes internos del equipo (no aparecen en el feed de familias ni alumnos).',
   className = '',
 }) {
   const queryClient = useQueryClient();
@@ -137,6 +146,7 @@ export default function StaffAnnouncementsPanel({
   }));
   const recipients = recipientsQuery.data?.data?.recipients || recipientsQuery.data?.recipients || [];
   const recipientSummary = recipientsQuery.data?.data?.summary || recipientsQuery.data?.summary || null;
+  const selectedRoleCount = (composeDraft.targetRoles || []).length;
 
   const toggleTargetRole = (role) => {
     setComposeDraft((current) => {
@@ -145,6 +155,17 @@ export default function StaffAnnouncementsPanel({
       else selected.add(role);
       return { ...current, targetRoles: Array.from(selected) };
     });
+  };
+
+  const selectAllTargetRoles = () => {
+    setComposeDraft((current) => ({
+      ...current,
+      targetRoles: targetRoleOptions.map((option) => option.value || option),
+    }));
+  };
+
+  const clearTargetRoles = () => {
+    setComposeDraft((current) => ({ ...current, targetRoles: [] }));
   };
 
   const onCreateAnnouncement = (event) => {
@@ -167,6 +188,7 @@ export default function StaffAnnouncementsPanel({
   return (
     <section className={`staff-announcements-panel ${className}`.trim()}>
       <header className="staff-announcements-panel__head">
+        <span className="staff-announcements-panel__head-icon"><AnnouncementIcon /></span>
         <div>
           <span className="staff-announcements-panel__kicker">Comunicación interna</span>
           <h2>{title}</h2>
@@ -180,27 +202,45 @@ export default function StaffAnnouncementsPanel({
 
       {canManage ? (
         <form className="staff-announcements-compose" onSubmit={onCreateAnnouncement}>
-          <h3>Nuevo comunicado</h3>
-          <label>
-            Título
-            <input
-              maxLength={160}
-              onChange={(event) => setComposeDraft((current) => ({ ...current, title: event.target.value }))}
-              placeholder="Asunto del comunicado"
-              value={composeDraft.title}
-            />
-          </label>
-          <label>
-            Mensaje
-            <textarea
-              onChange={(event) => setComposeDraft((current) => ({ ...current, body: event.target.value }))}
-              placeholder="Escribe el comunicado para el equipo..."
-              rows={5}
-              value={composeDraft.body}
-            />
-          </label>
-          <fieldset className="staff-announcements-roles">
-            <legend>Destinatarios</legend>
+          <div className="staff-announcements-compose__head">
+            <div>
+              <span className="staff-announcements-compose__step">Nuevo mensaje</span>
+              <h3>Crear comunicado interno</h3>
+              <p>La publicación llegará a los portales de los equipos seleccionados.</p>
+            </div>
+          </div>
+          <div className="staff-announcements-compose__fields">
+            <label>
+              <span>Título</span>
+              <input
+                maxLength={160}
+                onChange={(event) => setComposeDraft((current) => ({ ...current, title: event.target.value }))}
+                placeholder="Ej. Reunión general de docentes"
+                value={composeDraft.title}
+              />
+            </label>
+            <label>
+              <span>Mensaje</span>
+              <textarea
+                onChange={(event) => setComposeDraft((current) => ({ ...current, body: event.target.value }))}
+                placeholder="Escribe aquí la información que debe recibir el equipo..."
+                rows={6}
+                value={composeDraft.body}
+              />
+            </label>
+          </div>
+          <fieldset aria-labelledby="staff-announcements-recipients-title" className="staff-announcements-roles">
+            <div className="staff-announcements-roles__head">
+              <div>
+                <h4 id="staff-announcements-recipients-title">Destinatarios</h4>
+                <p>Selecciona las áreas que recibirán este comunicado.</p>
+              </div>
+              <div className="staff-announcements-roles__actions">
+                <span>{selectedRoleCount} seleccionados</span>
+                <button onClick={selectAllTargetRoles} type="button">Seleccionar todos</button>
+                <button onClick={clearTargetRoles} type="button">Limpiar</button>
+              </div>
+            </div>
             <div className="staff-announcements-roles__grid">
               {targetRoleOptions.map((option) => {
                 const value = option.value || option;
@@ -209,24 +249,29 @@ export default function StaffAnnouncementsPanel({
                 return (
                   <label key={value}>
                     <input checked={checked} onChange={() => toggleTargetRole(value)} type="checkbox" />
+                    <span className="staff-announcements-roles__check" aria-hidden="true">✓</span>
                     <span>{label}</span>
                   </label>
                 );
               })}
             </div>
           </fieldset>
-          <button className="staff-announcements-btn" disabled={createMutation.isPending} type="submit">
-            {createMutation.isPending ? 'Publicando...' : 'Publicar comunicado'}
-          </button>
+          <footer className="staff-announcements-compose__footer">
+            <span>Los destinatarios deberán confirmar la lectura.</span>
+            <button className="staff-announcements-btn" disabled={createMutation.isPending} type="submit">
+              <AnnouncementIcon />
+              {createMutation.isPending ? 'Publicando...' : 'Publicar comunicado interno'}
+            </button>
+          </footer>
         </form>
       ) : null}
 
       {showInbox ? (
         <div className="staff-announcements-list">
           <h3>Bandeja recibida</h3>
-          {inboxQuery.isLoading ? <p className="staff-announcements-empty">Cargando comunicados...</p> : null}
+          {inboxQuery.isLoading ? <p className="staff-announcements-empty">Cargando comunicados internos...</p> : null}
           {!inboxQuery.isLoading && inboxItems.length === 0 ? (
-            <p className="staff-announcements-empty">Aún no tienes comunicados.</p>
+            <p className="staff-announcements-empty">Aún no tienes comunicados internos.</p>
           ) : null}
           {inboxItems.map((item) => (
             <article className={`staff-announcements-card${item.isRead ? '' : ' is-unread'}`} key={item.id}>
@@ -252,7 +297,7 @@ export default function StaffAnnouncementsPanel({
                   onClick={() => markReadMutation.mutate(item.id)}
                   type="button"
                 >
-                  Confirmo que recibí y leí este comunicado
+                  Confirmo que recibí y leí este comunicado interno
                 </button>
               ) : (
                 <small className="staff-announcements-card__meta">
@@ -269,7 +314,7 @@ export default function StaffAnnouncementsPanel({
           <h3>Enviados y confirmaciones</h3>
           {sentQuery.isLoading ? <p className="staff-announcements-empty">Cargando enviados...</p> : null}
           {!sentQuery.isLoading && sentItems.length === 0 ? (
-            <p className="staff-announcements-empty">Aún no has enviado comunicados al equipo.</p>
+            <p className="staff-announcements-empty">Aún no has enviado comunicados internos al equipo.</p>
           ) : null}
           <div className="staff-announcements-sent__layout">
             <div className="staff-announcements-sent__list">
@@ -289,7 +334,7 @@ export default function StaffAnnouncementsPanel({
             </div>
             <div className="staff-announcements-sent__detail">
               {!selectedSentId ? (
-                <p className="staff-announcements-empty">Selecciona un comunicado para ver quién lo leyó.</p>
+                <p className="staff-announcements-empty">Selecciona un comunicado interno para ver quién lo leyó.</p>
               ) : recipientsQuery.isLoading ? (
                 <p className="staff-announcements-empty">Cargando confirmaciones...</p>
               ) : (

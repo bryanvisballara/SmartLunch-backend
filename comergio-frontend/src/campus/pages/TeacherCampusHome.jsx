@@ -8,6 +8,7 @@ import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests } from '../../services/hr.service';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../../components/staff-announcements/StaffAnnouncementsPanel';
+import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import {
   createCampusTeacherPost,
   createCampusTeacherDisciplineObservation,
@@ -15,6 +16,11 @@ import {
   getCampusTeacherAttendance,
   getCampusTeacherCourseDetail,
   getCampusTeacherDisciplineObservations,
+  getCampusTeacherFamilyFeed,
+  toggleCampusTeacherFamilyFeedLike,
+  createCampusTeacherFamilyFeedComment,
+  deleteCampusTeacherFamilyFeedComment,
+  toggleCampusTeacherFamilyFeedCommentLike,
   getCampusTeacherParentFeedRequests,
   getCampusTeacherCalendar,
   getCampusTeacherOverviewShell,
@@ -51,6 +57,7 @@ const teacherNavGroups = [
       'academic_management',
       'academic_content',
       'school_coexistence',
+      'family_feed',
       'social_publications',
       'resource_requests',
       'staff_announcements',
@@ -128,6 +135,13 @@ function TeacherSectionIcon({ icon }) {
           <path d="M3 20h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
         </svg>
       );
+    case 'family':
+      return (
+        <svg {...common}>
+          <path d="M4 19.5V11l8-6 8 6v8.5M8 19.5v-5h8v5M7.5 8.3V5.5h3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M4 19.5h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
     case 'resources':
       return (
         <svg {...common}>
@@ -160,9 +174,10 @@ const teacherSectionOptions = [
   { key: 'academic_management', label: 'Gestión académica', icon: 'academic', description: 'Definir evaluación y crear contenido académico por materia.' },
   { key: 'academic_content', label: 'Contenido académico', icon: 'content', description: 'Planear los temas de estudio por grado y asignatura.' },
   { key: 'school_coexistence', label: 'Convivencia escolar', icon: 'coexistence', description: 'Registrar observaciones de comportamiento para seguimiento institucional.' },
+  { key: 'family_feed', label: 'Feed de familias', icon: 'family', description: 'Consulta las publicaciones y comunicados visibles para las familias.' },
   { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
   { key: 'resource_requests', label: 'Solicitud de recursos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
-  { key: 'staff_announcements', label: 'Comunicados', icon: 'announcements', description: 'Recibe y confirma comunicados de rectoría y coordinación.' },
+  { key: 'staff_announcements', label: 'Comunicados internos', icon: 'announcements', description: 'Recibe y confirma mensajes internos de rectoría y coordinación.' },
 ];
 
 const teacherResourcePriorityOptions = [
@@ -299,6 +314,7 @@ const classworkAttachOptions = [
   { key: 'audio', label: 'Audio', accept: 'audio/*' },
 ];
 
+const EMPTY_TEACHER_LIST = [];
 const teacherAttendanceStatusOptions = [
   { value: 'present', label: 'Presente' },
   { value: 'late', label: 'Tarde' },
@@ -319,6 +335,7 @@ function createPostDraft(courseId = '') {
     scheduledClassSessionKey: '',
     targetType: 'course',
     targetStudentIds: [],
+    allowStudentSubmission: false,
     addToGradebook: false,
     gradebookPeriodKey: '',
     gradebookComponentKey: '',
@@ -892,6 +909,7 @@ function buildPostDraftFromPost(post, fallbackCourseId = '') {
     scheduledClassSessionKey: scheduledSession ? buildSessionKey(scheduledSession) : '',
     targetType: post?.targetType || 'course',
     targetStudentIds: Array.isArray(post?.targetStudentIds) ? post.targetStudentIds : [],
+    allowStudentSubmission: Boolean(post?.allowStudentSubmission),
     addToGradebook: false,
     gradebookPeriodKey: '',
     gradebookComponentKey: '',
@@ -916,6 +934,22 @@ function buildMaterialLinksFromPost(post) {
     .filter((attachment) => attachment.url);
 
   return linkAttachments.length > 0 ? linkAttachments : [createMaterialLinkDraft()];
+}
+
+function buildExistingFileAttachmentsFromPost(post) {
+  return (post?.attachments || [])
+    .filter((attachment) => String(attachment?.sourceType || '').toLowerCase() !== 'link')
+    .map((attachment) => ({
+      sourceType: attachment.sourceType || 'file',
+      kind: attachment.kind || 'file',
+      title: String(attachment.title || attachment.fileName || 'Adjunto').trim(),
+      url: String(attachment.url || '').trim(),
+      fileName: String(attachment.fileName || '').trim(),
+      mimeType: String(attachment.mimeType || '').trim(),
+      sizeBytes: Number(attachment.sizeBytes || 0),
+      extension: String(attachment.extension || '').trim(),
+      storage: String(attachment.storage || '').trim(),
+    }));
 }
 
 function buildClassCalendar(monthDate, classSessions, selectedDateValue) {
@@ -2580,6 +2614,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [postDraft, setPostDraft] = useState(createPostDraft(''));
   const [materialLinks, setMaterialLinks] = useState([createMaterialLinkDraft()]);
   const [materialFiles, setMaterialFiles] = useState([]);
+  const [existingMaterialFiles, setExistingMaterialFiles] = useState([]);
   const [showAttachLinkPanel, setShowAttachLinkPanel] = useState(false);
   const [classScheduleDraft, setClassScheduleDraft] = useState([]);
   const [academicPeriodDrafts, setAcademicPeriodDrafts] = useState([]);
@@ -2594,14 +2629,22 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [subcomponentDrafts, setSubcomponentDrafts] = useState({});
   const [studentDrafts, setStudentDrafts] = useState({});
   const [showTeacherMenu, setShowTeacherMenu] = useState(false);
+  const [showTeacherSidebar, setShowTeacherSidebar] = useState(false);
+  const [showTeacherCamera, setShowTeacherCamera] = useState(false);
   const [teacherPhotoPreview, setTeacherPhotoPreview] = useState('');
   const [teacherAttendanceLocked, setTeacherAttendanceLocked] = useState(false);
   const [teacherAttendanceSaveModal, setTeacherAttendanceSaveModal] = useState(null);
+  const [familyFeedCommentDrafts, setFamilyFeedCommentDrafts] = useState({});
+  const [familyFeedExpandedComments, setFamilyFeedExpandedComments] = useState({});
+  const [familyFeedPendingLikeIds, setFamilyFeedPendingLikeIds] = useState([]);
+  const [familyFeedPendingCommentKeys, setFamilyFeedPendingCommentKeys] = useState([]);
   const teacherPhotoInputRef = useRef(null);
+  const teacherSwipeStartRef = useRef(null);
   const teacherMenuRef = useRef(null);
   const classworkCreateMenuRef = useRef(null);
   const classworkUploadInputRef = useRef(null);
   const classworkUploadAppendRef = useRef(true);
+  const materialFilesRef = useRef([]);
   const isAttendanceLikeSection = activeTeacherSection === 'attendance' || activeTeacherSection === 'guidance_routine';
 
   const overviewShellQuery = useQuery({
@@ -2642,18 +2685,6 @@ function TeacherCampusHome({ forcePreview = false }) {
     retry: false,
     staleTime: 30_000,
   });
-
-  useEffect(() => {
-    if (!previewEnabled && activeCourseWorkspaceTab === 'posts' && selectedCourseId) {
-      courseDetailQuery.refetch();
-    }
-  }, [activeCourseWorkspaceTab, courseDetailQuery.refetch, previewEnabled, selectedCourseId]);
-
-  useEffect(() => {
-    if (!previewEnabled && activeCourseWorkspaceTab === 'gradebook' && selectedCourseId) {
-      courseDetailQuery.refetch();
-    }
-  }, [activeCourseWorkspaceTab, courseDetailQuery.refetch, previewEnabled, selectedCourseId]);
 
   const timelineCourseDetailQuery = useQuery({
     queryKey: ['campus', 'teacher', 'course', teacherQueryScope, timelineCourseId],
@@ -2707,6 +2738,120 @@ function TeacherCampusHome({ forcePreview = false }) {
     retry: false,
     staleTime: 20_000,
   });
+
+  const teacherFamilyFeedQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'family-feed', teacherQueryScope],
+    queryFn: getCampusTeacherFamilyFeed,
+    enabled: !previewEnabled && activeTeacherSection === 'family_feed',
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const familyFeedQueryKey = ['campus', 'teacher', 'family-feed', teacherQueryScope];
+
+  const patchFamilyFeedPublication = (updatedPublication) => {
+    if (!updatedPublication?.id) {
+      return;
+    }
+
+    queryClient.setQueryData(familyFeedQueryKey, (current) => {
+      const list = Array.isArray(current) ? current : [];
+      return list.map((item) => (String(item.id) === String(updatedPublication.id) ? updatedPublication : item));
+    });
+  };
+
+  const onToggleFamilyFeedLike = async (publicationId) => {
+    const id = String(publicationId || '');
+    if (!id || familyFeedPendingLikeIds.includes(id)) {
+      return;
+    }
+
+    setFamilyFeedPendingLikeIds((current) => [...current, id]);
+    try {
+      const updated = await toggleCampusTeacherFamilyFeedLike(id);
+      patchFamilyFeedPublication(updated);
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error?.response?.data?.message || error?.message || 'No se pudo actualizar el like.',
+      });
+    } finally {
+      setFamilyFeedPendingLikeIds((current) => current.filter((item) => item !== id));
+    }
+  };
+
+  const onSubmitFamilyFeedComment = async (publicationId) => {
+    const id = String(publicationId || '');
+    const body = String(familyFeedCommentDrafts[id] || '').trim();
+    if (!id || !body) {
+      setNotice({ type: 'error', text: 'Escribe un comentario.' });
+      return;
+    }
+
+    const pendingKey = `${id}:new`;
+    if (familyFeedPendingCommentKeys.includes(pendingKey)) {
+      return;
+    }
+
+    setFamilyFeedPendingCommentKeys((current) => [...current, pendingKey]);
+    try {
+      const updated = await createCampusTeacherFamilyFeedComment(id, { body });
+      patchFamilyFeedPublication(updated);
+      setFamilyFeedCommentDrafts((current) => ({ ...current, [id]: '' }));
+      setFamilyFeedExpandedComments((current) => ({ ...current, [id]: true }));
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error?.response?.data?.message || error?.message || 'No se pudo publicar el comentario.',
+      });
+    } finally {
+      setFamilyFeedPendingCommentKeys((current) => current.filter((item) => item !== pendingKey));
+    }
+  };
+
+  const onDeleteFamilyFeedComment = async (publicationId, commentId) => {
+    const id = String(publicationId || '');
+    const comment = String(commentId || '');
+    const pendingKey = `${id}:${comment}`;
+    if (!id || !comment || familyFeedPendingCommentKeys.includes(pendingKey)) {
+      return;
+    }
+
+    setFamilyFeedPendingCommentKeys((current) => [...current, pendingKey]);
+    try {
+      const updated = await deleteCampusTeacherFamilyFeedComment(id, comment);
+      patchFamilyFeedPublication(updated);
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error?.response?.data?.message || error?.message || 'No se pudo borrar el comentario.',
+      });
+    } finally {
+      setFamilyFeedPendingCommentKeys((current) => current.filter((item) => item !== pendingKey));
+    }
+  };
+
+  const onToggleFamilyFeedCommentLike = async (publicationId, commentId) => {
+    const id = String(publicationId || '');
+    const comment = String(commentId || '');
+    const pendingKey = `${id}:${comment}:like`;
+    if (!id || !comment || familyFeedPendingCommentKeys.includes(pendingKey)) {
+      return;
+    }
+
+    setFamilyFeedPendingCommentKeys((current) => [...current, pendingKey]);
+    try {
+      const updated = await toggleCampusTeacherFamilyFeedCommentLike(id, comment);
+      patchFamilyFeedPublication(updated);
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error?.response?.data?.message || error?.message || 'No se pudo actualizar el like del comentario.',
+      });
+    } finally {
+      setFamilyFeedPendingCommentKeys((current) => current.filter((item) => item !== pendingKey));
+    }
+  };
 
   const teacherDisciplineCourseDetailQuery = useQuery({
     queryKey: ['campus', 'teacher', 'discipline-course', teacherQueryScope, teacherDisciplineDraft.courseId],
@@ -2791,10 +2936,15 @@ function TeacherCampusHome({ forcePreview = false }) {
     onSuccess: (response) => {
       setTeacherPhotoPreview(String(response?.teacher?.photoThumbUrl || response?.teacher?.photoUrl || ''));
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
-      setNotice({ type: 'success', text: 'Foto del docente guardada en Cloudinary.' });
+      setNotice({ type: 'success', text: 'Foto del docente actualizada.' });
     },
     onError: (error) => {
-      setTeacherPhotoPreview(String(workspace.teacher?.photoThumbUrl || workspace.teacher?.photoUrl || ''));
+      setTeacherPhotoPreview((currentPreview) => {
+        if (currentPreview && !String(currentPreview).startsWith('blob:')) {
+          return currentPreview;
+        }
+        return '';
+      });
       setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar la foto del docente.' });
     },
   });
@@ -2850,7 +3000,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     return overviewData || emptyTeacherWorkspace;
   }, [authUser?.id, emptyTeacherWorkspace, overviewMetricsQuery.data, overviewShellQuery.data, previewEnabled, previewWorkspace]);
 
-  const courses = workspace.courses || [];
+  const courses = Array.isArray(workspace.courses) ? workspace.courses : EMPTY_TEACHER_LIST;
   const guidanceRoutineCourses = useMemo(
     () => courses.filter((course) => course.courseType === 'guidance_routine'),
     [courses]
@@ -3066,14 +3216,6 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => selectedCoursePosts.filter((post) => String(post?.status || '').toLowerCase() !== 'archived'),
     [selectedCoursePosts]
   );
-  const assignmentDetailPost = useMemo(() => {
-    if (!selectedAssignmentDetail?.id) {
-      return null;
-    }
-
-    return selectedCourseAssignmentPosts.find((post) => String(post.id) === String(selectedAssignmentDetail.id))
-      || selectedAssignmentDetail;
-  }, [selectedAssignmentDetail, selectedCourseAssignmentPosts]);
   const selectedCourseTimelineCalendar = useMemo(
     () => buildCourseTimelineCalendar(timelineMonth, selectedCourseSchedule, selectedCoursePosts),
     [timelineMonth, selectedCoursePosts, selectedCourseSchedule]
@@ -3110,11 +3252,14 @@ function TeacherCampusHome({ forcePreview = false }) {
       subject: item.subject,
       type: item.type,
       title: item.title,
-      body: item.detail || item.body,
+      body: item.body || item.detail,
       deliveryMode: item.deliveryMode,
       dueAt: item.dueAt,
       scheduledClassDate: item.scheduledClassDate,
+      scheduledClassSession: item.scheduledClassSession || null,
+      publishedAt: item.publishedAt || null,
       status: item.status || 'published',
+      attachments: Array.isArray(item.attachments) ? item.attachments : [],
     });
 
     if (previewEnabled) {
@@ -3128,6 +3273,32 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     return (teacherDashboardCalendarQuery.data?.items || []).map(mapCalendarItemToPost);
   }, [dashboardCalendarMonthKey, previewEnabled, recentPosts, teacherDashboardCalendarQuery.data?.items]);
+  const assignmentDetailPost = useMemo(() => {
+    if (!selectedAssignmentDetail?.id) {
+      return null;
+    }
+
+    const detailId = String(selectedAssignmentDetail.id);
+    const candidates = [
+      selectedCourseAssignmentPosts.find((post) => String(post.id) === detailId),
+      recentPosts.find((post) => String(post.id) === detailId),
+      dashboardCalendarPosts.find((post) => String(post.id) === detailId),
+      selectedAssignmentDetail,
+    ].filter(Boolean);
+
+    return candidates.reduce((best, candidate) => {
+      const bestAttachments = Array.isArray(best?.attachments) ? best.attachments.length : 0;
+      const candidateAttachments = Array.isArray(candidate?.attachments) ? candidate.attachments.length : 0;
+      if (candidateAttachments > bestAttachments) {
+        return { ...best, ...candidate, attachments: candidate.attachments };
+      }
+      return {
+        ...candidate,
+        ...best,
+        attachments: best?.attachments?.length ? best.attachments : (candidate.attachments || []),
+      };
+    }, candidates[0]);
+  }, [dashboardCalendarPosts, recentPosts, selectedAssignmentDetail, selectedCourseAssignmentPosts]);
   const dashboardCalendarGrid = useMemo(
     () => buildCourseTimelineCalendar(dashboardCalendarMonth, [], dashboardCalendarPosts),
     [dashboardCalendarMonth, dashboardCalendarPosts]
@@ -3163,7 +3334,10 @@ function TeacherCampusHome({ forcePreview = false }) {
   const selectedDisciplineCourseDetail = previewEnabled
     ? (selectedDisciplineCourse ? previewWorkspace.courseDetails?.[selectedDisciplineCourse.id] || null : null)
     : (teacherDisciplineDraft.courseId === selectedCourseId ? selectedCourseDetail : (teacherDisciplineCourseDetailQuery.data || null));
-  const disciplineStudentOptions = selectedDisciplineCourseDetail?.students || [];
+  const disciplineStudentOptions = useMemo(
+    () => (Array.isArray(selectedDisciplineCourseDetail?.students) ? selectedDisciplineCourseDetail.students : EMPTY_TEACHER_LIST),
+    [selectedDisciplineCourseDetail?.students]
+  );
   const selectedDisciplineStudent = disciplineStudentOptions.find((student) => student.studentId === teacherDisciplineDraft.studentId) || null;
   const selectedTeacherResourceItem = teacherResourceItems.find((item) => item.id === teacherResourceRequestDraft.itemId) || null;
   const isTeacherResourceCustomItem = teacherResourceRequestDraft.itemId === '__other__';
@@ -3238,6 +3412,87 @@ function TeacherCampusHome({ forcePreview = false }) {
   useEffect(() => {
     setTeacherPhotoPreview(String(workspace.teacher?.photoThumbUrl || workspace.teacher?.photoUrl || ''));
   }, [workspace.teacher?.photoThumbUrl, workspace.teacher?.photoUrl]);
+
+  useEffect(() => {
+    if (!showTeacherSidebar) {
+      return undefined;
+    }
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setShowTeacherSidebar(false);
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    document.body.classList.add('campus-teacher-sidebar-open');
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.classList.remove('campus-teacher-sidebar-open');
+    };
+  }, [showTeacherSidebar]);
+
+  useEffect(() => {
+    const isTouchDevice = window.matchMedia?.('(max-width: 960px)')?.matches
+      && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    if (!isTouchDevice || showTeacherCamera) {
+      return undefined;
+    }
+
+    const isInteractiveTarget = (target) => Boolean(target?.closest?.(
+      'input, textarea, select, button, a, video, [contenteditable=\"true\"], [role=\"dialog\"]'
+    ));
+
+    const onTouchStart = (event) => {
+      if (
+        showTeacherSidebar
+        || showTeacherMenu
+        || teacherSocialMediaUploading
+        || event.touches?.length !== 1
+        || isInteractiveTarget(event.target)
+      ) {
+        teacherSwipeStartRef.current = null;
+        return;
+      }
+
+      const touch = event.touches[0];
+      teacherSwipeStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        time: Date.now(),
+      };
+    };
+
+    const onTouchEnd = (event) => {
+      const start = teacherSwipeStartRef.current;
+      teacherSwipeStartRef.current = null;
+      const touch = event.changedTouches?.[0];
+      if (!start || !touch) {
+        return;
+      }
+
+      const deltaX = touch.clientX - start.x;
+      const deltaY = touch.clientY - start.y;
+      const elapsed = Date.now() - start.time;
+      const isSwipeLeft = deltaX <= -82
+        && Math.abs(deltaX) >= Math.abs(deltaY) * 1.35
+        && elapsed <= 900;
+
+      if (isSwipeLeft) {
+        setShowTeacherMenu(false);
+        setShowTeacherSidebar(false);
+        setShowTeacherCamera(true);
+      }
+    };
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [showTeacherCamera, showTeacherMenu, showTeacherSidebar, teacherSocialMediaUploading]);
 
   const onTeacherPhotoChange = (event) => {
     const selectedFile = event.target.files?.[0];
@@ -3414,13 +3669,20 @@ function TeacherCampusHome({ forcePreview = false }) {
   }, [teacherAttendanceClassSessionKey, teacherAttendanceClassSessions, teacherAttendanceType]);
 
   useEffect(() => {
-    setTeacherAttendanceRecords(teacherAttendanceQuery.data?.attendance?.records || []);
+    const nextRecords = teacherAttendanceQuery.data?.attendance?.records;
+    setTeacherAttendanceRecords(Array.isArray(nextRecords) ? nextRecords : []);
     setTeacherAttendanceLocked(Boolean(teacherAttendanceQuery.data?.attendance?.id));
   }, [teacherAttendanceQuery.data]);
 
   useEffect(() => {
+    if (activeTeacherSection !== 'school_coexistence') {
+      return;
+    }
+
     if (!courses.length) {
-      setTeacherDisciplineDraft((currentDraft) => (currentDraft.courseId ? { ...currentDraft, courseId: '', studentId: '' } : currentDraft));
+      setTeacherDisciplineDraft((currentDraft) => (
+        currentDraft.courseId ? { ...currentDraft, courseId: '', studentId: '' } : currentDraft
+      ));
       return;
     }
 
@@ -3428,21 +3690,35 @@ function TeacherCampusHome({ forcePreview = false }) {
       if (currentDraft.courseId && courses.some((course) => course.id === currentDraft.courseId)) {
         return currentDraft;
       }
-      return { ...currentDraft, courseId: courses[0].id, studentId: '' };
+      const nextCourseId = courses[0]?.id || '';
+      if (currentDraft.courseId === nextCourseId && !currentDraft.studentId) {
+        return currentDraft;
+      }
+      return { ...currentDraft, courseId: nextCourseId, studentId: '' };
     });
-  }, [courses]);
+  }, [activeTeacherSection, courses]);
 
   useEffect(() => {
+    if (activeTeacherSection !== 'school_coexistence') {
+      return;
+    }
+
     setTeacherDisciplineDraft((currentDraft) => {
       if (!currentDraft.courseId) {
         return currentDraft;
       }
-      if (currentDraft.studentId && disciplineStudentOptions.some((student) => student.studentId === currentDraft.studentId)) {
+
+      const nextStudentId = disciplineStudentOptions.some((student) => student.studentId === currentDraft.studentId)
+        ? currentDraft.studentId
+        : (disciplineStudentOptions[0]?.studentId || '');
+
+      if (currentDraft.studentId === nextStudentId) {
         return currentDraft;
       }
-      return { ...currentDraft, studentId: disciplineStudentOptions[0]?.studentId || '' };
+
+      return { ...currentDraft, studentId: nextStudentId };
     });
-  }, [disciplineStudentOptions, teacherDisciplineDraft.courseId]);
+  }, [activeTeacherSection, disciplineStudentOptions, teacherDisciplineDraft.courseId]);
 
   useEffect(() => {
     if (!portalSectionGradeGroups.length) {
@@ -3706,7 +3982,9 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     setMaterialFiles((currentFiles) => {
       const mergedFiles = append ? [...currentFiles, ...acceptedFiles] : acceptedFiles;
-      return mergedFiles.slice(0, maxMaterialFileCount);
+      const nextFiles = mergedFiles.slice(0, maxMaterialFileCount);
+      materialFilesRef.current = nextFiles;
+      return nextFiles;
     });
 
     if (event.target) {
@@ -3732,7 +4010,11 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onRemoveMaterialFile = (fileIndex) => {
-    setMaterialFiles((currentFiles) => currentFiles.filter((_, index) => index !== fileIndex));
+    setMaterialFiles((currentFiles) => {
+      const nextFiles = currentFiles.filter((_, index) => index !== fileIndex);
+      materialFilesRef.current = nextFiles;
+      return nextFiles;
+    });
   };
 
   const onAddWebLink = () => {
@@ -3799,6 +4081,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     setPostDraft(nextDraft);
     setMaterialLinks([createMaterialLinkDraft()]);
     setMaterialFiles([]);
+    materialFilesRef.current = [];
+    setExistingMaterialFiles([]);
     setShowAttachLinkPanel(false);
     setOpenPostMenuId('');
     setShowClassworkCreateMenu(false);
@@ -3830,9 +4114,17 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const openAssignmentDetail = (item) => {
-    const postId = item?.postId || item?.id;
-    const post = dashboardCalendarPosts.find((entry) => String(entry.id) === String(postId))
-      || recentPosts.find((entry) => String(entry.id) === String(postId));
+    const postId = String(item?.postId || item?.id || '');
+    const courseCandidates = [
+      recentPosts.find((entry) => String(entry.id) === postId),
+      selectedCourseAssignmentPosts.find((entry) => String(entry.id) === postId),
+      dashboardCalendarPosts.find((entry) => String(entry.id) === postId),
+    ].filter(Boolean);
+    const post = courseCandidates.reduce((best, candidate) => {
+      const bestCount = Array.isArray(best?.attachments) ? best.attachments.length : 0;
+      const nextCount = Array.isArray(candidate?.attachments) ? candidate.attachments.length : 0;
+      return nextCount > bestCount ? candidate : (best || candidate);
+    }, null);
     const courseId = item?.courseId || post?.courseId;
     const course = academicCourses.find((entry) => String(entry.id) === String(courseId));
 
@@ -3854,7 +4146,12 @@ function TeacherCampusHome({ forcePreview = false }) {
     setShowSelectedCourseWorkspace(true);
     setActiveCourseWorkspaceTab('posts');
     setShowAssignmentComposer(false);
-    setSelectedAssignmentDetail({ ...post, id: String(post.id) });
+    setSelectedAssignmentDetail({
+      ...post,
+      id: String(post.id),
+      attachments: Array.isArray(post.attachments) ? post.attachments : [],
+    });
+    queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope, course.id] });
   };
 
   const closeAssignmentComposer = () => {
@@ -3862,6 +4159,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     setPostDraft(createPostDraft(selectedCourse?.id || ''));
     setMaterialLinks([createMaterialLinkDraft()]);
     setMaterialFiles([]);
+    materialFilesRef.current = [];
+    setExistingMaterialFiles([]);
     setShowAttachLinkPanel(false);
     setShowAssignmentComposer(false);
     setOpenPostMenuId('');
@@ -3869,6 +4168,9 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   const onCreatePost = async (event) => {
     event.preventDefault();
+    const filesToUpload = Array.isArray(materialFilesRef.current) && materialFilesRef.current.length > 0
+      ? materialFilesRef.current
+      : (Array.isArray(materialFiles) ? materialFiles : []);
     const normalizedLinks = materialLinks
       .map((item) => ({ title: String(item.title || '').trim(), url: String(item.url || '').trim() }))
       .filter((item) => item.url);
@@ -3890,7 +4192,8 @@ function TeacherCampusHome({ forcePreview = false }) {
           label: selectedClassSession.label,
         }
         : null,
-      attachments: buildPreviewAttachments(normalizedLinks, materialFiles),
+      attachments: buildPreviewAttachments(normalizedLinks, filesToUpload),
+      allowStudentSubmission: Boolean(postDraft.allowStudentSubmission),
       targetType: postDraft.targetType || 'course',
       targetStudentIds: Array.isArray(postDraft.targetStudentIds) ? postDraft.targetStudentIds : [],
     };
@@ -3993,25 +4296,47 @@ function TeacherCampusHome({ forcePreview = false }) {
           }));
         }
       } else if (editingPostId) {
-        const updatePayload = {
+        const hasNewFiles = filesToUpload.length > 0;
+        const updatePayloadBase = {
           title: payload.title,
           body: payload.body,
           type: payload.type,
           status: payload.status,
           deliveryMode: payload.deliveryMode,
+          materialLinks: normalizedLinks,
+          allowStudentSubmission: Boolean(payload.allowStudentSubmission),
         };
 
         if (payload.deliveryMode === 'date') {
-          updatePayload.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
+          updatePayloadBase.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
         } else {
-          updatePayload.scheduledClassDate = payload.scheduledClassDate || null;
-          updatePayload.scheduledClassSession = payload.scheduledClassSession || null;
+          updatePayloadBase.scheduledClassDate = payload.scheduledClassDate || null;
+          updatePayloadBase.scheduledClassSession = payload.scheduledClassSession || null;
         }
 
-        await updatePostMutation.mutateAsync({ postId: editingPostId, payload: updatePayload });
+        if (hasNewFiles) {
+          const formData = new FormData();
+          Object.entries(updatePayloadBase).forEach(([key, value]) => {
+            if (value === null || value === undefined) {
+              formData.append(key, '');
+              return;
+            }
+            if (typeof value === 'object') {
+              formData.append(key, JSON.stringify(value));
+              return;
+            }
+            formData.append(key, String(value));
+          });
+          filesToUpload.forEach((file) => {
+            formData.append('files', file);
+          });
+          await updatePostMutation.mutateAsync({ postId: editingPostId, payload: formData });
+        } else {
+          await updatePostMutation.mutateAsync({ postId: editingPostId, payload: updatePayloadBase });
+        }
       } else {
         const selectedCourseForPost = courses.find((course) => course.id === payload.courseId) || selectedCourse || null;
-        const hasFiles = Array.isArray(materialFiles) && materialFiles.length > 0;
+        const hasFiles = filesToUpload.length > 0;
 
         if (hasFiles) {
           const formData = new FormData();
@@ -4022,6 +4347,7 @@ function TeacherCampusHome({ forcePreview = false }) {
           formData.append('status', payload.status);
           formData.append('deliveryMode', payload.deliveryMode);
           formData.append('materialLinks', JSON.stringify(normalizedLinks));
+          formData.append('allowStudentSubmission', payload.allowStudentSubmission ? 'true' : 'false');
           formData.append('targetType', payload.targetType);
           formData.append('targetStudentIds', JSON.stringify(payload.targetStudentIds));
           formData.append('sourceCourseKey', selectedCourseForPost?.sourceCourseKey || '');
@@ -4049,7 +4375,7 @@ function TeacherCampusHome({ forcePreview = false }) {
             formData.append('scheduledClassSession', JSON.stringify(payload.scheduledClassSession || {}));
           }
 
-          materialFiles.forEach((file) => {
+          filesToUpload.forEach((file) => {
             formData.append('files', file);
           });
 
@@ -4063,6 +4389,7 @@ function TeacherCampusHome({ forcePreview = false }) {
             status: payload.status,
             deliveryMode: payload.deliveryMode,
             materialLinks: normalizedLinks,
+            allowStudentSubmission: Boolean(payload.allowStudentSubmission),
             targetType: payload.targetType,
             targetStudentIds: payload.targetStudentIds,
             sourceCourseKey: selectedCourseForPost?.sourceCourseKey || '',
@@ -4100,6 +4427,8 @@ function TeacherCampusHome({ forcePreview = false }) {
       setPostDraft(createPostDraft(payload.courseId));
       setMaterialLinks([createMaterialLinkDraft()]);
       setMaterialFiles([]);
+      materialFilesRef.current = [];
+      setExistingMaterialFiles([]);
       setShowAttachLinkPanel(false);
       setShowAssignmentComposer(false);
 
@@ -4128,8 +4457,11 @@ function TeacherCampusHome({ forcePreview = false }) {
     setPostDraft(buildPostDraftFromPost(post, selectedCourse?.id || ''));
     setMaterialLinks(buildMaterialLinksFromPost(post));
     setMaterialFiles([]);
+    materialFilesRef.current = [];
+    setExistingMaterialFiles(buildExistingFileAttachmentsFromPost(post));
     setShowAssignmentComposer(true);
     setOpenPostMenuId('');
+    setSelectedAssignmentDetail(null);
 
     if (post.scheduledClassDate) {
       const parsedDate = new Date(post.scheduledClassDate);
@@ -4470,31 +4802,62 @@ function TeacherCampusHome({ forcePreview = false }) {
     setTeacherSocialPublicationDraft((currentDraft) => ({ ...currentDraft, [field]: value }));
   };
 
-  const onTeacherSocialMediaSelected = async (event) => {
-    const selectedFiles = Array.from(event.target.files || []);
-    event.target.value = '';
-
+  const uploadTeacherSocialMediaFiles = async (files, { fromCamera = false } = {}) => {
+    const selectedFiles = Array.from(files || []).filter((file) => (
+      String(file?.type || '').startsWith('image/')
+      || String(file?.type || '').startsWith('video/')
+    ));
     if (selectedFiles.length === 0) {
       return;
     }
 
     if ((teacherSocialPublicationDraft.media || []).length + selectedFiles.length > 8) {
-      setNotice({ type: 'error', text: 'Puedes adjuntar hasta 8 fotos o videos por publicación.' });
-      return;
+      const message = 'Puedes adjuntar hasta 8 fotos o videos por publicación.';
+      setNotice({ type: 'error', text: message });
+      throw new Error(message);
     }
 
     setTeacherSocialMediaUploading(true);
     try {
-      const response = await uploadCampusTeacherParentFeedMedia(selectedFiles);
+      const uploadedMedia = [];
+      for (let startIndex = 0; startIndex < selectedFiles.length; startIndex += 6) {
+        const response = await uploadCampusTeacherParentFeedMedia(selectedFiles.slice(startIndex, startIndex + 6));
+        uploadedMedia.push(...(response.media || []));
+      }
       setTeacherSocialPublicationDraft((currentDraft) => ({
         ...currentDraft,
-        media: [...(currentDraft.media || []), ...(response.media || [])].slice(0, 8),
+        media: [...(currentDraft.media || []), ...uploadedMedia].slice(0, 8),
       }));
-      setNotice({ type: 'success', text: 'Archivo adjuntado a la publicación.' });
+      if (fromCamera) {
+        setActiveTeacherSection('social_publications');
+        setShowSelectedCourseWorkspace(false);
+        setShowTeacherSidebar(false);
+        setShowTeacherCamera(false);
+        window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+      }
+      setNotice({
+        type: 'success',
+        text: selectedFiles.length === 1
+          ? 'Contenido precargado en la publicación.'
+          : `${selectedFiles.length} archivos precargados en la publicación.`,
+      });
     } catch (error) {
-      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo subir el archivo.' });
+      const message = error?.response?.data?.message || error?.message || 'No se pudo subir el archivo.';
+      setNotice({ type: 'error', text: message });
+      throw new Error(message);
     } finally {
       setTeacherSocialMediaUploading(false);
+    }
+  };
+
+  const onTeacherSocialMediaSelected = async (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+
+    try {
+      await uploadTeacherSocialMediaFiles(selectedFiles);
+    } catch (_error) {
+      // The notice above keeps the upload error visible in the portal.
     }
   };
 
@@ -5183,6 +5546,11 @@ function TeacherCampusHome({ forcePreview = false }) {
   return (
     <section className="campus-page campus-teacher-portal">
       <DismissibleNotice onClose={() => setNotice({ type: 'info', text: '' })} text={notice.text} type={notice.type} />
+      <TeacherCameraCapture
+        isOpen={showTeacherCamera}
+        onClose={() => setShowTeacherCamera(false)}
+        onFilesReady={(files) => uploadTeacherSocialMediaFiles(files, { fromCamera: true })}
+      />
 
       {showPostSuccessModal ? (
         <div className="campus-teacher__success-modal-backdrop" role="presentation">
@@ -5232,13 +5600,28 @@ function TeacherCampusHome({ forcePreview = false }) {
       <header className="campus-teacher__hero">
         <div className="campus-teacher__hero-side campus-teacher__hero-side--left">
           <button
+            aria-expanded={showTeacherSidebar}
+            aria-label="Abrir menú del portal docente"
+            className="campus-teacher__mobile-menu-button"
+            onClick={() => setShowTeacherSidebar(true)}
+            type="button"
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          <button
             className="campus-teacher__hero-avatar"
             disabled={uploadTeacherPhotoMutation.isPending}
             onClick={() => teacherPhotoInputRef.current?.click()}
             type="button"
           >
             {teacherPhotoPreview ? (
-              <img alt={teacherName} src={teacherPhotoPreview} />
+              <img
+                alt={teacherName}
+                onError={() => setTeacherPhotoPreview('')}
+                src={resolveApiAssetUrl(teacherPhotoPreview)}
+              />
             ) : (
               <span style={{fontSize: '2.2rem', color: '#64748b', fontWeight: 700, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%'}}>+</span>
             )}
@@ -5265,6 +5648,25 @@ function TeacherCampusHome({ forcePreview = false }) {
         </div>
 
         <div className="campus-teacher__hero-side campus-teacher__hero-side--right">
+          <button
+            aria-label="Actualizar foto de perfil"
+            className="campus-teacher__hero-avatar campus-teacher__hero-avatar--mobile"
+            disabled={uploadTeacherPhotoMutation.isPending}
+            onClick={() => teacherPhotoInputRef.current?.click()}
+            type="button"
+          >
+            {teacherPhotoPreview ? (
+              <img
+                alt={teacherName}
+                onError={() => setTeacherPhotoPreview('')}
+                src={resolveApiAssetUrl(teacherPhotoPreview)}
+              />
+            ) : (
+              <span className="campus-teacher__hero-avatar-fallback">
+                {String(teacherName || 'D').slice(0, 1).toUpperCase()}
+              </span>
+            )}
+          </button>
           <div className="campus-teacher__hero-user-menu" ref={teacherMenuRef}>
             <button
               aria-expanded={showTeacherMenu}
@@ -5295,8 +5697,22 @@ function TeacherCampusHome({ forcePreview = false }) {
         </div>
       </header>
 
+      <button
+        aria-label="Cerrar menú del portal docente"
+        className={`campus-teacher__sidebar-backdrop${showTeacherSidebar ? ' is-visible' : ''}`}
+        onClick={() => setShowTeacherSidebar(false)}
+        type="button"
+      />
+
       <div className="campus-teacher__frame">
-        <aside className="campus-teacher__sidebar campus-teacher__rail">
+        <aside className={`campus-teacher__sidebar campus-teacher__rail${showTeacherSidebar ? ' is-open' : ''}`}>
+          <div className="campus-teacher__mobile-sidebar-head">
+            <div>
+              <span>Portal docente</span>
+              <strong>{teacherName}</strong>
+            </div>
+            <button aria-label="Cerrar menú" onClick={() => setShowTeacherSidebar(false)} type="button">×</button>
+          </div>
           <nav aria-label="Portal docente" className="campus-teacher__rail-nav">
             {teacherNavGroups.map((group) => {
               const groupOptions = group.keys
@@ -5346,6 +5762,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       onClick={() => {
                                         setSelectedSubjectKey(subject.key);
                                         setShowSelectedCourseWorkspace(false);
+                                        setShowTeacherSidebar(false);
                                       }}
                                       type="button"
                                     >
@@ -5369,6 +5786,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           onClick={() => {
                             setShowSelectedCourseWorkspace(false);
                             setActiveTeacherSection(option.key);
+                            setShowTeacherSidebar(false);
                           }}
                           type="button"
                         >
@@ -5781,20 +6199,54 @@ function TeacherCampusHome({ forcePreview = false }) {
                               <section className="campus-teacher__assignment-detail-attachments">
                                 <h3>Material adjunto</h3>
                                 <div>
-                                  {(assignmentDetailPost.attachments || []).map((attachment, index) => (
-                                    <a
-                                      href={resolveApiAssetUrl(attachment.url)}
-                                      key={`${attachment.url || attachment.fileName || 'attachment'}-${index}`}
-                                      rel="noreferrer"
-                                      target="_blank"
-                                    >
-                                      <ClassworkAttachIcon kind={attachment.kind || attachment.sourceType || 'document'} />
-                                      <span>{attachment.title || attachment.fileName || `Adjunto ${index + 1}`}</span>
-                                    </a>
-                                  ))}
+                                  {(assignmentDetailPost.attachments || []).map((attachment, index) => {
+                                    const href = resolveApiAssetUrl(attachment.url);
+                                    const label = attachment.title || attachment.fileName || `Adjunto ${index + 1}`;
+                                    const kind = String(attachment.kind || attachment.sourceType || '').toLowerCase();
+                                    const iconKind = kind.includes('image')
+                                      ? 'image'
+                                      : kind.includes('video')
+                                        ? 'video'
+                                        : kind.includes('audio')
+                                          ? 'audio'
+                                          : kind.includes('link')
+                                            ? 'link'
+                                            : 'document';
+
+                                    if (!href) {
+                                      return (
+                                        <div className="campus-teacher__assignment-detail-attachment is-disabled" key={`${label}-${index}`}>
+                                          <ClassworkAttachIcon kind={iconKind} />
+                                          <span>{label}</span>
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <a
+                                        href={href}
+                                        key={`${href}-${index}`}
+                                        rel="noreferrer"
+                                        target="_blank"
+                                      >
+                                        <ClassworkAttachIcon kind={iconKind} />
+                                        <span>{label}</span>
+                                      </a>
+                                    );
+                                  })}
                                 </div>
                               </section>
-                            ) : null}
+                            ) : courseDetailQuery.isFetching ? (
+                              <section className="campus-teacher__assignment-detail-attachments">
+                                <h3>Material adjunto</h3>
+                                <p className="campus-panel__meta">Cargando archivos de la asignación...</p>
+                              </section>
+                            ) : (
+                              <section className="campus-teacher__assignment-detail-attachments">
+                                <h3>Material adjunto</h3>
+                                <p className="campus-panel__meta">Esta asignación no tiene archivos guardados. Usa Editar para adjuntar el PDF.</p>
+                              </section>
+                            )}
                           </article>
                         ) : showAssignmentComposer ? (
                           <form className="campus-teacher__classwork-composer" onSubmit={onCreatePost}>
@@ -5848,7 +6300,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   }}
                                 />
                                 {editingPostId ? (
-                                  <p className="campus-teacher__classwork-edit-note">Los archivos adjuntos originales se conservan. Para cambiarlos, elimina esta asignación y crea una nueva.</p>
+                                  <p className="campus-teacher__classwork-edit-note">
+                                    {existingMaterialFiles.length > 0
+                                      ? 'Los archivos ya guardados se conservan. Puedes agregar más archivos o enlaces y guardar.'
+                                      : 'Esta asignación aún no tiene archivos guardados. Puedes adjuntar el PDF u otros archivos aquí y guardar.'}
+                                  </p>
                                 ) : null}
 
                                 <section className="campus-teacher__classwork-attach">
@@ -5879,6 +6335,21 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     type="file"
                                   />
                                   <p className="campus-teacher__classwork-attach-hint">PDF, video, audio, foto o documentos. Máximo {maxMaterialFileCount} archivos de {Math.round(maxMaterialFileBytes / (1024 * 1024))} MB.</p>
+                                  {existingMaterialFiles.length > 0 ? (
+                                    <div className="campus-teacher__classwork-attach-files">
+                                      {existingMaterialFiles.map((file, fileIndex) => (
+                                        <div className="campus-teacher__classwork-attach-file is-saved" key={`${file.url || file.fileName}-${fileIndex}`}>
+                                          <span className="campus-teacher__classwork-attach-file-icon">
+                                            <ClassworkAttachIcon kind={String(file.kind || '').includes('image') ? 'image' : String(file.kind || '').includes('video') ? 'video' : String(file.kind || '').includes('audio') ? 'audio' : 'document'} />
+                                          </span>
+                                          <div className="campus-teacher__classwork-attach-file-copy">
+                                            <strong>{file.title || file.fileName || `Adjunto ${fileIndex + 1}`}</strong>
+                                            <span>Ya guardado</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                   {materialFiles.length > 0 ? (
                                     <div className="campus-teacher__classwork-attach-files">
                                       {materialFiles.map((file, fileIndex) => (
@@ -6103,6 +6574,18 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     value={postDraft.gradebookTopic}
                                     onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, gradebookTopic: event.target.value }))}
                                   />
+                                </label>
+
+                                <label className="campus-teacher__classwork-rail-checkbox">
+                                  <input
+                                    checked={Boolean(postDraft.allowStudentSubmission)}
+                                    onChange={(event) => setPostDraft((currentDraft) => ({
+                                      ...currentDraft,
+                                      allowStudentSubmission: event.target.checked,
+                                    }))}
+                                    type="checkbox"
+                                  />
+                                  <span>Permitir entrega del alumno</span>
                                 </label>
 
                                 {!editingPostId ? (
@@ -7470,12 +7953,175 @@ function TeacherCampusHome({ forcePreview = false }) {
               </article>
             ) : null}
 
+            {activeTeacherSection === 'family_feed' ? (
+              <article className="campus-teacher__family-feed campus-teacher__embedded-panel">
+                <header className="campus-teacher__family-feed-head">
+                  <div>
+                    <span className="campus-panel__kicker">Comunidad educativa</span>
+                    <h3>Feed de familias</h3>
+                    <p>Publicaciones generales del colegio y las tuyas ya publicadas. Puedes dar like y comentar.</p>
+                  </div>
+                </header>
+
+                {teacherFamilyFeedQuery.isLoading ? (
+                  <p className="campus-panel__meta">Cargando publicaciones...</p>
+                ) : null}
+                {teacherFamilyFeedQuery.isError ? (
+                  <p className="campus-teacher__family-feed-error">
+                    {teacherFamilyFeedQuery.error?.response?.data?.message || teacherFamilyFeedQuery.error?.message || 'No se pudo cargar el feed.'}
+                  </p>
+                ) : null}
+
+                <div className="campus-teacher__family-feed-list">
+                  {(Array.isArray(teacherFamilyFeedQuery.data) ? teacherFamilyFeedQuery.data : []).map((publication) => {
+                    const publicationId = String(publication.id || '');
+                    const isLikePending = familyFeedPendingLikeIds.includes(publicationId);
+                    const commentsOpen = Boolean(familyFeedExpandedComments[publicationId]);
+                    const commentDraft = familyFeedCommentDrafts[publicationId] || '';
+                    const isCommentPending = familyFeedPendingCommentKeys.includes(`${publicationId}:new`);
+
+                    return (
+                      <article className="campus-teacher__family-feed-card" key={publicationId}>
+                        <div className="campus-teacher__family-feed-author">
+                          <span className="campus-teacher__family-feed-avatar">
+                            {publication.authorPhotoUrl ? (
+                              <img
+                                alt=""
+                                onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                                src={resolveApiAssetUrl(publication.authorPhotoUrl)}
+                              />
+                            ) : String(publication.authorName || 'SA').slice(0, 2).toUpperCase()}
+                          </span>
+                          <div>
+                            <strong>{publication.authorName || 'Secretaría académica'}</strong>
+                            <span>{formatDateLabel(publication.sentAt)}</span>
+                          </div>
+                        </div>
+
+                        {(publication.media || []).length ? (
+                          <div className={`campus-teacher__family-feed-media${publication.media.length > 1 ? ' is-grid' : ''}`}>
+                            {publication.media.map((mediaItem, mediaIndex) => (
+                              mediaItem.kind === 'video' ? (
+                                <video controls key={mediaItem.id || `${publicationId}-video-${mediaIndex}`} preload="metadata" src={resolveApiAssetUrl(mediaItem.src)} />
+                              ) : (
+                                <img
+                                  alt={mediaItem.alt || publication.title || 'Publicación para familias'}
+                                  key={mediaItem.id || `${publicationId}-image-${mediaIndex}`}
+                                  loading="lazy"
+                                  src={resolveApiAssetUrl(mediaItem.src)}
+                                />
+                              )
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <div className="campus-teacher__family-feed-copy">
+                          <h4>{publication.title}</h4>
+                          <p>{publication.body}</p>
+                        </div>
+
+                        <div className="campus-teacher__family-feed-actions">
+                          <button
+                            aria-label={publication.likedByMe ? 'Quitar like' : 'Dar like'}
+                            className={`campus-teacher__family-feed-action${publication.likedByMe ? ' is-liked' : ''}`}
+                            disabled={isLikePending}
+                            onClick={() => onToggleFamilyFeedLike(publicationId)}
+                            type="button"
+                          >
+                            <span aria-hidden="true">{publication.likedByMe ? '♥' : '♡'}</span>
+                            <strong>{Number(publication.likesCount || 0)}</strong>
+                          </button>
+                          <button
+                            className="campus-teacher__family-feed-action"
+                            onClick={() => setFamilyFeedExpandedComments((current) => ({
+                              ...current,
+                              [publicationId]: !commentsOpen,
+                            }))}
+                            type="button"
+                          >
+                            Comentarios {Number(publication.commentsCount || 0)}
+                          </button>
+                        </div>
+
+                        {commentsOpen ? (
+                          <div className="campus-teacher__family-feed-comments">
+                            {(publication.comments || []).length ? publication.comments.map((comment) => {
+                              const commentPendingKey = `${publicationId}:${comment.id}`;
+                              const commentLikePendingKey = `${publicationId}:${comment.id}:like`;
+                              return (
+                                <div className="campus-teacher__family-feed-comment" key={comment.id}>
+                                  <div className="campus-teacher__family-feed-comment-head">
+                                    <strong>{comment.name}</strong>
+                                    <span>{formatDateLabel(comment.createdAt)}</span>
+                                  </div>
+                                  <p>{comment.body}</p>
+                                  <div className="campus-teacher__family-feed-comment-actions">
+                                    <button
+                                      className={`campus-teacher__family-feed-action is-compact${comment.likedByMe ? ' is-liked' : ''}`}
+                                      disabled={familyFeedPendingCommentKeys.includes(commentLikePendingKey)}
+                                      onClick={() => onToggleFamilyFeedCommentLike(publicationId, comment.id)}
+                                      type="button"
+                                    >
+                                      {comment.likedByMe ? '♥' : '♡'} {Number(comment.likesCount || 0)}
+                                    </button>
+                                    {comment.canDelete ? (
+                                      <button
+                                        className="campus-teacher__family-feed-action is-compact is-danger"
+                                        disabled={familyFeedPendingCommentKeys.includes(commentPendingKey)}
+                                        onClick={() => onDeleteFamilyFeedComment(publicationId, comment.id)}
+                                        type="button"
+                                      >
+                                        Borrar
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            }) : (
+                              <p className="campus-panel__meta">Sé el primero en comentar.</p>
+                            )}
+
+                            <form
+                              className="campus-teacher__family-feed-comment-form"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                onSubmitFamilyFeedComment(publicationId);
+                              }}
+                            >
+                              <textarea
+                                onChange={(event) => setFamilyFeedCommentDrafts((current) => ({
+                                  ...current,
+                                  [publicationId]: event.target.value,
+                                }))}
+                                placeholder="Escribe un comentario..."
+                                rows={3}
+                                value={commentDraft}
+                              />
+                              <button disabled={isCommentPending || !commentDraft.trim()} type="submit">
+                                {isCommentPending ? 'Publicando...' : 'Comentar'}
+                              </button>
+                            </form>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+
+                {!teacherFamilyFeedQuery.isLoading
+                  && !teacherFamilyFeedQuery.isError
+                  && (!Array.isArray(teacherFamilyFeedQuery.data) || teacherFamilyFeedQuery.data.length === 0) ? (
+                    <p className="campus-panel__meta">Todavía no hay publicaciones generales ni publicaciones propias enviadas a las familias.</p>
+                  ) : null}
+              </article>
+            ) : null}
+
             {activeTeacherSection === 'staff_announcements' ? (
               <article className="campus-teacher__resource-panel campus-teacher__embedded-panel">
                 <StaffAnnouncementsPanel
-                  description="Consulta los comunicados de rectoría y coordinación, y confirma cuando los hayas leído."
+                  description="Consulta los mensajes internos de rectoría y coordinación, y confirma cuando los hayas leído."
                   mode="inbox"
-                  title="Comunicados"
+                  title="Comunicados internos"
                 />
               </article>
             ) : null}

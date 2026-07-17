@@ -78,7 +78,7 @@ export function ParentPortalBootScreen({
   );
 }
 
-export function ParentPortalEmptyStudentsState({ onLogout }) {
+export function ParentPortalEmptyStudentsState({ onLogout, studentPortalMode = false }) {
   return (
     <section className="campus-page campus-parent-mobile-app parent-portal-state parent-portal-state--empty">
       <header className="campus-parent-mobile__app-header">
@@ -86,7 +86,9 @@ export function ParentPortalEmptyStudentsState({ onLogout }) {
           <img alt="Comergio" className="campus-parent-mobile__app-logo" src={comergioLogo} />
         </div>
         <div className="campus-parent-mobile__app-title-wrap">
-          <span className="campus-parent-mobile__app-school-name">Portal de acudientes</span>
+          <span className="campus-parent-mobile__app-school-name">
+            {studentPortalMode ? 'Portal del alumno' : 'Portal de acudientes'}
+          </span>
         </div>
         {onLogout ? (
           <button className="campus-parent-mobile__app-logout-button" onClick={onLogout} type="button">
@@ -98,9 +100,15 @@ export function ParentPortalEmptyStudentsState({ onLogout }) {
         <article className="parent-portal-state__card">
           <ParentPortalStateIcon variant="no-students" />
           <div className="parent-portal-state__copy">
-            <span className="parent-portal-state__eyebrow">Vinculación pendiente</span>
-            <h2>Sin alumnos vinculados</h2>
-            <p>Este usuario padre no tiene alumnos activos vinculados en este colegio. Si crees que es un error, contacta a la institución.</p>
+            <span className="parent-portal-state__eyebrow">
+              {studentPortalMode ? 'Cuenta incompleta' : 'Vinculación pendiente'}
+            </span>
+            <h2>{studentPortalMode ? 'No encontramos tu perfil de alumno' : 'Sin alumnos vinculados'}</h2>
+            <p>
+              {studentPortalMode
+                ? 'Tu usuario de alumno no tiene un perfil activo vinculado. Si crees que es un error, contacta a la institución.'
+                : 'Este usuario padre no tiene alumnos activos vinculados en este colegio. Si crees que es un error, contacta a la institución.'}
+            </p>
           </div>
         </article>
       </div>
