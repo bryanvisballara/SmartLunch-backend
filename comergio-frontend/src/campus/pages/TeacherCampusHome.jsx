@@ -1024,6 +1024,8 @@ function buildCourseTimelineCalendar(monthDate, classSessions, posts) {
       ...matchingPosts.map((post) => ({
         key: `post-${post.id}`,
         kind: 'activity',
+        postId: post.id,
+        courseId: post.courseId,
         label: post.title || formatPostTypeLabel(post.type),
         meta: [
           String(post.subject || post.courseTitle || '').trim(),
@@ -2567,6 +2569,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [dashboardCalendarMonth, setDashboardCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedTimelineDate, setSelectedTimelineDate] = useState('');
   const [selectedDashboardCalendarDate, setSelectedDashboardCalendarDate] = useState('');
+  const [selectedAssignmentDetail, setSelectedAssignmentDetail] = useState(null);
   const [activeIntegralModal, setActiveIntegralModal] = useState('');
   const [showPostSuccessModal, setShowPostSuccessModal] = useState(false);
   const [gradebookSaveModal, setGradebookSaveModal] = useState(null);
@@ -3063,6 +3066,14 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => selectedCoursePosts.filter((post) => String(post?.status || '').toLowerCase() !== 'archived'),
     [selectedCoursePosts]
   );
+  const assignmentDetailPost = useMemo(() => {
+    if (!selectedAssignmentDetail?.id) {
+      return null;
+    }
+
+    return selectedCourseAssignmentPosts.find((post) => String(post.id) === String(selectedAssignmentDetail.id))
+      || selectedAssignmentDetail;
+  }, [selectedAssignmentDetail, selectedCourseAssignmentPosts]);
   const selectedCourseTimelineCalendar = useMemo(
     () => buildCourseTimelineCalendar(timelineMonth, selectedCourseSchedule, selectedCoursePosts),
     [timelineMonth, selectedCoursePosts, selectedCourseSchedule]
@@ -3816,6 +3827,34 @@ function TeacherCampusHome({ forcePreview = false }) {
     setActiveCourseWorkspaceTab('gradebook');
     setGradebookMode('assignment');
     setSelectedGradebookAssignmentKey(assignmentKey || assignmentOptions[0]?.key || '');
+  };
+
+  const openAssignmentDetail = (item) => {
+    const postId = item?.postId || item?.id;
+    const post = dashboardCalendarPosts.find((entry) => String(entry.id) === String(postId))
+      || recentPosts.find((entry) => String(entry.id) === String(postId));
+    const courseId = item?.courseId || post?.courseId;
+    const course = academicCourses.find((entry) => String(entry.id) === String(courseId));
+
+    if (!post || !course) {
+      setNotice({ type: 'error', text: 'No se pudo abrir la asignación. Actualiza el calendario e intenta de nuevo.' });
+      return;
+    }
+
+    const subjectLabel = normalizeSubjectLabel(course.subject);
+    const subjectKey = slugifyComponentKey(subjectLabel) || 'subject';
+
+    setSelectedDashboardCalendarDate('');
+    setActiveIntegralModal('');
+    setActiveTeacherSection('academic_management');
+    setSelectedSubjectKey(subjectKey);
+    setSelectedCourseId(course.id);
+    setTimelineCourseId(course.id);
+    setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setShowSelectedCourseWorkspace(true);
+    setActiveCourseWorkspaceTab('posts');
+    setShowAssignmentComposer(false);
+    setSelectedAssignmentDetail({ ...post, id: String(post.id) });
   };
 
   const closeAssignmentComposer = () => {
@@ -5694,7 +5733,70 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                     {activeCourseWorkspaceTab === 'posts' ? (
                       <div className="campus-teacher__classwork">
-                        {showAssignmentComposer ? (
+                        {assignmentDetailPost && !showAssignmentComposer ? (
+                          <article className="campus-teacher__assignment-detail">
+                            <header className="campus-teacher__assignment-detail-head">
+                              <button
+                                className="campus-teacher__ghost-btn"
+                                onClick={() => setSelectedAssignmentDetail(null)}
+                                type="button"
+                              >
+                                ← Volver a asignaciones
+                              </button>
+                              <button
+                                className="campus-teacher__classwork-create-btn"
+                                onClick={() => onEditPost(assignmentDetailPost)}
+                                type="button"
+                              >
+                                Editar
+                              </button>
+                            </header>
+                            <div className="campus-teacher__assignment-detail-title">
+                              <span className={`campus-teacher__classwork-type-icon is-${getClassworkTypeTone(assignmentDetailPost.type)}`}>
+                                <ClassworkTypeIcon type={assignmentDetailPost.type} />
+                              </span>
+                              <div>
+                                <span>{formatPostTypeLabel(assignmentDetailPost.type)}</span>
+                                <h2>{assignmentDetailPost.title || 'Sin título'}</h2>
+                                <p>{getCourseDisplayTitle(selectedCourse)} · {formatDeliveryLabel(assignmentDetailPost)}</p>
+                              </div>
+                            </div>
+                            <div className="campus-teacher__assignment-detail-body">
+                              <section>
+                                <h3>Instrucciones</h3>
+                                <p>{assignmentDetailPost.body || 'Esta asignación no tiene instrucciones adicionales.'}</p>
+                              </section>
+                              <aside>
+                                <div>
+                                  <span>Publicada</span>
+                                  <strong>{formatPostedDate(assignmentDetailPost)}</strong>
+                                </div>
+                                <div>
+                                  <span>Entrega</span>
+                                  <strong>{formatDeliveryLabel(assignmentDetailPost)}</strong>
+                                </div>
+                              </aside>
+                            </div>
+                            {(assignmentDetailPost.attachments || []).length > 0 ? (
+                              <section className="campus-teacher__assignment-detail-attachments">
+                                <h3>Material adjunto</h3>
+                                <div>
+                                  {(assignmentDetailPost.attachments || []).map((attachment, index) => (
+                                    <a
+                                      href={resolveApiAssetUrl(attachment.url)}
+                                      key={`${attachment.url || attachment.fileName || 'attachment'}-${index}`}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      <ClassworkAttachIcon kind={attachment.kind || attachment.sourceType || 'document'} />
+                                      <span>{attachment.title || attachment.fileName || `Adjunto ${index + 1}`}</span>
+                                    </a>
+                                  ))}
+                                </div>
+                              </section>
+                            ) : null}
+                          </article>
+                        ) : showAssignmentComposer ? (
                           <form className="campus-teacher__classwork-composer" onSubmit={onCreatePost}>
                             <header className="campus-teacher__classwork-composer-header">
                               <button aria-label="Cerrar" className="campus-teacher__classwork-close" onClick={onCancelEditPost} type="button">
@@ -6113,10 +6215,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       <span className={`campus-teacher__classwork-type-icon is-${tone}`}>
                                         <ClassworkTypeIcon type={post.type} />
                                       </span>
-                                      <div className="campus-teacher__classwork-item-copy">
+                                      <button
+                                        className="campus-teacher__classwork-item-copy campus-teacher__classwork-item-copy--button"
+                                        onClick={() => setSelectedAssignmentDetail({ ...post, id: String(post.id) })}
+                                        type="button"
+                                      >
                                         <strong>{post.title || 'Sin título'}</strong>
                                         <span>{formatPostTypeLabel(post.type)} · {formatDeliveryLabel(post)}</span>
-                                      </div>
+                                      </button>
                                       <span className="campus-teacher__classwork-item-date">Publicado {formatPostedDate(post)}</span>
                                       <div className="campus-teacher__classwork-item-menu">
                                         <button
@@ -7682,12 +7788,27 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                       <div className="campus-teacher__timeline-modal-body">
                         {selectedDashboardCalendarDay.items.length > 0 ? selectedDashboardCalendarDay.items.map((item) => (
-                          <article className={`campus-teacher__timeline-modal-item is-${item.kind}`} key={item.key}>
-                            <span className="campus-teacher__timeline-modal-item-kind">{item.kind === 'class' ? 'Clase' : 'Actividad'}</span>
-                            <strong>{item.label}</strong>
-                            <span>{item.meta}</span>
-                            <p>{item.description}</p>
-                          </article>
+                          item.kind === 'activity' ? (
+                            <button
+                              className="campus-teacher__timeline-modal-item is-activity is-clickable"
+                              key={item.key}
+                              onClick={() => openAssignmentDetail(item)}
+                              type="button"
+                            >
+                              <span className="campus-teacher__timeline-modal-item-kind">Actividad</span>
+                              <strong>{item.label}</strong>
+                              <span>{item.meta}</span>
+                              <p>{item.description}</p>
+                              <span className="campus-teacher__timeline-modal-item-action">Ver asignación</span>
+                            </button>
+                          ) : (
+                            <article className="campus-teacher__timeline-modal-item is-class" key={item.key}>
+                              <span className="campus-teacher__timeline-modal-item-kind">Clase</span>
+                              <strong>{item.label}</strong>
+                              <span>{item.meta}</span>
+                              <p>{item.description}</p>
+                            </article>
+                          )
                         )) : <p className="campus-panel__meta">No hay actividades programadas para este día.</p>}
                       </div>
                     </div>

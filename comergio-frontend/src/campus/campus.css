@@ -8160,6 +8160,22 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   min-width: 0;
 }
 
+.campus-teacher__classwork-item-copy--button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-teacher__classwork-item-copy--button:hover strong,
+.campus-teacher__classwork-item-copy--button:focus-visible strong {
+  color: #1a73e8;
+  text-decoration: underline;
+}
+
 .campus-teacher__classwork-item-copy strong {
   color: #202124;
   font-size: 0.92rem;
@@ -8233,6 +8249,124 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
 .campus-teacher__classwork-item-dropdown button:hover,
 .campus-teacher__classwork-item-dropdown button:focus-visible {
   background: #f1f3f4;
+}
+
+.campus-teacher__assignment-detail {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.35rem;
+  border: 1px solid #dadce0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.campus-teacher__assignment-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.campus-teacher__assignment-detail-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.campus-teacher__assignment-detail-title > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.campus-teacher__assignment-detail-title span,
+.campus-teacher__assignment-detail-title p,
+.campus-teacher__assignment-detail-body aside span {
+  margin: 0;
+  color: #5f6368;
+  font-size: 0.84rem;
+}
+
+.campus-teacher__assignment-detail-title h2 {
+  margin: 0;
+  color: #202124;
+  font-size: clamp(1.35rem, 3vw, 1.9rem);
+}
+
+.campus-teacher__assignment-detail-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.32fr);
+  gap: 1.5rem;
+}
+
+.campus-teacher__assignment-detail-body h3,
+.campus-teacher__assignment-detail-attachments h3 {
+  margin: 0 0 0.55rem;
+  color: #202124;
+  font-size: 1rem;
+}
+
+.campus-teacher__assignment-detail-body section p {
+  margin: 0;
+  color: #3c4043;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.campus-teacher__assignment-detail-body aside {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+}
+
+.campus-teacher__assignment-detail-body aside > div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem;
+  border-radius: 10px;
+  background: #f8f9fa;
+}
+
+.campus-teacher__assignment-detail-body aside strong {
+  color: #202124;
+  font-size: 0.9rem;
+}
+
+.campus-teacher__assignment-detail-attachments {
+  padding-top: 1rem;
+  border-top: 1px solid #e8eaed;
+}
+
+.campus-teacher__assignment-detail-attachments > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.campus-teacher__assignment-detail-attachments a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 180px;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #dadce0;
+  border-radius: 10px;
+  color: #1a73e8;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+
+.campus-teacher__assignment-detail-attachments a:hover,
+.campus-teacher__assignment-detail-attachments a:focus-visible {
+  border-color: #1a73e8;
+  background: #f6f9fe;
+}
+
+.campus-teacher__assignment-detail-attachments svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
 }
 
 .campus-teacher__classwork-composer {
@@ -10680,6 +10814,10 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   .campus-teacher__classwork-composer-main {
     border-right: 0;
     border-bottom: 1px solid #dadce0;
+  }
+
+  .campus-teacher__assignment-detail-body {
+    grid-template-columns: 1fr;
   }
 
   .campus-teacher__classwork-item {
