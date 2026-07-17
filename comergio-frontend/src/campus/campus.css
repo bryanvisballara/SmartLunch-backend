@@ -2345,20 +2345,92 @@ button.campus-coordination__selected-item.is-selected {
   }
 }
 
-.campus-parent-mobile__feed-error {
+.campus-parent-mobile__feed-error,
+.campus-parent-mobile__feed-toast {
   position: fixed;
   right: 1rem;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 4.1rem);
-  left: 1rem;
-  z-index: 70;
-  max-width: 440px;
-  margin: 0 auto;
+  left: auto;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5.75rem);
+  z-index: 96;
+  width: min(18.5rem, calc(100vw - 5.25rem));
+  margin: 0;
   padding: 0.75rem 0.9rem;
   border-radius: 14px;
-  background: #fee2e2;
-  color: #991b1b;
-  font-size: 0.88rem;
+  background: #0f172a;
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.35;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.28);
+  animation: campus-parent-toast-enter 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.campus-parent-mobile__draft-toast {
+  position: fixed;
+  right: 1rem;
+  left: auto;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5.75rem);
+  z-index: 96;
+  display: grid;
+  gap: 0.45rem;
+  width: min(18.5rem, calc(100vw - 5.25rem));
+  padding: 0.7rem;
+  border-radius: 16px;
+  background: #0b3b5a;
+  color: #f8fbff;
+  box-shadow: 0 16px 36px rgba(11, 59, 90, 0.34);
+  animation: campus-parent-toast-enter 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.campus-parent-mobile__draft-toast-main {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-parent-mobile__draft-toast-main strong {
+  font-size: 0.9rem;
   font-weight: 800;
+}
+
+.campus-parent-mobile__draft-toast-main span {
+  color: rgba(248, 251, 255, 0.82);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.campus-parent-mobile__draft-toast-discard {
+  justify-self: start;
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@keyframes campus-parent-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateX(120%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .campus-parent-mobile__sheet-layer {
@@ -12175,7 +12247,7 @@ body.teacher-camera-open {
 
 .campus-parent-community-composer__actions {
   display: grid;
-  grid-template-columns: 1fr 1.4fr;
+  grid-template-columns: 1fr 1fr 1.35fr;
   gap: 0.65rem;
 }
 

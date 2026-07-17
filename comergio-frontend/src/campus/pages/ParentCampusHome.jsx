@@ -5615,6 +5615,23 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [activeSection]);
 
   useEffect(() => {
+    if (!feedActionMessage) {
+      return undefined;
+    }
+    const ephemeralMessages = new Set([
+      'Borrador eliminado.',
+      'Tu publicación ya está visible en el feed.',
+    ]);
+    if (!ephemeralMessages.has(feedActionMessage) && !feedActionMessage.startsWith('Tu publicación quedó')) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setFeedActionMessage((current) => (ephemeralMessages.has(current) || current.startsWith('Tu publicación quedó') ? '' : current));
+    }, 3200);
+    return () => window.clearTimeout(timer);
+  }, [feedActionMessage]);
+
+  useEffect(() => {
     const launchParams = readParentNotificationLaunchParams(location.search, location.pathname);
     const validAcademicViews = new Set(academicMenuItems.map((item) => item.id));
 
@@ -6826,6 +6843,38 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     });
   };
 
+  const hasPendingCommunityDraft = Boolean(
+    String(communityDraft.title || '').trim()
+    || String(communityDraft.body || '').trim()
+    || (Array.isArray(communityDraft.media) && communityDraft.media.length > 0)
+  );
+
+  const closeCommunityComposer = () => {
+    if (communityPublishing || communityMediaUploading) {
+      return;
+    }
+    setShowCommunityComposer(false);
+    if (hasPendingCommunityDraft) {
+      setFeedActionMessage('');
+    }
+  };
+
+  const resumeCommunityDraft = () => {
+    setFeedActionMessage('');
+    setShowCommunityCamera(false);
+    setShowCommunityComposer(true);
+  };
+
+  const discardCommunityDraft = () => {
+    if (communityPublishing || communityMediaUploading) {
+      return;
+    }
+    resetCommunityDraft();
+    setShowCommunityComposer(false);
+    setShowCommunityCamera(false);
+    setFeedActionMessage('Borrador eliminado.');
+  };
+
   const uploadCommunityMediaFiles = async (files, { fromCamera = false } = {}) => {
     const selectedFiles = Array.from(files || []).filter((file) => {
       const mimeType = String(file?.type || '').split(';')[0].trim().toLowerCase();
@@ -6888,11 +6937,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       if (fromCamera) {
         setShowCommunityCamera(false);
       }
-      setFeedActionMessage(
-        selectedFiles.length === 1
-          ? 'Contenido listo para publicar.'
-          : `${selectedFiles.length} archivos listos para publicar.`
-      );
+      setFeedActionMessage('');
     } catch (error) {
       setFeedActionMessage(error?.response?.data?.message || error?.message || 'No se pudo subir el archivo.');
     } finally {
@@ -7512,11 +7557,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       {showCommunityComposer ? (
         <div
           className="campus-parent-community-composer-layer"
-          onClick={() => {
-            if (!communityPublishing && !communityMediaUploading) {
-              setShowCommunityComposer(false);
-            }
-          }}
+          onClick={closeCommunityComposer}
           role="presentation"
         >
           <form
@@ -7538,7 +7579,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               </div>
               <button
                 disabled={communityPublishing || communityMediaUploading}
-                onClick={() => setShowCommunityComposer(false)}
+                onClick={closeCommunityComposer}
                 type="button"
               >
                 Cerrar
@@ -7633,7 +7674,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                   ))}
                 </div>
               ) : (
-                <p>También puedes deslizar a la izquierda para abrir la cámara.</p>
+                <p>También puedes deslizar a la derecha para abrir la cámara.</p>
               )}
             </div>
 
@@ -7647,6 +7688,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 type="button"
               >
                 Cámara
+              </button>
+              <button
+                disabled={communityPublishing || communityMediaUploading || !hasPendingCommunityDraft}
+                onClick={discardCommunityDraft}
+                type="button"
+              >
+                Descartar
               </button>
               <button disabled={communityPublishing || communityMediaUploading} type="submit">
                 {communityPublishing
@@ -7856,7 +7904,30 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       </div>
       ) : null}
 
-      {feedActionMessage ? <p className="campus-parent-mobile__feed-error">{feedActionMessage}</p> : null}
+      {hasPendingCommunityDraft && !showCommunityComposer && !showCommunityCamera ? (
+        <div className="campus-parent-mobile__draft-toast" role="status">
+          <button className="campus-parent-mobile__draft-toast-main" onClick={resumeCommunityDraft} type="button">
+            <strong>Borrador listo</strong>
+            <span>
+              {(communityDraft.media || []).length
+                ? `${communityDraft.media.length} archivo${communityDraft.media.length === 1 ? '' : 's'} · toca para seguir`
+                : 'Toca para seguir editando'}
+            </span>
+          </button>
+          <button
+            aria-label="Descartar borrador"
+            className="campus-parent-mobile__draft-toast-discard"
+            onClick={discardCommunityDraft}
+            type="button"
+          >
+            Descartar
+          </button>
+        </div>
+      ) : null}
+
+      {feedActionMessage && !(hasPendingCommunityDraft && !showCommunityComposer && !showCommunityCamera) ? (
+        <p className="campus-parent-mobile__feed-toast">{feedActionMessage}</p>
+      ) : null}
 
       {showFinanceConceptsSheet ? (
         <ParentFeedBottomSheet onClose={() => setShowFinanceConceptsSheet(false)} title="Detalle del cobro">
