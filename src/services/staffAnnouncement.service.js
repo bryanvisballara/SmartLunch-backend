@@ -1,8 +1,17 @@
 const User = require('../models/user.model');
 const StaffAnnouncement = require('../models/staffAnnouncement.model');
 const StaffAnnouncementRecipient = require('../models/staffAnnouncementRecipient.model');
-const { STAFF_ANNOUNCEMENT_TARGET_ROLES } = require('../models/staffAnnouncement.model');
 const { queueNotificationsForParents } = require('./notification.service');
+
+const STAFF_ANNOUNCEMENT_TARGET_ROLES = [
+  'teacher',
+  'psychology',
+  'nursing',
+  'academic_secretary',
+  'admissions',
+  'coordination',
+  'billing',
+];
 
 function normalizeText(value) {
   return String(value || '').trim();

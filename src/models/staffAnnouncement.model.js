@@ -39,4 +39,3 @@ staffAnnouncementSchema.index({ schoolId: 1, status: 1, publishedAt: -1 });
 staffAnnouncementSchema.index({ schoolId: 1, senderUserId: 1, publishedAt: -1 });
 
 module.exports = registerSchoolScopedModel('StaffAnnouncement', staffAnnouncementSchema);
-module.exports.STAFF_ANNOUNCEMENT_TARGET_ROLES = STAFF_ANNOUNCEMENT_TARGET_ROLES;
