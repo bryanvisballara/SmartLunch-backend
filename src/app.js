@@ -361,7 +361,8 @@ app.get('/health', (req, res) => {
     nodeEnv: process.env.NODE_ENV || '',
     render: String(process.env.RENDER || '').trim() === 'true',
     cloudinaryEnabled: isCloudinaryEnabled(),
-    feedUploadVersion: 2,
+    feedUploadVersion: 3,
+    campusMaterialsDbServe: true,
   });
 });
 
