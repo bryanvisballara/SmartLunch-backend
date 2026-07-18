@@ -1119,7 +1119,8 @@ button.campus-coordination__selected-item.is-selected {
   padding-top: 0;
 }
 
-.campus-parent-mobile-app.is-academic-section {
+.campus-parent-mobile-app.is-academic-section,
+.campus-parent-mobile-app.is-home-section {
   align-content: start;
   grid-auto-rows: max-content;
 }
@@ -9292,6 +9293,60 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   margin-bottom: 0.35rem;
 }
 
+.campus-teacher__workspace .campus-teacher__grading-refresh-btn,
+.campus-teacher__grading-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 0 0.9rem;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1a73e8;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: none;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.campus-teacher__workspace .campus-teacher__grading-refresh-btn:hover,
+.campus-teacher__workspace .campus-teacher__grading-refresh-btn:focus-visible,
+.campus-teacher__grading-refresh-btn:hover,
+.campus-teacher__grading-refresh-btn:focus-visible {
+  background: #f4f8fe;
+  border-color: rgba(26, 115, 232, 0.4);
+  box-shadow: 0 1px 4px rgba(26, 115, 232, 0.14);
+}
+
+.campus-teacher__workspace .campus-teacher__grading-refresh-btn:disabled,
+.campus-teacher__grading-refresh-btn:disabled {
+  color: #9aa0a6;
+  border-color: #e8eaed;
+  background: #f8f9fa;
+  box-shadow: none;
+}
+
+.campus-teacher__grading-refresh-btn span {
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.campus-teacher__grading-refresh-btn span.is-spinning {
+  animation: campus-teacher-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes campus-teacher-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .campus-teacher__classroom-title {
   margin: 0;
   color: #202124;
@@ -11526,7 +11581,7 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
 }
 
 .parent-portal-state__card--feed-empty {
-  margin: 0.35rem 0 0;
+  margin: 0.35rem auto 0;
 }
 
 .parent-portal-state__copy {

@@ -415,6 +415,37 @@ function createAcademicContentTopicDraft(index = 0) {
   };
 }
 
+function pickActiveAcademicPeriod(periods = []) {
+  const list = (Array.isArray(periods) ? periods : []).filter(Boolean);
+  if (list.length <= 1) {
+    return list[0] || null;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const withDates = list.filter((period) => period.startDate && period.endDate);
+
+  const current = withDates.find((period) => period.startDate <= today && today <= period.endDate);
+  if (current) {
+    return current;
+  }
+
+  const upcoming = withDates
+    .filter((period) => period.startDate > today)
+    .sort((left, right) => String(left.startDate).localeCompare(String(right.startDate)))[0];
+  if (upcoming) {
+    return upcoming;
+  }
+
+  const mostRecentPast = withDates
+    .filter((period) => period.endDate < today)
+    .sort((left, right) => String(right.endDate).localeCompare(String(left.endDate)))[0];
+  if (mostRecentPast) {
+    return mostRecentPast;
+  }
+
+  return list[0];
+}
+
 function buildAssignmentComponentOptions(periods = []) {
   const normalizedPeriods = Array.isArray(periods) ? periods : [];
   const seenNames = new Set();
@@ -2439,7 +2470,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         const saveResult = await onSaveGradingScheme(
           nextAcademicPeriodDrafts,
           'Subcomponente guardado en la estructura academica.',
-          { strictTotals: false },
+          { strictTotals: false, silentNotices: true },
         );
 
         if (!saveResult.ok) {
@@ -2546,7 +2577,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         const saveResult = await onSaveGradingScheme(
           nextAcademicPeriodDrafts,
           'Componente guardado en la estructura academica.',
-          { strictTotals: false },
+          { strictTotals: false, silentNotices: true },
         );
 
         if (!saveResult.ok) {
@@ -2876,7 +2907,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         queryClient.setQueryData(['campus', 'teacher', 'course', teacherQueryScope, selectedCourseId], detail);
       }
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
-      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
     },
   });
 
@@ -2884,7 +2915,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     mutationFn: ({ courseId, payload }) => updateCampusTeacherAcademicContent(courseId, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
-      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
     },
   });
 
@@ -2893,7 +2924,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'calendar'] });
-      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
     },
   });
 
@@ -2902,14 +2933,14 @@ function TeacherCampusHome({ forcePreview = false }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'calendar'] });
-      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
     },
   });
 
   const saveGradesMutation = useMutation({
     mutationFn: ({ courseId, studentId, payload }) => saveCampusTeacherStudentGrades(courseId, studentId, payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', selectedCourseId] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
     },
   });
 
@@ -3180,7 +3211,10 @@ function TeacherCampusHome({ forcePreview = false }) {
       ? selectedCourseAcademicPeriods
       : selectedCourseDraftAcademicPeriods;
 
-    return buildAssignmentComponentOptions(sourcePeriods);
+    // Solo mostramos los componentes del periodo vigente: si el docente renombró
+    // componentes en un periodo, no queremos mezclar nombres viejos de otros periodos.
+    const activePeriod = pickActiveAcademicPeriod(sourcePeriods);
+    return buildAssignmentComponentOptions(activePeriod ? [activePeriod] : sourcePeriods);
   }, [selectedCourseAcademicPeriods, selectedCourseDraftAcademicPeriods]);
   const gradebookAssignmentOptions = useMemo(
     () => buildGradebookAssignmentOptions(selectedCourseDraftAcademicPeriods),
@@ -4529,6 +4563,40 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
   };
 
+  const onRefreshGradingStructure = async () => {
+    if (!selectedCourse) {
+      setNotice({ type: 'error', text: 'Selecciona un curso para actualizar la estructura de notas.' });
+      return;
+    }
+
+    if (previewEnabled) {
+      const previewDetail = previewWorkspace.courseDetails?.[selectedCourse.id] || null;
+      setAcademicPeriodDrafts(buildAcademicPeriodDrafts(previewDetail?.course || selectedCourse));
+      setSubcomponentDrafts({});
+      setNotice({ type: 'success', text: 'Estructura de notas actualizada.' });
+      return;
+    }
+
+    try {
+      const result = await courseDetailQuery.refetch();
+      if (result.error) {
+        throw result.error;
+      }
+
+      const refreshedDetail = result.data;
+      if (refreshedDetail?.course) {
+        setAcademicPeriodDrafts(buildAcademicPeriodDrafts(refreshedDetail.course));
+        setSubcomponentDrafts({});
+      }
+      setNotice({ type: 'success', text: 'Estructura de notas actualizada con las asignaciones más recientes.' });
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error?.response?.data?.message || error?.message || 'No se pudo actualizar la estructura de notas.',
+      });
+    }
+  };
+
   const onAddAcademicPeriod = () => {
     setAcademicPeriodDrafts((currentDrafts) => [...currentDrafts, createAcademicPeriodDraft(currentDrafts.length)]);
   };
@@ -4986,11 +5054,17 @@ function TeacherCampusHome({ forcePreview = false }) {
     successMessage = 'Períodos y esquema de calificación actualizados.',
     options = {},
   ) => {
-    const { strictTotals = true } = options;
-    if (!selectedCourse) {
-      const error = 'Selecciona un curso asignado.';
-      setNotice({ type: 'error', text: error });
+    const { strictTotals = true, silentNotices = false } = options;
+    // Cuando el caller muestra su propio modal (gradebookSaveModal), evitamos
+    // duplicar el aviso con DismissibleNotice.
+    const failValidation = (error) => {
+      if (!silentNotices) {
+        setNotice({ type: 'error', text: error });
+      }
       return { ok: false, error };
+    };
+    if (!selectedCourse) {
+      return failValidation('Selecciona un curso asignado.');
     }
 
     const sourceDrafts = Array.isArray(draftsOverride) ? draftsOverride : academicPeriodDrafts;
@@ -5020,87 +5094,73 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     if (normalizedPeriods.length === 0) {
       const error = 'Agrega al menos un período académico.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => !period.name || !period.key)) {
       const error = 'Cada periodo necesita nombre y clave valida.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (new Set(normalizedPeriods.map((period) => period.key)).size !== normalizedPeriods.length) {
       const error = 'Las claves de los periodos no pueden repetirse.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => !Number.isFinite(period.weight) || period.weight <= 0)) {
       const error = 'Cada periodo debe tener un porcentaje mayor que cero.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     const weightTotal = normalizedPeriods.reduce((total, period) => total + period.weight, 0);
     if (strictTotals && Math.abs(weightTotal - 100) > 0.001) {
       const error = 'La ponderacion de los periodos debe sumar 100%.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).length === 0)) {
       const error = 'Cada periodo debe tener al menos un componente de evaluacion.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => !component.name || !component.key))) {
       const error = 'Cada componente necesita nombre y clave valida.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => new Set((period.gradingComponents || []).map((component) => component.key)).size !== (period.gradingComponents || []).length)) {
       const error = 'Dentro de cada periodo las claves de los componentes no pueden repetirse.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => !Number.isFinite(component.weight) || component.weight <= 0))) {
       const error = 'Cada componente debe tener un porcentaje mayor que cero.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => (component.subcomponents || []).some((subcomponent) => !subcomponent.name || !subcomponent.key)))) {
       const error = 'Cada subcomponente necesita nombre y clave valida.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => new Set((component.subcomponents || []).map((subcomponent) => subcomponent.key)).size !== (component.subcomponents || []).length))) {
       const error = 'Dentro de cada componente las claves de los subcomponentes no pueden repetirse.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => (component.subcomponents || []).some((subcomponent) => !Number.isFinite(subcomponent.weight) || subcomponent.weight <= 0)))) {
       const error = 'Cada subcomponente debe tener un porcentaje mayor que cero.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (normalizedPeriods.some((period) => (period.gradingComponents || []).some((component) => (component.subcomponents || []).reduce((total, subcomponent) => total + subcomponent.weight, 0) > 100.001))) {
       const error = 'Dentro de cada componente los subcomponentes no pueden superar 100%.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     if (strictTotals && normalizedPeriods.some((period) => Math.abs((period.gradingComponents || []).reduce((total, component) => total + component.weight, 0) - 100) > 0.001)) {
       const error = 'Dentro de cada periodo los componentes deben sumar 100%.';
-      setNotice({ type: 'error', text: error });
-      return { ok: false, error };
+      return failValidation(error);
     }
 
     try {
@@ -5197,11 +5257,15 @@ function TeacherCampusHome({ forcePreview = false }) {
         });
       }
 
-      setNotice({ type: 'success', text: successMessage });
+      if (!silentNotices) {
+        setNotice({ type: 'success', text: successMessage });
+      }
       return { ok: true };
     } catch (error) {
       const errorText = error?.response?.data?.message || error?.message || 'No se pudo guardar la estructura academica.';
-      setNotice({ type: 'error', text: errorText });
+      if (!silentNotices) {
+        setNotice({ type: 'error', text: errorText });
+      }
       return { ok: false, error: errorText };
     }
   };
@@ -6778,6 +6842,15 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <h2 className="campus-teacher__classroom-title">{gradingCourseTitle}</h2>
                             <p className="campus-teacher__classroom-subtitle">Configura periodos, componentes y subcomponentes de evaluación.</p>
                           </div>
+                          <button
+                            className="campus-teacher__action-btn campus-teacher__action-btn--compact campus-teacher__grading-refresh-btn"
+                            disabled={!selectedCourse || courseDetailQuery.isFetching || isBusy}
+                            onClick={onRefreshGradingStructure}
+                            type="button"
+                          >
+                            <span aria-hidden="true" className={courseDetailQuery.isFetching ? 'is-spinning' : ''}>↻</span>
+                            {courseDetailQuery.isFetching ? 'Actualizando…' : 'Actualizar'}
+                          </button>
                         </div>
                         <div className="campus-teacher__grading-stack">
                           {!selectedCourse ? <p className="campus-panel__meta">Selecciona un curso para editar la estructura de notas.</p> : null}

@@ -140,14 +140,14 @@ export function ParentFeedLoadingSkeleton({ count = 2 }) {
   );
 }
 
-export function ParentFeedEmptyState({ studentName = 'tu alumno' }) {
+export function ParentFeedEmptyState({ studentName = 'tu alumno', title = '', description = '' }) {
   return (
     <article className="parent-portal-state__card parent-portal-state__card--feed-empty">
       <ParentPortalStateIcon variant="feed-empty" />
       <div className="parent-portal-state__copy">
         <span className="parent-portal-state__eyebrow">{studentName}</span>
-        <h2>Sin comunicados por ahora</h2>
-        <p>Cuando el colegio publique información para este acudiente o alumno, la verás aquí al instante.</p>
+        <h2>{title || 'Sin comunicados por ahora'}</h2>
+        <p>{description || 'Cuando el colegio publique información para este acudiente o alumno, la verás aquí al instante.'}</p>
       </div>
       <p className="parent-portal-state__hint">Desliza hacia abajo para actualizar el feed.</p>
     </article>

@@ -5,6 +5,10 @@ import {
   getStudentAssignmentDetail,
   submitStudentAssignment,
 } from '../../services/studentPortal.service';
+import {
+  getParentAssignments,
+  getParentAssignmentDetail,
+} from '../../services/parent.service';
 import './StudentAssignmentsPanel.css';
 
 function formatAssignmentDate(value) {
@@ -129,6 +133,9 @@ function AssignmentDetailIllustration() {
 export default function StudentAssignmentsPanel({
   initialAssignmentId = '',
   onClearInitialAssignment = null,
+  readOnly = false,
+  studentId = '',
+  studentName = '',
 }) {
   const fileInputRef = useRef(null);
   const assignmentsListRef = useRef(null);
@@ -151,7 +158,11 @@ export default function StudentAssignmentsPanel({
     setIsLoading(true);
     setError('');
 
-    getStudentAssignments()
+    const request = readOnly
+      ? getParentAssignments({ studentId })
+      : getStudentAssignments();
+
+    request
       .then((response) => {
         if (cancelled) return;
         const items = response?.data?.assignments || response?.assignments || [];
@@ -169,13 +180,12 @@ export default function StudentAssignmentsPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [readOnly, studentId]);
 
   useEffect(() => {
-    if (initialAssignmentId) {
-      setSelectedId(String(initialAssignmentId));
-    }
-  }, [initialAssignmentId]);
+    setSelectedId(String(initialAssignmentId || ''));
+    setDetail(null);
+  }, [initialAssignmentId, studentId]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -187,7 +197,11 @@ export default function StudentAssignmentsPanel({
     setDetailLoading(true);
     setNotice({ type: '', text: '' });
 
-    getStudentAssignmentDetail(selectedId)
+    const request = readOnly
+      ? getParentAssignmentDetail(selectedId, { studentId })
+      : getStudentAssignmentDetail(selectedId);
+
+    request
       .then((response) => {
         if (cancelled) return;
         const assignment = response?.data?.assignment || response?.assignment || null;
@@ -212,7 +226,7 @@ export default function StudentAssignmentsPanel({
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [readOnly, selectedId, studentId]);
 
   const sortedAssignments = useMemo(() => {
     return [...assignments].sort((left, right) => {
@@ -287,9 +301,7 @@ export default function StudentAssignmentsPanel({
 
   if (selectedId) {
     const detailState = getAssignmentState(detail || {});
-    const detailStatus = detail?.hasSubmission
-      ? { key: 'done', label: 'Entregada' }
-      : { key: 'open', label: 'Pendiente' };
+    const detailStatus = detailState;
     return (
       <section className="student-assignments-panel is-detail">
         <header className="student-assignments-panel__toolbar">
@@ -393,7 +405,7 @@ export default function StudentAssignmentsPanel({
 
             {detail.hasSubmission && detail.submission ? (
               <section className="student-assignments-submission is-done">
-                <h3>Tu entrega</h3>
+                <h3>{readOnly ? `Entrega de ${studentName || 'tu alumno'}` : 'Tu entrega'}</h3>
                 <p>Enviada el {formatAssignmentDate(detail.submission.submittedAt)}</p>
                 {detail.submission.note ? <p>{detail.submission.note}</p> : null}
                 {(detail.submission.attachments || []).length ? (
@@ -415,7 +427,7 @@ export default function StudentAssignmentsPanel({
               </section>
             ) : null}
 
-            {detail.allowStudentSubmission ? (
+            {detail.allowStudentSubmission && !readOnly ? (
               <form className="student-assignments-submit" onSubmit={onSubmitAssignment}>
                 <div className="student-assignments-detail__section-title">
                   <span aria-hidden="true">↑</span>
@@ -479,6 +491,14 @@ export default function StudentAssignmentsPanel({
                   {isSubmitting ? 'Enviando...' : (detail.hasSubmission ? 'Actualizar entrega' : 'Enviar entrega')}
                 </button>
               </form>
+            ) : readOnly && detail.allowStudentSubmission ? (
+              <div className="student-assignments-panel__read-only">
+                <span aria-hidden="true">👁</span>
+                <div>
+                  <strong>Seguimiento para acudientes</strong>
+                  <p>Puedes revisar las instrucciones y materiales. La entrega debe realizarla el alumno desde su portal.</p>
+                </div>
+              </div>
             ) : (
               <div className="student-assignments-panel__read-only">
                 <span aria-hidden="true">✓</span>
@@ -499,14 +519,14 @@ export default function StudentAssignmentsPanel({
       <header className="student-assignments-panel__head">
         <div className="student-assignments-panel__head-copy">
           <span className="student-assignments-panel__eyebrow">Aula virtual</span>
-          <h2>Mis asignaciones</h2>
-          <p>Todo tu trabajo escolar en un solo lugar.</p>
+          <h2>{readOnly ? `Asignaciones de ${studentName || 'tu alumno'}` : 'Mis asignaciones'}</h2>
+          <p>{readOnly ? 'Revisa sus tareas, instrucciones y materiales para acompañar su proceso.' : 'Todo tu trabajo escolar en un solo lugar.'}</p>
           <button
             className="student-assignments-panel__hero-cta"
             onClick={() => assignmentsListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
             type="button"
           >
-            Ver mis asignaciones
+            {readOnly ? 'Ver asignaciones' : 'Ver mis asignaciones'}
             <span aria-hidden="true">→</span>
           </button>
         </div>
@@ -520,7 +540,9 @@ export default function StudentAssignmentsPanel({
       {isLoading ? <p className="student-assignments-panel__status">Cargando asignaciones...</p> : null}
       {error ? <p className="student-assignments-panel__status is-error">{error}</p> : null}
       {!isLoading && !error && sortedAssignments.length === 0 ? (
-        <p className="student-assignments-panel__status">Todavía no tienes asignaciones publicadas.</p>
+        <p className="student-assignments-panel__status">
+          {readOnly ? 'Todavía no hay asignaciones publicadas para este alumno.' : 'Todavía no tienes asignaciones publicadas.'}
+        </p>
       ) : null}
 
       {!isLoading && !error && sortedAssignments.length ? (

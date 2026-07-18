@@ -38,6 +38,7 @@ const AcademicCalendarAssignment = require('../models/academicCalendarAssignment
 const CampusCourse = require('../models/campusCourse.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
 const CampusPost = require('../models/campusPost.model');
+const CampusPostSubmission = require('../models/campusPostSubmission.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
@@ -2059,6 +2060,31 @@ function serializeParentAcademicCalendarPost(post = {}) {
       mimeType: normalizeText(attachment.mimeType),
     })) : [],
     allowStudentSubmission: Boolean(post.allowStudentSubmission),
+    source: 'campus_post',
+  };
+}
+
+function serializeParentStudentSubmission(submission) {
+  if (!submission) {
+    return null;
+  }
+
+  return {
+    id: String(submission._id || submission.id || ''),
+    note: normalizeText(submission.note),
+    status: normalizeText(submission.status) || 'submitted',
+    submittedAt: submission.submittedAt || submission.updatedAt || submission.createdAt || null,
+    attachments: Array.isArray(submission.attachments) ? submission.attachments.map((attachment) => ({
+      sourceType: normalizeText(attachment.sourceType) || 'file',
+      kind: normalizeText(attachment.kind) || 'file',
+      title: normalizeText(attachment.title),
+      url: normalizeText(attachment.url),
+      fileName: normalizeText(attachment.fileName),
+      mimeType: normalizeText(attachment.mimeType),
+      sizeBytes: Number(attachment.sizeBytes || 0),
+      extension: normalizeText(attachment.extension),
+      storage: normalizeText(attachment.storage),
+    })) : [],
   };
 }
 
@@ -4293,6 +4319,73 @@ router.post('/portal/academic-feed/:communicationId/comments/:commentId/like', a
   }
 });
 
+async function resolveParentAssignmentAccess(req) {
+  const { schoolId, role, userId } = req.user;
+  const requestedParentUserId = role === 'admin' ? req.query.parentUserId || userId : userId;
+  const parentUserId = toObjectId(requestedParentUserId);
+  const studentId = toObjectId(req.query.studentId);
+
+  if (!parentUserId || !studentId) {
+    const error = new Error('Invalid student id');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const linkedStudent = await ParentStudentLink.exists({
+    schoolId,
+    parentId: parentUserId,
+    studentId,
+    status: 'active',
+  });
+
+  if (!linkedStudent && role !== 'admin') {
+    const error = new Error('Student does not belong to this parent');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null })
+    .select('name grade course')
+    .lean();
+  if (!student) {
+    const error = new Error('Student not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const { gradeValues, courseValues, courseTitleValues } = buildParentStudentAcademicMatchValues(student);
+  const [academicStructure, academicGradeCourses] = await Promise.all([
+    AcademicStructure.findOne({ schoolId }).lean(),
+    gradeValues.length
+      ? CampusCourse.find({
+        schoolId,
+        status: 'active',
+        studentGradeKey: { $in: gradeValues },
+      })
+        .select('title subject gradeLevel section studentGradeKey teacherUserId gradingComponents academicPeriods')
+        .sort({ title: 1 })
+        .lean()
+      : Promise.resolve([]),
+  ]);
+  const parentGradebookCourses = buildParentGradebookCoursesFromStructure({
+    academicStructure,
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+    courses: academicGradeCourses,
+    gradeEntryCourseIds: new Set(),
+  });
+  const courseIds = await resolveParentUpcomingAssignmentCourseIds({
+    schoolId,
+    courses: parentGradebookCourses,
+    gradeValues,
+    courseValues,
+    courseTitleValues,
+  });
+
+  return { schoolId, student, courseIds };
+}
+
 router.get('/portal/academic-calendar', async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
@@ -4411,6 +4504,90 @@ router.get('/portal/academic-calendar', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/assignments', roleMiddleware('parent', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, student, courseIds } = await resolveParentAssignmentAccess(req);
+    if (!courseIds.length) {
+      return res.status(200).json({ assignments: [] });
+    }
+
+    const posts = await CampusPost.find({
+      schoolId,
+      courseId: { $in: courseIds },
+      status: 'published',
+    })
+      .populate('courseId', 'title subject section studentGradeKey')
+      .sort({ scheduledClassDate: 1, dueAt: 1, publishedAt: -1, createdAt: -1 })
+      .lean();
+    const evaluativePosts = posts.filter((post) => isParentEvaluativePostType(post.type));
+    const postIds = evaluativePosts.map((post) => post._id);
+    const submissions = postIds.length
+      ? await CampusPostSubmission.find({
+        schoolId,
+        studentId: student._id,
+        postId: { $in: postIds },
+      }).lean()
+      : [];
+    const submissionByPostId = new Map(
+      submissions.map((submission) => [String(submission.postId), submission])
+    );
+
+    return res.status(200).json({
+      assignments: evaluativePosts.map((post) => {
+        const submission = submissionByPostId.get(String(post._id));
+        return {
+          ...serializeParentAcademicCalendarPost(post),
+          body: normalizeText(post.body),
+          submission: serializeParentStudentSubmission(submission),
+          hasSubmission: Boolean(submission),
+        };
+      }),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/assignments/:id', roleMiddleware('parent', 'admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(String(id || ''))) {
+      return res.status(400).json({ message: 'Invalid assignment id' });
+    }
+
+    const { schoolId, student, courseIds } = await resolveParentAssignmentAccess(req);
+    const post = await CampusPost.findOne({
+      _id: id,
+      schoolId,
+      courseId: { $in: courseIds },
+      status: 'published',
+    })
+      .populate('courseId', 'title subject section studentGradeKey')
+      .lean();
+
+    if (!post || !isParentEvaluativePostType(post.type)) {
+      return res.status(404).json({ message: 'Asignación no encontrada.' });
+    }
+
+    const submission = await CampusPostSubmission.findOne({
+      schoolId,
+      studentId: student._id,
+      postId: post._id,
+    }).lean();
+
+    return res.status(200).json({
+      assignment: {
+        ...serializeParentAcademicCalendarPost(post),
+        body: normalizeText(post.body),
+        submission: serializeParentStudentSubmission(submission),
+        hasSubmission: Boolean(submission),
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
   }
 });
 

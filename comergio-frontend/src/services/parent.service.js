@@ -8,6 +8,9 @@ export const deleteParentAcademicFeedComment = (communicationId, commentId) => a
 export const toggleParentAcademicFeedCommentLike = (communicationId, commentId) => api.post(`/parent/portal/academic-feed/${communicationId}/comments/${commentId}/like`);
 export const getParentAcademicCalendar = (params = {}) => api.get('/parent/portal/academic-calendar', { params });
 export const getParentAcademicAttendance = (params = {}) => api.get('/parent/portal/academic-attendance', { params });
+export const getParentAssignments = (params = {}) => api.get('/parent/portal/assignments', { params });
+export const getParentAssignmentDetail = (assignmentId, params = {}) =>
+	api.get(`/parent/portal/assignments/${assignmentId}`, { params });
 export const getParentAcademicBilling = (params = {}) => api.get('/parent/portal/academic-billing', { params });
 export const payParentAcademicCharge = (chargeId, data = {}) => api.post(`/parent/portal/academic-billing/charges/${chargeId}/pay`, data);
 export const getParentPortalCategories = () => api.get('/parent/portal/categories');

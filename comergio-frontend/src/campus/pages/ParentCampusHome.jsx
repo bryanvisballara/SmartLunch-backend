@@ -1475,6 +1475,8 @@ function mapParentUpcomingAssignmentRow(item) {
 
   return {
     id: item.id,
+    courseId: item.courseId || '',
+    source: item.source || '',
     title: item.title,
     subtitle: item.subject || item.courseTitle || 'Actividad académica',
     meta: dateLabel,
@@ -4379,7 +4381,7 @@ function ParentAcademicContent({
           </PerformanceKpiTag>
           <PerformanceKpiTag
             className={`campus-parent-mobile__performance-kpi-card is-violet${canNavigateAcademic ? ' is-clickable' : ''}`}
-            onClick={canNavigateAcademic ? () => goToAcademicView(studentPortalMode ? 'academic-assignments' : 'academic-calendar') : undefined}
+            onClick={canNavigateAcademic ? () => goToAcademicView('academic-assignments') : undefined}
             type={canNavigateAcademic ? 'button' : undefined}
           >
             <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
@@ -4412,7 +4414,7 @@ function ParentAcademicContent({
             {typeof onSelectAcademicView === 'function' ? (
               <button
                 className="campus-parent-mobile__assignments-link"
-                onClick={() => onSelectAcademicView(studentPortalMode ? 'academic-assignments' : 'academic-calendar')}
+                onClick={() => onSelectAcademicView('academic-assignments')}
                 type="button"
               >
                 Ver todas
@@ -4424,8 +4426,8 @@ function ParentAcademicContent({
           {parentAcademicCalendar.error ? <p className="campus-parent-mobile__academic-calendar-status is-error">{parentAcademicCalendar.error}</p> : null}
           <div className="campus-parent-mobile__assignments-list">
             {weeklyAssignedActivities.length ? weeklyAssignedActivities.slice(0, 5).map((activity) => {
-              const canOpenAssignment = studentPortalMode
-                && activity.id
+              const canOpenAssignment = activity.id
+                && activity.courseId
                 && typeof onOpenAssignment === 'function';
               const CardTag = canOpenAssignment ? 'button' : 'article';
 
@@ -4758,9 +4760,20 @@ function ParentAcademicContent({
           <div className="campus-parent-mobile__assignments-list">
             {academicCalendarItems.length ? paginatedCalendarKeyDates.map((item) => {
               const keyDate = mapParentUpcomingAssignmentRow(item);
+              const canOpenAssignment = Boolean(
+                keyDate.id
+                && keyDate.courseId
+                && typeof onOpenAssignment === 'function'
+              );
+              const CardTag = canOpenAssignment ? 'button' : 'article';
 
               return (
-                <article className="campus-parent-mobile__assignment-card" key={keyDate.id}>
+                <CardTag
+                  className={`campus-parent-mobile__assignment-card${canOpenAssignment ? ' is-clickable' : ''}`}
+                  key={keyDate.id}
+                  onClick={canOpenAssignment ? () => onOpenAssignment(keyDate.id) : undefined}
+                  type={canOpenAssignment ? 'button' : undefined}
+                >
                   <span className={`campus-parent-mobile__assignment-card-icon is-${keyDate.accent || 'task'}`} aria-hidden="true">
                     <ParentAssignmentTypeIcon variant={keyDate.iconVariant || 'task'} />
                   </span>
@@ -4780,7 +4793,7 @@ function ParentAcademicContent({
                       <span className="campus-parent-mobile__assignment-card-remaining">{keyDate.remainingLabel}</span>
                     ) : null}
                   </div>
-                </article>
+                </CardTag>
               );
             }) : (
               <article className="campus-parent-mobile__performance-empty-card">
@@ -4844,24 +4857,14 @@ function ParentAcademicContent({
   }
 
   if (effectiveActiveView === 'academic-assignments') {
-    if (!studentPortalMode) {
-      return (
-        <section className="campus-parent-mobile__academic-page">
-          <section className="campus-parent-mobile__academic-section">
-            <article className="campus-parent-mobile__performance-empty-card">
-              <strong>Asignaciones</strong>
-              <span>Esta sección está disponible en el portal del alumno.</span>
-            </article>
-          </section>
-        </section>
-      );
-    }
-
     return (
       <section className="campus-parent-mobile__academic-page">
         <StudentAssignmentsPanel
           initialAssignmentId={focusedAssignmentId}
           onClearInitialAssignment={onClearFocusedAssignment}
+          readOnly={!studentPortalMode}
+          studentId={studentPortalMode ? '' : selectedChild?.id}
+          studentName={selectedChild?.name || ''}
         />
       </section>
     );
@@ -5845,10 +5848,8 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     [parentAppFeatures]
   );
   const visibleAcademicMenuItems = useMemo(
-    () => (studentPortalMode
-      ? academicMenuItems
-      : academicMenuItems.filter((item) => item.id !== 'academic-assignments')),
-    [studentPortalMode]
+    () => academicMenuItems,
+    []
   );
 
   const realParentChildren = useMemo(
@@ -7984,8 +7985,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                     <ParentAnnouncementText text={announcement.caption} />
                   </article>
                 );
-              }) : (
-                <ParentFeedEmptyState studentName={selectedChild.name} />
+              }              ) : (
+                <ParentFeedEmptyState
+                  description={studentPortalMode && studentFeedFilter !== 'all'
+                    ? `Aún no hay publicaciones en «${(studentFeedFilterOptions.find((option) => option.id === studentFeedFilter) || {}).label || 'este feed'}». Cambia de feed arriba o vuelve más tarde.`
+                    : ''}
+                  studentName={selectedChild.name}
+                  title={studentPortalMode && studentFeedFilter !== 'all' ? 'Sin publicaciones en este feed' : ''}
+                />
               )}
             </section>
           </>
