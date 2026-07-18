@@ -3240,6 +3240,19 @@ button.campus-parent-mobile__academic-calendar-day {
   box-shadow: 0 1.1rem 2.2rem rgba(16, 44, 66, 0.18);
 }
 
+.campus-parent-mobile__performance-hero.is-clickable {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease;
+}
+
+.campus-parent-mobile__performance-hero.is-clickable:active {
+  transform: scale(0.99);
+}
+
 .campus-parent-mobile__performance-hero-body {
   display: grid;
   gap: 0.85rem;
@@ -3426,6 +3439,20 @@ button.campus-parent-mobile__academic-calendar-day {
   border-radius: 1rem;
   background: #fff;
   box-shadow: 0 0.65rem 1.2rem rgba(16, 44, 66, 0.06);
+}
+
+.campus-parent-mobile__performance-kpi-card.is-clickable {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease;
+}
+
+.campus-parent-mobile__performance-kpi-card.is-clickable:active {
+  transform: scale(0.985);
 }
 
 .campus-parent-mobile__performance-kpi-icon {
@@ -3708,6 +3735,22 @@ button.campus-parent-mobile__academic-calendar-day {
   box-shadow: 0 0.55rem 1rem rgba(16, 44, 66, 0.05);
 }
 
+.campus-parent-mobile__grade-card.is-clickable,
+.campus-parent-mobile__reinforce-card.is-clickable {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.campus-parent-mobile__grade-card.is-clickable:active,
+.campus-parent-mobile__reinforce-card.is-clickable:active {
+  transform: scale(0.992);
+}
+
 .campus-parent-mobile__grade-card-icon,
 .campus-parent-mobile__reinforce-card-icon {
   display: inline-grid;
@@ -3886,12 +3929,141 @@ button.campus-parent-mobile__academic-calendar-day {
   text-align: center;
 }
 
+.campus-parent-mobile__attendance-kpi-card.is-clickable {
+  width: 100%;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 140ms ease;
+}
+
+.campus-parent-mobile__attendance-kpi-card.is-clickable:active {
+  transform: scale(0.985);
+}
+
 .campus-parent-mobile__attendance-kpi-icon {
   display: inline-grid;
   place-items: center;
   width: 2.35rem;
   height: 2.35rem;
   border-radius: 0.68rem;
+}
+
+.campus-parent-mobile__ranking-hero {
+  display: grid;
+  gap: 0.2rem;
+  padding: 1.1rem 1.15rem;
+  border-radius: 1rem;
+  background: linear-gradient(145deg, #102c42 0%, #1d4d6e 100%);
+  color: #fff;
+  box-shadow: 0 1.1rem 2.2rem rgba(16, 44, 66, 0.18);
+}
+
+.campus-parent-mobile__ranking-hero span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.campus-parent-mobile__ranking-hero strong {
+  font-size: 2.1rem;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.campus-parent-mobile__ranking-hero small {
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.campus-parent-mobile__ranking-list {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.campus-parent-mobile__ranking-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.72rem;
+  padding: 0.78rem 0.85rem;
+  border: 1px solid rgba(16, 44, 66, 0.08);
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 0.55rem 1rem rgba(16, 44, 66, 0.05);
+}
+
+.campus-parent-mobile__ranking-row.is-self {
+  border-color: rgba(36, 114, 234, 0.45);
+  background: rgba(36, 114, 234, 0.06);
+}
+
+.campus-parent-mobile__ranking-position {
+  display: inline-grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.14);
+  color: #475569;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.campus-parent-mobile__ranking-row.is-top-1 .campus-parent-mobile__ranking-position {
+  background: rgba(234, 179, 8, 0.2);
+  color: #a16207;
+}
+
+.campus-parent-mobile__ranking-row.is-top-2 .campus-parent-mobile__ranking-position {
+  background: rgba(148, 163, 184, 0.24);
+  color: #475569;
+}
+
+.campus-parent-mobile__ranking-row.is-top-3 .campus-parent-mobile__ranking-position {
+  background: rgba(217, 119, 6, 0.18);
+  color: #b45309;
+}
+
+.campus-parent-mobile__ranking-copy {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.campus-parent-mobile__ranking-copy strong {
+  color: #102c42;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.campus-parent-mobile__ranking-copy small {
+  color: #2472ea;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.campus-parent-mobile__ranking-score {
+  color: #102c42;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.campus-parent-mobile__ranking-note {
+  margin: 0.85rem 0 0;
+  color: #667085;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-align: center;
 }
 
 .campus-parent-mobile__attendance-kpi-icon svg {

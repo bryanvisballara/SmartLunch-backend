@@ -3530,6 +3530,50 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
   );
 }
 
+const studentFeedFilterOptions = [
+  { id: 'general', label: 'Feed colegio', description: 'Publicaciones para todo el colegio', avatar: 'CO' },
+  { id: 'course', label: 'Feed curso · alumnos & docentes', description: 'Publicaciones de tu curso', avatar: 'CU' },
+  { id: 'course_students', label: 'Feed curso privado (alumnos)', description: 'Solo entre alumnos del curso', avatar: 'AL' },
+  { id: 'all', label: 'Feed combinado', description: 'Todo el contenido en un solo lugar', avatar: 'FC' },
+];
+
+function StudentFeedSelector({ isOpen, onSelect, onToggle, selectedFilterId }) {
+  const feedSwitcherRef = useRef(null);
+  const selectedOption = studentFeedFilterOptions.find((option) => option.id === selectedFilterId)
+    || studentFeedFilterOptions[studentFeedFilterOptions.length - 1];
+
+  return (
+    <section aria-label="Selector de feed" className={`parent-student-switcher${isOpen ? ' is-open' : ''}`} ref={feedSwitcherRef}>
+      <div className="parent-student-toggle-card">
+        <button aria-expanded={isOpen} className="parent-student-toggle" onClick={onToggle} type="button">
+          <div className="parent-student-toggle-copy">
+            <p className="meta">Feed seleccionado</p>
+            <h3>{selectedOption.label}</h3>
+            <p>{selectedOption.description}</p>
+          </div>
+          <span className={`chevron ${isOpen ? 'open' : ''}`}>⌄</span>
+        </button>
+
+        <button aria-label="Cambiar tipo de feed" className="parent-student-photo-btn" onClick={onToggle} type="button">
+          <span className="parent-student-avatar">{selectedOption.avatar}</span>
+        </button>
+      </div>
+
+      <ParentStudentOptionsPortal anchorRef={feedSwitcherRef} isOpen={isOpen}>
+        {studentFeedFilterOptions.map((option) => (
+          <button key={option.id} onClick={() => onSelect(option.id)} type="button">
+            <span className="parent-student-avatar is-small">{option.avatar}</span>
+            <span className="parent-student-option-copy">
+              <strong>{option.label}</strong>
+              <span>{option.description}</span>
+            </span>
+          </button>
+        ))}
+      </ParentStudentOptionsPortal>
+    </section>
+  );
+}
+
 function ParentMobilePortalHeader({
   canOpenMenu = false,
   guardianName,
@@ -3884,7 +3928,7 @@ function ParentAcademicContent({
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
       : buildAcademicWorkspace(selectedChild)
   ), [selectedChild]);
-  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance', 'academic-assignments'].includes(activeView)
+  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance', 'academic-assignments', 'academic-ranking'].includes(activeView)
     ? 'academic-performance'
     : activeView;
   const weeklyClassSchedule = useMemo(() => {
@@ -3898,6 +3942,7 @@ function ParentAcademicContent({
   const [selectedGradeSubjectId, setSelectedGradeSubjectId] = useState('');
   const [selectedAttendanceSubjectKey, setSelectedAttendanceSubjectKey] = useState('');
   const [expandedGradeComponentId, setExpandedGradeComponentId] = useState('');
+  const pendingGradeComponentIdRef = useRef('');
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
   const [selectedScheduleBlock, setSelectedScheduleBlock] = useState(null);
   const [parentAcademicAttendance, setParentAcademicAttendance] = useState(buildParentAcademicAttendanceState);
@@ -3932,8 +3977,28 @@ function ParentAcademicContent({
   }, [selectedChild, academicWorkspace.gradebook]);
 
   useEffect(() => {
+    if (pendingGradeComponentIdRef.current) {
+      setExpandedGradeComponentId(pendingGradeComponentIdRef.current);
+      pendingGradeComponentIdRef.current = '';
+      return;
+    }
     setExpandedGradeComponentId('');
   }, [selectedGradeSubjectId]);
+
+  const openGradeEvaluationDetail = (subjectId, componentId = '') => {
+    if (!subjectId) {
+      return;
+    }
+    pendingGradeComponentIdRef.current = componentId || '';
+    setSelectedGradeSubjectId(subjectId);
+    setExpandedGradeComponentId(componentId || '');
+    if (typeof onSelectAcademicView === 'function') {
+      onSelectAcademicView('academic-grades');
+    }
+    window.setTimeout(() => {
+      document.querySelector('.campus-parent-mobile__subject-card.is-open')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 160);
+  };
 
   useEffect(() => {
     setSelectedCalendarDay(null);
@@ -4201,6 +4266,8 @@ function ParentAcademicContent({
       .filter((evaluation) => evaluation.score !== null && evaluation.score !== undefined)
       .map((evaluation) => ({
         id: `${subject.id}-${period.id}-${component.id}-${evaluation.id}`,
+        subjectId: subject.id,
+        componentId: component.id,
         subject: subject.name,
         teacher: subject.teacher,
         title: evaluation.title || component.label,
@@ -4219,12 +4286,24 @@ function ParentAcademicContent({
   const attendanceRecords = selectedChild?.isRealParentChild ? parentAcademicAttendance.records : academicWorkspace.attendance.records;
   const recentBehaviorComments = academicWorkspace.behavior.teacherComments.slice(0, 2);
 
+  const canNavigateAcademic = typeof onSelectAcademicView === 'function';
+  const goToAcademicView = (viewId) => {
+    if (canNavigateAcademic) {
+      onSelectAcademicView(viewId);
+    }
+  };
+
   if (effectiveActiveView === 'academic-performance') {
+    const PerformanceHeroTag = canNavigateAcademic ? 'button' : 'article';
+    const PerformanceKpiTag = canNavigateAcademic ? 'button' : 'article';
+
     return (
       <section className="campus-parent-mobile__academic-page">
-        <article
-          className={`campus-parent-mobile__performance-hero${performanceHeroClassName ? ` ${performanceHeroClassName}` : ''}${isPerformanceLoading ? ' is-loading' : ''}`}
+        <PerformanceHeroTag
+          className={`campus-parent-mobile__performance-hero${performanceHeroClassName ? ` ${performanceHeroClassName}` : ''}${isPerformanceLoading ? ' is-loading' : ''}${canNavigateAcademic ? ' is-clickable' : ''}`}
+          onClick={canNavigateAcademic ? () => goToAcademicView('academic-ranking') : undefined}
           style={performanceHeroStyle}
+          type={canNavigateAcademic ? 'button' : undefined}
         >
           <div className="campus-parent-mobile__performance-hero-body">
             <div className="campus-parent-mobile__performance-hero-main">
@@ -4268,9 +4347,13 @@ function ParentAcademicContent({
                 : formatAcademicRankingLabel(academicWorkspace.ranking, sortedGradebookSubjects)}
             </strong>
           </div>
-        </article>
+        </PerformanceHeroTag>
         <section className="campus-parent-mobile__performance-kpi-grid" aria-label="Indicadores académicos del alumno">
-          <article className="campus-parent-mobile__performance-kpi-card is-primary">
+          <PerformanceKpiTag
+            className={`campus-parent-mobile__performance-kpi-card is-primary${canNavigateAcademic ? ' is-clickable' : ''}`}
+            onClick={canNavigateAcademic ? () => goToAcademicView('academic-grades') : undefined}
+            type={canNavigateAcademic ? 'button' : undefined}
+          >
             <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
               <ParentAcademicKpiIcon variant="grades" />
             </span>
@@ -4279,8 +4362,12 @@ function ParentAcademicContent({
               <strong>{gradedSubjects.length}</strong>
               <small>{sortedGradebookSubjects.length} asignadas</small>
             </div>
-          </article>
-          <article className="campus-parent-mobile__performance-kpi-card is-warn">
+          </PerformanceKpiTag>
+          <PerformanceKpiTag
+            className={`campus-parent-mobile__performance-kpi-card is-warn${canNavigateAcademic ? ' is-clickable' : ''}`}
+            onClick={canNavigateAcademic ? () => goToAcademicView('academic-grades') : undefined}
+            type={canNavigateAcademic ? 'button' : undefined}
+          >
             <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
               <ParentAcademicKpiIcon variant="warn" />
             </span>
@@ -4289,8 +4376,12 @@ function ParentAcademicContent({
               <strong>{subjectsToReinforce.length}</strong>
               <small>{subjectsToReinforce.length ? 'Requieren seguimiento' : 'Sin alertas'}</small>
             </div>
-          </article>
-          <article className="campus-parent-mobile__performance-kpi-card is-violet">
+          </PerformanceKpiTag>
+          <PerformanceKpiTag
+            className={`campus-parent-mobile__performance-kpi-card is-violet${canNavigateAcademic ? ' is-clickable' : ''}`}
+            onClick={canNavigateAcademic ? () => goToAcademicView(studentPortalMode ? 'academic-assignments' : 'academic-calendar') : undefined}
+            type={canNavigateAcademic ? 'button' : undefined}
+          >
             <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
               <ParentAcademicKpiIcon variant="assignments" />
             </span>
@@ -4299,8 +4390,12 @@ function ParentAcademicContent({
               <strong>{weeklyAssignedActivities.length}</strong>
               <small>Publicadas por docentes</small>
             </div>
-          </article>
-          <article className="campus-parent-mobile__performance-kpi-card is-good">
+          </PerformanceKpiTag>
+          <PerformanceKpiTag
+            className={`campus-parent-mobile__performance-kpi-card is-good${canNavigateAcademic ? ' is-clickable' : ''}`}
+            onClick={canNavigateAcademic ? () => goToAcademicView('academic-attendance') : undefined}
+            type={canNavigateAcademic ? 'button' : undefined}
+          >
             <span className="campus-parent-mobile__performance-kpi-icon" aria-hidden="true">
               <ParentAcademicKpiIcon variant="attendance" />
             </span>
@@ -4309,7 +4404,7 @@ function ParentAcademicContent({
               <strong>{attendanceSummary.attendanceRate || selectedChild.attendanceRate}</strong>
               <small>{Number(attendanceSummary.total || 0)} registros</small>
             </div>
-          </article>
+          </PerformanceKpiTag>
         </section>
         <section className="campus-parent-mobile__academic-section campus-parent-mobile__assignments-section">
           <header className="campus-parent-mobile__assignments-head">
@@ -4377,7 +4472,12 @@ function ParentAcademicContent({
               const scoreTone = getGradeScoreTone(gradeEntry.score);
 
               return (
-                <article className="campus-parent-mobile__grade-card" key={gradeEntry.id}>
+                <button
+                  className="campus-parent-mobile__grade-card is-clickable"
+                  key={gradeEntry.id}
+                  onClick={() => openGradeEvaluationDetail(gradeEntry.subjectId, gradeEntry.componentId)}
+                  type="button"
+                >
                   <span className={`campus-parent-mobile__grade-card-icon is-${scoreTone}`} aria-hidden="true">
                     <ParentGradeScoreIcon tone={scoreTone} />
                   </span>
@@ -4395,7 +4495,7 @@ function ParentAcademicContent({
                   <span className="campus-parent-mobile__grade-card-chevron" aria-hidden="true">
                     <ParentAcademicChevronIcon />
                   </span>
-                </article>
+                </button>
               );
             }) : (
               <article className="campus-parent-mobile__performance-empty-card">
@@ -4424,7 +4524,12 @@ function ParentAcademicContent({
               const scoreTone = getGradeScoreTone(subject.finalAverage);
 
               return (
-                <article className="campus-parent-mobile__reinforce-card" key={subject.id}>
+                <button
+                  className="campus-parent-mobile__reinforce-card is-clickable"
+                  key={subject.id}
+                  onClick={() => openGradeEvaluationDetail(subject.id)}
+                  type="button"
+                >
                   <span className={`campus-parent-mobile__reinforce-card-icon is-${scoreTone}`} aria-hidden="true">
                     <ParentGradeScoreIcon tone={scoreTone} />
                   </span>
@@ -4440,7 +4545,7 @@ function ParentAcademicContent({
                   <span className="campus-parent-mobile__reinforce-card-chevron" aria-hidden="true">
                     <ParentAcademicChevronIcon />
                   </span>
-                </article>
+                </button>
               );
             }) : (
               <article className="campus-parent-mobile__performance-empty-card is-good">
@@ -4455,30 +4560,29 @@ function ParentAcademicContent({
           {parentAcademicAttendance.isLoading ? <p className="campus-parent-mobile__academic-calendar-status">Cargando asistencia...</p> : null}
           {parentAcademicAttendance.error ? <p className="campus-parent-mobile__academic-calendar-status is-error">{parentAcademicAttendance.error}</p> : null}
           <div className="campus-parent-mobile__attendance-kpi-grid">
-            <article className="campus-parent-mobile__attendance-kpi-card is-present">
-              <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
-                <ParentAttendanceSummaryIcon variant="present" />
-              </span>
-              <span className="campus-parent-mobile__attendance-kpi-label">Presente</span>
-              <strong>{attendanceSummary.present || 0}</strong>
-              <small>días</small>
-            </article>
-            <article className="campus-parent-mobile__attendance-kpi-card is-late">
-              <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
-                <ParentAttendanceSummaryIcon variant="late" />
-              </span>
-              <span className="campus-parent-mobile__attendance-kpi-label">Tardanzas</span>
-              <strong>{attendanceSummary.lateCount || 0}</strong>
-              <small>días</small>
-            </article>
-            <article className="campus-parent-mobile__attendance-kpi-card is-absent">
-              <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
-                <ParentAttendanceSummaryIcon variant="absent" />
-              </span>
-              <span className="campus-parent-mobile__attendance-kpi-label">Ausencias</span>
-              <strong>{attendanceSummary.unexcusedAbsences || 0}</strong>
-              <small>días</small>
-            </article>
+            {[
+              { key: 'present', className: 'is-present', variant: 'present', label: 'Presente', value: attendanceSummary.present || 0 },
+              { key: 'late', className: 'is-late', variant: 'late', label: 'Tardanzas', value: attendanceSummary.lateCount || 0 },
+              { key: 'absent', className: 'is-absent', variant: 'absent', label: 'Ausencias', value: attendanceSummary.unexcusedAbsences || 0 },
+            ].map((kpi) => {
+              const AttendanceKpiTag = canNavigateAcademic ? 'button' : 'article';
+
+              return (
+                <AttendanceKpiTag
+                  className={`campus-parent-mobile__attendance-kpi-card ${kpi.className}${canNavigateAcademic ? ' is-clickable' : ''}`}
+                  key={kpi.key}
+                  onClick={canNavigateAcademic ? () => goToAcademicView('academic-attendance') : undefined}
+                  type={canNavigateAcademic ? 'button' : undefined}
+                >
+                  <span className="campus-parent-mobile__attendance-kpi-icon" aria-hidden="true">
+                    <ParentAttendanceSummaryIcon variant={kpi.variant} />
+                  </span>
+                  <span className="campus-parent-mobile__attendance-kpi-label">{kpi.label}</span>
+                  <strong>{kpi.value}</strong>
+                  <small>días</small>
+                </AttendanceKpiTag>
+              );
+            })}
           </div>
           {!parentAcademicAttendance.isLoading && attendanceRecords.length === 0 ? (
             <article className="campus-parent-mobile__attendance-empty-card">
@@ -4521,6 +4625,60 @@ function ParentAcademicContent({
             </div>
           </section>
         ) : null}
+      </section>
+    );
+  }
+
+  if (effectiveActiveView === 'academic-ranking') {
+    const rankingData = academicWorkspace.ranking || {};
+    const rankingTop = Array.isArray(rankingData.top) ? rankingData.top : [];
+    const rankingPosition = Number(rankingData.position || 0);
+    const rankingTotal = Number(rankingData.total || 0);
+
+    return (
+      <section className="campus-parent-mobile__academic-page">
+        <section className="campus-parent-mobile__academic-section campus-parent-mobile__ranking-section">
+          <header className="campus-parent-mobile__assignments-head">
+            <h3>Ranking del curso</h3>
+            {canNavigateAcademic ? (
+              <button
+                className="campus-parent-mobile__assignments-link"
+                onClick={() => goToAcademicView('academic-performance')}
+                type="button"
+              >
+                Volver
+              </button>
+            ) : null}
+          </header>
+          <article className="campus-parent-mobile__ranking-hero">
+            <span>{studentPortalMode ? 'Tu puesto' : `Puesto de ${selectedChild.name}`}</span>
+            <strong>{rankingPosition ? `#${rankingPosition}` : 'Sin ranking'}</strong>
+            <small>{rankingTotal ? `de ${rankingTotal} alumnos del curso` : 'Aún no hay calificaciones publicadas'}</small>
+          </article>
+          {rankingTop.length ? (
+            <div className="campus-parent-mobile__ranking-list">
+              {rankingTop.map((entry) => (
+                <article
+                  className={`campus-parent-mobile__ranking-row${entry.isSelf ? ' is-self' : ''}${entry.position <= 3 ? ` is-top-${entry.position}` : ''}`}
+                  key={entry.studentId || entry.position}
+                >
+                  <span className="campus-parent-mobile__ranking-position" aria-hidden="true">{entry.position}</span>
+                  <div className="campus-parent-mobile__ranking-copy">
+                    <strong>{entry.name}</strong>
+                    {entry.isSelf ? <small>{studentPortalMode ? 'Tú' : 'Tu hijo(a)'}</small> : null}
+                  </div>
+                  <strong className="campus-parent-mobile__ranking-score">{formatGrade(entry.average)}</strong>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <article className="campus-parent-mobile__performance-empty-card">
+              <strong>Sin ranking disponible</strong>
+              <span>Cuando los docentes publiquen calificaciones, verás aquí los mejores promedios del curso.</span>
+            </article>
+          )}
+          <p className="campus-parent-mobile__ranking-note">Se muestran solo los 10 mejores promedios del curso.</p>
+        </section>
       </section>
     );
   }
@@ -5551,6 +5709,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [pendingFeedCommentLikeKeys, setPendingFeedCommentLikeKeys] = useState([]);
   const [feedRefreshCount, setFeedRefreshCount] = useState(0);
   const [academicRefreshCount, setAcademicRefreshCount] = useState(0);
+  const [studentFeedFilter, setStudentFeedFilter] = useState('all');
   const [showCommunityCamera, setShowCommunityCamera] = useState(false);
   const [showCommunityComposer, setShowCommunityComposer] = useState(false);
   const [communityMediaUploading, setCommunityMediaUploading] = useState(false);
@@ -6714,7 +6873,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     }
 
     const matchedItems = studentPortalMode
-      ? academicFeed
+      ? academicFeed.filter((item) => {
+        if (studentFeedFilter === 'all') {
+          return true;
+        }
+        return (normalizeLookupKey(item.audienceType) || 'general') === studentFeedFilter;
+      })
       : academicFeed.filter((item) => {
         if (isAllChildrenFeedSelected) {
           return workspace.children.some((child) => academicFeedItemMatchesChild(item, child));
@@ -6749,7 +6913,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       commentsCount: Number(item.commentsCount || 0),
       comments: Array.isArray(item.comments) ? item.comments : [],
     }));
-  }, [academicFeed, isAllChildrenFeedSelected, selectedChild, studentPortalMode, workspace.announcements, workspace.children]);
+  }, [academicFeed, isAllChildrenFeedSelected, selectedChild, studentFeedFilter, studentPortalMode, workspace.announcements, workspace.children]);
 
   const selectedLikesAnnouncement = feedAnnouncements.find((announcement) => announcement.id === feedLikesSheetId) || null;
   const selectedCommentsAnnouncement = feedAnnouncements.find((announcement) => announcement.id === feedCommentsSheetId) || null;
@@ -7519,18 +7683,30 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             userMenuRef={userMenuRef}
           />
           {activeSection !== 'games' ? (
-          <ParentFinanceStudentSelector
-            children={workspace.children}
-            includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
-            isOpen={showFinanceChildOptions}
-            onSelectChild={(childId) => {
-              setSelectedChildId(childId);
-              setShowFinanceChildOptions(false);
-            }}
-            onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
-            readOnly={studentPortalMode}
-            selectedChild={selectedChildForSwitcher}
-          />
+            studentPortalMode && activeSection === 'home' ? (
+              <StudentFeedSelector
+                isOpen={showFinanceChildOptions}
+                onSelect={(filterId) => {
+                  setStudentFeedFilter(filterId);
+                  setShowFinanceChildOptions(false);
+                }}
+                onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
+                selectedFilterId={studentFeedFilter}
+              />
+            ) : (
+              <ParentFinanceStudentSelector
+                children={workspace.children}
+                includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
+                isOpen={showFinanceChildOptions}
+                onSelectChild={(childId) => {
+                  setSelectedChildId(childId);
+                  setShowFinanceChildOptions(false);
+                }}
+                onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
+                readOnly={studentPortalMode}
+                selectedChild={selectedChildForSwitcher}
+              />
+            )
           ) : null}
           {parentCareSectionContent}
           {parentTransportSectionContent}

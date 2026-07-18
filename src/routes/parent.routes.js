@@ -2652,27 +2652,13 @@ async function buildParentAcademicGradebook({ schoolId, studentId, courses = [],
 }
 
 async function buildParentAcademicRanking({ schoolId, selectedStudentId, selectedStudentGrade = '', selectedStudentCourse = '', courses = [], currentAverage = null, gradingScale = null }) {
-  const totalStudents = await Student.countDocuments({
-    schoolId,
-    deletedAt: null,
-    grade: selectedStudentGrade,
-    course: selectedStudentCourse,
-  });
-
-  if (currentAverage === null || currentAverage === undefined || currentAverage === '') {
-    return {
-      position: null,
-      total: totalStudents,
-      label: totalStudents ? `Sin ranking/${totalStudents} alumnos` : 'Sin ranking',
-    };
-  }
-
   const classmates = await Student.find({
     schoolId,
     deletedAt: null,
     grade: selectedStudentGrade,
     course: selectedStudentCourse,
-  }).select('_id').lean();
+  }).select('_id name').lean();
+  const totalStudents = classmates.length;
   const averages = [];
 
   for (const classmate of classmates) {
@@ -2688,16 +2674,29 @@ async function buildParentAcademicRanking({ schoolId, selectedStudentId, selecte
     }
 
     const average = Math.round(gradedSubjects.reduce((sum, subject) => sum + Number(subject.finalAverage || 0), 0) / gradedSubjects.length);
-    averages.push({ studentId: String(classmate._id), average });
+    averages.push({ studentId: String(classmate._id), name: normalizeText(classmate.name) || 'Alumno', average });
   }
 
   averages.sort((left, right) => right.average - left.average || left.studentId.localeCompare(right.studentId));
-  const position = averages.findIndex((item) => item.studentId === String(selectedStudentId)) + 1;
+  // Only expose the top 10 so students with lower averages are never singled out.
+  const top = averages.slice(0, 10).map((item, index) => ({
+    position: index + 1,
+    studentId: item.studentId,
+    name: item.name,
+    average: item.average,
+    isSelf: item.studentId === String(selectedStudentId),
+  }));
+
+  const hasOwnAverage = !(currentAverage === null || currentAverage === undefined || currentAverage === '');
+  const position = hasOwnAverage
+    ? averages.findIndex((item) => item.studentId === String(selectedStudentId)) + 1
+    : 0;
 
   return {
     position: position || null,
     total: totalStudents,
     label: position && totalStudents ? `${position}/${totalStudents} alumnos` : (totalStudents ? `Sin ranking/${totalStudents} alumnos` : 'Sin ranking'),
+    top,
   };
 }
 
