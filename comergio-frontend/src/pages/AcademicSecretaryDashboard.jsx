@@ -3013,7 +3013,10 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       if (enrollmentEditingStudentId) {
         await updateAcademicSecretaryDatabaseRow(enrollmentEditingStudentId, createAcademicDatabasePayloadFromEnrollmentForm(enrollmentForm));
       } else {
-        await createAcademicSecretaryEnrollment(enrollmentForm);
+        await createAcademicSecretaryEnrollment({
+          ...enrollmentForm,
+          schoolName,
+        });
       }
       setEnrollmentForm({
         father: createEmptyParentDraft(),

@@ -4795,6 +4795,42 @@ async function buildCommunicationRequestSummary(schoolId) {
   };
 }
 
+function buildEnrollmentPensionNoticeCharges(charges = []) {
+  return (Array.isArray(charges) ? charges : []).flatMap((charge) => {
+    const studentName = normalizeText(charge?.studentName)
+      || normalizeText(charge?.studentId?.name)
+      || 'Alumno';
+    const breakdownItems = Array.isArray(charge?.breakdownItems) ? charge.breakdownItems : [];
+    const pensionItem = breakdownItems.find((item) => (
+      normalizeText(item?.key) === 'monthly_tuition'
+      && Number(item?.amount || 0) > 0
+    ));
+
+    if (!pensionItem) {
+      return [];
+    }
+
+    return [{
+      ...charge,
+      concept: normalizeText(pensionItem.label) || 'Pensión',
+      studentName,
+      amount: Number(pensionItem.amount || 0),
+      originalAmount: Number(pensionItem.originalAmount || pensionItem.amount || 0),
+    }];
+  });
+}
+
+async function resolveAcademicNoticeSchoolName(schoolId, requestedSchoolName = '') {
+  const requested = normalizeText(requestedSchoolName);
+  if (requested && !/^comergio$/i.test(requested)) {
+    return requested;
+  }
+
+  const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
+  const resolved = normalizeText(await getSchoolDisplayName(schoolId));
+  return resolved || requested || 'Colegio';
+}
+
 async function dispatchBillingNotice({ schoolId, schoolName, parents, title, intro, charges, pushTitle, pushBody, payload }) {
   const parentIds = parents.map((parent) => parent._id);
   const pushResult = await queueNotificationsForParents({
@@ -8430,8 +8466,9 @@ router.post('/enrollments', async (req, res) => {
       mother = {},
       primaryGuardian = 'mother',
       students = [],
-      schoolName = 'Comergio',
+      schoolName: requestedSchoolName = '',
     } = req.body || {};
+    const schoolName = await resolveAcademicNoticeSchoolName(schoolId, requestedSchoolName);
 
     if (!Array.isArray(students) || students.length === 0) {
       return res.status(400).json({ message: 'students is required' });
@@ -8644,19 +8681,20 @@ router.post('/enrollments', async (req, res) => {
       .lean();
 
     const parentEmails = linkedParents.filter((record) => normalizeEmail(record.user.email));
-    if (parentEmails.length && charges.length) {
+    const enrollmentNoticeCharges = buildEnrollmentPensionNoticeCharges(charges.map((charge) => ({
+      ...charge,
+      studentName: charge.studentId?.name || 'Alumno',
+    })));
+    if (parentEmails.length && enrollmentNoticeCharges.length) {
       await dispatchBillingNotice({
         schoolId,
         schoolName,
         parents: parentEmails.map((record) => record.user),
         title: 'Nueva matrícula registrada',
-        intro: 'Se registró la matrícula del alumno y ya tienes los cargos iniciales disponibles en la app.',
-        charges: charges.map((charge) => ({
-          ...charge,
-          studentName: charge.studentId?.name || 'Alumno',
-        })),
+        intro: 'Se registró la matrícula del alumno y ya tienes los cargos de pensiones disponibles en la app.',
+        charges: enrollmentNoticeCharges,
         pushTitle: 'Matrícula registrada',
-        pushBody: 'Ya puedes pagar el cobro mensual consolidado en la app.',
+        pushBody: 'Ya tienes los cargos de pensiones disponibles en la app.',
         payload: { type: 'academic.billing.enrollment', url: buildParentPushUrl('academic.billing.enrollment') },
       });
     }
