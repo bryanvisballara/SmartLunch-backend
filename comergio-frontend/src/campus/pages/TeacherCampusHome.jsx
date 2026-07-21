@@ -3508,10 +3508,13 @@ function TeacherCampusHome({ forcePreview = false }) {
 
       const deltaX = touch.clientX - start.x;
       const deltaY = touch.clientY - start.y;
-      const elapsed = Date.now() - start.time;
-      const isSwipeRight = deltaX >= 82
-        && Math.abs(deltaX) >= Math.abs(deltaY) * 1.35
-        && elapsed <= 900;
+      const elapsed = Math.max(Date.now() - start.time, 1);
+      const velocityX = deltaX / elapsed;
+      // Instagram-like: abre con poco recorrido o con un flick rápido.
+      const isSwipeRight = deltaX > 0
+        && Math.abs(deltaX) >= Math.abs(deltaY) * 1.05
+        && elapsed <= 700
+        && (deltaX >= 28 || (deltaX >= 16 && velocityX >= 0.4));
 
       if (isSwipeRight) {
         setShowTeacherMenu(false);

@@ -2,7 +2,16 @@ import { jsPDF } from 'jspdf';
 import millenniumSchoolCrest from '../assets/millennium-school-crest.png';
 import { isEducationalLevelKey } from './feeGradeMatching';
 import { openJsPdfDocument } from './openPdfDocument';
+import contratoInfantsTemplate from './contracts/millennium/contrato-matricula-infants-template.txt?raw';
+import contratoKinderTemplate from './contracts/millennium/contrato-matricula-kinder-template.txt?raw';
+import contratoKinder5Template from './contracts/millennium/contrato-matricula-kinder-5-template.txt?raw';
+import contratoTransicionTemplate from './contracts/millennium/contrato-matricula-transicion-template.txt?raw';
 import contratoPreescolarTemplate from './contracts/millennium/contrato-matricula-preescolar-template.txt?raw';
+import contratoPrimaria12Template from './contracts/millennium/contrato-matricula-1-2-template.txt?raw';
+import contratoPrimaria3Template from './contracts/millennium/contrato-matricula-3-template.txt?raw';
+import contratoPrimaria47Template from './contracts/millennium/contrato-matricula-4-7-template.txt?raw';
+import contratoPrimaria8Template from './contracts/millennium/contrato-matricula-8-template.txt?raw';
+import contratoPrimaria911Template from './contracts/millennium/contrato-matricula-9-11-template.txt?raw';
 import contratoPrimariaSecundariaTemplate from './contracts/millennium/contrato-matricula-primaria-secundaria-template.txt?raw';
 import pagareTemplate from './contracts/millennium/pagare-carta-template.txt?raw';
 
@@ -185,14 +194,215 @@ function normalizeGradeLookupValue(value) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-export function isPreschoolEnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+export function isInfantsEnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
   const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
   if (!candidates.length) {
     return false;
   }
 
   return candidates.some((candidate) => {
-    if (isEducationalLevelKey(candidate)) {
+    const normalized = normalizeGradeLookupValue(candidate);
+    if (!normalized) {
+      return false;
+    }
+
+    return /^(infants?)$/.test(normalized);
+  });
+}
+
+export function isKinderEnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate);
+    if (!normalized) {
+      return false;
+    }
+
+    // Kinder, Kinder 2, Kinder 3 y Kinder 4 (k4 del colegio) comparten contrato.
+    return /^(kinder(?:[\s_-]*(?:2|3|4))?|k[\s_-]*(?:2|3|4)|k-grade|kgrade)$/.test(normalized);
+  });
+}
+
+export function isKinder5EnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate);
+    if (!normalized) {
+      return false;
+    }
+
+    return /^(kinder[\s_-]*5|k[\s_-]*5)$/.test(normalized);
+  });
+}
+
+export function isTransicionEnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate);
+    if (!normalized) {
+      return false;
+    }
+
+    return /^(transicion|transition)$/.test(normalized)
+      || normalized.includes('transicion');
+  });
+}
+
+export function isPrimaria12EnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate)
+      .replace(/[º°]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return false;
+    }
+
+    if (/^(?:grado[\s_-]*)?(?:primero|segundo)(?:[\s_-]*[a-z])?$/.test(normalized)) {
+      return true;
+    }
+
+    const stripped = normalized.replace(/^grado[\s_-]*/, '').trim();
+    return /^(?:1|2)(?:[\s_-]*[a-z])?$/.test(stripped);
+  });
+}
+
+export function isPrimaria3EnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate)
+      .replace(/[º°]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return false;
+    }
+
+    if (/^(?:grado[\s_-]*)?tercero(?:[\s_-]*[a-z])?$/.test(normalized)) {
+      return true;
+    }
+
+    const stripped = normalized.replace(/^grado[\s_-]*/, '').trim();
+    return /^3(?:[\s_-]*[a-z])?$/.test(stripped);
+  });
+}
+
+export function isPrimaria47EnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate)
+      .replace(/[º°]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return false;
+    }
+
+    if (/^(?:grado[\s_-]*)?(?:cuarto|quinto|sexto|septimo)(?:[\s_-]*[a-z])?$/.test(normalized)) {
+      return true;
+    }
+
+    const stripped = normalized.replace(/^grado[\s_-]*/, '').trim();
+    return /^(?:4|5|6|7)(?:[\s_-]*[a-z])?$/.test(stripped);
+  });
+}
+
+export function isPrimaria8EnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate)
+      .replace(/[º°]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return false;
+    }
+
+    if (/^(?:grado[\s_-]*)?octavo(?:[\s_-]*[a-z])?$/.test(normalized)) {
+      return true;
+    }
+
+    const stripped = normalized.replace(/^grado[\s_-]*/, '').trim();
+    return /^8(?:[\s_-]*[a-z])?$/.test(stripped);
+  });
+}
+
+export function isPrimaria911EnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    const normalized = normalizeGradeLookupValue(candidate)
+      .replace(/[º°]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return false;
+    }
+
+    if (/^(?:grado[\s_-]*)?(?:noveno|decimo|undecimo|onceavo)(?:[\s_-]*[a-z])?$/.test(normalized)) {
+      return true;
+    }
+
+    const stripped = normalized.replace(/^grado[\s_-]*/, '').trim();
+    return /^(?:9|10|11)(?:[\s_-]*[a-z])?$/.test(stripped);
+  });
+}
+
+export function isPreschoolEnrollmentGrade({ grade = '', gradeLabel = '' } = {}) {
+  const candidates = [grade, gradeLabel].map(normalizeText).filter(Boolean);
+  if (!candidates.length) {
+    return false;
+  }
+
+  if (
+    isInfantsEnrollmentGrade({ grade, gradeLabel })
+    || isKinderEnrollmentGrade({ grade, gradeLabel })
+    || isKinder5EnrollmentGrade({ grade, gradeLabel })
+    || isTransicionEnrollmentGrade({ grade, gradeLabel })
+  ) {
+    return false;
+  }
+
+  return candidates.some((candidate) => {
+    if (
+      isEducationalLevelKey(candidate)
+      && !isInfantsEnrollmentGrade({ grade: candidate, gradeLabel: candidate })
+      && !isKinderEnrollmentGrade({ grade: candidate, gradeLabel: candidate })
+      && !isKinder5EnrollmentGrade({ grade: candidate, gradeLabel: candidate })
+      && !isTransicionEnrollmentGrade({ grade: candidate, gradeLabel: candidate })
+    ) {
       return true;
     }
 
@@ -201,7 +411,7 @@ export function isPreschoolEnrollmentGrade({ grade = '', gradeLabel = '' } = {})
       return false;
     }
 
-    return /^(maternal|kinder|prep|prejardin|jardin|transicion|toddlers|infants|nursery|k-grade|kgrade)/.test(normalized)
+    return /^(maternal|prep|prejardin|jardin|toddlers|nursery)/.test(normalized)
       || normalized.includes('preescolar');
   });
 }
@@ -213,20 +423,100 @@ function resolveEnrollmentContractParams(contractParams = {}, context = {}) {
   };
 }
 
+export function usesInfantsEnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isInfantsEnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesKinderEnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isKinderEnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesKinder5EnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isKinder5EnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesTransicionEnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isTransicionEnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesPrimaria12EnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isPrimaria12EnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesPrimaria3EnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isPrimaria3EnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesPrimaria47EnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isPrimaria47EnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesPrimaria8EnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isPrimaria8EnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
+export function usesPrimaria911EnrollmentContractTemplate(contractParams = {}, context = {}) {
+  return isPrimaria911EnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
+}
+
 export function usesPreschoolEnrollmentContractTemplate(contractParams = {}, context = {}) {
   return isPreschoolEnrollmentGrade(resolveEnrollmentContractParams(contractParams, context));
 }
 
 function getEnrollmentContractTemplate(contractParams = {}, context = {}) {
+  if (usesInfantsEnrollmentContractTemplate(contractParams, context)) {
+    return contratoInfantsTemplate;
+  }
+
+  if (usesKinder5EnrollmentContractTemplate(contractParams, context)) {
+    return contratoKinder5Template;
+  }
+
+  if (usesKinderEnrollmentContractTemplate(contractParams, context)) {
+    return contratoKinderTemplate;
+  }
+
+  if (usesTransicionEnrollmentContractTemplate(contractParams, context)) {
+    return contratoTransicionTemplate;
+  }
+
+  if (usesPrimaria12EnrollmentContractTemplate(contractParams, context)) {
+    return contratoPrimaria12Template;
+  }
+
+  if (usesPrimaria3EnrollmentContractTemplate(contractParams, context)) {
+    return contratoPrimaria3Template;
+  }
+
+  if (usesPrimaria47EnrollmentContractTemplate(contractParams, context)) {
+    return contratoPrimaria47Template;
+  }
+
+  if (usesPrimaria8EnrollmentContractTemplate(contractParams, context)) {
+    return contratoPrimaria8Template;
+  }
+
+  if (usesPrimaria911EnrollmentContractTemplate(contractParams, context)) {
+    return contratoPrimaria911Template;
+  }
+
   return usesPreschoolEnrollmentContractTemplate(contractParams, context)
     ? contratoPreescolarTemplate
     : contratoPrimariaSecundariaTemplate;
 }
 
 export function getEnrollmentContractDocumentTitle(contractParams = {}, context = {}) {
-  return usesPreschoolEnrollmentContractTemplate(contractParams, context)
-    ? 'CONTRATO DE MATRÍCULA Y PRESTACIÓN DE SERVICIOS EDUCATIVOS AÑO ACADEMICO 2026-2027'
-    : 'CONTRATO DE MATRÍCULA 2026-27';
+  if (
+    usesInfantsEnrollmentContractTemplate(contractParams, context)
+    || usesKinderEnrollmentContractTemplate(contractParams, context)
+    || usesKinder5EnrollmentContractTemplate(contractParams, context)
+    || usesTransicionEnrollmentContractTemplate(contractParams, context)
+    || usesPreschoolEnrollmentContractTemplate(contractParams, context)
+  ) {
+    return 'CONTRATO DE MATRÍCULA Y PRESTACIÓN DE SERVICIOS EDUCATIVOS AÑO ACADEMICO 2026-2027';
+  }
+
+  return 'CONTRATO DE MATRÍCULA 2026-27';
 }
 
 export function isMillenniumSchool(schoolName = '', schoolId = '') {
