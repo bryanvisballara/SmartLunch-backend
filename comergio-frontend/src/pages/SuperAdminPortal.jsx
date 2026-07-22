@@ -477,6 +477,13 @@ function SuperAdminPortal() {
         <article><span>Colegios suscritos</span><strong>{formatNumber(summary.totals?.subscribedSchools)}</strong><p>{formatNumber(summary.totals?.totalSchools)} colegios totales</p></article>
         <article><span>Alumnos matriculados</span><strong>{formatNumber(summary.totals?.activeStudents)}</strong><p>Activos en todos los colegios</p></article>
         <article><span>Acudientes activos</span><strong>{formatNumber(summary.totals?.parentUsers)}</strong><p>Usuarios padre registrados</p></article>
+        <article>
+          <span>Descargas de la app</span>
+          <strong>{formatNumber(summary.totals?.appInstallUsers)}</strong>
+          <p>
+            {formatNumber(summary.totals?.iosDevices)} iOS · {formatNumber(summary.totals?.androidDevices)} Android
+          </p>
+        </article>
         <article><span>Cobro mensual proyectado</span><strong>{formatCurrency(summary.totals?.projectedMonthlyBilling)}</strong><p>Según precio por alumno</p></article>
       </section>
 

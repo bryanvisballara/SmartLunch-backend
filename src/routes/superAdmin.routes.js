@@ -9,8 +9,11 @@ const AcademicStructure = require('../models/academicStructure.model');
 const SchoolCreationSnapshot = require('../models/schoolCreationSnapshot.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
+const DeviceToken = require('../models/deviceToken.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { getSchoolDisplayName, updateSchoolDisplayName } = require('../utils/schoolDisplayName');
+
+const NATIVE_APP_PLATFORMS = ['ios', 'android'];
 
 const router = express.Router();
 
@@ -160,14 +163,36 @@ async function findTenantContext(schoolId) {
   return tenantContexts.find((context) => context.schoolId === schoolId) || null;
 }
 
+async function countNativeAppInstalls(schoolId) {
+  const nativeFilter = {
+    schoolId,
+    status: 'active',
+    platform: { $in: NATIVE_APP_PLATFORMS },
+  };
+
+  const [appInstallUsers, iosDevices, androidDevices] = await Promise.all([
+    DeviceToken.distinct('userId', nativeFilter),
+    DeviceToken.countDocuments({ ...nativeFilter, platform: 'ios' }),
+    DeviceToken.countDocuments({ ...nativeFilter, platform: 'android' }),
+  ]);
+
+  return {
+    appInstallUsers: appInstallUsers.length,
+    appInstallDevices: iosDevices + androidDevices,
+    iosDevices,
+    androidDevices,
+  };
+}
+
 async function getSchoolSummary(tenantContext) {
   return runWithSchoolContext(tenantContext.schoolId, async () => {
-    const [schoolName, activeStudents, inactiveStudents, parentUsers, settings] = await Promise.all([
+    const [schoolName, activeStudents, inactiveStudents, parentUsers, settings, appInstalls] = await Promise.all([
       getSchoolDisplayName(tenantContext.schoolId),
       Student.countDocuments({ schoolId: tenantContext.schoolId, status: 'active', deletedAt: null }),
       Student.countDocuments({ schoolId: tenantContext.schoolId, status: 'inactive', deletedAt: null }),
       User.countDocuments({ schoolId: tenantContext.schoolId, role: 'parent', status: 'active', deletedAt: null }),
       SuperAdminSchoolSettings.findOne({ schoolId: tenantContext.schoolId }).lean(),
+      countNativeAppInstalls(tenantContext.schoolId),
     ]);
     const serializedSettings = serializeSettings(settings || { schoolId: tenantContext.schoolId });
 
@@ -178,6 +203,7 @@ async function getSchoolSummary(tenantContext) {
       activeStudents,
       inactiveStudents,
       parentUsers,
+      ...appInstalls,
       settings: serializedSettings,
       monthlyCharge: activeStudents * serializedSettings.pricePerStudent,
     };
@@ -194,6 +220,10 @@ router.get('/summary', async (_req, res) => {
       accumulator.subscribedSchools += school.settings.subscriptionStatus === 'subscribed' ? 1 : 0;
       accumulator.activeStudents += school.activeStudents;
       accumulator.parentUsers += school.parentUsers;
+      accumulator.appInstallUsers += school.appInstallUsers;
+      accumulator.appInstallDevices += school.appInstallDevices;
+      accumulator.iosDevices += school.iosDevices;
+      accumulator.androidDevices += school.androidDevices;
       accumulator.projectedMonthlyBilling += school.monthlyCharge;
       return accumulator;
     }, {
@@ -201,6 +231,10 @@ router.get('/summary', async (_req, res) => {
       subscribedSchools: 0,
       activeStudents: 0,
       parentUsers: 0,
+      appInstallUsers: 0,
+      appInstallDevices: 0,
+      iosDevices: 0,
+      androidDevices: 0,
       projectedMonthlyBilling: 0,
     });
 
