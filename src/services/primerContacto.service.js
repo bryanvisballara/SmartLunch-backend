@@ -1,4 +1,5 @@
 const AdmissionApplicant = require('../models/admissionApplicant.model');
+const AcademicStructure = require('../models/academicStructure.model');
 const { runWithSchoolContext } = require('../config/db');
 const { sendAdmissionAppointmentEmail } = require('./brevo.service');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
@@ -18,26 +19,6 @@ const LOCATION_OPTIONS = {
   sede_km5: 'Sede km 5 (primaria y secundaria)',
   sede_villacampestre: 'Sede Villacampestre (preescolar)',
 };
-
-const GRADE_OPTIONS = [
-  { value: 'Nursery', label: 'Nursery' },
-  { value: 'Toddlers', label: 'Toddlers' },
-  { value: 'PK', label: 'Pre-Kinder' },
-  { value: 'K', label: 'Kinder' },
-  { value: '1st', label: '1st' },
-  { value: '2nd', label: '2nd' },
-  { value: '3rd', label: '3rd' },
-  { value: '4th', label: '4th' },
-  { value: '5th', label: '5th' },
-  { value: '6th', label: '6th' },
-  { value: '7th', label: '7th' },
-  { value: '8th', label: '8th' },
-  { value: '9th', label: '9th' },
-  { value: '10th', label: '10th' },
-  { value: '11th', label: '11th' },
-  { value: '12th', label: '12th' },
-];
-
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -126,8 +107,40 @@ function formatTimeLabel(time) {
   return `${hour12}:${pad2(minute)}${suffix}`;
 }
 
-function getGradeLabel(grade) {
-  return GRADE_OPTIONS.find((option) => option.value === grade)?.label || grade;
+function serializeRectoriaGradeOptions(academicStructure = {}) {
+  const seenValues = new Set();
+  return (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+    .filter((grade) => normalizeText(grade?.status || 'active') !== 'archived')
+    .map((grade) => {
+      const key = normalizeText(grade?.key);
+      const label = normalizeText(grade?.label || grade?.key);
+      return {
+        key,
+        value: label || key,
+        label: label || key,
+        levelKey: normalizeText(grade?.levelKey),
+        order: Number(grade?.order || 0),
+      };
+    })
+    .filter((grade) => {
+      if (!grade.value || seenValues.has(grade.value)) return false;
+      seenValues.add(grade.value);
+      return true;
+    })
+    .sort((left, right) => (left.order - right.order) || left.label.localeCompare(right.label, 'es', { numeric: true }));
+}
+
+async function getRectoriaGradeOptions(schoolId = BERCKLEY_SCHOOL_ID) {
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('grades').lean();
+  return serializeRectoriaGradeOptions(academicStructure);
+}
+
+function getGradeLabel(grade, gradeOptions = []) {
+  const normalized = normalizeText(grade);
+  const match = (Array.isArray(gradeOptions) ? gradeOptions : []).find((option) => (
+    option.value === normalized || option.key === normalized || option.label === normalized
+  ));
+  return match?.label || normalized;
 }
 
 function resolveCalendarLocation({ appointmentType, locationKey, schoolName }) {
@@ -165,8 +178,8 @@ function buildWhatsAppMessage({
     `• Acudiente: ${guardianName}`,
     `• Email: ${guardianEmail}`,
     `• Teléfono: ${guardianPhone}`,
-    `• Grado/programa: ${getGradeLabel(grade)}`,
-    `• Año: ${academicYear}`,
+    `• Grado/programa: ${grade}`,
+    `• Periodo: ${academicYear}`,
     `• Tipo de cita: ${typeLabel}`,
     `• Fecha: ${formatAppointmentDateLabel(appointmentDate)}`,
     `• Hora: ${formatTimeLabel(appointmentTime)}`,
@@ -248,6 +261,8 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
     const toDateKeyValue = toDateKey(toDate);
     const busyAppointments = await listBusyAppointments(BERCKLEY_SCHOOL_ID, fromDateKey, toDateKeyValue);
 
+    const gradeOptions = await getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID);
+
     return {
       schoolId: BERCKLEY_SCHOOL_ID,
       schoolName: await getSchoolDisplayName(BERCKLEY_SCHOOL_ID) || 'International Berckley School',
@@ -263,7 +278,7 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
         { value: 'in_person', label: APPOINTMENT_TYPE_LABELS.in_person },
       ],
       locations: Object.entries(LOCATION_OPTIONS).map(([value, label]) => ({ value, label })),
-      grades: GRADE_OPTIONS,
+      grades: gradeOptions,
       days: buildAvailabilityDays({
         fromDate: safeFrom,
         dayCount,
@@ -273,7 +288,7 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
   });
 }
 
-function validatePrimerContactoPayload(body = {}) {
+function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
   const fullName = normalizeText(body.fullName || body.student?.firstName);
   const birthDate = normalizeText(body.birthDate || body.student?.birthDate);
   const previousSchool = normalizeText(body.previousSchool || body.student?.previousSchool);
@@ -281,7 +296,7 @@ function validatePrimerContactoPayload(body = {}) {
   const guardianEmail = normalizeEmail(body.guardianEmail || body.guardian?.email);
   const guardianPhone = normalizeText(body.guardianPhone || body.guardian?.phone);
   const grade = normalizeText(body.grade);
-  const academicYear = normalizeText(body.academicYear) || String(new Date().getFullYear());
+  const academicYear = normalizeText(body.academicYear) || '2026-2027';
   const appointmentType = normalizeAppointmentType(body.appointmentType || body.appointment?.type);
   const appointmentDate = normalizeText(body.appointmentDate || body.appointment?.date);
   const appointmentTime = normalizeText(body.appointmentTime || body.appointment?.time);
@@ -306,6 +321,18 @@ function validatePrimerContactoPayload(body = {}) {
     const error = new Error(`Completa: ${missing.join(', ')}.`);
     error.statusCode = 400;
     throw error;
+  }
+
+  const allowedGrades = Array.isArray(gradeOptions) ? gradeOptions : [];
+  if (allowedGrades.length) {
+    const gradeAllowed = allowedGrades.some((option) => (
+      option.value === grade || option.key === grade || option.label === grade
+    ));
+    if (!gradeAllowed) {
+      const error = new Error('El grado seleccionado no está disponible. Elige un grado configurado por Rectoría.');
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   if (!SLOT_START_TIMES.includes(appointmentTime)) {
@@ -346,9 +373,10 @@ function validatePrimerContactoPayload(body = {}) {
 }
 
 async function submitPrimerContacto(body = {}) {
-  const payload = validatePrimerContactoPayload(body);
-
   return runWithSchoolContext(BERCKLEY_SCHOOL_ID, async () => {
+    const gradeOptions = await getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID);
+    const payload = validatePrimerContactoPayload(body, gradeOptions);
+    const gradeLabel = getGradeLabel(payload.grade, gradeOptions);
     const busyAppointments = await listBusyAppointments(
       BERCKLEY_SCHOOL_ID,
       payload.appointmentDate,
@@ -443,7 +471,7 @@ async function submitPrimerContacto(body = {}) {
         toName: payload.guardianName,
         schoolName,
         applicantName: payload.fullName,
-        grade: getGradeLabel(payload.grade),
+        grade: gradeLabel,
         appointmentTypeLabel: typeLabel,
         appointmentDateLabel: formatAppointmentDateLabel(payload.appointmentDate),
         appointmentDate: payload.appointmentDate,
@@ -458,7 +486,7 @@ async function submitPrimerContacto(body = {}) {
       console.warn(`[PRIMER_CONTACTO_EMAIL_FAILED] applicantId=${applicant._id} error=${emailError.message}`);
     }
 
-    const whatsappMessage = buildWhatsAppMessage(payload);
+    const whatsappMessage = buildWhatsAppMessage({ ...payload, grade: gradeLabel });
     return {
       ok: true,
       applicantId: String(applicant._id),
@@ -485,5 +513,5 @@ module.exports = {
   submitPrimerContacto,
   APPOINTMENT_TYPE_LABELS,
   LOCATION_OPTIONS,
-  GRADE_OPTIONS,
+  getRectoriaGradeOptions,
 };

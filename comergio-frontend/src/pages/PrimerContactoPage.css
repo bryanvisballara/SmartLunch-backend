@@ -1,113 +1,441 @@
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 .primer-contacto-page {
-  --pc-ink: #143843;
-  --pc-muted: rgba(20, 56, 67, 0.68);
-  --pc-teal: #1f7f86;
-  --pc-teal-deep: #0f4c5c;
-  --pc-line: rgba(18, 84, 92, 0.12);
-  --pc-soft: #f3fafb;
+  --pc-ink: #1a365d;
+  --pc-muted: #64748b;
+  --pc-teal: #0d9488;
+  --pc-teal-bright: #14b8a6;
+  --pc-teal-deep: #0f766e;
+  --pc-line: rgba(13, 148, 136, 0.12);
+  --pc-soft: #f0fdfa;
   --pc-card: #ffffff;
-  --pc-accent: #d8a24a;
+  --pc-sand: #f8fafc;
   min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
   color: var(--pc-ink);
   font-family: 'Manrope', system-ui, sans-serif;
   background:
-    radial-gradient(circle at 12% 8%, rgba(31, 127, 134, 0.16), transparent 34%),
-    radial-gradient(circle at 88% 0%, rgba(216, 162, 74, 0.14), transparent 28%),
-    linear-gradient(180deg, #e7f2f4 0%, #f7fbfc 42%, #eef5f7 100%);
+    radial-gradient(ellipse 80% 50% at 50% 100%, rgba(13, 148, 136, 0.08), transparent 55%),
+    radial-gradient(circle at 10% 0%, rgba(20, 184, 166, 0.12), transparent 38%),
+    radial-gradient(circle at 90% 5%, rgba(15, 118, 110, 0.08), transparent 32%),
+    linear-gradient(180deg, #eef7f6 0%, #f5f8fa 48%, #e8f1f4 100%);
+  position: relative;
 }
 
-.primer-contacto-page__shell {
-  width: min(980px, calc(100% - 1.5rem));
-  margin: 0 auto;
-  padding: 1.5rem 0 3rem;
+.primer-contacto-page::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 180px;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 120% 80% at 20% 120%, rgba(13, 148, 136, 0.1), transparent 50%),
+    radial-gradient(ellipse 100% 70% at 80% 130%, rgba(15, 118, 110, 0.08), transparent 48%);
+  z-index: 0;
 }
 
-.primer-contacto-page__brand {
+.primer-contacto-topbar,
+.primer-contacto-layout {
+  position: relative;
+  z-index: 1;
+}
+
+.primer-contacto-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 1.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0.85rem clamp(1.25rem, 3.5vw, 3.5rem);
+  background: rgba(255, 255, 255, 0.86);
+  border-bottom: 1px solid rgba(15, 118, 110, 0.1);
+  backdrop-filter: blur(12px);
+  animation: pc-enter-down 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.primer-contacto-page__eyebrow {
-  margin: 0;
-  font-size: 0.72rem;
+.primer-contacto-topbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.primer-contacto-topbar__brand img {
+  width: 1.7rem;
+  height: 1.7rem;
+  object-fit: contain;
+}
+
+.primer-contacto-topbar__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.primer-contacto-topbar__ghost,
+.primer-contacto-topbar__solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.86rem;
   font-weight: 700;
+  padding: 0.55rem 0.95rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primer-contacto-topbar__ghost svg,
+.primer-contacto-topbar__solid svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+}
+
+.primer-contacto-topbar__ghost {
+  color: var(--pc-teal-deep);
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  background: #fff;
+}
+
+.primer-contacto-topbar__solid {
+  color: #fff;
+  background: linear-gradient(135deg, var(--pc-teal-deep), var(--pc-teal-bright));
+  border: none;
+}
+
+.primer-contacto-layout {
+  --pc-gutter: clamp(1.25rem, 3.5vw, 3.5rem);
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 1.5rem var(--pc-gutter) 2.75rem;
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) minmax(240px, 300px);
+  gap: clamp(1.5rem, 2.5vw, 2.75rem);
+  align-items: start;
+  box-sizing: border-box;
+}
+
+.primer-contacto-side {
+  position: sticky;
+  top: 4.6rem;
+}
+
+.primer-contacto-side--left {
+  padding: 0.75rem 0.5rem 0.2rem 0;
+  width: 100%;
+  max-width: 340px;
+  margin-inline: 0;
+  justify-self: start;
+  box-sizing: border-box;
+  animation: pc-enter-left 0.7s 0.08s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-side--right {
+  width: 100%;
+  max-width: 280px;
+  margin-inline: auto;
+  display: grid;
+  gap: 0.9rem;
+  animation: pc-enter-right 0.7s 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-side__eyebrow {
+  margin: 0 0 0.7rem;
+  font-size: 0.7rem;
+  font-weight: 800;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--pc-teal);
+  color: #0d9488;
 }
 
-.primer-contacto-page__school {
+.primer-contacto-side__title {
   margin: 0;
-  font-family: 'Fraunces', Georgia, serif;
-  font-size: clamp(1.8rem, 4vw, 2.6rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: clamp(1.85rem, 2.5vw, 2.35rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: #0f2744;
 }
 
-.primer-contacto-page__lead {
-  margin: 0.35rem 0 0;
-  max-width: 38rem;
-  color: var(--pc-muted);
-  font-size: 1rem;
+.primer-contacto-side__accent {
+  display: block;
+  width: 2.75rem;
+  height: 0.32rem;
+  margin: 0.9rem 0 1.05rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0d9488, #14b8a6);
+}
+
+.primer-contacto-side__lead {
+  margin: 0 0 1.55rem;
+  color: #64748b;
+  font-size: 0.95rem;
   line-height: 1.55;
+  max-width: none;
+}
+
+.primer-contacto-side__photo {
+  position: relative;
+  margin: 1.75rem 0 0;
+  margin-left: calc(-1 * var(--pc-gutter));
+  width: calc(100% + var(--pc-gutter) + 0.75rem);
+  max-width: none;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  animation: pc-enter-up 0.75s 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-side__photo-media {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  width: 100%;
+  height: 220px;
+  border-radius: 0;
+  /* Flush left edge + soft organic top */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 220' preserveAspectRatio='none'%3E%3Cpath fill='%23000' d='M0 42C46 12 98 2 156 4c52 2 96 18 138 36 36 16 68 30 106 38v142H0V42z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 220' preserveAspectRatio='none'%3E%3Cpath fill='%23000' d='M0 42C46 12 98 2 156 4c52 2 96 18 138 36 36 16 68 30 106 38v142H0V42z'/%3E%3C/svg%3E");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.primer-contacto-side__photo-media img {
+  display: block;
+  width: 115%;
+  max-width: none;
+  height: 100%;
+  object-fit: cover;
+  object-position: left 42%;
+  margin-left: 0;
+  filter: none;
+  transform: scale(1.04);
+  transform-origin: left center;
+}
+
+.primer-contacto-side__photo-media::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, transparent 34%);
+  pointer-events: none;
+}
+
+.primer-contacto-side__photo-media::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.52);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.primer-contacto-side__photo-badge {
+  position: absolute;
+  right: -0.1rem;
+  bottom: 20%;
+  z-index: 2;
+  width: 4.6rem;
+  height: 5rem;
+  clip-path: polygon(14% 4%, 86% 4%, 94% 28%, 72% 90%, 50% 100%, 28% 90%, 6% 28%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563eb;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.72) 100%);
+  box-shadow: 0 16px 32px rgba(15, 39, 68, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  line-height: 0;
+}
+
+.primer-contacto-side__photo-badge svg {
+  display: block;
+  width: 1.85rem;
+  height: 1.85rem;
+  transform: translateY(-0.1rem);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.primer-contacto-features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.05rem;
+}
+
+.primer-contacto-features li {
+  display: grid;
+  grid-template-columns: 2.55rem 1fr;
+  gap: 0.8rem;
+  align-items: start;
+  animation: pc-enter-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-features li:nth-child(1) { animation-delay: 0.28s; }
+.primer-contacto-features li:nth-child(2) { animation-delay: 0.36s; }
+.primer-contacto-features li:nth-child(3) { animation-delay: 0.44s; }
+
+.primer-contacto-features__icon {
+  width: 2.55rem;
+  height: 2.55rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #e6f7f5;
+  color: #16324f;
+  box-shadow: inset 0 0 0 1px rgba(13, 148, 136, 0.12);
+  line-height: 0;
+}
+
+.primer-contacto-features__icon svg {
+  display: block;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.primer-contacto-features li > div strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f2744;
+}
+
+.primer-contacto-features li > div span {
+  display: block;
+  margin-top: 0.18rem;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 .primer-contacto-card {
-  background: linear-gradient(180deg, #f7fcfd 0%, var(--pc-card) 24%);
-  border: 1px solid var(--pc-line);
-  border-radius: 22px;
-  box-shadow: 0 24px 60px rgba(10, 36, 44, 0.12);
+  background: var(--pc-card);
+  border: 1px solid rgba(15, 118, 110, 0.08);
+  border-radius: 28px;
+  box-shadow:
+    0 4px 6px rgba(16, 42, 67, 0.02),
+    0 24px 60px rgba(16, 42, 67, 0.08);
   overflow: hidden;
+  animation: pc-enter-scale 0.72s 0.14s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .primer-contacto-card__header {
-  padding: 1.35rem 1.5rem 1rem;
+  padding: 1.45rem 1.55rem 1.1rem;
   border-bottom: 1px solid var(--pc-line);
+  background: linear-gradient(180deg, #f7fffe 0%, #ffffff 100%);
+}
+
+.primer-contacto-card__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.primer-contacto-card__badge {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--pc-teal-deep);
+  background: rgba(13, 148, 136, 0.12);
+  line-height: 0;
+}
+
+.primer-contacto-card__badge svg {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
 }
 
 .primer-contacto-card__title {
   margin: 0;
   font-family: 'Fraunces', Georgia, serif;
-  font-size: clamp(1.45rem, 3vw, 2rem);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  font-size: clamp(1.45rem, 2.4vw, 1.85rem);
+  letter-spacing: -0.01em;
+  color: var(--pc-ink);
 }
 
 .primer-contacto-card__subtitle {
-  margin: 0.45rem 0 0;
+  margin: 0.35rem 0 0;
   color: var(--pc-muted);
-  font-size: 0.95rem;
+  font-size: 0.92rem;
 }
 
 .primer-contacto-form {
   display: grid;
-  gap: 1.25rem;
-  padding: 1.25rem 1.5rem 1.5rem;
+  gap: 1.15rem;
+  padding: 1.2rem 1.55rem 1.4rem;
 }
 
 .primer-contacto-section {
-  border: 1px solid var(--pc-line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 1rem 1rem 1.1rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  animation: pc-enter-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-form > .primer-contacto-section:nth-of-type(1) { animation-delay: 0.32s; }
+.primer-contacto-form > .primer-contacto-section:nth-of-type(2) { animation-delay: 0.4s; }
+.primer-contacto-form > .primer-contacto-section:nth-of-type(3) { animation-delay: 0.48s; }
+
+.primer-contacto-section + .primer-contacto-section {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--pc-line);
 }
 
 .primer-contacto-section__title {
   margin: 0 0 0.85rem;
   font-size: 0.72rem;
   font-weight: 800;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--pc-teal);
 }
 
 .primer-contacto-grid {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.8rem;
 }
 
 .primer-contacto-grid--2 {
@@ -116,13 +444,13 @@
 
 .primer-contacto-field {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.32rem;
 }
 
 .primer-contacto-field label {
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--pc-teal);
 }
@@ -130,40 +458,86 @@
 .primer-contacto-field input,
 .primer-contacto-field select {
   width: 100%;
-  border: 1px solid rgba(18, 84, 92, 0.18);
+  border: 1px solid rgba(15, 118, 110, 0.16);
   border-radius: 12px;
   background: #fff;
   color: var(--pc-ink);
   padding: 0.78rem 0.9rem;
   font: inherit;
   outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .primer-contacto-field input:focus,
 .primer-contacto-field select:focus {
-  border-color: rgba(31, 127, 134, 0.55);
-  box-shadow: 0 0 0 3px rgba(31, 127, 134, 0.12);
+  border-color: rgba(20, 184, 166, 0.7);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
 }
 
 .primer-contacto-field--age input {
-  background: #eef6f7;
+  background: #f1f5f9;
   color: var(--pc-muted);
+}
+
+.primer-contacto-school-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.85rem 1rem;
+}
+
+.primer-contacto-field--school {
+  flex: 0 1 22rem;
+  width: min(100%, 22rem);
+}
+
+.primer-contacto-field--school input:disabled {
+  background: #e8eef3;
+  color: #94a3b8;
+  border-color: rgba(15, 118, 110, 0.1);
+  cursor: not-allowed;
+}
+
+.primer-contacto-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.85rem;
+  flex: 0 0 auto;
+  padding: 0.55rem 0.1rem 0.55rem 0;
+  color: #0f2744;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.primer-contacto-check input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #0f766e;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.primer-contacto-check span {
+  line-height: 1.2;
 }
 
 .primer-contacto-type-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.7rem;
+  gap: 0.65rem;
 }
 
 .primer-contacto-type {
-  border: 1px solid rgba(18, 84, 92, 0.16);
+  border: 1px solid rgba(15, 118, 110, 0.14);
   border-radius: 14px;
   background: #fff;
-  padding: 0.9rem 0.75rem;
+  padding: 0.85rem 0.7rem;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .primer-contacto-type:hover {
@@ -171,90 +545,195 @@
 }
 
 .primer-contacto-type.is-selected {
-  border-color: var(--pc-teal-deep);
-  box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.12);
-  background: #f2fbfb;
+  border-color: var(--pc-teal);
+  background: var(--pc-soft);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1);
 }
 
 .primer-contacto-type strong {
   display: block;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
 }
 
 .primer-contacto-type span {
   display: block;
   margin-top: 0.25rem;
   color: var(--pc-muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.35;
 }
 
 .primer-contacto-scheduler {
   display: grid;
-  gap: 1rem;
+  gap: 0.85rem;
 }
 
 .primer-contacto-scheduler__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem 1rem;
+  gap: 0.55rem 0.9rem;
   color: var(--pc-muted);
-  font-size: 0.86rem;
+  font-size: 0.82rem;
 }
 
-.primer-contacto-days {
+.primer-contacto-scheduler__meta strong {
+  color: var(--pc-teal-deep);
+}
+
+.primer-contacto-scheduler__board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
 }
 
-.primer-contacto-day {
-  border: 1px dashed rgba(18, 84, 92, 0.18);
-  border-radius: 14px;
+.primer-contacto-calendar,
+.primer-contacto-times {
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 16px;
   background: #fff;
-  padding: 0.7rem 0.55rem 0.8rem;
-  min-height: 210px;
 }
 
-.primer-contacto-day__head {
-  text-align: center;
-  margin-bottom: 0.55rem;
+.primer-contacto-calendar {
+  padding: 0.8rem 0.75rem 0.95rem;
 }
 
-.primer-contacto-day__head strong {
-  display: block;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--pc-muted);
-}
-
-.primer-contacto-day__head span {
-  display: block;
-  margin-top: 0.15rem;
-  font-family: 'Fraunces', Georgia, serif;
-  font-size: 1.2rem;
-}
-
-.primer-contacto-slots {
+.primer-contacto-calendar__nav {
   display: grid;
-  gap: 0.4rem;
+  grid-template-columns: 2rem 1fr 2rem;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.7rem;
+}
+
+.primer-contacto-calendar__nav h4 {
+  margin: 0;
+  text-align: center;
+  font-size: 0.92rem;
+  text-transform: capitalize;
+}
+
+.primer-contacto-calendar__nav button {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 999px;
+  background: var(--pc-soft);
+  color: var(--pc-teal-deep);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.primer-contacto-calendar__weekdays,
+.primer-contacto-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.primer-contacto-calendar__weekdays span {
+  text-align: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--pc-muted);
+  padding: 0.15rem 0;
+}
+
+.primer-contacto-calendar__empty {
+  min-height: 2rem;
+}
+
+.primer-contacto-calendar__day {
+  position: relative;
+  min-height: 2rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pc-ink);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primer-contacto-calendar__day.has-slots::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 0.18rem;
+  width: 0.26rem;
+  height: 0.26rem;
+  border-radius: 999px;
+  background: var(--pc-teal-bright);
+  transform: translateX(-50%);
+}
+
+.primer-contacto-calendar__day.is-today {
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.35);
+}
+
+.primer-contacto-calendar__day.is-selected {
+  background: var(--pc-teal-deep);
+  color: #fff;
+}
+
+.primer-contacto-calendar__day.is-selected.has-slots::after {
+  background: #fff;
+}
+
+.primer-contacto-calendar__day:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+.primer-contacto-calendar__hint {
+  margin: 0.7rem 0 0;
+  color: var(--pc-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.primer-contacto-times {
+  padding: 0.9rem 0.95rem 1rem;
+  min-height: 260px;
+}
+
+.primer-contacto-times__head h4 {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.05rem;
+  text-transform: capitalize;
+}
+
+.primer-contacto-times__head span {
+  display: block;
+  margin-top: 0.18rem;
+  color: var(--pc-muted);
+  font-size: 0.8rem;
+}
+
+.primer-contacto-times__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.8rem;
 }
 
 .primer-contacto-slot {
-  border: 1px solid rgba(31, 127, 134, 0.28);
+  border: 1px solid rgba(15, 118, 110, 0.22);
   border-radius: 999px;
   background: #fff;
   color: var(--pc-teal-deep);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.86rem;
   font-weight: 700;
-  padding: 0.42rem 0.5rem;
+  padding: 0.58rem 0.65rem;
   cursor: pointer;
 }
 
 .primer-contacto-slot:hover:not(:disabled) {
-  background: #eef9f9;
+  background: var(--pc-soft);
 }
 
 .primer-contacto-slot.is-selected {
@@ -272,26 +751,44 @@
 .primer-contacto-empty-day {
   text-align: center;
   color: var(--pc-muted);
-  font-size: 0.78rem;
-  padding: 1.2rem 0.4rem;
+  font-size: 0.88rem;
+  padding: 2rem 0.8rem;
 }
 
 .primer-contacto-actions {
-  display: grid;
-  gap: 0.7rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  border-top: 1px solid var(--pc-line);
+  margin-top: 0.2rem;
+  padding-top: 1rem;
+  animation: pc-enter-up 0.5s 0.56s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-actions__note {
+  margin: 0;
+  max-width: 28rem;
+  color: var(--pc-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 .primer-contacto-submit {
   border: none;
   border-radius: 999px;
-  background: linear-gradient(135deg, #0f4c5c 0%, #1f7f86 100%);
+  background: linear-gradient(135deg, var(--pc-teal-deep), var(--pc-teal-bright));
   color: #fff;
   font: inherit;
   font-weight: 800;
-  letter-spacing: 0.02em;
-  padding: 0.95rem 1.2rem;
+  letter-spacing: 0.01em;
+  padding: 0.9rem 1.25rem;
   cursor: pointer;
-  box-shadow: 0 14px 28px rgba(15, 76, 92, 0.22);
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.22);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .primer-contacto-submit:disabled {
@@ -320,17 +817,520 @@
   color: #065f46;
 }
 
-.primer-contacto-footnote {
+.primer-contacto-panel {
+  border: 1px solid rgba(15, 39, 68, 0.06);
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(16, 42, 67, 0.06);
+  padding: 1.35rem 1.2rem 1.2rem;
+  animation: pc-enter-up 0.6s 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-panel--guide {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.primer-contacto-panel h3 {
   margin: 0;
-  color: var(--pc-muted);
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #0f2744;
+  letter-spacing: -0.02em;
+}
+
+.primer-contacto-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.primer-contacto-steps li {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.8rem;
+  align-items: start;
+  position: relative;
+  padding-bottom: 1.15rem;
+  animation: pc-enter-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-steps li:nth-child(1) { animation-delay: 0.38s; }
+.primer-contacto-steps li:nth-child(2) { animation-delay: 0.46s; }
+.primer-contacto-steps li:nth-child(3) { animation-delay: 0.54s; }
+
+.primer-contacto-steps li:last-child {
+  padding-bottom: 0.15rem;
+}
+
+.primer-contacto-steps__rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100%;
+}
+
+.primer-contacto-steps li:not(:last-child) .primer-contacto-steps__rail::after {
+  content: '';
+  position: absolute;
+  top: 2rem;
+  bottom: -1.15rem;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(13, 148, 136, 0.28), rgba(13, 148, 136, 0.08));
+}
+
+.primer-contacto-steps__num {
+  position: relative;
+  z-index: 1;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: linear-gradient(160deg, #e7f8f5, #d8f3ef);
+  color: #0f766e;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(13, 148, 136, 0.1);
+}
+
+.primer-contacto-steps li > div strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f2744;
+}
+
+.primer-contacto-steps li > div span {
+  display: block;
+  margin-top: 0.22rem;
+  color: #64748b;
   font-size: 0.82rem;
   line-height: 1.45;
 }
 
+.primer-contacto-privacy {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 2.35rem 1fr;
+  gap: 0.8rem;
+  align-items: start;
+  margin-top: 0.2rem;
+  padding: 1rem 0.95rem;
+  border-radius: 18px;
+  background: #eef4f8;
+  border: 1px solid rgba(15, 39, 68, 0.04);
+  animation: pc-enter-up 0.5s 0.62s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-privacy__icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #ffffff;
+  color: #2563eb;
+  line-height: 0;
+  box-shadow: 0 4px 12px rgba(15, 39, 68, 0.08);
+}
+
+.primer-contacto-privacy__icon svg {
+  display: block;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+}
+
+.primer-contacto-privacy__watermark {
+  position: absolute;
+  right: 0.55rem;
+  bottom: 0.35rem;
+  color: rgba(13, 148, 136, 0.16);
+  line-height: 0;
+  pointer-events: none;
+}
+
+.primer-contacto-privacy__watermark svg {
+  width: 1.7rem;
+  height: 1.7rem;
+}
+
+.primer-contacto-privacy > div strong {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #0f2744;
+}
+
+.primer-contacto-privacy > div span {
+  display: block;
+  margin-top: 0.18rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.primer-contacto-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.1rem;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(20, 184, 166, 0.18), transparent 36%),
+    rgba(15, 39, 68, 0.48);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: primer-contacto-fade-in 280ms ease both;
+}
+
+.primer-contacto-modal {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: min(88vh, 760px);
+  overflow: auto;
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, #f7fffd 0%, #ffffff 28%, #ffffff 100%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 30px 80px rgba(15, 39, 68, 0.28),
+    0 2px 0 rgba(255, 255, 255, 0.8) inset;
+  padding: 1.45rem 1.35rem 1.25rem;
+  animation: primer-contacto-rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-modal__close {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #0f2744;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 0;
+  animation: pc-enter-scale 0.4s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-modal__close svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.primer-contacto-modal__hero {
+  padding-right: 2rem;
+  margin-bottom: 1.2rem;
+  animation: pc-enter-up 0.45s 0.08s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-modal__badge {
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0f766e;
+  background: linear-gradient(160deg, #e7f8f5, #d8f3ef);
+  box-shadow: inset 0 0 0 1px rgba(13, 148, 136, 0.12);
+  margin-bottom: 0.85rem;
+}
+
+.primer-contacto-modal__badge svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.primer-contacto-modal__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #0d9488;
+}
+
+.primer-contacto-modal h2 {
+  margin: 0;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: clamp(1.55rem, 3vw, 1.9rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #0f2744;
+}
+
+.primer-contacto-modal__lead {
+  margin: 0.55rem 0 0;
+  color: #64748b;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.primer-contacto-modal__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0.15rem 0 0;
+  display: grid;
+  gap: 0;
+}
+
+.primer-contacto-modal__steps li {
+  display: grid;
+  grid-template-columns: 2.35rem 1fr;
+  column-gap: 0.95rem;
+  align-items: start;
+  position: relative;
+  min-height: 4.4rem;
+  padding-bottom: 1.15rem;
+  animation: pc-enter-up 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-modal__steps li:nth-child(1) { animation-delay: 0.16s; }
+.primer-contacto-modal__steps li:nth-child(2) { animation-delay: 0.24s; }
+.primer-contacto-modal__steps li:nth-child(3) { animation-delay: 0.32s; }
+.primer-contacto-modal__steps li:nth-child(4) { animation-delay: 0.4s; }
+.primer-contacto-modal__steps li:nth-child(5) { animation-delay: 0.48s; }
+
+.primer-contacto-modal__steps li:last-child {
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.primer-contacto-modal__rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 2.35rem;
+  align-self: stretch;
+}
+
+.primer-contacto-modal__steps li:not(:last-child) .primer-contacto-modal__rail::before {
+  content: '';
+  position: absolute;
+  top: 2.35rem;
+  bottom: -1.15rem;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: #d7e3e8;
+  border-radius: 999px;
+}
+
+.primer-contacto-modal__step-num {
+  position: relative;
+  z-index: 1;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  background: #5ec4b6;
+  color: #1f4f55;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow:
+    0 8px 16px rgba(15, 118, 110, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.35) inset;
+}
+
+.primer-contacto-modal__steps li > div {
+  padding-top: 0.2rem;
+}
+
+.primer-contacto-modal__steps li > div strong {
+  display: block;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #0f2744;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.primer-contacto-modal__steps li > div span {
+  display: block;
+  margin-top: 0.28rem;
+  color: #6b7c8f;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.primer-contacto-modal__footer {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(13, 148, 136, 0.12);
+  display: grid;
+  gap: 0.9rem;
+  animation: pc-enter-up 0.45s 0.56s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.primer-contacto-modal__footer p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.primer-contacto-modal__cta {
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  padding: 0.9rem 1.2rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  box-shadow: 0 14px 28px rgba(15, 118, 110, 0.22);
+}
+
+@keyframes primer-contacto-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes primer-contacto-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pc-enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pc-enter-down {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pc-enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pc-enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pc-enter-scale {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primer-contacto-page *,
+  .primer-contacto-page *::before,
+  .primer-contacto-page *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .primer-contacto-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .primer-contacto-side {
+    position: static;
+  }
+
+  .primer-contacto-side--left,
+  .primer-contacto-side--right {
+    max-width: none;
+    margin-inline: 0;
+  }
+
+  .primer-contacto-side__photo {
+    margin-left: calc(-1 * var(--pc-gutter));
+    width: calc(100% + var(--pc-gutter));
+  }
+
+  .primer-contacto-side--right {
+    order: 3;
+  }
+}
+
 @media (max-width: 760px) {
   .primer-contacto-grid--2,
-  .primer-contacto-type-grid {
+  .primer-contacto-type-grid,
+  .primer-contacto-scheduler__board {
     grid-template-columns: 1fr;
+  }
+
+  .primer-contacto-field--school {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .primer-contacto-check {
+    min-height: 0;
+    padding-top: 0;
   }
 
   .primer-contacto-form,
@@ -339,7 +1339,21 @@
     padding-right: 1rem;
   }
 
-  .primer-contacto-days {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .primer-contacto-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .primer-contacto-submit {
+    justify-content: center;
+  }
+
+  .primer-contacto-modal {
+    padding: 1.2rem 1rem 1.1rem;
+    border-radius: 22px;
+  }
+
+  .primer-contacto-topbar__ghost {
+    padding-inline: 0.75rem;
   }
 }
