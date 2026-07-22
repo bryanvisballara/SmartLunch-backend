@@ -95,6 +95,7 @@ const ROUTE_FALLBACKS = [
   'parent/cafeteria/gio-ia',
   'epayco-resultado',
   'landing',
+  'berckleyprimercontacto',
   'primercontacto',
   'login',
   'cuenta-eliminada',

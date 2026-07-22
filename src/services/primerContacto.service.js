@@ -302,7 +302,7 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
   const appointmentTime = normalizeText(body.appointmentTime || body.appointment?.time);
   const locationKey = normalizeLocationKey(body.locationKey || body.appointmentLocation || body.appointment?.locationKey);
   const referenceOrigin = normalizeText(body.referenceOrigin || body.source?.referenceOrigin)
-    || 'Primer contacto — comergio.com/primercontacto';
+    || 'Primer contacto — comergio.com/berckleyprimercontacto';
 
   const missing = [];
   if (!fullName) missing.push('nombre del aspirante');
@@ -430,7 +430,7 @@ async function submitPrimerContacto(body = {}) {
       admissionEvents: [
         {
           title: 'Aspirante creado',
-          notes: 'Registro desde Primer Contacto (comergio.com/primercontacto).',
+          notes: 'Registro desde Primer Contacto (comergio.com/berckleyprimercontacto).',
           stageKey: 'interesados',
           stageLabel: 'Interesados',
           responsible: 'Primer Contacto',

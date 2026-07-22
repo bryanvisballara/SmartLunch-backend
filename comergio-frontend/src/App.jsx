@@ -98,7 +98,7 @@ function App() {
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
   const isLandingRoute = normalizedPathname === '/landing';
-  const isPrimerContactoRoute = normalizedPathname === '/primercontacto';
+  const isPrimerContactoRoute = normalizedPathname === '/berckleyprimercontacto';
   const isLoginRoute = normalizedPathname === '/';
   const isRegisterRoute = normalizedPathname === '/register' || normalizedPathname === '/register/next-step';
   const isAuthFlowRoute = isLoginRoute || isRegisterRoute;
@@ -358,7 +358,8 @@ function App() {
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<LandingPage />} path="/landing" />
-          <Route element={<PrimerContactoPage />} path="/primercontacto" />
+          <Route element={<PrimerContactoPage />} path="/berckleyprimercontacto" />
+          <Route element={<Navigate replace to="/berckleyprimercontacto" />} path="/primercontacto" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="coordinacion-preescolar" postLoginPath="/coordinacion" />} path="/login/coordinacion-preescolar" /> : null}
