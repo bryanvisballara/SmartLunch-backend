@@ -294,17 +294,36 @@ function buildGoogleCalendarLink({ title, details, location, date, time, duratio
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
-async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, applicantName, grade, appointmentTypeLabel, appointmentDateLabel, appointmentDate, appointmentTime, notes, calendarLocation }) {
+async function sendAdmissionAppointmentEmail({
+  toEmail,
+  toName,
+  schoolName,
+  applicantName,
+  grade,
+  appointmentTypeLabel,
+  appointmentDateLabel,
+  appointmentDate,
+  appointmentTime,
+  notes,
+  calendarLocation,
+  durationMinutes = 60,
+  departmentLabel = 'Departamento de Admisiones',
+  retentionIntro = '',
+}) {
   const safeSchoolName = schoolName || 'Colegio';
   const safeApplicantName = applicantName || 'Aspirante';
   const safeAppointmentType = appointmentTypeLabel || 'Cita de admisiones';
   const safeDateLabel = appointmentDateLabel || appointmentDate || 'Fecha por confirmar';
   const safeTime = appointmentTime || 'Hora por confirmar';
   const safeLocation = calendarLocation || safeSchoolName;
+  const safeDepartment = departmentLabel || 'Departamento de Admisiones';
+  const safeRetention = retentionIntro
+    || 'Estamos felices de acompañarte en este primer paso. Nuestro equipo de Admisiones preparó esta cita para conocerte y orientarte con cercanía y claridad.';
   const subject = `${safeSchoolName} | Cita de admisiones confirmada`;
   const calendarDetails = [
     `Cita de admisiones para ${safeApplicantName}`,
     `Colegio: ${safeSchoolName}`,
+    `Departamento: ${safeDepartment}`,
     grade ? `Grado/programa: ${grade}` : '',
     `Tipo de cita: ${safeAppointmentType}`,
     notes ? `Notas: ${notes}` : '',
@@ -316,7 +335,7 @@ async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, appl
     location: safeLocation,
     date: appointmentDate,
     time: appointmentTime,
-    durationMinutes: 60,
+    durationMinutes: Number(durationMinutes) || 60,
   });
   const notesBlock = notes ? `
     <div style="margin-top:18px;background:#fff7ed;border:1px solid #fed7aa;border-radius:18px;padding:16px 18px;color:#7c2d12;">
@@ -325,41 +344,41 @@ async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, appl
     </div>
   ` : '';
   const calendarButton = calendarLink ? `
-    <a href="${calendarLink}" style="display:inline-block;margin-top:22px;background:#155e75;color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 20px;font-size:14px;font-weight:900;box-shadow:0 12px 24px rgba(21,94,117,0.24);">Añadir a Google Calendar</a>
+    <a href="${calendarLink}" style="display:inline-block;margin-top:22px;background:#0f4c5c;color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 20px;font-size:14px;font-weight:900;box-shadow:0 12px 24px rgba(15,76,92,0.24);">Añadir a Google Calendar</a>
   ` : '';
   const htmlContent = `
-    <div style="margin:0;padding:0;background:#eef4f7;">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eef4f7;padding:28px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <div style="margin:0;padding:0;background:#e8f1f3;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#e8f1f3;padding:28px 12px;font-family:Georgia,'Times New Roman',serif;">
         <tr>
           <td align="center">
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:650px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(15,23,42,0.18);">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:650px;background:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 20px 55px rgba(15,23,42,0.16);">
               <tr>
-                <td style="background:#0f2f3d;background-image:linear-gradient(135deg,#0f172a 0%,#155e75 56%,#2dd4bf 120%);padding:34px 30px 38px;color:#ffffff;">
-                  <p style="margin:0 0 12px 0;font-size:12px;letter-spacing:1.6px;text-transform:uppercase;opacity:0.9;">Proceso de admisiones</p>
-                  <h1 style="margin:0;font-size:32px;line-height:1.12;font-weight:900;">${escapeHtml(safeSchoolName)}</h1>
-                  <p style="margin:14px 0 0 0;font-size:16px;line-height:1.6;opacity:0.96;">Tu cita de admisiones ha sido registrada. Te compartimos los detalles para que puedas asistir con tranquilidad.</p>
+                <td style="background:#103844;background-image:linear-gradient(140deg,#0b2a33 0%,#145866 58%,#1f8a84 120%);padding:34px 30px 38px;color:#ffffff;">
+                  <p style="margin:0 0 10px 0;font-size:12px;letter-spacing:1.8px;text-transform:uppercase;opacity:0.92;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${escapeHtml(safeDepartment)}</p>
+                  <h1 style="margin:0;font-size:34px;line-height:1.1;font-weight:700;">${escapeHtml(safeSchoolName)}</h1>
+                  <p style="margin:14px 0 0 0;font-size:16px;line-height:1.65;opacity:0.96;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">${escapeHtml(safeRetention)}</p>
                 </td>
               </tr>
               <tr>
-                <td style="padding:30px;color:#102033;">
+                <td style="padding:30px;color:#102033;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                   <p style="margin:0 0 18px 0;font-size:16px;line-height:1.65;">Hola${toName ? ` ${escapeHtml(toName)}` : ''},</p>
-                  <p style="margin:0 0 22px 0;font-size:15px;line-height:1.7;color:#3b4a5f;">La cita para el proceso de admisión de <strong style="color:#0f172a;">${escapeHtml(safeApplicantName)}</strong>${grade ? `, aspirante a <strong style="color:#0f172a;">${escapeHtml(grade)}</strong>` : ''}, quedó programada con la siguiente información:</p>
+                  <p style="margin:0 0 22px 0;font-size:15px;line-height:1.7;color:#3b4a5f;">Tu cita para el proceso de admisión de <strong style="color:#0f172a;">${escapeHtml(safeApplicantName)}</strong>${grade ? `, aspirante a <strong style="color:#0f172a;">${escapeHtml(grade)}</strong>` : ''}, quedó confirmada:</p>
                   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;border-spacing:0 10px;">
                     <tr>
-                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Tipo</td>
-                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeAppointmentType)}</td>
+                      <td style="width:34%;padding:14px 16px;background:#f4fafb;border:1px solid #d5e7eb;border-right:0;border-radius:16px 0 0 16px;color:#5b7380;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Tipo</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #d5e7eb;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeAppointmentType)}</td>
                     </tr>
                     <tr>
-                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Fecha</td>
-                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeDateLabel)}</td>
+                      <td style="width:34%;padding:14px 16px;background:#f4fafb;border:1px solid #d5e7eb;border-right:0;border-radius:16px 0 0 16px;color:#5b7380;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Fecha</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #d5e7eb;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeDateLabel)}</td>
                     </tr>
                     <tr>
-                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Hora</td>
-                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeTime)}</td>
+                      <td style="width:34%;padding:14px 16px;background:#f4fafb;border:1px solid #d5e7eb;border-right:0;border-radius:16px 0 0 16px;color:#5b7380;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Hora</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #d5e7eb;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeTime)} · ${Number(durationMinutes) || 60} min</td>
                     </tr>
                     <tr>
-                      <td style="width:34%;padding:14px 16px;background:#f8fafc;border:1px solid #dbe7ef;border-right:0;border-radius:16px 0 0 16px;color:#64748b;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Lugar</td>
-                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #dbe7ef;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeLocation)}</td>
+                      <td style="width:34%;padding:14px 16px;background:#f4fafb;border:1px solid #d5e7eb;border-right:0;border-radius:16px 0 0 16px;color:#5b7380;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Lugar</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #d5e7eb;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeLocation)}</td>
                     </tr>
                   </table>
                   ${notesBlock}
@@ -367,8 +386,8 @@ async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, appl
                 </td>
               </tr>
               <tr>
-                <td style="padding:0 30px 30px;color:#64748b;font-size:12px;line-height:1.65;">
-                  Este correo fue enviado automaticamente por el equipo de admisiones a traves de Comergio. Si necesitas reprogramar, responde este mensaje o contacta al colegio.
+                <td style="padding:0 30px 30px;color:#64748b;font-size:12px;line-height:1.65;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                  Este correo fue enviado por el ${escapeHtml(safeDepartment)} de ${escapeHtml(safeSchoolName)}. Si necesitas reprogramar, responde este mensaje o contacta al colegio por WhatsApp.
                 </td>
               </tr>
             </table>
@@ -385,7 +404,7 @@ async function sendAdmissionAppointmentEmail({ toEmail, toName, schoolName, appl
     senderEmail: process.env.ADMISSIONS_SENDER_EMAIL || 'berckley@comergio.com',
     senderName: `${safeSchoolName} Admisiones`,
     htmlContent,
-    textContent: `${safeSchoolName}\n\nCita de admisiones confirmada\n\nAspirante: ${safeApplicantName}\nGrado/programa: ${grade || '-'}\nTipo: ${safeAppointmentType}\nFecha: ${safeDateLabel}\nHora: ${safeTime}\nLugar: ${safeLocation}${calendarLink ? `\n\nGoogle Calendar: ${calendarLink}` : ''}`,
+    textContent: `${safeSchoolName}\n${safeDepartment}\n\nCita de admisiones confirmada\n\nAspirante: ${safeApplicantName}\nGrado/programa: ${grade || '-'}\nTipo: ${safeAppointmentType}\nFecha: ${safeDateLabel}\nHora: ${safeTime}\nLugar: ${safeLocation}${calendarLink ? `\n\nGoogle Calendar: ${calendarLink}` : ''}`,
   });
 }
 

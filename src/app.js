@@ -37,6 +37,7 @@ const hrRoutes = require('./routes/hr.routes');
 const staffAnnouncementsRoutes = require('./routes/staffAnnouncements.routes');
 const academicSecretaryRoutes = require('./routes/academicSecretary.routes');
 const admissionsRoutes = require('./routes/admissions.routes');
+const publicPrimerContactoRoutes = require('./routes/publicPrimerContacto.routes');
 const schoolCreationRoutes = require('./routes/schoolCreation.routes');
 const superAdminRoutes = require('./routes/superAdmin.routes');
 const {
@@ -391,6 +392,7 @@ app.use('/community-reports', communityReportRoutes);
 app.use('/hr', hrRoutes);
 app.use('/staff-announcements', staffAnnouncementsRoutes);
 app.use('/academic-secretary/admissions', admissionsRoutes);
+app.use('/public/berckley/primer-contacto', publicPrimerContactoRoutes);
 app.use('/academic-secretary', academicSecretaryRoutes);
 app.use('/school-creation', limiter, schoolCreationRoutes);
 app.use('/super-admin', superAdminRoutes);

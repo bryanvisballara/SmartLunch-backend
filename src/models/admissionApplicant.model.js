@@ -14,6 +14,8 @@ const appointmentSchema = new mongoose.Schema({
   label: { type: String, default: '', trim: true },
   date: { type: String, default: '', trim: true },
   time: { type: String, default: '', trim: true },
+  locationKey: { type: String, default: '', trim: true },
+  locationLabel: { type: String, default: '', trim: true },
   guardianEmail: { type: String, default: '', trim: true, lowercase: true },
   scheduledAt: { type: Date, default: null },
 }, { _id: false });

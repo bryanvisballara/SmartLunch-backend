@@ -1,0 +1,345 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+.primer-contacto-page {
+  --pc-ink: #143843;
+  --pc-muted: rgba(20, 56, 67, 0.68);
+  --pc-teal: #1f7f86;
+  --pc-teal-deep: #0f4c5c;
+  --pc-line: rgba(18, 84, 92, 0.12);
+  --pc-soft: #f3fafb;
+  --pc-card: #ffffff;
+  --pc-accent: #d8a24a;
+  min-height: 100vh;
+  color: var(--pc-ink);
+  font-family: 'Manrope', system-ui, sans-serif;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(31, 127, 134, 0.16), transparent 34%),
+    radial-gradient(circle at 88% 0%, rgba(216, 162, 74, 0.14), transparent 28%),
+    linear-gradient(180deg, #e7f2f4 0%, #f7fbfc 42%, #eef5f7 100%);
+}
+
+.primer-contacto-page__shell {
+  width: min(980px, calc(100% - 1.5rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 3rem;
+}
+
+.primer-contacto-page__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+}
+
+.primer-contacto-page__eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pc-teal);
+}
+
+.primer-contacto-page__school {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.primer-contacto-page__lead {
+  margin: 0.35rem 0 0;
+  max-width: 38rem;
+  color: var(--pc-muted);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.primer-contacto-card {
+  background: linear-gradient(180deg, #f7fcfd 0%, var(--pc-card) 24%);
+  border: 1px solid var(--pc-line);
+  border-radius: 22px;
+  box-shadow: 0 24px 60px rgba(10, 36, 44, 0.12);
+  overflow: hidden;
+}
+
+.primer-contacto-card__header {
+  padding: 1.35rem 1.5rem 1rem;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.primer-contacto-card__title {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.primer-contacto-card__subtitle {
+  margin: 0.45rem 0 0;
+  color: var(--pc-muted);
+  font-size: 0.95rem;
+}
+
+.primer-contacto-form {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+.primer-contacto-section {
+  border: 1px solid var(--pc-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 1rem 1rem 1.1rem;
+}
+
+.primer-contacto-section__title {
+  margin: 0 0 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--pc-teal);
+}
+
+.primer-contacto-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.primer-contacto-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.primer-contacto-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.primer-contacto-field label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pc-teal);
+}
+
+.primer-contacto-field input,
+.primer-contacto-field select {
+  width: 100%;
+  border: 1px solid rgba(18, 84, 92, 0.18);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--pc-ink);
+  padding: 0.78rem 0.9rem;
+  font: inherit;
+  outline: none;
+}
+
+.primer-contacto-field input:focus,
+.primer-contacto-field select:focus {
+  border-color: rgba(31, 127, 134, 0.55);
+  box-shadow: 0 0 0 3px rgba(31, 127, 134, 0.12);
+}
+
+.primer-contacto-field--age input {
+  background: #eef6f7;
+  color: var(--pc-muted);
+}
+
+.primer-contacto-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.primer-contacto-type {
+  border: 1px solid rgba(18, 84, 92, 0.16);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.9rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.primer-contacto-type:hover {
+  transform: translateY(-1px);
+}
+
+.primer-contacto-type.is-selected {
+  border-color: var(--pc-teal-deep);
+  box-shadow: 0 0 0 3px rgba(15, 76, 92, 0.12);
+  background: #f2fbfb;
+}
+
+.primer-contacto-type strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.primer-contacto-type span {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--pc-muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.primer-contacto-scheduler {
+  display: grid;
+  gap: 1rem;
+}
+
+.primer-contacto-scheduler__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  color: var(--pc-muted);
+  font-size: 0.86rem;
+}
+
+.primer-contacto-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 0.75rem;
+}
+
+.primer-contacto-day {
+  border: 1px dashed rgba(18, 84, 92, 0.18);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.7rem 0.55rem 0.8rem;
+  min-height: 210px;
+}
+
+.primer-contacto-day__head {
+  text-align: center;
+  margin-bottom: 0.55rem;
+}
+
+.primer-contacto-day__head strong {
+  display: block;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pc-muted);
+}
+
+.primer-contacto-day__head span {
+  display: block;
+  margin-top: 0.15rem;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.2rem;
+}
+
+.primer-contacto-slots {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.primer-contacto-slot {
+  border: 1px solid rgba(31, 127, 134, 0.28);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--pc-teal-deep);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.42rem 0.5rem;
+  cursor: pointer;
+}
+
+.primer-contacto-slot:hover:not(:disabled) {
+  background: #eef9f9;
+}
+
+.primer-contacto-slot.is-selected {
+  background: var(--pc-teal-deep);
+  border-color: var(--pc-teal-deep);
+  color: #fff;
+}
+
+.primer-contacto-slot:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.primer-contacto-empty-day {
+  text-align: center;
+  color: var(--pc-muted);
+  font-size: 0.78rem;
+  padding: 1.2rem 0.4rem;
+}
+
+.primer-contacto-actions {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.primer-contacto-submit {
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f4c5c 0%, #1f7f86 100%);
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  padding: 0.95rem 1.2rem;
+  cursor: pointer;
+  box-shadow: 0 14px 28px rgba(15, 76, 92, 0.22);
+}
+
+.primer-contacto-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.primer-contacto-error,
+.primer-contacto-success {
+  border-radius: 12px;
+  padding: 0.8rem 0.95rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.primer-contacto-error {
+  background: #fff1f1;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.primer-contacto-success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.primer-contacto-footnote {
+  margin: 0;
+  color: var(--pc-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .primer-contacto-grid--2,
+  .primer-contacto-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .primer-contacto-form,
+  .primer-contacto-card__header {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .primer-contacto-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

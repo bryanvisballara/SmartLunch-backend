@@ -30,6 +30,7 @@ import EpaycoReturnBridge from './pages/EpaycoReturnBridge';
 import MeriendasOperator from './pages/MeriendasOperator';
 import Privacy from './pages/Privacy';
 import Contact from './pages/Contact';
+import PrimerContactoPage from './pages/PrimerContactoPage';
 import AccountDeletionRequest from './pages/AccountDeletionRequest';
 import Register from './pages/Register';
 import RegisterVerifiedNext from './pages/RegisterVerifiedNext';
@@ -97,6 +98,7 @@ function App() {
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
   const isLandingRoute = normalizedPathname === '/landing';
+  const isPrimerContactoRoute = normalizedPathname === '/primercontacto';
   const isLoginRoute = normalizedPathname === '/';
   const isRegisterRoute = normalizedPathname === '/register' || normalizedPathname === '/register/next-step';
   const isAuthFlowRoute = isLoginRoute || isRegisterRoute;
@@ -142,6 +144,7 @@ function App() {
   ].includes(normalizedPathname) || normalizedPathname.startsWith('/student');
   const showNavbar =
     !isLandingRoute &&
+    !isPrimerContactoRoute &&
     !isLoginRoute &&
     normalizedPathname !== '/cuenta-eliminada' &&
     normalizedPathname !== '/register' &&
@@ -158,6 +161,7 @@ function App() {
     !['/privacy', '/contact'].includes(normalizedPathname);
   const hideFooter =
     isLandingRoute ||
+    isPrimerContactoRoute ||
     isLoginRoute ||
     normalizedPathname === '/cuenta-eliminada' ||
     normalizedPathname === '/register' ||
@@ -350,10 +354,11 @@ function App() {
   return (
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={isLandingRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute || isInstitutionalPortalRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
+      <main className={isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute || isInstitutionalPortalRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<LandingPage />} path="/landing" />
+          <Route element={<PrimerContactoPage />} path="/primercontacto" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="coordinacion-preescolar" postLoginPath="/coordinacion" />} path="/login/coordinacion-preescolar" /> : null}

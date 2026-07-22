@@ -188,9 +188,10 @@ function formatAdmissionAppointmentDateLabel(value) {
   return date.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-function resolveAdmissionCalendarLocation(schoolName, appointmentType) {
+function resolveAdmissionCalendarLocation(schoolName, appointmentType, locationLabel = '') {
   if (appointmentType === 'virtual') return 'Cita virtual';
   if (appointmentType === 'phone') return 'Llamada telefonica';
+  if (normalizeText(locationLabel)) return normalizeText(locationLabel);
   return schoolName || 'Instalaciones del colegio';
 }
 
@@ -216,7 +217,12 @@ async function notifyAdmissionAppointment(applicant, eventPayload, schoolId) {
     appointmentDate: eventPayload.appointment.date,
     appointmentTime: eventPayload.appointment.time,
     notes: normalizeText(eventPayload.notes),
-    calendarLocation: resolveAdmissionCalendarLocation(schoolName, eventPayload.appointment.type),
+    calendarLocation: resolveAdmissionCalendarLocation(
+      schoolName,
+      eventPayload.appointment.type,
+      eventPayload.appointment.locationLabel,
+    ),
+    durationMinutes: 30,
   });
 }
 
@@ -238,11 +244,13 @@ function buildAppointmentPayload(body = {}) {
   const date = normalizeText(body.appointment?.date || body.appointmentDate);
   const time = normalizeText(body.appointment?.time || body.appointmentTime);
   const guardianEmail = normalizeEmail(body.appointment?.guardianEmail || body.guardianEmail);
+  const locationKey = normalizeText(body.appointment?.locationKey || body.locationKey || body.appointmentLocation);
+  const locationLabel = normalizeText(body.appointment?.locationLabel || body.locationLabel);
 
   // Only treat as an appointment draft when type/date/time are present.
   // guardianEmail alone is often sent with unrelated events (e.g. E6 result).
   if (!type && !date && !time) {
-    return { type: '', label: '', date: '', time: '', guardianEmail: '', scheduledAt: null };
+    return { type: '', label: '', date: '', time: '', locationKey: '', locationLabel: '', guardianEmail: '', scheduledAt: null };
   }
 
   if (!type || !date || !time) {
@@ -269,6 +277,8 @@ function buildAppointmentPayload(body = {}) {
     label: appointmentTypeLabels[type] || '',
     date,
     time,
+    locationKey,
+    locationLabel,
     guardianEmail,
     scheduledAt,
   };
