@@ -13,8 +13,8 @@ android {
         applicationId "com.comergio.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 18
-        versionName "2.4"
+        versionCode 20
+        versionName "2.5.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -63,6 +63,12 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+tasks.configureEach { task ->
+    if (task.name.toLowerCase().contains('artprofile')) {
+        task.enabled = false
+    }
+}
 
 try {
     def servicesJSON = file('google-services.json')

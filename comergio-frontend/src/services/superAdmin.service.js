@@ -19,3 +19,30 @@ export const getSuperAdminRectoriaUser = (schoolId) => (
 export const saveSuperAdminRectoriaUser = (schoolId, data) => (
   api.post(`/super-admin/schools/${encodeURIComponent(schoolId)}/rectoria`, data)
 );
+
+export const getDianConfig = () => api.get('/super-admin/dian/config');
+
+export const saveDianConfig = (data) => api.put('/super-admin/dian/config', data);
+
+export const uploadDianCertificate = (file, password) => {
+  const formData = new FormData();
+  formData.append('certificate', file);
+  if (password) {
+    formData.append('password', password);
+  }
+  return api.post('/super-admin/dian/config/certificate', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
+export const listDianInvoices = (params = {}) => api.get('/super-admin/dian/invoices', { params });
+
+export const createDianInvoice = (data) => api.post('/super-admin/dian/invoices', data);
+
+export const sendDianInvoice = (invoiceId) => (
+  api.post(`/super-admin/dian/invoices/${encodeURIComponent(invoiceId)}/send`)
+);
+
+export const downloadDianInvoiceXmlUrl = (invoiceId) => (
+  `/super-admin/dian/invoices/${encodeURIComponent(invoiceId)}/xml`
+);

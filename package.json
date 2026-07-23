@@ -26,6 +26,7 @@
     "seed:rectoria": "node src/scripts/seedRectoriaBase.js"
   },
   "dependencies": {
+    "@dian-kit/sdk-node": "^1.0.1",
     "@simplewebauthn/server": "^13.2.3",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",

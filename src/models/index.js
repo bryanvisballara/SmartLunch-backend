@@ -48,6 +48,8 @@ require('./academicFeeConfiguration.model');
 require('./academicStructure.model');
 require('./schoolCreationSnapshot.model');
 require('./superAdminSchoolSettings.model');
+require('./dianInvoicingConfig.model');
+require('./dianElectronicInvoice.model');
 require('./studentBillingProfile.model');
 require('./academicCharge.model');
 require('./academicChargePayment.model');

@@ -12,8 +12,14 @@ const User = require('../models/user.model');
 const DeviceToken = require('../models/deviceToken.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { getSchoolDisplayName, updateSchoolDisplayName } = require('../utils/schoolDisplayName');
+const dianInvoicingService = require('../services/dianInvoicing.service');
+const multer = require('multer');
 
 const NATIVE_APP_PLATFORMS = ['ios', 'android'];
+const uploadDianCertificate = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 const router = express.Router();
 
@@ -134,6 +140,7 @@ function serializeSettings(settings = {}) {
     subscriptionStatus: SUBSCRIPTION_STATUSES.has(settings.subscriptionStatus) ? settings.subscriptionStatus : 'subscribed',
     pricePerStudent: normalizePricePerStudent(settings.pricePerStudent),
     parentFeatures: normalizeParentFeatures(settings.parentFeatures || {}),
+    billingParty: dianInvoicingService.serializeBillingParty(settings.billingParty || {}),
     notes: normalizeText(settings.notes),
     updatedAt: settings.updatedAt || null,
   };
@@ -304,6 +311,10 @@ router.patch('/schools/:schoolId/settings', async (req, res) => {
       updatedBy: normalizeText(req.user?.username || req.user?.name),
     };
 
+    if (req.body?.billingParty !== undefined) {
+      updates.billingParty = dianInvoicingService.serializeBillingParty(req.body.billingParty);
+    }
+
     const nextSchoolName = req.body?.schoolName !== undefined
       ? normalizeText(req.body.schoolName)
       : null;
@@ -458,6 +469,147 @@ router.delete('/schools/:schoolId', async (req, res) => {
   } catch (error) {
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({ message: error.message });
+  }
+});
+
+router.get('/dian/config', async (_req, res) => {
+  try {
+    const config = await dianInvoicingService.getPublicConfig();
+    return res.status(200).json({ config });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.put('/dian/config', async (req, res) => {
+  try {
+    const config = await dianInvoicingService.updateConfig(
+      req.body || {},
+      normalizeText(req.user?.username || req.user?.name)
+    );
+    return res.status(200).json({ config, message: 'Configuración DIAN guardada.' });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.post('/dian/config/certificate', uploadDianCertificate.single('certificate'), async (req, res) => {
+  try {
+    const config = await dianInvoicingService.uploadCertificate(
+      {
+        buffer: req.file?.buffer,
+        fileName: req.file?.originalname,
+        password: req.body?.password,
+      },
+      normalizeText(req.user?.username || req.user?.name)
+    );
+    return res.status(200).json({ config, message: 'Certificado DIAN cargado.' });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.get('/dian/invoices', async (req, res) => {
+  try {
+    const invoices = await dianInvoicingService.listInvoices({
+      schoolId: normalizeText(req.query.schoolId),
+      limit: Number(req.query.limit || 50),
+    });
+    return res.status(200).json({ invoices });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.post('/dian/invoices', async (req, res) => {
+  try {
+    const schoolId = normalizeText(req.body?.schoolId);
+    const tenantContext = await findTenantContext(schoolId);
+    if (!tenantContext) {
+      return res.status(404).json({ message: 'Colegio no encontrado' });
+    }
+
+    const school = await getSchoolSummary(tenantContext);
+    const billingParty = req.body?.billingParty
+      || school.settings?.billingParty
+      || {};
+
+    const quantity = Math.max(1, Number(req.body?.quantity || school.activeStudents || 1));
+    const unitPrice = req.body?.unitPrice !== undefined
+      ? Number(req.body.unitPrice)
+      : Number(school.settings?.pricePerStudent || 0);
+    const taxPercent = Number(req.body?.taxPercent ?? 0);
+
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      return res.status(400).json({ message: 'El valor unitario es inválido.' });
+    }
+
+    const invoice = await dianInvoicingService.createDraftInvoice({
+      schoolId,
+      schoolName: school.schoolName,
+      billingParty,
+      periodLabel: normalizeText(req.body?.periodLabel),
+      periodStart: req.body?.periodStart,
+      periodEnd: req.body?.periodEnd,
+      unitPrice,
+      quantity,
+      taxPercent,
+      description: normalizeText(req.body?.description),
+      createdBy: normalizeText(req.user?.username || req.user?.name),
+    });
+
+    return res.status(201).json({ invoice, message: 'Borrador de factura creado.' });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.get('/dian/invoices/:invoiceId', async (req, res) => {
+  try {
+    const invoice = await dianInvoicingService.getInvoice(req.params.invoiceId);
+    return res.status(200).json({ invoice });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.get('/dian/invoices/:invoiceId/xml', async (req, res) => {
+  try {
+    const signed = String(req.query.signed || '1') !== '0';
+    const payload = await dianInvoicingService.getInvoiceXml(req.params.invoiceId, { signed });
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${payload.documentNumber || 'factura'}.xml"`
+    );
+    return res.status(200).send(payload.xml);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.post('/dian/invoices/:invoiceId/send', async (req, res) => {
+  try {
+    const invoicePreview = await dianInvoicingService.getInvoice(req.params.invoiceId);
+    const tenantContext = await findTenantContext(invoicePreview.schoolId);
+    let billingParty = null;
+    if (tenantContext) {
+      const school = await getSchoolSummary(tenantContext);
+      billingParty = school.settings?.billingParty || null;
+    }
+
+    const invoice = await dianInvoicingService.sendInvoiceToDian(req.params.invoiceId, {
+      createdBy: normalizeText(req.user?.username || req.user?.name),
+      billingParty,
+    });
+    return res.status(200).json({
+      invoice,
+      message: invoice.status === 'accepted'
+        ? 'Factura aceptada por la DIAN.'
+        : `Factura enviada. Estado: ${invoice.status}`,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
   }
 });
 

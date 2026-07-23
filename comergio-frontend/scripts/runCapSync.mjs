@@ -1,9 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
+const frontendRoot = resolve(rootDir, '..');
+
+const NATIVE_WEB_ASSET_EXCLUDES = [
+  'tourvirtualberckley',
+  'landing',
+];
 
 function parseEnvFile(relativePath) {
   const absolutePath = resolve(rootDir, '..', relativePath);
@@ -61,11 +67,39 @@ if (useEmbeddedShell) {
   console.warn('[mobile] CAPACITOR_SERVER_URL missing; Capacitor will use embedded dist.');
 }
 
-const result = spawnSync('npx', ['cap', 'sync'], {
-  cwd: resolve(rootDir, '..'),
+const result = spawnSync('npx', ['cap', 'sync', ...process.argv.slice(2)], {
+  cwd: frontendRoot,
   stdio: 'inherit',
   env: process.env,
   shell: true,
 });
 
-process.exit(result.status ?? 1);
+if ((result.status ?? 1) !== 0) {
+  process.exit(result.status ?? 1);
+}
+
+function stripHeavyWebAssetsFromNativeShells() {
+  const nativePublicRoots = [
+    resolve(frontendRoot, 'android/app/src/main/assets/public'),
+    resolve(frontendRoot, 'ios/App/App/public'),
+  ];
+
+  for (const publicRoot of nativePublicRoots) {
+    if (!existsSync(publicRoot)) {
+      continue;
+    }
+
+    for (const folderName of NATIVE_WEB_ASSET_EXCLUDES) {
+      const targetPath = resolve(publicRoot, folderName);
+      if (!existsSync(targetPath)) {
+        continue;
+      }
+
+      rmSync(targetPath, { recursive: true, force: true });
+      console.log(`[mobile] Removed oversized web asset from native shell: ${folderName} (${publicRoot})`);
+    }
+  }
+}
+
+stripHeavyWebAssetsFromNativeShells();
+process.exit(0);

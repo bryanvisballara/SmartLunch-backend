@@ -4,6 +4,7 @@ import { LOGIN_PATH } from '../lib/authNavigation';
 import useAuthStore from '../store/auth.store';
 import { createSuperAdminSchool, deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
 import { PortalBootSplash } from '../components/PortalBootSplash';
+import SuperAdminDianPanel from './SuperAdminDianPanel';
 
 const featureOptions = [
   { key: 'home', label: 'Inicio' },
@@ -42,6 +43,24 @@ function getDefaultFeatures(features = {}) {
   }, {});
 }
 
+function buildBillingPartyDraft(party = {}) {
+  return {
+    legalName: party.legalName || '',
+    nit: party.nit || '',
+    dv: party.dv || '',
+    email: party.email || '',
+    phone: party.phone || '',
+    personType: party.personType || '1',
+    taxLevelCode: party.taxLevelCode || 'R-99-PN',
+    addressLine: party.addressLine || '',
+    cityCode: party.cityCode || '11001',
+    cityName: party.cityName || 'Bogotá',
+    departmentCode: party.departmentCode || '11',
+    departmentName: party.departmentName || 'Bogotá',
+    postalCode: party.postalCode || '',
+  };
+}
+
 function buildDraftFromSchool(school = {}) {
   return {
     schoolName: school.schoolName || '',
@@ -49,6 +68,9 @@ function buildDraftFromSchool(school = {}) {
     pricePerStudent: String(Number(school.settings?.pricePerStudent || 0)),
     notes: school.settings?.notes || '',
     parentFeatures: getDefaultFeatures(school.settings?.parentFeatures || {}),
+    billingParty: buildBillingPartyDraft(school.settings?.billingParty || {
+      legalName: school.schoolName || '',
+    }),
   };
 }
 
@@ -569,6 +591,94 @@ function SuperAdminPortal() {
             <section className="super-admin-feature-panel">
               <div className="super-admin-panel-head">
                 <div>
+                  <h3>Datos fiscales del colegio (adquiriente)</h3>
+                  <p>Se usan al emitir la factura electrónica DIAN a este cliente.</p>
+                </div>
+              </div>
+              <div className="super-admin-form-grid">
+                <label>
+                  Razón social
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, legalName: event.target.value },
+                    }))}
+                    type="text"
+                    value={selectedDraft.billingParty?.legalName || ''}
+                  />
+                </label>
+                <label>
+                  NIT
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, nit: event.target.value },
+                    }))}
+                    type="text"
+                    value={selectedDraft.billingParty?.nit || ''}
+                  />
+                </label>
+                <label>
+                  DV
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, dv: event.target.value },
+                    }))}
+                    type="text"
+                    value={selectedDraft.billingParty?.dv || ''}
+                  />
+                </label>
+                <label>
+                  Correo recepción FE
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, email: event.target.value },
+                    }))}
+                    type="email"
+                    value={selectedDraft.billingParty?.email || ''}
+                  />
+                </label>
+                <label className="is-wide">
+                  Dirección
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, addressLine: event.target.value },
+                    }))}
+                    type="text"
+                    value={selectedDraft.billingParty?.addressLine || ''}
+                  />
+                </label>
+                <label>
+                  Ciudad
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, cityName: event.target.value },
+                    }))}
+                    type="text"
+                    value={selectedDraft.billingParty?.cityName || ''}
+                  />
+                </label>
+                <label>
+                  Código DANE ciudad
+                  <input
+                    onChange={(event) => updateDraft(selectedSchool.schoolId, (current) => ({
+                      ...current,
+                      billingParty: { ...current.billingParty, cityCode: event.target.value },
+                    }))}
+                    type="text"
+                    value={selectedDraft.billingParty?.cityCode || ''}
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section className="super-admin-feature-panel">
+              <div className="super-admin-panel-head">
+                <div>
                   <h3>Opciones visibles en la app de padres</h3>
                   <p>Al desactivar una opción, desaparece de la barra inferior de los papás de este colegio.</p>
                 </div>
@@ -702,6 +812,8 @@ function SuperAdminPortal() {
           <section className="super-admin-detail"><p className="super-admin-muted">No hay colegios disponibles.</p></section>
         )}
       </div>
+
+      <SuperAdminDianPanel selectedDraft={selectedDraft} selectedSchool={selectedSchool} />
 
       {rectoriaFeedback?.type === 'success' ? (
         <div
