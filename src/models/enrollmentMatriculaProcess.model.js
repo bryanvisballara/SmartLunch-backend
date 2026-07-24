@@ -106,5 +106,9 @@ const enrollmentMatriculaProcessSchema = new mongoose.Schema(
 enrollmentMatriculaProcessSchema.index({ schoolId: 1, chargeId: 1 }, { unique: true });
 enrollmentMatriculaProcessSchema.index({ schoolId: 1, parentId: 1, status: 1, updatedAt: -1 });
 enrollmentMatriculaProcessSchema.index({ schoolId: 1, studentId: 1, status: 1 });
+enrollmentMatriculaProcessSchema.index({ schoolId: 1, updatedAt: -1 });
+enrollmentMatriculaProcessSchema.index({ schoolId: 1, 'consent.accepted': 1, 'consent.acceptedAt': -1 });
+enrollmentMatriculaProcessSchema.index({ schoolId: 1, 'contract.signedAt': -1 });
+enrollmentMatriculaProcessSchema.index({ schoolId: 1, 'pagare.signedAt': -1 });
 
 module.exports = registerSchoolScopedModel('EnrollmentMatriculaProcess', enrollmentMatriculaProcessSchema);

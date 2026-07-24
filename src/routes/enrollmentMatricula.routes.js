@@ -10,6 +10,7 @@ const {
   buildSignedDocumentsZipForRectoria,
   getMatriculaRequirementForParent,
   getOrCreateProcessForCharge,
+  getSignedDocumentEvidenceForRectoria,
   listConsentsForRectoria,
   listPendingSignaturesForParent,
   listSignedDocumentsForRectoria,
@@ -235,6 +236,20 @@ rectoriaRouter.get('/signatures', async (req, res) => {
     return res.status(200).json({ items });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+rectoriaRouter.get('/signatures/:processId/evidence', async (req, res) => {
+  try {
+    const evidence = await getSignedDocumentEvidenceForRectoria({
+      schoolId: req.user.schoolId,
+      processId: req.params.processId,
+      documentType: req.query?.documentType || 'contract',
+    });
+    return res.status(200).json({ evidence });
+  } catch (error) {
+    const status = /no encontrado/i.test(String(error.message || '')) ? 404 : 500;
+    return res.status(status).json({ message: error.message });
   }
 });
 

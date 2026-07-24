@@ -1091,7 +1091,8 @@ async function listConsentsForRectoria({ schoolId }) {
   })
     .sort({ 'consent.acceptedAt': -1 })
     .select('studentName parentName consent status academicYear payment createdAt updatedAt studentId parentId chargeId contractMode')
-    .lean();
+    .lean()
+    .maxTimeMS(20000);
 
   return items.map((item) => ({
     ...item,
@@ -1100,16 +1101,134 @@ async function listConsentsForRectoria({ schoolId }) {
 }
 
 async function listSignedDocumentsForRectoria({ schoolId }) {
-  return EnrollmentMatriculaProcess.find({
+  // No cargar PDF/selfie/cédula en base64: eso dispara el límite de sort en memoria de Mongo (~32MB).
+  const items = await EnrollmentMatriculaProcess.aggregate([
+    {
+      $match: {
+        schoolId,
+        $or: [
+          { 'contract.signedAt': { $ne: null } },
+          { 'pagare.signedAt': { $ne: null } },
+          { 'contract.signers.0': { $exists: true } },
+          { 'pagare.signers.0': { $exists: true } },
+        ],
+      },
+    },
+    {
+      $project: {
+        studentName: 1,
+        parentName: 1,
+        status: 1,
+        academicYear: 1,
+        payment: 1,
+        studentId: 1,
+        parentId: 1,
+        contractMode: 1,
+        updatedAt: 1,
+        createdAt: 1,
+        contract: {
+          signedAt: '$contract.signedAt',
+          fileName: '$contract.fileName',
+          hasSignedPdf: {
+            $and: [
+              { $ne: [{ $ifNull: ['$contract.signedPdfBase64', ''] }, ''] },
+            ],
+          },
+          signers: {
+            $map: {
+              input: { $ifNull: ['$contract.signers', []] },
+              as: 'signer',
+              in: {
+                order: '$$signer.order',
+                role: '$$signer.role',
+                displayName: '$$signer.displayName',
+                signedAt: '$$signer.signedAt',
+                documentNumber: '$$signer.documentNumber',
+                hasSelfie: {
+                  $and: [{ $ne: [{ $ifNull: ['$$signer.selfieImage', ''] }, ''] }],
+                },
+                hasIdFront: {
+                  $and: [{ $ne: [{ $ifNull: ['$$signer.idFrontImage', ''] }, ''] }],
+                },
+                hasIdBack: {
+                  $and: [{ $ne: [{ $ifNull: ['$$signer.idBackImage', ''] }, ''] }],
+                },
+              },
+            },
+          },
+        },
+        pagare: {
+          signedAt: '$pagare.signedAt',
+          fileName: '$pagare.fileName',
+          hasSignedPdf: {
+            $and: [
+              { $ne: [{ $ifNull: ['$pagare.signedPdfBase64', ''] }, ''] },
+            ],
+          },
+          signers: {
+            $map: {
+              input: { $ifNull: ['$pagare.signers', []] },
+              as: 'signer',
+              in: {
+                order: '$$signer.order',
+                role: '$$signer.role',
+                displayName: '$$signer.displayName',
+                signedAt: '$$signer.signedAt',
+                documentNumber: '$$signer.documentNumber',
+                hasSelfie: {
+                  $and: [{ $ne: [{ $ifNull: ['$$signer.selfieImage', ''] }, ''] }],
+                },
+                hasIdFront: {
+                  $and: [{ $ne: [{ $ifNull: ['$$signer.idFrontImage', ''] }, ''] }],
+                },
+                hasIdBack: {
+                  $and: [{ $ne: [{ $ifNull: ['$$signer.idBackImage', ''] }, ''] }],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    { $sort: { updatedAt: -1 } },
+  ]).allowDiskUse(true).option({ maxTimeMS: 30000 });
+
+  return items;
+}
+
+async function getSignedDocumentEvidenceForRectoria({ schoolId, processId, documentType = 'contract' }) {
+  const process = await EnrollmentMatriculaProcess.findOne({
+    _id: processId,
     schoolId,
-    $or: [
-      { 'contract.signedAt': { $ne: null } },
-      { 'pagare.signedAt': { $ne: null } },
-    ],
   })
-    .sort({ updatedAt: -1 })
-    .select('studentName parentName contract pagare status academicYear payment studentId parentId contractMode contractParamsSnapshot')
+    .select('studentName parentName contract.signers pagare.signers contract.signedAt pagare.signedAt')
     .lean();
+
+  if (!process) {
+    throw new Error('Proceso de matrícula no encontrado.');
+  }
+
+  const key = documentType === 'pagare' ? 'pagare' : 'contract';
+  const document = process[key] || {};
+  const signers = (Array.isArray(document.signers) ? document.signers : []).map((signer) => ({
+    order: signer.order,
+    role: signer.role || '',
+    displayName: signer.displayName || '',
+    signedAt: signer.signedAt || null,
+    documentNumber: signer.documentNumber || '',
+    selfieImage: signer.selfieImage || '',
+    idFrontImage: signer.idFrontImage || '',
+    idBackImage: signer.idBackImage || '',
+  }));
+
+  return {
+    processId: process._id,
+    studentName: process.studentName || '',
+    parentName: process.parentName || '',
+    documentType: key,
+    signedAt: document.signedAt || null,
+    signers,
+  };
 }
 
 function sanitizeZipEntryName(value, fallback = 'documento.pdf') {
@@ -1688,6 +1807,7 @@ module.exports = {
   listConsentsForRectoria,
   listPendingSignaturesForParent,
   listSignedDocumentsForRectoria,
+  getSignedDocumentEvidenceForRectoria,
   linkCarteraPaymentToEnrollmentMatricula,
   unlinkCarteraPaymentFromEnrollmentMatricula,
   markPaymentPending,

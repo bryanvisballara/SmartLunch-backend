@@ -15,6 +15,8 @@ export const createWompiMatriculaCheckout = (processId) => api.post('/payments/w
 export const getWompiMatriculaPaymentStatus = (params) => api.get('/payments/wompi/matricula-status', { params });
 export const getRectoriaEnrollmentConsents = () => api.get('/enrollment-matricula/consents');
 export const getRectoriaEnrollmentSignatures = () => api.get('/enrollment-matricula/signatures');
+export const getRectoriaEnrollmentSignatureEvidence = (processId, documentType = 'contract') =>
+  api.get(`/enrollment-matricula/signatures/${processId}/evidence`, { params: { documentType } });
 export const getEnrollmentMatriculaPurgeRequestsMine = () => api.get('/enrollment-matricula/purge-requests/mine');
 export const getEnrollmentMatriculaPurgeRequestsPending = () => api.get('/enrollment-matricula/purge-requests/pending');
 export const getEnrollmentMatriculaPurgeRequestsHistory = () => api.get('/enrollment-matricula/purge-requests/history');

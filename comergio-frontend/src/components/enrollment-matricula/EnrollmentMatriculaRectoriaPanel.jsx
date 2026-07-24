@@ -5,6 +5,7 @@ import {
   downloadRectoriaEnrollmentDocumentsZip,
   getEnrollmentMatriculaPurgeRequestsMine,
   getRectoriaEnrollmentConsents,
+  getRectoriaEnrollmentSignatureEvidence,
   getRectoriaEnrollmentSignatures,
 } from '../../services/enrollmentMatricula.service';
 import './MatriculaEnrollmentFlow.css';
@@ -48,18 +49,41 @@ function formatEnrollmentMatriculaConsentStatus(item = {}) {
   return labels[item?.status] || item?.status || '—';
 }
 
-function DocumentSignersEvidence({ document, label }) {
+function DocumentSignersEvidence({ processId, document, documentType, label }) {
   const signers = Array.isArray(document?.signers) ? document.signers : [];
+  const [loadedSigners, setLoadedSigners] = useState(null);
+  const [loadingEvidence, setLoadingEvidence] = useState(false);
+  const [evidenceError, setEvidenceError] = useState('');
+
   if (!document?.signedAt && !signers.length) {
     return <span>Pendiente</span>;
   }
 
+  const visibleSigners = loadedSigners || signers;
+  const needsEvidenceLoad = !loadedSigners && signers.some(
+    (signer) => signer.hasSelfie || signer.hasIdFront || signer.hasIdBack
+  );
+
+  const onLoadEvidence = async () => {
+    if (!processId || loadingEvidence) return;
+    setLoadingEvidence(true);
+    setEvidenceError('');
+    try {
+      const response = await getRectoriaEnrollmentSignatureEvidence(processId, documentType);
+      setLoadedSigners(response.data?.evidence?.signers || []);
+    } catch (error) {
+      setEvidenceError(error?.response?.data?.message || 'No se pudo cargar la evidencia.');
+    } finally {
+      setLoadingEvidence(false);
+    }
+  };
+
   return (
     <div className="enrollment-matricula-rectoria__evidence">
       <span>{document?.signedAt ? formatDateTime(document.signedAt) : `${label} en progreso`}</span>
-      {signers.length ? (
+      {visibleSigners.length ? (
         <div className="enrollment-matricula-rectoria__signers">
-          {signers.map((signer) => (
+          {visibleSigners.map((signer) => (
             <div className="enrollment-matricula-rectoria__signer-card" key={`${signer.role}-${signer.order}`}>
               <strong>
                 {Number(signer.order) === 1 ? '1º' : `${signer.order}º`}: {signer.displayName || 'Firmante'}
@@ -86,11 +110,26 @@ function DocumentSignersEvidence({ document, label }) {
                     </figure>
                   ) : null}
                 </div>
+              ) : (signer.hasSelfie || signer.hasIdFront || signer.hasIdBack) ? (
+                <span className="enrollment-matricula-rectoria__pending-note">
+                  Identidad capturada (selfie/cédula)
+                </span>
               ) : null}
             </div>
           ))}
         </div>
       ) : null}
+      {needsEvidenceLoad ? (
+        <button
+          className="enrollment-matricula-rectoria__download"
+          disabled={loadingEvidence}
+          onClick={onLoadEvidence}
+          type="button"
+        >
+          {loadingEvidence ? 'Cargando evidencia...' : 'Ver selfie y cédula'}
+        </button>
+      ) : null}
+      {evidenceError ? <span className="enrollment-matricula-rectoria__pending-note">{evidenceError}</span> : null}
     </div>
   );
 }
@@ -209,7 +248,8 @@ function EnrollmentMatriculaRectoriaPanel() {
   };
 
   const signaturesWithPdf = signatures.filter(
-    (item) => item.contract?.signedPdfBase64 || item.pagare?.signedPdfBase64
+    (item) => item.contract?.hasSignedPdf || item.pagare?.hasSignedPdf
+      || item.contract?.signedPdfBase64 || item.pagare?.signedPdfBase64
   );
 
   return (
@@ -370,8 +410,13 @@ function EnrollmentMatriculaRectoriaPanel() {
                     <td>
                       {item.contract?.signedAt || item.contract?.signers?.length ? (
                         <>
-                          <DocumentSignersEvidence document={item.contract} label="Contrato" />
-                          {item.contract?.signedPdfBase64 ? (
+                          <DocumentSignersEvidence
+                            document={item.contract}
+                            documentType="contract"
+                            label="Contrato"
+                            processId={item._id}
+                          />
+                          {item.contract?.hasSignedPdf || item.contract?.signedPdfBase64 ? (
                             <button
                               className="enrollment-matricula-rectoria__download"
                               onClick={() => onDownload(item._id, 'contract', item.contract?.fileName)}
@@ -388,8 +433,13 @@ function EnrollmentMatriculaRectoriaPanel() {
                     <td>
                       {item.pagare?.signedAt || item.pagare?.signers?.length ? (
                         <>
-                          <DocumentSignersEvidence document={item.pagare} label="Pagaré" />
-                          {item.pagare?.signedPdfBase64 ? (
+                          <DocumentSignersEvidence
+                            document={item.pagare}
+                            documentType="pagare"
+                            label="Pagaré"
+                            processId={item._id}
+                          />
+                          {item.pagare?.hasSignedPdf || item.pagare?.signedPdfBase64 ? (
                             <button
                               className="enrollment-matricula-rectoria__download"
                               onClick={() => onDownload(item._id, 'pagare', item.pagare?.fileName)}
