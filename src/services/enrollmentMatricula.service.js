@@ -389,12 +389,20 @@ function isSignerEvidenceComplete(signer = {}, requireIdentity = false) {
   );
 }
 
+function processLooksLikeMillennium(process = {}) {
+  const snapshot = process?.contractParamsSnapshot || {};
+  return isMillenniumSchoolId(process?.schoolId)
+    || isMillenniumSchoolId(snapshot.schoolId)
+    || String(snapshot.schoolName || '').toLowerCase().includes('millennium')
+    || String(snapshot.schoolName || '').toLowerCase().includes('milenium');
+}
+
 function resolveRequiredSigners(process = {}) {
   const snapshot = process?.contractParamsSnapshot || {};
   const father = snapshot.father || {};
   const mother = snapshot.mother || {};
   const signers = [];
-  const dualParentSigning = isMillenniumSchoolId(process?.schoolId);
+  const dualParentSigning = processLooksLikeMillennium(process);
 
   if (!dualParentSigning) {
     if (normalizeText(process.parentName)) {
@@ -465,7 +473,7 @@ function resolveRequiredSigners(process = {}) {
 
 function getDocumentSigningProgress(process = {}, documentType = 'contract') {
   const required = resolveRequiredSigners(process);
-  const requireIdentity = isMillenniumSchoolId(process?.schoolId);
+  const requireIdentity = processLooksLikeMillennium(process);
   const document = documentType === 'pagare' ? process.pagare : process.contract;
   const completedSigners = Array.isArray(document?.signers)
     ? document.signers.filter((signer) => isSignerEvidenceComplete(signer, requireIdentity))
@@ -485,7 +493,7 @@ function getDocumentSigningProgress(process = {}, documentType = 'contract') {
 function serializeProcess(process, charge = null) {
   const doc = process?.toObject ? process.toObject() : process;
   const paymentConfirmed = normalizeText(doc?.payment?.status).includes('PAID') || Boolean(doc?.payment?.chargePaymentId);
-  const hideEnrollmentAmount = isMillenniumSchoolId(doc?.schoolId) && !paymentConfirmed;
+  const hideEnrollmentAmount = processLooksLikeMillennium(doc) && !paymentConfirmed;
   const requiredSigners = resolveRequiredSigners(doc);
   const contractProgress = getDocumentSigningProgress(doc, 'contract');
   const pagareProgress = getDocumentSigningProgress(doc, 'pagare');
@@ -1015,7 +1023,7 @@ async function listPendingSignaturesForParent({ schoolId, parentId }) {
     ],
   })
     .sort({ updatedAt: -1 })
-    .select('studentName parentName status chargeId studentId parentId consent payment contract pagare contractParamsSnapshot academicYear contractMode')
+    .select('schoolId studentName parentName status chargeId studentId parentId consent payment contract pagare contractParamsSnapshot academicYear contractMode')
     .lean();
 
   return processes.map((item) => serializeProcess(item));
@@ -1062,7 +1070,7 @@ function hasEnrollmentPaymentConfirmed(process = {}) {
 }
 
 function hasEnrollmentSignedDocuments(process = {}) {
-  const requireIdentity = isMillenniumSchoolId(process?.schoolId);
+  const requireIdentity = processLooksLikeMillennium(process);
   const contractSigners = Array.isArray(process.contract?.signers) ? process.contract.signers : [];
   const pagareSigners = Array.isArray(process.pagare?.signers) ? process.pagare.signers : [];
   return Boolean(

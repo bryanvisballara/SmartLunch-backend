@@ -9,6 +9,7 @@ import {
   downloadMillenniumPagareContractPdf,
   getEnrollmentContractDocumentTitle,
   getPagareDebtorColumns,
+  isMillenniumSchool,
   millenniumSchoolCrest,
   normalizeOfficialEnrollmentContractParams,
   parseEnrollmentContractSections,
@@ -51,6 +52,7 @@ function MatriculaContractDocumentPreview({
   const title = variant === 'contract'
     ? 'Contrato oficial de matrícula'
     : 'Pagaré y carta de instrucciones';
+  const requiresIdentityFlow = isMillenniumSchool(resolvedSchoolName, resolvedSchoolId);
 
   const onDownload = async () => {
     if (!normalizedParams || !usesOfficialTemplate || downloading) return;
@@ -86,9 +88,9 @@ function MatriculaContractDocumentPreview({
         <div>
           <h3>{title}</h3>
           <p>
-            {variant === 'contract'
-              ? 'Descarga el PDF para revisarlo. La firma se habilitará después de la descarga.'
-              : 'Descarga el PDF para revisarlo. La firma se habilitará después de la descarga.'}
+            {requiresIdentityFlow
+              ? 'Descarga el PDF para revisarlo. Luego marca la aceptación para continuar con la firma, selfie y cédula.'
+              : 'Descarga el PDF para revisarlo. Luego marca la aceptación para habilitar la firma.'}
           </p>
         </div>
         {usesOfficialTemplate ? (

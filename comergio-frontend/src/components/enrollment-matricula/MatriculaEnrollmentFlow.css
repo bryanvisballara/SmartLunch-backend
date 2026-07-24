@@ -570,6 +570,34 @@
   color: #0f172a;
 }
 
+.matricula-flow-pending-signers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.matricula-flow-pending-signers li {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.matricula-flow-pending-signers li.is-done {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.matricula-flow-pending-signers li.is-current {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .matricula-flow-signature-label {
   margin: 18px 0 0;
   color: #334155;

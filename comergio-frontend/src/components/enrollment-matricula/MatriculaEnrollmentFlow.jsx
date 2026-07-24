@@ -107,22 +107,7 @@ function resolveActiveStep(process) {
   return 'consent';
 }
 
-function resolveRequiredSignersFromProcess(process, contractParams, { dualParentSigning = false } = {}) {
-  if (Array.isArray(process?.requiredSigners) && process.requiredSigners.length) {
-    return process.requiredSigners;
-  }
-
-  if (!dualParentSigning) {
-    if (process?.parentName) {
-      return [{
-        order: 1,
-        role: 'guardian',
-        displayName: process.parentName,
-        documentNumber: '',
-      }];
-    }
-  }
-
+function buildDualParentSigners(process, contractParams) {
   const father = contractParams?.father || process?.contractParamsSnapshot?.father || {};
   const mother = contractParams?.mother || process?.contractParamsSnapshot?.mother || {};
   const signers = [];
@@ -158,6 +143,36 @@ function resolveRequiredSignersFromProcess(process, contractParams, { dualParent
     });
   }
   return signers;
+}
+
+function resolveRequiredSignersFromProcess(process, contractParams, { dualParentSigning = false } = {}) {
+  const fromApi = Array.isArray(process?.requiredSigners) ? process.requiredSigners : [];
+  if (dualParentSigning) {
+    const fromParents = buildDualParentSigners(process, contractParams);
+    // Prefer father+mother when API still returns a single guardian (legacy serialize without schoolId).
+    if (fromParents.length >= 2) {
+      return fromParents;
+    }
+    if (fromApi.length) {
+      return fromApi;
+    }
+    return fromParents;
+  }
+
+  if (fromApi.length) {
+    return fromApi;
+  }
+
+  if (process?.parentName) {
+    return [{
+      order: 1,
+      role: 'guardian',
+      displayName: process.parentName,
+      documentNumber: '',
+    }];
+  }
+
+  return buildDualParentSigners(process, contractParams);
 }
 
 function isSignerCompleteLocal(signer, requireIdentity) {
@@ -511,12 +526,23 @@ function MatriculaSignatureZone({
   );
 }
 
-function PendingSignatureIntro({ process, pendingSignatureResume }) {
+function PendingSignatureIntro({
+  process,
+  pendingSignatureResume,
+  requiredSigners = [],
+  nextSigner = null,
+  requireIdentity = false,
+}) {
   if (!pendingSignatureResume || !process) return null;
 
   const pendingLabel = process.pendingContractSignature || ['payment_confirmed', 'contract_pending'].includes(process.status)
     ? 'contrato oficial de matrícula'
     : 'pagaré';
+  const documentType = process.pendingContractSignature || ['payment_confirmed', 'contract_pending'].includes(process.status)
+    ? 'contract'
+    : 'pagare';
+  const document = documentType === 'pagare' ? process?.pagare : process?.contract;
+  const savedSigners = Array.isArray(document?.signers) ? document.signers : [];
 
   return (
     <div className="matricula-flow-pending-intro">
@@ -529,7 +555,33 @@ function PendingSignatureIntro({ process, pendingSignatureResume }) {
         {pendingLabel}
         .
       </p>
-      <p>Debes completar esta firma para finalizar el proceso de matrícula.</p>
+      {requireIdentity ? (
+        <p>
+          Cada acudiente debe completar
+          {' '}
+          <strong>firma digital, selfie y fotos de la cédula</strong>
+          {' '}
+          (frente y reverso) para finalizar.
+        </p>
+      ) : (
+        <p>Debes completar esta firma para finalizar el proceso de matrícula.</p>
+      )}
+      {requiredSigners.length > 1 ? (
+        <ul className="matricula-flow-pending-signers">
+          {requiredSigners.map((signer) => {
+            const saved = savedSigners.find((item) => Number(item.order) === Number(signer.order));
+            const done = isSignerCompleteLocal(saved, requireIdentity);
+            const isCurrent = nextSigner && Number(nextSigner.order) === Number(signer.order);
+            return (
+              <li key={`${signer.role}-${signer.order}`} className={done ? 'is-done' : (isCurrent ? 'is-current' : '')}>
+                <strong>{signer.displayName}</strong>
+                {' — '}
+                {done ? 'Completado' : (isCurrent ? 'En turno ahora' : 'Pendiente')}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -1305,7 +1357,13 @@ function MatriculaEnrollmentFlow({
             {activeStep === 'contract' ? (
               <section className="matricula-flow-panel">
                 {pendingSignatureResume ? (
-                  <PendingSignatureIntro pendingSignatureResume={pendingSignatureResume} process={process} />
+                  <PendingSignatureIntro
+                    nextSigner={nextContractSigner}
+                    pendingSignatureResume={pendingSignatureResume}
+                    process={process}
+                    requireIdentity={requireIdentity}
+                    requiredSigners={requiredSigners}
+                  />
                 ) : (
                   <p className="matricula-flow-note">
                     Pago confirmado por {formatCurrency(process.payment?.amount)} el {formatDateTime(process.payment?.paidAt)}.
@@ -1425,7 +1483,13 @@ function MatriculaEnrollmentFlow({
 
             {activeStep === 'pagare' ? (
               <section className="matricula-flow-panel">
-                <PendingSignatureIntro pendingSignatureResume={pendingSignatureResume} process={process} />
+                <PendingSignatureIntro
+                  nextSigner={nextPagareSigner}
+                  pendingSignatureResume={pendingSignatureResume}
+                  process={process}
+                  requireIdentity={requireIdentity}
+                  requiredSigners={requiredSigners}
+                />
                 {isMillennium ? (
                   <SignerOrderBanner
                     currentSigner={nextPagareSigner}
