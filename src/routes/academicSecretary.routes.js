@@ -3972,7 +3972,15 @@ function buildAcademicPaymentPlanBenefitDescription(pricing = {}) {
   return windowLabel || 'Sin beneficio económico activo para la fecha actual.';
 }
 
-function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfiguration, relatedCharges = [], paymentsByChargeId = new Map(), now = new Date() }) {
+function buildAcademicStudentPaymentPlan({
+  student,
+  billingProfile,
+  feeConfiguration,
+  relatedCharges = [],
+  paymentsByChargeId = new Map(),
+  enrollmentProcessByChargeId = new Map(),
+  now = new Date(),
+}) {
   const studentGrade = normalizeText(billingProfile?.grade || student?.grade || student?.course || '');
   const gradeFeeSetting = findGradeFeeSetting(feeConfiguration, studentGrade);
   const fallbackBenefitRules = resolveAcademicFeeBenefitRules(feeConfiguration, gradeFeeSetting);
@@ -4051,6 +4059,9 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
     const isPaid = chargeIsPaid || (outstandingAmount <= 0 && paidAmount > 0);
     const isOverdue = !isPaid && dueDate.getTime() < now.getTime();
     const paymentMethod = latestPayment?.method || charge?.paymentMethod || '';
+    const enrollmentProcess = charge?._id
+      ? enrollmentProcessByChargeId.get(String(charge._id)) || null
+      : null;
 
     return {
       key: `annual_tuition-${charge._id || index}`,
@@ -4088,6 +4099,9 @@ function buildAcademicStudentPaymentPlan({ student, billingProfile, feeConfigura
       paymentNotes: isPaid ? latestPayment?.notes || '' : '',
       paymentDetails: isPaid ? buildPaymentDetails(chargePayments) : [],
       existingChargeId: charge?._id || '',
+      enrollmentContractMode: enrollmentProcess?.contractMode || '',
+      enrollmentStatus: enrollmentProcess?.status || '',
+      enrollmentProcessId: enrollmentProcess?._id || '',
     };
   });
 
@@ -5079,6 +5093,27 @@ async function buildBillingSummary(schoolId) {
     });
   });
 
+  const enrollmentProcessByChargeId = new Map();
+  if (isMillenniumSchoolId(schoolId)) {
+    const enrollmentChargeIds = pendingCharges
+      .filter((charge) => String(charge.category || '') === 'annual_tuition')
+      .map((charge) => charge._id)
+      .filter(Boolean);
+    if (enrollmentChargeIds.length) {
+      const enrollmentProcesses = await EnrollmentMatriculaProcess.find({
+        schoolId,
+        chargeId: { $in: enrollmentChargeIds },
+      })
+        .select('chargeId contractMode status')
+        .lean();
+      enrollmentProcesses.forEach((process) => {
+        if (process?.chargeId) {
+          enrollmentProcessByChargeId.set(String(process.chargeId), process);
+        }
+      });
+    }
+  }
+
   const studentAccounts = students.map((student) => {
     const studentId = String(student._id);
     const relatedCharges = (chargesByStudentId.get(studentId) || [])
@@ -5095,6 +5130,7 @@ async function buildBillingSummary(schoolId) {
       feeConfiguration,
       relatedCharges,
       paymentsByChargeId,
+      enrollmentProcessByChargeId,
       now,
     });
 
@@ -9037,6 +9073,100 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
       payment,
       remainingAmount,
       chargeStatus: charge.status,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/billing/payments/:paymentId', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const paymentId = toObjectId(req.params.paymentId);
+    if (!paymentId) {
+      return res.status(400).json({ message: 'paymentId no es válido.' });
+    }
+
+    const payment = await AcademicChargePayment.findOne({ _id: paymentId, schoolId });
+    if (!payment) {
+      return res.status(404).json({ message: 'Pago no encontrado.' });
+    }
+
+    const gatewayMethods = new Set(['wompi', 'parent_portal', 'epayco', 'bold', 'pse']);
+    if (gatewayMethods.has(String(payment.method || '').toLowerCase())) {
+      return res.status(409).json({ message: 'Los pagos por pasarela no se editan desde cartera.' });
+    }
+
+    const charge = await AcademicCharge.findOne({ _id: payment.chargeId, schoolId });
+    if (!charge) {
+      return res.status(404).json({ message: 'El cargo asociado al pago no existe.' });
+    }
+
+    const isMatricula = String(charge.category || '') === 'annual_tuition';
+    const wantsContractModeUpdate = Object.prototype.hasOwnProperty.call(req.body || {}, 'enrollmentContractMode');
+    if (isMillenniumSchoolId(schoolId) && isMatricula && wantsContractModeUpdate) {
+      const contractMode = normalizeText(req.body?.enrollmentContractMode).toLowerCase();
+      if (!['physical', 'digital', 'fisico', 'contrato_fisico', 'contrato fisico', 'contrato_digital', 'contrato digital'].includes(contractMode)) {
+        return res.status(400).json({ message: 'Selecciona si el contrato de matrícula es físico o digital.' });
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'method')) {
+      const nextMethod = normalizeAcademicManualPaymentMethod(req.body.method);
+      if (gatewayMethods.has(nextMethod)) {
+        return res.status(400).json({ message: 'No puedes cambiar el pago a un medio de pasarela desde este formulario.' });
+      }
+      payment.method = nextMethod;
+      charge.paymentMethod = nextMethod;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'notes')) {
+      payment.notes = normalizeText(req.body.notes);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'paidAt') && req.body.paidAt) {
+      const paidAt = new Date(req.body.paidAt);
+      if (Number.isNaN(paidAt.getTime())) {
+        return res.status(400).json({ message: 'La fecha de pago no es válida.' });
+      }
+      payment.paidAt = paidAt;
+      if (String(charge.status) === 'paid') {
+        charge.paidAt = paidAt;
+      }
+    }
+
+    await payment.save();
+    await charge.save();
+
+    let enrollmentProcess = null;
+    if (
+      isMillenniumSchoolId(schoolId)
+      && isMatricula
+      && (wantsContractModeUpdate || Object.prototype.hasOwnProperty.call(req.body || {}, 'method'))
+    ) {
+      const existingProcess = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId: charge._id }).lean();
+      const nextContractMode = wantsContractModeUpdate
+        ? req.body.enrollmentContractMode
+        : (existingProcess?.contractMode || '');
+      if (nextContractMode) {
+        enrollmentProcess = await linkCarteraPaymentToEnrollmentMatricula({
+          schoolId,
+          charge,
+          chargePayment: payment,
+          contractMode: nextContractMode,
+          recordedByUserId: userId,
+          recordedByRole: role,
+        });
+      }
+    }
+
+    const billing = await buildBillingSummarySafely(schoolId);
+    return res.status(200).json({
+      message: 'Pago actualizado con éxito.',
+      payment,
+      enrollmentContractMode: enrollmentProcess?.contractMode || null,
+      enrollmentStatus: enrollmentProcess?.status || null,
+      billing,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

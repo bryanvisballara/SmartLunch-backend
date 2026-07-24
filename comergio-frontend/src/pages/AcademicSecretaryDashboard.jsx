@@ -56,6 +56,7 @@ import {
   requestAcademicSecretaryGradePromotion,
   rejectAcademicSecretaryCommunicationRequest,
   registerAcademicSecretaryChargePayment,
+  updateAcademicSecretaryBillingPayment,
   removeAcademicSecretarySchoolRouteStop,
   sendAcademicSecretaryReminder,
   updateAcademicSecretaryDatabaseRow,
@@ -1157,6 +1158,31 @@ function isMatriculaBillingPaymentRow(row = null, charge = null) {
   return category === 'annual_tuition';
 }
 
+function labelEnrollmentContractMode(mode = '') {
+  const normalized = String(mode || '').toLowerCase();
+  if (normalized === 'physical' || normalized === 'fisico') return 'Contrato físico';
+  if (normalized === 'digital') return 'Contrato digital';
+  return '';
+}
+
+function createBillingPaymentEditDraft(row = null) {
+  const payment = resolveCarteraDeletablePaymentFromRow(row)
+    || (Array.isArray(row?.paymentDetails) ? row.paymentDetails[0] : null)
+    || null;
+  const paidAtValue = payment?.paidAt || row?.paidAt || '';
+  const paidAt = paidAtValue
+    ? getBogotaTodayDateInput(new Date(paidAtValue))
+    : getBogotaTodayDateInput();
+
+  return {
+    paymentId: payment?._id || '',
+    method: payment?.method || row?.paymentMethod || 'bank_transfer',
+    paidAt,
+    notes: payment?.notes || row?.paymentNotes || '',
+    enrollmentContractMode: row?.enrollmentContractMode || '',
+  };
+}
+
 function createEmptyParentDraft() {
   return { name: '', documentType: 'CC', documentNumber: '', phone: '', email: '', password: '', address: '' };
 }
@@ -1696,6 +1722,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [chargeAdjustmentModal, setChargeAdjustmentModal] = useState({ open: false, row: null });
   const [chargeAdjustmentDraft, setChargeAdjustmentDraft] = useState(createChargeAdjustmentDraft);
   const [billingPaymentDetailModal, setBillingPaymentDetailModal] = useState({ open: false, row: null });
+  const [billingPaymentEditModal, setBillingPaymentEditModal] = useState({ open: false, row: null });
+  const [billingPaymentEditDraft, setBillingPaymentEditDraft] = useState(() => createBillingPaymentEditDraft());
   const [paymentHistoryFilters, setPaymentHistoryFilters] = useState(() => ({
     dateFrom: getBogotaTodayDateInput(),
     dateTo: getBogotaTodayDateInput(),
@@ -3303,6 +3331,60 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     setBillingPaymentDetailModal({ open: false, row: null });
   };
 
+  const openBillingPaymentEditModal = (row = null) => {
+    if (!row || String(row.status || '') !== 'paid') return;
+    const draft = createBillingPaymentEditDraft(row);
+    if (!draft.paymentId) {
+      setError('No se encontró el pago editable de este cobro.');
+      return;
+    }
+    if (isGatewayBillingPaymentMethod(draft.method)) {
+      setError('Los pagos por pasarela no se editan desde cartera.');
+      return;
+    }
+    setBillingPaymentEditDraft(draft);
+    setBillingPaymentEditModal({ open: true, row });
+  };
+
+  const closeBillingPaymentEditModal = () => {
+    setBillingPaymentEditModal({ open: false, row: null });
+    setBillingPaymentEditDraft(createBillingPaymentEditDraft());
+  };
+
+  const showEditEnrollmentContractModeField = isMatriculaBillingPaymentRow(billingPaymentEditModal.row);
+  const billingPaymentEditMethodOptions = showEditEnrollmentContractModeField
+    ? MATRICULA_BILLING_PAYMENT_METHOD_OPTIONS
+    : BILLING_PAYMENT_METHOD_OPTIONS.filter((option) => isCarteraBillingPaymentMethod(option.value));
+  const billingPaymentEditCanSubmit = Boolean(billingPaymentEditDraft.paymentId)
+    && Boolean(billingPaymentEditDraft.method)
+    && (!showEditEnrollmentContractModeField || Boolean(billingPaymentEditDraft.enrollmentContractMode));
+
+  const onSubmitBillingPaymentEdit = async (event) => {
+    event.preventDefault();
+    if (!billingPaymentEditCanSubmit) return;
+
+    await runAction(async () => {
+      const response = await updateAcademicSecretaryBillingPayment(billingPaymentEditDraft.paymentId, {
+        method: billingPaymentEditDraft.method,
+        paidAt: billingPaymentEditDraft.paidAt,
+        notes: billingPaymentEditDraft.notes,
+        enrollmentContractMode: showEditEnrollmentContractModeField
+          ? billingPaymentEditDraft.enrollmentContractMode
+          : undefined,
+      });
+      if (response?.data?.billing) {
+        setBootstrap((previous) => ({
+          ...previous,
+          billing: response.data.billing,
+        }));
+      } else {
+        await loadBootstrap();
+      }
+      closeBillingPaymentEditModal();
+      closeBillingPaymentDetailModal();
+    }, 'Pago actualizado.', 'overview');
+  };
+
   const openDeleteBillingPaymentModal = ({ paymentId = '', studentName = '', concept = '' } = {}) => {
     if (!paymentId) return;
     setDeleteBillingPaymentModal({ open: true, paymentId, studentName, concept });
@@ -3994,6 +4076,21 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                     <td>{row.status === 'paid' ? (
                                       <div className="academic-secretary__billing-plan-actions">
                                         <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
+                                        {resolveCarteraDeletablePaymentFromRow(row) ? (
+                                          <button
+                                            className="academic-secretary__billing-plan-action academic-secretary__billing-plan-action--secondary"
+                                            disabled={busy}
+                                            onClick={() => openBillingPaymentEditModal(row)}
+                                            type="button"
+                                          >
+                                            Editar pago
+                                          </button>
+                                        ) : null}
+                                        {isMatriculaBillingPaymentRow(row) && row.enrollmentContractMode ? (
+                                          <div className="academic-secretary__billing-plan-meta">
+                                            {labelEnrollmentContractMode(row.enrollmentContractMode)}
+                                          </div>
+                                        ) : null}
                                         {renderBillingPaymentDeletionAction(
                                           resolveCarteraDeletablePaymentFromRow(row),
                                           {
@@ -5351,6 +5448,12 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 <div><span>Valor pagado</span><strong>{formatCurrency(row.paidAmount || row.chargeAmount || 0)}</strong></div>
                 <div><span>Fecha</span><strong>{row.paidAt ? formatDate(row.paidAt) : '-'}</strong></div>
                 <div><span>Medio</span><strong>{row.paymentMethodLabel || '-'}</strong></div>
+                {isMatriculaBillingPaymentRow(row) ? (
+                  <div>
+                    <span>Contrato</span>
+                    <strong>{labelEnrollmentContractMode(row.enrollmentContractMode) || 'Sin registrar'}</strong>
+                  </div>
+                ) : null}
               </div>
               <div className="academic-secretary__billing-ledger-list">
                 {paymentDetails.map((payment, index) => (
@@ -5362,6 +5465,11 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               </div>
               <div className="academic-secretary__actions">
                 {resolveCarteraDeletablePaymentFromRow(row) ? (
+                  <button className="btn btn-outline" disabled={busy} onClick={() => openBillingPaymentEditModal(row)} type="button">
+                    Editar pago
+                  </button>
+                ) : null}
+                {resolveCarteraDeletablePaymentFromRow(row) ? (
                   renderBillingPaymentDeletionAction(resolveCarteraDeletablePaymentFromRow(row), {
                     studentName: selectedBillingAccount?.studentName,
                     concept: row.concept || row.monthLabel,
@@ -5369,6 +5477,85 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 ) : null}
                 <button className="btn btn-primary" onClick={closeBillingPaymentDetailModal} type="button">Cerrar</button>
               </div>
+            </div>
+          </div>
+        );
+      })() : null}
+
+      {billingPaymentEditModal.open ? (() => {
+        const row = billingPaymentEditModal.row || {};
+        return (
+          <div className="academic-secretary__modal-overlay" role="dialog" aria-modal="true" aria-label="Editar pago registrado">
+            <div className="academic-secretary__modal-card academic-secretary__modal-card--payment">
+              <div className="academic-secretary__panel-head">
+                <div>
+                  <span className="academic-secretary__eyebrow academic-secretary__modal-eyebrow">Cartera</span>
+                  <h2>Editar pago</h2>
+                  <p>{row.concept || row.monthLabel || selectedBillingAccount?.studentName || 'Pago académico'}</p>
+                </div>
+                <button className="academic-secretary__message-close" disabled={busy} onClick={closeBillingPaymentEditModal} type="button"><CloseIcon /></button>
+              </div>
+              <form className="academic-secretary__billing-payment-form" onSubmit={onSubmitBillingPaymentEdit}>
+                <div className="academic-secretary__payment-detail-summary">
+                  <div><span>Valor pagado</span><strong>{formatCurrency(row.paidAmount || row.chargeAmount || 0)}</strong></div>
+                </div>
+                <div className="academic-secretary__form-row">
+                  <label>
+                    Medio de pago
+                    <select
+                      disabled={busy}
+                      onChange={(event) => setBillingPaymentEditDraft((previous) => ({ ...previous, method: event.target.value }))}
+                      value={billingPaymentEditDraft.method}
+                    >
+                      {billingPaymentEditMethodOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Fecha de pago
+                    <input
+                      disabled={busy}
+                      onChange={(event) => setBillingPaymentEditDraft((previous) => ({ ...previous, paidAt: event.target.value }))}
+                      type="date"
+                      value={billingPaymentEditDraft.paidAt}
+                    />
+                  </label>
+                </div>
+                {showEditEnrollmentContractModeField ? (
+                  <label>
+                    Contrato de matrícula
+                    <select
+                      disabled={busy}
+                      onChange={(event) => setBillingPaymentEditDraft((previous) => ({ ...previous, enrollmentContractMode: event.target.value }))}
+                      value={billingPaymentEditDraft.enrollmentContractMode}
+                    >
+                      <option value="">Selecciona una opción</option>
+                      <option value="physical">Contrato físico</option>
+                      <option value="digital">Contrato digital</option>
+                    </select>
+                    <small className="academic-secretary__field-hint">
+                      Físico: no pide firma en la app. Digital: el acudiente debe firmar contrato y pagaré en la app.
+                      Si lo cambias de físico a digital, se reabre la firma en la app del acudiente.
+                    </small>
+                  </label>
+                ) : null}
+                <label>
+                  Nota o referencia
+                  <textarea
+                    disabled={busy}
+                    onChange={(event) => setBillingPaymentEditDraft((previous) => ({ ...previous, notes: event.target.value }))}
+                    placeholder="Referencia de transferencia, voucher o nota interna"
+                    value={billingPaymentEditDraft.notes}
+                  />
+                </label>
+                <div className="academic-secretary__actions">
+                  <button className="btn btn-outline" disabled={busy} onClick={closeBillingPaymentEditModal} type="button">Cancelar</button>
+                  <button className="btn btn-primary" disabled={!billingPaymentEditCanSubmit || busy} type="submit">
+                    {busy ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         );
