@@ -50,6 +50,8 @@ require('./schoolCreationSnapshot.model');
 require('./superAdminSchoolSettings.model');
 require('./dianInvoicingConfig.model');
 require('./dianElectronicInvoice.model');
+require('./wwtecnoUser.model');
+require('./wwtecnoCompany.model');
 require('./studentBillingProfile.model');
 require('./academicCharge.model');
 require('./academicChargePayment.model');
