@@ -77,7 +77,7 @@ function MatriculaContractDocumentPreview({
   if (!contractParams) {
     return (
       <p className="matricula-flow-note">
-        El documento se generará cuando el pago quede confirmado.
+        Aún no hay datos suficientes para mostrar el documento. Completa el consentimiento y el pago; si ya pagaste, cierra y vuelve a abrir la app.
       </p>
     );
   }

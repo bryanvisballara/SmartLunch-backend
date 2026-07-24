@@ -97,8 +97,18 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function isPaymentConfirmedForSigning(process) {
+  const status = String(process?.status || '');
+  if (['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(status)) {
+    return true;
+  }
+  return String(process?.payment?.status || '').toUpperCase().includes('PAID')
+    || Boolean(process?.payment?.chargePaymentId);
+}
+
 function resolveActiveStep(process) {
-  const nextActionType = process?.nextSigningAction?.documentType;
+  const canSign = isPaymentConfirmedForSigning(process);
+  const nextActionType = canSign ? process?.nextSigningAction?.documentType : null;
   if (nextActionType === 'contract') return 'contract';
   if (nextActionType === 'pagare') return 'pagare';
 
@@ -236,6 +246,10 @@ function isPersonFullyCompleteLocal(process, signerOrder, requireIdentityOnContr
 
 /** Cada persona: contrato (+ identidad) → pagaré (solo firma), luego la siguiente. */
 function getNextSigningActionLocal(process, contractParams, { dualParentSigning = false, requireIdentityOnContract = false } = {}) {
+  if (!isPaymentConfirmedForSigning(process)) {
+    return null;
+  }
+
   if (process?.nextSigningAction?.signer && process?.nextSigningAction?.documentType) {
     return process.nextSigningAction;
   }
@@ -745,6 +759,10 @@ function MatriculaEnrollmentFlow({
 
     if (!looksMillennium) return base;
 
+    if (!isPaymentConfirmedForSigning(process)) {
+      return base;
+    }
+
     const action = getNextSigningActionLocal(process, snapshot, {
       dualParentSigning: true,
       requireIdentityOnContract: true,
@@ -761,6 +779,32 @@ function MatriculaEnrollmentFlow({
       setWompiCheckoutLoading(false);
     }
   }, [activeStep, process?._id]);
+
+  useEffect(() => {
+    if (!process?._id || !isPaymentConfirmedForSigning(process)) return undefined;
+    if (process?.contractParamsSnapshot?.student?.firstName && process?.contractParamsSnapshot?.schoolId) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await getEnrollmentMatriculaPaymentStatus(process._id);
+        if (cancelled) return;
+        const nextProcess = response.data?.process;
+        if (nextProcess) {
+          setProcess(nextProcess);
+          onProcessUpdated?.(nextProcess);
+        }
+      } catch (_error) {
+        // Keep current process; user can retry from UI.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onProcessUpdated, process?._id, process?.contractParamsSnapshot?.schoolId, process?.contractParamsSnapshot?.student?.firstName, process?.payment?.chargePaymentId, process?.payment?.status, process?.status]);
 
   useEffect(() => {
     if (activeStep !== 'payment' || process?.payment?.status === 'PAID') {
@@ -1522,12 +1566,12 @@ function MatriculaEnrollmentFlow({
                     requireIdentityOnContract={requireIdentityOnContract}
                     requiredSigners={requiredSigners}
                   />
-                ) : (
+                ) : isPaymentConfirmedForSigning(process) ? (
                   <p className="matricula-flow-note">
                     Pago confirmado por {formatCurrency(process.payment?.amount)} el {formatDateTime(process.payment?.paidAt)}.
                   </p>
-                )}
-                {pendingSignatureResume && process.payment?.paidAt ? (
+                ) : null}
+                {pendingSignatureResume && isPaymentConfirmedForSigning(process) && process.payment?.paidAt ? (
                   <p className="matricula-flow-note matricula-flow-note--muted">
                     Pago confirmado por {formatCurrency(process.payment?.amount)} el {formatDateTime(process.payment?.paidAt)}.
                   </p>

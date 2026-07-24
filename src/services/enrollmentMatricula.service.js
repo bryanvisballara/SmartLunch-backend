@@ -493,8 +493,28 @@ function isPersonFullyComplete(process = {}, order = 1) {
     && isPersonDocumentComplete(process, 'pagare', order);
 }
 
+const MATRICULA_SIGNATURE_REQUIRED_STATUSES = [
+  'payment_confirmed',
+  'contract_pending',
+  'pagare_pending',
+  'office_payment_confirmed',
+];
+
+function isProcessReadyForSigning(process = {}) {
+  const status = normalizeText(process?.status);
+  if (MATRICULA_SIGNATURE_REQUIRED_STATUSES.includes(status)) {
+    return true;
+  }
+  return normalizeText(process?.payment?.status).includes('PAID')
+    || Boolean(process?.payment?.chargePaymentId);
+}
+
 /** Orden: cada acudiente completa contrato (+ identidad) y luego pagaré (solo firma), antes del siguiente. */
 function getNextSigningAction(process = {}) {
+  if (!isProcessReadyForSigning(process)) {
+    return null;
+  }
+
   const required = resolveRequiredSigners(process);
   for (const signer of required) {
     if (!isPersonDocumentComplete(process, 'contract', signer.order)) {
@@ -613,7 +633,7 @@ function serializeProcess(process, charge = null, { forParent = false } = {}) {
       status: charge.status,
       amountHiddenUntilGateway: hideEnrollmentAmount || undefined,
     } : undefined,
-    requiresSignature: ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(doc.status),
+    requiresSignature: isProcessReadyForSigning(doc),
     pendingContractSignature: Boolean(
       nextSigningAction?.documentType === 'contract'
       || (!nextSigningAction && ['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(doc.status))
@@ -737,13 +757,17 @@ async function markPaymentPending({ process, paymentTransaction, amount, method 
 }
 
 async function refreshContractParamsSnapshotIfNeeded(process) {
-  if (!process || !['contract_pending', 'pagare_pending', 'payment_confirmed', 'office_payment_confirmed'].includes(process.status)) {
+  if (!process || !isProcessReadyForSigning(process)) {
     return process;
   }
 
   const snapshot = process.contractParamsSnapshot || {};
+  const primaryGuardian = snapshot.primaryGuardian === 'father' ? snapshot.father : snapshot.mother;
   const needsRefresh = !snapshot.schoolId
     || !normalizeText(snapshot.gradeLabel)
+    || !normalizeText(snapshot.student?.firstName)
+    || !normalizeText(snapshot.student?.lastName)
+    || !normalizeText(primaryGuardian?.name)
     || normalizeText(snapshot.gradeLabel) === normalizeText(snapshot.student?.grade);
 
   if (!needsRefresh) {
@@ -1117,13 +1141,6 @@ async function signDocument({
   await process.save();
   return process;
 }
-
-const MATRICULA_SIGNATURE_REQUIRED_STATUSES = [
-  'payment_confirmed',
-  'contract_pending',
-  'pagare_pending',
-  'office_payment_confirmed',
-];
 
 async function listPendingSignaturesForParent({ schoolId, parentId }) {
   const parentObjectId = toObjectId(parentId);
@@ -1733,15 +1750,23 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
 
   const pendingSignatures = await listPendingSignaturesForParent({ schoolId, parentId: parentObjectId });
   if (pendingSignatures.length > 0) {
-    const process = pendingSignatures[0];
-    const charge = process?.chargeId
-      ? await AcademicCharge.findOne({ _id: process.chargeId, schoolId }).lean()
+    const processId = pendingSignatures[0]?._id;
+    const liveProcess = processId
+      ? await EnrollmentMatriculaProcess.findOne({ _id: processId, schoolId })
+      : null;
+    if (liveProcess) {
+      await refreshContractParamsSnapshotIfNeeded(liveProcess);
+    }
+    const charge = (liveProcess || pendingSignatures[0])?.chargeId
+      ? await AcademicCharge.findOne({ _id: (liveProcess || pendingSignatures[0]).chargeId, schoolId }).lean()
       : null;
     return {
       required: true,
       blocking: true,
       reason: 'signature_pending',
-      process,
+      process: liveProcess
+        ? serializeProcessForParent(liveProcess, charge)
+        : pendingSignatures[0],
       charge,
     };
   }
