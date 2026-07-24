@@ -21,6 +21,7 @@ const {
   approveMatriculaPurgeRequest,
   createMatriculaPurgeRequest,
   createIndividualConsentPurgeRequest,
+  createIndividualSignaturePurgeRequest,
   getMatriculaPurgeRequestSummary,
   listMatriculaPurgeRequestsForRequester,
   listMatriculaPurgeRequestsForReviewer,
@@ -298,6 +299,14 @@ rectoriaRouter.post('/purge-requests', async (req, res) => {
         userName: req.user.name,
         processId,
       })
+      : actionType === 'clear_signature'
+        ? await createIndividualSignaturePurgeRequest({
+          schoolId: req.user.schoolId,
+          userId: req.user.userId,
+          userRole: req.user.role,
+          userName: req.user.name,
+          processId,
+        })
       : await createMatriculaPurgeRequest({
         schoolId: req.user.schoolId,
         userId: req.user.userId,

@@ -5,7 +5,7 @@ const enrollmentMatriculaPurgeRequestSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     actionType: {
       type: String,
-      enum: ['clear_consents', 'clear_consent', 'clear_signatures', 'delete_billing_payment'],
+      enum: ['clear_consents', 'clear_consent', 'clear_signatures', 'clear_signature', 'delete_billing_payment'],
       required: true,
       index: true,
     },
@@ -61,12 +61,12 @@ enrollmentMatriculaPurgeRequestSchema.index(
   }
 );
 enrollmentMatriculaPurgeRequestSchema.index(
-  { schoolId: 1, processId: 1 },
+  { schoolId: 1, processId: 1, actionType: 1 },
   {
     unique: true,
     partialFilterExpression: {
       status: 'pending',
-      actionType: 'clear_consent',
+      actionType: { $in: ['clear_consent', 'clear_signature'] },
     },
   }
 );

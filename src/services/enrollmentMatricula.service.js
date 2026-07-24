@@ -890,22 +890,44 @@ async function clearAllSignedDocumentsForRectoria({ schoolId }) {
 
   let updated = 0;
   for (const process of processes) {
-    process.contract = {};
-    process.pagare = {};
-
-    if (hasEnrollmentPaymentConfirmed(process)) {
-      process.status = process.contractMode === 'digital' ? 'office_payment_confirmed' : 'payment_confirmed';
-    } else if (process.consent?.accepted) {
-      process.status = 'consent_accepted';
-    } else {
-      process.status = 'intro_pending';
-    }
-
+    applySignedDocumentsClearToProcess(process);
     await process.save();
     updated += 1;
   }
 
   return { updated };
+}
+
+async function clearSignedDocumentsForRectoria({ schoolId, processId }) {
+  const process = await EnrollmentMatriculaProcess.findOne({
+    _id: processId,
+    schoolId,
+    $or: [
+      { 'contract.signedAt': { $ne: null } },
+      { 'pagare.signedAt': { $ne: null } },
+    ],
+  });
+
+  if (!process) {
+    throw new Error('Documento firmado no encontrado o ya fue eliminado.');
+  }
+
+  applySignedDocumentsClearToProcess(process);
+  await process.save();
+  return { updated: 1 };
+}
+
+function applySignedDocumentsClearToProcess(process) {
+  process.contract = {};
+  process.pagare = {};
+
+  if (hasEnrollmentPaymentConfirmed(process)) {
+    process.status = process.contractMode === 'digital' ? 'office_payment_confirmed' : 'payment_confirmed';
+  } else if (process.consent?.accepted) {
+    process.status = 'consent_accepted';
+  } else {
+    process.status = 'intro_pending';
+  }
 }
 
 async function buildSignedDocumentsZipForRectoria({ schoolId }) {
@@ -1261,9 +1283,30 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     };
   }
 
-  const unpaidCharge = await AcademicCharge.findOne({
+  // Students who already finished enrollment (paid + signed) must not be blocked again
+  // by leftover/duplicate annual_tuition charges (installments or regenerated fees).
+  const enrolledStudentIds = await EnrollmentMatriculaProcess.distinct('studentId', {
     schoolId,
     studentId: { $in: studentIds },
+    $or: [
+      { status: 'completed' },
+      {
+        'payment.status': { $regex: /PAID/i },
+        'contract.signedAt': { $ne: null },
+        'pagare.signedAt': { $ne: null },
+      },
+    ],
+  });
+  const enrolledKeySet = new Set(enrolledStudentIds.map((id) => String(id)));
+  const studentsNeedingEnrollment = studentIds.filter((id) => !enrolledKeySet.has(String(id)));
+
+  if (!studentsNeedingEnrollment.length) {
+    return { required: false, blocking: false };
+  }
+
+  const unpaidCharge = await AcademicCharge.findOne({
+    schoolId,
+    studentId: { $in: studentsNeedingEnrollment },
     category: 'annual_tuition',
     status: { $in: ['pending', 'overdue'] },
   })
@@ -1325,6 +1368,7 @@ module.exports = {
   clearAllConsentsForRectoria,
   clearConsentForRectoria,
   clearAllSignedDocumentsForRectoria,
+  clearSignedDocumentsForRectoria,
   completeMatriculaDirectPayment,
   completeMatriculaGatewayPayment,
   getMatriculaRequirementForParent,

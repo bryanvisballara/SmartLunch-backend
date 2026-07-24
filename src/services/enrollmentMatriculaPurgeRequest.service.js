@@ -8,6 +8,7 @@ const {
   clearAllConsentsForRectoria,
   clearAllSignedDocumentsForRectoria,
   clearConsentForRectoria,
+  clearSignedDocumentsForRectoria,
 } = require('./enrollmentMatricula.service');
 const {
   executeBillingPaymentDeletion,
@@ -20,6 +21,7 @@ const ACTION_LABELS = {
   clear_consents: 'Borrar consentimientos de matrícula',
   clear_consent: 'Borrar consentimiento individual',
   clear_signatures: 'Borrar documentos firmados de matrícula',
+  clear_signature: 'Borrar firmas individuales',
   delete_billing_payment: 'Anular pago de cartera',
 };
 
@@ -97,6 +99,60 @@ async function createIndividualConsentPurgeRequest({
   const request = await EnrollmentMatriculaPurgeRequest.create({
     schoolId,
     actionType: 'clear_consent',
+    status: 'pending',
+    requestedByUserId: userId,
+    requestedByName: normalizeText(userName) || 'Usuario',
+    requestedByRole: normalizeText(userRole),
+    recordCount: 1,
+    processId,
+    chargeId: process.chargeId || null,
+    studentId: process.studentId || null,
+    studentName: normalizeText(process.studentName) || '',
+    parentName: normalizeText(process.parentName) || '',
+    submittedAt: new Date(),
+  });
+
+  return serializePurgeRequest(request);
+}
+
+async function createIndividualSignaturePurgeRequest({
+  schoolId,
+  userId,
+  userRole,
+  userName,
+  processId,
+}) {
+  if (!processId) {
+    throw createHttpError('Proceso de matrícula inválido.');
+  }
+
+  const process = await EnrollmentMatriculaProcess.findOne({
+    _id: processId,
+    schoolId,
+    $or: [
+      { 'contract.signedAt': { $ne: null } },
+      { 'pagare.signedAt': { $ne: null } },
+    ],
+  }).select('studentId studentName parentName chargeId').lean();
+
+  if (!process) {
+    throw createHttpError('No se encontraron firmas para eliminar.', 404);
+  }
+
+  const existingPending = await EnrollmentMatriculaPurgeRequest.findOne({
+    schoolId,
+    actionType: 'clear_signature',
+    processId,
+    status: 'pending',
+  }).lean();
+
+  if (existingPending) {
+    throw createHttpError('Ya existe una solicitud pendiente para estas firmas.', 409);
+  }
+
+  const request = await EnrollmentMatriculaPurgeRequest.create({
+    schoolId,
+    actionType: 'clear_signature',
     status: 'pending',
     requestedByUserId: userId,
     requestedByName: normalizeText(userName) || 'Usuario',
@@ -293,6 +349,11 @@ async function approveMatriculaPurgeRequest({
       schoolId,
       processId: request.processId,
     });
+  } else if (request.actionType === 'clear_signature') {
+    result = await clearSignedDocumentsForRectoria({
+      schoolId,
+      processId: request.processId,
+    });
   } else {
     result = request.actionType === 'clear_consents'
       ? await clearAllConsentsForRectoria({ schoolId })
@@ -305,6 +366,7 @@ async function approveMatriculaPurgeRequest({
   request.reviewedByName = normalizeText(reviewerName) || 'Rectoría';
   request.executedCount = request.actionType === 'delete_billing_payment'
     || request.actionType === 'clear_consent'
+    || request.actionType === 'clear_signature'
     ? 1
     : Number(result?.updated || 0);
   await request.save();
@@ -358,6 +420,7 @@ module.exports = {
   approveMatriculaPurgeRequest,
   createBillingPaymentDeletionRequest,
   createIndividualConsentPurgeRequest,
+  createIndividualSignaturePurgeRequest,
   createMatriculaPurgeRequest,
   getMatriculaPurgeRequestSummary,
   listMatriculaPurgeRequestsForRequester,

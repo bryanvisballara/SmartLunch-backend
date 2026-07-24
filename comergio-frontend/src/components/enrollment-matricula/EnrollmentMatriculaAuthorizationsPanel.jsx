@@ -66,7 +66,7 @@ function resolveRequestDetail(item = {}) {
     );
   }
 
-  if (item.actionType === 'clear_consent') {
+  if (item.actionType === 'clear_consent' || item.actionType === 'clear_signature') {
     return (
       <div className="enrollment-matricula-rectoria__evidence">
         <span>{item.studentName || '—'}</span>

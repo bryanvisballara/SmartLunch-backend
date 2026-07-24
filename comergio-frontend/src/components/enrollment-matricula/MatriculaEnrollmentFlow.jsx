@@ -785,14 +785,18 @@ function MatriculaEnrollmentFlow({
                 <p className="matricula-flow-note">
                   Estado:
                   {' '}
-                  <strong>{process.payment?.status === 'PAID' ? 'Pago confirmado' : 'Pendiente de pago'}</strong>
+                  <strong>{
+                    process.payment?.status === 'PAID' || process.payment?.chargePaymentId
+                      ? 'Pago confirmado'
+                      : 'Pendiente de pago'
+                  }</strong>
                 </p>
                 {process.consent?.acceptedAt ? (
                   <p className="matricula-flow-note matricula-flow-note--muted">
                     Consentimiento registrado el {formatDateTime(process.consent.acceptedAt)}
                   </p>
                 ) : null}
-                {process.payment?.status === 'PAID' ? (
+                {process.payment?.status === 'PAID' || process.payment?.chargePaymentId ? (
                   <button className="matricula-flow-primary" onClick={refreshProcess} type="button">
                     Continuar a firma de contrato
                   </button>
