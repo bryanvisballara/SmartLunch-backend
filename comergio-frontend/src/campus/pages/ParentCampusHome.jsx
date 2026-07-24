@@ -3739,24 +3739,34 @@ function ParentMobilePortalHeader({
   onToggleMenu,
   onToggleUserMenu,
   preferStudentNotifications = false,
+  schoolName = '',
   showUserMenu,
   userMenuRef,
 }) {
   const parentFirstName = String(guardianName || 'Padre').split(' ')[0] || 'Padre';
   const parentInitial = String(guardianName || 'P').charAt(0).toUpperCase();
+  const resolvedSchoolName = String(schoolName || '').trim() || 'Colegio';
 
   return (
     <header className="parent-topbar">
       {canOpenMenu ? (
-        <button aria-expanded={isMenuOpen} aria-label="Abrir menu" className="parent-icon-btn" onClick={onToggleMenu} type="button">
-          <span />
-          <span />
-          <span />
+        <button
+          aria-expanded={isMenuOpen}
+          aria-label="Abrir menu"
+          className="parent-topbar-colibri-btn"
+          onClick={onToggleMenu}
+          type="button"
+        >
+          <img alt="" className="parent-topbar-colibri" src={colibriGameCover} />
         </button>
-      ) : <span aria-hidden="true" className="parent-icon-btn parent-icon-btn--placeholder" />}
+      ) : (
+        <span className="parent-topbar-colibri-wrap" aria-hidden="true">
+          <img alt="" className="parent-topbar-colibri" src={colibriGameCover} />
+        </span>
+      )}
 
       <div className="parent-title-wrap">
-        <ComergioBrandTitle />
+        <p className="parent-school-name">{resolvedSchoolName}</p>
         <h1>{`Hola, ${parentFirstName}!`}</h1>
       </div>
 
@@ -7837,6 +7847,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             }}
             onToggleUserMenu={() => setShowUserMenu((currentValue) => !currentValue)}
             preferStudentNotifications={studentPortalMode}
+            schoolName={schoolDisplayName}
             showUserMenu={showUserMenu}
             userMenuRef={userMenuRef}
           />

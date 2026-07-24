@@ -46,6 +46,8 @@
   align-items: flex-start;
   gap: 0.55rem;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 
 .parent-topbar-actions .parent-profile-wrap {

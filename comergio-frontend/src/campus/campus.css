@@ -12570,11 +12570,12 @@ body.teacher-camera-open {
 
   .campus-parent-mobile-app.is-student-portal .parent-title-wrap {
     gap: 0.3rem;
-    transform: none;
+    transform: translateX(-50%);
   }
 
-  .campus-parent-mobile-app.is-student-portal .parent-topbar .comergio-brand-title {
-    font-size: 1.5rem;
+  .campus-parent-mobile-app.is-student-portal .parent-topbar .comergio-brand-title,
+  .campus-parent-mobile-app.is-student-portal .parent-topbar .parent-school-name {
+    font-size: 1.35rem;
   }
 
   .campus-parent-mobile-app.is-student-portal .parent-topbar h1 {

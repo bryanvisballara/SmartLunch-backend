@@ -5409,9 +5409,11 @@ body.login-boot-active main.container {
 }
 
 .parent-topbar {
+  position: relative;
   min-height: calc(max(env(safe-area-inset-top, 0px), 0.75rem) + 4rem);
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 0.65rem;
   padding: max(env(safe-area-inset-top, 0px), 0.75rem) 1rem 0.55rem;
   color: #fff;
@@ -5427,7 +5429,7 @@ body.login-boot-active main.container {
 }
 
 .parent-topbar--embedded-cafeteria .parent-title-wrap {
-  transform: none;
+  transform: translateX(-50%);
   align-self: center;
 }
 
@@ -5435,8 +5437,9 @@ body.login-boot-active main.container {
   margin-top: 0.55rem;
 }
 
-.parent-topbar--embedded-cafeteria .comergio-brand-title {
-  font-size: clamp(1.15rem, 4.6vw, 1.45rem);
+.parent-topbar--embedded-cafeteria .comergio-brand-title,
+.parent-topbar--embedded-cafeteria .parent-school-name {
+  font-size: clamp(1.05rem, 4.2vw, 1.35rem);
 }
 
 .parent-topbar--embedded-cafeteria h1 {
@@ -5457,13 +5460,21 @@ body.login-boot-active main.container {
 }
 
 .parent-title-wrap {
-  flex: 1;
+  position: absolute;
+  left: 50%;
+  top: max(env(safe-area-inset-top, 0px), 0.75rem);
+  transform: translateX(-50%);
   display: grid;
-  position: relative;
   justify-items: center;
   text-align: center;
   gap: 0.2rem;
-  transform: translateY(-0.15rem);
+  width: min(62vw, 16.5rem);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.parent-title-wrap > * {
+  pointer-events: auto;
 }
 
 .parent-brand-logo {
@@ -5476,6 +5487,48 @@ body.login-boot-active main.container {
   z-index: 0;
   object-fit: contain;
   filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.2));
+}
+
+.parent-topbar-colibri-wrap,
+.parent-topbar-colibri-btn {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+}
+
+.parent-topbar-colibri-btn {
+  cursor: pointer;
+}
+
+.parent-topbar-colibri {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.28));
+}
+
+.parent-school-name {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  font-size: clamp(0.92rem, 3.6vw, 1.18rem);
+  text-align: center;
 }
 
 .comergio-brand-title {
@@ -5507,12 +5560,13 @@ body.login-boot-active main.container {
   color: transparent;
 }
 
-.parent-topbar .comergio-brand-title {
+.parent-topbar .comergio-brand-title,
+.parent-topbar .parent-school-name {
   margin-bottom: -0.1rem;
 }
 
 .parent-topbar h1 {
-  margin: 0.45rem 0 0;
+  margin: 0.35rem 0 0;
   position: relative;
   z-index: 1;
   font-size: clamp(1.02rem, 3.2vw, 1.45rem);
