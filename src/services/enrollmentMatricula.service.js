@@ -376,16 +376,16 @@ async function getOrCreateProcessForCharge({ schoolId, parentId, chargeId, req }
 }
 
 function isSignerEvidenceComplete(signer = {}, requireIdentity = false) {
-  if (!normalizeText(signer.signatureImage) || !signer.signedAt) {
+  if (!normalizeText(signer?.signatureImage) || !signer?.signedAt) {
     return false;
   }
   if (!requireIdentity) {
     return true;
   }
   return Boolean(
-    normalizeText(signer.selfieImage)
-    && normalizeText(signer.idFrontImage)
-    && normalizeText(signer.idBackImage)
+    normalizeText(signer?.selfieImage)
+    && normalizeText(signer?.idFrontImage)
+    && normalizeText(signer?.idBackImage)
   );
 }
 
@@ -471,15 +471,60 @@ function resolveRequiredSigners(process = {}) {
   return signers;
 }
 
+function documentRequiresIdentity(process = {}, documentType = 'contract') {
+  return processLooksLikeMillennium(process) && documentType === 'contract';
+}
+
+function getSignerFromDocument(process = {}, documentType = 'contract', order = 1) {
+  const document = documentType === 'pagare' ? process.pagare : process.contract;
+  return (Array.isArray(document?.signers) ? document.signers : [])
+    .find((signer) => Number(signer.order) === Number(order)) || null;
+}
+
+function isPersonDocumentComplete(process = {}, documentType = 'contract', order = 1) {
+  return isSignerEvidenceComplete(
+    getSignerFromDocument(process, documentType, order) || {},
+    documentRequiresIdentity(process, documentType),
+  );
+}
+
+function isPersonFullyComplete(process = {}, order = 1) {
+  return isPersonDocumentComplete(process, 'contract', order)
+    && isPersonDocumentComplete(process, 'pagare', order);
+}
+
+/** Orden: cada acudiente completa contrato (+ identidad) y luego pagaré (solo firma), antes del siguiente. */
+function getNextSigningAction(process = {}) {
+  const required = resolveRequiredSigners(process);
+  for (const signer of required) {
+    if (!isPersonDocumentComplete(process, 'contract', signer.order)) {
+      return { documentType: 'contract', signer };
+    }
+    if (!isPersonDocumentComplete(process, 'pagare', signer.order)) {
+      return { documentType: 'pagare', signer };
+    }
+  }
+  return null;
+}
+
+function deriveSigningStatus(process = {}) {
+  const next = getNextSigningAction(process);
+  if (!next) return 'completed';
+  return next.documentType === 'pagare' ? 'pagare_pending' : 'contract_pending';
+}
+
 function getDocumentSigningProgress(process = {}, documentType = 'contract') {
   const required = resolveRequiredSigners(process);
-  const requireIdentity = processLooksLikeMillennium(process);
+  const requireIdentity = documentRequiresIdentity(process, documentType);
   const document = documentType === 'pagare' ? process.pagare : process.contract;
   const completedSigners = Array.isArray(document?.signers)
     ? document.signers.filter((signer) => isSignerEvidenceComplete(signer, requireIdentity))
     : [];
   const completedOrders = new Set(completedSigners.map((signer) => Number(signer.order)));
-  const nextRequired = required.find((signer) => !completedOrders.has(Number(signer.order))) || null;
+  const nextAction = getNextSigningAction(process);
+  const nextRequired = nextAction && nextAction.documentType === documentType
+    ? nextAction.signer
+    : null;
 
   return {
     requiredSigners: required,
@@ -497,12 +542,14 @@ function serializeProcess(process, charge = null) {
   const requiredSigners = resolveRequiredSigners(doc);
   const contractProgress = getDocumentSigningProgress(doc, 'contract');
   const pagareProgress = getDocumentSigningProgress(doc, 'pagare');
+  const nextSigningAction = getNextSigningAction(doc);
 
   return {
     ...doc,
     requiredSigners,
     contractSigning: contractProgress,
     pagareSigning: pagareProgress,
+    nextSigningAction,
     charge: charge ? {
       _id: charge._id,
       concept: charge.concept,
@@ -514,8 +561,14 @@ function serializeProcess(process, charge = null) {
       amountHiddenUntilGateway: hideEnrollmentAmount || undefined,
     } : undefined,
     requiresSignature: ['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(doc.status),
-    pendingContractSignature: ['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(doc.status),
-    pendingPagareSignature: doc.status === 'pagare_pending',
+    pendingContractSignature: Boolean(
+      nextSigningAction?.documentType === 'contract'
+      || (!nextSigningAction && ['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(doc.status))
+    ),
+    pendingPagareSignature: Boolean(
+      nextSigningAction?.documentType === 'pagare'
+      || (!nextSigningAction && doc.status === 'pagare_pending')
+    ),
     isCompleted: doc.status === 'completed',
     officePaymentConfirmed: doc.status === 'office_payment_confirmed',
     statusLabel: resolveEnrollmentMatriculaStatusLabel(doc),
@@ -881,18 +934,24 @@ async function signDocument({
     throw new Error('Firmante inválido para este documento.');
   }
 
-  const requiresIdentityCapture = isMillenniumSchoolId(schoolId);
   const documentKey = documentType === 'pagare' ? 'pagare' : 'contract';
-  if (documentKey === 'contract') {
-    if (!['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(process.status)) {
-      throw new Error('El contrato ya fue firmado o no esta disponible.');
+  const requiresIdentityCapture = isMillenniumSchoolId(schoolId) && documentKey === 'contract';
+  const nextAction = getNextSigningAction(process);
+
+  if (!['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(process.status)) {
+    throw new Error('El pago debe estar confirmado antes de firmar.');
+  }
+
+  if (
+    !nextAction
+    || nextAction.documentType !== documentKey
+    || Number(nextAction.signer.order) !== order
+  ) {
+    if (nextAction) {
+      const nextLabel = nextAction.documentType === 'pagare' ? 'el pagaré' : 'el contrato';
+      throw new Error(`Ahora corresponde ${nextLabel} de ${nextAction.signer.displayName}.`);
     }
-  } else if (documentKey === 'pagare') {
-    if (process.status !== 'pagare_pending') {
-      throw new Error('Debes firmar primero el contrato de matricula.');
-    }
-  } else {
-    throw new Error('Tipo de documento invalido.');
+    throw new Error('Este documento ya fue completado por todos los firmantes.');
   }
 
   const currentDocument = process[documentKey] || {};
@@ -901,12 +960,13 @@ async function signDocument({
 
   for (const prior of requiredSigners) {
     if (Number(prior.order) >= order) break;
-    const priorComplete = existingSigners.find(
-      (signer) => Number(signer.order) === Number(prior.order) && isSignerEvidenceComplete(signer, requiresIdentityCapture)
-    );
-    if (!priorComplete) {
-      throw new Error(`Primero debe firmar ${prior.displayName}.`);
+    if (!isPersonFullyComplete(process, prior.order)) {
+      throw new Error(`Primero debe completar contrato y pagaré ${prior.displayName}.`);
     }
+  }
+
+  if (documentKey === 'pagare' && !isPersonDocumentComplete(process, 'contract', order)) {
+    throw new Error('Debes completar primero el contrato de matrícula (firma, selfie y cédula).');
   }
 
   const nextSignatureImage = mergeSignerImageField(signatureImage, existingSigner.signatureImage);
@@ -981,12 +1041,7 @@ async function signDocument({
   };
 
   process[documentKey] = nextDocument;
-
-  if (documentKey === 'contract') {
-    process.status = allSignersComplete ? 'pagare_pending' : 'contract_pending';
-  } else {
-    process.status = allSignersComplete ? 'completed' : 'pagare_pending';
-  }
+  process.status = deriveSigningStatus(process);
 
   await process.save();
   return process;
@@ -1070,7 +1125,7 @@ function hasEnrollmentPaymentConfirmed(process = {}) {
 }
 
 function hasEnrollmentSignedDocuments(process = {}) {
-  const requireIdentity = processLooksLikeMillennium(process);
+  const requireIdentityOnContract = processLooksLikeMillennium(process);
   const contractSigners = Array.isArray(process.contract?.signers) ? process.contract.signers : [];
   const pagareSigners = Array.isArray(process.pagare?.signers) ? process.pagare.signers : [];
   return Boolean(
@@ -1078,8 +1133,8 @@ function hasEnrollmentSignedDocuments(process = {}) {
     || normalizeText(process.pagare?.signedPdfBase64)
     || process.contract?.signedAt
     || process.pagare?.signedAt
-    || contractSigners.some((signer) => isSignerEvidenceComplete(signer, requireIdentity))
-    || pagareSigners.some((signer) => isSignerEvidenceComplete(signer, requireIdentity))
+    || contractSigners.some((signer) => isSignerEvidenceComplete(signer, requireIdentityOnContract))
+    || pagareSigners.some((signer) => isSignerEvidenceComplete(signer, false))
   );
 }
 
