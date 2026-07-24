@@ -1143,15 +1143,14 @@ async function unlinkCarteraPaymentFromEnrollmentMatricula({
     return process;
   }
 
-  if (normalizeText(process.contract?.signedPdfBase64) || normalizeText(process.pagare?.signedPdfBase64)) {
-    throw new Error('No se puede anular el pago: el acudiente ya firmó contrato o pagaré digitalmente.');
-  }
-
+  // After rectoría-approved annulment, force a full enrollment reset so the parent
+  // must re-consent and re-sign even if documents were already completed.
   process.payment = {};
   process.contract = {};
   process.pagare = {};
   process.contractParamsSnapshot = null;
-  process.status = process.consent?.accepted ? 'payment_pending' : 'payment_pending';
+  applyConsentClearToProcess(process);
+  process.status = 'intro_pending';
   await process.save();
   return process;
 }

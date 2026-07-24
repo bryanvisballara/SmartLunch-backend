@@ -3990,20 +3990,16 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                     <td><strong>{row.benefitLabel || 'Precio full'}</strong><div>{row.benefitDescription || row.benefitWindowLabel || 'Sin beneficio activo.'}</div></td>
                                     <td><strong>{formatCurrency(row.status === 'paid' ? row.paidAmount || row.chargeAmount || 0 : row.amount || row.chargeAmount || 0)}</strong>{Number(row.paidAmount || 0) > 0 ? <div>Pagado: {formatCurrency(row.paidAmount)}</div> : null}</td>
                                     <td>{row.status === 'paid' ? (
-                                      activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && (row.paymentDetails || []).length ? (
-                                        <div className="academic-secretary__billing-plan-actions">
-                                          <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
-                                          {renderBillingPaymentDeletionAction(
-                                            resolveCarteraDeletablePaymentFromRow(row),
-                                            {
-                                              studentName: selectedBillingAccount?.studentName,
-                                              concept: row.concept || row.monthLabel,
-                                            },
-                                          )}
-                                        </div>
-                                      ) : (
+                                      <div className="academic-secretary__billing-plan-actions">
                                         <button className="academic-secretary__billing-plan-paid-label" onClick={() => openBillingPaymentDetailModal(row)} type="button">PAGADO</button>
-                                      )
+                                        {renderBillingPaymentDeletionAction(
+                                          resolveCarteraDeletablePaymentFromRow(row),
+                                          {
+                                            studentName: selectedBillingAccount?.studentName,
+                                            concept: row.concept || row.monthLabel,
+                                          },
+                                        )}
+                                      </div>
                                     ) : (
                                       <div className="academic-secretary__billing-plan-actions">
                                         <button className="academic-secretary__billing-plan-action" disabled={busy || (activeSection === 'enrollments' && billingEnrollmentSubview === 'paid') || Number(row.amount || row.chargeAmount || 0) <= 0} onClick={() => openBillingPaymentModal(row)} type="button">Registrar pago</button>
@@ -5162,7 +5158,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           confirmLabel="Enviar solicitud"
           eyebrow="Portal de cartera"
           loading={busy}
-          message={`Se enviará a Rectoría la solicitud para anular el pago de ${deleteBillingPaymentModal.concept || 'matrícula'} de ${deleteBillingPaymentModal.studentName || 'este alumno'}. El cargo volverá a quedar pendiente solo después de la autorización.`}
+          message={`Se enviará a Rectoría la solicitud para anular el pago de ${deleteBillingPaymentModal.concept || 'este cargo'} de ${deleteBillingPaymentModal.studentName || 'este alumno'}. Tras la autorización, el cargo vuelve a pendiente. Si es matrícula, también se borran consentimiento y firmas para que el acudiente deba repetir el proceso.`}
           onCancel={closeDeleteBillingPaymentModal}
           onConfirm={onDeleteBillingPayment}
           title="¿Solicitar anulación del pago?"
@@ -5363,7 +5359,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 ))}
               </div>
               <div className="academic-secretary__actions">
-                {activeSection === 'enrollments' && billingEnrollmentSubview === 'paid' && resolveCarteraDeletablePaymentFromRow(row) ? (
+                {resolveCarteraDeletablePaymentFromRow(row) ? (
                   renderBillingPaymentDeletionAction(resolveCarteraDeletablePaymentFromRow(row), {
                     studentName: selectedBillingAccount?.studentName,
                     concept: row.concept || row.monthLabel,
