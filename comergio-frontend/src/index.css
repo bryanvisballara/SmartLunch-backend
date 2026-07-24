@@ -5410,6 +5410,7 @@ body.login-boot-active main.container {
 
 .parent-topbar {
   position: relative;
+  z-index: 60;
   min-height: calc(max(env(safe-area-inset-top, 0px), 0.75rem) + 4rem);
   display: flex;
   align-items: flex-start;
@@ -5639,6 +5640,16 @@ body.login-boot-active main.container {
   border-radius: 14px;
   padding: 0.35rem 0.75rem;
   box-shadow: 0 16px 34px rgba(2, 6, 23, 0.34);
+  z-index: 14000;
+}
+
+.parent-profile-menu--portal {
+  position: fixed;
+  z-index: 14000;
+}
+
+.parent-profile-backdrop--portal {
+  z-index: 13950;
 }
 
 .parent-profile-menu nav {

@@ -65,6 +65,66 @@ import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPorta
 import ColibriFlappyGame from '../../components/games/ColibriFlappyGame';
 import colibriGameCover from '../../assets/colibrisinfondo.png';
 
+const MATRICULA_GATE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 días
+
+function buildMatriculaGateCacheKey(userId, schoolId) {
+  return `comergio.matriculaGate.v1.${String(userId || '').trim()}.${String(schoolId || '').trim()}`;
+}
+
+function readMatriculaGateCache(userId, schoolId) {
+  if (typeof window === 'undefined' || !userId || !schoolId) {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(buildMatriculaGateCacheKey(userId, schoolId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.gate || !parsed?.at) return null;
+    if (Date.now() - Number(parsed.at) > MATRICULA_GATE_CACHE_TTL_MS) {
+      return null;
+    }
+    if (parsed.gate !== 'open' && parsed.gate !== 'blocked') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeMatriculaGateCache(userId, schoolId, gate) {
+  if (typeof window === 'undefined' || !userId || !schoolId) {
+    return;
+  }
+  if (gate !== 'open' && gate !== 'blocked') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      buildMatriculaGateCacheKey(userId, schoolId),
+      JSON.stringify({ gate, at: Date.now() }),
+    );
+  } catch {
+    // Ignore quota / private mode failures.
+  }
+}
+
+function resolveInitialMatriculaAccessGate({ studentPortalMode = false, user = null } = {}) {
+  if (studentPortalMode) {
+    return 'open';
+  }
+  const schoolId = String(user?.schoolId || '').trim();
+  const schoolName = getSchoolDisplayName(user, schoolId || 'Colegio');
+  if (!isMillenniumSchool(schoolName, schoolId)) {
+    return 'open';
+  }
+  const cached = readMatriculaGateCache(user?._id || user?.id, schoolId);
+  if (cached?.gate === 'open' || cached?.gate === 'blocked') {
+    return cached.gate;
+  }
+  return 'idle';
+}
+
 const parentAppSections = [
   { key: 'home', label: 'Inicio', icon: 'home' },
   { key: 'finance', label: 'Cartera', icon: 'money' },
@@ -3746,6 +3806,39 @@ function ParentMobilePortalHeader({
   const parentFirstName = String(guardianName || 'Padre').split(' ')[0] || 'Padre';
   const parentInitial = String(guardianName || 'P').charAt(0).toUpperCase();
   const resolvedSchoolName = String(schoolName || '').trim() || 'Colegio';
+  const [profileMenuStyle, setProfileMenuStyle] = useState(null);
+
+  useEffect(() => {
+    if (!showUserMenu || typeof window === 'undefined') {
+      setProfileMenuStyle(null);
+      return undefined;
+    }
+
+    const updatePosition = () => {
+      const anchor = userMenuRef?.current?.querySelector?.('.parent-avatar-btn')
+        || userMenuRef?.current;
+      const rect = anchor?.getBoundingClientRect?.();
+      if (!rect) {
+        setProfileMenuStyle(null);
+        return;
+      }
+      setProfileMenuStyle({
+        position: 'fixed',
+        top: `${rect.bottom + 8}px`,
+        right: `${Math.max(12, window.innerWidth - rect.right)}px`,
+        left: 'auto',
+        zIndex: 14000,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [showUserMenu, userMenuRef]);
 
   return (
     <header className="parent-topbar">
@@ -3786,9 +3879,22 @@ function ParentMobilePortalHeader({
           >
             {parentInitial}
           </button>
+        </div>
+      </div>
 
-          {showUserMenu ? (
-            <div className="parent-profile-menu" role="menu">
+      {showUserMenu && typeof document !== 'undefined'
+        ? createPortal(
+          <>
+            <div
+              className="parent-profile-backdrop parent-profile-backdrop--portal"
+              onClick={onToggleUserMenu}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') onToggleUserMenu();
+              }}
+              role="button"
+              tabIndex={0}
+            />
+            <div className="parent-profile-menu parent-profile-menu--portal" role="menu" style={profileMenuStyle || undefined}>
               <button className="logout" onClick={onLogout} type="button">
                 <span className="icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3798,9 +3904,10 @@ function ParentMobilePortalHeader({
                 <span>Cerrar sesión</span>
               </button>
             </div>
-          ) : null}
-        </div>
-      </div>
+          </>,
+          document.body,
+        )
+        : null}
     </header>
   );
 }
@@ -5864,7 +5971,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [matriculaFlowCharge, setMatriculaFlowCharge] = useState(null);
   const [matriculaPendingSignature, setMatriculaPendingSignature] = useState(null);
   // Idle + checking keep Millennium locked until the first gate resolution finishes.
-  const [matriculaAccessGate, setMatriculaAccessGate] = useState('idle');
+  // Si hay cache "open", arranca abierto para no mostrar "Validando matrícula" en cada reopen.
+  const [matriculaAccessGate, setMatriculaAccessGate] = useState(() => resolveInitialMatriculaAccessGate({
+    studentPortalMode,
+    user: useAuthStore.getState()?.user,
+  }));
   const matriculaAccessRequestRef = useRef(0);
   const [showFinanceConceptsSheet, setShowFinanceConceptsSheet] = useState(false);
   const [financePaymentsPage, setFinancePaymentsPage] = useState(1);
@@ -6313,7 +6424,18 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
     const requestId = matriculaAccessRequestRef.current + 1;
     matriculaAccessRequestRef.current = requestId;
-    setMatriculaAccessGate('checking');
+    const userId = user?._id || user?.id;
+    // No forzar splash si ya está abierto/bloqueado o hay cache: revalidación en silencio.
+    setMatriculaAccessGate((current) => {
+      if (current === 'open' || current === 'blocked') {
+        return current;
+      }
+      const cached = readMatriculaGateCache(userId, user.schoolId);
+      if (cached?.gate === 'open' || cached?.gate === 'blocked') {
+        return cached.gate;
+      }
+      return 'checking';
+    });
 
     try {
       const billingResponse = await getParentAcademicBilling().catch(() => null);
@@ -6358,6 +6480,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           },
         );
         setMatriculaAccessGate('blocked');
+        writeMatriculaGateCache(userId, user.schoolId, 'blocked');
         return;
       }
 
@@ -6371,6 +6494,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             { pendingResume: true, pendingSignature },
           );
           setMatriculaAccessGate('blocked');
+          writeMatriculaGateCache(userId, user.schoolId, 'blocked');
           return;
         }
 
@@ -6386,6 +6510,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               pendingSignature: nextProcess || pendingSignature,
             });
             setMatriculaAccessGate('blocked');
+            writeMatriculaGateCache(userId, user.schoolId, 'blocked');
             return;
           }
         } catch (error) {
@@ -6395,6 +6520,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             { pendingResume: true, pendingSignature },
           );
           setMatriculaAccessGate('blocked');
+          writeMatriculaGateCache(userId, user.schoolId, 'blocked');
           return;
         }
       }
@@ -6403,14 +6529,22 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       setMatriculaFlowOpen(false);
       setMatriculaFlowPendingResume(false);
       setMatriculaAccessGate('open');
+      writeMatriculaGateCache(userId, user.schoolId, 'open');
     } catch (error) {
       if (requestId !== matriculaAccessRequestRef.current) {
         return;
       }
+      // Si ya había cache abierta, no bloquear la UI por un error de red puntual.
+      const cached = readMatriculaGateCache(userId, user.schoolId);
+      if (cached?.gate === 'open') {
+        setMatriculaAccessGate('open');
+        return;
+      }
       setMatriculaAccessGate('blocked');
+      writeMatriculaGateCache(userId, user.schoolId, 'blocked');
       setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo validar el estado de matrícula.');
     }
-  }, [isMillenniumParent, openMatriculaFlowFromProcess, refreshMatriculaPendingSignatures, user?.schoolId]);
+  }, [isMillenniumParent, openMatriculaFlowFromProcess, refreshMatriculaPendingSignatures, user?.schoolId, user?._id, user?.id]);
 
   useEffect(() => {
     evaluateMatriculaAccess();
@@ -8398,8 +8532,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               setMatriculaFlowPendingResume(false);
               setMatriculaFlowOpen(false);
               setMatriculaAccessGate('open');
+              writeMatriculaGateCache(user?._id || user?.id, user?.schoolId, 'open');
             } else {
               setMatriculaAccessGate('blocked');
+              writeMatriculaGateCache(user?._id || user?.id, user?.schoolId, 'blocked');
               refreshMatriculaPendingSignatures();
             }
           }}
