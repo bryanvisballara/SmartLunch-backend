@@ -1694,6 +1694,15 @@ async function ensureAnnualTuitionChargesForMatriculaGate({ schoolId, parentId, 
   const now = new Date();
 
   for (const profile of billingProfiles) {
+    const existingMatriculaProcess = await EnrollmentMatriculaProcess.exists({
+      schoolId,
+      studentId: profile.studentId,
+      status: { $in: [...MATRICULA_SIGNATURE_REQUIRED_STATUSES, 'completed'] },
+    });
+    if (existingMatriculaProcess) {
+      continue;
+    }
+
     const existingCharge = await AcademicCharge.exists({
       schoolId,
       studentId: profile.studentId,
@@ -1798,25 +1807,35 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     .lean();
 
   if (unsignedPaidProcess) {
-    const charge = unsignedPaidProcess.chargeId
-      ? await AcademicCharge.findOne({ _id: unsignedPaidProcess.chargeId, schoolId }).lean()
+    const liveUnsigned = await EnrollmentMatriculaProcess.findOne({
+      _id: unsignedPaidProcess._id,
+      schoolId,
+    });
+    if (liveUnsigned) {
+      await refreshContractParamsSnapshotIfNeeded(liveUnsigned);
+    }
+    const charge = (liveUnsigned || unsignedPaidProcess).chargeId
+      ? await AcademicCharge.findOne({ _id: (liveUnsigned || unsignedPaidProcess).chargeId, schoolId }).lean()
       : null;
     return {
       required: true,
       blocking: true,
       reason: 'signature_pending',
-      process: serializeProcessForParent(unsignedPaidProcess, charge),
+      process: liveUnsigned
+        ? serializeProcessForParent(liveUnsigned, charge)
+        : serializeProcessForParent(unsignedPaidProcess, charge),
       charge,
     };
   }
 
-  // Students who already finished enrollment (paid + signed) must not be blocked again
-  // by leftover/duplicate annual_tuition charges (installments or regenerated fees).
+  // Students who already finished enrollment OR are mid-signature must not be blocked again
+  // by leftover/duplicate annual_tuition charges (regenerated fees).
   const enrolledStudentIds = await EnrollmentMatriculaProcess.distinct('studentId', {
     schoolId,
     studentId: { $in: studentIds },
     $or: [
       { status: 'completed' },
+      { status: { $in: MATRICULA_SIGNATURE_REQUIRED_STATUSES } },
       {
         'payment.status': { $regex: /PAID/i },
         'contract.signedAt': { $ne: null },
@@ -1831,6 +1850,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     return { required: false, blocking: false };
   }
 
+  // Prefer an unpaid charge that is not a leftover duplicate beside an already-paid matricula charge.
   const unpaidCharge = await AcademicCharge.findOne({
     schoolId,
     studentId: { $in: studentsNeedingEnrollment },
