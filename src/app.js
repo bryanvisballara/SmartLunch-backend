@@ -40,11 +40,13 @@ const admissionsRoutes = require('./routes/admissions.routes');
 const publicPrimerContactoRoutes = require('./routes/publicPrimerContacto.routes');
 const schoolCreationRoutes = require('./routes/schoolCreation.routes');
 const superAdminRoutes = require('./routes/superAdmin.routes');
+const { router: wwtecnoRoutes } = require('./routes/wwtecno.routes');
 const {
   parentEnrollmentMatriculaRouter,
   rectoriaEnrollmentMatriculaRouter,
 } = require('./routes/enrollmentMatricula.routes');
 const schoolContextMiddleware = require('./middleware/schoolContextMiddleware');
+const { ensureBootstrapData: ensureWwtecnoBootstrap } = require('./routes/wwtecno.routes');
 
 const app = express();
 
@@ -173,12 +175,12 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({
-  limit: '10mb',
+  limit: '25mb',
   verify: (req, _res, buf) => {
     req.rawBody = buf;
   },
 }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(morgan('dev'));
 app.use(schoolContextMiddleware);
 app.use(['/assets/admissions-marketing/:fileName', '/uploads/admissions-marketing/:fileName'], async (req, res, next) => {
@@ -396,6 +398,7 @@ app.use('/public/berckley/primer-contacto', publicPrimerContactoRoutes);
 app.use('/academic-secretary', academicSecretaryRoutes);
 app.use('/school-creation', limiter, schoolCreationRoutes);
 app.use('/super-admin', superAdminRoutes);
+app.use('/wwtecno', wwtecnoRoutes);
 app.use('/payments', paymentsRoutes);
 app.use('/webhooks', paymentsRoutes);
 

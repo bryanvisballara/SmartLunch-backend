@@ -15,6 +15,7 @@ const {
   listPendingSignaturesForParent,
   listSignedDocumentsForRectoria,
   serializeProcess,
+  serializeProcessForParent,
   signDocument,
   refreshContractParamsSnapshotIfNeeded,
   findProcessAccessibleByParent,
@@ -85,7 +86,7 @@ router.get('/portal/enrollment-matricula/process', async (req, res) => {
       req,
     });
 
-    return res.status(200).json({ process: serializeProcess(process, charge) });
+    return res.status(200).json({ process: serializeProcessForParent(process, charge) });
   } catch (error) {
     return res.status(error.statusCode || 400).json({ message: error.message });
   }
@@ -111,7 +112,7 @@ router.post('/portal/enrollment-matricula/process/:processId/ack-intro', async (
       schoolId,
       parentId: parentUserId,
     });
-    return res.status(200).json({ process: serializeProcess(process) });
+    return res.status(200).json({ process: serializeProcessForParent(process) });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }
@@ -130,7 +131,7 @@ router.post('/portal/enrollment-matricula/process/:processId/consent', async (re
       parentId: parentUserId,
       req,
     });
-    return res.status(200).json({ process: serializeProcess(process) });
+    return res.status(200).json({ process: serializeProcessForParent(process) });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }
@@ -159,7 +160,7 @@ router.get('/portal/enrollment-matricula/process/:processId/payment-status', asy
 
     await refreshContractParamsSnapshotIfNeeded(process);
 
-    return res.status(200).json({ process: serializeProcess(process) });
+    return res.status(200).json({ process: serializeProcessForParent(process) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -185,7 +186,7 @@ router.post('/portal/enrollment-matricula/process/:processId/sign-contract', asy
       role: req.body?.role,
       req,
     });
-    return res.status(200).json({ process: serializeProcess(process) });
+    return res.status(200).json({ process: serializeProcessForParent(process) });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }
@@ -211,7 +212,7 @@ router.post('/portal/enrollment-matricula/process/:processId/sign-pagare', async
       role: req.body?.role,
       req,
     });
-    return res.status(200).json({ process: serializeProcess(process) });
+    return res.status(200).json({ process: serializeProcessForParent(process) });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }

@@ -535,7 +535,60 @@ function getDocumentSigningProgress(process = {}, documentType = 'contract') {
   };
 }
 
-function serializeProcess(process, charge = null) {
+function slimSignerForParent(signer = {}, { keepIdentity = false } = {}) {
+  const base = {
+    order: signer.order,
+    role: signer.role || '',
+    displayName: signer.displayName || '',
+    documentNumber: signer.documentNumber || '',
+    signedAt: signer.signedAt || null,
+    userId: signer.userId || null,
+    signatureImage: signer.signatureImage || '',
+    hasSelfie: Boolean(normalizeText(signer.selfieImage)),
+    hasIdFront: Boolean(normalizeText(signer.idFrontImage)),
+    hasIdBack: Boolean(normalizeText(signer.idBackImage)),
+  };
+
+  if (!keepIdentity) {
+    return {
+      ...base,
+      selfieImage: '',
+      idFrontImage: '',
+      idBackImage: '',
+    };
+  }
+
+  return {
+    ...base,
+    selfieImage: signer.selfieImage || '',
+    idFrontImage: signer.idFrontImage || '',
+    idBackImage: signer.idBackImage || '',
+  };
+}
+
+function slimDocumentForParent(document = {}, { requireIdentity = false } = {}) {
+  if (!document || typeof document !== 'object') {
+    return document;
+  }
+
+  const signers = Array.isArray(document.signers)
+    ? document.signers.map((signer) => {
+      const complete = isSignerEvidenceComplete(signer, requireIdentity);
+      return slimSignerForParent(signer, { keepIdentity: requireIdentity && !complete });
+    })
+    : [];
+
+  return {
+    ...document,
+    signers,
+    signedPdfBase64: '',
+    hasSignedPdf: Boolean(normalizeText(document.signedPdfBase64)),
+    // Keep legacy single signature if present for older clients; strip PDF only.
+    signatureImage: document.signatureImage || '',
+  };
+}
+
+function serializeProcess(process, charge = null, { forParent = false } = {}) {
   const doc = process?.toObject ? process.toObject() : process;
   const paymentConfirmed = normalizeText(doc?.payment?.status).includes('PAID') || Boolean(doc?.payment?.chargePaymentId);
   const hideEnrollmentAmount = processLooksLikeMillennium(doc) && !paymentConfirmed;
@@ -544,7 +597,7 @@ function serializeProcess(process, charge = null) {
   const pagareProgress = getDocumentSigningProgress(doc, 'pagare');
   const nextSigningAction = getNextSigningAction(doc);
 
-  return {
+  const base = {
     ...doc,
     requiredSigners,
     contractSigning: contractProgress,
@@ -573,6 +626,24 @@ function serializeProcess(process, charge = null) {
     officePaymentConfirmed: doc.status === 'office_payment_confirmed',
     statusLabel: resolveEnrollmentMatriculaStatusLabel(doc),
   };
+
+  if (!forParent) {
+    return base;
+  }
+
+  return {
+    ...base,
+    contract: slimDocumentForParent(base.contract, {
+      requireIdentity: documentRequiresIdentity(doc, 'contract'),
+    }),
+    pagare: slimDocumentForParent(base.pagare, {
+      requireIdentity: false,
+    }),
+  };
+}
+
+function serializeProcessForParent(process, charge = null) {
+  return serializeProcess(process, charge, { forParent: true });
 }
 
 function resolveEnrollmentMatriculaStatusLabel(process = {}) {
@@ -1081,7 +1152,7 @@ async function listPendingSignaturesForParent({ schoolId, parentId }) {
     .select('schoolId studentName parentName status chargeId studentId parentId consent payment contract pagare contractParamsSnapshot academicYear contractMode')
     .lean();
 
-  return processes.map((item) => serializeProcess(item));
+  return processes.map((item) => serializeProcessForParent(item));
 }
 
 async function listConsentsForRectoria({ schoolId }) {
@@ -1709,7 +1780,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
       required: true,
       blocking: true,
       reason: 'signature_pending',
-      process: serializeProcess(unsignedPaidProcess, charge),
+      process: serializeProcessForParent(unsignedPaidProcess, charge),
       charge,
     };
   }
@@ -1762,7 +1833,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
       required: true,
       blocking: true,
       reason: 'signature_pending',
-      process: serializeProcess(process, charge),
+      process: serializeProcessForParent(process, charge),
       charge,
     };
   }
@@ -1776,7 +1847,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
       required: true,
       blocking: true,
       reason: 'signature_pending',
-      process: serializeProcess(process, charge),
+      process: serializeProcessForParent(process, charge),
       charge,
     };
   }
@@ -1785,7 +1856,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     required: true,
     blocking: true,
     reason: 'payment_pending',
-    process: serializeProcess(process, charge),
+    process: serializeProcessForParent(process, charge),
     charge,
   };
 }
@@ -1816,6 +1887,7 @@ module.exports = {
   refreshContractParamsSnapshotIfNeeded,
   resolveChargeAmount,
   serializeProcess,
+  serializeProcessForParent,
   signDocument,
   findProcessAccessibleByParent,
 };

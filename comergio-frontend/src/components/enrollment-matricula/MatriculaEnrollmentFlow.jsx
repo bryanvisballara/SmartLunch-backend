@@ -179,10 +179,49 @@ function resolveRequiredSignersFromProcess(process, contractParams, { dualParent
   return buildDualParentSigners(process, contractParams);
 }
 
+function compressDataUrlImage(dataUrl, { maxWidth = 900, quality = 0.72, mimeType = 'image/jpeg' } = {}) {
+  return new Promise((resolve) => {
+    const source = String(dataUrl || '');
+    if (!source.startsWith('data:image/')) {
+      resolve(source);
+      return;
+    }
+
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, maxWidth / Math.max(1, image.width));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          resolve(source);
+          return;
+        }
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+        resolve(canvas.toDataURL(mimeType, quality));
+      } catch (_error) {
+        resolve(source);
+      }
+    };
+    image.onerror = () => resolve(source);
+    image.src = source;
+  });
+}
+
 function isSignerCompleteLocal(signer, requireIdentity) {
   if (!signer?.signatureImage) return false;
   if (!requireIdentity) return true;
-  return Boolean(signer?.selfieImage && signer?.idFrontImage && signer?.idBackImage);
+  // Parent API may slim identity images and only send hasSelfie/hasId* flags.
+  if (signer.selfieImage && signer.idFrontImage && signer.idBackImage) {
+    return true;
+  }
+  return Boolean(signer.hasSelfie && signer.hasIdFront && signer.hasIdBack);
 }
 
 function isPersonFullyCompleteLocal(process, signerOrder, requireIdentityOnContract) {
@@ -1098,9 +1137,22 @@ function MatriculaEnrollmentFlow({
       throw new Error('Los documentos de matrícula aún no están disponibles para este colegio.');
     }
 
+    // Let the UI paint "Guardando..." before heavy PDF work.
+    await new Promise((resolve) => window.setTimeout(resolve, 40));
+
     const needsIdentity = requireIdentityOnContract && documentType === 'contract';
-    const signerComplete = Boolean(nextSignature)
-      && (!needsIdentity || Boolean(selfieImage && idFrontImage && idBackImage));
+    const savedCurrent = getSavedSignerProgress(process, documentType, currentSigner.order);
+    const effectiveSelfie = selfieImage || savedCurrent?.selfieImage || '';
+    const effectiveIdFront = idFrontImage || savedCurrent?.idFrontImage || '';
+    const effectiveIdBack = idBackImage || savedCurrent?.idBackImage || '';
+    const compressedSignature = await compressDataUrlImage(nextSignature, {
+      maxWidth: 1000,
+      quality: 0.7,
+    });
+
+    const signerComplete = Boolean(compressedSignature)
+      && (!needsIdentity || Boolean(effectiveSelfie && effectiveIdFront && effectiveIdBack)
+        || Boolean(savedCurrent?.hasSelfie && savedCurrent?.hasIdFront && savedCurrent?.hasIdBack));
     const othersComplete = requiredSigners
       .filter((signer) => Number(signer.order) !== Number(currentSigner.order))
       .every((signer) => {
@@ -1108,20 +1160,35 @@ function MatriculaEnrollmentFlow({
         return isSignerCompleteLocal(saved, needsIdentity);
       });
     const shouldFinalize = finalize && signerComplete && othersComplete;
-    const pdfPayload = shouldFinalize
-      ? buildSignedPdfPayload(documentType, currentSigner, nextSignature)
-      : { signedPdfBase64: '', fileName: '' };
+
+    let pdfPayload = { signedPdfBase64: '', fileName: '' };
+    if (shouldFinalize) {
+      try {
+        pdfPayload = buildSignedPdfPayload(documentType, currentSigner, compressedSignature);
+      } catch (error) {
+        throw new Error(error?.message || 'No se pudo generar el PDF firmado. Intenta de nuevo.');
+      }
+      if (!pdfPayload.signedPdfBase64) {
+        throw new Error('No se pudo generar el PDF firmado. Intenta de nuevo.');
+      }
+    }
+
+    // Avoid resending large identity blobs that are already stored server-side.
+    const alreadyHasIdentity = Boolean(
+      (savedCurrent?.selfieImage && savedCurrent?.idFrontImage && savedCurrent?.idBackImage)
+      || (savedCurrent?.hasSelfie && savedCurrent?.hasIdFront && savedCurrent?.hasIdBack)
+    );
 
     const payload = {
-      signatureImage: nextSignature,
+      signatureImage: compressedSignature,
       signedPdfBase64: pdfPayload.signedPdfBase64,
       fileName: pdfPayload.fileName,
       signerOrder: currentSigner.order,
       displayName: currentSigner.displayName,
       role: currentSigner.role,
-      selfieImage: needsIdentity ? selfieImage : '',
-      idFrontImage: needsIdentity ? idFrontImage : '',
-      idBackImage: needsIdentity ? idBackImage : '',
+      selfieImage: needsIdentity && !alreadyHasIdentity ? effectiveSelfie : '',
+      idFrontImage: needsIdentity && !alreadyHasIdentity ? effectiveIdFront : '',
+      idBackImage: needsIdentity && !alreadyHasIdentity ? effectiveIdBack : '',
     };
 
     const response = documentType === 'pagare'
@@ -1498,17 +1565,23 @@ function MatriculaEnrollmentFlow({
                   </p>
                 ) : null}
 
-                {contractAccepted && requireIdentity && nextContractSigner ? (
+                {contractAccepted && nextContractSigner ? (
                   <SignerPersonChip
                     phaseLabel={
-                      signingPhase === 'signature'
-                        ? '1. Firma'
-                        : signingPhase === 'identity'
-                          ? '2. Selfie y cédula'
-                          : ''
+                      requireIdentity
+                        ? (signingPhase === 'signature'
+                          ? '1. Firma'
+                          : signingPhase === 'identity'
+                            ? '2. Selfie y cédula'
+                            : '')
+                        : 'Firma del contrato'
                     }
                     signerName={nextContractSigner.displayName}
                   />
+                ) : null}
+
+                {errorMessage && contractAccepted ? (
+                  <p className="matricula-flow-note matricula-flow-note--error">{errorMessage}</p>
                 ) : null}
 
                 {contractAccepted && (!requireIdentity || signingPhase === 'signature') ? (
@@ -1621,6 +1694,10 @@ function MatriculaEnrollmentFlow({
                     phaseLabel="Firma del pagaré"
                     signerName={nextPagareSigner.displayName}
                   />
+                ) : null}
+
+                {errorMessage && pagareAccepted ? (
+                  <p className="matricula-flow-note matricula-flow-note--error">{errorMessage}</p>
                 ) : null}
 
                 {pagareAccepted ? (

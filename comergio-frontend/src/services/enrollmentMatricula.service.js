@@ -8,8 +8,10 @@ export const acceptEnrollmentMatriculaConsent = (processId, data = {}) => api.po
 export const confirmEnrollmentMatriculaPayment = (processId, data = {}) =>
   api.post(`/parent/portal/enrollment-matricula/process/${processId}/payment/confirm`, data);
 export const getEnrollmentMatriculaPaymentStatus = (processId) => api.get(`/parent/portal/enrollment-matricula/process/${processId}/payment-status`);
-export const signEnrollmentMatriculaContract = (processId, data) => api.post(`/parent/portal/enrollment-matricula/process/${processId}/sign-contract`, data);
-export const signEnrollmentMatriculaPagare = (processId, data) => api.post(`/parent/portal/enrollment-matricula/process/${processId}/sign-pagare`, data);
+export const signEnrollmentMatriculaContract = (processId, data) =>
+  api.post(`/parent/portal/enrollment-matricula/process/${processId}/sign-contract`, data, { timeout: 120000 });
+export const signEnrollmentMatriculaPagare = (processId, data) =>
+  api.post(`/parent/portal/enrollment-matricula/process/${processId}/sign-pagare`, data, { timeout: 120000 });
 
 export const createWompiMatriculaCheckout = (processId) => api.post('/payments/wompi/matricula-checkout', { processId });
 export const getWompiMatriculaPaymentStatus = (params) => api.get('/payments/wompi/matricula-status', { params });
