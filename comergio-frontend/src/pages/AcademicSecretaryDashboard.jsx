@@ -150,7 +150,8 @@ function findPendingBillingPaymentDeletionRequest(requests = [], paymentId = '')
 }
 
 function resolveCarteraDeletablePaymentFromRow(row = {}) {
-  const payment = (row.paymentDetails || []).find((item) => canRequestBillingPaymentDeletion(item));
+  const safeRow = row && typeof row === 'object' ? row : {};
+  const payment = (safeRow.paymentDetails || []).find((item) => canRequestBillingPaymentDeletion(item));
   return payment || null;
 }
 
@@ -1166,20 +1167,21 @@ function labelEnrollmentContractMode(mode = '') {
 }
 
 function createBillingPaymentEditDraft(row = null) {
-  const payment = resolveCarteraDeletablePaymentFromRow(row)
-    || (Array.isArray(row?.paymentDetails) ? row.paymentDetails[0] : null)
+  const safeRow = row && typeof row === 'object' ? row : {};
+  const payment = resolveCarteraDeletablePaymentFromRow(safeRow)
+    || (Array.isArray(safeRow.paymentDetails) ? safeRow.paymentDetails[0] : null)
     || null;
-  const paidAtValue = payment?.paidAt || row?.paidAt || '';
+  const paidAtValue = payment?.paidAt || safeRow.paidAt || '';
   const paidAt = paidAtValue
     ? getBogotaTodayDateInput(new Date(paidAtValue))
     : getBogotaTodayDateInput();
 
   return {
     paymentId: payment?._id || '',
-    method: payment?.method || row?.paymentMethod || 'bank_transfer',
+    method: payment?.method || safeRow.paymentMethod || 'bank_transfer',
     paidAt,
-    notes: payment?.notes || row?.paymentNotes || '',
-    enrollmentContractMode: row?.enrollmentContractMode || '',
+    notes: payment?.notes || safeRow.paymentNotes || '',
+    enrollmentContractMode: safeRow.enrollmentContractMode || '',
   };
 }
 
