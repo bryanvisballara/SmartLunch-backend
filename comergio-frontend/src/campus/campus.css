@@ -2095,6 +2095,48 @@ button.campus-coordination__selected-item.is-selected {
   background: #000;
 }
 
+.campus-parent-mobile__feed-video {
+  position: relative;
+  width: 100%;
+  background: #000;
+}
+
+.campus-parent-mobile__feed-video video {
+  display: block;
+  width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  background: #000;
+  pointer-events: none;
+}
+
+.campus-parent-mobile__feed-video-play-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: 4.25rem;
+  height: 4.25rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.42);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.55);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.campus-parent-mobile__feed-video-play-icon::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 54%;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0.85rem 0 0.85rem 1.35rem;
+  border-color: transparent transparent transparent #fff;
+  transform: translate(-50%, -50%);
+}
+
 .campus-parent-mobile__post-media-copy {
   position: relative;
   z-index: 1;
@@ -2437,10 +2479,16 @@ button.campus-coordination__selected-item.is-selected {
 .campus-parent-mobile__sheet-layer {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 130;
   display: grid;
   align-items: end;
   background: rgba(15, 23, 42, 0.28);
+}
+
+.campus-parent-mobile-app:has(.campus-parent-mobile__sheet-layer) .campus-parent-mobile__bottom-nav {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .campus-parent-mobile__sheet {
@@ -12641,7 +12689,8 @@ body.teacher-camera-open {
     background: #e7edf4;
   }
 
-  .campus-parent-mobile-app.is-student-portal .campus-parent-mobile__post-gallery-slide video {
+  .campus-parent-mobile-app.is-student-portal .campus-parent-mobile__post-gallery-slide video,
+  .campus-parent-mobile-app.is-student-portal .campus-parent-mobile__feed-video video {
     max-height: 620px;
     object-fit: contain;
   }

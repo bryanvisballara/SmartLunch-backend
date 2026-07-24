@@ -48,6 +48,53 @@ function formatEnrollmentMatriculaConsentStatus(item = {}) {
   return labels[item?.status] || item?.status || '—';
 }
 
+function DocumentSignersEvidence({ document, label }) {
+  const signers = Array.isArray(document?.signers) ? document.signers : [];
+  if (!document?.signedAt && !signers.length) {
+    return <span>Pendiente</span>;
+  }
+
+  return (
+    <div className="enrollment-matricula-rectoria__evidence">
+      <span>{document?.signedAt ? formatDateTime(document.signedAt) : `${label} en progreso`}</span>
+      {signers.length ? (
+        <div className="enrollment-matricula-rectoria__signers">
+          {signers.map((signer) => (
+            <div className="enrollment-matricula-rectoria__signer-card" key={`${signer.role}-${signer.order}`}>
+              <strong>
+                {Number(signer.order) === 1 ? '1º' : `${signer.order}º`}: {signer.displayName || 'Firmante'}
+              </strong>
+              <span>{formatDateTime(signer.signedAt)}</span>
+              {(signer.selfieImage || signer.idFrontImage || signer.idBackImage) ? (
+                <div className="enrollment-matricula-rectoria__id-grid">
+                  {signer.selfieImage ? (
+                    <figure>
+                      <img alt={`Selfie ${signer.displayName || ''}`} src={signer.selfieImage} />
+                      <figcaption>Selfie</figcaption>
+                    </figure>
+                  ) : null}
+                  {signer.idFrontImage ? (
+                    <figure>
+                      <img alt={`Cédula frente ${signer.displayName || ''}`} src={signer.idFrontImage} />
+                      <figcaption>Frente</figcaption>
+                    </figure>
+                  ) : null}
+                  {signer.idBackImage ? (
+                    <figure>
+                      <img alt={`Cédula reverso ${signer.displayName || ''}`} src={signer.idBackImage} />
+                      <figcaption>Reverso</figcaption>
+                    </figure>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function downloadBlob(blob, fileName) {
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -273,7 +320,7 @@ function EnrollmentMatriculaRectoriaPanel() {
           <div className="enrollment-matricula-rectoria__section-head">
             <div>
               <h3>Contratos y pagarés firmados</h3>
-              <p>Documentos firmados digitalmente por los acudientes después del pago.</p>
+              <p>Documentos firmados digitalmente, con selfie y cédula de cada firmante cuando aplica (Millennium).</p>
               {pendingSignatureRequest ? (
                 <p className="enrollment-matricula-rectoria__pending-note">
                   Solicitud pendiente en Rectoría desde {formatDateTime(pendingSignatureRequest.submittedAt)}.
@@ -321,39 +368,39 @@ function EnrollmentMatriculaRectoriaPanel() {
                     <td>{item.studentName || '—'}</td>
                     <td>{item.parentName || '—'}</td>
                     <td>
-                      {item.contract?.signedAt ? (
-                        <div className="enrollment-matricula-rectoria__evidence">
-                          <span>{formatDateTime(item.contract.signedAt)}</span>
+                      {item.contract?.signedAt || item.contract?.signers?.length ? (
+                        <>
+                          <DocumentSignersEvidence document={item.contract} label="Contrato" />
                           {item.contract?.signedPdfBase64 ? (
                             <button
                               className="enrollment-matricula-rectoria__download"
                               onClick={() => onDownload(item._id, 'contract', item.contract?.fileName)}
                               type="button"
                             >
-                              Descargar
+                              Descargar PDF
                             </button>
-                          ) : (
-                            <span>Contrato físico en oficina</span>
-                          )}
-                        </div>
+                          ) : item.contract?.signedAt ? (
+                            <span className="enrollment-matricula-rectoria__evidence">Contrato físico en oficina</span>
+                          ) : null}
+                        </>
                       ) : 'Pendiente'}
                     </td>
                     <td>
-                      {item.pagare?.signedAt ? (
-                        <div className="enrollment-matricula-rectoria__evidence">
-                          <span>{formatDateTime(item.pagare.signedAt)}</span>
+                      {item.pagare?.signedAt || item.pagare?.signers?.length ? (
+                        <>
+                          <DocumentSignersEvidence document={item.pagare} label="Pagaré" />
                           {item.pagare?.signedPdfBase64 ? (
                             <button
                               className="enrollment-matricula-rectoria__download"
                               onClick={() => onDownload(item._id, 'pagare', item.pagare?.fileName)}
                               type="button"
                             >
-                              Descargar
+                              Descargar PDF
                             </button>
-                          ) : (
-                            <span>Pagaré físico en oficina</span>
-                          )}
-                        </div>
+                          ) : item.pagare?.signedAt ? (
+                            <span className="enrollment-matricula-rectoria__evidence">Pagaré físico en oficina</span>
+                          ) : null}
+                        </>
                       ) : 'Pendiente'}
                     </td>
                     <td>

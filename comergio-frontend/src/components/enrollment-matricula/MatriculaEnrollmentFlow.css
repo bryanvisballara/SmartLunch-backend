@@ -1059,3 +1059,106 @@
     transform: none;
   }
 }
+
+.matricula-signer-banner {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ecfdf5 0%, #eff6ff 100%);
+  border: 1px solid #bfdbfe;
+  color: #0f172a;
+}
+
+.matricula-signer-banner strong {
+  font-size: 1rem;
+}
+
+.matricula-signer-banner p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.matricula-signer-banner ol {
+  margin: 4px 0 0;
+  padding-left: 1.2rem;
+  color: #1e3a8a;
+  font-size: 0.9rem;
+}
+
+.matricula-signer-chip {
+  display: grid;
+  gap: 2px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #fff;
+}
+
+.matricula-signer-chip span {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.matricula-signer-chip strong {
+  font-size: 1.05rem;
+}
+
+.matricula-signer-chip em {
+  font-style: normal;
+  font-size: 0.88rem;
+  color: #93c5fd;
+}
+
+.enrollment-matricula-rectoria__signers {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.enrollment-matricula-rectoria__signer-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.enrollment-matricula-rectoria__signer-card strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.enrollment-matricula-rectoria__id-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.enrollment-matricula-rectoria__id-grid figure {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.enrollment-matricula-rectoria__id-grid img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+}
+
+.enrollment-matricula-rectoria__id-grid figcaption {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+}

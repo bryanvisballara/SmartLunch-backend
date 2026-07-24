@@ -23,6 +23,7 @@ import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
 import { getEnrollmentMatriculaPurgeRequestSummary } from '../services/enrollmentMatricula.service';
+import { getCommunityReports } from '../services/communityReport.service';
 import {
   createAdminUser,
   deleteAdminUser,
@@ -2343,6 +2344,7 @@ function RectoriaDashboard() {
   const [scheduleBreakGradeSelections, setScheduleBreakGradeSelections] = useState({});
   const [activeAdmissionsView, setActiveAdmissionsView] = useState('dashboard');
   const [matriculaAuthorizationPendingCount, setMatriculaAuthorizationPendingCount] = useState(0);
+  const [communityReportsPendingCount, setCommunityReportsPendingCount] = useState(0);
 
   const allowedSectionKeys = useMemo(
     () => {
@@ -2686,6 +2688,15 @@ function RectoriaDashboard() {
     }
   };
 
+  const refreshCommunityReportsSummary = async () => {
+    try {
+      const response = await getCommunityReports({ status: 'pending', limit: 1 });
+      setCommunityReportsPendingCount(Number(response.data?.summary?.pending || 0));
+    } catch {
+      setCommunityReportsPendingCount(0);
+    }
+  };
+
   const loadOverviewShell = async () => {
     const requestResults = await Promise.allSettled([
       isCoordinationPortal ? getCampusCoordinationTeachers() : getAdminUsers(),
@@ -2892,6 +2903,7 @@ function RectoriaDashboard() {
       setFeeSettingsDraft(nextFeeSettings);
 
       await refreshMatriculaAuthorizationSummary();
+      await refreshCommunityReportsSummary();
 
       return failedSections;
     } finally {
@@ -2950,6 +2962,15 @@ function RectoriaDashboard() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refreshMatriculaAuthorizationSummary();
+      refreshCommunityReportsSummary();
+    }, 45000);
+
+    return () => window.clearInterval(timer);
+  }, [isCoordinationPortal]);
 
   useEffect(() => {
     const availableLevelKeys = academicStructureDraft.levels.map((level) => level.key).filter(Boolean);
@@ -4066,6 +4087,9 @@ function RectoriaDashboard() {
   const pendingCourseStudents = useMemo(
     () => students
       .filter((student) => {
+        if (String(student.status || 'active').toLowerCase() !== 'active' || student.deletedAt) {
+          return false;
+        }
         if (!normalizeText(student.grade)) {
           return false;
         }
@@ -4085,6 +4109,27 @@ function RectoriaDashboard() {
         }
         return String(left.name || '').localeCompare(String(right.name || ''), 'es', { sensitivity: 'base' });
       }),
+    [students, academicStructureDraft.grades]
+  );
+
+  const studentsMissingPlacementCount = useMemo(
+    () => students.filter((student) => {
+      if (String(student.status || 'active').toLowerCase() !== 'active' || student.deletedAt) {
+        return false;
+      }
+
+      if (!normalizeText(student.grade)) {
+        return true;
+      }
+
+      const gradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades);
+      const grade = academicStructureDraft.grades.find((entry) => entry.key === gradeKey);
+      if (!grade) {
+        return !normalizeText(student.course);
+      }
+
+      return !studentHasAssignedCourseInGrade(student, grade);
+    }).length,
     [students, academicStructureDraft.grades]
   );
 
@@ -7616,6 +7661,8 @@ function RectoriaDashboard() {
           expandedGroup={expandedSidebarGroup}
           isCoordinationPortal={isCoordinationPortal}
           matriculaAuthorizationPendingCount={matriculaAuthorizationPendingCount}
+          studentsMissingPlacementCount={studentsMissingPlacementCount}
+          communityReportsPendingCount={communityReportsPendingCount}
           staffAnnouncementsUnreadCount={staffAnnouncementsUnreadCount}
           onExpandedGroupChange={setExpandedSidebarGroup}
           onSectionChange={setActiveSection}
@@ -7648,6 +7695,7 @@ function RectoriaDashboard() {
           campusPerformanceCourses={campusPerformanceCourses}
           disciplineObservations={disciplineObservations}
           educationalLevelSummaries={educationalLevelSummaries}
+          onCommunityReportsSummaryChange={(summary) => setCommunityReportsPendingCount(Number(summary?.pending || 0))}
           overviewAcademicLevelKpi={overviewAcademicLevelKpi}
           overviewAcademicPerformance={overviewAcademicPerformance}
           passingScoreLabel={passingScoreLabel}
@@ -7658,7 +7706,10 @@ function RectoriaDashboard() {
       ) : null}
 
       {activeSection === 'community_reports' && isCoordinationPortal ? (
-        <CommunityReportsPanel className="community-reports-panel--embedded" />
+        <CommunityReportsPanel
+          className="community-reports-panel--embedded"
+          onSummaryChange={(summary) => setCommunityReportsPendingCount(Number(summary?.pending || 0))}
+        />
       ) : null}
 
       {activeSection === 'schedule' && isCoordinationPortal ? (

@@ -7450,6 +7450,7 @@ router.patch('/database/:studentId', async (req, res) => {
 
     for (const config of parentConfigs) {
       const parentId = toObjectId(req.body?.[`${config.key}Id`]);
+      const parentPassword = String(req.body?.[`${config.key}Password`] || '').trim();
       const parentPayload = {
         name: normalizeText(req.body?.[`${config.key}Name`]),
         documentType: normalizeAcademicDatabaseDocumentType(req.body?.[`${config.key}DocumentType`]),
@@ -7457,8 +7458,16 @@ router.patch('/database/:studentId', async (req, res) => {
         phone: normalizeText(req.body?.[`${config.key}Phone`]),
         email: normalizeEmail(req.body?.[`${config.key}Email`]),
         address: normalizeText(req.body?.address),
+        password: parentPassword,
       };
-      const hasValues = Object.values(parentPayload).some(Boolean);
+      const hasValues = Object.values({
+        name: parentPayload.name,
+        documentType: parentPayload.documentType,
+        documentNumber: parentPayload.documentNumber,
+        phone: parentPayload.phone,
+        email: parentPayload.email,
+        address: parentPayload.address,
+      }).some(Boolean);
       let resolvedParentId = null;
 
       if (parentId) {
@@ -7485,6 +7494,9 @@ router.patch('/database/:studentId', async (req, res) => {
             parent.phone = parentPayload.phone;
             parent.email = parentPayload.email;
             parent.address = parentPayload.address;
+            if (parentPassword) {
+              parent.passwordHash = await bcrypt.hash(parentPassword, 10);
+            }
             await parent.save();
             resolvedParentId = parent._id;
           }

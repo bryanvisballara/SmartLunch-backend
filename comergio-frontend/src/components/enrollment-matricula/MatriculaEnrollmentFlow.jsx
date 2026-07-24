@@ -13,12 +13,15 @@ import {
   canUseOfficialEnrollmentContract,
   generateSignedEnrollmentContractPdfBase64,
   generateSignedPagarePdfBase64,
+  isMillenniumSchool,
   normalizeOfficialEnrollmentContractParams,
   shouldHideParentEnrollmentPaymentAmount,
 } from '../../lib/millenniumEnrollmentContracts';
 import MatriculaContractDocumentPreview from './MatriculaContractDocumentPreview';
+import MatriculaIdentityCapture from './MatriculaIdentityCapture';
 import { evaluateSignatureImage } from './signatureValidation';
 import './MatriculaEnrollmentFlow.css';
+import './MatriculaIdentityCapture.css';
 
 const CONSENT_DECLARATIONS = [
   'He sido informado sobre los costos educativos correspondientes al año lectivo.',
@@ -102,6 +105,177 @@ function resolveActiveStep(process) {
   if (status === 'pagare_pending') return 'pagare';
   if (status === 'completed') return 'done';
   return 'consent';
+}
+
+function resolveRequiredSignersFromProcess(process, contractParams, { dualParentSigning = false } = {}) {
+  if (Array.isArray(process?.requiredSigners) && process.requiredSigners.length) {
+    return process.requiredSigners;
+  }
+
+  if (!dualParentSigning) {
+    if (process?.parentName) {
+      return [{
+        order: 1,
+        role: 'guardian',
+        displayName: process.parentName,
+        documentNumber: '',
+      }];
+    }
+  }
+
+  const father = contractParams?.father || process?.contractParamsSnapshot?.father || {};
+  const mother = contractParams?.mother || process?.contractParamsSnapshot?.mother || {};
+  const signers = [];
+  if (String(father.name || '').trim()) {
+    signers.push({
+      order: 1,
+      role: 'father',
+      displayName: String(father.name).trim(),
+      documentNumber: String(father.documentNumber || '').trim(),
+    });
+  }
+  if (
+    String(mother.name || '').trim()
+    && (
+      !String(father.name || '').trim()
+      || String(mother.name).trim() !== String(father.name).trim()
+      || String(mother._id || '') !== String(father._id || '')
+    )
+  ) {
+    signers.push({
+      order: signers.length + 1,
+      role: 'mother',
+      displayName: String(mother.name).trim(),
+      documentNumber: String(mother.documentNumber || '').trim(),
+    });
+  }
+  if (!signers.length && process?.parentName) {
+    signers.push({
+      order: 1,
+      role: 'guardian',
+      displayName: process.parentName,
+      documentNumber: '',
+    });
+  }
+  return signers;
+}
+
+function isSignerCompleteLocal(signer, requireIdentity) {
+  if (!signer?.signatureImage) return false;
+  if (!requireIdentity) return true;
+  return Boolean(signer?.selfieImage && signer?.idFrontImage && signer?.idBackImage);
+}
+
+function getNextSigner(process, documentType, contractParams, { dualParentSigning = false, requireIdentity = false } = {}) {
+  const required = resolveRequiredSignersFromProcess(process, contractParams, { dualParentSigning });
+  const document = documentType === 'pagare' ? process?.pagare : process?.contract;
+  const completedOrders = new Set(
+    (Array.isArray(document?.signers) ? document.signers : [])
+      .filter((signer) => isSignerCompleteLocal(signer, requireIdentity))
+      .map((signer) => Number(signer.order))
+  );
+  return required.find((signer) => !completedOrders.has(Number(signer.order))) || null;
+}
+
+function emptyIdentityEvidence() {
+  return { selfieImage: '', idFrontImage: '', idBackImage: '' };
+}
+
+function getSavedSignerProgress(process, documentType, signerOrder) {
+  const document = documentType === 'pagare' ? process?.pagare : process?.contract;
+  const signers = Array.isArray(document?.signers) ? document.signers : [];
+  return signers.find((signer) => Number(signer.order) === Number(signerOrder)) || null;
+}
+
+function hydrateSigningStateFromSaved(saved, requireIdentity) {
+  if (!saved?.signatureImage) {
+    return {
+      signatureImage: '',
+      identityEvidence: emptyIdentityEvidence(),
+      signingPhase: 'idle',
+      accepted: false,
+    };
+  }
+
+  const identityEvidence = {
+    selfieImage: saved.selfieImage || '',
+    idFrontImage: saved.idFrontImage || '',
+    idBackImage: saved.idBackImage || '',
+  };
+  const identityComplete = !requireIdentity || (
+    identityEvidence.selfieImage
+    && identityEvidence.idFrontImage
+    && identityEvidence.idBackImage
+  );
+
+  return {
+    signatureImage: saved.signatureImage,
+    identityEvidence,
+    signingPhase: requireIdentity && !identityComplete ? 'identity' : 'signature',
+    accepted: true,
+  };
+}
+
+function SignerOrderBanner({ requiredSigners = [], currentSigner = null, documentLabel = 'documento', process = null, documentType = 'contract' }) {
+  if (!currentSigner) return null;
+  const total = requiredSigners.length;
+  const isFirst = Number(currentSigner.order) === 1;
+  const nextAfter = requiredSigners.find((signer) => Number(signer.order) === Number(currentSigner.order) + 1);
+  const saved = getSavedSignerProgress(process, documentType, currentSigner.order);
+  const progressBits = [];
+  if (saved?.signatureImage) progressBits.push('firma');
+  if (saved?.selfieImage) progressBits.push('selfie');
+  if (saved?.idFrontImage) progressBits.push('cédula frente');
+  if (saved?.idBackImage) progressBits.push('cédula reverso');
+
+  return (
+    <div className="matricula-signer-banner">
+      <strong>
+        Trámite de {currentSigner.displayName}
+      </strong>
+      <p>
+        {isFirst
+          ? `Primero debe completar este paso ${currentSigner.displayName} (${documentLabel}).`
+          : `Ahora el trámite es de ${currentSigner.displayName}. Pasa el dispositivo a esta persona o que entre desde su cuenta.`}
+      </p>
+      {progressBits.length ? (
+        <p>
+          Progreso guardado: {progressBits.join(', ')}.
+          {progressBits.length < 4 ? ' Puedes continuar más tarde desde el paso pendiente.' : ''}
+        </p>
+      ) : null}
+      {total > 1 ? (
+        <ol>
+          {requiredSigners.map((signer) => {
+            const signerSaved = getSavedSignerProgress(process, documentType, signer.order);
+            const done = isSignerCompleteLocal(signerSaved, true);
+            const partial = Boolean(signerSaved?.signatureImage) && !done;
+            return (
+              <li key={`${signer.role}-${signer.order}`}>
+                {Number(signer.order) === 1 ? 'Primero' : 'Después'}: {signer.displayName}
+                {done ? ' ✓' : partial ? ' (en progreso)' : ''}
+                {Number(signer.order) < Number(currentSigner.order) && !done ? '' : ''}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+      {nextAfter && isFirst ? (
+        <p>Después continuará {nextAfter.displayName} (puede ser desde otra ciudad o dispositivo).</p>
+      ) : null}
+    </div>
+  );
+}
+
+function SignerPersonChip({ signerName = '', phaseLabel = '' }) {
+  if (!signerName) return null;
+  return (
+    <div className="matricula-signer-chip">
+      <span>Persona en trámite</span>
+      <strong>{signerName}</strong>
+      {phaseLabel ? <em>{phaseLabel}</em> : null}
+    </div>
+  );
 }
 
 let fallbackFingerTipOffsetPx = null;
@@ -386,6 +560,9 @@ function MatriculaEnrollmentFlow({
   const [pagareAccepted, setPagareAccepted] = useState(false);
   const [wompiCheckoutConfig, setWompiCheckoutConfig] = useState(null);
   const [wompiCheckoutLoading, setWompiCheckoutLoading] = useState(false);
+  const [identityEvidence, setIdentityEvidence] = useState(emptyIdentityEvidence);
+  const [identityReady, setIdentityReady] = useState(false);
+  const [signingPhase, setSigningPhase] = useState('idle'); // idle | signature | identity
 
   useEffect(() => {
     setProcess(initialProcess);
@@ -441,20 +618,132 @@ function MatriculaEnrollmentFlow({
   }, [activeStep, onProcessUpdated, process?._id, process?.payment?.method, process?.payment?.reference, process?.payment?.status]);
 
   const contractParams = process?.contractParamsSnapshot || null;
-  const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({ schoolId, schoolName })
+  const effectiveSchoolId = schoolId
+    || process?.schoolId
+    || contractParams?.schoolId
+    || '';
+  const effectiveSchoolName = schoolName
+    || contractParams?.schoolName
+    || process?.schoolName
+    || '';
+  const isMillennium = isMillenniumSchool(effectiveSchoolName, effectiveSchoolId)
+    || String(process?.schoolId || '').toLowerCase().includes('millennium')
+    || String(contractParams?.schoolId || '').toLowerCase().includes('millennium')
+    || String(contractParams?.schoolName || '').toLowerCase().includes('millennium');
+  const requireIdentity = isMillennium;
+  const dualParentSigning = isMillennium;
+  const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({
+    schoolId: effectiveSchoolId,
+    schoolName: effectiveSchoolName,
+  })
     && activeStep === 'payment'
     && process.payment?.status !== 'PAID';
 
+  const requiredSigners = useMemo(
+    () => resolveRequiredSignersFromProcess(process, contractParams, { dualParentSigning }),
+    [process, contractParams, dualParentSigning],
+  );
+  const nextContractSigner = useMemo(
+    () => getNextSigner(process, 'contract', contractParams, { dualParentSigning, requireIdentity }),
+    [process, contractParams, dualParentSigning, requireIdentity],
+  );
+  const nextPagareSigner = useMemo(
+    () => getNextSigner(process, 'pagare', contractParams, { dualParentSigning, requireIdentity }),
+    [process, contractParams, dualParentSigning, requireIdentity],
+  );
+  const currentSigner = activeStep === 'pagare' ? nextPagareSigner : nextContractSigner;
+
+  const previousSignerStepKeyRef = useRef('');
+  const hydratedSignerKeyRef = useRef('');
+
+  const applyHydratedSigningState = (saved) => {
+    const hydrated = hydrateSigningStateFromSaved(saved, requireIdentity);
+    setSignatureImage(hydrated.signatureImage);
+    setIdentityEvidence(hydrated.identityEvidence);
+    setIdentityReady(!requireIdentity || Boolean(
+      hydrated.identityEvidence.selfieImage
+      && hydrated.identityEvidence.idFrontImage
+      && hydrated.identityEvidence.idBackImage
+    ));
+    setSigningPhase(hydrated.signingPhase);
+    if (activeStep === 'contract') setContractAccepted(hydrated.accepted);
+    if (activeStep === 'pagare') setPagareAccepted(hydrated.accepted);
+  };
+
+  const resetSigningSubflow = () => {
+    setSignatureImage('');
+    setIdentityEvidence(emptyIdentityEvidence());
+    setIdentityReady(!requireIdentity);
+    setSigningPhase('idle');
+    if (activeStep === 'contract') setContractAccepted(false);
+    if (activeStep === 'pagare') setPagareAccepted(false);
+  };
+
   useEffect(() => {
-    if (activeStep === 'contract') {
-      setContractAccepted(false);
-      setSignatureImage('');
-    }
-    if (activeStep === 'pagare') {
-      setPagareAccepted(false);
-      setSignatureImage('');
-    }
+    previousSignerStepKeyRef.current = '';
+    hydratedSignerKeyRef.current = '';
+    resetSigningSubflow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar documento/proceso
   }, [activeStep, process?._id]);
+
+  useEffect(() => {
+    const signerKey = `${activeStep}|${currentSigner?.order || ''}|${currentSigner?.displayName || ''}`;
+    if (!currentSigner?.displayName || (activeStep !== 'contract' && activeStep !== 'pagare')) {
+      return;
+    }
+
+    const documentType = activeStep === 'pagare' ? 'pagare' : 'contract';
+    const saved = getSavedSignerProgress(process, documentType, currentSigner.order);
+    const hydrateKey = `${signerKey}|${saved?.signatureImage ? 'sig' : ''}|${saved?.selfieImage ? 'selfie' : ''}|${saved?.idFrontImage ? 'front' : ''}|${saved?.idBackImage ? 'back' : ''}`;
+
+    if (previousSignerStepKeyRef.current && previousSignerStepKeyRef.current !== signerKey) {
+      // Cambió de firmante: hidratar progreso guardado del nuevo (puede venir de otra ciudad/sesión).
+      previousSignerStepKeyRef.current = signerKey;
+      hydratedSignerKeyRef.current = hydrateKey;
+      applyHydratedSigningState(saved);
+      return;
+    }
+
+    previousSignerStepKeyRef.current = signerKey;
+
+    // Primera carga o actualización remota del mismo firmante: restaurar sin borrar progreso.
+    if (hydratedSignerKeyRef.current !== hydrateKey) {
+      hydratedSignerKeyRef.current = hydrateKey;
+      if (saved?.signatureImage) {
+        applyHydratedSigningState(saved);
+      }
+    }
+  }, [
+    activeStep,
+    currentSigner?.order,
+    currentSigner?.displayName,
+    process,
+    requireIdentity,
+  ]);
+
+  useEffect(() => {
+    if (!requireIdentity) {
+      setIdentityReady(true);
+      return;
+    }
+    setIdentityReady(Boolean(
+      identityEvidence.selfieImage
+      && identityEvidence.idFrontImage
+      && identityEvidence.idBackImage
+    ));
+  }, [identityEvidence, requireIdentity]);
+
+  // Si el colegio Millennium se detecta después de marcar el check, subir al flujo con aviso.
+  useEffect(() => {
+    if (!requireIdentity) return;
+    if (activeStep === 'contract' && contractAccepted && signingPhase === 'idle') {
+      setSigningPhase('signature');
+    }
+    if (activeStep === 'pagare' && pagareAccepted && signingPhase === 'idle') {
+      setSigningPhase('signature');
+    }
+  }, [requireIdentity, activeStep, contractAccepted, pagareAccepted, signingPhase]);
+
   const contractDocumentParams = useMemo(
     () => (contractParams
       ? normalizeOfficialEnrollmentContractParams({
@@ -567,32 +856,221 @@ function MatriculaEnrollmentFlow({
     return true;
   };
 
+  const beginMillenniumSignerFlow = () => {
+    setSigningPhase('signature');
+    setIdentityEvidence(emptyIdentityEvidence());
+    setIdentityReady(false);
+    setSignatureImage('');
+    setErrorMessage('');
+  };
+
+  const onAcceptContractTerms = (checked) => {
+    setContractAccepted(checked);
+    if (!checked) {
+      setSigningPhase('idle');
+      setSignatureImage('');
+      setIdentityEvidence(emptyIdentityEvidence());
+      setIdentityReady(!requireIdentity);
+      return;
+    }
+    if (requireIdentity) {
+      const saved = getSavedSignerProgress(process, 'contract', currentSigner?.order);
+      if (saved?.signatureImage) {
+        applyHydratedSigningState(saved);
+        return;
+      }
+      beginMillenniumSignerFlow();
+      return;
+    }
+    setSigningPhase('idle');
+  };
+
+  const onAcceptPagareTerms = (checked) => {
+    setPagareAccepted(checked);
+    if (!checked) {
+      setSigningPhase('idle');
+      setSignatureImage('');
+      setIdentityEvidence(emptyIdentityEvidence());
+      setIdentityReady(!requireIdentity);
+      return;
+    }
+    if (requireIdentity) {
+      const saved = getSavedSignerProgress(process, 'pagare', currentSigner?.order);
+      if (saved?.signatureImage) {
+        applyHydratedSigningState(saved);
+        return;
+      }
+      beginMillenniumSignerFlow();
+      return;
+    }
+    setSigningPhase('idle');
+  };
+
+  const buildSignedPdfPayload = (documentType, currentSignerMeta, signatureOverride = '') => {
+    const activeSignature = signatureOverride || signatureImage;
+    const document = documentType === 'pagare' ? process?.pagare : process?.contract;
+    const existingSigners = Array.isArray(document?.signers) ? document.signers : [];
+    const firstExisting = existingSigners.find((signer) => Number(signer.order) === 1);
+    const isLastSigner = Number(currentSignerMeta.order) >= requiredSigners.length;
+    if (!isLastSigner) {
+      return { signedPdfBase64: '', fileName: '' };
+    }
+
+    const primarySignature = Number(currentSignerMeta.order) === 1
+      ? activeSignature
+      : (firstExisting?.signatureImage || activeSignature);
+    const secondarySignature = Number(currentSignerMeta.order) > 1 ? activeSignature : '';
+    const secondaryName = Number(currentSignerMeta.order) > 1
+      ? (currentSignerMeta.displayName || '')
+      : (requiredSigners.find((signer) => Number(signer.order) === 2)?.displayName || '');
+
+    if (documentType === 'pagare') {
+      const signedDocument = generateSignedPagarePdfBase64(contractDocumentParams, primarySignature, {
+        secondarySignatureDataUrl: secondarySignature,
+        secondarySignerName: secondaryName,
+      });
+      return { signedPdfBase64: signedDocument.base64, fileName: signedDocument.fileName };
+    }
+
+    const signedDocument = generateSignedEnrollmentContractPdfBase64(contractDocumentParams, primarySignature, {
+      secondarySignatureDataUrl: secondarySignature,
+      secondarySignerName: secondaryName,
+    });
+    return { signedPdfBase64: signedDocument.base64, fileName: signedDocument.fileName };
+  };
+
+  const persistSignerProgress = async (documentType, {
+    signatureImage: nextSignature = signatureImage,
+    selfieImage = identityEvidence.selfieImage,
+    idFrontImage = identityEvidence.idFrontImage,
+    idBackImage = identityEvidence.idBackImage,
+    finalize = false,
+  } = {}) => {
+    if (!currentSigner) {
+      throw new Error('No hay un firmante pendiente.');
+    }
+    if (!canUseOfficialDocs) {
+      throw new Error('Los documentos de matrícula aún no están disponibles para este colegio.');
+    }
+
+    const signerComplete = Boolean(nextSignature)
+      && (!requireIdentity || Boolean(selfieImage && idFrontImage && idBackImage));
+    const othersComplete = requiredSigners
+      .filter((signer) => Number(signer.order) !== Number(currentSigner.order))
+      .every((signer) => {
+        const saved = getSavedSignerProgress(process, documentType, signer.order);
+        return isSignerCompleteLocal(saved, requireIdentity);
+      });
+    const shouldFinalize = finalize && signerComplete && othersComplete;
+    const pdfPayload = shouldFinalize
+      ? buildSignedPdfPayload(documentType, currentSigner, nextSignature)
+      : { signedPdfBase64: '', fileName: '' };
+
+    const payload = {
+      signatureImage: nextSignature,
+      signedPdfBase64: pdfPayload.signedPdfBase64,
+      fileName: pdfPayload.fileName,
+      signerOrder: currentSigner.order,
+      displayName: currentSigner.displayName,
+      role: currentSigner.role,
+      selfieImage: requireIdentity ? selfieImage : '',
+      idFrontImage: requireIdentity ? idFrontImage : '',
+      idBackImage: requireIdentity ? idBackImage : '',
+    };
+
+    const response = documentType === 'pagare'
+      ? await signEnrollmentMatriculaPagare(process._id, payload)
+      : await signEnrollmentMatriculaContract(process._id, payload);
+
+    const nextProcess = response.data?.process || process;
+    setProcess(nextProcess);
+    onProcessUpdated?.(nextProcess);
+    return nextProcess;
+  };
+
+  const onContinueToIdentityAfterSignature = async () => {
+    if (!(await validateSignatureBeforeSubmit())) {
+      return;
+    }
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      await persistSignerProgress(activeStep === 'pagare' ? 'pagare' : 'contract', {
+        signatureImage,
+        selfieImage: '',
+        idFrontImage: '',
+        idBackImage: '',
+        finalize: false,
+      });
+      setSigningPhase('identity');
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo guardar la firma.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onIdentityStepComplete = async (nextEvidence, step) => {
+    setIdentityEvidence(nextEvidence);
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      const documentType = activeStep === 'pagare' ? 'pagare' : 'contract';
+      const nextProcess = await persistSignerProgress(documentType, {
+        signatureImage,
+        selfieImage: nextEvidence.selfieImage,
+        idFrontImage: nextEvidence.idFrontImage,
+        idBackImage: nextEvidence.idBackImage,
+        finalize: step === 'idBack',
+      });
+
+      const nextPending = getNextSigner(nextProcess, documentType, nextProcess?.contractParamsSnapshot || contractParams, {
+        dualParentSigning,
+        requireIdentity,
+      });
+      if (!nextPending || Number(nextPending.order) !== Number(currentSigner?.order)) {
+        setSignatureImage('');
+        setIdentityEvidence(emptyIdentityEvidence());
+        setIdentityReady(!requireIdentity);
+        setSigningPhase('idle');
+        if (activeStep === 'contract') setContractAccepted(false);
+        if (activeStep === 'pagare') setPagareAccepted(false);
+      }
+    } catch (error) {
+      setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo guardar el progreso de identidad.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const onSignContract = async () => {
     if (!contractAccepted) {
       setErrorMessage('Debes leer y aceptar el contrato para habilitar la firma.');
       return;
     }
+    if (requireIdentity && !identityReady) {
+      setErrorMessage(`Completa la verificación de identidad de ${currentSigner?.displayName || 'el firmante'} antes de firmar.`);
+      return;
+    }
     if (!(await validateSignatureBeforeSubmit())) {
       return;
     }
-    if (!canUseOfficialDocs) {
-      setErrorMessage('Los documentos de matrícula aún no están disponibles para este colegio.');
+    if (!currentSigner) {
+      setErrorMessage('No hay un firmante pendiente para el contrato.');
       return;
     }
 
     setLoading(true);
     setErrorMessage('');
     try {
-      const signedDocument = generateSignedEnrollmentContractPdfBase64(contractDocumentParams, signatureImage);
-      const response = await signEnrollmentMatriculaContract(process._id, {
-        signatureImage,
-        signedPdfBase64: signedDocument.base64,
-        fileName: signedDocument.fileName,
+      await persistSignerProgress('contract', {
+        finalize: true,
       });
-      const nextProcess = response.data?.process || process;
-      setProcess(nextProcess);
-      onProcessUpdated?.(nextProcess);
       setSignatureImage('');
+      setIdentityEvidence(emptyIdentityEvidence());
+      setIdentityReady(!requireIdentity);
+      setSigningPhase('idle');
+      setContractAccepted(false);
     } catch (error) {
       setErrorMessage(error?.response?.data?.message || 'No se pudo guardar la firma del contrato.');
     } finally {
@@ -605,27 +1083,29 @@ function MatriculaEnrollmentFlow({
       setErrorMessage('Debes leer y aceptar el pagaré para habilitar la firma.');
       return;
     }
+    if (requireIdentity && !identityReady) {
+      setErrorMessage(`Completa la verificación de identidad de ${currentSigner?.displayName || 'el firmante'} antes de firmar.`);
+      return;
+    }
     if (!(await validateSignatureBeforeSubmit())) {
       return;
     }
-    if (!canUseOfficialDocs) {
-      setErrorMessage('El pagaré aún no está disponible para este colegio.');
+    if (!currentSigner) {
+      setErrorMessage('No hay un firmante pendiente para el pagaré.');
       return;
     }
 
     setLoading(true);
     setErrorMessage('');
     try {
-      const signedDocument = generateSignedPagarePdfBase64(contractDocumentParams, signatureImage);
-      const response = await signEnrollmentMatriculaPagare(process._id, {
-        signatureImage,
-        signedPdfBase64: signedDocument.base64,
-        fileName: signedDocument.fileName,
+      await persistSignerProgress('pagare', {
+        finalize: true,
       });
-      const nextProcess = response.data?.process || process;
-      setProcess(nextProcess);
-      onProcessUpdated?.(nextProcess);
       setSignatureImage('');
+      setIdentityEvidence(emptyIdentityEvidence());
+      setIdentityReady(!requireIdentity);
+      setSigningPhase('idle');
+      setPagareAccepted(false);
     } catch (error) {
       setErrorMessage(error?.response?.data?.message || 'No se pudo guardar la firma del pagaré.');
     } finally {
@@ -637,8 +1117,12 @@ function MatriculaEnrollmentFlow({
     return null;
   }
 
-  const signaturePadVisible = (activeStep === 'contract' && contractAccepted)
-    || (activeStep === 'pagare' && pagareAccepted);
+  const signaturePadVisible = (
+    (activeStep === 'contract' && contractAccepted && signingPhase === 'signature')
+    || (activeStep === 'pagare' && pagareAccepted && signingPhase === 'signature')
+    || (activeStep === 'contract' && contractAccepted && !requireIdentity)
+    || (activeStep === 'pagare' && pagareAccepted && !requireIdentity)
+  );
   const shellClassName = [
     'matricula-flow-shell',
     showIntro ? 'matricula-flow-shell--intro' : '',
@@ -832,6 +1316,15 @@ function MatriculaEnrollmentFlow({
                     Pago confirmado por {formatCurrency(process.payment?.amount)} el {formatDateTime(process.payment?.paidAt)}.
                   </p>
                 ) : null}
+                {isMillennium ? (
+                  <SignerOrderBanner
+                    currentSigner={nextContractSigner}
+                    documentLabel="contrato de matrícula"
+                    documentType="contract"
+                    process={process}
+                    requiredSigners={requiredSigners}
+                  />
+                ) : null}
                 <MatriculaContractDocumentPreview
                   contractParams={contractDocumentParams || contractParams}
                   liveSignatureImage={signatureImage}
@@ -842,32 +1335,106 @@ function MatriculaEnrollmentFlow({
                 <label className="matricula-flow-checkbox">
                   <input
                     checked={contractAccepted}
-                    onChange={(event) => setContractAccepted(event.target.checked)}
+                    onChange={(event) => onAcceptContractTerms(event.target.checked)}
                     type="checkbox"
                   />
-                  <span>He leído el contrato y acepto los términos y condiciones suscritos en él.</span>
+                  <span>
+                    He leído el contrato y acepto los términos y condiciones suscritos en él.
+                  </span>
                 </label>
                 {!contractAccepted ? (
                   <p className="matricula-flow-note matricula-flow-note--muted">
-                    Marca la casilla de aceptación para habilitar la firma del contrato.
+                    Marca la casilla de aceptación para continuar.
                   </p>
                 ) : null}
-                <MatriculaSignatureZone
-                  enabled={contractAccepted}
-                  disabled={loading || !contractAccepted}
-                  helperText="Firma con tu dedo en el recuadro para legalizar el contrato."
-                  loading={loading}
-                  onChange={setSignatureImage}
-                  onSubmit={onSignContract}
-                  submitLabel="Firmar contrato"
-                  submittingLabel="Guardando firma..."
-                />
+
+                {contractAccepted && requireIdentity && nextContractSigner ? (
+                  <SignerPersonChip
+                    phaseLabel={
+                      signingPhase === 'signature'
+                        ? '1. Firma'
+                        : signingPhase === 'identity'
+                          ? '2. Selfie y cédula'
+                          : ''
+                    }
+                    signerName={nextContractSigner.displayName}
+                  />
+                ) : null}
+
+                {contractAccepted && (!requireIdentity || signingPhase === 'signature') ? (
+                  <MatriculaSignatureZone
+                    enabled
+                    disabled={loading}
+                    helperText={
+                      nextContractSigner
+                        ? `${nextContractSigner.displayName}: firma con tu dedo en el recuadro.`
+                        : 'Firma con tu dedo en el recuadro para legalizar el contrato.'
+                    }
+                    loading={loading}
+                    onChange={setSignatureImage}
+                    onSubmit={requireIdentity ? onContinueToIdentityAfterSignature : onSignContract}
+                    submitLabel={
+                      requireIdentity
+                        ? `Continuar con selfie de ${nextContractSigner?.displayName || 'firmante'}`
+                        : (nextContractSigner && requiredSigners.length > 1
+                          ? `Firmar contrato (${nextContractSigner.displayName})`
+                          : 'Firmar contrato')
+                    }
+                    submittingLabel={requireIdentity ? 'Validando firma...' : 'Guardando firma...'}
+                  />
+                ) : null}
+
+                {contractAccepted && requireIdentity && signingPhase === 'identity' && nextContractSigner ? (
+                  <>
+                    <p className="matricula-flow-note matricula-flow-note--muted">
+                      Cada paso se guarda automáticamente. Puedes cerrar y continuar después, o que el otro acudiente complete su parte desde otro dispositivo.
+                    </p>
+                    <MatriculaIdentityCapture
+                      onChange={setIdentityEvidence}
+                      onStepComplete={onIdentityStepComplete}
+                      saving={loading}
+                      signerName={nextContractSigner.displayName}
+                      value={identityEvidence}
+                    />
+                    {signatureImage ? (
+                      <button
+                        className="matricula-flow-secondary"
+                        disabled={loading}
+                        onClick={() => setSigningPhase('signature')}
+                        type="button"
+                      >
+                        Volver a la firma de {nextContractSigner.displayName}
+                      </button>
+                    ) : null}
+                    {identityReady ? (
+                      <button
+                        className="matricula-flow-primary"
+                        disabled={loading || !signatureImage}
+                        onClick={onSignContract}
+                        type="button"
+                      >
+                        {loading
+                          ? 'Guardando...'
+                          : `Confirmar trámite de ${nextContractSigner.displayName}`}
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
               </section>
             ) : null}
 
             {activeStep === 'pagare' ? (
               <section className="matricula-flow-panel">
                 <PendingSignatureIntro pendingSignatureResume={pendingSignatureResume} process={process} />
+                {isMillennium ? (
+                  <SignerOrderBanner
+                    currentSigner={nextPagareSigner}
+                    documentLabel="pagaré"
+                    documentType="pagare"
+                    process={process}
+                    requiredSigners={requiredSigners}
+                  />
+                ) : null}
                 <MatriculaContractDocumentPreview
                   contractParams={contractDocumentParams || contractParams}
                   liveSignatureImage={signatureImage}
@@ -878,26 +1445,91 @@ function MatriculaEnrollmentFlow({
                 <label className="matricula-flow-checkbox">
                   <input
                     checked={pagareAccepted}
-                    onChange={(event) => setPagareAccepted(event.target.checked)}
+                    onChange={(event) => onAcceptPagareTerms(event.target.checked)}
                     type="checkbox"
                   />
-                  <span>He leído el pagaré y acepto los términos y condiciones suscritos en él.</span>
+                  <span>
+                    He leído el pagaré y acepto los términos y condiciones suscritos en él.
+                  </span>
                 </label>
                 {!pagareAccepted ? (
                   <p className="matricula-flow-note matricula-flow-note--muted">
-                    Marca la casilla de aceptación para habilitar la firma del pagaré.
+                    Marca la casilla de aceptación para continuar.
                   </p>
                 ) : null}
-                <MatriculaSignatureZone
-                  enabled={pagareAccepted}
-                  disabled={loading || !pagareAccepted}
-                  helperText="Firma con tu dedo en el recuadro para completar tu matrícula."
-                  loading={loading}
-                  onChange={setSignatureImage}
-                  onSubmit={onSignPagare}
-                  submitLabel="Firmar pagaré"
-                  submittingLabel="Guardando firma..."
-                />
+
+                {pagareAccepted && requireIdentity && nextPagareSigner ? (
+                  <SignerPersonChip
+                    phaseLabel={
+                      signingPhase === 'signature'
+                        ? '1. Firma'
+                        : signingPhase === 'identity'
+                          ? '2. Selfie y cédula'
+                          : ''
+                    }
+                    signerName={nextPagareSigner.displayName}
+                  />
+                ) : null}
+
+                {pagareAccepted && (!requireIdentity || signingPhase === 'signature') ? (
+                  <MatriculaSignatureZone
+                    enabled
+                    disabled={loading}
+                    helperText={
+                      nextPagareSigner
+                        ? `${nextPagareSigner.displayName}: firma con tu dedo en el recuadro.`
+                        : 'Firma con tu dedo en el recuadro para completar tu matrícula.'
+                    }
+                    loading={loading}
+                    onChange={setSignatureImage}
+                    onSubmit={requireIdentity ? onContinueToIdentityAfterSignature : onSignPagare}
+                    submitLabel={
+                      requireIdentity
+                        ? `Continuar con selfie de ${nextPagareSigner?.displayName || 'firmante'}`
+                        : (nextPagareSigner && requiredSigners.length > 1
+                          ? `Firmar pagaré (${nextPagareSigner.displayName})`
+                          : 'Firmar pagaré')
+                    }
+                    submittingLabel={requireIdentity ? 'Validando firma...' : 'Guardando firma...'}
+                  />
+                ) : null}
+
+                {pagareAccepted && requireIdentity && signingPhase === 'identity' && nextPagareSigner ? (
+                  <>
+                    <p className="matricula-flow-note matricula-flow-note--muted">
+                      Cada paso se guarda automáticamente. Puedes cerrar y continuar después, o que el otro acudiente complete su parte desde otro dispositivo.
+                    </p>
+                    <MatriculaIdentityCapture
+                      onChange={setIdentityEvidence}
+                      onStepComplete={onIdentityStepComplete}
+                      saving={loading}
+                      signerName={nextPagareSigner.displayName}
+                      value={identityEvidence}
+                    />
+                    {signatureImage ? (
+                      <button
+                        className="matricula-flow-secondary"
+                        disabled={loading}
+                        onClick={() => setSigningPhase('signature')}
+                        type="button"
+                      >
+                        Volver a la firma de {nextPagareSigner.displayName}
+                      </button>
+                    ) : null}
+                    {identityReady ? (
+                      <button
+                        className="matricula-flow-primary"
+                        disabled={loading || !signatureImage}
+                        onClick={onSignPagare}
+                        type="button"
+                      >
+                        {loading
+                          ? 'Guardando...'
+                          : `Confirmar trámite de ${nextPagareSigner.displayName}`}
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
               </section>
             ) : null}
 

@@ -28,6 +28,25 @@ const paymentEvidenceSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const signerEvidenceSchema = new mongoose.Schema(
+  {
+    order: { type: Number, min: 1, default: 1 },
+    role: { type: String, trim: true, default: '' },
+    displayName: { type: String, trim: true, default: '' },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    documentNumber: { type: String, trim: true, default: '' },
+    signedAt: { type: Date, default: null },
+    signatureImage: { type: String, default: '' },
+    selfieImage: { type: String, default: '' },
+    idFrontImage: { type: String, default: '' },
+    idBackImage: { type: String, default: '' },
+    ipAddress: { type: String, trim: true, default: '' },
+    device: { type: String, trim: true, default: '' },
+    userAgent: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 const signatureEvidenceSchema = new mongoose.Schema(
   {
     signedAt: { type: Date, default: null },
@@ -38,6 +57,7 @@ const signatureEvidenceSchema = new mongoose.Schema(
     signatureImage: { type: String, default: '' },
     signedPdfBase64: { type: String, default: '' },
     fileName: { type: String, trim: true, default: '' },
+    signers: { type: [signerEvidenceSchema], default: [] },
   },
   { _id: false }
 );

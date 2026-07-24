@@ -798,6 +798,7 @@ export default function RectoriaControlCenterPanel({
   teacherLabelById = {},
   disciplineObservations = [],
   passingScoreLabel = '70',
+  onCommunityReportsSummaryChange,
 }) {
   const [wellbeingData, setWellbeingData] = useState(null);
   const [nursingData, setNursingData] = useState(null);
@@ -1737,7 +1738,10 @@ export default function RectoriaControlCenterPanel({
       ) : null}
 
       {view === 'control_community_reports' ? (
-        <CommunityReportsPanel className="community-reports-panel--embedded" />
+        <CommunityReportsPanel
+          className="community-reports-panel--embedded"
+          onSummaryChange={onCommunityReportsSummaryChange}
+        />
       ) : null}
     </div>
   );

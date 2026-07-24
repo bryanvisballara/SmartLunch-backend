@@ -31,11 +31,49 @@ function ChevronIcon({ expanded }) {
   );
 }
 
+function RectoriaNavCountBadge({ count = 0, label = 'notificaciones pendientes' }) {
+  const safeCount = Number(count || 0);
+  if (safeCount <= 0) return null;
+  return (
+    <span aria-label={`${safeCount} ${label}`} className="rectoria-rail__badge">
+      {safeCount > 99 ? '99+' : safeCount}
+    </span>
+  );
+}
+
+function resolveGroupBadgeCount(groupKey, counts = {}) {
+  if (groupKey === 'administrative') {
+    return Number(counts.matriculaAuthorizations || 0);
+  }
+  if (groupKey === 'institutional_config') {
+    return Number(counts.studentsMissingPlacement || 0);
+  }
+  if (groupKey === 'control_center') {
+    return Number(counts.communityReports || 0);
+  }
+  return 0;
+}
+
+function resolveItemBadgeCount(itemKey, counts = {}) {
+  if (itemKey === 'matricula_authorizations') {
+    return Number(counts.matriculaAuthorizations || 0);
+  }
+  if (itemKey === 'students') {
+    return Number(counts.studentsMissingPlacement || 0);
+  }
+  if (itemKey === 'control_community_reports' || itemKey === 'community_reports') {
+    return Number(counts.communityReports || 0);
+  }
+  return 0;
+}
+
 export default function RectoriaPortalSidebar({
   activeSection,
   expandedGroup,
   isCoordinationPortal = false,
   matriculaAuthorizationPendingCount = 0,
+  studentsMissingPlacementCount = 0,
+  communityReportsPendingCount = 0,
   staffAnnouncementsUnreadCount = 0,
   onSectionChange,
   onExpandedGroupChange,
@@ -46,6 +84,11 @@ export default function RectoriaPortalSidebar({
   const nav = isCoordinationPortal ? COORDINATION_NAV : RECTORIA_PORTAL_NAV;
   const [expandedNestedSection, setExpandedNestedSection] = useState('');
   const previousActiveSectionRef = useRef(activeSection);
+  const badgeCounts = {
+    matriculaAuthorizations: matriculaAuthorizationPendingCount,
+    studentsMissingPlacement: studentsMissingPlacementCount,
+    communityReports: communityReportsPendingCount,
+  };
 
   useEffect(() => {
     if (activeSection === previousActiveSectionRef.current) {
@@ -141,6 +184,7 @@ export default function RectoriaPortalSidebar({
         {nav.map((entry) => {
           if (entry.type === 'item') {
             const isActive = activeSection === entry.key;
+            const itemBadgeCount = resolveItemBadgeCount(entry.key, badgeCounts);
             return (
               <button
                 className={`rectoria-rail__item${isActive ? ' is-active' : ''}`}
@@ -152,7 +196,9 @@ export default function RectoriaPortalSidebar({
                   {entry.key === 'community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : entry.label}
                   {entry.key === 'staff_announcements' ? (
                     <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
-                  ) : null}
+                  ) : (
+                    <RectoriaNavCountBadge count={itemBadgeCount} />
+                  )}
                 </span>
               </button>
             );
@@ -160,6 +206,7 @@ export default function RectoriaPortalSidebar({
 
           const isGroupOpen = expandedGroup === entry.key;
           const hasActiveChild = (entry.items || []).some((item) => item.key === activeSection);
+          const groupBadgeCount = resolveGroupBadgeCount(entry.key, badgeCounts);
 
           return (
             <div className={`rectoria-rail__group${isGroupOpen ? ' is-open' : ''}${hasActiveChild ? ' has-active-child' : ''}`} key={entry.key}>
@@ -169,7 +216,10 @@ export default function RectoriaPortalSidebar({
                 onClick={() => handleGroupToggle(entry.key, entry.items || [])}
                 type="button"
               >
-                <span className="rectoria-rail__item-label">{entry.label}</span>
+                <span className="rectoria-rail__item-label">
+                  {entry.label}
+                  <RectoriaNavCountBadge count={groupBadgeCount} />
+                </span>
                 <ChevronIcon expanded={isGroupOpen} />
               </button>
 
@@ -177,9 +227,7 @@ export default function RectoriaPortalSidebar({
                 <div className="rectoria-rail__children">
                   {(entry.items || []).map((item) => {
                     const isActive = activeSection === item.key;
-                    const label = item.key === 'matricula_authorizations' && matriculaAuthorizationPendingCount > 0
-                      ? `${item.label} (${matriculaAuthorizationPendingCount})`
-                      : item.label;
+                    const itemBadgeCount = resolveItemBadgeCount(item.key, badgeCounts);
                     const hasNestedSubnav = itemHasNestedSubnav(entry.key, item.key);
                     const nestedSubnav = hasNestedSubnav ? resolveNestedSubnavContent(entry.key, item.key) : null;
                     const isNestedOpen = isActive && expandedNestedSection === item.key && Boolean(nestedSubnav);
@@ -192,7 +240,10 @@ export default function RectoriaPortalSidebar({
                           onClick={() => handleChildClick(item.key, entry.key)}
                           type="button"
                         >
-                          <span>{item.key === 'control_community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : label}</span>
+                          <span className="rectoria-rail__child-label">
+                            {item.key === 'control_community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : item.label}
+                            <RectoriaNavCountBadge count={itemBadgeCount} />
+                          </span>
                           {hasNestedSubnav ? <ChevronIcon expanded={isNestedOpen} /> : null}
                         </button>
                         {isNestedOpen ? (

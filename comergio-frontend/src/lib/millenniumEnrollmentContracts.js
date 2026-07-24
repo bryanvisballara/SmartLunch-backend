@@ -525,7 +525,9 @@ export function isMillenniumSchool(schoolName = '', schoolId = '') {
   return MILLENNIUM_SCHOOL_IDS.has(normalized)
     || MILLENNIUM_SCHOOL_IDS.has(normalizedId)
     || normalized.includes('millennium')
-    || normalizedId.includes('millennium');
+    || normalizedId.includes('millennium')
+    || normalized.includes('milenium')
+    || normalizedId.includes('milenium');
 }
 
 export function shouldHideParentEnrollmentPaymentAmount({ schoolId = '', schoolName = '' } = {}) {
@@ -927,8 +929,10 @@ function drawEnrollmentSignatureBlockPdf(doc, {
   cursorY,
   context = {},
   parentSignatureDataUrl = '',
+  secondarySignerName = '',
+  secondarySignatureDataUrl = '',
 }) {
-  const blockHeight = 130;
+  const blockHeight = secondarySignatureDataUrl || secondarySignerName ? 210 : 130;
   let y = ensurePdfSpace(doc, {
     cursorY,
     requiredHeight: blockHeight,
@@ -981,7 +985,27 @@ function drawEnrollmentSignatureBlockPdf(doc, {
   doc.setFontSize(7);
   doc.text('Firma institución', rightX, signatureLineY + 12);
 
-  return signatureLineY + 28;
+  let nextY = signatureLineY + 28;
+  if (secondarySignerName || secondarySignatureDataUrl) {
+    const secondLineY = nextY + 64;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text(String(secondarySignerName || 'ACUDIENTE 2').toUpperCase(), leftX, nextY + 18);
+    doc.setLineWidth(0.8);
+    doc.line(leftX, secondLineY, leftX + columnWidth - 8, secondLineY);
+    if (secondarySignatureDataUrl) {
+      try {
+        doc.addImage(secondarySignatureDataUrl, 'PNG', leftX + 8, secondLineY - 52, columnWidth - 24, 44);
+      } catch (error) {
+        // Ignore invalid signature image payloads.
+      }
+    }
+    doc.setFontSize(7);
+    doc.text('Firma segundo acudiente', leftX, secondLineY + 12);
+    nextY = secondLineY + 28;
+  }
+
+  return nextY;
 }
 
 function buildEnrollmentContractPdfDoc({
@@ -990,6 +1014,8 @@ function buildEnrollmentContractPdfDoc({
   contractParams = {},
   headerImage,
   parentSignatureDataUrl = '',
+  secondarySignerName = '',
+  secondarySignatureDataUrl = '',
 }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -1020,6 +1046,7 @@ function buildEnrollmentContractPdfDoc({
         debtorOne: debtorColumns.debtorOne,
         debtorTwo: debtorColumns.debtorTwo,
         primarySignatureDataUrl: parentSignatureDataUrl,
+        secondarySignatureDataUrl,
       });
       return;
     }
@@ -1042,6 +1069,8 @@ function buildEnrollmentContractPdfDoc({
         cursorY: cursorY + 8,
         context,
         parentSignatureDataUrl,
+        secondarySignerName,
+        secondarySignatureDataUrl,
       });
       return;
     }
@@ -1081,6 +1110,7 @@ function buildPagarePdfDoc({
   content,
   debtorColumns,
   primarySignatureDataUrl = '',
+  secondarySignatureDataUrl = '',
 }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -1107,6 +1137,7 @@ function buildPagarePdfDoc({
         debtorOne: debtorColumns.debtorOne,
         debtorTwo: debtorColumns.debtorTwo,
         primarySignatureDataUrl,
+        secondarySignatureDataUrl,
       });
       return;
     }
@@ -1137,16 +1168,20 @@ function pdfDocToBase64(doc) {
   return String(doc.output('datauristring') || '').split(',')[1] || '';
 }
 
-export function generateSignedEnrollmentContractPdfBase64(params, signatureDataUrl = '') {
+export function generateSignedEnrollmentContractPdfBase64(params, signatureDataUrl = '', options = {}) {
   const contractParams = normalizeOfficialEnrollmentContractParams(params);
   const context = buildMillenniumEnrollmentContractContext(contractParams);
   const content = renderMillenniumEnrollmentContract(context, contractParams);
+  const secondarySignatureDataUrl = options.secondarySignatureDataUrl || '';
+  const secondarySignerName = options.secondarySignerName || '';
   const doc = buildEnrollmentContractPdfDoc({
     content,
     context,
     contractParams,
     headerImage: millenniumSchoolCrest,
     parentSignatureDataUrl: signatureDataUrl,
+    secondarySignerName,
+    secondarySignatureDataUrl,
   });
   return {
     base64: pdfDocToBase64(doc),
@@ -1155,7 +1190,7 @@ export function generateSignedEnrollmentContractPdfBase64(params, signatureDataU
   };
 }
 
-export function generateSignedPagarePdfBase64(params, signatureDataUrl = '') {
+export function generateSignedPagarePdfBase64(params, signatureDataUrl = '', options = {}) {
   const contractParams = normalizeOfficialEnrollmentContractParams(params);
   const context = buildMillenniumEnrollmentContractContext(contractParams);
   const content = renderMillenniumPagareContract(context);
@@ -1167,6 +1202,7 @@ export function generateSignedPagarePdfBase64(params, signatureDataUrl = '') {
     content,
     debtorColumns,
     primarySignatureDataUrl: signatureDataUrl,
+    secondarySignatureDataUrl: options.secondarySignatureDataUrl || '',
   });
   return {
     base64: pdfDocToBase64(doc),
@@ -1249,6 +1285,7 @@ function drawPagareDebtorsTablePdf(doc, {
   debtorOne,
   debtorTwo,
   primarySignatureDataUrl = '',
+  secondarySignatureDataUrl = '',
 }) {
   const tableWidth = pageWidth - (margin * 2);
   const columnGap = 10;
@@ -1272,6 +1309,7 @@ function drawPagareDebtorsTablePdf(doc, {
     y: cursorY,
     width: columnWidth,
     debtor: debtorTwo,
+    signatureDataUrl: secondarySignatureDataUrl,
   });
 
   return Math.max(leftBottom, rightBottom) + 16;

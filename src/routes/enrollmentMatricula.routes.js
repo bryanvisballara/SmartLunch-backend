@@ -16,6 +16,7 @@ const {
   serializeProcess,
   signDocument,
   refreshContractParamsSnapshotIfNeeded,
+  findProcessAccessibleByParent,
 } = require('../services/enrollmentMatricula.service');
 const {
   approveMatriculaPurgeRequest,
@@ -145,8 +146,8 @@ router.get('/portal/enrollment-matricula/process/:processId/payment-status', asy
   try {
     const { schoolId, userId, role } = req.user;
     const parentUserId = role === 'admin' ? req.query?.parentUserId || userId : userId;
-    const process = await EnrollmentMatriculaProcess.findOne({
-      _id: req.params.processId,
+    const process = await findProcessAccessibleByParent({
+      processId: req.params.processId,
       schoolId,
       parentId: parentUserId,
     });
@@ -175,6 +176,12 @@ router.post('/portal/enrollment-matricula/process/:processId/sign-contract', asy
       signatureImage: req.body?.signatureImage,
       signedPdfBase64: req.body?.signedPdfBase64,
       fileName: req.body?.fileName,
+      signerOrder: req.body?.signerOrder,
+      selfieImage: req.body?.selfieImage,
+      idFrontImage: req.body?.idFrontImage,
+      idBackImage: req.body?.idBackImage,
+      displayName: req.body?.displayName,
+      role: req.body?.role,
       req,
     });
     return res.status(200).json({ process: serializeProcess(process) });
@@ -195,6 +202,12 @@ router.post('/portal/enrollment-matricula/process/:processId/sign-pagare', async
       signatureImage: req.body?.signatureImage,
       signedPdfBase64: req.body?.signedPdfBase64,
       fileName: req.body?.fileName,
+      signerOrder: req.body?.signerOrder,
+      selfieImage: req.body?.selfieImage,
+      idFrontImage: req.body?.idFrontImage,
+      idBackImage: req.body?.idBackImage,
+      displayName: req.body?.displayName,
+      role: req.body?.role,
       req,
     });
     return res.status(200).json({ process: serializeProcess(process) });

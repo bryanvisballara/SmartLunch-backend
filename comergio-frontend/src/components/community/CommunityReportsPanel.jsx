@@ -34,7 +34,7 @@ function statusLabel(value) {
   return 'Pendiente';
 }
 
-export default function CommunityReportsPanel({ className = '' }) {
+export default function CommunityReportsPanel({ className = '', onSummaryChange }) {
   const [reports, setReports] = useState([]);
   const [summary, setSummary] = useState({ pending: 0, reviewed: 0, archived: 0 });
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -53,8 +53,10 @@ export default function CommunityReportsPanel({ className = '' }) {
         reportType: typeFilter || undefined,
         limit: 100,
       });
+      const nextSummary = response.data?.summary || { pending: 0, reviewed: 0, archived: 0 };
       setReports(Array.isArray(response.data?.reports) ? response.data.reports : []);
-      setSummary(response.data?.summary || { pending: 0, reviewed: 0, archived: 0 });
+      setSummary(nextSummary);
+      onSummaryChange?.(nextSummary);
     } catch (requestError) {
       setReports([]);
       setError(requestError?.response?.data?.message || 'No se pudieron cargar los reportes comunitarios.');

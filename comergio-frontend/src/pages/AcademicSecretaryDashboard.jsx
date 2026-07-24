@@ -1454,6 +1454,8 @@ function createAcademicDatabasePayloadFromEnrollmentForm(enrollmentForm = {}) {
       fatherPhone: enrollmentForm.father?.phone || '',
       fatherEmail: enrollmentForm.father?.email || '',
     }),
+    fatherPassword: String(enrollmentForm.father?.password || '').trim(),
+    motherPassword: String(enrollmentForm.mother?.password || '').trim(),
     entryDate: student.entryDate || '',
     schoolCode: student.schoolCode || '',
     enrollmentBonusInstallments: student.enrollmentBonusInstallments || 1,

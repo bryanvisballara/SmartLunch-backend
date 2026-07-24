@@ -3254,14 +3254,131 @@ function ParentAnnouncementImage({ mediaItem, fallbackAlt }) {
   );
 }
 
-function ParentAnnouncementMedia({ announcement, onLike }) {
+function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiRef = null }) {
+  const videoRef = useRef(null);
+  const [isPaused, setIsPaused] = useState(true);
+  const userPausedRef = useRef(false);
+  const inViewRef = useRef(false);
+
+  const pauseVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    setIsPaused(true);
+  }, []);
+
+  const playVideo = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (ParentFeedAutoVideo.activeVideo && ParentFeedAutoVideo.activeVideo !== video) {
+      try {
+        ParentFeedAutoVideo.activeVideo.pause();
+      } catch {
+        // ignore
+      }
+    }
+
+    ParentFeedAutoVideo.activeVideo = video;
+    video.muted = true;
+    try {
+      await video.play();
+      setIsPaused(false);
+    } catch {
+      setIsPaused(true);
+    }
+  }, []);
+
+  const togglePlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      userPausedRef.current = false;
+      playVideo();
+      return;
+    }
+    userPausedRef.current = true;
+    pauseVideo();
+  }, [pauseVideo, playVideo]);
+
+  useEffect(() => {
+    if (!videoApiRef) return undefined;
+    videoApiRef.current = { toggle: togglePlayback, pause: pauseVideo };
+    return () => {
+      if (videoApiRef.current?.toggle === togglePlayback) {
+        videoApiRef.current = null;
+      }
+    };
+  }, [pauseVideo, togglePlayback, videoApiRef]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const visible = Boolean(entry?.isIntersecting) && Number(entry?.intersectionRatio || 0) >= 0.55;
+        inViewRef.current = visible;
+        if (!visible) {
+          pauseVideo();
+          return;
+        }
+        if (isActiveSlide && !userPausedRef.current) {
+          playVideo();
+        }
+      },
+      { threshold: [0, 0.35, 0.55, 0.75, 1] },
+    );
+
+    observer.observe(video);
+    return () => {
+      observer.disconnect();
+      if (ParentFeedAutoVideo.activeVideo === video) {
+        ParentFeedAutoVideo.activeVideo = null;
+      }
+    };
+  }, [isActiveSlide, pauseVideo, playVideo, src]);
+
+  useEffect(() => {
+    if (!isActiveSlide) {
+      pauseVideo();
+      return;
+    }
+    if (inViewRef.current && !userPausedRef.current) {
+      playVideo();
+    }
+  }, [isActiveSlide, pauseVideo, playVideo]);
+
+  return (
+    <div className={`campus-parent-mobile__feed-video${isPaused ? ' is-paused' : ''}`}>
+      <video
+        autoPlay={false}
+        loop
+        muted
+        playsInline
+        poster={poster || undefined}
+        preload="metadata"
+        ref={videoRef}
+        src={src}
+      />
+      {isPaused ? (
+        <span aria-hidden="true" className="campus-parent-mobile__feed-video-play-icon" />
+      ) : null}
+    </div>
+  );
+}
+ParentFeedAutoVideo.activeVideo = null;
+
+function ParentAnnouncementMedia({ announcement, onLike, onSwipeOpenCamera }) {
   const mediaItems = useMemo(() => getAnnouncementMediaItems(announcement), [announcement]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const viewportRef = useRef(null);
   const lastTapRef = useRef(0);
+  const singleTapTimerRef = useRef(null);
   const touchStartRef = useRef(null);
+  const activeVideoApiRef = useRef(null);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -3270,6 +3387,12 @@ function ParentAnnouncementMedia({ announcement, onLike }) {
       viewportRef.current.scrollLeft = 0;
     }
   }, [announcement.id, mediaItems.length]);
+
+  useEffect(() => () => {
+    if (singleTapTimerRef.current) {
+      window.clearTimeout(singleTapTimerRef.current);
+    }
+  }, []);
 
   if (!mediaItems.length) {
     return null;
@@ -3310,7 +3433,7 @@ function ParentAnnouncementMedia({ announcement, onLike }) {
   const onMediaTouchStart = (event) => {
     const touch = event.touches?.[0];
     if (!touch) return;
-    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
   };
 
   const onMediaTouchEnd = (event) => {
@@ -3322,6 +3445,16 @@ function ParentAnnouncementMedia({ announcement, onLike }) {
       const deltaX = touch.clientX - touchStart.x;
       const deltaY = touch.clientY - touchStart.y;
       if (Math.abs(deltaX) > 34 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15) {
+        if (singleTapTimerRef.current) {
+          window.clearTimeout(singleTapTimerRef.current);
+          singleTapTimerRef.current = null;
+        }
+        // Swipe derecha en el primer media → abrir cámara (mismo gesto que en el resto del feed).
+        if (deltaX > 0 && activeIndex === 0 && typeof onSwipeOpenCamera === 'function') {
+          onSwipeOpenCamera();
+          lastTapRef.current = 0;
+          return;
+        }
         scrollToMediaIndex(activeIndex + (deltaX < 0 ? 1 : -1));
         lastTapRef.current = 0;
         return;
@@ -3330,20 +3463,41 @@ function ParentAnnouncementMedia({ announcement, onLike }) {
 
     const now = Date.now();
     if (now - lastTapRef.current < 320) {
+      if (singleTapTimerRef.current) {
+        window.clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
       triggerAnimatedLike();
       lastTapRef.current = 0;
       return;
     }
+
     lastTapRef.current = now;
+    if (singleTapTimerRef.current) {
+      window.clearTimeout(singleTapTimerRef.current);
+    }
+    singleTapTimerRef.current = window.setTimeout(() => {
+      singleTapTimerRef.current = null;
+      if (mediaItems[activeIndex]?.kind === 'video') {
+        activeVideoApiRef.current?.toggle?.();
+      }
+    }, 280);
   };
 
   return (
     <div className="campus-parent-mobile__post-media has-gallery" onDoubleClick={triggerAnimatedLike} onTouchEnd={onMediaTouchEnd} onTouchStart={onMediaTouchStart}>
       <div className="campus-parent-mobile__post-gallery" onScroll={onScroll} ref={viewportRef}>
-        {mediaItems.map((mediaItem) => (
+        {mediaItems.map((mediaItem, index) => (
           <figure className="campus-parent-mobile__post-gallery-slide" key={mediaItem.id}>
             {mediaItem.kind === 'video'
-              ? <video controls playsInline poster={mediaItem.thumbUrl || ''} src={mediaItem.src} />
+              ? (
+                <ParentFeedAutoVideo
+                  isActiveSlide={index === activeIndex}
+                  poster={mediaItem.thumbUrl || ''}
+                  src={mediaItem.src}
+                  videoApiRef={index === activeIndex ? activeVideoApiRef : undefined}
+                />
+              )
               : <ParentAnnouncementImage fallbackAlt={announcement.imageLabel} mediaItem={mediaItem} />}
           </figure>
         ))}
@@ -7965,7 +8119,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                         </span>
                       </div>
                     </div>
-                    <ParentAnnouncementMedia announcement={announcement} onLike={() => onToggleFeedLike(announcement.id)} />
+                    <ParentAnnouncementMedia
+                      announcement={announcement}
+                      onLike={() => onToggleFeedLike(announcement.id)}
+                      onSwipeOpenCamera={() => {
+                        setShowUserMenu(false);
+                        setShowAcademicMenu(false);
+                        setShowCareMenu(false);
+                        setShowCommunityCamera(true);
+                      }}
+                    />
                     <div className="campus-parent-mobile__post-actions">
                       <button
                         aria-label={announcement.likedByMe ? 'Quitar like' : 'Dar like'}
