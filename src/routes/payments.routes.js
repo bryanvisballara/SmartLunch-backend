@@ -2814,7 +2814,7 @@ router.get('/wompi/matricula-status', async (req, res) => {
 
     const refreshedPayment = await findPaymentTransactionRecord({ _id: payment._id }, { lean: true });
     const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
-    const { serializeProcess } = require('../services/enrollmentMatricula.service');
+    const { serializeProcessForParent } = require('../services/enrollmentMatricula.service');
     const process = refreshedPayment?.enrollmentMatriculaProcessId
       ? await EnrollmentMatriculaProcess.findOne({
         _id: refreshedPayment.enrollmentMatriculaProcessId,
@@ -2827,7 +2827,7 @@ router.get('/wompi/matricula-status', async (req, res) => {
       status: refreshedPayment?.status || payment.status,
       providerStatus: refreshedPayment?.providerStatus || payment.providerStatus,
       approvedAt: refreshedPayment?.approvedAt || payment.approvedAt || null,
-      process: process ? serializeProcess(process) : null,
+      process: process ? serializeProcessForParent(process) : null,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
