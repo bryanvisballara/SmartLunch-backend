@@ -14,11 +14,27 @@ const {
   applyMonthlyTuitionAdditionalDiscount,
   normalizeAdditionalPensionDiscount,
 } = require('../utils/academicAdditionalPensionDiscount');
+const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
 
 const DEFAULT_ACADEMIC_MONTHLY_DUE_DAY = 10;
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function shouldOmitAnnualTuitionFromMonthlyStatement(schoolId = '') {
+  // Millennium bills matrícula as a standalone annual_tuition charge (enrollment gate),
+  // so consolidated monthly statements must never re-include that same fee.
+  return isMillenniumSchoolId(schoolId);
+}
+
+function filterStatementBreakdownItems(breakdownItems = [], { omitAnnualTuition = false } = {}) {
+  if (!omitAnnualTuition) {
+    return Array.isArray(breakdownItems) ? breakdownItems : [];
+  }
+  return (Array.isArray(breakdownItems) ? breakdownItems : []).filter(
+    (item) => normalizeText(item?.key) !== 'annual_tuition',
+  );
 }
 
 function parseAcademicCalendarDate(value) {
@@ -179,7 +195,14 @@ function buildDueDateForMonth(monthDate, dueDay = DEFAULT_ACADEMIC_MONTHLY_DUE_D
   return new Date(Date.UTC(year, month, Math.min(safeDueDay, lastDay), 5, 0, 0, 0));
 }
 
-function buildConsolidatedMonthlyStatement(profile = {}, feeConfiguration = {}, monthIndex = 0, academicGrades = [], referenceDate = new Date()) {
+function buildConsolidatedMonthlyStatement(
+  profile = {},
+  feeConfiguration = {},
+  monthIndex = 0,
+  academicGrades = [],
+  referenceDate = new Date(),
+  options = {},
+) {
   const schoolYearConfiguration = normalizeSchoolYearConfiguration(feeConfiguration, profile.grade, academicGrades);
   const parsedEntryDate = parseAcademicCalendarDate(profile.entryDate) || schoolYearConfiguration.startDate;
   const schoolYearStartMonth = startOfMonthUtc(schoolYearConfiguration.startDate);
@@ -202,9 +225,10 @@ function buildConsolidatedMonthlyStatement(profile = {}, feeConfiguration = {}, 
   const breakdownItems = [];
   let totalAmount = 0;
   let totalOriginalAmount = 0;
+  const omitAnnualTuition = Boolean(options.omitAnnualTuition);
 
   const tuitionInstallmentAmount = tuitionInstallmentAmounts[monthIndex] || 0;
-  if (tuitionInstallmentAmount > 0) {
+  if (!omitAnnualTuition && tuitionInstallmentAmount > 0) {
     const tuitionInstallmentCount = tuitionInstallmentAmounts.length;
     breakdownItems.push({
       key: 'annual_tuition',
@@ -260,7 +284,9 @@ function buildConsolidatedMonthlyStatement(profile = {}, feeConfiguration = {}, 
     monthDate,
     dueDate,
     concept: `Pago mensual ${formatAcademicMonthLabel(monthDate)}`,
-    description: 'Cargo mensual consolidado con pensión, matrícula y bono según plan financiero.',
+    description: omitAnnualTuition
+      ? 'Cargo mensual consolidado con pensión según plan financiero.'
+      : 'Cargo mensual consolidado con pensión, matrícula y bono según plan financiero.',
     amount: totalAmount,
     originalAmount: totalOriginalAmount,
     breakdownItems,
@@ -307,7 +333,15 @@ async function ensureConsolidatedMonthlyCharge({
   audienceType = 'individual',
 }) {
   const existingCharges = await getStudentStatementCharges(schoolId, studentId);
-  const previewForLength = buildConsolidatedMonthlyStatement(billingProfile, feeConfiguration, 0, academicGrades);
+  const omitAnnualTuition = shouldOmitAnnualTuitionFromMonthlyStatement(schoolId);
+  const previewForLength = buildConsolidatedMonthlyStatement(
+    billingProfile,
+    feeConfiguration,
+    0,
+    academicGrades,
+    referenceDate,
+    { omitAnnualTuition },
+  );
   if (!previewForLength) {
     return { created: false, charge: null, reason: 'no_billable_amount' };
   }
@@ -318,7 +352,14 @@ async function ensureConsolidatedMonthlyCharge({
     return { created: false, charge: openCharge, reason: openCharge ? 'open_charge_exists' : 'schedule_complete' };
   }
 
-  const statement = buildConsolidatedMonthlyStatement(billingProfile, feeConfiguration, monthIndex, academicGrades, referenceDate);
+  const statement = buildConsolidatedMonthlyStatement(
+    billingProfile,
+    feeConfiguration,
+    monthIndex,
+    academicGrades,
+    referenceDate,
+    { omitAnnualTuition },
+  );
   if (!statement || statement.amount <= 0) {
     return { created: false, charge: null, reason: 'empty_statement' };
   }
@@ -421,8 +462,21 @@ async function ensureSchoolConsolidatedMonthlyCharges({
   return { processed: profiles.length, created };
 }
 
-function recalculateConsolidatedStatementPricing(charge = {}, billingProfile = {}, referenceDate = new Date()) {
-  const breakdownItems = (Array.isArray(charge.breakdownItems) ? charge.breakdownItems : []).map((item) => {
+function recalculateConsolidatedStatementPricing(
+  charge = {},
+  billingProfile = {},
+  referenceDate = new Date(),
+  options = {},
+) {
+  const omitAnnualTuition = Boolean(
+    options.omitAnnualTuition
+    || shouldOmitAnnualTuitionFromMonthlyStatement(charge.schoolId || options.schoolId || ''),
+  );
+  const sourceItems = filterStatementBreakdownItems(
+    Array.isArray(charge.breakdownItems) ? charge.breakdownItems : [],
+    { omitAnnualTuition },
+  );
+  const breakdownItems = sourceItems.map((item) => {
     if (normalizeText(item?.key) !== 'monthly_tuition') {
       return {
         ...item,
@@ -451,20 +505,35 @@ function recalculateConsolidatedStatementPricing(charge = {}, billingProfile = {
     breakdownItems,
     benefitLabel: pensionItem?.benefitLabel || '',
     hasPensionDiscount: Number(pensionItem?.originalAmount || 0) > Number(pensionItem?.amount || 0),
+    omitAnnualTuition,
   };
 }
 
-function serializeConsolidatedChargeForParent(charge = {}, billingProfile = null, paymentTotalsByChargeId = new Map(), referenceDate = new Date()) {
+function serializeConsolidatedChargeForParent(charge = {}, billingProfile = null, paymentTotalsByChargeId = new Map(), referenceDate = new Date(), options = {}) {
   const isPaid = String(charge.status) === 'paid';
   const repriced = !isPaid && billingProfile
-    ? recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate)
+    ? recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, {
+      ...options,
+      schoolId: charge.schoolId || options.schoolId,
+    })
     : {
       amount: Math.max(0, Number(charge.amount || 0)),
       originalAmount: Math.max(0, Number(charge.originalAmount || charge.amount || 0)),
-      breakdownItems: Array.isArray(charge.breakdownItems) ? charge.breakdownItems : [],
+      breakdownItems: filterStatementBreakdownItems(
+        Array.isArray(charge.breakdownItems) ? charge.breakdownItems : [],
+        {
+          omitAnnualTuition: shouldOmitAnnualTuitionFromMonthlyStatement(charge.schoolId || options.schoolId || '')
+            || Boolean(options.omitAnnualTuition),
+        },
+      ),
       benefitLabel: '',
       hasPensionDiscount: false,
     };
+
+  // Keep paid statements stable, but still hide matrícula lines already billed separately.
+  if (isPaid && shouldOmitAnnualTuitionFromMonthlyStatement(charge.schoolId || options.schoolId || '')) {
+    repriced.breakdownItems = filterStatementBreakdownItems(repriced.breakdownItems, { omitAnnualTuition: true });
+  }
 
   const pricingAmount = Math.max(0, Number(repriced.amount || 0));
   const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0);
@@ -564,6 +633,20 @@ async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate =
 
   const profileCache = new Map();
   let refreshedCharges = 0;
+  const omitAnnualTuition = shouldOmitAnnualTuitionFromMonthlyStatement(schoolId);
+
+  // Also strip matrícula from statements when it was already collected as a standalone paid charge.
+  const studentIds = [...new Set(pendingCharges.map((charge) => String(charge.studentId || '')).filter(Boolean))];
+  const paidAnnualStudentIds = new Set();
+  if (!omitAnnualTuition && studentIds.length) {
+    const paidAnnualCharges = await AcademicCharge.find({
+      schoolId,
+      studentId: { $in: studentIds },
+      category: 'annual_tuition',
+      status: 'paid',
+    }).select('studentId').lean();
+    paidAnnualCharges.forEach((charge) => paidAnnualStudentIds.add(String(charge.studentId)));
+  }
 
   for (const charge of pendingCharges) {
     const profileId = String(charge.billingProfileId || '');
@@ -576,7 +659,11 @@ async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate =
     }
     if (!profile) continue;
 
-    const repriced = recalculateConsolidatedStatementPricing(charge, profile, referenceDate);
+    const shouldOmit = omitAnnualTuition || paidAnnualStudentIds.has(String(charge.studentId || ''));
+    const repriced = recalculateConsolidatedStatementPricing(charge, profile, referenceDate, {
+      omitAnnualTuition: shouldOmit,
+      schoolId,
+    });
     const updateResult = await AcademicCharge.updateOne(
       { _id: charge._id, status: { $in: ['pending', 'overdue'] } },
       {
@@ -584,6 +671,9 @@ async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate =
           amount: repriced.amount,
           originalAmount: repriced.originalAmount,
           breakdownItems: repriced.breakdownItems,
+          description: shouldOmit
+            ? 'Cargo mensual consolidado con pensión según plan financiero.'
+            : charge.description,
         },
       },
     );

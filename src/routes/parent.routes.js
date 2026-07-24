@@ -1170,8 +1170,12 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
   }
   if (String(charge?.category || '') === 'monthly_statement') {
     const { recalculateConsolidatedStatementPricing } = require('../services/academicConsolidatedBilling.service');
+    const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
     const repriced = billingProfile && String(charge?.status || '') !== 'paid'
-      ? recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate)
+      ? recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, {
+        omitAnnualTuition: isMillenniumSchoolId(charge?.schoolId),
+        schoolId: charge?.schoolId,
+      })
       : {
         amount: Math.max(0, Number(charge?.amount || baseAmount || 0)),
         originalAmount: Math.max(0, Number(charge?.originalAmount || baseAmount || 0)),
