@@ -25,7 +25,7 @@ const paymentTransactionSchema = new mongoose.Schema(
     academicChargeId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicCharge', default: null },
     purpose: {
       type: String,
-      enum: ['wallet_recharge', 'academic_matricula'],
+      enum: ['wallet_recharge', 'academic_matricula', 'academic_charge'],
       default: 'wallet_recharge',
       index: true,
     },

@@ -5063,6 +5063,17 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
       return res.status(409).json({ message: 'Este cobro ya fue pagado.' });
     }
 
+    const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
+    if (
+      isMillenniumSchoolId(schoolId)
+      && ['monthly_statement', 'monthly_tuition'].includes(String(charge.category || ''))
+    ) {
+      return res.status(400).json({
+        message: 'Este cobro debe pagarse con Wompi.',
+        gateway: 'wompi',
+      });
+    }
+
     const payment = await AcademicChargePayment.create({
       schoolId,
       chargeId: charge._id,

@@ -821,11 +821,130 @@ async function syncSchoolBillingProfilesFromFeeConfiguration({
   };
 }
 
+async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, referenceDate = new Date() }) {
+  const StudentBillingProfile = require('../models/studentBillingProfile.model');
+  const AcademicChargePayment = require('../models/academicChargePayment.model');
+  const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
+
+  const billingProfile = charge?.billingProfileId
+    ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
+    : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
+
+  let pricingAmount = Math.max(0, Number(charge?.amount || 0));
+  if (String(charge?.category || '') === 'monthly_statement' && billingProfile) {
+    const repriced = recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, { schoolId });
+    pricingAmount = Math.max(0, Number(repriced.amount || 0));
+  } else if (String(charge?.category || '') === 'monthly_tuition' && billingProfile) {
+    const dueDate = parseAcademicCalendarDate(charge.dueDate) || referenceDate;
+    const pricing = resolveMonthlyTuitionAmount(billingProfile, dueDate);
+    pricingAmount = Math.max(0, Number(pricing.amount || charge?.amount || 0));
+  } else if (String(charge?.category || '') === 'annual_tuition') {
+    const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+    if (billingProfile && feeConfiguration) {
+      const pricing = resolveParentAnnualTuitionPricing(billingProfile, feeConfiguration, referenceDate);
+      pricingAmount = Math.max(0, Number(pricing.effectiveAmount || charge?.amount || 0));
+    }
+  }
+
+  const previousPayments = await AcademicChargePayment.find({ schoolId, chargeId: charge._id }).select('amount').lean();
+  const previousPaidAmount = previousPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const outstandingAmount = Math.max(0, Math.round(pricingAmount - previousPaidAmount));
+
+  return {
+    billingProfile,
+    pricingAmount,
+    previousPaidAmount,
+    outstandingAmount,
+  };
+}
+
+async function completeAcademicChargeGatewayPayment(paymentRecord, providerPayload, session) {
+  const AcademicCharge = require('../models/academicCharge.model');
+  const AcademicChargePayment = require('../models/academicChargePayment.model');
+
+  if (paymentRecord.academicChargePaymentId) {
+    return { alreadyProcessed: true, chargePaymentId: paymentRecord.academicChargePaymentId };
+  }
+
+  const chargeId = paymentRecord.academicChargeId;
+  if (!chargeId) {
+    throw new Error('Academic charge id missing on payment transaction');
+  }
+
+  const charge = await AcademicCharge.findById(chargeId).session(session);
+  if (!charge) {
+    throw new Error('Academic charge not found');
+  }
+
+  const providerTransactionId = String(
+    providerPayload?.data?.transaction?.id
+    || providerPayload?.transaction?.id
+    || paymentRecord.providerTransactionId
+    || ''
+  ).trim();
+
+  const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
+    schoolId: charge.schoolId,
+    charge,
+    referenceDate: new Date(),
+  });
+
+  const paidAmount = Math.max(
+    1,
+    Math.round(Number(paymentRecord.amount || outstandingAmount || charge.amount || 0)),
+  );
+
+  if (String(charge.status) === 'paid' && !outstandingAmount) {
+    paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
+    paymentRecord.status = 'approved';
+    paymentRecord.approvedAt = paymentRecord.approvedAt || new Date();
+    await paymentRecord.save({ session });
+    return { alreadyProcessed: true, chargeId: charge._id };
+  }
+
+  const [chargePayment] = await AcademicChargePayment.create(
+    [
+      {
+        schoolId: charge.schoolId,
+        chargeId: charge._id,
+        studentId: charge.studentId || null,
+        parentId: paymentRecord.parentId,
+        recordedByUserId: paymentRecord.parentId,
+        recordedByRole: 'parent',
+        amount: paidAmount,
+        method: paymentRecord.method === 'wompi' ? 'wompi' : (paymentRecord.method || 'parent_portal'),
+        notes: `Pago academico via pasarela (${paymentRecord.reference})`,
+        paidAt: new Date(),
+      },
+    ],
+    { session },
+  );
+
+  charge.status = 'paid';
+  charge.paidAt = chargePayment.paidAt;
+  charge.paymentMethod = chargePayment.method;
+  await charge.save({ session });
+
+  paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
+  paymentRecord.status = 'approved';
+  paymentRecord.approvedAt = new Date();
+  paymentRecord.failureReason = null;
+  paymentRecord.academicChargePaymentId = chargePayment._id;
+  paymentRecord.providerResponse = {
+    ...(paymentRecord.providerResponse || {}),
+    academicChargeCompletion: providerPayload,
+  };
+  await paymentRecord.save({ session });
+
+  return { chargePaymentId: chargePayment._id, chargeId: charge._id, paidAmount };
+}
+
 module.exports = {
   DEFAULT_ACADEMIC_MONTHLY_DUE_DAY,
   buildBillingProfileFeeSyncFields,
   buildConsolidatedMonthlyStatement,
   buildMonthKey,
+  completeAcademicChargeGatewayPayment,
   ensureConsolidatedMonthlyCharge,
   ensureSchoolConsolidatedMonthlyCharges,
   formatAcademicMonthLabel,
@@ -834,6 +953,7 @@ module.exports = {
   recalculateConsolidatedStatementPricing,
   refreshPendingIndividualTuitionCharges,
   refreshPendingMonthlyStatementCharges,
+  resolveOutstandingAcademicChargeAmount,
   serializeConsolidatedChargeForParent,
   syncSchoolBillingProfilesFromFeeConfiguration,
 };

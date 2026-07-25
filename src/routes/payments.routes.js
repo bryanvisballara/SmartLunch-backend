@@ -30,6 +30,7 @@ const {
 } = require('../services/bold.service');
 const { queueAutoDebitRechargeNotification } = require('../services/notification.service');
 const {
+  buildAcademicChargeReference,
   buildMatriculaReference,
   buildWompiIntegritySignature,
   fetchWompiTransaction,
@@ -1046,6 +1047,18 @@ async function reconcileEpaycoPaymentRecord(paymentRecord, providerPayload, { so
       };
     }
 
+    if (lockedPayment.purpose === 'academic_charge') {
+      const { completeAcademicChargeGatewayPayment } = require('../services/academicConsolidatedBilling.service');
+      await completeAcademicChargeGatewayPayment(lockedPayment, providerPayload, session);
+      await session.commitTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        purpose: 'academic_charge',
+      };
+    }
+
     const wallet = await Wallet.findOne({
       schoolId: lockedPayment.schoolId,
       studentId: lockedPayment.studentId,
@@ -1448,6 +1461,18 @@ async function reconcileBoldPaymentRecord(paymentRecord, providerPayload, { sour
         credited: true,
         status: 'approved',
         purpose: 'academic_matricula',
+      };
+    }
+
+    if (lockedPayment.purpose === 'academic_charge') {
+      const { completeAcademicChargeGatewayPayment } = require('../services/academicConsolidatedBilling.service');
+      await completeAcademicChargeGatewayPayment(lockedPayment, providerPayload, session);
+      await session.commitTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        purpose: 'academic_charge',
       };
     }
 
@@ -2052,6 +2077,15 @@ function buildWompiMatriculaRedirectUrl({ frontendBaseUrl, processId }) {
   return url.toString();
 }
 
+function buildWompiAcademicChargeRedirectUrl({ frontendBaseUrl, chargeId }) {
+  const base = String(frontendBaseUrl || getFrontendBaseUrl()).trim().replace(/\/$/, '');
+  const url = new URL('/parent', `${base}/`);
+  url.searchParams.set('section', 'finance');
+  url.searchParams.set('chargeId', String(chargeId || '').trim());
+  url.searchParams.set('paymentPurpose', 'academic_charge');
+  return url.toString();
+}
+
 async function reconcileWompiPaymentRecord(paymentRecord, providerPayload, { source = 'webhook' } = {}) {
   return runWithSchoolContext(paymentRecord?.schoolId, async () => {
     let session;
@@ -2101,20 +2135,32 @@ async function reconcileWompiPaymentRecord(paymentRecord, providerPayload, { sou
         return { received: true, credited: true, alreadyProcessed: true, status: 'approved' };
       }
 
-      if (lockedPayment.purpose === 'academic_matricula') {
-        const { completeMatriculaGatewayPayment } = require('../services/enrollmentMatricula.service');
-        await completeMatriculaGatewayPayment(lockedPayment, providerPayload, session);
-        await session.commitTransaction();
-        return {
-          received: true,
-          credited: true,
-          status: 'approved',
-          purpose: 'academic_matricula',
-        };
-      }
+    if (lockedPayment.purpose === 'academic_matricula') {
+      const { completeMatriculaGatewayPayment } = require('../services/enrollmentMatricula.service');
+      await completeMatriculaGatewayPayment(lockedPayment, providerPayload, session);
+      await session.commitTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        purpose: 'academic_matricula',
+      };
+    }
 
-      await session.abortTransaction();
-      return { received: true, credited: false, status: 'failed', message: 'Unsupported Wompi payment purpose' };
+    if (lockedPayment.purpose === 'academic_charge') {
+      const { completeAcademicChargeGatewayPayment } = require('../services/academicConsolidatedBilling.service');
+      await completeAcademicChargeGatewayPayment(lockedPayment, providerPayload, session);
+      await session.commitTransaction();
+      return {
+        received: true,
+        credited: true,
+        status: 'approved',
+        purpose: 'academic_charge',
+      };
+    }
+
+    await session.abortTransaction();
+    return { received: true, credited: false, status: 'failed', message: 'Unsupported Wompi payment purpose' };
     } catch (error) {
       if (session) {
         await session.abortTransaction();
@@ -2770,6 +2816,137 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
   }
 });
 
+router.post('/wompi/academic-charge-checkout', async (req, res) => {
+  try {
+    if (!isWompiConfigured()) {
+      return res.status(503).json({ message: 'Wompi no esta configurado en el backend.' });
+    }
+
+    const { schoolId, userId, role } = req.user;
+    if (!isWompiSchoolId(schoolId)) {
+      return res.status(403).json({ message: 'Wompi solo esta disponible para Millennium School.' });
+    }
+
+    const chargeId = toObjectId(req.body?.chargeId);
+    if (!chargeId) {
+      return res.status(400).json({ message: 'chargeId is required' });
+    }
+
+    const AcademicCharge = require('../models/academicCharge.model');
+    const {
+      resolveOutstandingAcademicChargeAmount,
+    } = require('../services/academicConsolidatedBilling.service');
+
+    const charge = await AcademicCharge.findOne({
+      _id: chargeId,
+      schoolId,
+      status: { $in: ['pending', 'overdue'] },
+      category: { $in: ['monthly_statement', 'monthly_tuition', 'enrollment_bonus', 'additional'] },
+    });
+
+    if (!charge) {
+      return res.status(404).json({ message: 'Cobro academico no encontrado o ya pagado.' });
+    }
+
+    const allowed = await canAccessStudent(req.user, charge.studentId);
+    if (!allowed) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
+      schoolId,
+      charge,
+      referenceDate: new Date(),
+    });
+
+    if (outstandingAmount <= 0) {
+      return res.status(409).json({ message: 'Este cobro ya fue pagado.' });
+    }
+
+    const amountInCents = Math.max(1, Math.round(Number(outstandingAmount) * 100));
+    if (!Number.isFinite(amountInCents) || amountInCents < 100) {
+      return res.status(400).json({ message: 'Monto de cobro invalido.' });
+    }
+
+    const parentUser = await User.findOne({
+      _id: userId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    }).select('name email phone documentType documentNumber');
+
+    if (!parentUser) {
+      return res.status(404).json({ message: 'Parent user not found' });
+    }
+
+    const student = await Student.findOne({
+      _id: charge.studentId,
+      schoolId,
+      deletedAt: null,
+    }).select('name');
+
+    const reference = buildAcademicChargeReference();
+    const frontendBaseUrl = getFrontendBaseUrlFromRequest(req);
+    const redirectUrl = buildWompiAcademicChargeRedirectUrl({
+      frontendBaseUrl,
+      chargeId: charge._id,
+    });
+    const integritySignature = buildWompiIntegritySignature({
+      reference,
+      amountInCents,
+      currency: 'COP',
+    });
+
+    const payment = await PaymentTransaction.create({
+      schoolId,
+      studentId: charge.studentId,
+      parentId: role === 'admin' ? (req.body?.parentUserId || userId) : userId,
+      amount: outstandingAmount,
+      method: 'wompi',
+      documentType: normalizeWompiLegalIdType(parentUser.documentType),
+      documentNumber: String(parentUser.documentNumber || '').trim(),
+      reference,
+      status: 'pending',
+      providerStatus: 'PENDING',
+      purpose: 'academic_charge',
+      academicChargeId: charge._id,
+      description: `${String(charge.concept || '').trim() || 'Pago academico'} · ${student?.name || 'estudiante'}`,
+      providerResponse: {
+        frontendBaseUrl,
+        redirectUrl,
+      },
+    });
+
+    return res.status(200).json({
+      paymentId: payment._id,
+      reference,
+      amount: payment.amount,
+      amountInCents,
+      checkout: {
+        publicKey: getWompiPublicKey(),
+        currency: 'COP',
+        amountInCents,
+        reference,
+        integritySignature,
+        redirectUrl,
+        sandbox: isWompiSandboxMode(),
+        customerData: {
+          email: String(parentUser.email || '').trim(),
+          fullName: String(parentUser.name || '').trim(),
+          phoneNumber: String(parentUser.phone || '').replace(/\D/g, '').slice(-10),
+          phoneNumberPrefix: '+57',
+          legalId: String(parentUser.documentNumber || '').trim(),
+          legalIdType: normalizeWompiLegalIdType(parentUser.documentType),
+        },
+        description: payment.description,
+        chargeId: String(charge._id),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/wompi/matricula-status', async (req, res) => {
   try {
     const { schoolId, userId, role } = req.user;
@@ -2828,6 +3005,78 @@ router.get('/wompi/matricula-status', async (req, res) => {
       providerStatus: refreshedPayment?.providerStatus || payment.providerStatus,
       approvedAt: refreshedPayment?.approvedAt || payment.approvedAt || null,
       process: process ? serializeProcessForParent(process) : null,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/wompi/academic-charge-status', async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const reference = String(req.query?.reference || '').trim();
+    const transactionId = String(req.query?.transactionId || req.query?.id || '').trim();
+
+    if (!reference && !transactionId) {
+      return res.status(400).json({ message: 'reference or transactionId is required' });
+    }
+
+    const paymentQuery = { schoolId, method: 'wompi', purpose: 'academic_charge' };
+    if (role !== 'admin') {
+      paymentQuery.parentId = userId;
+    }
+
+    const payment = await findPaymentTransactionRecord({
+      ...paymentQuery,
+      $or: [
+        ...(reference ? [{ reference }] : []),
+        ...(transactionId ? [{ providerTransactionId: transactionId }] : []),
+      ],
+    });
+
+    if (!payment) {
+      return res.status(404).json({ message: 'Payment transaction not found' });
+    }
+
+    if ((transactionId || reference) && payment.status === 'pending' && isWompiConfigured()) {
+      try {
+        const providerTransaction = transactionId
+          ? await fetchWompiTransaction(transactionId)
+          : null;
+        if (providerTransaction) {
+          await reconcileWompiPaymentRecord(payment, { data: { transaction: providerTransaction } }, { source: 'status_query' });
+        }
+      } catch (statusError) {
+        console.warn('[WOMPI_ACADEMIC_CHARGE_STATUS_SYNC_FAILED]', {
+          reference: payment.reference,
+          transactionId,
+          message: statusError.message,
+        });
+      }
+    }
+
+    const refreshedPayment = await findPaymentTransactionRecord({ _id: payment._id }, { lean: true });
+    const AcademicCharge = require('../models/academicCharge.model');
+    const charge = refreshedPayment?.academicChargeId
+      ? await AcademicCharge.findOne({ _id: refreshedPayment.academicChargeId, schoolId }).lean()
+      : null;
+
+    return res.status(200).json({
+      reference: refreshedPayment?.reference || payment.reference,
+      status: refreshedPayment?.status || payment.status,
+      providerStatus: refreshedPayment?.providerStatus || payment.providerStatus,
+      approvedAt: refreshedPayment?.approvedAt || payment.approvedAt || null,
+      amount: refreshedPayment?.amount || payment.amount,
+      charge: charge
+        ? {
+          _id: charge._id,
+          concept: charge.concept,
+          status: charge.status,
+          amount: charge.amount,
+          paidAt: charge.paidAt || null,
+          category: charge.category,
+        }
+        : null,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

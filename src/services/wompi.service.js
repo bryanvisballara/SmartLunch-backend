@@ -161,10 +161,15 @@ function buildMatriculaReference() {
   return `MAT-${Date.now()}-${Math.floor(Math.random() * 1e6).toString().padStart(6, '0')}`;
 }
 
+function buildAcademicChargeReference() {
+  return `ACA-${Date.now()}-${Math.floor(Math.random() * 1e6).toString().padStart(6, '0')}`;
+}
+
 module.exports = {
   MILLENNIUM_SCHOOL_ID,
   WOMPI_SANDBOX_API_URL,
   WOMPI_PRODUCTION_API_URL,
+  buildAcademicChargeReference,
   buildMatriculaReference,
   buildWompiIntegritySignature,
   fetchWompiTransaction,

@@ -30,11 +30,14 @@ import {
   getParentAcademicBilling,
   getParentAcademicFeed,
   getParentPortalOverview,
+  createWompiAcademicChargeCheckout,
+  getWompiAcademicChargePaymentStatus,
   payParentAcademicCharge,
   toggleParentAcademicFeedCommentLike,
   toggleParentAcademicFeedLike,
   uploadCommunityPublicationMedia,
 } from '../../services/parent.service';
+import { launchWompiWebCheckout } from '../../components/WompiPaymentButton';
 import StudentAssignmentsPanel from '../components/StudentAssignmentsPanel';
 import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import { getParentNursingRecords } from '../../services/nursing.service';
@@ -3317,8 +3320,10 @@ function ParentAnnouncementImage({ mediaItem, fallbackAlt }) {
 function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiRef = null }) {
   const videoRef = useRef(null);
   const [isPaused, setIsPaused] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const userPausedRef = useRef(false);
   const inViewRef = useRef(false);
+  const mutedRef = useRef(false);
 
   const pauseVideo = useCallback(() => {
     const video = videoRef.current;
@@ -3340,11 +3345,24 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
     }
 
     ParentFeedAutoVideo.activeVideo = video;
-    video.muted = true;
+    video.muted = mutedRef.current;
     try {
       await video.play();
       setIsPaused(false);
     } catch {
+      // Browsers may block unmuted autoplay; retry muted so playback still starts.
+      if (!mutedRef.current) {
+        mutedRef.current = true;
+        video.muted = true;
+        setIsMuted(true);
+        try {
+          await video.play();
+          setIsPaused(false);
+          return;
+        } catch {
+          // fall through
+        }
+      }
       setIsPaused(true);
     }
   }, []);
@@ -3360,6 +3378,21 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
     userPausedRef.current = true;
     pauseVideo();
   }, [pauseVideo, playVideo]);
+
+  const toggleMute = useCallback((event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const video = videoRef.current;
+    const nextMuted = !mutedRef.current;
+    mutedRef.current = nextMuted;
+    setIsMuted(nextMuted);
+    if (video) {
+      video.muted = nextMuted;
+      if (!nextMuted && video.paused && inViewRef.current && !userPausedRef.current) {
+        playVideo();
+      }
+    }
+  }, [playVideo]);
 
   useEffect(() => {
     if (!videoApiRef) return undefined;
@@ -3414,7 +3447,7 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
       <video
         autoPlay={false}
         loop
-        muted
+        muted={isMuted}
         playsInline
         poster={poster || undefined}
         preload="metadata"
@@ -3424,6 +3457,26 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
       {isPaused ? (
         <span aria-hidden="true" className="campus-parent-mobile__feed-video-play-icon" />
       ) : null}
+      <button
+        aria-label={isMuted ? 'Activar sonido' : 'Silenciar video'}
+        className={`campus-parent-mobile__feed-video-mute${isMuted ? ' is-muted' : ''}`}
+        onClick={toggleMute}
+        onTouchEnd={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
+        type="button"
+      >
+        {isMuted ? (
+          <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
+            <path d="M11 5 6 9H3v6h3l5 4V5Z" fill="currentColor" />
+            <path d="m16 9 5 5M21 9l-5 5" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+          </svg>
+        ) : (
+          <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
+            <path d="M11 5 6 9H3v6h3l5 4V5Z" fill="currentColor" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 }
@@ -6612,8 +6665,39 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     const processId = String(params.get('matriculaProcessId') || '').trim();
     const paymentPurpose = String(params.get('paymentPurpose') || '').trim();
     const wompiTransactionId = String(params.get('id') || '').trim();
+    const chargeId = String(params.get('chargeId') || '').trim();
+
+    if (paymentPurpose === 'academic_charge' && chargeId) {
+      let cancelled = false;
+      const resumeAcademicChargePayment = async () => {
+        try {
+          if (wompiTransactionId) {
+            await getWompiAcademicChargePaymentStatus({ transactionId: wompiTransactionId }).catch(() => null);
+          }
+          const billingResponse = await getParentAcademicBilling();
+          if (cancelled) return;
+          setAcademicBilling(billingResponse.data || {
+            summary: { pendingAmount: 0, pendingCount: 0 },
+            currentCharges: [],
+            charges: [],
+            payments: [],
+            paymentHistory: [],
+            pricingGuides: {},
+          });
+          setAcademicPaymentMessage('Si el pago fue aprobado en Wompi, el saldo se actualizará en unos segundos.');
+          setShowFinanceConceptsSheet(false);
+        } catch (_error) {
+          // Keep current finance state; parent can refresh manually.
+        }
+      };
+      resumeAcademicChargePayment();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     if (!processId || paymentPurpose !== 'enrollment_matricula') {
-      return;
+      return undefined;
     }
 
     let cancelled = false;
@@ -6995,7 +7079,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       return;
     }
 
-    const isAnnualTuition = String(primaryPendingCharge?.category || '').toLowerCase() === 'annual_tuition';
+    const chargeCategory = String(primaryPendingCharge?.category || '').toLowerCase();
+    const isAnnualTuition = chargeCategory === 'annual_tuition';
+    const isWompiAcademicCharge = ['monthly_statement', 'monthly_tuition', 'enrollment_bonus', 'additional'].includes(chargeCategory);
 
     if (isAnnualTuition) {
       setPayingChargeId(payableChargeIds[0]);
@@ -7024,6 +7110,18 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     setAcademicPaymentMessage('');
 
     try {
+      if (isWompiAcademicCharge && isMillenniumParent) {
+        const response = await createWompiAcademicChargeCheckout(payableChargeIds[0]);
+        const checkout = response.data?.checkout;
+        if (!checkout?.reference || !checkout?.integritySignature) {
+          throw new Error('No se pudo preparar la pasarela Wompi.');
+        }
+        setShowFinanceConceptsSheet(false);
+        setAcademicPaymentMessage('Abriendo Wompi...');
+        launchWompiWebCheckout(checkout);
+        return;
+      }
+
       await payParentAcademicCharge(payableChargeIds[0], { method: 'parent_portal' });
       const billingResponse = await getParentAcademicBilling();
       setAcademicBilling(billingResponse.data || {
@@ -7041,7 +7139,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       if (whatsappUrl) {
         window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
       }
-      setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo registrar el pago.');
+      setAcademicPaymentMessage(error?.response?.data?.message || 'No se pudo iniciar el pago.');
     } finally {
       setPayingChargeId('');
     }
