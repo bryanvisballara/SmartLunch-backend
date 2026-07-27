@@ -4033,9 +4033,18 @@ function buildAcademicStudentPaymentPlan({
     recordedByRole: payment.recordedByRole || '',
   }));
 
-  const annualTuitionCharges = relatedCharges
-    .filter((charge) => String(charge.category || '') === 'annual_tuition')
-    .sort((left, right) => new Date(left.dueDate || 0) - new Date(right.dueDate || 0));
+  const annualInstallmentCount = normalizeAcademicInstallmentCount(effectiveBillingProfile.annualTuitionInstallments, 1);
+  const activeAnnualTuitionCharges = relatedCharges
+    .filter((charge) => String(charge.category || '') === 'annual_tuition' && String(charge.status || '') !== 'cancelled')
+    .sort((left, right) => new Date(left.dueDate || left.createdAt || 0) - new Date(right.dueDate || right.createdAt || 0));
+  const paidAnnualTuitionCharges = activeAnnualTuitionCharges.filter((charge) => String(charge.status || '') === 'paid');
+  const pendingAnnualTuitionCharges = activeAnnualTuitionCharges.filter((charge) => ['pending', 'overdue'].includes(String(charge.status || '')));
+  // Single-installment matrícula: if already paid, ignore leftover pending twin charges.
+  const annualTuitionCharges = paidAnnualTuitionCharges.length > 0 && annualInstallmentCount <= 1
+    ? [paidAnnualTuitionCharges.sort((left, right) => new Date(left.paidAt || left.createdAt || 0) - new Date(right.paidAt || right.createdAt || 0))[0]]
+    : (paidAnnualTuitionCharges.length > 0
+      ? [...paidAnnualTuitionCharges, ...pendingAnnualTuitionCharges].slice(0, annualInstallmentCount)
+      : pendingAnnualTuitionCharges);
   const annualTuitionRows = annualTuitionCharges.map((charge, index) => {
     const chargePayments = charge?._id ? paymentsByChargeId.get(String(charge._id)) || [] : [];
     const latestPayment = chargePayments[0] || null;
@@ -4123,7 +4132,6 @@ function buildAcademicStudentPaymentPlan({
     const activeAnnualAdditionalDiscountAmount = annualPricing.activeAnnualAdditionalDiscountAmount;
     const annualAmount = annualPricing.effectiveAmount;
     const annualBenefitLabel = annualPricing.benefitLabel;
-    const annualInstallmentCount = normalizeAcademicInstallmentCount(effectiveBillingProfile.annualTuitionInstallments, 1);
     const annualInstallmentAmounts = annualAmount > 0 ? splitAcademicAmountIntoInstallments(annualAmount, annualInstallmentCount) : [0];
     const annualBaseInstallmentAmounts = annualBaseAmount > 0 ? splitAcademicAmountIntoInstallments(annualBaseAmount, annualInstallmentCount) : annualInstallmentAmounts;
     const annualBenefitParts = [];
@@ -4902,25 +4910,34 @@ function isPendingEnrollmentPlanRow(row = {}) {
 }
 
 function summarizeStudentAccountEnrollment(account = {}) {
-  const enrollmentCharges = (account.charges || []).filter((charge) => String(charge.category || '') === 'annual_tuition');
+  const enrollmentCharges = (account.charges || []).filter((charge) => (
+    String(charge.category || '') === 'annual_tuition'
+    && String(charge.status || '') !== 'cancelled'
+  ));
   const enrollmentPlanRows = (account.paymentPlan?.rows || []).filter((row) => String(row.category || '') === 'annual_tuition');
+  const paidEnrollmentCharges = enrollmentCharges.filter((charge) => String(charge.status || '') === 'paid');
   const pendingEnrollmentCharges = enrollmentCharges.filter(isPendingEnrollmentCharge);
-  const pendingEnrollmentPlanRows = enrollmentPlanRows.filter(isPendingEnrollmentPlanRow);
-  const pendingAmountFromCharges = pendingEnrollmentCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0);
+  // If matrícula is already paid, ignore leftover pending twin charges in account status.
+  const effectivePendingEnrollmentCharges = paidEnrollmentCharges.length > 0 ? [] : pendingEnrollmentCharges;
+  const pendingEnrollmentPlanRows = paidEnrollmentCharges.length > 0
+    ? []
+    : enrollmentPlanRows.filter(isPendingEnrollmentPlanRow);
+  const pendingAmountFromCharges = effectivePendingEnrollmentCharges.reduce((sum, charge) => sum + Number(charge.amount || 0), 0);
   const pendingAmountFromPlan = pendingEnrollmentPlanRows
     .filter((row) => {
       const chargeId = String(row.existingChargeId || '').trim();
       if (!chargeId) return true;
-      return !pendingEnrollmentCharges.some((charge) => String(charge._id) === chargeId);
+      return !effectivePendingEnrollmentCharges.some((charge) => String(charge._id) === chargeId);
     })
     .reduce((sum, row) => sum + Number(row.outstandingAmount || row.amount || 0), 0);
   const enrollmentPendingAmount = pendingAmountFromCharges + pendingAmountFromPlan;
   const enrollmentPaidAmount = Math.max(
-    enrollmentCharges.reduce((sum, charge) => sum + Number(charge.paidAmount || 0), 0),
-    enrollmentPlanRows.reduce((sum, row) => sum + Number(row.paidAmount || 0), 0),
-    enrollmentPlanRows.some((row) => String(row.status || '') === 'paid') ? enrollmentPlanRows
+    0,
+    ...paidEnrollmentCharges.map((charge) => Number(charge.paidAmount || charge.amount || 0)),
+    ...enrollmentPlanRows.map((row) => Number(row.paidAmount || 0)),
+    ...enrollmentPlanRows
       .filter((row) => String(row.status || '') === 'paid')
-      .reduce((sum, row) => sum + Number(row.paidAmount || row.chargeAmount || row.amount || 0), 0) : 0
+      .map((row) => Number(row.paidAmount || row.chargeAmount || row.amount || 0)),
   );
   const hasEnrollmentActivity = enrollmentCharges.length > 0
     || enrollmentPlanRows.length > 0
@@ -4928,8 +4945,8 @@ function summarizeStudentAccountEnrollment(account = {}) {
     || enrollmentPendingAmount > 0;
   const enrollmentStatus = enrollmentPendingAmount > 0
     ? 'pending'
-    : (hasEnrollmentActivity ? 'paid' : 'none');
-  const hasEnrollmentOverdue = pendingEnrollmentCharges.some((charge) => String(charge.status) === 'overdue' || Number(charge.overdueMonths || 0) > 0)
+    : (hasEnrollmentActivity || paidEnrollmentCharges.length > 0 ? 'paid' : 'none');
+  const hasEnrollmentOverdue = effectivePendingEnrollmentCharges.some((charge) => String(charge.status) === 'overdue' || Number(charge.overdueMonths || 0) > 0)
     || pendingEnrollmentPlanRows.some((row) => String(row.status) === 'overdue');
   const pensionPlanRows = (account.paymentPlan?.rows || []).filter((row) => String(row.category || '') === 'monthly_tuition');
   const pensionPendingAmount = pensionPlanRows
@@ -4947,7 +4964,7 @@ function summarizeStudentAccountEnrollment(account = {}) {
       : (enrollmentStatus === 'paid' ? 'Matrícula pagada' : 'Sin matrícula'),
     enrollmentPendingAmount,
     enrollmentPaidAmount,
-    enrollmentOverdueMonths: pendingEnrollmentCharges.reduce((maxMonths, charge) => Math.max(maxMonths, Number(charge.overdueMonths || 0)), 0),
+    enrollmentOverdueMonths: effectivePendingEnrollmentCharges.reduce((maxMonths, charge) => Math.max(maxMonths, Number(charge.overdueMonths || 0)), 0),
     pensionPendingAmount,
     pensionPaidAmount,
     hasPensionActivity,
@@ -8881,7 +8898,18 @@ router.post('/billing/charges', async (req, res) => {
     const createdCharges = [];
 
     if (links.length > 0) {
+      // One academic charge per student — never one per parent link.
+      // Students with two acudientes previously got a paid charge + leftover pending twin.
+      const linksByStudentId = new Map();
       for (const link of links) {
+        const studentKey = String(link.studentId || '');
+        if (!studentKey || linksByStudentId.has(studentKey)) {
+          continue;
+        }
+        linksByStudentId.set(studentKey, link);
+      }
+
+      for (const link of linksByStudentId.values()) {
         const student = studentMap.get(String(link.studentId));
         const billingProfile = billingProfilesByStudentId.get(String(link.studentId || '')) || null;
         const existingMonthlyCharge = normalizedCategory === 'monthly_tuition' && normalizeText(monthKey)
@@ -8890,6 +8918,30 @@ router.post('/billing/charges', async (req, res) => {
         if (existingMonthlyCharge) {
           createdCharges.push(existingMonthlyCharge);
           continue;
+        }
+
+        if (normalizedCategory === 'annual_tuition') {
+          const existingPaidAnnual = await AcademicCharge.findOne({
+            schoolId,
+            studentId: link.studentId,
+            category: 'annual_tuition',
+            status: 'paid',
+          }).sort({ paidAt: 1, createdAt: 1 });
+          if (existingPaidAnnual) {
+            createdCharges.push(existingPaidAnnual);
+            continue;
+          }
+
+          const existingPendingAnnual = await AcademicCharge.findOne({
+            schoolId,
+            studentId: link.studentId,
+            category: 'annual_tuition',
+            status: { $in: ['pending', 'overdue'] },
+          }).sort({ createdAt: 1 });
+          if (existingPendingAnnual) {
+            createdCharges.push(existingPendingAnnual);
+            continue;
+          }
         }
 
         createdCharges.push(await createCharge({
@@ -9041,6 +9093,20 @@ router.post('/billing/charges/:chargeId/pay', async (req, res) => {
     }
     charge.paymentMethod = method;
     await charge.save();
+
+    if (String(charge.category || '') === 'annual_tuition' && String(charge.status) === 'paid' && charge.studentId) {
+      // Cancel leftover twin pending matrícula charges (historically created once per acudiente).
+      await AcademicCharge.updateMany(
+        {
+          schoolId,
+          studentId: charge.studentId,
+          category: 'annual_tuition',
+          status: { $in: ['pending', 'overdue'] },
+          _id: { $ne: charge._id },
+        },
+        { $set: { status: 'cancelled' } },
+      );
+    }
 
     if (isMillenniumSchoolId(schoolId) && String(charge.category || '') === 'annual_tuition') {
       await linkCarteraPaymentToEnrollmentMatricula({

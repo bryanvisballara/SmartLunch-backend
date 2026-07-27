@@ -1731,6 +1731,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     dateTo: getBogotaTodayDateInput(),
     studentId: '',
   }));
+  const [paymentHistoryStudentQuery, setPaymentHistoryStudentQuery] = useState('');
+  const [paymentHistoryStudentMenuOpen, setPaymentHistoryStudentMenuOpen] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState({ payments: [], total: 0, loading: false });
   const [deleteBillingPaymentModal, setDeleteBillingPaymentModal] = useState({ open: false, paymentId: '', studentName: '', concept: '' });
   const [billingPaymentDeletionRequests, setBillingPaymentDeletionRequests] = useState([]);
@@ -1913,6 +1915,22 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const billingEnrollmentFocus = billing.billingFocus === 'enrollment';
 
   const billingStudentAccounts = useMemo(() => Array.isArray(billing.studentAccounts) ? billing.studentAccounts : [], [billing.studentAccounts]);
+  const paymentHistoryStudentOptions = useMemo(() => {
+    const term = normalizeBillingSearch(paymentHistoryStudentQuery);
+    const sorted = [...billingStudentAccounts].sort((left, right) => String(left.studentName || '').localeCompare(String(right.studentName || ''), 'es'));
+    if (!term) return sorted;
+    return sorted.filter((account) => normalizeBillingSearch([
+      account.studentName,
+      account.documentNumber,
+      account.grade,
+      account.course,
+      account.parentName,
+    ].filter(Boolean).join(' ')).includes(term));
+  }, [billingStudentAccounts, paymentHistoryStudentQuery]);
+  const selectedPaymentHistoryStudentName = useMemo(() => {
+    if (!paymentHistoryFilters.studentId) return '';
+    return billingStudentAccounts.find((account) => String(account.studentId) === String(paymentHistoryFilters.studentId))?.studentName || '';
+  }, [billingStudentAccounts, paymentHistoryFilters.studentId]);
   const billingWorkspaceAccounts = useMemo(() => {
     if (activeSection === 'enrollments') {
       return filterBillingEnrollmentAccounts(billingStudentAccounts, billingEnrollmentSubview);
@@ -1939,6 +1957,15 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
     return rows;
   }, [billingSearch, billingWorkspaceAccounts]);
+
+  useEffect(() => {
+    if (!paymentHistoryFilters.studentId) {
+      return;
+    }
+    if (!paymentHistoryStudentQuery && selectedPaymentHistoryStudentName) {
+      setPaymentHistoryStudentQuery(selectedPaymentHistoryStudentName);
+    }
+  }, [paymentHistoryFilters.studentId, paymentHistoryStudentQuery, selectedPaymentHistoryStudentName]);
 
   const billingStudentTotalPages = useMemo(() => {
     if (!filteredBillingStudentRows.length) return 1;
@@ -3229,12 +3256,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   };
 
   const openBillingPaymentModal = (row = null) => {
-    const preferredChargeId = row?.existingChargeId || '';
-    const preferredCharge = selectedBillingPendingCharges.find((charge) => String(charge._id) === String(preferredChargeId));
+    const preferredChargeId = String(row?.existingChargeId || '').trim();
+    const preferredCharge = selectedBillingPendingCharges.find((charge) => String(charge._id) === preferredChargeId);
     const rowAmount = Number(row?.outstandingAmount || row?.amount || row?.chargeAmount || 0);
     setBillingPaymentDraft((previous) => ({
       ...createBillingPaymentDraft(),
-      chargeId: preferredCharge?._id || '',
+      // Prefer the plan-row charge id even if list timing lags — never blank it and recreate twins.
+      chargeId: preferredCharge?._id || preferredChargeId || '',
       amount: String(Math.round(rowAmount > 0 ? rowAmount : Number(preferredCharge?.amount || 0))),
       enrollmentContractMode: isMatriculaBillingPaymentRow(row, preferredCharge) ? '' : '',
     }));
@@ -4205,17 +4233,64 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                 value={paymentHistoryFilters.dateTo}
               />
             </label>
-            <label>
+            <label className="academic-secretary__billing-history-student">
               Alumno
-              <select
-                onChange={(event) => setPaymentHistoryFilters((previous) => ({ ...previous, studentId: event.target.value }))}
-                value={paymentHistoryFilters.studentId}
-              >
-                <option value="">Todos los alumnos</option>
-                {billingStudentAccounts.map((account) => (
-                  <option key={account.studentId} value={account.studentId}>{account.studentName}</option>
-                ))}
-              </select>
+              <div className="academic-secretary__billing-history-student-field">
+                <input
+                  aria-autocomplete="list"
+                  aria-expanded={paymentHistoryStudentMenuOpen}
+                  aria-label="Buscar alumno"
+                  onBlur={() => {
+                    window.setTimeout(() => setPaymentHistoryStudentMenuOpen(false), 120);
+                  }}
+                  onChange={(event) => {
+                    const nextQuery = event.target.value;
+                    setPaymentHistoryStudentQuery(nextQuery);
+                    setPaymentHistoryStudentMenuOpen(true);
+                    if (!nextQuery.trim()) {
+                      setPaymentHistoryFilters((previous) => ({ ...previous, studentId: '' }));
+                    }
+                  }}
+                  onFocus={() => setPaymentHistoryStudentMenuOpen(true)}
+                  placeholder="Escribe para filtrar alumnos"
+                  type="search"
+                  value={paymentHistoryStudentQuery}
+                />
+                {paymentHistoryStudentMenuOpen ? (
+                  <div className="academic-secretary__billing-history-student-menu" role="listbox">
+                    <button
+                      className={!paymentHistoryFilters.studentId ? 'is-active' : ''}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        setPaymentHistoryFilters((previous) => ({ ...previous, studentId: '' }));
+                        setPaymentHistoryStudentQuery('');
+                        setPaymentHistoryStudentMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      Todos los alumnos
+                    </button>
+                    {paymentHistoryStudentOptions.length === 0 ? (
+                      <div className="academic-secretary__billing-history-student-empty">Sin coincidencias</div>
+                    ) : paymentHistoryStudentOptions.map((account) => (
+                      <button
+                        className={String(paymentHistoryFilters.studentId) === String(account.studentId) ? 'is-active' : ''}
+                        key={account.studentId}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setPaymentHistoryFilters((previous) => ({ ...previous, studentId: account.studentId }));
+                          setPaymentHistoryStudentQuery(account.studentName || '');
+                          setPaymentHistoryStudentMenuOpen(false);
+                        }}
+                        type="button"
+                      >
+                        {account.studentName}
+                        {account.grade ? <span>{formatGradeLabel(account.grade)}</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </label>
             <button
               className="btn"
