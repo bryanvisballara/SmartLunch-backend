@@ -31,8 +31,21 @@ const {
   rejectMatriculaPurgeRequest,
   resolveReviewerName,
 } = require('../services/enrollmentMatriculaPurgeRequest.service');
+const {
+  ensureEnrollmentMatriculaPurgeIndexes,
+} = require('../services/ensureEnrollmentMatriculaPurgeIndexes');
 
 const RECTORIA_APPROVER_ROLES = ['rectoria', 'direccion', 'admin'];
+const purgeIndexReadyBySchool = new Set();
+
+async function ensurePurgeIndexesForSchool(schoolId) {
+  const key = String(schoolId || '').trim();
+  if (!key || purgeIndexReadyBySchool.has(key)) {
+    return;
+  }
+  await ensureEnrollmentMatriculaPurgeIndexes();
+  purgeIndexReadyBySchool.add(key);
+}
 
 function assertRectoriaApproverRole(role) {
   if (!RECTORIA_APPROVER_ROLES.includes(String(role || ''))) {
@@ -317,6 +330,7 @@ rectoriaRouter.get('/purge-requests/mine', async (req, res) => {
 
 rectoriaRouter.post('/purge-requests', async (req, res) => {
   try {
+    await ensurePurgeIndexesForSchool(req.user.schoolId);
     const actionType = normalizeText(req.body?.actionType);
     const processId = req.body?.processId;
 

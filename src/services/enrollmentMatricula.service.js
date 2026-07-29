@@ -704,11 +704,8 @@ function resolveCarteraPaymentMethodLabel(method = '') {
 }
 
 async function acknowledgeIntro({ processId, schoolId, parentId }) {
-  const process = await EnrollmentMatriculaProcess.findOne({
-    _id: processId,
-    schoolId,
-    parentId,
-  });
+  // Any linked parent must be able to continue the shared matricula process.
+  const process = await findProcessAccessibleByParent({ processId, schoolId, parentId });
   if (!process) throw new Error('Proceso de matricula no encontrado.');
   if (process.status === 'intro_pending') {
     process.status = 'consent_pending';
@@ -719,11 +716,7 @@ async function acknowledgeIntro({ processId, schoolId, parentId }) {
 }
 
 async function acceptConsent({ processId, schoolId, parentId, req }) {
-  const process = await EnrollmentMatriculaProcess.findOne({
-    _id: processId,
-    schoolId,
-    parentId,
-  });
+  const process = await findProcessAccessibleByParent({ processId, schoolId, parentId });
   if (!process) throw new Error('Proceso de matricula no encontrado.');
   if (!['intro_pending', 'consent_pending'].includes(process.status)) {
     return process;
@@ -737,6 +730,9 @@ async function acceptConsent({ processId, schoolId, parentId, req }) {
     ...evidence,
   };
   process.status = 'consent_accepted';
+  if (!process.introAcknowledgedAt) {
+    process.introAcknowledgedAt = new Date();
+  }
   await process.save();
   return process;
 }
@@ -848,11 +844,7 @@ async function finalizeMatriculaPaidProcess({
 }
 
 async function completeMatriculaDirectPayment({ processId, schoolId, parentId }) {
-  const process = await EnrollmentMatriculaProcess.findOne({
-    _id: processId,
-    schoolId,
-    parentId,
-  });
+  const process = await findProcessAccessibleByParent({ processId, schoolId, parentId });
 
   if (!process) {
     throw new Error('Proceso de matricula no encontrado.');
@@ -1425,6 +1417,8 @@ async function clearSignedDocumentsForRectoria({ schoolId, processId }) {
     $or: [
       { 'contract.signedAt': { $ne: null } },
       { 'pagare.signedAt': { $ne: null } },
+      { 'contract.signers.0': { $exists: true } },
+      { 'pagare.signers.0': { $exists: true } },
     ],
   });
 

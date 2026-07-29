@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ParentNotificationCenter from '../../components/parent/ParentNotificationCenter';
-import { LOGIN_PATH } from '../../lib/authNavigation';
+import { redirectToLoginPage } from '../../lib/authNavigation';
 import { ComergioBrandTitle } from '../../components/ComergioBrandTitle';
 import femImage from '../../assets/fem.png';
 import informesImage from '../../assets/informes.png';
@@ -3317,6 +3317,23 @@ function ParentAnnouncementImage({ mediaItem, fallbackAlt }) {
   );
 }
 
+function clearFeedNowPlayingSession() {
+  try {
+    if (!navigator.mediaSession) return;
+    navigator.mediaSession.metadata = null;
+    navigator.mediaSession.playbackState = 'none';
+    ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'previoustrack', 'nexttrack'].forEach((action) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, null);
+      } catch {
+        // Unsupported action on this browser.
+      }
+    });
+  } catch {
+    // Media Session API unavailable.
+  }
+}
+
 function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiRef = null }) {
   const videoRef = useRef(null);
   const [isPaused, setIsPaused] = useState(true);
@@ -3330,11 +3347,15 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
     if (!video) return;
     video.pause();
     setIsPaused(true);
+    clearFeedNowPlayingSession();
   }, []);
 
   const playVideo = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
+    if (typeof document !== 'undefined' && document.hidden) {
+      return;
+    }
 
     if (ParentFeedAutoVideo.activeVideo && ParentFeedAutoVideo.activeVideo !== video) {
       try {
@@ -3349,6 +3370,7 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
     try {
       await video.play();
       setIsPaused(false);
+      clearFeedNowPlayingSession();
     } catch {
       // Browsers may block unmuted autoplay; retry muted so playback still starts.
       if (!mutedRef.current) {
@@ -3358,6 +3380,7 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
         try {
           await video.play();
           setIsPaused(false);
+          clearFeedNowPlayingSession();
           return;
         } catch {
           // fall through
@@ -3442,10 +3465,72 @@ function ParentFeedAutoVideo({ src, poster = '', isActiveSlide = true, videoApiR
     }
   }, [isActiveSlide, pauseVideo, playVideo]);
 
+  useEffect(() => {
+    const stopForBackground = () => {
+      pauseVideo();
+      if (ParentFeedAutoVideo.activeVideo === videoRef.current) {
+        ParentFeedAutoVideo.activeVideo = null;
+      }
+      clearFeedNowPlayingSession();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        stopForBackground();
+        return;
+      }
+      if (isActiveSlide && inViewRef.current && !userPausedRef.current) {
+        playVideo();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', stopForBackground);
+    window.addEventListener('blur', stopForBackground);
+
+    let removeAppListener = null;
+    import('@capacitor/app')
+      .then(({ App }) => App.addListener('appStateChange', ({ isActive }) => {
+        if (!isActive) {
+          stopForBackground();
+          return;
+        }
+        if (isActiveSlide && inViewRef.current && !userPausedRef.current) {
+          playVideo();
+        }
+      }))
+      .then((handle) => {
+        removeAppListener = () => handle?.remove?.();
+      })
+      .catch(() => {});
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', stopForBackground);
+      window.removeEventListener('blur', stopForBackground);
+      removeAppListener?.();
+      clearFeedNowPlayingSession();
+    };
+  }, [isActiveSlide, pauseVideo, playVideo]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('x-webkit-airplay', 'deny');
+    video.disablePictureInPicture = true;
+    if ('disableRemotePlayback' in video) {
+      video.disableRemotePlayback = true;
+    }
+  }, [src]);
+
   return (
     <div className={`campus-parent-mobile__feed-video${isPaused ? ' is-paused' : ''}`}>
       <video
         autoPlay={false}
+        disablePictureInPicture
+        disableRemotePlayback
         loop
         muted={isMuted}
         playsInline
@@ -3895,21 +3980,24 @@ function ParentMobilePortalHeader({
 
   return (
     <header className="parent-topbar">
-      {canOpenMenu ? (
-        <button
-          aria-expanded={isMenuOpen}
-          aria-label="Abrir menu"
-          className="parent-topbar-colibri-btn"
-          onClick={onToggleMenu}
-          type="button"
-        >
-          <img alt="" className="parent-topbar-colibri" src={colibriGameCover} />
-        </button>
-      ) : (
+      <div className="parent-topbar-leading">
+        {canOpenMenu ? (
+          <button
+            aria-expanded={isMenuOpen}
+            aria-label="Abrir menu"
+            className="parent-topbar-menu-btn"
+            onClick={onToggleMenu}
+            type="button"
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+        ) : null}
         <span className="parent-topbar-colibri-wrap" aria-hidden="true">
           <img alt="" className="parent-topbar-colibri" src={colibriGameCover} />
         </span>
-      )}
+      </div>
 
       <div className="parent-title-wrap">
         <p className="parent-school-name">{resolvedSchoolName}</p>
@@ -3947,7 +4035,13 @@ function ParentMobilePortalHeader({
               role="button"
               tabIndex={0}
             />
-            <div className="parent-profile-menu parent-profile-menu--portal" role="menu" style={profileMenuStyle || undefined}>
+            <div
+              className="parent-profile-menu parent-profile-menu--portal"
+              onMouseDown={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              role="menu"
+              style={profileMenuStyle || undefined}
+            >
               <button className="logout" onClick={onLogout} type="button">
                 <span className="icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -7062,7 +7156,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const onLogout = () => {
     setShowUserMenu(false);
     logout();
-    navigate(LOGIN_PATH, { replace: true });
+    redirectToLoginPage();
   };
 
   const onPayAcademicCharge = async () => {
@@ -7705,7 +7799,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     }
 
     const onPointerDown = (event) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setShowUserMenu(false);
+        return;
+      }
+
+      // Menu is portaled to document.body, so it is outside userMenuRef.
+      // Ignore presses on the menu itself so "Cerrar sesión" can receive the click.
+      const clickedInsideAnchor = Boolean(userMenuRef.current?.contains(target));
+      const clickedInsideMenu = Boolean(target.closest('.parent-profile-menu'));
+      if (!clickedInsideAnchor && !clickedInsideMenu) {
         setShowUserMenu(false);
       }
     };
@@ -8645,7 +8749,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           process={matriculaProcess}
           schoolId={user?.schoolId}
           schoolName={schoolDisplayName}
-          startAtIntro={matriculaFlowPendingResume ? false : ['intro_pending', 'consent_pending'].includes(matriculaProcess.status)}
+          startAtIntro={matriculaFlowPendingResume ? false : String(matriculaProcess.status || '') === 'intro_pending'}
         />
       ) : null}
 

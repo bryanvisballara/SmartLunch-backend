@@ -7,7 +7,7 @@
 
   position: fixed;
   inset: 0;
-  z-index: 12000;
+  z-index: 16000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -543,6 +543,10 @@
   font-size: 14px;
 }
 
+.matricula-flow-error--intro {
+  margin: 0 0 12px;
+}
+
 .matricula-flow-note--muted {
   font-size: 13px;
 }
@@ -896,7 +900,7 @@
 .matricula-pending-popup-overlay {
   position: fixed;
   inset: 0;
-  z-index: 11950;
+  z-index: 15950;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -979,6 +983,26 @@
   border-radius: 12px;
   padding: 12px 14px;
   font-weight: 600;
+}
+
+.enrollment-matricula-rectoria__flash {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.enrollment-matricula-rectoria__row-action {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.enrollment-matricula-rectoria__row-error {
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 600;
+  max-width: 220px;
+  line-height: 1.35;
 }
 
 .enrollment-matricula-rectoria__pending-note {
@@ -1082,7 +1106,8 @@
     animation: none !important;
   }
 
-  .matricula-flow-steps__card {
+  .matricula-flow-steps__card,
+  .matricula-flow-primary--intro {
     opacity: 1;
     transform: none;
   }

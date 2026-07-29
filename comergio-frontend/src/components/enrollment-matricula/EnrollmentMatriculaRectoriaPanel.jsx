@@ -151,6 +151,7 @@ function EnrollmentMatriculaRectoriaPanel() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [rowErrorByKey, setRowErrorByKey] = useState({});
   const [successMessage, setSuccessMessage] = useState('');
 
   const loadRecords = useCallback(async () => {
@@ -233,6 +234,14 @@ function EnrollmentMatriculaRectoriaPanel() {
     setActionLoading(loadingKey);
     setErrorMessage('');
     setSuccessMessage('');
+    if (loadingKey) {
+      setRowErrorByKey((current) => {
+        if (!current[loadingKey]) return current;
+        const next = { ...current };
+        delete next[loadingKey];
+        return next;
+      });
+    }
     try {
       const payload = processId
         ? { actionType, processId }
@@ -241,7 +250,11 @@ function EnrollmentMatriculaRectoriaPanel() {
       setSuccessMessage(response.data?.message || 'Solicitud enviada a Rectoría.');
       await loadRecords();
     } catch (error) {
-      setErrorMessage(error?.response?.data?.message || 'No se pudo enviar la solicitud.');
+      const message = error?.response?.data?.message || 'No se pudo enviar la solicitud.';
+      setErrorMessage(message);
+      if (loadingKey) {
+        setRowErrorByKey((current) => ({ ...current, [loadingKey]: message }));
+      }
     } finally {
       setActionLoading('');
     }
@@ -271,8 +284,8 @@ function EnrollmentMatriculaRectoriaPanel() {
         </button>
       </div>
 
-      {errorMessage ? <div className="matricula-flow-error">{errorMessage}</div> : null}
-      {successMessage ? <div className="enrollment-matricula-rectoria__success">{successMessage}</div> : null}
+      {errorMessage ? <div className="matricula-flow-error enrollment-matricula-rectoria__flash">{errorMessage}</div> : null}
+      {successMessage ? <div className="enrollment-matricula-rectoria__success enrollment-matricula-rectoria__flash">{successMessage}</div> : null}
       {loading ? <p>Cargando registros de matrícula digital...</p> : null}
 
       {!loading && activeTab === 'consents' ? (
@@ -332,14 +345,21 @@ function EnrollmentMatriculaRectoriaPanel() {
                           Pendiente desde {formatDateTime(pendingIndividual.submittedAt)}
                         </span>
                       ) : (
-                        <button
-                          className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
-                          disabled={Boolean(isSubmitting)}
-                          onClick={() => onRequestPurge('clear_consent', item._id)}
-                          type="button"
-                        >
-                          {isSubmitting ? 'Enviando...' : 'Solicitar borrado'}
-                        </button>
+                        <div className="enrollment-matricula-rectoria__row-action">
+                          <button
+                            className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
+                            disabled={Boolean(isSubmitting)}
+                            onClick={() => onRequestPurge('clear_consent', item._id)}
+                            type="button"
+                          >
+                            {isSubmitting ? 'Enviando...' : 'Solicitar borrado'}
+                          </button>
+                          {rowErrorByKey[`clear_consent:${item._id}`] ? (
+                            <span className="enrollment-matricula-rectoria__row-error">
+                              {rowErrorByKey[`clear_consent:${item._id}`]}
+                            </span>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -465,14 +485,21 @@ function EnrollmentMatriculaRectoriaPanel() {
                           Pendiente desde {formatDateTime(pendingIndividual.submittedAt)}
                         </span>
                       ) : (
-                        <button
-                          className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
-                          disabled={Boolean(isSubmitting)}
-                          onClick={() => onRequestPurge('clear_signature', item._id)}
-                          type="button"
-                        >
-                          {isSubmitting ? 'Enviando...' : 'Solicitar borrado'}
-                        </button>
+                        <div className="enrollment-matricula-rectoria__row-action">
+                          <button
+                            className="enrollment-matricula-rectoria__action enrollment-matricula-rectoria__action--danger"
+                            disabled={Boolean(isSubmitting)}
+                            onClick={() => onRequestPurge('clear_signature', item._id)}
+                            type="button"
+                          >
+                            {isSubmitting ? 'Enviando...' : 'Solicitar borrado'}
+                          </button>
+                          {rowErrorByKey[`clear_signature:${item._id}`] ? (
+                            <span className="enrollment-matricula-rectoria__row-error">
+                              {rowErrorByKey[`clear_signature:${item._id}`]}
+                            </span>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                   </tr>

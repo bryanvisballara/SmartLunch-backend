@@ -64,6 +64,19 @@ async function countRecordsForPurgeAction({ schoolId, actionType }) {
   throw createHttpError('Tipo de solicitud inválido.');
 }
 
+const SIGNED_DOCUMENTS_MATCH = {
+  $or: [
+    { 'contract.signedAt': { $ne: null } },
+    { 'pagare.signedAt': { $ne: null } },
+    { 'contract.signers.0': { $exists: true } },
+    { 'pagare.signers.0': { $exists: true } },
+  ],
+};
+
+function isDuplicateKeyError(error) {
+  return Boolean(error && (error.code === 11000 || String(error.message || '').includes('E11000')));
+}
+
 async function createIndividualConsentPurgeRequest({
   schoolId,
   userId,
@@ -96,23 +109,30 @@ async function createIndividualConsentPurgeRequest({
     throw createHttpError('Ya existe una solicitud pendiente para este consentimiento.', 409);
   }
 
-  const request = await EnrollmentMatriculaPurgeRequest.create({
-    schoolId,
-    actionType: 'clear_consent',
-    status: 'pending',
-    requestedByUserId: userId,
-    requestedByName: normalizeText(userName) || 'Usuario',
-    requestedByRole: normalizeText(userRole),
-    recordCount: 1,
-    processId,
-    chargeId: process.chargeId || null,
-    studentId: process.studentId || null,
-    studentName: normalizeText(process.studentName) || '',
-    parentName: normalizeText(process.parentName) || '',
-    submittedAt: new Date(),
-  });
+  try {
+    const request = await EnrollmentMatriculaPurgeRequest.create({
+      schoolId,
+      actionType: 'clear_consent',
+      status: 'pending',
+      requestedByUserId: userId,
+      requestedByName: normalizeText(userName) || 'Usuario',
+      requestedByRole: normalizeText(userRole),
+      recordCount: 1,
+      processId,
+      chargeId: process.chargeId || null,
+      studentId: process.studentId || null,
+      studentName: normalizeText(process.studentName) || '',
+      parentName: normalizeText(process.parentName) || '',
+      submittedAt: new Date(),
+    });
 
-  return serializePurgeRequest(request);
+    return serializePurgeRequest(request);
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw createHttpError('Ya existe una solicitud pendiente para este consentimiento.', 409);
+    }
+    throw error;
+  }
 }
 
 async function createIndividualSignaturePurgeRequest({
@@ -129,10 +149,7 @@ async function createIndividualSignaturePurgeRequest({
   const process = await EnrollmentMatriculaProcess.findOne({
     _id: processId,
     schoolId,
-    $or: [
-      { 'contract.signedAt': { $ne: null } },
-      { 'pagare.signedAt': { $ne: null } },
-    ],
+    ...SIGNED_DOCUMENTS_MATCH,
   }).select('studentId studentName parentName chargeId').lean();
 
   if (!process) {
@@ -150,23 +167,30 @@ async function createIndividualSignaturePurgeRequest({
     throw createHttpError('Ya existe una solicitud pendiente para estas firmas.', 409);
   }
 
-  const request = await EnrollmentMatriculaPurgeRequest.create({
-    schoolId,
-    actionType: 'clear_signature',
-    status: 'pending',
-    requestedByUserId: userId,
-    requestedByName: normalizeText(userName) || 'Usuario',
-    requestedByRole: normalizeText(userRole),
-    recordCount: 1,
-    processId,
-    chargeId: process.chargeId || null,
-    studentId: process.studentId || null,
-    studentName: normalizeText(process.studentName) || '',
-    parentName: normalizeText(process.parentName) || '',
-    submittedAt: new Date(),
-  });
+  try {
+    const request = await EnrollmentMatriculaPurgeRequest.create({
+      schoolId,
+      actionType: 'clear_signature',
+      status: 'pending',
+      requestedByUserId: userId,
+      requestedByName: normalizeText(userName) || 'Usuario',
+      requestedByRole: normalizeText(userRole),
+      recordCount: 1,
+      processId,
+      chargeId: process.chargeId || null,
+      studentId: process.studentId || null,
+      studentName: normalizeText(process.studentName) || '',
+      parentName: normalizeText(process.parentName) || '',
+      submittedAt: new Date(),
+    });
 
-  return serializePurgeRequest(request);
+    return serializePurgeRequest(request);
+  } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      throw createHttpError('Ya existe una solicitud pendiente para estas firmas.', 409);
+    }
+    throw error;
+  }
 }
 
 async function createMatriculaPurgeRequest({

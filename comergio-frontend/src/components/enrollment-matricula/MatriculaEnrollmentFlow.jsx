@@ -1003,13 +1003,28 @@ function MatriculaEnrollmentFlow({
     setLoading(true);
     setErrorMessage('');
     try {
-      const response = await acknowledgeEnrollmentMatriculaIntro(process._id);
-      const nextProcess = response.data?.process || process;
+      const processId = String(process?._id || process?.id || '').trim();
+      const currentStatus = String(process?.status || '');
+
+      // Already past the intro step — never trap the parent on this screen.
+      if (!processId || (currentStatus && currentStatus !== 'intro_pending')) {
+        setShowIntro(false);
+        return;
+      }
+
+      const response = await acknowledgeEnrollmentMatriculaIntro(processId);
+      const nextProcess = response.data?.process || { ...process, status: 'consent_pending' };
       setProcess(nextProcess);
       onProcessUpdated?.(nextProcess);
       setShowIntro(false);
     } catch (error) {
-      setErrorMessage(error?.response?.data?.message || 'No se pudo continuar.');
+      const message = error?.response?.data?.message || error?.message || 'No se pudo continuar.';
+      setErrorMessage(message);
+      // Soft-continue only if the process already moved forward on the server.
+      const status = String(process?.status || '');
+      if (status && status !== 'intro_pending') {
+        setShowIntro(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -1434,7 +1449,13 @@ function MatriculaEnrollmentFlow({
                   </li>
                 ))}
               </ol>
-              <button className="matricula-flow-primary matricula-flow-primary--intro" disabled={loading} onClick={onAckIntro} type="button">
+              {errorMessage ? <div className="matricula-flow-error matricula-flow-error--intro">{errorMessage}</div> : null}
+              <button
+                className="matricula-flow-primary matricula-flow-primary--intro"
+                disabled={loading}
+                onClick={onAckIntro}
+                type="button"
+              >
                 {loading ? 'Preparando...' : 'Entendido, continuar'}
                 {!loading ? <span aria-hidden="true" className="matricula-flow-primary__arrow">→</span> : null}
               </button>

@@ -2678,16 +2678,20 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
       return res.status(400).json({ message: 'processId is required' });
     }
 
-    const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
     const AcademicCharge = require('../models/academicCharge.model');
     const StudentBillingProfile = require('../models/studentBillingProfile.model');
     const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
-    const { markPaymentPending, resolveChargeAmount } = require('../services/enrollmentMatricula.service');
+    const {
+      findProcessAccessibleByParent,
+      markPaymentPending,
+      resolveChargeAmount,
+    } = require('../services/enrollmentMatricula.service');
 
-    const process = await EnrollmentMatriculaProcess.findOne({
-      _id: processId,
+    const parentUserId = role === 'admin' ? req.body?.parentUserId || userId : userId;
+    const process = await findProcessAccessibleByParent({
+      processId,
       schoolId,
-      parentId: role === 'admin' ? req.body?.parentUserId || userId : userId,
+      parentId: parentUserId,
     });
 
     if (!process) {

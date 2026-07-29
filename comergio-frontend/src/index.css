@@ -5490,6 +5490,39 @@ body.login-boot-active main.container {
   filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.2));
 }
 
+.parent-topbar-leading {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+}
+
+.parent-topbar-menu-btn {
+  display: inline-grid;
+  place-items: center;
+  gap: 0.28rem;
+  width: 2.55rem;
+  height: 2.55rem;
+  margin: 0;
+  padding: 0.55rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  cursor: pointer;
+}
+
+.parent-topbar-menu-btn span {
+  display: block;
+  width: 1.05rem;
+  height: 0.14rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .parent-topbar-colibri-wrap,
 .parent-topbar-colibri-btn {
   position: relative;
