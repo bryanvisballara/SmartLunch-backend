@@ -16,14 +16,72 @@ async function blobToDataUrl(blob) {
 
 async function compressCanvasToDataUrl(canvas, quality = 0.72) {
   return new Promise((resolve) => {
-    canvas.toBlob(async (blob) => {
-      if (!blob) {
+    const fallback = () => {
+      try {
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch (_error) {
         resolve('');
-        return;
       }
-      resolve(await blobToDataUrl(blob));
-    }, 'image/jpeg', quality);
+    };
+
+    if (typeof canvas.toBlob !== 'function') {
+      fallback();
+      return;
+    }
+
+    try {
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          fallback();
+          return;
+        }
+        try {
+          resolve(await blobToDataUrl(blob));
+        } catch (_error) {
+          fallback();
+        }
+      }, 'image/jpeg', quality);
+    } catch (_error) {
+      fallback();
+    }
   });
+}
+
+async function openCameraStream(facingMode = 'user') {
+  if (!navigator?.mediaDevices?.getUserMedia) {
+    throw new Error('Este dispositivo no permite usar la cámara desde el navegador.');
+  }
+
+  const attempts = [
+    {
+      audio: false,
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+    },
+    {
+      audio: false,
+      video: {
+        facingMode,
+      },
+    },
+    {
+      audio: false,
+      video: true,
+    },
+  ];
+
+  let lastError = null;
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('No se pudo abrir la cámara. Revisa los permisos del dispositivo.');
 }
 
 export function resolveIdentityCaptureMode(value = {}) {
@@ -101,23 +159,19 @@ export default function MatriculaIdentityCapture({
     setCameraState('requesting');
     setError('');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      });
+      const stream = await openCameraStream(facingMode);
       streamRef.current = stream;
       if (videoRef.current) {
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.muted = true;
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
       setCameraState('ready');
     } catch (err) {
       setCameraState('error');
-      setError(err?.message || 'No se pudo abrir la cámara. Revisa los permisos del dispositivo.');
+      setError(err?.message || 'No se pudo abrir la cámara. Revisa los permisos del dispositivo o usa “Tomar con cámara del teléfono”.');
     }
   }, [stopCamera]);
 
@@ -257,11 +311,15 @@ export default function MatriculaIdentityCapture({
     try {
       const dataUrl = await blobToDataUrl(file);
       setError('');
+      if (uploadTarget === 'selfie' || mode === 'selfie') {
+        setPendingSelfie(dataUrl);
+        return;
+      }
       if (uploadTarget === 'idFront' || mode === 'idFront') {
         setPendingIdFront(dataUrl);
-      } else {
-        setPendingIdBack(dataUrl);
+        return;
       }
+      setPendingIdBack(dataUrl);
     } catch (err) {
       setError(err?.message || 'No se pudo cargar el archivo.');
     }
@@ -281,7 +339,7 @@ export default function MatriculaIdentityCapture({
       return 'Revisa el reverso de tu cédula. Si se ve claro, continúa; si no, toma otra.';
     }
     if (mode === 'selfie') {
-      return `${signerName}: coloca tu cara dentro del óvalo y tómate un selfie. No se permite galería.`;
+      return `${signerName}: coloca tu cara dentro del óvalo y tómate un selfie. Si la cámara en pantalla falla (común en Android), usa “Usar cámara del teléfono”.`;
     }
     if (mode === 'idFront') {
       return `${signerName}: captura el FRENTE de tu cédula (cámara o archivo). Puedes continuar después si no la tienes ahora.`;
@@ -411,33 +469,57 @@ export default function MatriculaIdentityCapture({
         <div className="matricula-identity__actions">
           <button
             className="matricula-flow-primary"
-            disabled={cameraState !== 'ready' || saving}
-            onClick={takePhoto}
+            disabled={(cameraState !== 'ready' && cameraState !== 'error') || saving}
+            onClick={() => {
+              if (cameraState === 'error') {
+                setUploadTarget(mode === 'selfie' ? 'selfie' : (mode === 'idFront' ? 'idFront' : 'idBack'));
+                fileInputRef.current?.click();
+                return;
+              }
+              takePhoto();
+            }}
             type="button"
           >
-            {cameraState === 'requesting' ? 'Abriendo cámara...' : saving ? 'Guardando...' : 'Tomar foto'}
+            {cameraState === 'requesting'
+              ? 'Abriendo cámara...'
+              : saving
+                ? 'Guardando...'
+                : cameraState === 'error'
+                  ? 'Tomar con cámara del teléfono'
+                  : 'Tomar foto'}
           </button>
-          {mode !== 'selfie' ? (
+          {mode === 'selfie' || mode === 'idFront' || mode === 'idBack' ? (
             <>
               <button
                 className="matricula-flow-secondary"
                 disabled={saving}
                 onClick={() => {
-                  setUploadTarget(mode === 'idFront' ? 'idFront' : 'idBack');
+                  setUploadTarget(mode === 'selfie' ? 'selfie' : (mode === 'idFront' ? 'idFront' : 'idBack'));
                   fileInputRef.current?.click();
                 }}
                 type="button"
               >
-                Subir archivo
+                {mode === 'selfie' ? 'Usar cámara del teléfono' : 'Subir archivo'}
               </button>
               <input
                 accept="image/*"
+                capture={mode === 'selfie' ? 'user' : 'environment'}
                 hidden
                 onChange={onPickFile}
                 ref={fileInputRef}
                 type="file"
               />
             </>
+          ) : null}
+          {cameraState === 'error' ? (
+            <button
+              className="matricula-flow-secondary"
+              disabled={saving}
+              onClick={() => startCamera(mode === 'selfie' ? 'user' : 'environment')}
+              type="button"
+            >
+              Reintentar cámara en pantalla
+            </button>
           ) : null}
           {mode !== 'selfie' && value.selfieImage ? (
             <button

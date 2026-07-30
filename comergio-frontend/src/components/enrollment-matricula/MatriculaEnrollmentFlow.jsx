@@ -299,6 +299,13 @@ function getSavedSignerProgress(process, documentType, signerOrder) {
   return signers.find((signer) => Number(signer.order) === Number(signerOrder)) || null;
 }
 
+function signerHasIdentityEvidence(saved = {}) {
+  if (saved.selfieImage && saved.idFrontImage && saved.idBackImage) {
+    return true;
+  }
+  return Boolean(saved.hasSelfie && saved.hasIdFront && saved.hasIdBack);
+}
+
 function hydrateSigningStateFromSaved(saved, requireIdentity) {
   if (!saved?.signatureImage) {
     return {
@@ -314,15 +321,12 @@ function hydrateSigningStateFromSaved(saved, requireIdentity) {
     idFrontImage: saved.idFrontImage || '',
     idBackImage: saved.idBackImage || '',
   };
-  const identityComplete = !requireIdentity || (
-    identityEvidence.selfieImage
-    && identityEvidence.idFrontImage
-    && identityEvidence.idBackImage
-  );
+  const identityComplete = !requireIdentity || signerHasIdentityEvidence(saved);
 
   return {
     signatureImage: saved.signatureImage,
     identityEvidence,
+    // Signature already on file but identity missing → jump to selfie/cédula.
     signingPhase: requireIdentity && !identityComplete ? 'identity' : 'signature',
     accepted: true,
   };
@@ -343,9 +347,9 @@ function SignerOrderBanner({
   const saved = getSavedSignerProgress(process, documentType, currentSigner.order);
   const progressBits = [];
   if (saved?.signatureImage) progressBits.push('firma');
-  if (documentType === 'contract' && requireIdentity && saved?.selfieImage) progressBits.push('selfie');
-  if (documentType === 'contract' && requireIdentity && saved?.idFrontImage) progressBits.push('cédula frente');
-  if (documentType === 'contract' && requireIdentity && saved?.idBackImage) progressBits.push('cédula reverso');
+  if (documentType === 'contract' && requireIdentity && (saved?.selfieImage || saved?.hasSelfie)) progressBits.push('selfie');
+  if (documentType === 'contract' && requireIdentity && (saved?.idFrontImage || saved?.hasIdFront)) progressBits.push('cédula frente');
+  if (documentType === 'contract' && requireIdentity && (saved?.idBackImage || saved?.hasIdBack)) progressBits.push('cédula reverso');
   const identityNeeded = documentType === 'contract' && requireIdentity ? 3 : 0;
   const progressNeeded = 1 + identityNeeded;
 
@@ -467,11 +471,19 @@ function SignatureCanvas({ onChange, disabled = false }) {
   const drawingRef = useRef(false);
   const emitFrameRef = useRef(null);
   const displaySizeRef = useRef({ width: 0, height: 0 });
+  const snapshotRef = useRef('');
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   const emitSignature = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    onChange?.(canvas.toDataURL('image/png'));
+    const dataUrl = canvas.toDataURL('image/png');
+    snapshotRef.current = dataUrl;
+    onChangeRef.current?.(dataUrl);
   };
 
   const scheduleEmitSignature = () => {
@@ -493,18 +505,58 @@ function SignatureCanvas({ onChange, disabled = false }) {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
 
+    const restoreSnapshot = () => {
+      const dataUrl = snapshotRef.current;
+      if (!dataUrl) return;
+      const image = new Image();
+      image.onload = () => {
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        const { width, height } = displaySizeRef.current;
+        context.save();
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.restore();
+        configureContext(context);
+        context.drawImage(image, 0, 0, width, height);
+      };
+      image.src = dataUrl;
+    };
+
     const resize = () => {
       const ratio = Math.max(window.devicePixelRatio || 1, 1);
       const rect = canvas.getBoundingClientRect();
       const width = rect.width || canvas.clientWidth || canvas.offsetWidth;
       const height = rect.height || canvas.clientHeight || canvas.offsetHeight;
       if (!width || !height) return;
+
+      const previousWidth = displaySizeRef.current.width;
+      const previousHeight = displaySizeRef.current.height;
+      // Android Chrome fires visualViewport resize often; skip no-op resizes that wipe ink.
+      if (
+        Math.abs(previousWidth - width) < 1
+        && Math.abs(previousHeight - height) < 1
+        && canvas.width === Math.floor(width * ratio)
+        && canvas.height === Math.floor(height * ratio)
+      ) {
+        return;
+      }
+
+      if (!snapshotRef.current && canvas.width && canvas.height) {
+        try {
+          snapshotRef.current = canvas.toDataURL('image/png');
+        } catch (_error) {
+          // Ignore tainted/empty canvas.
+        }
+      }
+
       displaySizeRef.current = { width, height };
       canvas.width = Math.max(1, Math.floor(width * ratio));
       canvas.height = Math.max(1, Math.floor(height * ratio));
       const context = canvas.getContext('2d');
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       configureContext(context);
+      restoreSnapshot();
     };
 
     resize();
@@ -512,17 +564,15 @@ function SignatureCanvas({ onChange, disabled = false }) {
     const observer = typeof ResizeObserver !== 'undefined'
       ? new ResizeObserver(() => resize())
       : null;
-    observer?.observe(canvas);
+    observer?.observe(canvas.parentElement || canvas);
     window.addEventListener('resize', resize);
     const viewport = window.visualViewport;
     viewport?.addEventListener('resize', resize);
-    viewport?.addEventListener('scroll', resize);
 
     return () => {
       observer?.disconnect();
       window.removeEventListener('resize', resize);
       viewport?.removeEventListener('resize', resize);
-      viewport?.removeEventListener('scroll', resize);
       if (emitFrameRef.current) {
         window.cancelAnimationFrame(emitFrameRef.current);
       }
@@ -544,9 +594,16 @@ function SignatureCanvas({ onChange, disabled = false }) {
 
     const beginStroke = (event) => {
       if (disabled) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
       event.preventDefault();
       drawingRef.current = true;
+      try {
+        canvas.setPointerCapture?.(event.pointerId);
+      } catch (_error) {
+        // Older WebViews may not support capture.
+      }
       const context = canvas.getContext('2d');
+      configureContext(context);
       const point = getPoint(event);
       context.beginPath();
       context.moveTo(point.x, point.y);
@@ -564,27 +621,31 @@ function SignatureCanvas({ onChange, disabled = false }) {
 
     const endStroke = (event) => {
       if (!drawingRef.current) return;
-      event?.preventDefault();
+      event?.preventDefault?.();
       drawingRef.current = false;
+      try {
+        if (event?.pointerId != null) {
+          canvas.releasePointerCapture?.(event.pointerId);
+        }
+      } catch (_error) {
+        // Ignore.
+      }
       emitSignature();
     };
 
-    canvas.addEventListener('touchstart', beginStroke, { passive: false });
-    canvas.addEventListener('touchmove', continueStroke, { passive: false });
-    canvas.addEventListener('touchend', endStroke, { passive: false });
-    canvas.addEventListener('touchcancel', endStroke, { passive: false });
-    canvas.addEventListener('mousedown', beginStroke);
-    canvas.addEventListener('mousemove', continueStroke);
-    window.addEventListener('mouseup', endStroke);
+    // Pointer Events cover Android/iOS/desktop more reliably than mixed touch+mouse.
+    canvas.addEventListener('pointerdown', beginStroke, { passive: false });
+    canvas.addEventListener('pointermove', continueStroke, { passive: false });
+    canvas.addEventListener('pointerup', endStroke, { passive: false });
+    canvas.addEventListener('pointercancel', endStroke, { passive: false });
+    window.addEventListener('pointerup', endStroke);
 
     return () => {
-      canvas.removeEventListener('touchstart', beginStroke);
-      canvas.removeEventListener('touchmove', continueStroke);
-      canvas.removeEventListener('touchend', endStroke);
-      canvas.removeEventListener('touchcancel', endStroke);
-      canvas.removeEventListener('mousedown', beginStroke);
-      canvas.removeEventListener('mousemove', continueStroke);
-      window.removeEventListener('mouseup', endStroke);
+      canvas.removeEventListener('pointerdown', beginStroke);
+      canvas.removeEventListener('pointermove', continueStroke);
+      canvas.removeEventListener('pointerup', endStroke);
+      canvas.removeEventListener('pointercancel', endStroke);
+      window.removeEventListener('pointerup', endStroke);
     };
   }, [disabled]);
 
@@ -593,7 +654,8 @@ function SignatureCanvas({ onChange, disabled = false }) {
     const context = canvas.getContext('2d');
     const { width, height } = displaySizeRef.current;
     context.clearRect(0, 0, width || canvas.offsetWidth, height || canvas.offsetHeight);
-    onChange?.('');
+    snapshotRef.current = '';
+    onChangeRef.current?.('');
   };
 
   return (
@@ -749,13 +811,16 @@ function MatriculaEnrollmentFlow({
   const activeStep = useMemo(() => {
     const base = resolveActiveStep(process);
     const snapshot = process?.contractParamsSnapshot || {};
-    const looksMillennium = isMillenniumSchool(
-      schoolName || snapshot.schoolName || '',
-      schoolId || process?.schoolId || snapshot.schoolId || '',
-    )
+    const looksMillennium = Boolean(process?.looksLikeMillennium)
+      || Boolean(process?.requiresIdentityOnContract)
+      || isMillenniumSchool(
+        schoolName || snapshot.schoolName || '',
+        schoolId || process?.schoolId || snapshot.schoolId || '',
+      )
       || String(process?.schoolId || '').toLowerCase().includes('millennium')
       || String(snapshot.schoolId || '').toLowerCase().includes('millennium')
-      || String(snapshot.schoolName || '').toLowerCase().includes('millennium');
+      || String(snapshot.schoolName || '').toLowerCase().includes('millennium')
+      || String(snapshot.schoolName || '').toLowerCase().includes('milenium');
 
     if (!looksMillennium) return base;
 
@@ -851,14 +916,17 @@ function MatriculaEnrollmentFlow({
     || contractParams?.schoolName
     || process?.schoolName
     || '';
-  const isMillennium = isMillenniumSchool(effectiveSchoolName, effectiveSchoolId)
+  const isMillennium = Boolean(process?.looksLikeMillennium)
+    || Boolean(process?.requiresIdentityOnContract)
+    || isMillenniumSchool(effectiveSchoolName, effectiveSchoolId)
     || String(process?.schoolId || '').toLowerCase().includes('millennium')
     || String(contractParams?.schoolId || '').toLowerCase().includes('millennium')
-    || String(contractParams?.schoolName || '').toLowerCase().includes('millennium');
+    || String(contractParams?.schoolName || '').toLowerCase().includes('millennium')
+    || String(contractParams?.schoolName || '').toLowerCase().includes('milenium');
   const dualParentSigning = isMillennium;
   // Selfie + cédula solo en el contrato; el pagaré es solo firma.
   const requireIdentity = isMillennium && activeStep === 'contract';
-  const requireIdentityOnContract = isMillennium;
+  const requireIdentityOnContract = isMillennium || Boolean(process?.requiresIdentityOnContract);
   const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({
     schoolId: effectiveSchoolId,
     schoolName: effectiveSchoolName,
@@ -893,7 +961,7 @@ function MatriculaEnrollmentFlow({
     const hydrated = hydrateSigningStateFromSaved(saved, requireIdentity);
     setSignatureImage(hydrated.signatureImage);
     setIdentityEvidence(hydrated.identityEvidence);
-    setIdentityReady(!requireIdentity || Boolean(
+    setIdentityReady(!requireIdentity || signerHasIdentityEvidence(saved) || Boolean(
       hydrated.identityEvidence.selfieImage
       && hydrated.identityEvidence.idFrontImage
       && hydrated.identityEvidence.idBackImage
@@ -959,20 +1027,31 @@ function MatriculaEnrollmentFlow({
       setIdentityReady(true);
       return;
     }
+    const saved = getSavedSignerProgress(process, activeStep === 'pagare' ? 'pagare' : 'contract', currentSigner?.order);
     setIdentityReady(Boolean(
-      identityEvidence.selfieImage
-      && identityEvidence.idFrontImage
-      && identityEvidence.idBackImage
+      (identityEvidence.selfieImage
+        && identityEvidence.idFrontImage
+        && identityEvidence.idBackImage)
+      || signerHasIdentityEvidence(saved)
     ));
-  }, [identityEvidence, requireIdentity]);
+  }, [identityEvidence, requireIdentity, process, currentSigner?.order, activeStep]);
 
   // Si el colegio Millennium se detecta después de marcar el check, subir al flujo con aviso.
   useEffect(() => {
     if (!requireIdentity) return;
-    if (activeStep === 'contract' && contractAccepted && signingPhase === 'idle') {
+    if (activeStep !== 'contract' || !contractAccepted) return;
+
+    const saved = getSavedSignerProgress(process, 'contract', currentSigner?.order);
+    if (saved?.signatureImage && !signerHasIdentityEvidence(saved) && signingPhase !== 'identity') {
+      setSignatureImage((previous) => previous || saved.signatureImage);
+      setSigningPhase('identity');
+      return;
+    }
+
+    if (signingPhase === 'idle') {
       setSigningPhase('signature');
     }
-  }, [requireIdentity, activeStep, contractAccepted, signingPhase]);
+  }, [requireIdentity, activeStep, contractAccepted, signingPhase, process, currentSigner?.order]);
 
   const contractDocumentParams = useMemo(
     () => (contractParams
@@ -1320,24 +1399,47 @@ function MatriculaEnrollmentFlow({
       setErrorMessage('Debes leer y aceptar el contrato para habilitar la firma.');
       return;
     }
+    if (!currentSigner) {
+      setErrorMessage('No hay un firmante pendiente para el contrato. Cierra y vuelve a abrir la matrícula, o contacta al colegio.');
+      return;
+    }
     if (requireIdentity && !identityReady) {
-      setErrorMessage(`Completa la verificación de identidad de ${currentSigner?.displayName || 'el firmante'} antes de firmar.`);
+      const saved = getSavedSignerProgress(process, 'contract', currentSigner.order);
+      if (saved?.signatureImage || signatureImage) {
+        if (signatureImage || saved?.signatureImage) {
+          setSignatureImage(signatureImage || saved.signatureImage);
+        }
+        setSigningPhase('identity');
+        setErrorMessage(`Firma guardada. Ahora ${currentSigner.displayName} debe completar selfie y cédula para continuar.`);
+        return;
+      }
+      setErrorMessage(`Completa la verificación de identidad de ${currentSigner.displayName || 'el firmante'} antes de firmar.`);
       return;
     }
     if (!(await validateSignatureBeforeSubmit())) {
-      return;
-    }
-    if (!currentSigner) {
-      setErrorMessage('No hay un firmante pendiente para el contrato.');
       return;
     }
 
     setLoading(true);
     setErrorMessage('');
     try {
-      await persistSignerProgress('contract', {
+      const nextProcess = await persistSignerProgress('contract', {
         finalize: true,
       });
+      const nextPending = getNextSigner(nextProcess, 'contract', nextProcess?.contractParamsSnapshot || contractParams, {
+        dualParentSigning: Boolean(nextProcess?.looksLikeMillennium) || dualParentSigning,
+        requireIdentity: Boolean(nextProcess?.requiresIdentityOnContract) || requireIdentityOnContract,
+      });
+      const sameSignerStillPending = nextPending
+        && Number(nextPending.order) === Number(currentSigner.order);
+
+      if (sameSignerStillPending && (Boolean(nextProcess?.requiresIdentityOnContract) || requireIdentityOnContract)) {
+        setSigningPhase('identity');
+        setContractAccepted(true);
+        setErrorMessage(`Firma guardada. Ahora completa selfie y cédula de ${currentSigner.displayName}.`);
+        return;
+      }
+
       setSignatureImage('');
       setIdentityEvidence(emptyIdentityEvidence());
       setIdentityReady(!requireIdentity);
@@ -1645,26 +1747,30 @@ function MatriculaEnrollmentFlow({
                   />
                 ) : null}
 
+                {contractAccepted && !nextContractSigner ? (
+                  <p className="matricula-flow-note matricula-flow-note--error">
+                    No hay un firmante pendiente para este contrato. Cierra la ventana y vuelve a abrir la matrícula. Si el problema continúa, contacta al colegio.
+                  </p>
+                ) : null}
+
                 {errorMessage && contractAccepted ? (
                   <p className="matricula-flow-note matricula-flow-note--error">{errorMessage}</p>
                 ) : null}
 
-                {contractAccepted && (!requireIdentity || signingPhase === 'signature') ? (
+                {contractAccepted && nextContractSigner && (!requireIdentity || signingPhase === 'signature') ? (
                   <MatriculaSignatureZone
                     enabled
                     disabled={loading}
                     helperText={
-                      nextContractSigner
-                        ? `${nextContractSigner.displayName}: firma con tu dedo en el recuadro.`
-                        : 'Firma con tu dedo en el recuadro para legalizar el contrato.'
+                      `${nextContractSigner.displayName}: firma con tu dedo en el recuadro.`
                     }
                     loading={loading}
                     onChange={setSignatureImage}
                     onSubmit={requireIdentity ? onContinueToIdentityAfterSignature : onSignContract}
                     submitLabel={
                       requireIdentity
-                        ? `Continuar con selfie de ${nextContractSigner?.displayName || 'firmante'}`
-                        : (nextContractSigner && requiredSigners.length > 1
+                        ? `Continuar con selfie de ${nextContractSigner.displayName}`
+                        : (requiredSigners.length > 1
                           ? `Firmar contrato (${nextContractSigner.displayName})`
                           : 'Firmar contrato')
                     }
@@ -1677,6 +1783,11 @@ function MatriculaEnrollmentFlow({
                     <p className="matricula-flow-note matricula-flow-note--muted">
                       Cada paso se guarda automáticamente. Puedes cerrar y continuar después, o que el otro acudiente complete su parte desde otro dispositivo.
                     </p>
+                    {!signatureImage ? (
+                      <p className="matricula-flow-note matricula-flow-note--error">
+                        Falta la firma de {nextContractSigner.displayName}. Vuelve al paso de firma antes de la selfie.
+                      </p>
+                    ) : null}
                     <MatriculaIdentityCapture
                       onChange={setIdentityEvidence}
                       onStepComplete={onIdentityStepComplete}
@@ -1693,7 +1804,16 @@ function MatriculaEnrollmentFlow({
                       >
                         Volver a la firma de {nextContractSigner.displayName}
                       </button>
-                    ) : null}
+                    ) : (
+                      <button
+                        className="matricula-flow-primary"
+                        disabled={loading}
+                        onClick={() => setSigningPhase('signature')}
+                        type="button"
+                      >
+                        Ir a firmar ({nextContractSigner.displayName})
+                      </button>
+                    )}
                     {identityReady ? (
                       <button
                         className="matricula-flow-primary"
@@ -1705,6 +1825,9 @@ function MatriculaEnrollmentFlow({
                           ? 'Guardando...'
                           : `Confirmar trámite de ${nextContractSigner.displayName}`}
                       </button>
+                    ) : null}
+                    {errorMessage ? (
+                      <p className="matricula-flow-note matricula-flow-note--error">{errorMessage}</p>
                     ) : null}
                   </>
                 ) : null}

@@ -114,6 +114,10 @@ function DocumentSignersEvidence({ processId, document, documentType, label }) {
                 <span className="enrollment-matricula-rectoria__pending-note">
                   Identidad capturada (selfie/cédula)
                 </span>
+              ) : signer.signedAt ? (
+                <span className="enrollment-matricula-rectoria__pending-note enrollment-matricula-rectoria__pending-note--warn">
+                  Firma registrada · Falta selfie y cédula
+                </span>
               ) : null}
             </div>
           ))}

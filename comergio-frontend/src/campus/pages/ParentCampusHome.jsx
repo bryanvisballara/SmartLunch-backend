@@ -8753,9 +8753,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         />
       ) : null}
 
-      {selectedChild && !shouldLockParentPortal ? (
+      {selectedChild && !shouldLockParentPortal && !matriculaFlowOpen ? (
       <CommunityReportFab
-        disabled={shouldLockParentPortal}
+        disabled={shouldLockParentPortal || matriculaFlowOpen}
         studentId={selectedChild?.id || selectedChild?._id || ''}
         studentPortalMode={studentPortalMode}
       />

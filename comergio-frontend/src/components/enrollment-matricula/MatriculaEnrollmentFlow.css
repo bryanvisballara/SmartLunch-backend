@@ -1006,10 +1006,19 @@
 }
 
 .enrollment-matricula-rectoria__pending-note {
+  display: block;
   margin: 8px 0 0;
   color: #b45309;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.enrollment-matricula-rectoria__pending-note--warn {
+  color: #c2410c;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  padding: 6px 8px;
 }
 
 .enrollment-matricula-rectoria__table-wrap {

@@ -645,6 +645,8 @@ function serializeProcess(process, charge = null, { forParent = false } = {}) {
     isCompleted: doc.status === 'completed',
     officePaymentConfirmed: doc.status === 'office_payment_confirmed',
     statusLabel: resolveEnrollmentMatriculaStatusLabel(doc),
+    looksLikeMillennium: processLooksLikeMillennium(doc),
+    requiresIdentityOnContract: documentRequiresIdentity(doc, 'contract'),
   };
 
   if (!forParent) {
@@ -1022,7 +1024,11 @@ async function signDocument({
   }
 
   const documentKey = documentType === 'pagare' ? 'pagare' : 'contract';
-  const requiresIdentityCapture = isMillenniumSchoolId(schoolId) && documentKey === 'contract';
+  // Prefer process school context — JWT schoolId alone can miss Millennium on some tenants.
+  const requiresIdentityCapture = (
+    isMillenniumSchoolId(schoolId)
+    || processLooksLikeMillennium(process)
+  ) && documentKey === 'contract';
   const nextAction = getNextSigningAction(process);
 
   if (!['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(process.status)) {
