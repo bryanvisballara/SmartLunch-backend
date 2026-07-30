@@ -125,13 +125,73 @@ function normalizePlannerActivities(value) {
     .map((entry) => {
       const dateValue = normalizeText(entry?.date);
       const parsedDate = dateValue ? new Date(dateValue) : null;
+      const quantity = Math.max(0, Number(entry?.quantity || 0));
       return {
         date: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
         title: normalizeText(entry?.title),
         description: normalizeText(entry?.description),
+        subject: normalizeText(entry?.subject),
+        grade: normalizeText(entry?.grade),
+        courseLabel: normalizeText(entry?.courseLabel || entry?.course),
+        materialName: normalizeText(entry?.materialName || entry?.material),
+        quantity: Number.isFinite(quantity) ? quantity : 0,
+        purpose: normalizeText(entry?.purpose),
       };
     })
     .filter((entry) => entry.date && entry.title);
+}
+
+function isPlannerDeadlineOpen(cycle) {
+  if (!cycle?.submissionDeadline) {
+    return true;
+  }
+  const deadline = new Date(cycle.submissionDeadline);
+  if (Number.isNaN(deadline.getTime())) {
+    return true;
+  }
+  const endOfDeadlineDay = new Date(Date.UTC(
+    deadline.getUTCFullYear(),
+    deadline.getUTCMonth(),
+    deadline.getUTCDate(),
+    23,
+    59,
+    59,
+    999,
+  ));
+  return Date.now() <= endOfDeadlineDay.getTime();
+}
+
+function buildRequestItemsFromPayload(rawItems = [], plannerActivities = [], noMaterialsNeeded = false) {
+  if (noMaterialsNeeded) {
+    return [];
+  }
+
+  const fromPayload = (Array.isArray(rawItems) ? rawItems : [])
+    .map((entry) => ({
+      itemId: isValidObjectId(entry.itemId) ? entry.itemId : null,
+      customName: isValidObjectId(entry.itemId) ? '' : normalizeText(entry.customName || entry.materialName),
+      quantity: Math.max(1, Number(entry.quantity || 0)),
+    }))
+    .filter((entry) => entry.quantity > 0 && (entry.itemId || entry.customName));
+
+  if (fromPayload.length) {
+    return fromPayload;
+  }
+
+  const aggregated = new Map();
+  plannerActivities.forEach((activity) => {
+    const materialName = normalizeText(activity.materialName);
+    const quantity = Math.max(1, Number(activity.quantity || 0));
+    if (!materialName || quantity <= 0) {
+      return;
+    }
+    const key = materialName.toLowerCase();
+    const current = aggregated.get(key) || { itemId: null, customName: materialName, quantity: 0 };
+    current.quantity += quantity;
+    aggregated.set(key, current);
+  });
+
+  return Array.from(aggregated.values());
 }
 
 function serializeRequest(request) {
@@ -151,8 +211,15 @@ function serializeRequest(request) {
         date: activity.date || null,
         title: normalizeText(activity.title),
         description: normalizeText(activity.description),
+        subject: normalizeText(activity.subject),
+        grade: normalizeText(activity.grade),
+        courseLabel: normalizeText(activity.courseLabel),
+        materialName: normalizeText(activity.materialName),
+        quantity: Number(activity.quantity || 0),
+        purpose: normalizeText(activity.purpose),
       }))
       : [],
+    noMaterialsNeeded: Boolean(request.noMaterialsNeeded),
     consolidatedFromRequestIds: Array.isArray(request.consolidatedFromRequestIds) ? request.consolidatedFromRequestIds.map((id) => String(id)) : [],
     consolidatedRequestId: String(request.consolidatedRequestId?._id || request.consolidatedRequestId || ''),
     requestedForArea: normalizeText(request.requestedForArea),
@@ -580,43 +647,12 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.user;
     const requestType = safeEnum(req.body.requestType, requestTypes, 'material');
+    const noMaterialsNeeded = Boolean(req.body.noMaterialsNeeded);
     const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
-
-    if (!rawItems.length) {
-      return res.status(400).json({ message: 'items are required' });
-    }
 
     if (requestType === 'replenishment' && !hrManagerRoles.includes(role)) {
       return res.status(403).json({ message: 'Only HR can request replenishment' });
     }
-
-    const items = rawItems
-      .map((entry) => ({
-        itemId: normalizeText(entry.itemId),
-        customName: normalizeText(entry.customName || entry.name),
-        quantity: Math.max(1, Number(entry.quantity || 0)),
-      }))
-      .filter((entry) => (isValidObjectId(entry.itemId) || entry.customName) && entry.quantity > 0)
-      .map((entry) => ({
-        itemId: isValidObjectId(entry.itemId) ? entry.itemId : null,
-        customName: isValidObjectId(entry.itemId) ? '' : entry.customName,
-        quantity: entry.quantity,
-      }));
-
-    if (!items.length) {
-      return res.status(400).json({ message: 'valid items are required' });
-    }
-
-    const catalogItemIds = items.map((entry) => entry.itemId).filter(Boolean);
-    const existingItemsCount = catalogItemIds.length
-      ? await HrSupplyItem.countDocuments({ schoolId, _id: { $in: catalogItemIds }, status: 'active' })
-      : 0;
-    if (existingItemsCount !== catalogItemIds.length) {
-      return res.status(400).json({ message: 'Some items are invalid or inactive' });
-    }
-
-    const neededByDate = normalizeText(req.body.neededByDate);
-    const parsedNeededByDate = neededByDate ? new Date(neededByDate) : null;
 
     const plannerCycleId = normalizeText(req.body.plannerCycleId);
     const plannerActivities = normalizePlannerActivities(req.body.plannerActivities);
@@ -630,21 +666,60 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
       if (!plannerCycle) {
         return res.status(400).json({ message: 'El planner seleccionado no esta activo.' });
       }
-      if (!plannerActivities.length) {
+      if (!isPlannerDeadlineOpen(plannerCycle)) {
+        return res.status(400).json({ message: 'La fecha limite del planner ya vencio. No puedes enviar ni editar.' });
+      }
+      if (!noMaterialsNeeded && !plannerActivities.length) {
         return res.status(400).json({ message: 'Registra al menos una actividad del planner.' });
       }
+
+      const existingPending = await HrSupplyRequest.findOne({
+        schoolId,
+        requestType: 'material',
+        plannerCycleId: plannerCycle._id,
+        requestedByUserId: userId,
+        status: 'pending_coordination_review',
+      }).lean();
+      if (existingPending) {
+        return res.status(409).json({
+          message: 'Ya enviaste este planner. Usa la edicion del card verde para modificarlo antes de la fecha limite.',
+          requestId: String(existingPending._id),
+        });
+      }
+    } else if (!rawItems.length && !noMaterialsNeeded) {
+      return res.status(400).json({ message: 'items are required' });
     }
 
+    const items = buildRequestItemsFromPayload(rawItems, plannerActivities, noMaterialsNeeded);
+
+    if (!noMaterialsNeeded && !items.length) {
+      return res.status(400).json({ message: 'valid items are required' });
+    }
+
+    const catalogItemIds = items.map((entry) => entry.itemId).filter(Boolean);
+    const existingItemsCount = catalogItemIds.length
+      ? await HrSupplyItem.countDocuments({ schoolId, _id: { $in: catalogItemIds }, status: 'active' })
+      : 0;
+    if (existingItemsCount !== catalogItemIds.length) {
+      return res.status(400).json({ message: 'Some items are invalid or inactive' });
+    }
+
+    const neededByDate = normalizeText(req.body.neededByDate);
+    const parsedNeededByDate = neededByDate ? new Date(neededByDate) : null;
     const initialStatus = role === 'teacher' && requestType === 'material' ? 'pending_coordination_review' : 'pending_purchasing_review';
+    const purpose = noMaterialsNeeded
+      ? (normalizeText(req.body.purpose) || 'No necesito material para este periodo.')
+      : normalizeText(req.body.purpose);
 
     const request = await HrSupplyRequest.create({
       schoolId,
       requestType,
       requestedByUserId: userId,
       plannerCycleId: plannerCycle?._id || null,
-      plannerActivities,
+      plannerActivities: noMaterialsNeeded ? [] : plannerActivities,
+      noMaterialsNeeded,
       requestedForArea: normalizeText(req.body.requestedForArea),
-      purpose: normalizeText(req.body.purpose),
+      purpose,
       neededByDate: parsedNeededByDate && !Number.isNaN(parsedNeededByDate.getTime()) ? parsedNeededByDate : null,
       priority: safeEnum(req.body.priority, priorities, 'medium'),
       items,
@@ -658,7 +733,9 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
       await notifyCoordination({
         schoolId,
         title: 'Planner docente para revisar',
-        body: `${request.requestedByUserId?.name || 'Un docente'} envio planner y ${items.length} requerimiento(s).`,
+        body: noMaterialsNeeded
+          ? `${request.requestedByUserId?.name || 'Un docente'} marco que no necesita material en este periodo.`
+          : `${request.requestedByUserId?.name || 'Un docente'} envio planner y ${items.length} requerimiento(s).`,
         payload: { type: 'hr.planner.coordination_review', requestId: String(request._id), requestType, url: '/campus/coordination' },
       }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] request=${request._id} error=${error.message}`));
     } else {
@@ -671,6 +748,74 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
     }
 
     return res.status(201).json({ request: serializeRequest(request) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/requests/:id', roleMiddleware(['teacher']), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Solicitud invalida.' });
+    }
+
+    const request = await HrSupplyRequest.findOne({
+      _id: id,
+      schoolId,
+      requestType: 'material',
+      requestedByUserId: userId,
+    });
+
+    if (!request) {
+      return res.status(404).json({ message: 'Solicitud no encontrada.' });
+    }
+
+    if (request.status !== 'pending_coordination_review') {
+      return res.status(409).json({ message: 'Solo puedes editar el planner mientras esta en revision de coordinacion.' });
+    }
+
+    const plannerCycle = request.plannerCycleId
+      ? await HrPlannerCycle.findOne({ _id: request.plannerCycleId, schoolId }).lean()
+      : null;
+    if (!isPlannerDeadlineOpen(plannerCycle)) {
+      return res.status(400).json({ message: 'La fecha limite del planner ya vencio. No puedes editar.' });
+    }
+
+    const noMaterialsNeeded = Boolean(req.body.noMaterialsNeeded);
+    const plannerActivities = normalizePlannerActivities(req.body.plannerActivities);
+    if (!noMaterialsNeeded && !plannerActivities.length) {
+      return res.status(400).json({ message: 'Registra al menos una actividad del planner.' });
+    }
+
+    const items = buildRequestItemsFromPayload(req.body.items, plannerActivities, noMaterialsNeeded);
+    if (!noMaterialsNeeded && !items.length) {
+      return res.status(400).json({ message: 'Agrega al menos un material o marca que no necesitas material.' });
+    }
+
+    const catalogItemIds = items.map((entry) => entry.itemId).filter(Boolean);
+    const existingItemsCount = catalogItemIds.length
+      ? await HrSupplyItem.countDocuments({ schoolId, _id: { $in: catalogItemIds }, status: 'active' })
+      : 0;
+    if (existingItemsCount !== catalogItemIds.length) {
+      return res.status(400).json({ message: 'Some items are invalid or inactive' });
+    }
+
+    request.noMaterialsNeeded = noMaterialsNeeded;
+    request.plannerActivities = noMaterialsNeeded ? [] : plannerActivities;
+    request.items = items;
+    request.requestedForArea = normalizeText(req.body.requestedForArea) || request.requestedForArea;
+    request.purpose = noMaterialsNeeded
+      ? (normalizeText(req.body.purpose) || 'No necesito material para este periodo.')
+      : normalizeText(req.body.purpose);
+    await request.save();
+
+    await request.populate('requestedByUserId', 'name username role');
+    await request.populate('items.itemId', 'name category itemType unit sku stock minStock location status notes');
+    await request.populate('plannerCycleId', 'title startDate endDate submissionDeadline instructions status');
+
+    return res.status(200).json({ request: serializeRequest(request) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

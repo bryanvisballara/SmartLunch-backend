@@ -11,6 +11,7 @@ export const deleteHrPlannerCycle = (cycleId) => api.delete(`/hr/planner-cycles/
 export const getHrSupplyRequests = (params = {}) => api.get('/hr/requests', { params });
 export const getHrCoordinationPlannerRequests = (params = {}) => api.get('/hr/coordination/planner-requests', { params });
 export const createHrSupplyRequest = (data) => api.post('/hr/requests', data);
+export const updateHrSupplyRequest = (requestId, data) => api.patch(`/hr/requests/${requestId}`, data);
 export const consolidateHrPlannerRequests = (data) => api.post('/hr/coordination/consolidate', data);
 export const submitHrSupplyRequestForApproval = (requestId, data = {}) => api.post(`/hr/requests/${requestId}/submit-approval`, data);
 export const acceptHrPurchasingRequest = (requestId, data = {}) => api.post(`/hr/requests/${requestId}/purchasing-accept`, data);

@@ -6,7 +6,7 @@ import { LOGIN_PATH } from '../../lib/authNavigation';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
-import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests } from '../../services/hr.service';
+import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests, updateHrSupplyRequest } from '../../services/hr.service';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../../components/staff-announcements/StaffAnnouncementsPanel';
 import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import {
@@ -180,13 +180,6 @@ const teacherSectionOptions = [
   { key: 'staff_announcements', label: 'Comunicados internos', icon: 'announcements', description: 'Recibe y confirma mensajes internos de rectoría y coordinación.' },
 ];
 
-const teacherResourcePriorityOptions = [
-  { value: 'low', label: 'Baja' },
-  { value: 'medium', label: 'Media' },
-  { value: 'high', label: 'Alta' },
-  { value: 'urgent', label: 'Urgente' },
-];
-
 const teacherResourceStatusLabels = {
   pending_coordination_review: 'En revisión de coordinación',
   consolidated: 'Consolidada por coordinación',
@@ -200,20 +193,52 @@ const teacherResourceStatusLabels = {
   cancelled: 'Cancelada',
 };
 
+const TEACHER_COMMON_MATERIALS = [
+  'Foamy',
+  'Cartón paja',
+  'Papel cometa',
+  'Celofán',
+  'Cartulina',
+  'Papel bond',
+  'Silicona',
+  'Pegante',
+  'Tijeras',
+  'Témperas',
+  'Crayones',
+  'Marcadores',
+  'Globos',
+  'Pitillos',
+  'Cinta masking',
+  'Papel crepé',
+];
+
 function createTeacherResourceRequestDraft() {
   return {
-    requestedForArea: '',
-    plannerCycleId: '',
-    activityDate: '',
-    activityTitle: '',
-    activityDescription: '',
-    purpose: '',
-    neededByDate: '',
-    priority: 'medium',
-    itemId: '',
-    customName: '',
+    subjectKey: '',
+    gradeKey: '',
+    courseId: '',
+    materialKey: '',
+    customMaterialName: '',
     quantity: '1',
+    activityTitle: '',
+    purpose: '',
+    activityDate: '',
+    noMaterialsNeeded: false,
   };
+}
+
+function isPlannerSubmissionOpen(cycle) {
+  const deadline = toDateInputValue(cycle?.submissionDeadline);
+  if (!deadline) return true;
+  const today = getTodayDateInputValue();
+  return today <= deadline;
+}
+
+function getTeacherRequestForCycle(requests, cycleId) {
+  return (Array.isArray(requests) ? requests : []).find((request) => (
+    String(request.plannerCycleId || request.plannerCycle?.id || '') === String(cycleId)
+    && request.status !== 'cancelled'
+  )) || null;
 }
 
 function createTeacherSocialPublicationDraft() {
@@ -913,6 +938,12 @@ function toDateTimeLocalValue(isoValue) {
 function toDateInputValue(isoValue) {
   if (!isoValue) {
     return '';
+  }
+
+  const raw = String(isoValue);
+  const dateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`;
   }
 
   const parsedDate = new Date(isoValue);
@@ -2652,8 +2683,10 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [academicContentDrafts, setAcademicContentDrafts] = useState([]);
   const [academicContentTopicInputs, setAcademicContentTopicInputs] = useState({});
   const [teacherResourceRequestDraft, setTeacherResourceRequestDraft] = useState(createTeacherResourceRequestDraft);
-  const [teacherResourceRequestItems, setTeacherResourceRequestItems] = useState([]);
   const [teacherResourcePlannerActivities, setTeacherResourcePlannerActivities] = useState([]);
+  const [selectedTeacherPlannerCycleId, setSelectedTeacherPlannerCycleId] = useState('');
+  const [teacherPlannerConfirmOpen, setTeacherPlannerConfirmOpen] = useState(false);
+  const [editingTeacherPlannerRequestId, setEditingTeacherPlannerRequestId] = useState('');
   const [teacherSocialPublicationDraft, setTeacherSocialPublicationDraft] = useState(createTeacherSocialPublicationDraft);
   const [teacherSocialMediaUploading, setTeacherSocialMediaUploading] = useState(false);
   const [teacherDisciplineDraft, setTeacherDisciplineDraft] = useState(createTeacherDisciplineObservationDraft);
@@ -2749,7 +2782,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const teacherPlannerCyclesQuery = useQuery({
     queryKey: ['hr', 'teacher', 'planner-cycles'],
     queryFn: () => getHrPlannerCycles({ status: 'active' }),
-    enabled: !previewEnabled && activeTeacherSection === 'resource_requests',
+    enabled: !previewEnabled,
     retry: false,
     staleTime: 30_000,
   });
@@ -2757,7 +2790,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const teacherResourceRequestsQuery = useQuery({
     queryKey: ['hr', 'teacher', 'supply-requests'],
     queryFn: () => getHrSupplyRequests({ requestType: 'material' }),
-    enabled: !previewEnabled && activeTeacherSection === 'resource_requests',
+    enabled: !previewEnabled,
     retry: false,
     staleTime: 20_000,
   });
@@ -2981,7 +3014,9 @@ function TeacherCampusHome({ forcePreview = false }) {
   });
 
   const createTeacherResourceRequestMutation = useMutation({
-    mutationFn: createHrSupplyRequest,
+    mutationFn: ({ requestId, payload }) => (
+      requestId ? updateHrSupplyRequest(requestId, payload) : createHrSupplyRequest(payload)
+    ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'teacher', 'supply-requests'] });
       queryClient.invalidateQueries({ queryKey: ['hr', 'teacher', 'planner-cycles'] });
@@ -3373,9 +3408,57 @@ function TeacherCampusHome({ forcePreview = false }) {
     [selectedDisciplineCourseDetail?.students]
   );
   const selectedDisciplineStudent = disciplineStudentOptions.find((student) => student.studentId === teacherDisciplineDraft.studentId) || null;
-  const selectedTeacherResourceItem = teacherResourceItems.find((item) => item.id === teacherResourceRequestDraft.itemId) || null;
-  const isTeacherResourceCustomItem = teacherResourceRequestDraft.itemId === '__other__';
-  const selectedTeacherPlannerCycle = teacherPlannerCycles.find((cycle) => cycle.id === teacherResourceRequestDraft.plannerCycleId) || null;
+  const selectedTeacherPlannerCycle = teacherPlannerCycles.find((cycle) => cycle.id === selectedTeacherPlannerCycleId) || null;
+  const selectedTeacherPlannerRequest = selectedTeacherPlannerCycle
+    ? getTeacherRequestForCycle(teacherResourceRequests, selectedTeacherPlannerCycle.id)
+    : null;
+  const teacherPlannerPendingCount = useMemo(
+    () => teacherPlannerCycles.filter((cycle) => (
+      isPlannerSubmissionOpen(cycle) && !getTeacherRequestForCycle(teacherResourceRequests, cycle.id)
+    )).length,
+    [teacherPlannerCycles, teacherResourceRequests]
+  );
+  const teacherPlannerSubjectOptions = useMemo(() => groupCoursesBySubject(academicCourses), [academicCourses]);
+  const selectedTeacherPlannerSubject = useMemo(
+    () => teacherPlannerSubjectOptions.find((subject) => subject.key === teacherResourceRequestDraft.subjectKey) || null,
+    [teacherPlannerSubjectOptions, teacherResourceRequestDraft.subjectKey]
+  );
+  const teacherPlannerGradeOptions = useMemo(() => {
+    const gradeMap = new Map();
+    (selectedTeacherPlannerSubject?.courses || []).forEach((course) => {
+      const gradeLabel = getCourseGradeLabel(course) || getCourseGroupLabel(course) || 'Sin grado';
+      const gradeKey = slugifyComponentKey(gradeLabel) || gradeLabel;
+      if (!gradeMap.has(gradeKey)) {
+        gradeMap.set(gradeKey, { key: gradeKey, label: gradeLabel, courses: [] });
+      }
+      gradeMap.get(gradeKey).courses.push(course);
+    });
+    return Array.from(gradeMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
+  }, [selectedTeacherPlannerSubject]);
+  const selectedTeacherPlannerGrade = useMemo(
+    () => teacherPlannerGradeOptions.find((grade) => grade.key === teacherResourceRequestDraft.gradeKey) || null,
+    [teacherPlannerGradeOptions, teacherResourceRequestDraft.gradeKey]
+  );
+  const teacherPlannerCourseOptions = useMemo(
+    () => (selectedTeacherPlannerGrade?.courses || []).slice().sort((left, right) => (
+      getCourseDisplayTitle(left).localeCompare(getCourseDisplayTitle(right), 'es')
+    )),
+    [selectedTeacherPlannerGrade]
+  );
+  const selectedTeacherPlannerCourse = useMemo(
+    () => teacherPlannerCourseOptions.find((course) => course.id === teacherResourceRequestDraft.courseId) || null,
+    [teacherPlannerCourseOptions, teacherResourceRequestDraft.courseId]
+  );
+  const teacherPlannerMaterialOptions = useMemo(() => {
+    const catalogNames = teacherResourceItems.map((item) => String(item.name || '').trim()).filter(Boolean);
+    const merged = Array.from(new Set([...TEACHER_COMMON_MATERIALS, ...catalogNames]));
+    return merged.sort((left, right) => left.localeCompare(right, 'es'));
+  }, [teacherResourceItems]);
+  const isTeacherPlannerEditable = Boolean(
+    selectedTeacherPlannerCycle
+    && isPlannerSubmissionOpen(selectedTeacherPlannerCycle)
+    && (!selectedTeacherPlannerRequest || selectedTeacherPlannerRequest.status === 'pending_coordination_review')
+  );
   const isBusy = updateGradingSchemeMutation.isPending
     || updateAcademicContentMutation.isPending
     || createPostMutation.isPending
@@ -4761,111 +4844,251 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onTeacherResourceDraftChange = (field, value) => {
-    setTeacherResourceRequestDraft((currentDraft) => ({ ...currentDraft, [field]: value }));
+    setTeacherResourceRequestDraft((currentDraft) => {
+      const nextDraft = { ...currentDraft, [field]: value };
+      if (field === 'subjectKey') {
+        nextDraft.gradeKey = '';
+        nextDraft.courseId = '';
+      }
+      if (field === 'gradeKey') {
+        nextDraft.courseId = '';
+      }
+      if (field === 'materialKey' && value !== '__other__') {
+        nextDraft.customMaterialName = '';
+      }
+      return nextDraft;
+    });
   };
 
-  const onAddTeacherResourceItem = () => {
-    const customName = String(teacherResourceRequestDraft.customName || '').trim();
+  const resetTeacherPlannerDraftForSameCourse = () => {
+    setTeacherResourceRequestDraft((currentDraft) => ({
+      ...currentDraft,
+      materialKey: '',
+      customMaterialName: '',
+      quantity: '1',
+      activityTitle: '',
+      purpose: '',
+      activityDate: '',
+      noMaterialsNeeded: false,
+    }));
+  };
 
-    if (!selectedTeacherResourceItem && !isTeacherResourceCustomItem) {
-      setNotice({ type: 'error', text: 'Selecciona un material del inventario.' });
+  const loadTeacherPlannerRequestIntoDraft = (request) => {
+    if (!request) {
+      setTeacherResourcePlannerActivities([]);
+      setEditingTeacherPlannerRequestId('');
+      setTeacherResourceRequestDraft(createTeacherResourceRequestDraft());
       return;
     }
 
-    if (isTeacherResourceCustomItem && !customName) {
-      setNotice({ type: 'error', text: 'Escribe el nombre del material que necesitas.' });
+    setEditingTeacherPlannerRequestId(request.id || '');
+    setTeacherResourceRequestDraft((currentDraft) => ({
+      ...currentDraft,
+      noMaterialsNeeded: Boolean(request.noMaterialsNeeded),
+      subjectKey: '',
+      gradeKey: '',
+      courseId: '',
+      materialKey: '',
+      customMaterialName: '',
+      quantity: '1',
+      activityTitle: '',
+      purpose: '',
+      activityDate: '',
+    }));
+
+    const activities = (Array.isArray(request.plannerActivities) ? request.plannerActivities : []).map((activity, index) => ({
+      key: `${activity.id || index}:${activity.title}`,
+      date: toDateInputValue(activity.date),
+      title: activity.title || '',
+      purpose: activity.purpose || activity.description || '',
+      subject: activity.subject || '',
+      grade: activity.grade || '',
+      courseLabel: activity.courseLabel || '',
+      materialName: activity.materialName || '',
+      quantity: Number(activity.quantity || 0) || 1,
+    }));
+
+    if (!activities.length && request.noMaterialsNeeded) {
+      setTeacherResourcePlannerActivities([]);
       return;
     }
 
-    const quantity = Math.max(1, Number(teacherResourceRequestDraft.quantity || 0));
-    const itemKey = isTeacherResourceCustomItem ? `custom:${customName.toLowerCase()}` : selectedTeacherResourceItem.id;
-    setTeacherResourceRequestItems((currentItems) => {
-      const existingItem = currentItems.find((item) => item.key === itemKey);
-      if (existingItem) {
-        return currentItems.map((item) => (
-          item.key === itemKey
-            ? { ...item, quantity: item.quantity + quantity }
-            : item
-        ));
-      }
+    if (!activities.length && Array.isArray(request.items) && request.items.length) {
+      setTeacherResourcePlannerActivities(request.items.map((item, index) => ({
+        key: `legacy-item-${item.id || index}`,
+        date: toDateInputValue(request.neededByDate) || getTodayDateInputValue(),
+        title: item.item?.name || item.customName || 'Material solicitado',
+        purpose: request.purpose || '',
+        subject: '',
+        grade: '',
+        courseLabel: request.requestedForArea || '',
+        materialName: item.item?.name || item.customName || '',
+        quantity: Number(item.quantity || 1),
+      })));
+      return;
+    }
 
-      return [
-        ...currentItems,
-        {
-          key: itemKey,
-          itemId: isTeacherResourceCustomItem ? '' : selectedTeacherResourceItem.id,
-          customName: isTeacherResourceCustomItem ? customName : '',
-          name: isTeacherResourceCustomItem ? customName : selectedTeacherResourceItem.name,
-          unit: isTeacherResourceCustomItem ? 'unidad' : selectedTeacherResourceItem.unit || 'unidad',
-          quantity,
-          stock: isTeacherResourceCustomItem ? null : Number(selectedTeacherResourceItem.stock || 0),
-        },
-      ];
-    });
-    setTeacherResourceRequestDraft((currentDraft) => ({ ...currentDraft, itemId: '', customName: '', quantity: '1' }));
+    setTeacherResourcePlannerActivities(activities);
+  };
+
+  const onSelectTeacherPlannerCycle = (cycleId) => {
+    const nextId = String(cycleId || '');
+    if (selectedTeacherPlannerCycleId === nextId) {
+      setSelectedTeacherPlannerCycleId('');
+      setTeacherPlannerConfirmOpen(false);
+      setEditingTeacherPlannerRequestId('');
+      setTeacherResourcePlannerActivities([]);
+      setTeacherResourceRequestDraft(createTeacherResourceRequestDraft());
+      return;
+    }
+
+    setSelectedTeacherPlannerCycleId(nextId);
+    setTeacherPlannerConfirmOpen(false);
+    const existingRequest = getTeacherRequestForCycle(teacherResourceRequests, nextId);
+    loadTeacherPlannerRequestIntoDraft(existingRequest);
   };
 
   const onAddTeacherResourceActivity = () => {
-    const title = String(teacherResourceRequestDraft.activityTitle || '').trim();
-    const date = String(teacherResourceRequestDraft.activityDate || '').trim();
-    const description = String(teacherResourceRequestDraft.activityDescription || '').trim();
+    if (!isTeacherPlannerEditable) {
+      setNotice({ type: 'error', text: 'Este planner ya no se puede editar.' });
+      return;
+    }
 
-    if (!date || !title) {
-      setNotice({ type: 'error', text: 'Escribe fecha y actividad del planner.' });
+    if (teacherResourceRequestDraft.noMaterialsNeeded) {
+      setNotice({ type: 'error', text: 'Desmarca “No necesito material” para agregar actividades.' });
+      return;
+    }
+
+    const subjectLabel = selectedTeacherPlannerSubject?.label || '';
+    const gradeLabel = selectedTeacherPlannerGrade?.label || '';
+    const courseLabel = selectedTeacherPlannerCourse
+      ? (getCourseGroupLabel(selectedTeacherPlannerCourse) || getCourseDisplayTitle(selectedTeacherPlannerCourse))
+      : '';
+    const materialName = teacherResourceRequestDraft.materialKey === '__other__'
+      ? String(teacherResourceRequestDraft.customMaterialName || '').trim()
+      : String(teacherResourceRequestDraft.materialKey || '').trim();
+    const title = String(teacherResourceRequestDraft.activityTitle || '').trim();
+    const purpose = String(teacherResourceRequestDraft.purpose || '').trim();
+    const date = String(teacherResourceRequestDraft.activityDate || '').trim();
+    const quantity = Math.max(1, Number(teacherResourceRequestDraft.quantity || 0));
+    const minDate = toDateInputValue(selectedTeacherPlannerCycle?.startDate);
+    const maxDate = toDateInputValue(selectedTeacherPlannerCycle?.endDate);
+
+    if (!subjectLabel || !gradeLabel || !courseLabel) {
+      setNotice({ type: 'error', text: 'Selecciona asignatura, grado y curso.' });
+      return;
+    }
+    if (!materialName) {
+      setNotice({ type: 'error', text: 'Selecciona o escribe el material.' });
+      return;
+    }
+    if (!title || !purpose || !date) {
+      setNotice({ type: 'error', text: 'Completa título, motivo pedagógico y fecha de la actividad.' });
+      return;
+    }
+    if ((minDate && date < minDate) || (maxDate && date > maxDate)) {
+      setNotice({ type: 'error', text: `La fecha debe estar entre ${formatDateLabel(minDate)} y ${formatDateLabel(maxDate)}.` });
       return;
     }
 
     setTeacherResourcePlannerActivities((currentActivities) => [
       ...currentActivities,
-      { key: `${date}:${title}:${currentActivities.length}`, date, title, description },
+      {
+        key: `${date}:${title}:${materialName}:${currentActivities.length}`,
+        date,
+        title,
+        purpose,
+        subject: subjectLabel,
+        grade: gradeLabel,
+        courseLabel,
+        materialName,
+        quantity,
+      },
     ]);
-    setTeacherResourceRequestDraft((currentDraft) => ({
-      ...currentDraft,
-      activityDate: '',
-      activityTitle: '',
-      activityDescription: '',
-    }));
+    resetTeacherPlannerDraftForSameCourse();
   };
 
-  const onSubmitTeacherResourceRequest = async (event) => {
-    event.preventDefault();
+  const onRemoveTeacherResourceActivity = (activityKey) => {
+    if (!isTeacherPlannerEditable) return;
+    setTeacherResourcePlannerActivities((currentActivities) => (
+      currentActivities.filter((activity) => activity.key !== activityKey)
+    ));
+  };
 
-    if (teacherResourceRequestItems.length === 0) {
-      setNotice({ type: 'error', text: 'Agrega al menos un material antes de enviar la solicitud.' });
+  const buildTeacherPlannerPayload = () => {
+    const noMaterialsNeeded = Boolean(teacherResourceRequestDraft.noMaterialsNeeded);
+    const plannerActivities = noMaterialsNeeded
+      ? []
+      : teacherResourcePlannerActivities.map((activity) => ({
+        date: activity.date,
+        title: activity.title,
+        description: activity.purpose,
+        purpose: activity.purpose,
+        subject: activity.subject,
+        grade: activity.grade,
+        courseLabel: activity.courseLabel,
+        materialName: activity.materialName,
+        quantity: activity.quantity,
+      }));
+
+    const areaParts = Array.from(new Set(
+      teacherResourcePlannerActivities
+        .map((activity) => [activity.subject, activity.grade, activity.courseLabel].filter(Boolean).join(' · '))
+        .filter(Boolean)
+    ));
+
+    return {
+      requestType: 'material',
+      plannerCycleId: selectedTeacherPlannerCycleId,
+      noMaterialsNeeded,
+      requestedForArea: areaParts.join(' | ') || selectedTeacherPlannerCycle?.title || '',
+      purpose: noMaterialsNeeded
+        ? 'No necesito material para este periodo.'
+        : (teacherResourcePlannerActivities[0]?.purpose || 'Planner docente'),
+      plannerActivities,
+      items: noMaterialsNeeded
+        ? []
+        : teacherResourcePlannerActivities.map((activity) => ({
+          customName: activity.materialName,
+          quantity: activity.quantity,
+        })),
+    };
+  };
+
+  const onSubmitTeacherResourceRequest = async () => {
+    if (!selectedTeacherPlannerCycleId) {
+      setNotice({ type: 'error', text: 'Selecciona un planner activo.' });
+      return;
+    }
+    if (!isTeacherPlannerEditable) {
+      setNotice({ type: 'error', text: 'La fecha límite ya venció o el planner ya no es editable.' });
       return;
     }
 
-    if (!teacherResourceRequestDraft.plannerCycleId) {
-      setNotice({ type: 'error', text: 'Selecciona el planner definido por coordinacion.' });
-      return;
-    }
-
-    if (teacherResourcePlannerActivities.length === 0) {
-      setNotice({ type: 'error', text: 'Agrega al menos una actividad del planner.' });
+    const noMaterialsNeeded = Boolean(teacherResourceRequestDraft.noMaterialsNeeded);
+    if (!noMaterialsNeeded && teacherResourcePlannerActivities.length === 0) {
+      setNotice({ type: 'error', text: 'Agrega al menos una actividad o marca que no necesitas material.' });
       return;
     }
 
     try {
       await createTeacherResourceRequestMutation.mutateAsync({
-        requestType: 'material',
-        plannerCycleId: teacherResourceRequestDraft.plannerCycleId,
-        plannerActivities: teacherResourcePlannerActivities.map((activity) => ({
-          date: activity.date,
-          title: activity.title,
-          description: activity.description,
-        })),
-        requestedForArea: teacherResourceRequestDraft.requestedForArea,
-        purpose: teacherResourceRequestDraft.purpose,
-        neededByDate: teacherResourceRequestDraft.neededByDate,
-        priority: teacherResourceRequestDraft.priority,
-        items: teacherResourceRequestItems.map((item) => ({ itemId: item.itemId, customName: item.customName, quantity: item.quantity })),
+        requestId: editingTeacherPlannerRequestId || selectedTeacherPlannerRequest?.id || '',
+        payload: buildTeacherPlannerPayload(),
       });
-      setTeacherResourceRequestDraft(createTeacherResourceRequestDraft());
-      setTeacherResourceRequestItems([]);
-      setTeacherResourcePlannerActivities([]);
-      setNotice({ type: 'success', text: 'Planner enviado a coordinacion para consolidacion.' });
+      setTeacherPlannerConfirmOpen(false);
+      setNotice({
+        type: 'success',
+        text: editingTeacherPlannerRequestId || selectedTeacherPlannerRequest?.id
+          ? 'Planner actualizado correctamente.'
+          : 'Planner enviado a coordinación.',
+      });
+      const refreshed = await teacherResourceRequestsQuery.refetch();
+      const nextRequests = refreshed?.data?.data?.requests || refreshed?.data?.requests || [];
+      const nextRequest = getTeacherRequestForCycle(nextRequests, selectedTeacherPlannerCycleId);
+      loadTeacherPlannerRequestIntoDraft(nextRequest);
     } catch (error) {
-      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo enviar la solicitud de materiales.' });
+      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo enviar el planner.' });
     }
   };
 
@@ -5900,6 +6123,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </span>
                           <span className="campus-teacher__nav-item-label">
                             {option.label}
+                            {option.key === 'resource_requests' && teacherPlannerPendingCount > 0 ? (
+                              <span className="campus-teacher__nav-badge" aria-label={`${teacherPlannerPendingCount} planner(s) pendientes`}>
+                                {teacherPlannerPendingCount}
+                              </span>
+                            ) : null}
                             {option.key === 'staff_announcements' ? (
                               <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
                             ) : null}
@@ -7867,203 +8095,340 @@ function TeacherCampusHome({ forcePreview = false }) {
                   <div>
                     <span className="campus-panel__kicker">Solicitud de recursos</span>
                     <h3>Planner docente y requerimientos</h3>
+                    <p className="campus-panel__meta">Selecciona un planner activo. Amarillo = pendiente. Verde = ya enviado.</p>
                   </div>
                   <button
                     className="campus-teacher__ghost-btn"
-                    disabled={teacherResourceRequestsQuery.isFetching}
-                    onClick={() => teacherResourceRequestsQuery.refetch()}
+                    disabled={teacherResourceRequestsQuery.isFetching || teacherPlannerCyclesQuery.isFetching}
+                    onClick={() => {
+                      teacherPlannerCyclesQuery.refetch();
+                      teacherResourceRequestsQuery.refetch();
+                    }}
                     type="button"
                   >
                     Actualizar
                   </button>
                 </div>
 
-                <form className="campus-teacher__resource-form" onSubmit={onSubmitTeacherResourceRequest}>
-                  <label className="campus-teacher__resource-field-wide">
-                    Planner definido por coordinacion
-                    <select
-                      value={teacherResourceRequestDraft.plannerCycleId}
-                      onChange={(event) => onTeacherResourceDraftChange('plannerCycleId', event.target.value)}
-                    >
-                      <option value="">Seleccionar planner activo</option>
-                      {teacherPlannerCycles.map((cycle) => (
-                        <option key={cycle.id} value={cycle.id}>{cycle.title} · limite {formatDateLabel(cycle.submissionDeadline)}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {selectedTeacherPlannerCycle ? (
-                    <p className="campus-panel__meta campus-teacher__resource-field-wide">
-                      Periodo: {formatDateLabel(selectedTeacherPlannerCycle.startDate)} - {formatDateLabel(selectedTeacherPlannerCycle.endDate)}. {selectedTeacherPlannerCycle.instructions || ''}
-                    </p>
-                  ) : null}
-                  <label>
-                    Área o curso
-                    <input
-                      placeholder="Ej. 4A, laboratorio, artística primaria"
-                      value={teacherResourceRequestDraft.requestedForArea}
-                      onChange={(event) => onTeacherResourceDraftChange('requestedForArea', event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Prioridad
-                    <select
-                      value={teacherResourceRequestDraft.priority}
-                      onChange={(event) => onTeacherResourceDraftChange('priority', event.target.value)}
-                    >
-                      {teacherResourcePriorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    Fecha de entrega requerida
-                    <input
-                      type="date"
-                      value={teacherResourceRequestDraft.neededByDate}
-                      onChange={(event) => onTeacherResourceDraftChange('neededByDate', event.target.value)}
-                    />
-                  </label>
-                  <label className="campus-teacher__resource-field-wide">
-                    Motivo pedagógico
-                    <textarea
-                      placeholder="Actividad, proyecto o necesidad del aula"
-                      rows={3}
-                      value={teacherResourceRequestDraft.purpose}
-                      onChange={(event) => onTeacherResourceDraftChange('purpose', event.target.value)}
-                    />
-                  </label>
+                {teacherPlannerCyclesQuery.isLoading || teacherResourceRequestsQuery.isLoading ? (
+                  <p className="campus-panel__meta">Cargando planners...</p>
+                ) : null}
 
-                  <div className="campus-teacher__resource-picker campus-teacher__resource-field-wide">
-                    <label>
-                      Dia de actividad
-                      <input
-                        type="date"
-                        value={teacherResourceRequestDraft.activityDate}
-                        onChange={(event) => onTeacherResourceDraftChange('activityDate', event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Actividad
-                      <input
-                        placeholder="Ej. Collage de ecosistemas"
-                        value={teacherResourceRequestDraft.activityTitle}
-                        onChange={(event) => onTeacherResourceDraftChange('activityTitle', event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      Detalle
-                      <input
-                        placeholder="Grupo, producto esperado o indicaciones"
-                        value={teacherResourceRequestDraft.activityDescription}
-                        onChange={(event) => onTeacherResourceDraftChange('activityDescription', event.target.value)}
-                      />
-                    </label>
-                    <button className="campus-teacher__action-btn" onClick={onAddTeacherResourceActivity} type="button">
-                      Agregar actividad
-                    </button>
-                  </div>
+                {!teacherPlannerCyclesQuery.isLoading && teacherPlannerCycles.length === 0 ? (
+                  <p className="campus-panel__meta">No hay planners activos definidos por coordinación o rectoría.</p>
+                ) : null}
 
-                  <div className="campus-teacher__resource-selected-list campus-teacher__resource-field-wide">
-                    {teacherResourcePlannerActivities.length === 0 ? <p className="campus-panel__meta">Agrega las actividades por dia antes de enviar el planner.</p> : null}
-                    {teacherResourcePlannerActivities.map((activity) => (
+                <div className="campus-teacher__planner-card-grid">
+                  {teacherPlannerCycles.map((cycle) => {
+                    const existingRequest = getTeacherRequestForCycle(teacherResourceRequests, cycle.id);
+                    const isSubmitted = Boolean(existingRequest);
+                    const isSelected = selectedTeacherPlannerCycleId === cycle.id;
+                    const isOpen = isPlannerSubmissionOpen(cycle);
+                    return (
                       <button
-                        className="campus-teacher__resource-chip"
-                        key={activity.key}
-                        onClick={() => setTeacherResourcePlannerActivities((currentActivities) => currentActivities.filter((currentActivity) => currentActivity.key !== activity.key))}
+                        className={`campus-teacher__planner-card${isSubmitted ? ' is-submitted' : ' is-pending'}${isSelected ? ' is-selected' : ''}${!isOpen ? ' is-closed' : ''}`}
+                        key={cycle.id}
+                        onClick={() => onSelectTeacherPlannerCycle(cycle.id)}
                         type="button"
                       >
-                        <strong>{activity.title}</strong>
-                        <span>{formatDateLabel(activity.date)}</span>
+                        <span className="campus-teacher__planner-card-status">
+                          {isSubmitted ? 'Enviado' : (isOpen ? 'Pendiente' : 'Cerrado')}
+                        </span>
+                        <strong>{cycle.title}</strong>
+                        <span>{formatDateLabel(cycle.startDate)} – {formatDateLabel(cycle.endDate)}</span>
+                        <span>Límite {formatDateLabel(cycle.submissionDeadline)}</span>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
+                </div>
 
-                  <div className="campus-teacher__resource-picker">
-                    <label>
-                      Material
-                      <select
-                        value={teacherResourceRequestDraft.itemId}
-                        onChange={(event) => onTeacherResourceDraftChange('itemId', event.target.value)}
-                      >
-                        <option value="">Seleccionar material</option>
-                        {teacherResourceItems.map((item) => (
-                          <option key={item.id} value={item.id}>{item.name} · {item.stock} {item.unit}</option>
-                        ))}
-                        <option value="__other__">Otro</option>
-                      </select>
-                    </label>
-                    {isTeacherResourceCustomItem ? (
-                      <label>
-                        Nombre del material
-                        <input
-                          placeholder="Ej. Foamy azul escarchado"
-                          value={teacherResourceRequestDraft.customName}
-                          onChange={(event) => onTeacherResourceDraftChange('customName', event.target.value)}
-                        />
-                      </label>
+                {selectedTeacherPlannerCycle ? (
+                  <div className="campus-teacher__planner-workspace">
+                    <div className="campus-teacher__planner-workspace-head">
+                      <div>
+                        <h4>{selectedTeacherPlannerCycle.title}</h4>
+                        <p className="campus-panel__meta">
+                          Periodo: {formatDateLabel(selectedTeacherPlannerCycle.startDate)} - {formatDateLabel(selectedTeacherPlannerCycle.endDate)}.
+                          {' '}Límite de entrega: {formatDateLabel(selectedTeacherPlannerCycle.submissionDeadline)}.
+                          {selectedTeacherPlannerCycle.instructions ? ` ${selectedTeacherPlannerCycle.instructions}` : ''}
+                        </p>
+                        {!isTeacherPlannerEditable ? (
+                          <p className="campus-teacher__planner-locked-note">
+                            {selectedTeacherPlannerRequest && selectedTeacherPlannerRequest.status !== 'pending_coordination_review'
+                              ? 'Este planner ya avanzó en el flujo y no se puede editar aquí.'
+                              : 'La fecha límite ya venció. Solo puedes consultar el historial.'}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {selectedTeacherPlannerRequest && !isTeacherPlannerEditable ? (
+                      <div className="campus-teacher__planner-history">
+                        <h5>Historial enviado</h5>
+                        {selectedTeacherPlannerRequest.noMaterialsNeeded ? (
+                          <p>Marcaste que no necesitas material para este periodo.</p>
+                        ) : null}
+                        <div className="campus-teacher__planner-table-wrap">
+                          <table className="campus-teacher__planner-table">
+                            <thead>
+                              <tr>
+                                <th>Asignatura</th>
+                                <th>Grado</th>
+                                <th>Curso</th>
+                                <th>Material</th>
+                                <th>Cant.</th>
+                                <th>Actividad</th>
+                                <th>Fecha</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(selectedTeacherPlannerRequest.plannerActivities || []).length ? (
+                                selectedTeacherPlannerRequest.plannerActivities.map((activity) => (
+                                  <tr key={activity.id || `${activity.title}-${activity.date}`}>
+                                    <td>{activity.subject || '—'}</td>
+                                    <td>{activity.grade || '—'}</td>
+                                    <td>{activity.courseLabel || '—'}</td>
+                                    <td>{activity.materialName || '—'}</td>
+                                    <td>{activity.quantity || '—'}</td>
+                                    <td>
+                                      <strong>{activity.title || '—'}</strong>
+                                      {activity.purpose ? <div className="campus-panel__meta">{activity.purpose}</div> : null}
+                                    </td>
+                                    <td>{formatDateLabel(activity.date)}</td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr>
+                                  <td colSpan={7}>
+                                    {(selectedTeacherPlannerRequest.items || []).map((entry) => `${entry.item?.name || entry.customName || 'Material'} x${entry.quantity}`).join(' · ') || 'Sin detalle de actividades.'}
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     ) : null}
-                    <label>
-                      Cantidad
-                      <input
-                        min="1"
-                        type="number"
-                        value={teacherResourceRequestDraft.quantity}
-                        onChange={(event) => onTeacherResourceDraftChange('quantity', event.target.value)}
-                      />
-                    </label>
-                    <button className="campus-teacher__action-btn" disabled={!teacherResourceRequestDraft.itemId || (isTeacherResourceCustomItem && !String(teacherResourceRequestDraft.customName || '').trim())} onClick={onAddTeacherResourceItem} type="button">
-                      Agregar
-                    </button>
-                  </div>
 
-                  <div className="campus-teacher__resource-selected-list">
-                    {teacherResourceRequestItems.length === 0 ? <p className="campus-panel__meta">Agrega los materiales que necesitas para enviar la solicitud.</p> : null}
-                    {teacherResourceRequestItems.map((item) => (
-                      <button
-                        className="campus-teacher__resource-chip"
-                        key={item.key}
-                        onClick={() => setTeacherResourceRequestItems((currentItems) => currentItems.filter((currentItem) => currentItem.key !== item.key))}
-                        type="button"
-                      >
-                        <strong>{item.name}</strong>
-                        <span>x{item.quantity} {item.unit}</span>
-                      </button>
-                    ))}
-                  </div>
+                    {isTeacherPlannerEditable ? (
+                      <div className="campus-teacher__planner-form">
+                        <label className="campus-teacher__planner-check">
+                          <input
+                            checked={Boolean(teacherResourceRequestDraft.noMaterialsNeeded)}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              onTeacherResourceDraftChange('noMaterialsNeeded', checked);
+                              if (checked) {
+                                setTeacherResourcePlannerActivities([]);
+                              }
+                            }}
+                            type="checkbox"
+                          />
+                          <span>No necesito material para este periodo</span>
+                        </label>
 
-                  <div className="campus-teacher__card-actions">
-                    <span className="campus-panel__meta">El inventario se descuenta cuando compras acepta el consolidado.</span>
-                    <button className="campus-teacher__action-btn" disabled={isBusy || teacherResourceRequestItems.length === 0 || teacherResourcePlannerActivities.length === 0 || !teacherResourceRequestDraft.plannerCycleId} type="submit">
-                      {createTeacherResourceRequestMutation.isPending ? 'Enviando...' : 'Enviar a coordinacion'}
-                    </button>
-                  </div>
-                </form>
+                        {!teacherResourceRequestDraft.noMaterialsNeeded ? (
+                          <>
+                            <div className="campus-teacher__planner-fields">
+                              <label>
+                                Asignatura
+                                <select
+                                  value={teacherResourceRequestDraft.subjectKey}
+                                  onChange={(event) => onTeacherResourceDraftChange('subjectKey', event.target.value)}
+                                >
+                                  <option value="">Seleccionar asignatura</option>
+                                  {teacherPlannerSubjectOptions.map((subject) => (
+                                    <option key={subject.key} value={subject.key}>{subject.label}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label>
+                                Grado
+                                <select
+                                  disabled={!teacherResourceRequestDraft.subjectKey}
+                                  value={teacherResourceRequestDraft.gradeKey}
+                                  onChange={(event) => onTeacherResourceDraftChange('gradeKey', event.target.value)}
+                                >
+                                  <option value="">Seleccionar grado</option>
+                                  {teacherPlannerGradeOptions.map((grade) => (
+                                    <option key={grade.key} value={grade.key}>{grade.label}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label>
+                                Curso
+                                <select
+                                  disabled={!teacherResourceRequestDraft.gradeKey}
+                                  value={teacherResourceRequestDraft.courseId}
+                                  onChange={(event) => onTeacherResourceDraftChange('courseId', event.target.value)}
+                                >
+                                  <option value="">Seleccionar curso</option>
+                                  {teacherPlannerCourseOptions.map((course) => (
+                                    <option key={course.id} value={course.id}>
+                                      {getCourseGroupLabel(course) || getCourseDisplayTitle(course)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label>
+                                Material
+                                <select
+                                  value={teacherResourceRequestDraft.materialKey}
+                                  onChange={(event) => onTeacherResourceDraftChange('materialKey', event.target.value)}
+                                >
+                                  <option value="">Seleccionar material</option>
+                                  {teacherPlannerMaterialOptions.map((material) => (
+                                    <option key={material} value={material}>{material}</option>
+                                  ))}
+                                  <option value="__other__">Otro</option>
+                                </select>
+                              </label>
+                              {teacherResourceRequestDraft.materialKey === '__other__' ? (
+                                <label>
+                                  Nombre del material
+                                  <input
+                                    placeholder="Escribe el material"
+                                    value={teacherResourceRequestDraft.customMaterialName}
+                                    onChange={(event) => onTeacherResourceDraftChange('customMaterialName', event.target.value)}
+                                  />
+                                </label>
+                              ) : null}
+                              <label>
+                                Cantidad
+                                <input
+                                  min="1"
+                                  type="number"
+                                  value={teacherResourceRequestDraft.quantity}
+                                  onChange={(event) => onTeacherResourceDraftChange('quantity', event.target.value)}
+                                />
+                              </label>
+                              <label className="campus-teacher__resource-field-wide">
+                                Título de actividad
+                                <input
+                                  placeholder="Ej. Collage de ecosistemas"
+                                  value={teacherResourceRequestDraft.activityTitle}
+                                  onChange={(event) => onTeacherResourceDraftChange('activityTitle', event.target.value)}
+                                />
+                              </label>
+                              <label className="campus-teacher__resource-field-wide">
+                                Motivo pedagógico
+                                <textarea
+                                  placeholder="Actividad, proyecto o necesidad del aula"
+                                  rows={3}
+                                  value={teacherResourceRequestDraft.purpose}
+                                  onChange={(event) => onTeacherResourceDraftChange('purpose', event.target.value)}
+                                />
+                              </label>
+                              <label>
+                                Fecha de la actividad
+                                <input
+                                  max={toDateInputValue(selectedTeacherPlannerCycle.endDate) || undefined}
+                                  min={toDateInputValue(selectedTeacherPlannerCycle.startDate) || undefined}
+                                  type="date"
+                                  value={teacherResourceRequestDraft.activityDate}
+                                  onChange={(event) => onTeacherResourceDraftChange('activityDate', event.target.value)}
+                                />
+                                <span className="campus-panel__meta">
+                                  Rango permitido: {formatDateLabel(selectedTeacherPlannerCycle.startDate)} - {formatDateLabel(selectedTeacherPlannerCycle.endDate)}
+                                </span>
+                              </label>
+                            </div>
 
-                <div className="campus-teacher__resource-history">
-                  <div className="campus-teacher__section-head">
-                    <div>
-                      <span className="campus-panel__kicker">Trazabilidad</span>
-                      <h3>Mis solicitudes</h3>
+                            <div className="campus-teacher__card-actions">
+                              <button className="campus-teacher__action-btn" onClick={onAddTeacherResourceActivity} type="button">
+                                Agregar actividad
+                              </button>
+                            </div>
+
+                            <div className="campus-teacher__planner-table-wrap">
+                              <table className="campus-teacher__planner-table">
+                                <thead>
+                                  <tr>
+                                    <th>Asignatura</th>
+                                    <th>Grado</th>
+                                    <th>Curso</th>
+                                    <th>Material</th>
+                                    <th>Cant.</th>
+                                    <th>Actividad</th>
+                                    <th>Fecha</th>
+                                    <th></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {teacherResourcePlannerActivities.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={8}>Aún no has agregado actividades para este planner.</td>
+                                    </tr>
+                                  ) : teacherResourcePlannerActivities.map((activity) => (
+                                    <tr key={activity.key}>
+                                      <td>{activity.subject}</td>
+                                      <td>{activity.grade}</td>
+                                      <td>{activity.courseLabel}</td>
+                                      <td>{activity.materialName}</td>
+                                      <td>{activity.quantity}</td>
+                                      <td>
+                                        <strong>{activity.title}</strong>
+                                        {activity.purpose ? <div className="campus-panel__meta">{activity.purpose}</div> : null}
+                                      </td>
+                                      <td>{formatDateLabel(activity.date)}</td>
+                                      <td>
+                                        <button
+                                          className="campus-teacher__ghost-btn"
+                                          onClick={() => onRemoveTeacherResourceActivity(activity.key)}
+                                          type="button"
+                                        >
+                                          Quitar
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="campus-panel__meta">
+                            Confirmaste que no necesitas material. Guarda para notificar a coordinación.
+                          </p>
+                        )}
+
+                        <div className="campus-teacher__card-actions">
+                          <button
+                            className="campus-teacher__action-btn"
+                            disabled={isBusy || (!teacherResourceRequestDraft.noMaterialsNeeded && teacherResourcePlannerActivities.length === 0)}
+                            onClick={() => setTeacherPlannerConfirmOpen(true)}
+                            type="button"
+                          >
+                            {createTeacherResourceRequestMutation.isPending
+                              ? 'Enviando...'
+                              : (selectedTeacherPlannerRequest ? 'Actualizar planner' : 'Enviar a coordinación')}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {teacherPlannerConfirmOpen ? (
+                  <div className="campus-teacher__planner-modal" role="dialog" aria-modal="true">
+                    <div className="campus-teacher__planner-modal-card">
+                      <h4>¿Confirmas el envío?</h4>
+                      <p>
+                        {teacherResourceRequestDraft.noMaterialsNeeded
+                          ? '¿Confirmas que no necesitas material para este rango de fechas?'
+                          : '¿Esta es toda la solicitud de materiales que necesitas para este rango de fechas?'}
+                      </p>
+                      <div className="campus-teacher__card-actions">
+                        <button className="campus-teacher__ghost-btn" onClick={() => setTeacherPlannerConfirmOpen(false)} type="button">
+                          Revisar otra vez
+                        </button>
+                        <button className="campus-teacher__action-btn" disabled={isBusy} onClick={onSubmitTeacherResourceRequest} type="button">
+                          Sí, enviar
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  {teacherResourceItemsQuery.isLoading || teacherResourceRequestsQuery.isLoading ? <p className="campus-panel__meta">Cargando materiales...</p> : null}
-                  {teacherResourceRequests.length === 0 && !teacherResourceRequestsQuery.isLoading ? <p className="campus-panel__meta">Todavía no tienes solicitudes registradas.</p> : null}
-                  {teacherResourceRequests.map((request) => (
-                    <article className={`campus-teacher__resource-request status-${request.status}`} key={request.id}>
-                      <div>
-                        <span className="campus-teacher__status-pill is-active">{teacherResourceStatusLabels[request.status] || request.status}</span>
-                        <h4>{request.requestedForArea || 'Solicitud de materiales'}</h4>
-                        {request.plannerCycle ? <small>{request.plannerCycle.title}</small> : null}
-                        <p>{(request.items || []).map((entry) => `${entry.item?.name || entry.customName || 'Material'} x${entry.quantity}`).join(' · ')}</p>
-                      </div>
-                      <div className="campus-teacher__resource-request-meta">
-                        <span>{formatDateLabel(request.createdAt)}</span>
-                        {request.neededByDate ? <span>Necesario: {formatDateLabel(request.neededByDate)}</span> : null}
-                        {request.approvedBy ? <span>Aprobó: {request.approvedBy.name}</span> : null}
-                        {request.deliveredBy ? <span>Entregó: {request.deliveredBy.name}</span> : null}
-                      </div>
-                      {request.purpose ? <p className="campus-teacher__resource-request-purpose">{request.purpose}</p> : null}
-                    </article>
-                  ))}
-                </div>
+                ) : null}
               </article>
             ) : null}
 

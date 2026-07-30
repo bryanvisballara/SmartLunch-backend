@@ -16,6 +16,12 @@ const hrPlannerActivitySchema = new mongoose.Schema(
     date: { type: Date, default: null },
     title: { type: String, trim: true, default: '' },
     description: { type: String, trim: true, default: '' },
+    subject: { type: String, trim: true, default: '' },
+    grade: { type: String, trim: true, default: '' },
+    courseLabel: { type: String, trim: true, default: '' },
+    materialName: { type: String, trim: true, default: '' },
+    quantity: { type: Number, default: 0, min: 0 },
+    purpose: { type: String, trim: true, default: '' },
   },
   { _id: true }
 );
@@ -27,6 +33,7 @@ const hrSupplyRequestSchema = new mongoose.Schema(
     requestedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     plannerCycleId: { type: mongoose.Schema.Types.ObjectId, ref: 'HrPlannerCycle', default: null, index: true },
     plannerActivities: [hrPlannerActivitySchema],
+    noMaterialsNeeded: { type: Boolean, default: false },
     consolidatedFromRequestIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'HrSupplyRequest' }],
     consolidatedRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'HrSupplyRequest', default: null },
     submittedToPurchasingByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
