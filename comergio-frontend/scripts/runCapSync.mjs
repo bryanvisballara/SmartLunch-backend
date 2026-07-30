@@ -56,6 +56,10 @@ if (!process.env.CAPACITOR_SERVER_URL && process.env.VITE_APP_URL) {
   process.env.CAPACITOR_SERVER_URL = process.env.VITE_APP_URL;
 }
 
+if (!process.env.CAPACITOR_SERVER_URL) {
+  process.env.CAPACITOR_SERVER_URL = 'https://comergio.com';
+}
+
 const useEmbeddedShell = ['1', 'true', 'yes', 'on'].includes(String(process.env.CAPACITOR_USE_EMBEDDED || '').trim().toLowerCase());
 const remoteServerUrl = String(process.env.CAPACITOR_SERVER_URL || '').trim().replace(/\/+$/, '');
 

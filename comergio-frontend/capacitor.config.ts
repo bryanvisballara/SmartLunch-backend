@@ -2,6 +2,8 @@
 
 import type { CapacitorConfig } from '@capacitor/cli';
 
+const DEFAULT_REMOTE_SERVER_URL = 'https://comergio.com';
+
 function isTruthy(value: string | undefined): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
@@ -20,13 +22,17 @@ function normalizeServerUrl(value: string | undefined): string | undefined {
 }
 
 const useEmbeddedShell = isTruthy(process.env.CAPACITOR_USE_EMBEDDED);
-const remoteServerUrl = normalizeServerUrl(process.env.CAPACITOR_SERVER_URL);
+const remoteServerUrl = normalizeServerUrl(process.env.CAPACITOR_SERVER_URL)
+  || normalizeServerUrl(process.env.VITE_APP_URL)
+  || DEFAULT_REMOTE_SERVER_URL;
 
 const config: CapacitorConfig = {
   appId: 'com.comergio.app',
   appName: 'Comergio',
   webDir: 'dist',
-  server: useEmbeddedShell || !remoteServerUrl
+  // Default: live web shell from comergio.com (same as iOS).
+  // Opt into offline APK assets only with CAPACITOR_USE_EMBEDDED=true.
+  server: useEmbeddedShell
     ? {
         androidScheme: 'https',
       }
@@ -52,10 +58,10 @@ const config: CapacitorConfig = {
   },
 };
 
-if (remoteServerUrl && !useEmbeddedShell) {
-  console.log(`[capacitor] Remote UI shell: ${remoteServerUrl}`);
-} else {
+if (useEmbeddedShell) {
   console.log('[capacitor] Embedded dist shell (local bundle)');
+} else {
+  console.log(`[capacitor] Remote UI shell: ${remoteServerUrl}`);
 }
 
 export default config;
