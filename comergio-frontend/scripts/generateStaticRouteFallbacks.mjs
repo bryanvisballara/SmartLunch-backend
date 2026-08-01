@@ -154,15 +154,17 @@ async function main() {
 
   const zipPath = path.join(process.cwd(), 'dist-deploy.zip');
   await fs.rm(zipPath, { force: true });
+  // Zip contents at archive root (not nested in dist-deploy/) so Hostinger
+  // public_html gets /index.html and /assets/* directly.
   execSync(
     [
-      'zip -rq dist-deploy.zip dist-deploy',
-      '-x "dist-deploy/tourvirtualberckley/*"',
-      '-x "dist-deploy/tourvirtualberckley/**/*"',
-      '-x "dist-deploy/landing/*"',
-      '-x "dist-deploy/landing/**/*"',
+      'zip -rq ../dist-deploy.zip .',
+      '-x "tourvirtualberckley/*"',
+      '-x "tourvirtualberckley/**/*"',
+      '-x "landing/*"',
+      '-x "landing/**/*"',
     ].join(' '),
-    { cwd: process.cwd(), stdio: 'inherit' },
+    { cwd: DIST_DEPLOY_DIR, stdio: 'inherit' },
   );
 
   console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);

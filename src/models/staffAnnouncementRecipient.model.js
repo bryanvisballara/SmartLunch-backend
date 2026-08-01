@@ -13,6 +13,7 @@ const staffAnnouncementRecipientSchema = new mongoose.Schema(
     roleSnapshot: { type: String, trim: true, default: '' },
     nameSnapshot: { type: String, trim: true, default: '' },
     readAt: { type: Date, default: null, index: true },
+    archivedAt: { type: Date, default: null, index: true },
   },
   { timestamps: true }
 );
@@ -20,5 +21,6 @@ const staffAnnouncementRecipientSchema = new mongoose.Schema(
 staffAnnouncementRecipientSchema.index({ schoolId: 1, announcementId: 1, userId: 1 }, { unique: true });
 staffAnnouncementRecipientSchema.index({ schoolId: 1, userId: 1, readAt: 1, createdAt: -1 });
 staffAnnouncementRecipientSchema.index({ schoolId: 1, announcementId: 1, readAt: 1 });
+staffAnnouncementRecipientSchema.index({ schoolId: 1, userId: 1, archivedAt: 1, createdAt: -1 });
 
 module.exports = registerSchoolScopedModel('StaffAnnouncementRecipient', staffAnnouncementRecipientSchema);

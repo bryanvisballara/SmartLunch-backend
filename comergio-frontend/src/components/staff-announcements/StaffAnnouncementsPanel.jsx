@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createStaffAnnouncement,
@@ -7,6 +7,7 @@ import {
   getStaffAnnouncementMeta,
   getStaffAnnouncementRecipients,
   getStaffAnnouncementUnreadCount,
+  markStaffAnnouncementArchived,
   markStaffAnnouncementRead,
 } from '../../services/staffAnnouncements.service';
 import './StaffAnnouncementsPanel.css';
@@ -19,6 +20,13 @@ const DEFAULT_TARGET_ROLES = [
   'admissions',
   'coordination',
   'billing',
+];
+
+const INBOX_TABS = [
+  { key: 'inbox', label: 'Bandeja recibida' },
+  { key: 'unread', label: 'No leídos' },
+  { key: 'confirmed', label: 'Confirmados' },
+  { key: 'archived', label: 'Archivados' },
 ];
 
 function formatAnnouncementDate(value) {
@@ -63,16 +71,33 @@ function AnnouncementIcon() {
   );
 }
 
+function EmptyInboxIllustration() {
+  return (
+    <svg aria-hidden="true" className="staff-announcements-empty-art" fill="none" viewBox="0 0 180 120">
+      <path d="M28 78h124v18a10 10 0 0 1-10 10H38a10 10 0 0 1-10-10V78Z" fill="#dbeafe" />
+      <path d="M28 78 90 42l62 36" stroke="#93c5fd" strokeLinejoin="round" strokeWidth="4" />
+      <path d="M40 74h100v8H40Z" fill="#bfdbfe" />
+      <path d="M98 34c18-8 34-4 42 8" stroke="#60a5fa" strokeDasharray="4 5" strokeLinecap="round" strokeWidth="2.5" />
+      <path d="M132 28 156 36l-18 14-6-20Z" fill="#3b82f6" />
+      <circle cx="54" cy="58" fill="#93c5fd" r="3" />
+      <circle cx="68" cy="50" fill="#bfdbfe" r="2.5" />
+    </svg>
+  );
+}
+
 export default function StaffAnnouncementsPanel({
   mode = 'inbox',
   title = 'Comunicados internos',
-  description = 'Mensajes internos del equipo (no aparecen en el feed de familias ni alumnos).',
+  description = 'Recibe y confirma mensajes internos de rectoría y coordinación.',
   className = '',
 }) {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState({ type: '', text: '' });
   const [composeDraft, setComposeDraft] = useState(() => createEmptyDraft());
   const [selectedSentId, setSelectedSentId] = useState('');
+  const [activeTab, setActiveTab] = useState('inbox');
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [senderFilter, setSenderFilter] = useState('all');
 
   const canManage = mode === 'manage' || mode === 'sender';
   const showInbox = mode === 'inbox' || mode === 'manage';
@@ -123,6 +148,20 @@ export default function StaffAnnouncementsPanel({
     },
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: ({ id, archived }) => markStaffAnnouncementArchived(id, archived),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['staff-announcements'] });
+      setNotice({
+        type: 'success',
+        text: variables.archived ? 'Comunicado archivado.' : 'Comunicado restaurado a la bandeja.',
+      });
+    },
+    onError: (error) => {
+      setNotice({ type: 'error', text: error?.response?.data?.message || 'No se pudo actualizar el archivo.' });
+    },
+  });
+
   const createMutation = useMutation({
     mutationFn: createStaffAnnouncement,
     onSuccess: () => {
@@ -147,6 +186,60 @@ export default function StaffAnnouncementsPanel({
   const recipients = recipientsQuery.data?.data?.recipients || recipientsQuery.data?.recipients || [];
   const recipientSummary = recipientsQuery.data?.data?.summary || recipientsQuery.data?.summary || null;
   const selectedRoleCount = (composeDraft.targetRoles || []).length;
+
+  const senderOptions = useMemo(() => {
+    const labels = new Map();
+    inboxItems.forEach((item) => {
+      const key = String(item.senderRole || item.senderName || '').trim().toLowerCase();
+      if (!key) return;
+      const label = item.senderRole || item.senderName || 'Equipo';
+      if (!labels.has(key)) labels.set(key, label);
+    });
+    return Array.from(labels.entries()).map(([value, label]) => ({ value, label }));
+  }, [inboxItems]);
+
+  const stats = useMemo(() => {
+    const unread = inboxItems.filter((item) => !item.isRead && !item.isArchived).length;
+    const confirmed = inboxItems.filter((item) => item.isRead && !item.isArchived).length;
+    const archived = inboxItems.filter((item) => item.isArchived).length;
+    return { unread, confirmed, archived };
+  }, [inboxItems]);
+
+  const filteredInboxItems = useMemo(() => {
+    return inboxItems.filter((item) => {
+      if (activeTab === 'inbox' && item.isArchived) return false;
+      if (activeTab === 'unread' && (item.isRead || item.isArchived)) return false;
+      if (activeTab === 'confirmed' && (!item.isRead || item.isArchived)) return false;
+      if (activeTab === 'archived' && !item.isArchived) return false;
+      if (senderFilter !== 'all') {
+        const key = String(item.senderRole || item.senderName || '').trim().toLowerCase();
+        if (key !== senderFilter) return false;
+      }
+      return true;
+    });
+  }, [activeTab, inboxItems, senderFilter]);
+
+  const emptyCopy = {
+    inbox: {
+      title: 'Tu bandeja está vacía',
+      text: 'Aún no tienes comunicados internos. Los mensajes que recibas aparecerán aquí.',
+    },
+    unread: {
+      title: 'No hay mensajes sin leer',
+      text: 'Cuando llegue un comunicado nuevo, lo verás en esta sección.',
+    },
+    confirmed: {
+      title: 'Sin confirmaciones todavía',
+      text: 'Los mensajes que confirmes como leídos aparecerán aquí.',
+    },
+    archived: {
+      title: 'No hay archivados',
+      text: 'Los comunicados que archives se guardarán en esta bandeja.',
+    },
+  }[activeTab] || {
+    title: 'Tu bandeja está vacía',
+    text: 'Aún no tienes comunicados internos.',
+  };
 
   const toggleTargetRole = (role) => {
     setComposeDraft((current) => {
@@ -187,10 +280,9 @@ export default function StaffAnnouncementsPanel({
 
   return (
     <section className={`staff-announcements-panel ${className}`.trim()}>
-      <header className="staff-announcements-panel__head">
-        <span className="staff-announcements-panel__head-icon"><AnnouncementIcon /></span>
+      <header className="staff-announcements-panel__hero">
         <div>
-          <span className="staff-announcements-panel__kicker">Comunicación interna</span>
+          <span className="staff-announcements-panel__kicker">Comunicados internos</span>
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
@@ -267,45 +359,147 @@ export default function StaffAnnouncementsPanel({
       ) : null}
 
       {showInbox ? (
-        <div className="staff-announcements-list">
-          <h3>Bandeja recibida</h3>
-          {inboxQuery.isLoading ? <p className="staff-announcements-empty">Cargando comunicados internos...</p> : null}
-          {!inboxQuery.isLoading && inboxItems.length === 0 ? (
-            <p className="staff-announcements-empty">Aún no tienes comunicados internos.</p>
-          ) : null}
-          {inboxItems.map((item) => (
-            <article className={`staff-announcements-card${item.isRead ? '' : ' is-unread'}`} key={item.id}>
-              <div className="staff-announcements-card__top">
-                <div>
-                  <strong>{item.title}</strong>
-                  <small>
-                    {item.senderName || 'Equipo directivo'}
-                    {item.senderRole ? ` · ${item.senderRole}` : ''}
-                    {' · '}
-                    {formatAnnouncementDate(item.publishedAt)}
-                  </small>
-                </div>
-                {!item.isRead ? <span className="staff-announcements-pill">Sin leer</span> : (
-                  <span className="staff-announcements-pill is-read">Leído</span>
-                )}
-              </div>
-              <p className="staff-announcements-card__body">{item.body}</p>
-              {!item.isRead ? (
+        <div className="staff-announcements-inbox">
+          <div className="staff-announcements-stats">
+            <article className="staff-announcements-stat is-unread">
+              <span className="staff-announcements-stat__icon" aria-hidden="true">
+                <AnnouncementIcon />
+              </span>
+              <strong>{stats.unread}</strong>
+              <h3>No leídos</h3>
+              <p>Tienes {stats.unread} mensaje{stats.unread === 1 ? '' : 's'} nuevo{stats.unread === 1 ? '' : 's'}</p>
+            </article>
+            <article className="staff-announcements-stat is-confirmed">
+              <span className="staff-announcements-stat__icon" aria-hidden="true">✓</span>
+              <strong>{stats.confirmed}</strong>
+              <h3>Confirmados</h3>
+              <p>Mensajes que has leído</p>
+            </article>
+            <article className="staff-announcements-stat is-archived">
+              <span className="staff-announcements-stat__icon" aria-hidden="true">▤</span>
+              <strong>{stats.archived}</strong>
+              <h3>Archivados</h3>
+              <p>Mensajes guardados</p>
+            </article>
+          </div>
+
+          <div className="staff-announcements-toolbar">
+            <div className="staff-announcements-tabs" role="tablist" aria-label="Filtros de bandeja">
+              {INBOX_TABS.map((tab) => (
                 <button
-                  className="staff-announcements-btn staff-announcements-btn--secondary"
-                  disabled={markReadMutation.isPending}
-                  onClick={() => markReadMutation.mutate(item.id)}
+                  aria-selected={activeTab === tab.key}
+                  className={`staff-announcements-tab${activeTab === tab.key ? ' is-active' : ''}`}
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  role="tab"
                   type="button"
                 >
-                  Confirmo que recibí y leí este comunicado interno
+                  {tab.label}
                 </button>
-              ) : (
-                <small className="staff-announcements-card__meta">
-                  Confirmado el {formatAnnouncementDate(item.readAt)}
-                </small>
-              )}
-            </article>
-          ))}
+              ))}
+            </div>
+
+            <div className="staff-announcements-filter">
+              <button
+                className={`staff-announcements-filter-btn${showFilterMenu || senderFilter !== 'all' ? ' is-active' : ''}`}
+                onClick={() => setShowFilterMenu((current) => !current)}
+                type="button"
+              >
+                <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                  <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+                </svg>
+                Filtrar
+                <span aria-hidden="true">▾</span>
+              </button>
+              {showFilterMenu ? (
+                <div className="staff-announcements-filter-menu" role="menu">
+                  <button
+                    className={senderFilter === 'all' ? 'is-active' : ''}
+                    onClick={() => {
+                      setSenderFilter('all');
+                      setShowFilterMenu(false);
+                    }}
+                    type="button"
+                  >
+                    Todos los remitentes
+                  </button>
+                  {senderOptions.map((option) => (
+                    <button
+                      className={senderFilter === option.value ? 'is-active' : ''}
+                      key={option.value}
+                      onClick={() => {
+                        setSenderFilter(option.value);
+                        setShowFilterMenu(false);
+                      }}
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="staff-announcements-list-shell">
+            {inboxQuery.isLoading ? <p className="staff-announcements-empty">Cargando comunicados internos...</p> : null}
+
+            {!inboxQuery.isLoading && filteredInboxItems.length === 0 ? (
+              <div className="staff-announcements-empty-state">
+                <EmptyInboxIllustration />
+                <strong>{emptyCopy.title}</strong>
+                <p>{emptyCopy.text}</p>
+              </div>
+            ) : null}
+
+            {!inboxQuery.isLoading && filteredInboxItems.length > 0 ? (
+              <div className="staff-announcements-list">
+                {filteredInboxItems.map((item) => (
+                  <article className={`staff-announcements-card${item.isRead ? '' : ' is-unread'}${item.isArchived ? ' is-archived' : ''}`} key={item.id}>
+                    <div className="staff-announcements-card__top">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <small>
+                          {item.senderName || 'Equipo directivo'}
+                          {item.senderRole ? ` · ${item.senderRole}` : ''}
+                          {' · '}
+                          {formatAnnouncementDate(item.publishedAt)}
+                        </small>
+                      </div>
+                      {!item.isRead && !item.isArchived ? <span className="staff-announcements-pill">Sin leer</span> : null}
+                      {item.isRead && !item.isArchived ? <span className="staff-announcements-pill is-read">Confirmado</span> : null}
+                      {item.isArchived ? <span className="staff-announcements-pill is-archived">Archivado</span> : null}
+                    </div>
+                    <p className="staff-announcements-card__body">{item.body}</p>
+                    <div className="staff-announcements-card__actions">
+                      {!item.isRead ? (
+                        <button
+                          className="staff-announcements-btn staff-announcements-btn--secondary"
+                          disabled={markReadMutation.isPending}
+                          onClick={() => markReadMutation.mutate(item.id)}
+                          type="button"
+                        >
+                          Confirmo que recibí y leí este comunicado
+                        </button>
+                      ) : (
+                        <small className="staff-announcements-card__meta">
+                          Confirmado el {formatAnnouncementDate(item.readAt)}
+                        </small>
+                      )}
+                      <button
+                        className="staff-announcements-btn staff-announcements-btn--ghost"
+                        disabled={archiveMutation.isPending}
+                        onClick={() => archiveMutation.mutate({ id: item.id, archived: !item.isArchived })}
+                        type="button"
+                      >
+                        {item.isArchived ? 'Restaurar' : 'Archivar'}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

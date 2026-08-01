@@ -366,7 +366,8 @@ function buildTeacherCommunicationAuthorName(request = {}) {
   }
 
   const teacherName = normalizeText(request.teacherUserId?.name || request.teacherName || request.teacherUserId?.username) || 'Docente';
-  const subjectLabel = normalizeText(request.courseId?.subject)
+  const subjectLabel = normalizeText(request.subject)
+    || normalizeText(request.courseId?.subject)
     || normalizeText(request.courseTitle).split(' - ')[0]
     || normalizeText(request.courseTitle);
 
@@ -4765,6 +4766,7 @@ function serializeCommunicationRequest(request) {
     authorStudentId: request.authorStudentId?._id || request.authorStudentId || null,
     courseId: request.courseId?._id || request.courseId || null,
     courseTitle: request.courseTitle || request.courseId?.title || '',
+    subject: request.subject || request.courseId?.subject || '',
     title: request.title || '',
     body: request.body || '',
     emailSubject: request.emailSubject || '',

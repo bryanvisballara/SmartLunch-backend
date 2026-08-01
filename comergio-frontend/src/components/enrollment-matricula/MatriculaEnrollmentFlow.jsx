@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useEffect, useMemo, useRef, useState } from 'react';
 import {
   acceptEnrollmentMatriculaConsent,
   acknowledgeEnrollmentMatriculaIntro,
@@ -299,11 +299,12 @@ function getSavedSignerProgress(process, documentType, signerOrder) {
   return signers.find((signer) => Number(signer.order) === Number(signerOrder)) || null;
 }
 
-function signerHasIdentityEvidence(saved = {}) {
-  if (saved.selfieImage && saved.idFrontImage && saved.idBackImage) {
+function signerHasIdentityEvidence(saved) {
+  const evidence = saved && typeof saved === 'object' ? saved : {};
+  if (evidence.selfieImage && evidence.idFrontImage && evidence.idBackImage) {
     return true;
   }
-  return Boolean(saved.hasSelfie && saved.hasIdFront && saved.hasIdBack);
+  return Boolean(evidence.hasSelfie && evidence.hasIdFront && evidence.hasIdBack);
 }
 
 function hydrateSigningStateFromSaved(saved, requireIdentity) {
@@ -796,7 +797,7 @@ function MatriculaEnrollmentFlow({
   const [pagareAccepted, setPagareAccepted] = useState(false);
   const [wompiCheckoutConfig, setWompiCheckoutConfig] = useState(null);
   const [wompiCheckoutLoading, setWompiCheckoutLoading] = useState(false);
-  const [identityEvidence, setIdentityEvidence] = useState(emptyIdentityEvidence);
+  const [identityEvidence, setIdentityEvidence] = useState(() => emptyIdentityEvidence());
   const [identityReady, setIdentityReady] = useState(false);
   const [signingPhase, setSigningPhase] = useState('idle'); // idle | signature | identity
 
@@ -960,11 +961,11 @@ function MatriculaEnrollmentFlow({
   const applyHydratedSigningState = (saved) => {
     const hydrated = hydrateSigningStateFromSaved(saved, requireIdentity);
     setSignatureImage(hydrated.signatureImage);
-    setIdentityEvidence(hydrated.identityEvidence);
+    setIdentityEvidence(hydrated.identityEvidence || emptyIdentityEvidence());
     setIdentityReady(!requireIdentity || signerHasIdentityEvidence(saved) || Boolean(
-      hydrated.identityEvidence.selfieImage
-      && hydrated.identityEvidence.idFrontImage
-      && hydrated.identityEvidence.idBackImage
+      hydrated.identityEvidence?.selfieImage
+      && hydrated.identityEvidence?.idFrontImage
+      && hydrated.identityEvidence?.idBackImage
     ));
     setSigningPhase(hydrated.signingPhase);
     if (activeStep === 'contract') setContractAccepted(hydrated.accepted);
@@ -1029,9 +1030,9 @@ function MatriculaEnrollmentFlow({
     }
     const saved = getSavedSignerProgress(process, activeStep === 'pagare' ? 'pagare' : 'contract', currentSigner?.order);
     setIdentityReady(Boolean(
-      (identityEvidence.selfieImage
-        && identityEvidence.idFrontImage
-        && identityEvidence.idBackImage)
+      (identityEvidence?.selfieImage
+        && identityEvidence?.idFrontImage
+        && identityEvidence?.idBackImage)
       || signerHasIdentityEvidence(saved)
     ));
   }, [identityEvidence, requireIdentity, process, currentSigner?.order, activeStep]);
@@ -1263,9 +1264,9 @@ function MatriculaEnrollmentFlow({
 
   const persistSignerProgress = async (documentType, {
     signatureImage: nextSignature = signatureImage,
-    selfieImage = identityEvidence.selfieImage,
-    idFrontImage = identityEvidence.idFrontImage,
-    idBackImage = identityEvidence.idBackImage,
+    selfieImage = identityEvidence?.selfieImage,
+    idFrontImage = identityEvidence?.idFrontImage,
+    idBackImage = identityEvidence?.idBackImage,
     finalize = false,
   } = {}) => {
     if (!currentSigner) {
@@ -1343,6 +1344,9 @@ function MatriculaEnrollmentFlow({
     if (!(await validateSignatureBeforeSubmit())) {
       return;
     }
+    // Move UI to identity immediately so Android doesn't sit on a blank shell
+    // while the API call + camera init run.
+    setSigningPhase('identity');
     setLoading(true);
     setErrorMessage('');
     try {
@@ -1353,8 +1357,8 @@ function MatriculaEnrollmentFlow({
         idBackImage: '',
         finalize: false,
       });
-      setSigningPhase('identity');
     } catch (error) {
+      setSigningPhase('signature');
       setErrorMessage(error?.response?.data?.message || error?.message || 'No se pudo guardar la firma.');
     } finally {
       setLoading(false);
@@ -1362,16 +1366,19 @@ function MatriculaEnrollmentFlow({
   };
 
   const onIdentityStepComplete = async (nextEvidence, step) => {
-    setIdentityEvidence(nextEvidence);
+    const safeEvidence = nextEvidence && typeof nextEvidence === 'object'
+      ? nextEvidence
+      : emptyIdentityEvidence();
+    setIdentityEvidence(safeEvidence);
     setLoading(true);
     setErrorMessage('');
     try {
       const documentType = activeStep === 'pagare' ? 'pagare' : 'contract';
       const nextProcess = await persistSignerProgress(documentType, {
         signatureImage,
-        selfieImage: nextEvidence.selfieImage,
-        idFrontImage: nextEvidence.idFrontImage,
-        idBackImage: nextEvidence.idBackImage,
+        selfieImage: safeEvidence.selfieImage,
+        idFrontImage: safeEvidence.idFrontImage,
+        idBackImage: safeEvidence.idBackImage,
         finalize: step === 'idBack',
       });
 
@@ -1789,11 +1796,11 @@ function MatriculaEnrollmentFlow({
                       </p>
                     ) : null}
                     <MatriculaIdentityCapture
-                      onChange={setIdentityEvidence}
+                      onChange={(next) => setIdentityEvidence(next || emptyIdentityEvidence())}
                       onStepComplete={onIdentityStepComplete}
                       saving={loading}
                       signerName={nextContractSigner.displayName}
-                      value={identityEvidence}
+                      value={identityEvidence || emptyIdentityEvidence()}
                     />
                     {signatureImage ? (
                       <button
@@ -1927,4 +1934,53 @@ function MatriculaEnrollmentFlow({
   );
 }
 
-export default MatriculaEnrollmentFlow;
+class MatriculaEnrollmentFlowBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      hasError: true,
+      message: error?.message || 'Error inesperado en el flujo de matrícula.',
+    };
+  }
+
+  componentDidCatch(error) {
+    // Keep a console trail for Android remote debugging without crashing the shell.
+    console.error('[MatriculaEnrollmentFlow]', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="matricula-flow-overlay" role="presentation">
+          <div aria-modal="true" className="matricula-flow-shell" role="dialog">
+            <h2>No se pudo mostrar la matrícula</h2>
+            <p className="matricula-flow-note matricula-flow-note--error">
+              {this.state.message}
+            </p>
+            <p className="matricula-flow-note matricula-flow-note--muted">
+              Cierra e intenta de nuevo. Si el problema continúa, reinicia la app.
+            </p>
+            <button
+              className="matricula-flow-primary"
+              onClick={() => {
+                this.setState({ hasError: false, message: '' });
+                this.props.onClose?.();
+              }}
+              type="button"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return <MatriculaEnrollmentFlow {...this.props} />;
+  }
+}
+
+export default MatriculaEnrollmentFlowBoundary;

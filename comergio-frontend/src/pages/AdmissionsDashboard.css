@@ -201,6 +201,18 @@
   color: #174f57;
 }
 
+.admissions-sidebar-item--academy {
+  border-color: rgba(124, 58, 237, 0.22);
+  background: linear-gradient(180deg, #f5f3ff 0%, #ede9fe 100%);
+  color: #5b21b6;
+}
+
+.admissions-sidebar-item--academy.is-active {
+  border-color: rgba(124, 58, 237, 0.38);
+  background: linear-gradient(180deg, #ede9fe 0%, #ddd6fe 100%);
+  color: #5b21b6;
+}
+
 .admissions-portal-shell .admissions-stage {
   width: 100%;
   max-width: none;

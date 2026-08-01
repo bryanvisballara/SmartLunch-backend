@@ -5,6 +5,10 @@ import useAuthStore from '../store/auth.store';
 import { createSuperAdminSchool, deleteSuperAdminSchool, getSuperAdminRectoriaUser, getSuperAdminSummary, saveSuperAdminRectoriaUser, updateSuperAdminSchoolSettings } from '../services/superAdmin.service';
 import { PortalBootSplash } from '../components/PortalBootSplash';
 import SuperAdminDianPanel from './SuperAdminDianPanel';
+import InformaPanel from '../components/comergio-academy/InformaPanel';
+import InformaDraftsPanel from '../components/comergio-academy/InformaDraftsPanel';
+import '../components/comergio-academy/InformaPanel.css';
+import '../components/comergio-academy/InformaDraftsPanel.css';
 
 const featureOptions = [
   { key: 'home', label: 'Inicio' },
@@ -814,6 +818,20 @@ function SuperAdminPortal() {
       </div>
 
       <SuperAdminDianPanel selectedDraft={selectedDraft} selectedSchool={selectedSchool} />
+
+      <section className="super-admin-feature-panel" style={{ marginTop: 24 }}>
+        <div className="super-admin-panel-head">
+          <div>
+            <span className="super-admin-kicker">Comergio Academy</span>
+            <h3>Comergio Informa</h3>
+          </div>
+        </div>
+        <p className="super-admin-muted" style={{ marginBottom: 16 }}>
+          Revisa los borradores automáticos (7:00 y 12:00 Colombia) y publícalos cuando quieras. También puedes redactar a mano.
+        </p>
+        <InformaDraftsPanel />
+        <InformaPanel />
+      </section>
 
       {rectoriaFeedback?.type === 'success' ? (
         <div

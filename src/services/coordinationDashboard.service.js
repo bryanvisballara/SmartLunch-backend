@@ -547,6 +547,7 @@ async function buildCoordinationDashboard({
       subject: normalizeText(item.subject),
       observation: normalizeText(item.observation),
       status: normalizeText(item.status),
+      incidentAt: item.incidentAt || null,
       submittedAt: item.submittedAt || item.createdAt,
     }));
 

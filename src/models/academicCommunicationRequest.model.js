@@ -17,6 +17,7 @@ const academicCommunicationRequestSchema = new mongoose.Schema(
     authorThumbUrl: { type: String, trim: true, default: '' },
     courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'CampusCourse', default: null, index: true },
     courseTitle: { type: String, trim: true, default: '' },
+    subject: { type: String, trim: true, default: '' },
     title: { type: String, required: true, trim: true },
     body: { type: String, required: true, trim: true },
     emailSubject: { type: String, trim: true, default: '' },

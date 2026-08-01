@@ -71,6 +71,8 @@ import { getAdmissionMarketingHistory, getAdmissions, sendAdmissionMarketingCamp
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
 
 const SECTION_OPTIONS = [
   { key: 'overview', label: 'Dashboard KPI' },
@@ -83,6 +85,7 @@ const SECTION_OPTIONS = [
   { key: 'routes', label: 'Rutas' },
   { key: 'database', label: 'Base de datos' },
   { key: 'approvals', label: 'Autorización de comunicados' },
+  { key: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label },
 ];
 
 const BILLING_SECTION_OPTIONS = [
@@ -91,6 +94,7 @@ const BILLING_SECTION_OPTIONS = [
   { key: 'enrollments', label: 'Matrículas' },
   { key: 'pensions', label: 'Pensiones' },
   { key: 'payment-history', label: 'Historial de pagos' },
+  { key: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label },
 ];
 
 const BILLING_PAYMENT_METHOD_OPTIONS = [
@@ -4405,6 +4409,14 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               mode="inbox"
               title="Comunicados internos"
             />
+          </article>
+        </section>
+      ) : null}
+
+      {activeSection === COMERGIO_ACADEMY_PARENT.key ? (
+        <section className="academic-secretary__grid academic-secretary__grid--content">
+          <article className="academic-secretary__panel">
+            <ComergioAcademyPanel showInternalNav />
           </article>
         </section>
       ) : null}

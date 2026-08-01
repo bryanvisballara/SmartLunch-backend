@@ -1,0 +1,208 @@
+.informa-drafts {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding: 1.2rem;
+  border: 1px solid rgba(47, 111, 237, 0.14);
+  border-radius: 22px;
+  background: linear-gradient(180deg, #f7faff 0%, #ffffff 48%);
+}
+
+.informa-drafts__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.informa-drafts__kicker {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  color: #2f6fed;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.informa-drafts__head h4 {
+  margin: 0;
+  color: #102a43;
+  font-size: 1.15rem;
+}
+
+.informa-drafts__head p,
+.informa-drafts__muted,
+.informa-drafts__empty span {
+  margin: 0.35rem 0 0;
+  color: #6b7c93;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.informa-drafts__generate,
+.informa-drafts__publish {
+  border: 0;
+  border-radius: 999px;
+  background: #2f6fed;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.informa-drafts__generate {
+  padding: 0.7rem 1.1rem;
+  white-space: nowrap;
+}
+
+.informa-drafts__banner {
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.informa-drafts__banner.is-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.informa-drafts__banner.is-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.informa-drafts__empty {
+  padding: 1.25rem;
+  border: 1px dashed rgba(47, 111, 237, 0.22);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.informa-drafts__empty p {
+  margin: 0;
+  color: #102a43;
+  font-weight: 700;
+}
+
+.informa-drafts__list {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.informa-drafts__card {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(15, 39, 68, 0.08);
+  border-radius: 18px;
+  background: #fff;
+}
+
+.informa-drafts__media {
+  min-height: 160px;
+  background: #eef2f7;
+}
+
+.informa-drafts__media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.informa-drafts__media span {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.informa-drafts__copy {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem 1rem 1rem 0;
+}
+
+.informa-drafts__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.informa-drafts__copy h5 {
+  margin: 0;
+  color: #102a43;
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.informa-drafts__copy p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.informa-drafts__copy a {
+  color: #2f6fed;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.informa-drafts__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+}
+
+.informa-drafts__publish,
+.informa-drafts__discard {
+  padding: 0.55rem 0.95rem;
+}
+
+.informa-drafts__discard {
+  border: 1px solid rgba(15, 39, 68, 0.12);
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.informa-drafts__generate:disabled,
+.informa-drafts__publish:disabled,
+.informa-drafts__discard:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 780px) {
+  .informa-drafts__head {
+    flex-direction: column;
+  }
+
+  .informa-drafts__generate {
+    width: 100%;
+  }
+
+  .informa-drafts__card {
+    grid-template-columns: 1fr;
+  }
+
+  .informa-drafts__copy {
+    padding: 0 1rem 1rem;
+  }
+
+  .informa-drafts__media {
+    min-height: 180px;
+  }
+}

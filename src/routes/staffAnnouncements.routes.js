@@ -71,6 +71,7 @@ router.get('/unread-count', roleMiddleware(inboxRoles), async (req, res) => {
       schoolId,
       userId,
       readAt: null,
+      archivedAt: null,
     });
     return res.status(200).json({ unreadCount });
   } catch (error) {
@@ -104,12 +105,47 @@ router.get('/inbox', roleMiddleware(inboxRoles), async (req, res) => {
         return serializeAnnouncement(announcement, {
           readAt: recipient.readAt || null,
           isRead: Boolean(recipient.readAt),
+          archivedAt: recipient.archivedAt || null,
+          isArchived: Boolean(recipient.archivedAt),
           recipientId: String(recipient._id),
         });
       })
       .filter(Boolean);
 
     return res.status(200).json({ announcements: items });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/:announcementId/archive', roleMiddleware(inboxRoles), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { announcementId } = req.params;
+    const shouldArchive = req.body?.archived !== false;
+    if (!isValidObjectId(announcementId)) {
+      return res.status(400).json({ message: 'Comunicado inválido.' });
+    }
+
+    const recipient = await StaffAnnouncementRecipient.findOneAndUpdate(
+      {
+        schoolId,
+        announcementId,
+        userId,
+      },
+      { $set: { archivedAt: shouldArchive ? new Date() : null } },
+      { new: true }
+    );
+
+    if (!recipient) {
+      return res.status(404).json({ message: 'Comunicado no encontrado en tu bandeja.' });
+    }
+
+    return res.status(200).json({
+      id: String(announcementId),
+      archivedAt: recipient.archivedAt || null,
+      isArchived: Boolean(recipient.archivedAt),
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

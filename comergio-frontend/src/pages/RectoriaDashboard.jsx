@@ -16,6 +16,8 @@ import RectoriaPortalSidebar from '../components/rectoria/RectoriaPortalSidebar'
 import RectoriaControlCenterPanel from '../components/rectoria/RectoriaControlCenterPanel';
 import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
 import StaffAnnouncementsPanel, { useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_CHILDREN, isComergioAcademySection } from '../components/comergio-academy/academyNav';
 import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection } from '../components/rectoria/rectoriaPortalNav';
 import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
@@ -2349,7 +2351,15 @@ function RectoriaDashboard() {
   const allowedSectionKeys = useMemo(
     () => {
       if (isCoordinationPortal) {
-        return ['overview', 'community_reports', 'communications', 'staff_announcements', 'resources', 'schedule'];
+        return [
+          'overview',
+          'community_reports',
+          'communications',
+          'staff_announcements',
+          'resources',
+          'schedule',
+          ...COMERGIO_ACADEMY_CHILDREN.map((child) => child.key),
+        ];
       }
       return flattenRectoriaNavKeys();
     },
@@ -2372,6 +2382,9 @@ function RectoriaDashboard() {
 
   useEffect(() => {
     if (isCoordinationPortal) {
+      if (isComergioAcademySection(activeSection)) {
+        setExpandedSidebarGroup('comergio_academy_group');
+      }
       return;
     }
     const groupKey = findRectoriaNavGroupForSection(activeSection);
@@ -8047,6 +8060,18 @@ function RectoriaDashboard() {
                 : 'Centraliza la comunicación interna con el equipo institucional y consulta las confirmaciones de lectura.'}
               mode="manage"
               title="Comunicados internos"
+            />
+          </section>
+        </div>
+      ) : null}
+
+      {isComergioAcademySection(activeSection) ? (
+        <div className="rectoria-stack">
+          <section className="panel rectoria-panel">
+            <ComergioAcademyPanel
+              activeKey={activeSection}
+              onNavigate={setActiveSection}
+              showLandingCards={false}
             />
           </section>
         </div>

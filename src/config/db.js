@@ -372,6 +372,7 @@ module.exports = {
   extractSchoolIdFromRequest,
   findOneAcrossTenantSchoolDbs,
   getControlDbName,
+  getControlDbSchoolIds,
   getCurrentSchoolId,
   getRegisteredModelNames,
   getSchoolConnection,

@@ -455,6 +455,7 @@ function CoordinationCampusHome() {
                   <strong>{item.studentName}</strong>
                   <span>{[item.courseTitle, item.teacherName].filter(Boolean).join(' · ')}</span>
                   <small>{item.observation}</small>
+                  <small>{item.incidentAt || item.submittedAt ? new Date(item.incidentAt || item.submittedAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Sin fecha'}</small>
                 </div>
               </div>
             ))}

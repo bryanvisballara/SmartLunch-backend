@@ -8,6 +8,11 @@ import useAuthStore from '../store/auth.store';
 import AcademicSecretaryDashboard from './AcademicSecretaryDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
+import { AcademyNotificationBadge } from '../components/comergio-academy/AcademyNotificationBadge';
+import { useComergioAcademyNotificationCounts } from '../components/comergio-academy/useComergioAcademyNotificationCounts';
+import '../components/comergio-academy/ComergioAcademyPanel.css';
 import {
   createAdmissionApplicant,
   createAdmissionEvent,
@@ -70,6 +75,7 @@ const ADMISSIONS_VIEW_OPTIONS = [
   { key: 'marketing', label: 'Marketing', status: '', empty: '' },
   { key: 'matricula', label: 'Matrícula', status: '', empty: '' },
   { key: 'matriculas_digitales', label: 'Matrículas digitales', status: '', empty: '' },
+  { key: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label, status: '', empty: '' },
 ];
 
 const ADMISSION_RESULT_OPTIONS = [
@@ -338,6 +344,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     ?? staffAnnouncementsUnreadQuery.data?.unreadCount
     ?? 0
   );
+  const academyCounts = useComergioAcademyNotificationCounts(!embedded);
   const schoolDisplayName = getSchoolDisplayName(user, 'Colegio');
   const userDisplayName = user?.name || user?.username || 'Usuario';
   const [loading, setLoading] = useState(true);
@@ -922,11 +929,19 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
         {!embedded ? (
           <aside className="admissions-sidebar" aria-label="Navegación de admisiones">
             {ADMISSIONS_VIEW_OPTIONS.map((option) => (
-              <button key={option.key} className={`admissions-sidebar-item${currentView === option.key ? ' is-active' : ''}`} type="button" onClick={() => openPortalView(option.key)}>
+              <button
+                key={option.key}
+                className={`admissions-sidebar-item${currentView === option.key ? ' is-active' : ''}${option.key === COMERGIO_ACADEMY_PARENT.key ? ' admissions-sidebar-item--academy' : ''}`}
+                type="button"
+                onClick={() => openPortalView(option.key)}
+              >
                 <span>
                   {option.label}
                   {option.key === 'staff_announcements' ? (
                     <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+                  ) : null}
+                  {option.key === COMERGIO_ACADEMY_PARENT.key ? (
+                    <AcademyNotificationBadge count={academyCounts.total} />
                   ) : null}
                 </span>
               </button>
@@ -1209,6 +1224,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                 mode="inbox"
                 title="Comunicados internos"
               />
+            </section>
+          ) : null}
+
+          {currentView === COMERGIO_ACADEMY_PARENT.key && !showApplicantDetail ? (
+            <section className="dashboard-card">
+              <ComergioAcademyPanel showInternalNav />
             </section>
           ) : null}
 

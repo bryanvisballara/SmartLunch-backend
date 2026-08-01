@@ -15,6 +15,7 @@ const campusDisciplineObservationSchema = new mongoose.Schema(
     studentGrade: { type: String, trim: true, default: '' },
     studentCourse: { type: String, trim: true, default: '' },
     observation: { type: String, required: true, trim: true },
+    incidentAt: { type: Date, default: null, index: true },
     status: { type: String, enum: ['submitted', 'reviewed', 'archived'], default: 'submitted', index: true },
     recipients: { type: [String], default: ['coordination', 'direccion', 'psychology', 'rectoria'] },
     submittedAt: { type: Date, default: Date.now, index: true },
@@ -25,5 +26,6 @@ const campusDisciplineObservationSchema = new mongoose.Schema(
 campusDisciplineObservationSchema.index({ schoolId: 1, submittedAt: -1 });
 campusDisciplineObservationSchema.index({ schoolId: 1, studentId: 1, submittedAt: -1 });
 campusDisciplineObservationSchema.index({ schoolId: 1, teacherUserId: 1, submittedAt: -1 });
+campusDisciplineObservationSchema.index({ schoolId: 1, incidentAt: -1 });
 
 module.exports = registerSchoolScopedModel('CampusDisciplineObservation', campusDisciplineObservationSchema);

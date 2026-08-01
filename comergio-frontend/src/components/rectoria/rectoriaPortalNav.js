@@ -1,3 +1,5 @@
+import { COMERGIO_ACADEMY_NAV_GROUP } from '../comergio-academy/academyNav';
+
 export const RECTORIA_CONTROL_CENTER_KEYS = [
   'control_levels',
   'control_subjects',
@@ -50,6 +52,7 @@ export const RECTORIA_PORTAL_NAV = [
       { key: 'matricula_authorizations', label: 'Solicitudes' },
     ],
   },
+  COMERGIO_ACADEMY_NAV_GROUP,
 ];
 
 export function flattenRectoriaNavKeys(nav = RECTORIA_PORTAL_NAV) {

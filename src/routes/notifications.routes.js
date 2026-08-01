@@ -8,6 +8,28 @@ const Notification = require('../models/notification.model');
 
 const router = express.Router();
 
+const notificationInboxRoles = [
+  'parent',
+  'student',
+  'admin',
+  'teacher',
+  'psychology',
+  'nursing',
+  'academic_secretary',
+  'admissions',
+  'coordination',
+  'billing',
+  'rectoria',
+  'direccion',
+];
+
+// Academy unread is tracked by Conecta/Informa cursors and merged in the UI badge.
+// Keep these out of the generic unread-count to avoid double-counting.
+const ACADEMY_NOTIFICATION_TYPES = ['informa.post', 'conecta.case'];
+const academyNotificationTypeFilter = {
+  $nor: ACADEMY_NOTIFICATION_TYPES.map((type) => ({ 'payload.type': type })),
+};
+
 let deviceTokenIndexMigrationPromise = null;
 
 async function ensureDeviceTokenIndexes() {
@@ -193,7 +215,7 @@ router.get('/audit', roleMiddleware('admin'), async (req, res) => {
   }
 });
 
-router.get('/unread-count', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+router.get('/unread-count', roleMiddleware(...notificationInboxRoles), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
     const count = await Notification.countDocuments({
@@ -201,14 +223,15 @@ router.get('/unread-count', roleMiddleware('parent', 'student', 'admin'), async 
       parentId: userId,
       dismissedAt: null,
       readAt: null,
+      ...academyNotificationTypeFilter,
     });
-    return res.status(200).json({ count });
+    return res.status(200).json({ count, unreadCount: count });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
 });
 
-router.patch('/:id/dismiss', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+router.patch('/:id/dismiss', roleMiddleware(...notificationInboxRoles), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
     const { id } = req.params;
@@ -239,7 +262,7 @@ router.patch('/:id/dismiss', roleMiddleware('parent', 'student', 'admin'), async
   }
 });
 
-router.post('/read-all', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+router.post('/read-all', roleMiddleware(...notificationInboxRoles), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
     const now = new Date();
@@ -253,7 +276,7 @@ router.post('/read-all', roleMiddleware('parent', 'student', 'admin'), async (re
   }
 });
 
-router.get('/', roleMiddleware('parent', 'student', 'admin'), async (req, res) => {
+router.get('/', roleMiddleware(...notificationInboxRoles), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
     const { parentId } = req.query;
@@ -263,17 +286,13 @@ router.get('/', roleMiddleware('parent', 'student', 'admin'), async (req, res) =
       dismissedAt: null,
     };
 
-    if (role === 'parent' || role === 'student') {
-      filter.parentId = userId;
-    }
-
     if (role === 'admin' && parentId) {
       filter.parentId = parentId;
-    }
-
-    if (role === 'admin' && !parentId) {
+    } else if (role === 'admin' && !parentId) {
       // Admin without parent filter keeps previous audit-oriented listing.
       delete filter.dismissedAt;
+    } else {
+      filter.parentId = userId;
     }
 
     const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(100);

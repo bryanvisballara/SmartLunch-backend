@@ -1730,7 +1730,7 @@ export default function RectoriaControlCenterPanel({
             items={disciplineObservations.slice(0, 12).map((item) => ({
               key: item.id || `${item.studentId}-${item.submittedAt}`,
               title: item.studentName || 'Alumno',
-              meta: `${item.category || item.type || 'Observación'} · ${item.teacherName || item.reportedBy || 'Docente'} · ${formatDate(item.submittedAt || item.createdAt)}`,
+              meta: `${item.category || item.type || 'Observación'} · ${item.teacherName || item.reportedBy || 'Docente'} · ${formatDate(item.incidentAt || item.submittedAt || item.createdAt)}`,
             }))}
             title="Observaciones recientes"
           />

@@ -7873,7 +7873,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     expandBottomNav();
   }, [activeSection, activeAcademicView, expandBottomNav]);
 
-  if (isMillenniumParent && (matriculaAccessGate === 'checking' || matriculaAccessGate === 'idle')) {
+  if (isMillenniumParent && !matriculaFlowOpen && (matriculaAccessGate === 'checking' || matriculaAccessGate === 'idle')) {
     return (
       <ColibriBootSplash
         ariaLabel="Validando matrícula"
@@ -8141,7 +8141,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                       <strong>{item.observation || 'Observación registrada'}</strong>
                     </div>
                     <div className="campus-parent-mobile__nursing-record-toggle-meta">
-                      <strong>{formatParentNursingDate(item.submittedAt || item.createdAt)}</strong>
+                      <strong>{formatParentNursingDate(item.incidentAt || item.submittedAt || item.createdAt)}</strong>
                       <span>{item.teacherName ? `Docente ${item.teacherName}` : item.courseTitle || 'Registro docente'}</span>
                     </div>
                   </div>

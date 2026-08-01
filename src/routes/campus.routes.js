@@ -1214,6 +1214,9 @@ function serializeTeacherCalendarPost(post = {}) {
   const course = post.courseId && typeof post.courseId === 'object' ? post.courseId : {};
   const courseTitle = normalizeText(course.title);
   const subject = normalizeText(course.subject) || courseTitle;
+  const courseGroup = normalizeText(course.section)
+    || normalizeText(course.studentGradeKey)
+    || '';
   const type = normalizePostType(post.type) || 'Aviso';
 
   return {
@@ -1227,6 +1230,7 @@ function serializeTeacherCalendarPost(post = {}) {
     body: normalizeText(post.body),
     courseId: String(course._id || post.courseId || ''),
     courseTitle,
+    courseGroup,
     subject,
     deliveryMode: normalizeText(post.deliveryMode) || 'date',
     dueAt: post.dueAt || null,
@@ -2612,6 +2616,7 @@ function serializeDisciplineObservation(observation) {
     studentGrade: normalizeText(observation.studentGrade || observation.studentId?.grade),
     studentCourse: normalizeText(observation.studentCourse || observation.studentId?.course),
     observation: normalizeText(observation.observation),
+    incidentAt: observation.incidentAt || null,
     status: normalizeText(observation.status) || 'submitted',
     recipients: Array.isArray(observation.recipients) ? observation.recipients.map(normalizeText).filter(Boolean) : [],
     submittedAt: observation.submittedAt || observation.createdAt,
@@ -2817,12 +2822,13 @@ async function notifyDisciplineObservation({ schoolId, observation }) {
     parentIds: target.userIds,
     studentId: observation.studentId,
     title: `Convivencia escolar: ${observation.studentName || 'Estudiante'}`,
-    body: `${observation.teacherName || 'Un docente'} registro una observacion de comportamiento en ${observation.courseTitle || 'clase'}.`,
+    body: `${observation.teacherName || 'Un docente'} registro una observacion de comportamiento en ${observation.courseTitle || 'clase'}${observation.incidentAt ? ` (${new Date(observation.incidentAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})` : ''}.`,
     payload: {
       type: 'campus.discipline_observation',
       observationId: String(observation._id),
       studentId: String(observation.studentId || ''),
       courseId: String(observation.courseId || ''),
+      incidentAt: observation.incidentAt || null,
       url: target.url,
     },
   })));
@@ -2831,7 +2837,7 @@ async function notifyDisciplineObservation({ schoolId, observation }) {
     schoolId,
     studentId: observation.studentId,
     title: `Convivencia escolar: ${observation.studentName || 'Estudiante'}`,
-    body: `${observation.teacherName || 'Un docente'} registro una observacion de comportamiento en ${observation.courseTitle || 'clase'}.`,
+    body: `${observation.teacherName || 'Un docente'} registro una observacion de comportamiento en ${observation.courseTitle || 'clase'}${observation.incidentAt ? ` (${new Date(observation.incidentAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})` : ''}.`,
     payload: {
       type: 'campus.discipline_observation_parent',
       observationId: String(observation._id),
@@ -3166,12 +3172,12 @@ async function buildTeacherCourseDetail({ schoolId, teacherUserId, course, gradi
 
 function normalizeCampusGradingScale(rawScale = {}) {
   const defaultPerformanceLevels = [
-    { key: 'deficiente', label: 'Deficiente', minScore: 0, maxScore: 59, order: 10 },
-    { key: 'insuficiente', label: 'Insuficiente', minScore: 60, maxScore: 69, order: 20 },
-    { key: 'aceptable', label: 'Aceptable', minScore: 70, maxScore: 79, order: 30 },
-    { key: 'bueno', label: 'Bueno', minScore: 80, maxScore: 89, order: 40 },
-    { key: 'sobresaliente', label: 'Sobresaliente', minScore: 90, maxScore: 95, order: 50 },
-    { key: 'excelente', label: 'Excelente', minScore: 96, maxScore: 100, order: 60 },
+    { key: 'deficiente', label: 'Deficiente', minScore: 0, maxScore: 59, color: '#ef4444', order: 10 },
+    { key: 'insuficiente', label: 'Insuficiente', minScore: 60, maxScore: 69, color: '#f97316', order: 20 },
+    { key: 'aceptable', label: 'Aceptable', minScore: 70, maxScore: 79, color: '#eab308', order: 30 },
+    { key: 'bueno', label: 'Bueno', minScore: 80, maxScore: 89, color: '#65a30d', order: 40 },
+    { key: 'sobresaliente', label: 'Sobresaliente', minScore: 90, maxScore: 95, color: '#15803d', order: 50 },
+    { key: 'excelente', label: 'Excelente', minScore: 96, maxScore: 100, color: '#166534', order: 60 },
   ];
   const defaultScale = { minScore: 0, maxScore: 100, passingScore: 70, performanceLevels: defaultPerformanceLevels };
   const hasPerformanceLevels = Array.isArray(rawScale?.performanceLevels) && rawScale.performanceLevels.length > 0;
@@ -3184,11 +3190,12 @@ function normalizeCampusGradingScale(rawScale = {}) {
     return defaultScale;
   }
   const performanceLevels = (Array.isArray(sourceScale?.performanceLevels) ? sourceScale.performanceLevels : defaultPerformanceLevels)
-    .map((level) => ({
+    .map((level, index) => ({
       key: normalizeText(level?.key),
       label: normalizeText(level?.label),
       minScore: Number(level?.minScore),
       maxScore: Number(level?.maxScore),
+      color: normalizeText(level?.color) || defaultPerformanceLevels[index]?.color || '#174a68',
       order: Number(level?.order || 0),
     }))
     .filter((level) => level.key && level.label && Number.isFinite(level.minScore) && Number.isFinite(level.maxScore));
@@ -3612,7 +3619,7 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
 
   const [allCoursePosts, schoolStudents] = await Promise.all([
     CampusPost.find({ schoolId, teacherUserId: userId })
-      .select('courseId type status title')
+      .select('courseId type status title body dueAt scheduledClassDate deliveryMode updatedAt createdAt')
       .lean(),
     loadStudentsForTeacherCourses(schoolId, courses),
   ]);
@@ -3679,11 +3686,97 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
     schoolStudents,
   });
 
+  const studentDirectoryMap = new Map();
+    enrichedOverviewCourses.forEach((course) => {
+    const courseId = String(course._id || '');
+    if (!courseId || normalizeText(course.courseType) === 'guidance_routine') {
+      return;
+    }
+
+    const courseSubject = normalizeText(course.subject);
+    const courseTitle = normalizeText(course.title);
+    const courseGradeLabel = normalizeText(course.gradeLevel || course.studentGradeKey || course.section);
+    const rosterStudents = schoolStudents.filter((student) => studentBelongsToCourse(student, course));
+
+    rosterStudents.forEach((student) => {
+      const studentId = String(student._id || '');
+      if (!studentId) {
+        return;
+      }
+
+      const existing = studentDirectoryMap.get(studentId) || {
+        studentId,
+        name: normalizeText(student.name),
+        schoolCode: normalizeText(student.schoolCode),
+        grade: normalizeText(student.grade),
+        courses: [],
+      };
+
+      if (!existing.courses.some((entry) => entry.id === courseId)) {
+        existing.courses.push({
+          id: courseId,
+          subject: courseSubject,
+          title: courseTitle,
+          gradeLabel: courseGradeLabel,
+        });
+      }
+
+      studentDirectoryMap.set(studentId, existing);
+    });
+  });
+
   return {
     courses: normalizedCourses.map((course) => ({
       id: course.id,
       stats: course.stats,
     })),
+    studentDirectory: Array.from(studentDirectoryMap.values()).sort((left, right) => (
+      left.name.localeCompare(right.name, 'es', { sensitivity: 'base' })
+    )),
+    pendingGradingItems: normalizedCourses.flatMap((course) => {
+      const pendingIds = new Set(
+        (Array.isArray(course.stats?.pendingGradingPostIds) ? course.stats.pendingGradingPostIds : [])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      );
+      if (pendingIds.size === 0) {
+        return [];
+      }
+
+      const coursePosts = postsByCourseId.get(String(course.id)) || [];
+      return coursePosts
+        .filter((post) => pendingIds.has(String(post._id || post.id || '')))
+        .map((post) => {
+          const dueSource = post.deliveryMode === 'class' ? post.scheduledClassDate : post.dueAt;
+          const dueDate = dueSource ? new Date(dueSource) : null;
+          const dateLabel = dueDate && !Number.isNaN(dueDate.getTime())
+            ? dueDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+            : 'Sin fecha';
+
+          return {
+            id: String(post._id || post.id || ''),
+            courseId: String(course.id),
+            title: normalizeText(post.title) || normalizeText(post.type) || 'Actividad',
+            type: normalizeText(post.type),
+            typeLabel: normalizeText(post.type) || 'Actividad',
+            courseTitle: [normalizeText(course.subject), normalizeText(course.gradeLevel || course.section || course.title)]
+              .filter(Boolean)
+              .join(' · ') || normalizeText(course.title) || 'Curso',
+            deliveryLabel: dueDate && !Number.isNaN(dueDate.getTime())
+              ? `Entrega ${dateLabel}`
+              : 'Sin fecha definida',
+            dateLabel,
+            description: normalizeText(post.body) || 'Actividad pendiente de revisión o calificación.',
+            dueAt: post.dueAt || null,
+            scheduledClassDate: post.scheduledClassDate || null,
+            updatedAt: post.updatedAt || null,
+          };
+        });
+    }).sort((left, right) => {
+      const leftTime = new Date(left.dueAt || left.scheduledClassDate || left.updatedAt || 0).getTime();
+      const rightTime = new Date(right.dueAt || right.scheduledClassDate || right.updatedAt || 0).getTime();
+      return leftTime - rightTime;
+    }),
   };
 }
 
@@ -4394,6 +4487,7 @@ router.get('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (r
       media: Array.isArray(request.media) ? request.media : [],
       status: normalizeText(request.status) || 'pending',
       courseTitle: normalizeText(request.courseTitle),
+      subject: normalizeText(request.subject),
       reviewNotes: normalizeText(request.reviewNotes),
       reviewedByName: normalizeText(request.reviewedByName),
       submittedAt: request.submittedAt || request.createdAt,
@@ -4697,22 +4791,33 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
     }
 
     let linkedCourse = null;
-    if (courseId) {
-      if (!isValidObjectId(courseId)) {
-        return res.status(400).json({ message: 'Invalid course id' });
-      }
-
-      linkedCourse = await resolveTeacherAssignedCourse({
-        schoolId,
-        teacherUserId: userId,
-        courseId,
-        sync: true,
-      });
-
-      if (!linkedCourse) {
-        return res.status(404).json({ message: 'Assigned course not found' });
-      }
+    if (!courseId || !isValidObjectId(courseId)) {
+      return res.status(400).json({ message: 'Selecciona la asignatura y el curso destinatario.' });
     }
+
+    linkedCourse = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId,
+      sync: true,
+    });
+
+    if (!linkedCourse) {
+      return res.status(404).json({ message: 'Assigned course not found' });
+    }
+
+    const linkedSubject = normalizeText(req.body.subject)
+      || normalizeText(linkedCourse.subject)
+      || normalizeText(linkedCourse.title);
+    const linkedCourseTargets = Array.from(new Set([
+      ...courseTargets,
+      normalizeText(linkedCourse.title),
+      normalizeText(linkedCourse.studentGradeKey),
+      normalizeText(linkedCourse.gradeLevel),
+      normalizeText(linkedCourse.section),
+      normalizeText(`${linkedCourse.gradeLevel || ''}${linkedCourse.section || ''}`),
+      normalizeText(`${linkedCourse.studentGradeKey || ''}${linkedCourse.section || ''}`),
+    ].filter(Boolean)));
 
     const request = await AcademicCommunicationRequest.create({
       schoolId,
@@ -4720,14 +4825,15 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
       teacherUserId: userId,
       teacherName: name,
       requesterUserId: userId,
-      courseId: linkedCourse?._id || null,
-      courseTitle: normalizeText(linkedCourse?.title),
+      courseId: linkedCourse._id,
+      courseTitle: normalizeText(linkedCourse.title),
+      subject: linkedSubject,
       title,
       body,
       emailSubject,
-      audienceType,
-      gradeTargets: gradeTargets.length ? gradeTargets : (linkedCourse?.studentGradeKey ? [normalizeText(linkedCourse.studentGradeKey)] : []),
-      courseTargets: courseTargets.length ? courseTargets : (linkedCourse?.title ? [normalizeText(linkedCourse.title)] : []),
+      audienceType: audienceType === 'general' ? 'course' : audienceType,
+      gradeTargets: gradeTargets.length ? gradeTargets : (linkedCourse.studentGradeKey ? [normalizeText(linkedCourse.studentGradeKey)] : []),
+      courseTargets: linkedCourseTargets,
       parentTargets,
       studentTargets,
       media,
@@ -5066,6 +5172,9 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
     const courseId = normalizeText(req.body.courseId);
     const studentId = normalizeText(req.body.studentId);
     const observationText = normalizeText(req.body.observation).slice(0, 2000);
+    const incidentDate = normalizeText(req.body.incidentDate);
+    const incidentTime = normalizeText(req.body.incidentTime);
+    const incidentAtRaw = normalizeText(req.body.incidentAt);
 
     if (!isValidObjectId(courseId)) {
       return res.status(400).json({ message: 'courseId is invalid' });
@@ -5075,6 +5184,22 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
     }
     if (!observationText || observationText.length < 8) {
       return res.status(400).json({ message: 'La observacion debe tener al menos 8 caracteres.' });
+    }
+
+    let incidentAt = null;
+    if (incidentAtRaw) {
+      incidentAt = parseOptionalDate(incidentAtRaw);
+      if (incidentAt === 'invalid') {
+        return res.status(400).json({ message: 'La fecha y hora del caso no son válidas.' });
+      }
+    } else if (incidentDate) {
+      const timePart = /^\d{2}:\d{2}$/.test(incidentTime) ? incidentTime : '00:00';
+      incidentAt = parseOptionalDate(`${incidentDate}T${timePart}:00`);
+      if (incidentAt === 'invalid' || !incidentAt) {
+        return res.status(400).json({ message: 'La fecha y hora del caso no son válidas.' });
+      }
+    } else {
+      return res.status(400).json({ message: 'Indica la fecha y hora del caso.' });
     }
 
     const course = await resolveTeacherAssignedCourse({
@@ -5114,6 +5239,7 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
       studentGrade: normalizeText(student.grade),
       studentCourse: normalizeText(student.course),
       observation: observationText,
+      incidentAt,
       status: 'submitted',
       recipients: disciplineObservationRecipients,
       submittedAt: new Date(),

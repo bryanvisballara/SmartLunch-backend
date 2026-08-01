@@ -60,9 +60,9 @@ function DocumentSignersEvidence({ processId, document, documentType, label }) {
   }
 
   const visibleSigners = loadedSigners || signers;
-  const needsEvidenceLoad = !loadedSigners && signers.some(
-    (signer) => signer.hasSelfie || signer.hasIdFront || signer.hasIdBack
-  );
+  const needsEvidenceLoad = documentType === 'contract'
+    && !loadedSigners
+    && signers.some((signer) => signer.hasSelfie || signer.hasIdFront || signer.hasIdBack);
 
   const onLoadEvidence = async () => {
     if (!processId || loadingEvidence) return;
@@ -114,9 +114,13 @@ function DocumentSignersEvidence({ processId, document, documentType, label }) {
                 <span className="enrollment-matricula-rectoria__pending-note">
                   Identidad capturada (selfie/cédula)
                 </span>
-              ) : signer.signedAt ? (
+              ) : signer.signedAt && documentType === 'contract' ? (
                 <span className="enrollment-matricula-rectoria__pending-note enrollment-matricula-rectoria__pending-note--warn">
                   Firma registrada · Falta selfie y cédula
+                </span>
+              ) : signer.signedAt ? (
+                <span className="enrollment-matricula-rectoria__pending-note">
+                  Firma registrada
                 </span>
               ) : null}
             </div>

@@ -39,13 +39,17 @@
     0 28px 80px rgba(15, 23, 42, 0.24),
     0 0 0 1px rgba(29, 53, 87, 0.06) inset;
   padding: 28px 24px 24px;
-  animation: matriculaShellIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* No entrance animation here: restarting it when leaving the signature pad
+     left the shell at opacity:0 on Android WebView (blank/white screen). */
+  opacity: 1;
+  transform: none;
 }
 
 .matricula-flow-shell--intro {
   padding: 0;
   overflow: auto;
   border-radius: 30px;
+  animation: matriculaShellIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .matricula-flow-shell--blocking {
@@ -55,8 +59,7 @@
 }
 
 .matricula-flow-shell--signature-active {
-  animation: none;
-  transform: none;
+  /* Keep pad stable while signing; do not toggle animations. */
 }
 
 @keyframes matriculaShellIn {

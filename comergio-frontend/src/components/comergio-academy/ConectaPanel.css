@@ -1,0 +1,733 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Manrope:wght@500;600;700;800&display=swap');
+
+.conecta-panel {
+  --conecta-ink: #1f2937;
+  --conecta-muted: #6b7280;
+  --conecta-line: rgba(15, 23, 42, 0.08);
+  --conecta-teal: #064e3b;
+  --conecta-teal-mid: #0f766e;
+  --conecta-teal-soft: #d1fae5;
+  --conecta-tag-bg: #f3e8ff;
+  --conecta-tag-ink: #7e22ce;
+  --conecta-page: #f3f4f6;
+  --conecta-card: #ffffff;
+  --conecta-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --conecta-sans: 'Manrope', 'Segoe UI', sans-serif;
+  display: grid;
+  gap: 1.1rem;
+  color: var(--conecta-ink);
+  background: transparent;
+  font-family: var(--conecta-sans);
+}
+
+.conecta-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 250px;
+  padding: 1.35rem 1.45rem 1.35rem 1.7rem;
+  overflow: hidden;
+  border-radius: 22px;
+  background: #02534d;
+  color: #fff;
+  box-shadow: 0 18px 40px rgba(2, 83, 77, 0.22);
+}
+
+.conecta-hero__copy {
+  display: grid;
+  gap: 0.85rem;
+  align-content: center;
+  max-width: 34rem;
+}
+
+.conecta-hero__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--conecta-sans);
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.conecta-hero__brand-icon {
+  display: inline-flex;
+  width: 1.85rem;
+  height: 1.85rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #7c3aed;
+  color: #ede9fe;
+  box-shadow: 0 8px 18px rgba(124, 58, 237, 0.35);
+}
+
+.conecta-hero__brand-icon svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.conecta-hero__copy h2 {
+  margin: 0;
+  font-family: var(--conecta-display);
+  font-size: clamp(1.45rem, 2.4vw, 2rem);
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.03em;
+}
+
+.conecta-hero__copy p {
+  margin: 0;
+  max-width: 30rem;
+  color: rgba(236, 253, 245, 0.9);
+  font-family: var(--conecta-sans);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.conecta-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  justify-self: start;
+  padding: 0.72rem 1.1rem;
+  border: 0;
+  border-radius: 12px;
+  background: #10b981;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.28);
+}
+
+.conecta-hero__cta svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.conecta-hero__visual {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 220px;
+  height: 100%;
+}
+
+.conecta-hero__visual img {
+  width: 100%;
+  max-width: none;
+  max-height: 260px;
+  object-fit: contain;
+  object-position: right center;
+  filter: none;
+}
+
+.conecta-primary-btn {
+  padding: 0.7rem 1.05rem;
+  border: 0;
+  border-radius: 12px;
+  background: var(--conecta-teal-mid);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.conecta-primary-btn.is-small {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.82rem;
+}
+
+.conecta-secondary-btn,
+.conecta-composer__close {
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--conecta-line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--conecta-ink);
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.conecta-banner {
+  padding: 0.8rem 0.95rem;
+  border-radius: 12px;
+  font-size: 0.88rem;
+}
+
+.conecta-banner.is-success {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.conecta-banner.is-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.conecta-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 1.1rem;
+  align-items: start;
+}
+
+.conecta-main,
+.conecta-feed,
+.conecta-rail {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.conecta-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.conecta-filters__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.conecta-pill {
+  padding: 0.48rem 0.9rem;
+  border: 0;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #4b5563;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.conecta-pill.is-active {
+  background: var(--conecta-teal);
+  color: #fff;
+}
+
+.conecta-sort select {
+  padding: 0.48rem 0.75rem;
+  border: 1px solid var(--conecta-line);
+  border-radius: 999px;
+  background: #fff;
+  color: #4b5563;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.conecta-composer,
+.conecta-card,
+.conecta-empty-card,
+.conecta-rail-card {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.05rem 1.1rem;
+  border: 1px solid var(--conecta-line);
+  border-radius: 18px;
+  background: var(--conecta-card);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.conecta-composer {
+  background: #f0fdfa;
+}
+
+.conecta-composer__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.conecta-composer__head h4,
+.conecta-card__body h4,
+.conecta-empty-card strong,
+.conecta-rail-card__head h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.conecta-composer__head p,
+.conecta-empty-card p,
+.conecta-empty {
+  margin: 0.2rem 0 0;
+  color: var(--conecta-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.conecta-field {
+  display: grid;
+  gap: 0.3rem;
+  color: #4b5563;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.conecta-field input,
+.conecta-field textarea,
+.conecta-field select,
+.conecta-comment-form textarea {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--conecta-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--conecta-ink);
+  font: inherit;
+}
+
+.conecta-composer__media {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.conecta-composer__thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.conecta-composer__thumbs figure {
+  position: relative;
+  margin: 0;
+  width: 84px;
+  height: 84px;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.conecta-composer__thumbs img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.conecta-composer__thumbs button {
+  position: absolute;
+  left: 0.3rem;
+  bottom: 0.3rem;
+  padding: 0.15rem 0.4rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.65rem;
+  cursor: pointer;
+}
+
+.conecta-composer__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.conecta-card__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.conecta-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.conecta-avatar--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--conecta-teal-soft);
+  color: var(--conecta-teal-mid);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.conecta-card__identity {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.conecta-card__name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.conecta-card__identity strong {
+  font-size: 0.92rem;
+}
+
+.conecta-role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #d1fae5;
+  color: #047857;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.conecta-card__identity span {
+  color: var(--conecta-muted);
+  font-size: 0.76rem;
+}
+
+.conecta-card__menu {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.conecta-card__menu span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #9ca3af;
+}
+
+.conecta-card__body h4 {
+  font-size: 1.02rem;
+  letter-spacing: -0.015em;
+}
+
+.conecta-card__body p {
+  display: -webkit-box;
+  margin: 0.45rem 0 0;
+  overflow: hidden;
+  color: #374151;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conecta-card.is-expanded .conecta-card__body p {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.conecta-card__gallery {
+  display: grid;
+  gap: 0.4rem;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.conecta-card__gallery.count-2,
+.conecta-card__gallery.count-3,
+.conecta-card__gallery.count-4 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.conecta-card__gallery img {
+  width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+  background: #f3f4f6;
+}
+
+.conecta-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.conecta-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  background: var(--conecta-tag-bg);
+  color: var(--conecta-tag-ink);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.conecta-card__stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.conecta-stat-btn,
+.conecta-reply-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #6b7280;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.conecta-stat-btn svg,
+.conecta-reply-btn svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.conecta-stat-btn.is-liked {
+  color: #dc2626;
+}
+
+.conecta-stat-btn.is-compact {
+  font-size: 0.74rem;
+}
+
+.conecta-reply-btn {
+  margin-left: 0.2rem;
+  color: var(--conecta-teal-mid);
+}
+
+.conecta-comments {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--conecta-line);
+}
+
+.conecta-comment {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.conecta-comment__meta {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.conecta-comment__meta strong {
+  font-size: 0.84rem;
+}
+
+.conecta-comment__meta span,
+.conecta-comment p {
+  margin: 0;
+  color: var(--conecta-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.conecta-comment p {
+  color: #374151;
+  font-size: 0.86rem;
+}
+
+.conecta-comment-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.conecta-rail-card__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.conecta-rail-card__head h3 {
+  font-size: 0.92rem;
+}
+
+.conecta-rail-card__icon {
+  display: inline-flex;
+  width: 1.55rem;
+  height: 1.55rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.conecta-rail-card__icon svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.conecta-rail-card__icon.is-star {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.conecta-rail-card__icon.is-people {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.conecta-rail-card__icon.is-fire {
+  background: #ffedd5;
+  color: #ea580c;
+}
+
+.conecta-featured-list,
+.conecta-trending-list {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conecta-featured-list li {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.conecta-featured-thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #e5e7eb;
+}
+
+.conecta-featured-thumb--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #065f46;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.conecta-featured-thumb.tone-1 {
+  background: linear-gradient(135deg, #99f6e4, #5eead4);
+}
+
+.conecta-featured-thumb.tone-2 {
+  background: linear-gradient(135deg, #c4b5fd, #a78bfa);
+}
+
+.conecta-featured-thumb.tone-3 {
+  background: linear-gradient(135deg, #fcd34d, #fbbf24);
+}
+
+.conecta-featured-list strong {
+  display: block;
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.conecta-featured-list span {
+  color: var(--conecta-muted);
+  font-size: 0.72rem;
+}
+
+.conecta-featured-chevron {
+  color: #9ca3af;
+  font-size: 1.1rem;
+}
+
+.conecta-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.conecta-stats-grid div {
+  display: grid;
+  gap: 0.15rem;
+  text-align: center;
+}
+
+.conecta-stats-grid strong {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--conecta-teal);
+}
+
+.conecta-stats-grid span {
+  color: var(--conecta-muted);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.conecta-trending-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #374151;
+  font-size: 0.82rem;
+}
+
+.conecta-trending-list strong {
+  color: var(--conecta-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.conecta-trending-more {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--conecta-teal-mid);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .conecta-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .conecta-rail {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .conecta-hero {
+    grid-template-columns: 1fr;
+    padding: 1.25rem;
+  }
+
+  .conecta-hero__visual {
+    justify-content: center;
+    min-height: 160px;
+  }
+
+  .conecta-hero__visual img {
+    max-height: 200px;
+    object-position: center;
+  }
+
+  .conecta-card__footer {
+    align-items: flex-start;
+  }
+}

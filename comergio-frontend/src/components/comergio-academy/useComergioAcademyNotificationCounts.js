@@ -1,0 +1,41 @@
+import { useQuery } from '@tanstack/react-query';
+import { getConectaUnreadCount } from '../../services/conecta.service';
+import { getInformaUnreadCount } from '../../services/informa.service';
+import { getComergioAcademyNotificationCounts } from './academyNotifications';
+
+export function useComergioAcademyNotificationCounts(enabled = true) {
+  const conectaQuery = useQuery({
+    queryKey: ['conecta-unread-count'],
+    queryFn: async () => {
+      const response = await getConectaUnreadCount();
+      return Number(response.data?.unreadCount || 0);
+    },
+    enabled,
+    refetchInterval: 60_000,
+    retry: 1,
+  });
+
+  const informaQuery = useQuery({
+    queryKey: ['informa-unread-count'],
+    queryFn: async () => {
+      const response = await getInformaUnreadCount();
+      return Number(response.data?.unreadCount || 0);
+    },
+    enabled,
+    refetchInterval: 60_000,
+    retry: 1,
+  });
+
+  const counts = getComergioAcademyNotificationCounts({
+    conecta: Number(conectaQuery.data || 0),
+    informa: Number(informaQuery.data || 0),
+  });
+
+  return {
+    ...counts,
+    isLoading: conectaQuery.isLoading || informaQuery.isLoading,
+    refetch: async () => {
+      await Promise.all([conectaQuery.refetch(), informaQuery.refetch()]);
+    },
+  };
+}

@@ -3,11 +3,27 @@ import Select from 'react-select';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../../lib/authNavigation';
+import { getSchoolDisplayName } from '../../lib/schools';
+import colibriLogo from '../../assets/colibrisinfondo.png';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests, updateHrSupplyRequest } from '../../services/hr.service';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../../components/staff-announcements/StaffAnnouncementsPanel';
+import ComergioAcademyPanel, { COMERGIO_TEACHER_SUPPORT_WHATSAPP_URL } from '../../components/comergio-academy/ComergioAcademyPanel';
+import {
+  COMERGIO_ACADEMY_CHILDREN,
+  COMERGIO_ACADEMY_PARENT,
+  isComergioAcademySection,
+} from '../../components/comergio-academy/academyNav';
+import { AcademyNotificationBadge } from '../../components/comergio-academy/AcademyNotificationBadge';
+import { useComergioAcademyNotificationCounts } from '../../components/comergio-academy/useComergioAcademyNotificationCounts';
+import '../../components/comergio-academy/ComergioAcademyPanel.css';
+import {
+  getNotifications,
+  getNotificationsUnreadCount,
+  markAllNotificationsRead,
+} from '../../services/notifications.service';
 import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import {
   createCampusTeacherPost,
@@ -47,15 +63,15 @@ const maxMaterialFileBytes = 25 * 1024 * 1024;
 const maxMaterialFileCount = 6;
 
 const teacherNavGroups = [
-  { id: 'main', label: null, keys: ['dashboard', 'schedule', 'courses'] },
+  { id: 'main', label: 'Inicio', keys: ['dashboard', 'schedule', 'courses'] },
   {
     id: 'teaching',
     label: 'Enseñanza',
     keys: [
-      'guidance_routine',
-      'attendance',
       'academic_management',
       'academic_content',
+      'attendance',
+      'guidance_routine',
       'school_coexistence',
       'family_feed',
       'social_publications',
@@ -63,7 +79,17 @@ const teacherNavGroups = [
       'staff_announcements',
     ],
   },
+  {
+    id: 'comergio',
+    label: 'Comergio Academy',
+    keys: [COMERGIO_ACADEMY_PARENT.key, 'conecta', 'informa'],
+  },
 ];
+
+function resolveTeacherNavLabel(option) {
+  if (option?.key === COMERGIO_ACADEMY_PARENT.key) return 'Video tutoriales';
+  return option?.label || '';
+}
 
 function TeacherSectionIcon({ icon }) {
   const common = {
@@ -156,6 +182,35 @@ function TeacherSectionIcon({ icon }) {
           <path d="M15.5 8.5a4.5 4.5 0 0 1 0 7M18 6a8 8 0 0 1 0 12" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
         </svg>
       );
+    case 'academy':
+      return (
+        <svg {...common}>
+          <path d="M4 10.5 12 6l8 4.5-8 4.5-8-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M7 13.2V17c0 1.2 2.2 2.5 5 2.5s5-1.3 5-2.5v-3.8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M20 10.5V16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'video':
+      return (
+        <svg {...common}>
+          <path d="M5 6.5h10a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M17 10.2 21 8v8l-4-2.2" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'connect':
+      return (
+        <svg {...common}>
+          <path d="M9.5 14.5 14.5 9.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <path d="M11 7.5 12.2 6.3a3.5 3.5 0 1 1 5 5L16 12.5M13 16.5 11.8 17.7a3.5 3.5 0 1 1-5-5L8 11.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'informa':
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M12 11v5M12 8h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
     default:
       return (
         <svg {...common}>
@@ -178,6 +233,16 @@ const teacherSectionOptions = [
   { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
   { key: 'resource_requests', label: 'Solicitud de recursos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
   { key: 'staff_announcements', label: 'Comunicados internos', icon: 'announcements', description: 'Recibe y confirma mensajes internos de rectoría y coordinación.' },
+  {
+    key: COMERGIO_ACADEMY_PARENT.key,
+    label: COMERGIO_ACADEMY_PARENT.label,
+    icon: 'academy',
+    description: COMERGIO_ACADEMY_PARENT.description,
+  },
+  ...COMERGIO_ACADEMY_CHILDREN.map((child) => ({
+    ...child,
+    icon: child.key === 'video_tutoriales' ? 'video' : child.key === 'conecta' ? 'connect' : 'informa',
+  })),
 ];
 
 const teacherResourceStatusLabels = {
@@ -243,6 +308,7 @@ function getTeacherRequestForCycle(requests, cycleId) {
 
 function createTeacherSocialPublicationDraft() {
   return {
+    subjectKey: '',
     courseId: '',
     title: '',
     body: '',
@@ -250,12 +316,38 @@ function createTeacherSocialPublicationDraft() {
   };
 }
 
+function getNowTimeInputValue() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
 function createTeacherDisciplineObservationDraft() {
   return {
     courseId: '',
     studentId: '',
     observation: '',
+    incidentDate: getTodayDateInputValue(),
+    incidentTime: getNowTimeInputValue(),
   };
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) {
+    return 'Sin fecha';
+  }
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return 'Sin fecha';
+  }
+
+  return parsedDate.toLocaleString('es-CO', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function normalizeCampusGradingScale(rawScale = {}) {
@@ -265,12 +357,24 @@ function normalizeCampusGradingScale(rawScale = {}) {
   const normalizedMin = Number.isFinite(minScore) ? minScore : 0;
   const normalizedMax = Number.isFinite(maxScore) && maxScore > normalizedMin ? maxScore : 100;
   const normalizedPassing = Number.isFinite(passingScore) ? Math.min(Math.max(passingScore, normalizedMin), normalizedMax) : 70;
-  const performanceLevels = (Array.isArray(rawScale?.performanceLevels) ? rawScale.performanceLevels : [])
+  const defaultPerformanceLevels = [
+    { key: 'deficiente', label: 'Deficiente', minScore: 0, maxScore: 59, color: '#ef4444', order: 10 },
+    { key: 'insuficiente', label: 'Insuficiente', minScore: 60, maxScore: 69, color: '#f97316', order: 20 },
+    { key: 'aceptable', label: 'Aceptable', minScore: 70, maxScore: 79, color: '#eab308', order: 30 },
+    { key: 'bueno', label: 'Bueno', minScore: 80, maxScore: 89, color: '#65a30d', order: 40 },
+    { key: 'sobresaliente', label: 'Sobresaliente', minScore: 90, maxScore: 95, color: '#15803d', order: 50 },
+    { key: 'excelente', label: 'Excelente', minScore: 96, maxScore: 100, color: '#166534', order: 60 },
+  ];
+  const sourceLevels = (Array.isArray(rawScale?.performanceLevels) && rawScale.performanceLevels.length > 0)
+    ? rawScale.performanceLevels
+    : defaultPerformanceLevels;
+  const performanceLevels = sourceLevels
     .map((level, index) => ({
       key: String(level?.key || `performance_level_${index + 1}`).trim(),
       label: String(level?.label || '').trim(),
       minScore: Number.isFinite(Number(level?.minScore)) ? Number(level.minScore) : normalizedMin,
       maxScore: Number.isFinite(Number(level?.maxScore)) ? Number(level.maxScore) : normalizedMax,
+      color: String(level?.color || defaultPerformanceLevels[index]?.color || '#174a68').trim(),
       order: Number(level?.order || (index + 1) * 10),
     }))
     .filter((level) => level.key && level.label);
@@ -285,9 +389,27 @@ function normalizeCampusGradingScale(rawScale = {}) {
 
 const teacherSocialPublicationStatusLabels = {
   pending: 'En revisión',
-  approved: 'Publicada',
+  approved: 'Aprobada',
   rejected: 'Rechazada',
 };
+
+function getTeacherSocialPublicationStatusTone(status) {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'approved') return 'approved';
+  if (normalized === 'rejected') return 'rejected';
+  return 'review';
+}
+
+function getTeacherSocialPublicationThumb(request) {
+  const media = Array.isArray(request?.media) ? request.media : [];
+  for (let index = 0; index < media.length; index += 1) {
+    const mediaItem = normalizeTeacherPublicationHistoryMedia(media[index], index);
+    if (mediaItem.kind === 'image' && (mediaItem.thumbUrl || mediaItem.src)) {
+      return mediaItem.thumbUrl || mediaItem.src;
+    }
+  }
+  return '';
+}
 
 function normalizeTeacherPublicationHistoryMedia(item, index) {
   const kind = String(item?.kind || '').trim().toLowerCase();
@@ -869,6 +991,109 @@ function formatMonthLabel(monthDate) {
   return monthDate.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
 }
 
+function formatLongWeekdayDate(date = new Date()) {
+  const label = date.toLocaleDateString('es-CO', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function getMondayOfWeek(date = new Date()) {
+  const nextDate = new Date(date);
+  nextDate.setHours(12, 0, 0, 0);
+  const day = nextDate.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  nextDate.setDate(nextDate.getDate() + diff);
+  return nextDate;
+}
+
+function addDaysToDate(date, amount) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + Number(amount || 0));
+  return nextDate;
+}
+
+function formatScheduleDayChip(date) {
+  return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+}
+
+function formatScheduleWeekRange(mondayDate) {
+  const fridayDate = addDaysToDate(mondayDate, 4);
+  const startLabel = mondayDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+  const endLabel = fridayDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+  return `${startLabel} - ${endLabel}, ${fridayDate.getFullYear()}`;
+}
+
+function exportTeacherWeeklyScheduleCsv(schedule, weekdays = []) {
+  const rows = [['Dia', 'Hora', 'Curso', 'Asignatura', 'Grupo', 'Bloque']];
+  (schedule?.slots || []).forEach((slot) => {
+    (slot.days || []).forEach((day) => {
+      const weekdayLabel = weekdays.find((entry) => entry.key === day.weekday)?.label || `Dia ${day.weekday}`;
+      if (!(day.items || []).length) {
+        rows.push([weekdayLabel, slot.label, '', '', '', '']);
+        return;
+      }
+      day.items.forEach((item) => {
+        rows.push([
+          weekdayLabel,
+          `${item.startTime || ''} - ${item.endTime || ''}`.trim(),
+          item.courseTitle || '',
+          item.subject || '',
+          item.studentGradeKey || '',
+          item.label || '',
+        ]);
+      });
+    });
+  });
+
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `horario-docente-${buildLocalDateValue(new Date())}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getTeacherFirstName(fullName) {
+  const first = String(fullName || '')
+    .replace(/^(profe|profesor|profesora)\s+/i, '')
+    .trim()
+    .split(/\s+/)[0];
+  return first || 'Docente';
+}
+
+function getCoursePerformanceTone(score, maxScore = 100) {
+  if (!Number.isFinite(Number(score))) {
+    return 'empty';
+  }
+  const ratio = Number(score) / Math.max(Number(maxScore) || 100, 1);
+  if (ratio >= 0.75) return 'good';
+  if (ratio >= 0.65) return 'warn';
+  return 'danger';
+}
+
+function resolveTeacherPerformanceLevel(score, gradingScale = {}) {
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return null;
+  }
+
+  const levels = Array.isArray(gradingScale?.performanceLevels) ? gradingScale.performanceLevels : [];
+  return levels.find((level) => (
+    numericScore >= Number(level.minScore)
+    && numericScore <= Number(level.maxScore)
+  )) || null;
+}
+
 function buildSessionKey(session) {
   return `${Number(session.weekday)}-${String(session.startTime || '')}-${String(session.endTime || '')}`;
 }
@@ -1117,19 +1342,25 @@ function buildCourseTimelineCalendar(monthDate, classSessions, posts) {
     const primaryPost = matchingPosts[0] || null;
     const titleParts = [];
     const timelineItems = [
-      ...matchingPosts.map((post) => ({
-        key: `post-${post.id}`,
-        kind: 'activity',
-        postId: post.id,
-        courseId: post.courseId,
-        label: post.title || formatPostTypeLabel(post.type),
-        meta: [
-          String(post.subject || post.courseTitle || '').trim(),
-          formatPostTypeLabel(post.type),
-          formatDeliveryLabel(post),
-        ].filter(Boolean).join(' · '),
-        description: post.body || 'Actividad programada para este día.',
-      })),
+      ...matchingPosts.map((post) => {
+        const subject = String(post.subject || '').trim();
+        const courseTitle = String(post.courseTitle || '').trim();
+        const courseGroup = String(post.courseGroup || '').trim();
+        const typeLabel = formatPostTypeLabel(post.type);
+        return {
+          key: `post-${post.id}`,
+          kind: 'activity',
+          postId: post.id,
+          courseId: post.courseId,
+          subject,
+          courseTitle,
+          courseGroup,
+          typeLabel,
+          label: post.title || typeLabel,
+          meta: [subject, courseGroup || courseTitle, typeLabel, formatDeliveryLabel(post)].filter(Boolean).join(' · '),
+          description: post.body || 'Actividad programada para este día.',
+        };
+      }),
       ...matchingSessions.map((session, index) => ({
         key: `session-${dateValue}-${index + 1}`,
         kind: 'class',
@@ -1264,7 +1495,7 @@ function aggregateUniqueStudentScores(studentEntries, gradingScale) {
   };
 }
 
-function buildTeacherManagementOverview(courses, posts, workspace) {
+function buildTeacherManagementOverview(courses, posts, workspace, options = {}) {
   const normalizedCourses = Array.isArray(courses) ? courses : [];
   const normalizedPosts = Array.isArray(posts) ? posts : [];
   const gradingScale = normalizeCampusGradingScale(workspace?.gradingScale || {});
@@ -1431,14 +1662,29 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
       description: post.body || 'Actividad programada.',
     }));
 
-  const pendingGradingItems = normalizedPosts
+  const pendingGradingItemsFromMetrics = Array.isArray(options.pendingGradingItems)
+    ? options.pendingGradingItems
+      .map((item) => ({
+        id: String(item?.id || '').trim(),
+        courseId: String(item?.courseId || '').trim(),
+        title: String(item?.title || '').trim() || formatPostTypeLabel(item?.type),
+        typeLabel: formatPostTypeLabel(item?.type) || String(item?.typeLabel || 'Actividad').trim(),
+        courseTitle: String(item?.courseTitle || '').trim() || 'Curso',
+        deliveryLabel: String(item?.deliveryLabel || '').trim() || 'Sin fecha definida',
+        dateLabel: String(item?.dateLabel || '').trim() || formatDateLabel(item?.dueAt || item?.scheduledClassDate || item?.updatedAt),
+        description: String(item?.description || item?.body || 'Actividad pendiente de revisión o calificación.').trim(),
+      }))
+      .filter((item) => item.id)
+    : [];
+
+  const pendingGradingItemsFromPosts = normalizedPosts
     .filter((post) => {
       if (!isEvaluativePostType(post.type) || String(post.status || '').toLowerCase() === 'archived') {
         return false;
       }
 
       if (pendingPostIds.size > 0) {
-        return pendingPostIds.has(post.id);
+        return pendingPostIds.has(String(post.id));
       }
 
       const course = normalizedCourses.find((entry) => entry.id === post.courseId);
@@ -1459,6 +1705,13 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
       dateLabel: formatDateLabel(post.dueAt || post.scheduledClassDate || post.updatedAt || post.createdAt),
       description: post.body || 'Actividad pendiente de revisión o calificación.',
     }));
+
+  const pendingGradingItems = pendingGradingItemsFromMetrics.length > 0
+    ? pendingGradingItemsFromMetrics
+    : pendingGradingItemsFromPosts;
+  const resolvedPendingGradingCount = pendingGradingItems.length > 0
+    ? pendingGradingItems.length
+    : pendingGradingCount;
 
   const totalActivities = normalizedPosts.filter((post) => post.status !== 'archived').length;
   const hasGradeInsights = studentsWithScore.length > 0;
@@ -1491,7 +1744,7 @@ function buildTeacherManagementOverview(courses, posts, workspace) {
     atRiskCount,
     atRiskStudents,
     droppingStudentsCount,
-    pendingGradingCount,
+    pendingGradingCount: resolvedPendingGradingCount,
     pendingGradingItems,
     totalActivities,
     gradingCoverageRate,
@@ -1702,6 +1955,50 @@ function getCourseDisplaySubtitle(course) {
   const parts = [subjectLabel, groupLabel].filter((part) => part && !title.includes(normalizeCourseDisplayKey(part)));
 
   return parts.join(' · ');
+}
+
+function getTimelineActivityCourseContext(item, courses = []) {
+  const course = (Array.isArray(courses) ? courses : []).find((entry) => String(entry?.id || '') === String(item?.courseId || '')) || null;
+  const subjectLabel = normalizeCourseDisplayText(item?.subject || course?.subject);
+  const courseLabel = normalizeCourseDisplayText(
+    (course && (getCourseGroupLabel(course) || getCourseGradeLabel(course)))
+    || item?.courseGroup
+    || item?.courseTitle
+    || course?.title
+  );
+  const uniqueParts = [];
+  [subjectLabel, courseLabel].forEach((part) => {
+    if (!part) {
+      return;
+    }
+    const normalizedPart = normalizeCourseDisplayKey(part);
+    if (uniqueParts.some((existing) => normalizeCourseDisplayKey(existing) === normalizedPart)) {
+      return;
+    }
+    uniqueParts.push(part);
+  });
+
+  return uniqueParts.join(' · ') || getCourseDisplayTitle(course) || 'Curso';
+}
+
+function getCourseViewAccent(course, index = 0) {
+  const palette = [
+    { accent: '#2563eb', soft: '#eff6ff', ink: '#1d4ed8' },
+    { accent: '#7c3aed', soft: '#f5f3ff', ink: '#6d28d9' },
+    { accent: '#059669', soft: '#ecfdf5', ink: '#047857' },
+    { accent: '#ea580c', soft: '#fff7ed', ink: '#c2410c' },
+    { accent: '#db2777', soft: '#fdf2f8', ink: '#be185d' },
+    { accent: '#0891b2', soft: '#ecfeff', ink: '#0e7490' },
+    { accent: '#ca8a04', soft: '#fefce8', ink: '#a16207' },
+    { accent: '#4f46e5', soft: '#eef2ff', ink: '#4338ca' },
+  ];
+  const fallback = palette[Math.abs(Number(index) || 0) % palette.length];
+  const accent = String(course?.colorToken || '').trim() || fallback.accent;
+  return {
+    accent,
+    soft: fallback.soft,
+    ink: accent,
+  };
 }
 
 function getCourseGradeGroupKey(course) {
@@ -2456,6 +2753,57 @@ function mergeTeacherOverviewShellAndMetrics(shell, metrics) {
   };
 }
 
+function normalizeTeacherQuickSearch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildPreviewTeacherStudentDirectory(previewWorkspace) {
+  const directoryMap = new Map();
+  const courses = Array.isArray(previewWorkspace?.courses) ? previewWorkspace.courses : [];
+  const courseDetails = previewWorkspace?.courseDetails || {};
+
+  courses.forEach((course) => {
+    const courseId = String(course?.id || '');
+    if (!courseId) {
+      return;
+    }
+
+    const students = Array.isArray(courseDetails?.[courseId]?.students) ? courseDetails[courseId].students : [];
+    students.forEach((student) => {
+      const studentId = String(student?.studentId || '');
+      if (!studentId) {
+        return;
+      }
+
+      const existing = directoryMap.get(studentId) || {
+        studentId,
+        name: String(student?.name || '').trim(),
+        schoolCode: String(student?.schoolCode || '').trim(),
+        grade: String(student?.grade || '').trim(),
+        courses: [],
+      };
+
+      if (!existing.courses.some((entry) => entry.id === courseId)) {
+        existing.courses.push({
+          id: courseId,
+          subject: String(course?.subject || '').trim(),
+          title: String(course?.title || '').trim(),
+          gradeLabel: String(course?.gradeLevel || course?.studentGradeKey || course?.section || '').trim(),
+        });
+      }
+
+      directoryMap.set(studentId, existing);
+    });
+  });
+
+  return Array.from(directoryMap.values()).sort((left, right) => left.name.localeCompare(right.name, 'es', { sensitivity: 'base' }));
+}
+
 function TeacherCampusHome({ forcePreview = false }) {
   const previewEnabled = campusPreviewEnabled || forcePreview;
       // --- Handlers para subcomponentes de cada componente de evaluación ---
@@ -2645,6 +2993,18 @@ function TeacherCampusHome({ forcePreview = false }) {
     ?? staffAnnouncementsUnreadQuery.data?.unreadCount
     ?? 0
   );
+  const generalNotificationsUnreadQuery = useQuery({
+    queryKey: ['teacher-notifications-unread', teacherQueryScope],
+    queryFn: getNotificationsUnreadCount,
+    enabled: !previewEnabled && Boolean(authUser?.id),
+    refetchInterval: 60_000,
+  });
+  const generalNotificationsUnreadCount = Number(
+    generalNotificationsUnreadQuery.data?.unreadCount
+    ?? generalNotificationsUnreadQuery.data?.count
+    ?? generalNotificationsUnreadQuery.data
+    ?? 0
+  );
   const [notice, setNotice] = useState({ type: 'info', text: '' });
   const [previewWorkspace, setPreviewWorkspace] = useState(() => clonePreviewWorkspace());
   const [selectedCourseId, setSelectedCourseId] = useState('');
@@ -2655,6 +3015,9 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [teacherAttendanceClassSessionKey, setTeacherAttendanceClassSessionKey] = useState('');
   const [teacherAttendanceRecords, setTeacherAttendanceRecords] = useState([]);
   const [activeTeacherSection, setActiveTeacherSection] = useState('dashboard');
+  const academyCounts = useComergioAcademyNotificationCounts();
+  const academyUnreadTotal = Number(academyCounts?.total || 0);
+  const topbarNotificationsBadgeCount = generalNotificationsUnreadCount + academyUnreadTotal;
   const [selectedSubjectKey, setSelectedSubjectKey] = useState('');
   const [selectedPortalGradeKey, setSelectedPortalGradeKey] = useState('');
   const [activeCourseWorkspaceTab, setActiveCourseWorkspaceTab] = useState('grading');
@@ -2665,6 +3028,19 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [dashboardCalendarMonth, setDashboardCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [selectedTimelineDate, setSelectedTimelineDate] = useState('');
   const [selectedDashboardCalendarDate, setSelectedDashboardCalendarDate] = useState('');
+  const [isDashboardCalendarExpanded, setIsDashboardCalendarExpanded] = useState(false);
+  const [scheduleWeekAnchor, setScheduleWeekAnchor] = useState(() => getMondayOfWeek(new Date()));
+  const [scheduleViewMode, setScheduleViewMode] = useState('week');
+  const [scheduleSelectedWeekday, setScheduleSelectedWeekday] = useState(() => {
+    const today = new Date().getDay();
+    return today >= 1 && today <= 5 ? today : 1;
+  });
+  const [coursesCatalogView, setCoursesCatalogView] = useState('grid');
+  const [coursesDetailOpen, setCoursesDetailOpen] = useState(false);
+  const [coursesPage, setCoursesPage] = useState(1);
+  const [coursesPageSize, setCoursesPageSize] = useState(12);
+  const [coursesSubjectFilter, setCoursesSubjectFilter] = useState('all');
+  const [showCoursesFilter, setShowCoursesFilter] = useState(false);
   const [selectedAssignmentDetail, setSelectedAssignmentDetail] = useState(null);
   const [activeIntegralModal, setActiveIntegralModal] = useState('');
   const [showPostSuccessModal, setShowPostSuccessModal] = useState(false);
@@ -2689,12 +3065,24 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [editingTeacherPlannerRequestId, setEditingTeacherPlannerRequestId] = useState('');
   const [teacherSocialPublicationDraft, setTeacherSocialPublicationDraft] = useState(createTeacherSocialPublicationDraft);
   const [teacherSocialMediaUploading, setTeacherSocialMediaUploading] = useState(false);
+  const [teacherSocialMediaDragActive, setTeacherSocialMediaDragActive] = useState(false);
   const [teacherDisciplineDraft, setTeacherDisciplineDraft] = useState(createTeacherDisciplineObservationDraft);
+  const [disciplineStudentSearch, setDisciplineStudentSearch] = useState('');
+  const [showDisciplineStudentMenu, setShowDisciplineStudentMenu] = useState(false);
   const [subcomponentDrafts, setSubcomponentDrafts] = useState({});
+  const [expandedGradingComponentKey, setExpandedGradingComponentKey] = useState('');
   const [studentDrafts, setStudentDrafts] = useState({});
   const [showTeacherMenu, setShowTeacherMenu] = useState(false);
   const [showTeacherSidebar, setShowTeacherSidebar] = useState(false);
+  const [isTeacherRailCollapsed, setIsTeacherRailCollapsed] = useState(false);
+  const [showTeacherNotifications, setShowTeacherNotifications] = useState(false);
+  const [teacherQuickSearch, setTeacherQuickSearch] = useState('');
+  const [showTeacherQuickSearch, setShowTeacherQuickSearch] = useState(false);
+  const [pendingGradebookFocus, setPendingGradebookFocus] = useState(null);
+  const [teacherNotifications, setTeacherNotifications] = useState([]);
+  const [loadingTeacherNotifications, setLoadingTeacherNotifications] = useState(false);
   const [showTeacherCamera, setShowTeacherCamera] = useState(false);
+  const [showTeacherSupportHelp, setShowTeacherSupportHelp] = useState(false);
   const [teacherPhotoPreview, setTeacherPhotoPreview] = useState('');
   const [teacherAttendanceLocked, setTeacherAttendanceLocked] = useState(false);
   const [teacherAttendanceSaveModal, setTeacherAttendanceSaveModal] = useState(null);
@@ -2705,7 +3093,11 @@ function TeacherCampusHome({ forcePreview = false }) {
   const teacherPhotoInputRef = useRef(null);
   const teacherSwipeStartRef = useRef(null);
   const teacherMenuRef = useRef(null);
+  const teacherNotificationsRef = useRef(null);
+  const teacherQuickSearchRef = useRef(null);
   const classworkCreateMenuRef = useRef(null);
+  const disciplineStudentComboboxRef = useRef(null);
+  const teacherSocialMediaInputRef = useRef(null);
   const classworkUploadInputRef = useRef(null);
   const classworkUploadAppendRef = useRef(true);
   const materialFilesRef = useRef([]);
@@ -3092,6 +3484,93 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => teacherSectionOptions.filter((option) => option.key !== 'guidance_routine' || guidanceRoutineCourses.length > 0),
     [guidanceRoutineCourses.length]
   );
+  const teacherStudentDirectory = useMemo(() => {
+    if (previewEnabled) {
+      return buildPreviewTeacherStudentDirectory(previewWorkspace);
+    }
+    return Array.isArray(overviewMetricsQuery.data?.studentDirectory)
+      ? overviewMetricsQuery.data.studentDirectory
+      : EMPTY_TEACHER_LIST;
+  }, [overviewMetricsQuery.data?.studentDirectory, previewEnabled, previewWorkspace]);
+  const teacherQuickSearchQuery = normalizeTeacherQuickSearch(teacherQuickSearch);
+  const teacherQuickSearchResults = useMemo(() => {
+    if (!teacherQuickSearchQuery) {
+      return { students: [], sections: [], courses: [] };
+    }
+
+    const studentMatches = [];
+    teacherStudentDirectory.forEach((student) => {
+      const haystack = normalizeTeacherQuickSearch([
+        student.name,
+        student.schoolCode,
+        student.grade,
+      ].join(' '));
+      if (!haystack.includes(teacherQuickSearchQuery)) {
+        return;
+      }
+
+      const coursesForStudent = Array.isArray(student.courses) ? student.courses : [];
+      if (coursesForStudent.length === 0) {
+        studentMatches.push({
+          key: `student-${student.studentId}`,
+          studentId: student.studentId,
+          name: student.name,
+          schoolCode: student.schoolCode,
+          grade: student.grade,
+          courseId: '',
+          courseLabel: 'Sin curso asignado',
+        });
+        return;
+      }
+
+      coursesForStudent.forEach((course) => {
+        studentMatches.push({
+          key: `student-${student.studentId}-${course.id}`,
+          studentId: student.studentId,
+          name: student.name,
+          schoolCode: student.schoolCode,
+          grade: student.grade,
+          courseId: course.id,
+          courseLabel: [course.subject || course.title, course.gradeLabel].filter(Boolean).join(' · '),
+        });
+      });
+    });
+
+    const sectionMatches = availableTeacherSectionOptions
+      .filter((option) => normalizeTeacherQuickSearch(`${option.label} ${option.description || ''}`).includes(teacherQuickSearchQuery))
+      .slice(0, 5)
+      .map((option) => ({
+        key: `section-${option.key}`,
+        sectionKey: option.key,
+        label: option.label,
+        description: option.description,
+      }));
+
+    const courseMatches = academicCourses
+      .filter((course) => normalizeTeacherQuickSearch([
+        course.subject,
+        course.title,
+        course.gradeLevel,
+        course.section,
+        getCourseDisplayTitle(course),
+      ].join(' ')).includes(teacherQuickSearchQuery))
+      .slice(0, 6)
+      .map((course) => ({
+        key: `course-${course.id}`,
+        courseId: course.id,
+        label: getCourseDisplayTitle(course),
+        description: [normalizeSubjectLabel(course.subject), getCourseGradeLabel(course)].filter(Boolean).join(' · '),
+      }));
+
+    return {
+      students: studentMatches.slice(0, 8),
+      sections: sectionMatches,
+      courses: courseMatches,
+    };
+  }, [academicCourses, availableTeacherSectionOptions, teacherQuickSearchQuery, teacherStudentDirectory]);
+  const hasTeacherQuickSearchResults = teacherQuickSearchResults.students.length > 0
+    || teacherQuickSearchResults.sections.length > 0
+    || teacherQuickSearchResults.courses.length > 0;
     const gradingScale = useMemo(() => normalizeCampusGradingScale(workspace.gradingScale || {}), [workspace.gradingScale]);
   const subjectGroups = useMemo(() => groupCoursesBySubject(academicCourses), [academicCourses]);
   const selectedSubject = useMemo(
@@ -3160,10 +3639,132 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
     return overviewTeacher?.name || authName || 'Docente';
   }, [authUser?.id, authUser?.name, authUser?.username, workspace.teacher]);
+  const schoolDisplayName = useMemo(
+    () => getSchoolDisplayName(authUser || workspace.teacher || {}, 'Colegio'),
+    [authUser, workspace.teacher],
+  );
+  const academicYearLabel = useMemo(() => {
+    const year = Number(workspace?.academicYear || workspace?.schoolYear || new Date().getFullYear());
+    return `Año lectivo ${Number.isFinite(year) ? year : new Date().getFullYear()}`;
+  }, [workspace?.academicYear, workspace?.schoolYear]);
   const teacherWeeklySchedule = useMemo(
     () => workspace.weeklySchedule || buildTeacherWeeklyScheduleFallback(courses),
     [courses, workspace.weeklySchedule]
   );
+  const scheduleWeekdays = useMemo(() => {
+    const sourceDays = Array.isArray(teacherWeeklySchedule?.weekdays) ? teacherWeeklySchedule.weekdays : [];
+    return sourceDays.map((day, index) => {
+      const date = addDaysToDate(scheduleWeekAnchor, index);
+      return {
+        ...day,
+        date,
+        dateLabel: formatScheduleDayChip(date),
+        headerLabel: `${day.label} ${formatScheduleDayChip(date)}`,
+      };
+    });
+  }, [scheduleWeekAnchor, teacherWeeklySchedule?.weekdays]);
+  const visibleScheduleWeekdays = useMemo(() => {
+    if (scheduleViewMode !== 'day') {
+      return scheduleWeekdays;
+    }
+    return scheduleWeekdays.filter((day) => Number(day.key) === Number(scheduleSelectedWeekday));
+  }, [scheduleSelectedWeekday, scheduleViewMode, scheduleWeekdays]);
+  const scheduleWeekRangeLabel = useMemo(
+    () => formatScheduleWeekRange(scheduleWeekAnchor),
+    [scheduleWeekAnchor]
+  );
+  const scheduleBaseRangeLabel = `${teacherWeeklySchedule?.timeRange?.startTime || '06:00'} - ${teacherWeeklySchedule?.timeRange?.endTime || '16:00'}`;
+  const coursesCatalogRows = useMemo(() => {
+    const sourceCourses = activeTeacherSection === 'academic_management'
+      ? visibleCourses
+      : academicCourses.filter((course) => {
+        if (coursesSubjectFilter === 'all') {
+          return true;
+        }
+        return normalizeSubjectLabel(course.subject) === coursesSubjectFilter;
+      });
+
+    return sourceCourses.map((course, index) => {
+      const stats = buildCourseCardStats(course, previewEnabled ? previewWorkspace : null);
+      const accent = getCourseViewAccent(course, index);
+      const performanceLevel = resolveTeacherPerformanceLevel(stats.averageScore, gradingScale);
+      return {
+        course,
+        stats,
+        accent,
+        performanceColor: performanceLevel?.color || '',
+        title: getCourseDisplayTitle(course),
+        subtitle: getCourseDisplaySubtitle(course) || 'Curso asignado',
+      };
+    });
+  }, [
+    academicCourses,
+    activeTeacherSection,
+    coursesSubjectFilter,
+    gradingScale,
+    previewEnabled,
+    previewWorkspace,
+    visibleCourses,
+  ]);
+  const coursesSubjectFilterOptions = useMemo(() => {
+    const subjects = Array.from(new Set(academicCourses.map((course) => normalizeSubjectLabel(course.subject)).filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right, 'es'));
+    return subjects;
+  }, [academicCourses]);
+  const coursesTotalPages = Math.max(1, Math.ceil(coursesCatalogRows.length / coursesPageSize));
+  const coursesPagedRows = useMemo(() => {
+    const start = (coursesPage - 1) * coursesPageSize;
+    return coursesCatalogRows.slice(start, start + coursesPageSize);
+  }, [coursesCatalogRows, coursesPage, coursesPageSize]);
+  const coursesPageStart = coursesCatalogRows.length === 0 ? 0 : ((coursesPage - 1) * coursesPageSize) + 1;
+  const coursesPageEnd = Math.min(coursesPage * coursesPageSize, coursesCatalogRows.length);
+  const coursesDetailStudents = useMemo(() => {
+    const students = Array.isArray(timelineCourseDetail?.students) ? timelineCourseDetail.students : [];
+    return [...students]
+      .map((student) => ({
+        ...student,
+        finalScore: parseFiniteScore(student.finalScore),
+      }))
+      .sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'es', { sensitivity: 'base' }));
+  }, [timelineCourseDetail]);
+  const openCoursesDetail = (course) => {
+    if (!course?.id) {
+      return;
+    }
+    setSelectedCourseId(course.id);
+    setTimelineCourseId(course.id);
+    setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setTimelineMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    setSelectedTimelineDate('');
+    setCoursesDetailOpen(true);
+    setShowSelectedCourseWorkspace(false);
+  };
+  const openAcademicManagementWorkspace = (course, tab = 'grading') => {
+    if (!course?.id) {
+      return;
+    }
+    const subjectLabel = normalizeSubjectLabel(course.subject);
+    const subjectKey = slugifyComponentKey(subjectLabel) || 'subject';
+    setSelectedSubjectKey(subjectKey);
+    setSelectedCourseId(course.id);
+    setTimelineCourseId(course.id);
+    setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setActiveCourseWorkspaceTab(tab);
+    setShowSelectedCourseWorkspace(true);
+    setCoursesDetailOpen(false);
+    setSelectedTimelineDate('');
+  };
+  const openCatalogCourse = (course) => {
+    if (activeTeacherSection === 'academic_management') {
+      openAcademicManagementWorkspace(course, 'grading');
+      return;
+    }
+    openCoursesDetail(course);
+  };
+  const closeCoursesDetail = () => {
+    setCoursesDetailOpen(false);
+    setSelectedTimelineDate('');
+  };
   const postFormCourse = useMemo(
     () => courses.find((course) => course.id === postDraft.courseId) || selectedCourse || null,
     [courses, postDraft.courseId, selectedCourse]
@@ -3199,9 +3800,47 @@ function TeacherCampusHome({ forcePreview = false }) {
     && postFormClassSchedule.length === 0
   );
   const integralOverview = useMemo(
-    () => buildTeacherManagementOverview(academicCourses, recentPosts, previewEnabled ? previewWorkspace : null),
-    [previewEnabled, academicCourses, previewWorkspace, recentPosts]
+    () => buildTeacherManagementOverview(
+      academicCourses,
+      recentPosts,
+      previewEnabled ? previewWorkspace : null,
+      {
+        pendingGradingItems: overviewMetricsQuery.data?.pendingGradingItems,
+      }
+    ),
+    [previewEnabled, academicCourses, overviewMetricsQuery.data?.pendingGradingItems, previewWorkspace, recentPosts]
   );
+  const dashboardCoursePerformance = useMemo(() => {
+    const maxScore = Number(gradingScale?.maxScore || 100);
+    return academicCourses
+      .map((course) => {
+        const stats = buildCourseCardStats(course, previewEnabled ? previewWorkspace : null);
+        const performanceLevel = resolveTeacherPerformanceLevel(stats.averageScore, gradingScale);
+        return {
+          id: course.id,
+          label: getCourseOptionLabel(course) || getCourseDisplayTitle(course),
+          averageScore: stats.averageScore,
+          maxScore,
+          tone: getCoursePerformanceTone(stats.averageScore, maxScore),
+          color: performanceLevel?.color || '',
+          levelLabel: performanceLevel?.label || '',
+          percent: stats.averageScore === null
+            ? 0
+            : Math.max(0, Math.min(100, (Number(stats.averageScore) / maxScore) * 100)),
+        };
+      })
+      .sort((left, right) => {
+        const leftScore = left.averageScore === null ? -1 : Number(left.averageScore);
+        const rightScore = right.averageScore === null ? -1 : Number(right.averageScore);
+        return rightScore - leftScore;
+      });
+  }, [academicCourses, gradingScale, previewEnabled, previewWorkspace]);
+  const visibleDashboardCoursePerformance = useMemo(
+    () => dashboardCoursePerformance.slice(0, 8),
+    [dashboardCoursePerformance]
+  );
+  const teacherWelcomeName = getTeacherFirstName(teacherName);
+  const todayWelcomeLabel = formatLongWeekdayDate(new Date());
   const activeSectionOption = teacherSectionOptions.find((option) => option.key === activeTeacherSection) || null;
   const activeSectionLabel = isCourseManagementSection && selectedSubject
     ? selectedSubject.label
@@ -3305,19 +3944,106 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     return recentPosts.filter((post) => post.courseId === timelineCourse.id);
   }, [recentPosts, timelineCourse, timelineCourseDetail]);
+  const coursesDetailUpcoming = useMemo(() => {
+    const today = new Date();
+    const todayValue = buildLocalDateValue(today);
+    const groupLabel = getCourseGroupLabel(timelineCourse) || getCourseGradeLabel(timelineCourse) || '';
+    const mapDateMeta = (dateValue) => {
+      const dayDate = dateValue ? new Date(`${dateValue}T12:00:00`) : null;
+      return {
+        dateValue,
+        weekdayShort: dayDate
+          ? dayDate.toLocaleDateString('es-CO', { weekday: 'short' }).replace('.', '').toUpperCase()
+          : '',
+        dayNumber: dayDate ? dayDate.getDate() : '',
+        monthShort: dayDate
+          ? dayDate.toLocaleDateString('es-CO', { month: 'short' }).replace('.', '')
+          : '',
+      };
+    };
+    const postItems = [...(timelineCoursePosts || [])]
+      .filter((post) => String(post?.status || '').toLowerCase() !== 'archived')
+      .filter((post) => getTimelineDateValue(post) >= todayValue)
+      .map((post) => {
+        const dateMeta = mapDateMeta(getTimelineDateValue(post));
+        const typeLabel = formatPostTypeLabel(post.type);
+        return {
+          id: `post-${post.id}`,
+          kind: 'activity',
+          typeTone: String(post.type || '').toLowerCase().includes('class') ? 'class' : 'activity',
+          title: post.title || typeLabel,
+          typeLabel,
+          description: post.body || formatDeliveryLabel(post),
+          deliveryLabel: formatDeliveryLabel(post),
+          groupLabel,
+          ...dateMeta,
+        };
+      });
+    const classItems = [];
+    for (let offset = 0; offset < 45; offset += 1) {
+      const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+      const dateValue = buildLocalDateValue(date);
+      const weekday = date.getDay();
+      (timelineCourseSchedule || [])
+        .filter((session) => Number(session.weekday) === weekday)
+        .forEach((session, sessionIndex) => {
+          const dateMeta = mapDateMeta(dateValue);
+          classItems.push({
+            id: `class-${dateValue}-${sessionIndex}`,
+            kind: 'class',
+            typeTone: 'class',
+            title: session.label || 'Clase programada',
+            typeLabel: 'Clase',
+            description: `${weekdayLongLabels[weekday] || 'Clase'} · ${formatTimeRange(session.startTime, session.endTime)}`,
+            deliveryLabel: [formatTimeRange(session.startTime, session.endTime), session.room || session.classroom || '']
+              .filter(Boolean)
+              .join(' · '),
+            groupLabel,
+            ...dateMeta,
+          });
+        });
+    }
+    return [...postItems, ...classItems]
+      .sort((left, right) => String(left.dateValue || '').localeCompare(String(right.dateValue || '')))
+      .slice(0, 8);
+  }, [timelineCourse, timelineCoursePosts, timelineCourseSchedule]);
   const timelineCourseCalendar = useMemo(
     () => buildCourseTimelineCalendar(timelineMonth, timelineCourseSchedule, timelineCoursePosts),
     [timelineCoursePosts, timelineCourseSchedule, timelineMonth]
+  );
+  const selectedCourseTimelineDay = useMemo(
+    () => selectedCourseTimelineCalendar.find((cell) => !cell.empty && cell.dateValue === selectedTimelineDate) || null,
+    [selectedCourseTimelineCalendar, selectedTimelineDate]
   );
   const selectedTimelineDay = useMemo(
     () => timelineCourseCalendar.find((cell) => !cell.empty && cell.dateValue === selectedTimelineDate) || null,
     [selectedTimelineDate, timelineCourseCalendar]
   );
+  const activeTimelineDayModal = useMemo(() => {
+    if (!selectedTimelineDate) {
+      return null;
+    }
+    if (activeTeacherSection === 'academic_management' && showSelectedCourseWorkspace) {
+      return selectedCourseTimelineDay;
+    }
+    if (activeTeacherSection === 'courses' && coursesDetailOpen) {
+      return selectedTimelineDay;
+    }
+    return null;
+  }, [
+    activeTeacherSection,
+    coursesDetailOpen,
+    selectedCourseTimelineDay,
+    selectedTimelineDate,
+    selectedTimelineDay,
+    showSelectedCourseWorkspace,
+  ]);
   const dashboardCalendarPosts = useMemo(() => {
     const mapCalendarItemToPost = (item) => ({
       id: item.id,
       courseId: item.courseId,
       courseTitle: item.courseTitle,
+      courseGroup: item.courseGroup,
       subject: item.subject,
       type: item.type,
       title: item.title,
@@ -3376,28 +4102,19 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => dashboardCalendarGrid.find((cell) => !cell.empty && cell.dateValue === selectedDashboardCalendarDate) || null,
     [dashboardCalendarGrid, selectedDashboardCalendarDate]
   );
-  const upcomingDashboardActivities = useMemo(() => {
-    const todayValue = buildLocalDateValue(new Date());
-
-    return [...dashboardCalendarPosts]
-      .filter((post) => getTimelineDateValue(post) >= todayValue)
-      .sort((left, right) => getTimelineDateValue(left).localeCompare(getTimelineDateValue(right)))
-      .slice(0, 6)
-      .map((post) => ({
-        id: post.id,
-        title: post.title || formatPostTypeLabel(post.type),
-        typeLabel: formatPostTypeLabel(post.type),
-        courseTitle: String(post.subject || post.courseTitle || 'Curso').trim(),
-        dateLabel: formatTimelineDateLabel(getTimelineDateValue(post)),
-        deliveryLabel: formatDeliveryLabel(post),
-        description: post.body || 'Actividad programada.',
-      }));
-  }, [dashboardCalendarPosts]);
   const teacherResourceItems = teacherResourceItemsQuery.data?.data?.items || teacherResourceItemsQuery.data?.items || [];
   const teacherResourceRequests = teacherResourceRequestsQuery.data?.data?.requests || teacherResourceRequestsQuery.data?.requests || [];
   const teacherPlannerCycles = teacherPlannerCyclesQuery.data?.data?.cycles || teacherPlannerCyclesQuery.data?.cycles || [];
   const teacherSocialPublicationRequests = teacherSocialPublicationRequestsQuery.data || [];
-  const selectedSocialPublicationCourse = courses.find((course) => course.id === teacherSocialPublicationDraft.courseId) || null;
+  const socialPublicationSubjectGroups = useMemo(() => groupCoursesBySubject(courses), [courses]);
+  const selectedSocialPublicationSubject = useMemo(
+    () => socialPublicationSubjectGroups.find((subject) => subject.key === teacherSocialPublicationDraft.subjectKey) || null,
+    [socialPublicationSubjectGroups, teacherSocialPublicationDraft.subjectKey]
+  );
+  const socialPublicationCoursesForSubject = selectedSocialPublicationSubject?.courses || [];
+  const selectedSocialPublicationCourse = socialPublicationCoursesForSubject.find((course) => course.id === teacherSocialPublicationDraft.courseId)
+    || courses.find((course) => course.id === teacherSocialPublicationDraft.courseId)
+    || null;
   const teacherDisciplineObservations = teacherDisciplineObservationsQuery.data?.observations || [];
   const selectedDisciplineCourse = courses.find((course) => course.id === teacherDisciplineDraft.courseId) || null;
   const selectedDisciplineCourseDetail = previewEnabled
@@ -3407,7 +4124,23 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => (Array.isArray(selectedDisciplineCourseDetail?.students) ? selectedDisciplineCourseDetail.students : EMPTY_TEACHER_LIST),
     [selectedDisciplineCourseDetail?.students]
   );
+  const filteredDisciplineStudentOptions = useMemo(() => {
+    const query = String(disciplineStudentSearch || '').trim().toLowerCase();
+    if (!query) {
+      return disciplineStudentOptions;
+    }
+    return disciplineStudentOptions.filter((student) => {
+      const haystack = `${student?.name || ''} ${student?.schoolCode || ''}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [disciplineStudentOptions, disciplineStudentSearch]);
   const selectedDisciplineStudent = disciplineStudentOptions.find((student) => student.studentId === teacherDisciplineDraft.studentId) || null;
+  const selectedDisciplineStudentLabel = selectedDisciplineStudent
+    ? `${selectedDisciplineStudent.name || 'Alumno'}${selectedDisciplineStudent.schoolCode ? ` · ${selectedDisciplineStudent.schoolCode}` : ''}`
+    : '';
+  const disciplineObservationLength = String(teacherDisciplineDraft.observation || '').length;
+  const socialPublicationBodyLength = String(teacherSocialPublicationDraft.body || '').length;
+  const recentTeacherSocialPublications = teacherSocialPublicationRequests.slice(0, 4);
   const selectedTeacherPlannerCycle = teacherPlannerCycles.find((cycle) => cycle.id === selectedTeacherPlannerCycleId) || null;
   const selectedTeacherPlannerRequest = selectedTeacherPlannerCycle
     ? getTeacherRequestForCycle(teacherResourceRequests, selectedTeacherPlannerCycle.id)
@@ -3646,8 +4379,62 @@ function TeacherCampusHome({ forcePreview = false }) {
     navigate(LOGIN_PATH, { replace: true });
   };
 
+  const openTeacherAcademySection = (sectionKey) => {
+    setShowTeacherNotifications(false);
+    setShowTeacherMenu(false);
+    setShowSelectedCourseWorkspace(false);
+    setActiveTeacherSection(sectionKey);
+    setShowTeacherSidebar(false);
+  };
+
+  const openTeacherNotifications = async () => {
+    setShowTeacherMenu(false);
+    setShowTeacherNotifications((current) => !current);
+    if (showTeacherNotifications) return;
+    setLoadingTeacherNotifications(true);
+    try {
+      const payload = await getNotifications();
+      const inboxItems = (Array.isArray(payload?.items) ? payload.items : []).filter((item) => {
+        const type = String(item?.payload?.type || item?.type || '');
+        return type !== 'informa.post' && type !== 'conecta.case';
+      });
+
+      const academyItems = [];
+      if (Number(academyCounts.informa || 0) > 0) {
+        academyItems.push({
+          id: 'academy-informa',
+          title: Number(academyCounts.informa) === 1
+            ? 'Nueva publicación en Comergio Informa'
+            : `${academyCounts.informa} publicaciones nuevas en Comergio Informa`,
+          body: 'Gerencia Comergio compartió novedades para el equipo.',
+          sectionKey: 'informa',
+          isAcademy: true,
+        });
+      }
+      if (Number(academyCounts.conecta || 0) > 0) {
+        academyItems.push({
+          id: 'academy-conecta',
+          title: Number(academyCounts.conecta) === 1
+            ? 'Nuevo caso en Conecta'
+            : `${academyCounts.conecta} casos nuevos en Conecta`,
+          body: 'Hay actividad nueva en la comunidad Comergio.',
+          sectionKey: 'conecta',
+          isAcademy: true,
+        });
+      }
+
+      setTeacherNotifications([...academyItems, ...inboxItems]);
+      await markAllNotificationsRead().catch(() => null);
+      queryClient.invalidateQueries({ queryKey: ['teacher-notifications-unread'] });
+    } catch (_error) {
+      setTeacherNotifications([]);
+    } finally {
+      setLoadingTeacherNotifications(false);
+    }
+  };
+
   useEffect(() => {
-    if (!showTeacherMenu || typeof document === 'undefined') {
+    if ((!showTeacherMenu && !showTeacherNotifications && !showTeacherQuickSearch) || typeof document === 'undefined') {
       return undefined;
     }
 
@@ -3655,11 +4442,19 @@ function TeacherCampusHome({ forcePreview = false }) {
       if (teacherMenuRef.current && !teacherMenuRef.current.contains(event.target)) {
         setShowTeacherMenu(false);
       }
+      if (teacherNotificationsRef.current && !teacherNotificationsRef.current.contains(event.target)) {
+        setShowTeacherNotifications(false);
+      }
+      if (teacherQuickSearchRef.current && !teacherQuickSearchRef.current.contains(event.target)) {
+        setShowTeacherQuickSearch(false);
+      }
     };
 
     const handleEscape = (event) => {
       if (event.key === 'Escape') {
         setShowTeacherMenu(false);
+        setShowTeacherNotifications(false);
+        setShowTeacherQuickSearch(false);
       }
     };
 
@@ -3670,7 +4465,36 @@ function TeacherCampusHome({ forcePreview = false }) {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [showTeacherMenu]);
+  }, [showTeacherMenu, showTeacherNotifications, showTeacherQuickSearch]);
+
+  useEffect(() => {
+    const studentId = String(pendingGradebookFocus?.studentId || '').trim();
+    if (!studentId || !selectedCourseDetail?.students) {
+      return;
+    }
+
+    const matchedStudent = selectedCourseDetail.students.find(
+      (student) => String(student.studentId) === studentId
+    );
+    if (!matchedStudent) {
+      return;
+    }
+
+    setGradebookMode('student');
+    setGradebookSearch(pendingGradebookFocus.studentName || matchedStudent.name || '');
+    setOpenGradebookRows((currentValue) => ({
+      ...currentValue,
+      [studentId]: true,
+    }));
+    setPendingGradebookFocus(null);
+
+    if (typeof document !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        const row = document.querySelector(`[data-gradebook-student-id="${studentId}"]`);
+        row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }, [pendingGradebookFocus, selectedCourseDetail]);
 
   useEffect(() => {
     if (!showClassworkCreateMenu || typeof document === 'undefined') {
@@ -3699,12 +4523,56 @@ function TeacherCampusHome({ forcePreview = false }) {
   }, [showClassworkCreateMenu]);
 
   useEffect(() => {
+    setCoursesDetailOpen(false);
+    setShowCoursesFilter(false);
+    setCoursesPage(1);
+    setSelectedTimelineDate('');
+  }, [activeTeacherSection]);
+
+  useEffect(() => {
+    setExpandedGradingComponentKey('');
+  }, [selectedCourseId, activeCourseWorkspaceTab]);
+
+  useEffect(() => {
+    if (activeTeacherSection !== 'academic_management') {
+      return;
+    }
+    setCoursesDetailOpen(false);
+    setCoursesPage(1);
+    setShowCoursesFilter(false);
+  }, [selectedSubjectKey, activeTeacherSection]);
+
+  useEffect(() => {
+    setCoursesPage(1);
+  }, [coursesSubjectFilter, coursesPageSize, academicCourses.length, visibleCourses.length]);
+
+  useEffect(() => {
+    if (coursesPage > coursesTotalPages) {
+      setCoursesPage(coursesTotalPages);
+    }
+  }, [coursesPage, coursesTotalPages]);
+
+  useEffect(() => {
     setSelectedTimelineDate('');
   }, [timelineCourseId, timelineMonth]);
 
   useEffect(() => {
     setSelectedDashboardCalendarDate('');
   }, [dashboardCalendarMonthKey]);
+
+  useEffect(() => {
+    if (activeTeacherSection !== 'dashboard') {
+      return;
+    }
+    if (selectedDashboardCalendarDate) {
+      return;
+    }
+    const todayValue = buildLocalDateValue(new Date());
+    const todayInMonth = dashboardCalendarGrid.some((cell) => !cell.empty && cell.dateValue === todayValue);
+    if (todayInMonth) {
+      setSelectedDashboardCalendarDate(todayValue);
+    }
+  }, [activeTeacherSection, dashboardCalendarGrid, selectedDashboardCalendarDate]);
 
   useEffect(() => {
     if (!academicCourses.length) {
@@ -3795,6 +4663,45 @@ function TeacherCampusHome({ forcePreview = false }) {
   }, [teacherAttendanceQuery.data]);
 
   useEffect(() => {
+    if (!showDisciplineStudentMenu || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (disciplineStudentComboboxRef.current && !disciplineStudentComboboxRef.current.contains(event.target)) {
+        setShowDisciplineStudentMenu(false);
+        setDisciplineStudentSearch('');
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setShowDisciplineStudentMenu(false);
+        setDisciplineStudentSearch('');
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showDisciplineStudentMenu]);
+
+  useEffect(() => {
+    if (activeTeacherSection !== 'school_coexistence') {
+      setShowDisciplineStudentMenu(false);
+      setDisciplineStudentSearch('');
+    }
+  }, [activeTeacherSection]);
+
+  useEffect(() => {
+    setDisciplineStudentSearch('');
+    setShowDisciplineStudentMenu(false);
+  }, [teacherDisciplineDraft.courseId]);
+
+  useEffect(() => {
     if (activeTeacherSection !== 'school_coexistence') {
       return;
     }
@@ -3869,7 +4776,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   }, [selectedCourseId]);
 
   useEffect(() => {
-    if (!selectedTimelineDay || typeof document === 'undefined') {
+    if (!activeTimelineDayModal || typeof document === 'undefined') {
       return undefined;
     }
 
@@ -3883,7 +4790,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     return () => {
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [selectedTimelineDay]);
+  }, [activeTimelineDayModal]);
 
   useEffect(() => {
     if (!activeIntegralModal || typeof document === 'undefined') {
@@ -4233,6 +5140,65 @@ function TeacherCampusHome({ forcePreview = false }) {
     setSelectedGradebookAssignmentKey(assignmentKey || assignmentOptions[0]?.key || '');
   };
 
+  const closeTeacherQuickSearch = () => {
+    setShowTeacherQuickSearch(false);
+    setTeacherQuickSearch('');
+  };
+
+  const openStudentGradebookFromSearch = (result) => {
+    const course = academicCourses.find((entry) => String(entry.id) === String(result.courseId));
+    if (!course) {
+      setNotice({ type: 'error', text: 'No se encontró el curso de ese alumno.' });
+      return;
+    }
+
+    const subjectLabel = normalizeSubjectLabel(course.subject);
+    const subjectKey = slugifyComponentKey(subjectLabel) || 'subject';
+
+    setShowTeacherMenu(false);
+    setShowTeacherNotifications(false);
+    setShowTeacherSidebar(false);
+    setActiveIntegralModal('');
+    setActiveTeacherSection('academic_management');
+    setSelectedSubjectKey(subjectKey);
+    setSelectedCourseId(course.id);
+    setTimelineCourseId(course.id);
+    setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setShowSelectedCourseWorkspace(true);
+    setActiveCourseWorkspaceTab('gradebook');
+    setGradebookMode('student');
+    setGradebookSearch(result.name || '');
+    setPendingGradebookFocus({
+      studentId: String(result.studentId || ''),
+      studentName: String(result.name || ''),
+    });
+    closeTeacherQuickSearch();
+  };
+
+  const openSectionFromSearch = (sectionKey) => {
+    setShowTeacherMenu(false);
+    setShowTeacherNotifications(false);
+    setShowTeacherSidebar(false);
+    setActiveIntegralModal('');
+    setActiveTeacherSection(sectionKey === COMERGIO_ACADEMY_PARENT.key ? 'video_tutoriales' : sectionKey);
+    closeTeacherQuickSearch();
+  };
+
+  const openCourseFromSearch = (courseId) => {
+    const course = academicCourses.find((entry) => String(entry.id) === String(courseId));
+    if (!course) {
+      return;
+    }
+
+    setShowTeacherMenu(false);
+    setShowTeacherNotifications(false);
+    setShowTeacherSidebar(false);
+    setActiveIntegralModal('');
+    setActiveTeacherSection('courses');
+    openCoursesDetail(course);
+    closeTeacherQuickSearch();
+  };
+
   const openAssignmentDetail = (item) => {
     const postId = String(item?.postId || item?.id || '');
     const courseCandidates = [
@@ -4257,6 +5223,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     const subjectKey = slugifyComponentKey(subjectLabel) || 'subject';
 
     setSelectedDashboardCalendarDate('');
+    setSelectedTimelineDate('');
     setActiveIntegralModal('');
     setActiveTeacherSection('academic_management');
     setSelectedSubjectKey(subjectKey);
@@ -5093,7 +6060,11 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onTeacherSocialPublicationDraftChange = (field, value) => {
-    setTeacherSocialPublicationDraft((currentDraft) => ({ ...currentDraft, [field]: value }));
+    setTeacherSocialPublicationDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+      ...(field === 'subjectKey' ? { courseId: '' } : {}),
+    }));
   };
 
   const uploadTeacherSocialMediaFiles = async (files, { fromCamera = false } = {}) => {
@@ -5188,6 +6159,20 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
   };
 
+  const onTeacherSocialMediaDrop = async (event) => {
+    event.preventDefault();
+    setTeacherSocialMediaDragActive(false);
+    if (teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= 8) {
+      return;
+    }
+
+    try {
+      await uploadTeacherSocialMediaFiles(Array.from(event.dataTransfer?.files || []));
+    } catch (_error) {
+      // The notice above keeps the upload error visible in the portal.
+    }
+  };
+
   const onRemoveTeacherSocialMedia = (mediaIndex) => {
     setTeacherSocialPublicationDraft((currentDraft) => ({
       ...currentDraft,
@@ -5201,8 +6186,13 @@ function TeacherCampusHome({ forcePreview = false }) {
     const title = String(teacherSocialPublicationDraft.title || '').trim();
     const body = String(teacherSocialPublicationDraft.body || '').trim();
 
-    if (!teacherSocialPublicationDraft.courseId) {
-      setNotice({ type: 'error', text: 'Selecciona el curso o grupo destinatario.' });
+    if (!teacherSocialPublicationDraft.subjectKey) {
+      setNotice({ type: 'error', text: 'Selecciona la asignatura.' });
+      return;
+    }
+
+    if (!teacherSocialPublicationDraft.courseId || !selectedSocialPublicationCourse) {
+      setNotice({ type: 'error', text: 'Selecciona el curso destinatario.' });
       return;
     }
 
@@ -5211,6 +6201,11 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
+    const courseGroupLabel = getCourseGroupLabel(selectedSocialPublicationCourse);
+    const subjectLabel = normalizeSubjectLabel(selectedSocialPublicationCourse.subject)
+      || selectedSocialPublicationSubject?.label
+      || '';
+
     try {
       await createTeacherSocialPublicationMutation.mutateAsync({
         courseId: teacherSocialPublicationDraft.courseId,
@@ -5218,9 +6213,17 @@ function TeacherCampusHome({ forcePreview = false }) {
         body,
         emailSubject: title,
         audienceType: 'course',
-        courseTargets: selectedSocialPublicationCourse
-          ? [selectedSocialPublicationCourse.title, selectedSocialPublicationCourse.studentGradeKey, selectedSocialPublicationCourse.gradeLevel].filter(Boolean)
-          : [],
+        subject: subjectLabel,
+        courseTargets: [
+          courseGroupLabel,
+          selectedSocialPublicationCourse.title,
+          selectedSocialPublicationCourse.studentGradeKey,
+          selectedSocialPublicationCourse.gradeLevel,
+          selectedSocialPublicationCourse.section,
+          `${selectedSocialPublicationCourse.gradeLevel || ''}${selectedSocialPublicationCourse.section || ''}`,
+          `${selectedSocialPublicationCourse.studentGradeKey || ''}${selectedSocialPublicationCourse.section || ''}`,
+        ].filter(Boolean),
+        gradeTargets: [selectedSocialPublicationCourse.studentGradeKey, selectedSocialPublicationCourse.gradeLevel].filter(Boolean),
         media: teacherSocialPublicationDraft.media || [],
         channels: { push: true, email: false },
       });
@@ -5237,18 +6240,39 @@ function TeacherCampusHome({ forcePreview = false }) {
       [field]: value,
       ...(field === 'courseId' ? { studentId: '' } : {}),
     }));
+    if (field === 'courseId') {
+      setDisciplineStudentSearch('');
+      setShowDisciplineStudentMenu(false);
+    }
+  };
+
+  const onSelectDisciplineStudent = (student) => {
+    onTeacherDisciplineDraftChange('studentId', student?.studentId || '');
+    setDisciplineStudentSearch('');
+    setShowDisciplineStudentMenu(false);
   };
 
   const onSubmitTeacherDisciplineObservation = async (event) => {
     event.preventDefault();
 
     const observationText = String(teacherDisciplineDraft.observation || '').trim();
+    const incidentDate = String(teacherDisciplineDraft.incidentDate || '').trim();
+    const incidentTime = String(teacherDisciplineDraft.incidentTime || '').trim();
     if (!teacherDisciplineDraft.courseId) {
       setNotice({ type: 'error', text: 'Selecciona el curso donde observaste la situación.' });
       return;
     }
     if (!teacherDisciplineDraft.studentId) {
       setNotice({ type: 'error', text: 'Selecciona el alumno correspondiente.' });
+      return;
+    }
+    if (!incidentDate || !incidentTime) {
+      setNotice({ type: 'error', text: 'Indica la fecha y hora del caso.' });
+      return;
+    }
+    const incidentAtDate = new Date(`${incidentDate}T${incidentTime}:00`);
+    if (Number.isNaN(incidentAtDate.getTime())) {
+      setNotice({ type: 'error', text: 'La fecha y hora del caso no son válidas.' });
       return;
     }
     if (observationText.length < 8) {
@@ -5259,7 +6283,12 @@ function TeacherCampusHome({ forcePreview = false }) {
     try {
       if (previewEnabled) {
         setNotice({ type: 'success', text: 'Observación registrada en vista previa.' });
-        setTeacherDisciplineDraft((currentDraft) => ({ ...currentDraft, observation: '' }));
+        setTeacherDisciplineDraft((currentDraft) => ({
+          ...currentDraft,
+          observation: '',
+          incidentDate: getTodayDateInputValue(),
+          incidentTime: getNowTimeInputValue(),
+        }));
         return;
       }
 
@@ -5267,8 +6296,16 @@ function TeacherCampusHome({ forcePreview = false }) {
         courseId: teacherDisciplineDraft.courseId,
         studentId: teacherDisciplineDraft.studentId,
         observation: observationText,
+        incidentDate,
+        incidentTime,
+        incidentAt: incidentAtDate.toISOString(),
       });
-      setTeacherDisciplineDraft((currentDraft) => ({ ...currentDraft, observation: '' }));
+      setTeacherDisciplineDraft((currentDraft) => ({
+        ...currentDraft,
+        observation: '',
+        incidentDate: getTodayDateInputValue(),
+        incidentTime: getNowTimeInputValue(),
+      }));
       setNotice({ type: 'success', text: 'Observación enviada a Coordinación, Dirección, Psicología y Rectoría.' });
     } catch (error) {
       setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo enviar la observación de convivencia.' });
@@ -5925,105 +6962,37 @@ function TeacherCampusHome({ forcePreview = false }) {
         </div>
       ) : null}
 
-      <header className="campus-teacher__hero">
-        <div className="campus-teacher__hero-side campus-teacher__hero-side--left">
-          <button
-            aria-expanded={showTeacherSidebar}
-            aria-label="Abrir menú del portal docente"
-            className="campus-teacher__mobile-menu-button"
-            onClick={() => setShowTeacherSidebar(true)}
-            type="button"
+      {activeTimelineDayModal ? (
+        <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setSelectedTimelineDate('')} role="presentation">
+          <div
+            aria-label={`Programación del ${activeTimelineDayModal.formattedDate}`}
+            aria-modal="true"
+            className="campus-teacher__timeline-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
           >
-            <span />
-            <span />
-            <span />
-          </button>
-          <button
-            className="campus-teacher__hero-avatar"
-            disabled={uploadTeacherPhotoMutation.isPending}
-            onClick={() => teacherPhotoInputRef.current?.click()}
-            type="button"
-          >
-            {teacherPhotoPreview ? (
-              <img
-                alt={teacherName}
-                onError={() => setTeacherPhotoPreview('')}
-                src={resolveApiAssetUrl(teacherPhotoPreview)}
-              />
-            ) : (
-              <span style={{fontSize: '2.2rem', color: '#64748b', fontWeight: 700, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%'}}>+</span>
-            )}
-          </button>
-          <input
-            accept="image/*"
-            className="campus-teacher__hero-file-input"
-            disabled={uploadTeacherPhotoMutation.isPending}
-            onChange={onTeacherPhotoChange}
-            ref={teacherPhotoInputRef}
-            type="file"
-          />
-          <div className="campus-teacher__hero-identity">
-            <span className="campus-teacher__portal-kicker">Docente</span>
-            <strong>{teacherName}</strong>
-            <span className="campus-teacher__hero-helper-text">
-              {uploadTeacherPhotoMutation.isPending ? 'Subiendo foto...' : 'Toca el avatar para actualizar la foto.'}
-            </span>
-          </div>
-        </div>
-
-        <div className="campus-teacher__hero-brand">
-          <img alt="Comergio Campus Docentes" className="campus-teacher__hero-brand-image" src="/campus/comergio-docentes-colibri.png" />
-        </div>
-
-        <div className="campus-teacher__hero-side campus-teacher__hero-side--right">
-          <button
-            aria-label="Actualizar foto de perfil"
-            className="campus-teacher__hero-avatar campus-teacher__hero-avatar--mobile"
-            disabled={uploadTeacherPhotoMutation.isPending}
-            onClick={() => teacherPhotoInputRef.current?.click()}
-            type="button"
-          >
-            {teacherPhotoPreview ? (
-              <img
-                alt={teacherName}
-                onError={() => setTeacherPhotoPreview('')}
-                src={resolveApiAssetUrl(teacherPhotoPreview)}
-              />
-            ) : (
-              <span className="campus-teacher__hero-avatar-fallback">
-                {String(teacherName || 'D').slice(0, 1).toUpperCase()}
-              </span>
-            )}
-          </button>
-          <div className="campus-teacher__hero-user-menu" ref={teacherMenuRef}>
-            <button
-              aria-expanded={showTeacherMenu}
-              aria-haspopup="menu"
-              aria-label="Abrir menu de usuario"
-              className="campus-teacher__hero-user-action"
-              onClick={() => setShowTeacherMenu((currentValue) => !currentValue)}
-              type="button"
-            >
-              <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                <path d="M4 20.5a8 8 0 0 1 16 0" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-              </svg>
-            </button>
-
-            {showTeacherMenu ? (
-              <div className="campus-teacher__hero-user-dropdown" role="menu">
-                <button className="campus-teacher__hero-user-dropdown-item" onClick={onLogout} role="menuitem" type="button">
-                  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M14 7V5.75A1.75 1.75 0 0 0 12.25 4h-5.5A1.75 1.75 0 0 0 5 5.75v12.5A1.75 1.75 0 0 0 6.75 20h5.5A1.75 1.75 0 0 0 14 18.25V17" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                    <path d="M10 12h9m0 0-2.75-2.75M19 12l-2.75 2.75" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                  </svg>
-                  <span>Cerrar sesión</span>
-                </button>
+            <div className="campus-teacher__timeline-modal-head">
+              <div>
+                <span className="campus-panel__kicker">Programación del día</span>
+                <h3>{activeTimelineDayModal.formattedDate}</h3>
               </div>
-            ) : null}
+              <button className="campus-teacher__ghost-btn" onClick={() => setSelectedTimelineDate('')} type="button">
+                Cerrar
+              </button>
+            </div>
+            <div className="campus-teacher__timeline-modal-body">
+              {activeTimelineDayModal.items.length > 0 ? activeTimelineDayModal.items.map((item) => (
+                <article className={`campus-teacher__timeline-modal-item is-${item.kind}`} key={item.key}>
+                  <span className="campus-teacher__timeline-modal-item-kind">{item.kind === 'class' ? 'Clase' : 'Actividad'}</span>
+                  <strong>{item.label}</strong>
+                  <span>{item.meta}</span>
+                  <p>{item.description}</p>
+                </article>
+              )) : <p className="campus-panel__meta">No hay actividades ni clases programadas para este día.</p>}
+            </div>
           </div>
         </div>
-      </header>
+      ) : null}
 
       <button
         aria-label="Cerrar menú del portal docente"
@@ -6032,15 +7001,38 @@ function TeacherCampusHome({ forcePreview = false }) {
         type="button"
       />
 
-      <div className="campus-teacher__frame">
+      <div className={`campus-teacher__frame${isTeacherRailCollapsed ? ' is-rail-collapsed' : ''}`}>
         <aside className={`campus-teacher__sidebar campus-teacher__rail${showTeacherSidebar ? ' is-open' : ''}`}>
-          <div className="campus-teacher__mobile-sidebar-head">
-            <div>
-              <span>Portal docente</span>
-              <strong>{teacherName}</strong>
+          <div className="campus-teacher__rail-brand">
+            <div className="campus-teacher__rail-brand-copy">
+              <img alt="Comergio" className="campus-teacher__rail-brand-logo" src={colibriLogo} />
+              <div>
+                <strong>Comergio</strong>
+                <span>Conectamos tu colegio</span>
+              </div>
             </div>
-            <button aria-label="Cerrar menú" onClick={() => setShowTeacherSidebar(false)} type="button">×</button>
+            <button
+              aria-label="Replegar menú"
+              className="campus-teacher__rail-brand-toggle campus-teacher__rail-brand-toggle--collapse"
+              onClick={() => setIsTeacherRailCollapsed(true)}
+              type="button"
+            >
+              <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                <path d="M15 6 9 12l6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+              </svg>
+            </button>
+            <button
+              aria-label="Cerrar menú"
+              className="campus-teacher__rail-brand-toggle campus-teacher__rail-brand-toggle--close"
+              onClick={() => setShowTeacherSidebar(false)}
+              type="button"
+            >
+              <span />
+              <span />
+              <span />
+            </button>
           </div>
+
           <nav aria-label="Portal docente" className="campus-teacher__rail-nav">
             {teacherNavGroups.map((group) => {
               const groupOptions = group.keys
@@ -6056,10 +7048,17 @@ function TeacherCampusHome({ forcePreview = false }) {
                   {group.label ? <p className="campus-teacher__rail-group-label">{group.label}</p> : null}
                   <div className="campus-teacher__nav-list">
                     {groupOptions.map((option) => {
-                      const isActive = activeTeacherSection === option.key;
-                      const isExpandable = option.key === 'academic_management' || option.key === 'academic_content';
+                      const isSubjectExpandable = option.key === 'academic_management' || option.key === 'academic_content';
+                      const isActive = activeTeacherSection === option.key
+                        || (option.key === COMERGIO_ACADEMY_PARENT.key && activeTeacherSection === 'video_tutoriales');
+                      const navLabel = resolveTeacherNavLabel(option);
+                      const academyChildCount = option.key === 'conecta'
+                        ? academyCounts.conecta
+                        : option.key === 'informa'
+                          ? academyCounts.informa
+                          : 0;
 
-                      if (isExpandable) {
+                      if (isSubjectExpandable) {
                         return (
                           <div className={`campus-teacher__nav-item campus-teacher__nav-item--expandable${isActive ? ' is-active' : ''}`} key={option.key}>
                             <button
@@ -6073,7 +7072,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                               <span className="campus-teacher__nav-item-icon">
                                 <TeacherSectionIcon icon={option.icon} />
                               </span>
-                              <span className="campus-teacher__nav-item-label">{option.label}</span>
+                              <span className="campus-teacher__nav-item-label">{navLabel}</span>
                               <svg aria-hidden="true" className="campus-teacher__nav-item-chevron" fill="none" viewBox="0 0 24 24">
                                 <path d={isActive ? 'M6 15l6-6 6 6' : 'M9 6l6 6-6 6'} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
                               </svg>
@@ -6090,6 +7089,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       onClick={() => {
                                         setSelectedSubjectKey(subject.key);
                                         setShowSelectedCourseWorkspace(false);
+                                        setActiveTeacherSection(option.key);
                                         setShowTeacherSidebar(false);
                                       }}
                                       type="button"
@@ -6109,11 +7109,11 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                       return (
                         <button
-                          className={`campus-teacher__nav-item${isActive ? ' is-active' : ''}`}
+                          className={`campus-teacher__nav-item${isActive ? ' is-active' : ''}${option.key === 'conecta' ? ' tone-conecta' : ''}${option.key === 'informa' ? ' tone-informa' : ''}${option.key === COMERGIO_ACADEMY_PARENT.key ? ' tone-academy' : ''}`}
                           key={option.key}
                           onClick={() => {
                             setShowSelectedCourseWorkspace(false);
-                            setActiveTeacherSection(option.key);
+                            setActiveTeacherSection(option.key === COMERGIO_ACADEMY_PARENT.key ? 'video_tutoriales' : option.key);
                             setShowTeacherSidebar(false);
                           }}
                           type="button"
@@ -6122,7 +7122,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <TeacherSectionIcon icon={option.icon} />
                           </span>
                           <span className="campus-teacher__nav-item-label">
-                            {option.label}
+                            {navLabel}
                             {option.key === 'resource_requests' && teacherPlannerPendingCount > 0 ? (
                               <span className="campus-teacher__nav-badge" aria-label={`${teacherPlannerPendingCount} planner(s) pendientes`}>
                                 {teacherPlannerPendingCount}
@@ -6130,6 +7130,9 @@ function TeacherCampusHome({ forcePreview = false }) {
                             ) : null}
                             {option.key === 'staff_announcements' ? (
                               <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+                            ) : null}
+                            {academyChildCount > 0 ? (
+                              <AcademyNotificationBadge count={academyChildCount} />
                             ) : null}
                           </span>
                         </button>
@@ -6141,25 +7144,753 @@ function TeacherCampusHome({ forcePreview = false }) {
             })}
           </nav>
 
-          <div className="campus-teacher__rail-footer">
-            <span>{summary.totalCourses} cursos</span>
-            <span aria-hidden="true">·</span>
-            <span>{summary.totalStudents} alumnos</span>
+          <div className="campus-teacher__rail-school">
+            <div className="campus-teacher__rail-school-main">
+              <span className="campus-teacher__rail-school-icon" aria-hidden="true">
+                <svg fill="none" viewBox="0 0 24 24">
+                  <path d="M12 3 4.5 6.5v4.2c0 4.6 3.1 8.8 7.5 10.3 4.4-1.5 7.5-5.7 7.5-10.3V6.5L12 3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                  <path d="M9.5 12.2 11 13.7l3.5-3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                </svg>
+              </span>
+              <div>
+                <strong>{schoolDisplayName}</strong>
+                <span>{academicYearLabel}</span>
+              </div>
+            </div>
           </div>
         </aside>
 
-        <div className="campus-teacher__workspace">
-          <section className="campus-teacher__course-deck campus-teacher__panel-surface">
-            <div className="campus-teacher__section-head">
-              <div>
-                <span className="campus-panel__kicker">{activeSectionLabel}</span>
-                <h2>{activeSectionDescription}</h2>
-              </div>
+        <div className="campus-teacher__main-column">
+          <header className="campus-teacher__topbar">
+            <button
+              aria-expanded={!isTeacherRailCollapsed || showTeacherSidebar}
+              aria-label={isTeacherRailCollapsed ? 'Expandir menú del portal docente' : 'Abrir menú del portal docente'}
+              className={`campus-teacher__mobile-menu-button${isTeacherRailCollapsed ? ' is-rail-expand' : ''}`}
+              onClick={() => {
+                if (isTeacherRailCollapsed) {
+                  setIsTeacherRailCollapsed(false);
+                  return;
+                }
+                setShowTeacherSidebar(true);
+              }}
+              type="button"
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+
+            <div className="campus-teacher__topbar-search" ref={teacherQuickSearchRef}>
+              <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
+                <path d="m20 20-3.5-3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+              </svg>
+              <input
+                aria-autocomplete="list"
+                aria-expanded={showTeacherQuickSearch && Boolean(teacherQuickSearchQuery)}
+                aria-label="Buscar alumno, curso o sección"
+                onChange={(event) => {
+                  setTeacherQuickSearch(event.target.value);
+                  setShowTeacherQuickSearch(true);
+                  setShowTeacherMenu(false);
+                  setShowTeacherNotifications(false);
+                }}
+                onFocus={() => {
+                  setShowTeacherQuickSearch(true);
+                  setShowTeacherMenu(false);
+                  setShowTeacherNotifications(false);
+                }}
+                placeholder="Buscar alumno, curso o sección..."
+                type="search"
+                value={teacherQuickSearch}
+              />
+              {showTeacherQuickSearch && teacherQuickSearchQuery ? (
+                <div className="campus-teacher__topbar-search-results" role="listbox">
+                  {!hasTeacherQuickSearchResults ? (
+                    <p className="campus-teacher__topbar-search-empty">Sin resultados para “{teacherQuickSearch.trim()}”.</p>
+                  ) : null}
+
+                  {teacherQuickSearchResults.students.length > 0 ? (
+                    <div className="campus-teacher__topbar-search-group">
+                      <span>Alumnos · calificaciones</span>
+                      {teacherQuickSearchResults.students.map((result) => (
+                        <button
+                          className="campus-teacher__topbar-search-item"
+                          key={result.key}
+                          onClick={() => openStudentGradebookFromSearch(result)}
+                          type="button"
+                        >
+                          <strong>{result.name}</strong>
+                          <span>
+                            {[result.courseLabel, result.grade || result.schoolCode].filter(Boolean).join(' · ')}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {teacherQuickSearchResults.sections.length > 0 ? (
+                    <div className="campus-teacher__topbar-search-group">
+                      <span>Secciones</span>
+                      {teacherQuickSearchResults.sections.map((result) => (
+                        <button
+                          className="campus-teacher__topbar-search-item"
+                          key={result.key}
+                          onClick={() => openSectionFromSearch(result.sectionKey)}
+                          type="button"
+                        >
+                          <strong>{result.label}</strong>
+                          <span>{result.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {teacherQuickSearchResults.courses.length > 0 ? (
+                    <div className="campus-teacher__topbar-search-group">
+                      <span>Cursos</span>
+                      {teacherQuickSearchResults.courses.map((result) => (
+                        <button
+                          className="campus-teacher__topbar-search-item"
+                          key={result.key}
+                          onClick={() => openCourseFromSearch(result.courseId)}
+                          type="button"
+                        >
+                          <strong>{result.label}</strong>
+                          <span>{result.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
-            {activeTeacherSection === 'courses' || isCourseManagementSection ? (
+            <div className="campus-teacher__topbar-actions">
+              <div className="campus-teacher__topbar-icon-wrap" ref={teacherNotificationsRef}>
+                <button
+                  aria-label="Notificaciones"
+                  className="campus-teacher__topbar-icon-btn"
+                  onClick={openTeacherNotifications}
+                  type="button"
+                >
+                  <svg fill="none" viewBox="0 0 24 24">
+                    <path d="M12 22a2.2 2.2 0 0 0 2.2-2.2h-4.4A2.2 2.2 0 0 0 12 22Z" fill="currentColor" />
+                    <path d="M18.4 16.2V11a6.4 6.4 0 1 0-12.8 0v5.2L4 18.8V20h16v-1.2l-1.6-2.6Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                  </svg>
+                  {topbarNotificationsBadgeCount > 0 ? (
+                    <span className="campus-teacher__topbar-badge">
+                      {topbarNotificationsBadgeCount > 99 ? '99+' : topbarNotificationsBadgeCount}
+                    </span>
+                  ) : null}
+                </button>
+
+                {showTeacherNotifications ? (
+                  <div className="campus-teacher__topbar-dropdown campus-teacher__topbar-dropdown--notifications" role="dialog">
+                    <header>
+                      <strong>Notificaciones</strong>
+                      <span>Alertas generales y Comergio Academy</span>
+                    </header>
+                    <div className="campus-teacher__topbar-dropdown-list">
+                      {loadingTeacherNotifications ? <p>Cargando...</p> : null}
+                      {!loadingTeacherNotifications && teacherNotifications.length === 0 ? (
+                        <p>No tienes notificaciones nuevas.</p>
+                      ) : null}
+                      {teacherNotifications.slice(0, 8).map((item) => (
+                        item.isAcademy ? (
+                          <button
+                            className="campus-teacher__topbar-dropdown-item campus-teacher__topbar-dropdown-item--academy"
+                            key={item.id}
+                            onClick={() => openTeacherAcademySection(item.sectionKey)}
+                            type="button"
+                          >
+                            <strong>{item.title || 'Notificación'}</strong>
+                            <span>{item.body || item.message || ''}</span>
+                          </button>
+                        ) : (
+                          <article key={item.id || item._id || `${item.title}-${item.createdAt}`}>
+                            <strong>{item.title || 'Notificación'}</strong>
+                            <span>{item.body || item.message || ''}</span>
+                          </article>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <button
+                aria-label="Comunicados internos"
+                className="campus-teacher__topbar-icon-btn"
+                onClick={() => {
+                  setShowTeacherNotifications(false);
+                  setActiveTeacherSection('staff_announcements');
+                }}
+                type="button"
+              >
+                <svg fill="none" viewBox="0 0 24 24">
+                  <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z" stroke="currentColor" strokeWidth="1.7" />
+                  <path d="m5 7 7 5 7-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                </svg>
+                {staffAnnouncementsUnreadCount > 0 ? (
+                  <span className="campus-teacher__topbar-badge">
+                    {staffAnnouncementsUnreadCount > 99 ? '99+' : staffAnnouncementsUnreadCount}
+                  </span>
+                ) : null}
+              </button>
+
+              <div className="campus-teacher__topbar-profile" ref={teacherMenuRef}>
+                <button
+                  aria-expanded={showTeacherMenu}
+                  aria-haspopup="menu"
+                  className="campus-teacher__topbar-profile-btn"
+                  onClick={() => {
+                    setShowTeacherNotifications(false);
+                    setShowTeacherMenu((currentValue) => !currentValue);
+                  }}
+                  type="button"
+                >
+                  <span
+                    className="campus-teacher__topbar-avatar"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      teacherPhotoInputRef.current?.click();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        teacherPhotoInputRef.current?.click();
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    {teacherPhotoPreview ? (
+                      <img
+                        alt={teacherName}
+                        onError={() => setTeacherPhotoPreview('')}
+                        src={resolveApiAssetUrl(teacherPhotoPreview)}
+                      />
+                    ) : (
+                      <span>{String(teacherName || 'D').slice(0, 1).toUpperCase()}</span>
+                    )}
+                  </span>
+                  <span className="campus-teacher__topbar-profile-copy">
+                    <strong>{teacherName}</strong>
+                    <span>Docente</span>
+                  </span>
+                  <svg aria-hidden="true" className="campus-teacher__topbar-chevron" fill="none" viewBox="0 0 24 24">
+                    <path d="m7 10 5 5 5-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                  </svg>
+                </button>
+                <input
+                  accept="image/*"
+                  className="campus-teacher__hero-file-input"
+                  disabled={uploadTeacherPhotoMutation.isPending}
+                  onChange={onTeacherPhotoChange}
+                  ref={teacherPhotoInputRef}
+                  type="file"
+                />
+
+                {showTeacherMenu ? (
+                  <div className="campus-teacher__topbar-dropdown" role="menu">
+                    <button className="campus-teacher__topbar-dropdown-item" onClick={() => teacherPhotoInputRef.current?.click()} role="menuitem" type="button">
+                      Actualizar foto
+                    </button>
+                    <button className="campus-teacher__topbar-dropdown-item" onClick={onLogout} role="menuitem" type="button">
+                      Cerrar sesión
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </header>
+
+          <div className="campus-teacher__workspace">
+            <section className="campus-teacher__course-deck campus-teacher__panel-surface">
+              <div className="campus-teacher__section-head" hidden={activeTeacherSection === 'conecta' || activeTeacherSection === 'dashboard' || activeTeacherSection === 'schedule' || activeTeacherSection === 'courses' || activeTeacherSection === 'academic_management' || isAttendanceLikeSection || activeTeacherSection === 'school_coexistence'}>
+                <div>
+                  <span className="campus-panel__kicker">{activeSectionLabel}</span>
+                  <h2>{activeSectionDescription}</h2>
+                </div>
+              </div>
+
+            {activeTeacherSection === 'courses' || (activeTeacherSection === 'academic_management' && !showSelectedCourseWorkspace) ? (
               <div className="campus-teacher__courses-stage">
-                {!showSelectedCourseWorkspace ? (
+                {activeTeacherSection === 'courses' && coursesDetailOpen && timelineCourse ? (
+                  <div className="campus-teacher__cursos-detail">
+                    <div className="campus-teacher__cursos-detail-actions">
+                      <button className="campus-teacher__ghost-btn campus-teacher__back-btn" onClick={closeCoursesDetail} type="button">
+                        Volver a cursos
+                      </button>
+                    </div>
+
+                    <article className="campus-teacher__cursos-cronograma campus-teacher__embedded-panel">
+                      <div className="campus-teacher__cursos-cronograma-top">
+                        <div>
+                          <h3>Cronograma de actividades</h3>
+                          <p className="campus-teacher__cursos-cronograma-course">{getCourseDisplayTitle(timelineCourse)}</p>
+                          <p className="campus-panel__meta">Revisa tu calendario mensual de clases, tareas, proyectos, exámenes y materiales publicados.</p>
+                        </div>
+                        <div className="campus-teacher__cursos-cronograma-nav">
+                          <button className="campus-teacher__ghost-btn" onClick={() => setTimelineMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} type="button">
+                            ← Mes anterior
+                          </button>
+                          <button
+                            className="campus-teacher__ghost-btn campus-teacher__cursos-today-btn"
+                            onClick={() => {
+                              const now = new Date();
+                              setTimelineMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+                              setSelectedTimelineDate(buildLocalDateValue(now));
+                            }}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                              <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                              <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                            </svg>
+                            Hoy
+                          </button>
+                          <button className="campus-teacher__ghost-btn" onClick={() => setTimelineMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} type="button">
+                            Mes siguiente →
+                          </button>
+                        </div>
+                      </div>
+
+                      {!previewEnabled && timelineCourseDetailQuery.isLoading ? <p className="campus-panel__meta">Cargando cronograma del curso...</p> : null}
+                      {!previewEnabled && timelineCourseDetailQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el cronograma completo del curso.</p> : null}
+
+                      <div className="campus-teacher__activity-calendar-shell campus-teacher__cursos-calendar-shell">
+                        <div className="campus-teacher__activity-calendar-header">
+                          <strong>{formatMonthLabel(timelineMonth)}</strong>
+                        </div>
+                        <div className="campus-teacher__activity-calendar-grid" role="list" aria-label={`Cronograma del curso ${getCourseDisplayTitle(timelineCourse)} para ${formatMonthLabel(timelineMonth)}`}>
+                          {weekdayShortLabels.map((label) => (
+                            <div className="campus-teacher__activity-calendar-weekday" key={`course-detail-weekday-${label}`} role="listitem" aria-hidden="true">
+                              {label}
+                            </div>
+                          ))}
+                          {timelineCourseCalendar.map((cell) => {
+                            if (cell.empty) {
+                              return <div className="campus-teacher__activity-calendar-empty" key={cell.key} aria-hidden="true" />;
+                            }
+                            const activityCount = (cell.items || []).filter((item) => item.kind === 'activity').length;
+                            const classCount = (cell.items || []).filter((item) => item.kind === 'class').length;
+                            return (
+                              <button
+                                className={`campus-teacher__activity-calendar-day campus-teacher__cursos-calendar-day${cell.isToday ? ' is-today' : ''}${selectedTimelineDate === cell.dateValue ? ' is-selected' : ''}${cell.hasActivity ? ' has-activity' : ''}`}
+                                key={cell.key}
+                                onClick={() => setSelectedTimelineDate(cell.dateValue)}
+                                role="listitem"
+                                title={cell.title || undefined}
+                                type="button"
+                              >
+                                <span className="day-number">{cell.dayNumber}</span>
+                                {classCount > 0 ? (
+                                  <span className="day-chip class">{classCount} clase{classCount === 1 ? '' : 's'}</span>
+                                ) : null}
+                                {activityCount > 0 ? (
+                                  <span className="day-chip activity">{activityCount} actividad{activityCount === 1 ? '' : 'es'}</span>
+                                ) : null}
+                                {classCount === 0 && activityCount === 0 ? <span className="day-chip empty">Sin actividades</span> : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </article>
+
+                    <section className="campus-teacher__cursos-upcoming campus-teacher__embedded-panel">
+                      <div className="campus-teacher__cursos-upcoming-head">
+                        <h3>Próximas actividades</h3>
+                        <button
+                          className="campus-teacher__cursos-link-btn"
+                          onClick={() => {
+                            openAcademicManagementWorkspace(timelineCourse, 'posts');
+                            if (activeTeacherSection !== 'academic_management') {
+                              setActiveTeacherSection('academic_management');
+                            }
+                          }}
+                          type="button"
+                        >
+                          Ver todas las actividades →
+                        </button>
+                      </div>
+                      {coursesDetailUpcoming.length === 0 ? (
+                        <p className="campus-panel__meta">No hay actividades próximas para este curso.</p>
+                      ) : (
+                        <div className="campus-teacher__cursos-upcoming-list">
+                          {coursesDetailUpcoming.map((item) => (
+                            <article className={`campus-teacher__cursos-upcoming-item is-${item.typeTone}`} key={item.id}>
+                              <div className="campus-teacher__cursos-upcoming-date">
+                                <span>{item.weekdayShort}</span>
+                                <strong>{item.dayNumber}</strong>
+                              </div>
+                              <div className={`campus-teacher__cursos-upcoming-icon is-${item.typeTone}`} aria-hidden="true">
+                                {item.typeTone === 'class' ? (
+                                  <svg fill="none" viewBox="0 0 24 24"><path d="M4 19V5h16v14H4Z" stroke="currentColor" strokeWidth="1.7" /><path d="M8 9h8M8 13h5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
+                                ) : (
+                                  <svg fill="none" viewBox="0 0 24 24"><path d="M7 3h7l5 5v13H7V3Z" stroke="currentColor" strokeWidth="1.7" /><path d="M14 3v5h5M9 13h6M9 17h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
+                                )}
+                              </div>
+                              <div className="campus-teacher__cursos-upcoming-copy">
+                                <div className="campus-teacher__cursos-upcoming-title-row">
+                                  <strong>{item.title}</strong>
+                                  <span className={`campus-teacher__cursos-type-pill is-${item.typeTone}`}>{item.typeLabel}</span>
+                                </div>
+                                <p>{item.description}</p>
+                              </div>
+                              <div className="campus-teacher__cursos-upcoming-meta">
+                                {item.groupLabel ? <span className="campus-teacher__cursos-group-pill">{item.groupLabel}</span> : null}
+                                <span>{item.deliveryLabel}</span>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="campus-teacher__cursos-students campus-teacher__embedded-panel">
+                      <div className="campus-teacher__cursos-students-head">
+                        <div>
+                          <h3>Alumnos del curso</h3>
+                          <p className="campus-panel__meta">Consulta el promedio de calificaciones de cada estudiante.</p>
+                        </div>
+                        <span className="campus-teacher__cursos-students-count">{coursesDetailStudents.length} alumno{coursesDetailStudents.length === 1 ? '' : 's'}</span>
+                      </div>
+                      {!previewEnabled && timelineCourseDetailQuery.isLoading ? (
+                        <p className="campus-panel__meta">Cargando alumnos...</p>
+                      ) : coursesDetailStudents.length === 0 ? (
+                        <p className="campus-panel__meta">Este curso todavía no tiene alumnos asignados.</p>
+                      ) : (
+                        <div className="campus-teacher__cursos-students-table-wrap">
+                          <table className="campus-teacher__cursos-students-table">
+                            <thead>
+                              <tr>
+                                <th>Alumno</th>
+                                <th>Código</th>
+                                <th>Promedio</th>
+                                <th>Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {coursesDetailStudents.map((student) => {
+                                const score = parseFiniteScore(student.finalScore);
+                                const performanceLevel = resolveTeacherPerformanceLevel(score, gradingScale);
+                                const isPassing = score === null ? null : score >= Number(gradingScale?.passingScore || 70);
+                                return (
+                                  <tr key={student.studentId || student.id || student.name}>
+                                    <td>
+                                      <strong>{student.name || 'Sin nombre'}</strong>
+                                    </td>
+                                    <td>{student.schoolCode || '—'}</td>
+                                    <td>
+                                      {score === null ? (
+                                        <span className="campus-teacher__cursos-score is-empty">Sin notas</span>
+                                      ) : (
+                                        <span className="campus-teacher__cursos-score" style={performanceLevel?.color ? { color: performanceLevel.color } : undefined}>
+                                          {Number(score).toFixed(1)}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      {score === null ? (
+                                        <span className="campus-teacher__cursos-status-pill is-muted">Pendiente</span>
+                                      ) : (
+                                        <span className={`campus-teacher__cursos-status-pill ${isPassing ? 'is-active' : 'is-risk'}`}>
+                                          {performanceLevel?.label || (isPassing ? 'En nivel' : 'En riesgo')}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </section>
+
+                  </div>
+                ) : (
+                  <article className="campus-teacher__cursos-panel">
+                    <header className="campus-teacher__cursos-hero">
+                      <div>
+                        <span className="campus-teacher__cursos-kicker">
+                          {activeTeacherSection === 'academic_management'
+                            ? (selectedSubject?.label || 'Gestión académica')
+                            : 'Cursos'}
+                        </span>
+                        <h2>
+                          {activeTeacherSection === 'academic_management'
+                            ? (selectedSubject
+                              ? `Gestiona evaluación y contenidos de ${selectedSubject.label}.`
+                              : 'Gestiona evaluación y contenidos por materia.')
+                            : 'Ver todos los cursos donde dictas clase.'}
+                        </h2>
+                        <p>
+                          {activeTeacherSection === 'academic_management'
+                            ? 'Abre un curso para definir evaluación, crear asignaciones y gestionar el libro de notas.'
+                            : 'Consulta el rendimiento, alumnos, tareas y más detalles de cada curso.'}
+                        </p>
+                      </div>
+                      <div className="campus-teacher__cursos-toolbar">
+                        <div className="campus-teacher__cursos-view-toggle" role="group" aria-label="Tipo de vista">
+                          <button
+                            aria-label="Vista de cuadrícula"
+                            aria-pressed={coursesCatalogView === 'grid'}
+                            className={coursesCatalogView === 'grid' ? 'is-active' : ''}
+                            onClick={() => setCoursesCatalogView('grid')}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                              <rect height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" width="7" x="4" y="4" />
+                              <rect height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" width="7" x="13" y="4" />
+                              <rect height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" width="7" x="4" y="13" />
+                              <rect height="7" rx="1.5" stroke="currentColor" strokeWidth="1.8" width="7" x="13" y="13" />
+                            </svg>
+                          </button>
+                          <button
+                            aria-label="Vista de lista"
+                            aria-pressed={coursesCatalogView === 'list'}
+                            className={coursesCatalogView === 'list' ? 'is-active' : ''}
+                            onClick={() => setCoursesCatalogView('list')}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                              <path d="M8 7h12M8 12h12M8 17h12" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+                              <circle cx="5" cy="7" fill="currentColor" r="1.2" />
+                              <circle cx="5" cy="12" fill="currentColor" r="1.2" />
+                              <circle cx="5" cy="17" fill="currentColor" r="1.2" />
+                            </svg>
+                          </button>
+                        </div>
+                        {activeTeacherSection === 'courses' ? (
+                          <button
+                            className={`campus-teacher__cursos-filter-btn${showCoursesFilter ? ' is-active' : ''}`}
+                            onClick={() => setShowCoursesFilter((current) => !current)}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                              <path d="M4 6h16l-6 7v5l-4 2v-7L4 6Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                            </svg>
+                            Filtrar
+                          </button>
+                        ) : null}
+                      </div>
+                    </header>
+
+                    {activeTeacherSection === 'courses' && showCoursesFilter ? (
+                      <div className="campus-teacher__cursos-filter-bar">
+                        <label>
+                          <span>Asignatura</span>
+                          <select
+                            onChange={(event) => setCoursesSubjectFilter(event.target.value)}
+                            value={coursesSubjectFilter}
+                          >
+                            <option value="all">Todas</option>
+                            {coursesSubjectFilterOptions.map((subject) => (
+                              <option key={subject} value={subject}>{subject}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {coursesCatalogRows.length === 0 ? (
+                      <p className="campus-panel__meta">
+                        {activeTeacherSection === 'academic_management'
+                          ? (selectedSubject
+                            ? `Rectoría todavía no te ha asignado cursos de ${selectedSubject.label}.`
+                            : 'Selecciona una asignatura en el menú para ver sus cursos.')
+                          : 'Rectoría todavía no te ha asignado cursos.'}
+                      </p>
+                    ) : coursesCatalogView === 'grid' ? (
+                      <div className="campus-teacher__cursos-grid">
+                        {coursesPagedRows.map((row) => (
+                          <article
+                            className="campus-teacher__cursos-card"
+                            key={row.course.id}
+                            style={{ '--campus-course-accent': row.accent.accent, '--campus-course-soft': row.accent.soft, '--campus-course-ink': row.accent.ink }}
+                          >
+                            <div className="campus-teacher__cursos-card-top">
+                              <span className="campus-teacher__cursos-card-icon" aria-hidden="true">
+                                <svg fill="none" viewBox="0 0 24 24">
+                                  <path d="M4 16c2-1 4 1 6 0s3-3 5-2 4 2 5 1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                  <circle cx="8" cy="8" fill="currentColor" r="2" />
+                                  <circle cx="14" cy="7" fill="currentColor" opacity="0.55" r="1.6" />
+                                  <circle cx="18" cy="10" fill="currentColor" opacity="0.35" r="1.4" />
+                                </svg>
+                              </span>
+                              <button
+                                aria-label={`Ver detalles de ${row.title}`}
+                                className="campus-teacher__cursos-card-menu"
+                                onClick={() => openCatalogCourse(row.course)}
+                                type="button"
+                              >
+                                ⋮
+                              </button>
+                            </div>
+                            <h3>{row.title}</h3>
+                            <span className="campus-teacher__cursos-status-pill is-active">Activo</span>
+                            <p className="campus-teacher__cursos-card-subtitle">1 curso asignado</p>
+                            <ul className="campus-teacher__cursos-card-facts">
+                              <li>
+                                <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" stroke="currentColor" strokeWidth="1.7" /><circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" /><path d="M19 19v-1a3.5 3.5 0 0 0-2.5-3.3M16.5 5.2a3 3 0 0 1 0 5.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
+                                <span><strong>{row.stats.studentCount}</strong> alumnos</span>
+                              </li>
+                              <li>
+                                <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M5 19V9M10 19V5M15 19v-7M20 19V8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
+                                <span>Promedio: <strong style={row.performanceColor ? { color: row.performanceColor } : undefined}>{row.stats.averageScore === null ? 'Sin notas' : row.stats.averageScore}</strong></span>
+                              </li>
+                              <li>
+                                <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 4.3 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" /></svg>
+                                <span><strong>{row.stats.atRiskCount}</strong> en riesgo</span>
+                              </li>
+                              <li>
+                                <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
+                                <span><strong>{row.stats.pendingGradingCount}</strong> tareas por calificar</span>
+                              </li>
+                            </ul>
+                            <button className="campus-teacher__cursos-card-cta" onClick={() => openCatalogCourse(row.course)} type="button">
+                              {activeTeacherSection === 'academic_management' ? 'Abrir curso' : 'Ver detalles'}
+                              <span aria-hidden="true">→</span>
+                            </button>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="campus-teacher__cursos-table-wrap">
+                        <table className="campus-teacher__cursos-table">
+                          <thead>
+                            <tr>
+                              <th>Curso</th>
+                              <th>Alumnos</th>
+                              <th>Promedio</th>
+                              <th>Estado</th>
+                              <th>Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {coursesPagedRows.map((row) => (
+                              <tr key={row.course.id} onClick={() => openCatalogCourse(row.course)}>
+                                <td>
+                                  <div className="campus-teacher__cursos-table-course">
+                                    <span className="campus-teacher__cursos-card-icon is-compact" style={{ '--campus-course-accent': row.accent.accent, '--campus-course-soft': row.accent.soft }} aria-hidden="true">
+                                      <svg fill="none" viewBox="0 0 24 24">
+                                        <path d="M4 16c2-1 4 1 6 0s3-3 5-2 4 2 5 1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                        <circle cx="8" cy="8" fill="currentColor" r="2" />
+                                      </svg>
+                                    </span>
+                                    <div>
+                                      <strong>{row.title}</strong>
+                                      <span>1 curso asignado</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className="campus-teacher__cursos-table-metric">
+                                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" stroke="currentColor" strokeWidth="1.7" /><circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" /></svg>
+                                    {row.stats.studentCount} alumnos
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="campus-teacher__cursos-table-metric">
+                                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M5 19V9M10 19V5M15 19v-7M20 19V8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
+                                    <strong style={row.performanceColor ? { color: row.performanceColor } : undefined}>
+                                      {row.stats.averageScore === null ? 'Sin notas' : row.stats.averageScore}
+                                    </strong>
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="campus-teacher__cursos-status-pill is-active">Activo</span>
+                                </td>
+                                <td>
+                                  <button
+                                    aria-label={`Abrir ${row.title}`}
+                                    className="campus-teacher__cursos-card-menu"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openCatalogCourse(row.course);
+                                    }}
+                                    type="button"
+                                  >
+                                    ···
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {coursesCatalogRows.length > 0 ? (
+                      <footer className="campus-teacher__cursos-pagination">
+                        <p>Mostrando {coursesPageStart} a {coursesPageEnd} de {coursesCatalogRows.length} cursos</p>
+                        <div className="campus-teacher__cursos-page-controls">
+                          <button
+                            aria-label="Página anterior"
+                            disabled={coursesPage <= 1}
+                            onClick={() => setCoursesPage((current) => Math.max(1, current - 1))}
+                            type="button"
+                          >
+                            ‹
+                          </button>
+                          {Array.from({ length: coursesTotalPages }, (_, index) => index + 1)
+                            .filter((page) => page === 1 || page === coursesTotalPages || Math.abs(page - coursesPage) <= 1)
+                            .reduce((acc, page, index, pages) => {
+                              if (index > 0 && page - pages[index - 1] > 1) {
+                                acc.push('ellipsis');
+                              }
+                              acc.push(page);
+                              return acc;
+                            }, [])
+                            .map((page, index) => (
+                              page === 'ellipsis' ? (
+                                <span key={`ellipsis-${index}`}>…</span>
+                              ) : (
+                                <button
+                                  aria-current={page === coursesPage ? 'page' : undefined}
+                                  className={page === coursesPage ? 'is-active' : ''}
+                                  key={page}
+                                  onClick={() => setCoursesPage(page)}
+                                  type="button"
+                                >
+                                  {page}
+                                </button>
+                              )
+                            ))}
+                          <button
+                            aria-label="Página siguiente"
+                            disabled={coursesPage >= coursesTotalPages}
+                            onClick={() => setCoursesPage((current) => Math.min(coursesTotalPages, current + 1))}
+                            type="button"
+                          >
+                            ›
+                          </button>
+                        </div>
+                        <label className="campus-teacher__cursos-page-size">
+                          <select
+                            onChange={(event) => setCoursesPageSize(Number(event.target.value) || 12)}
+                            value={coursesPageSize}
+                          >
+                            <option value={12}>12 por página</option>
+                            <option value={20}>20 por página</option>
+                            <option value={40}>40 por página</option>
+                          </select>
+                        </label>
+                      </footer>
+                    ) : null}
+                  </article>
+                )}
+              </div>
+            ) : null}
+
+            {isCourseManagementSection ? (
+              <div className="campus-teacher__courses-stage">
+                {activeTeacherSection === 'academic_content' && !showSelectedCourseWorkspace ? (
                   <div className="campus-teacher__course-strip">
                     {portalSectionGradeGroups.length === 0 ? <p className="campus-panel__meta">Rectoría todavía no te ha asignado cursos para esta sección.</p> : null}
                     {portalSectionGradeGroups.map((gradeGroup) => {
@@ -6178,7 +7909,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                             }
                             setActiveCourseWorkspaceTab('grading');
                             setTimelineMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-                            setShowSelectedCourseWorkspace(activeTeacherSection === 'academic_content' && Boolean(firstCourse));
+                            setShowSelectedCourseWorkspace(Boolean(firstCourse));
                           }}
                           style={{ '--campus-course-accent': firstCourse?.colorToken || '#2a6f97' }}
                           type="button"
@@ -6228,136 +7959,6 @@ function TeacherCampusHome({ forcePreview = false }) {
                     </div>
                     <p className="campus-panel__meta">Los temas guardados aquí se aplican a todos los grupos de este grado.</p>
                   </article>
-                ) : null}
-
-                {activeTeacherSection === 'academic_management' && selectedPortalGradeGroup && !showSelectedCourseWorkspace ? (
-                  <article className="campus-teacher__activity-timeline campus-teacher__activity-timeline--course-filter campus-teacher__embedded-panel">
-                    <div className="campus-teacher__activity-timeline-top">
-                      <div>
-                        <span className="campus-panel__kicker">Cursos del grado</span>
-                        <h3>{selectedPortalGradeGroup.title}</h3>
-                      </div>
-                      <label className="campus-teacher__timeline-filter">
-                        <span>Curso</span>
-                        <select
-                          onChange={(event) => {
-                            setSelectedCourseId(event.target.value);
-                            setTimelineCourseId(event.target.value);
-                            setActiveCourseWorkspaceTab('grading');
-                            setShowSelectedCourseWorkspace(Boolean(event.target.value));
-                          }}
-                          value=""
-                        >
-                          <option value="">Selecciona un curso</option>
-                          {selectedPortalGradeCourses.map((course) => (
-                            <option key={course.id} value={course.id}>{getCourseGroupLabel(course) || getCourseDisplayTitle(course)}</option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <p className="campus-panel__meta">Elige el grupo asignado dentro de este grado para definir evaluación, crear contenido y gestionar notas.</p>
-                  </article>
-                ) : null}
-
-                {activeTeacherSection === 'courses' && timelineCourse ? (
-                  <article className="campus-teacher__activity-timeline campus-teacher__activity-timeline--course-filter campus-teacher__embedded-panel">
-                    <div className="campus-teacher__activity-timeline-top">
-                      <div>
-                        <span className="campus-panel__kicker">Cronograma de actividades</span>
-                        <h3>{getCourseDisplayTitle(timelineCourse)}</h3>
-                      </div>
-                      <div className="campus-teacher__activity-timeline-nav">
-                        <label className="campus-teacher__timeline-filter">
-                          <span>Curso</span>
-                          <select
-                            onChange={(event) => setTimelineCourseId(event.target.value)}
-                            value={timelineCourseId}
-                          >
-                            {selectedPortalGradeCourses.map((course) => (
-                              <option key={course.id} value={course.id}>{getCourseGroupLabel(course) || getCourseDisplayTitle(course)}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <button className="campus-teacher__ghost-btn" onClick={() => setTimelineMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} type="button">
-                          Mes anterior
-                        </button>
-                        <button className="campus-teacher__ghost-btn" onClick={() => setTimelineMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} type="button">
-                          Mes siguiente
-                        </button>
-                      </div>
-                    </div>
-                    <p className="campus-panel__meta">Filtra por curso y revisa el cronograma mensual de clases, tareas, quices, proyectos, examenes y materiales publicados.</p>
-                    {!previewEnabled && timelineCourseDetailQuery.isLoading ? <p className="campus-panel__meta">Cargando cronograma del curso...</p> : null}
-                    {!previewEnabled && timelineCourseDetailQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el cronograma completo del curso.</p> : null}
-                    <div className="campus-teacher__activity-calendar-shell">
-                      <div className="campus-teacher__activity-calendar-header">
-                        <p>Calendario mensual</p>
-                        <strong>{formatMonthLabel(timelineMonth)}</strong>
-                      </div>
-                      <div className="campus-teacher__activity-calendar-grid" role="list" aria-label={`Cronograma del curso ${getCourseDisplayTitle(timelineCourse)} para ${formatMonthLabel(timelineMonth)}`}>
-                        {weekdayShortLabels.map((label) => (
-                          <div className="campus-teacher__activity-calendar-weekday" key={`course-timeline-weekday-${label}`} role="listitem" aria-hidden="true">
-                            {label}
-                          </div>
-                        ))}
-                        {timelineCourseCalendar.map((cell) => (
-                          cell.empty ? (
-                            <div className="campus-teacher__activity-calendar-empty" key={cell.key} aria-hidden="true" />
-                          ) : (
-                            <button
-                              className={`campus-teacher__activity-calendar-day${cell.isToday ? ' is-today' : ''}${cell.hasActivity ? ' has-activity' : ''}`}
-                              key={cell.key}
-                              onClick={() => setSelectedTimelineDate(cell.dateValue)}
-                              role="listitem"
-                              title={cell.title || undefined}
-                              type="button"
-                            >
-                              <div className="day-number-row">
-                                <span className="day-number">{cell.dayNumber}</span>
-                                {cell.itemCount > 0 ? <span className="day-count">({cell.itemCount})</span> : null}
-                              </div>
-                              {cell.primaryChip ? <span className="day-chip primary" title={cell.primaryChip.title}>{cell.primaryChip.label}</span> : null}
-                              {cell.secondaryChip ? <span className="day-chip secondary" title={cell.secondaryChip.title}>{cell.secondaryChip.label}</span> : null}
-                              {!cell.primaryChip && !cell.secondaryChip ? <span className="day-chip empty">Sin act.</span> : null}
-                            </button>
-                          )
-                        ))}
-                      </div>
-                    </div>
-                  </article>
-                ) : null}
-
-                {activeTeacherSection === 'courses' && selectedTimelineDay ? (
-                  <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setSelectedTimelineDate('')} role="presentation">
-                    <div
-                      aria-label={`Programación del ${selectedTimelineDay.formattedDate}`}
-                      aria-modal="true"
-                      className="campus-teacher__timeline-modal"
-                      onClick={(event) => event.stopPropagation()}
-                      role="dialog"
-                    >
-                      <div className="campus-teacher__timeline-modal-head">
-                        <div>
-                          <span className="campus-panel__kicker">Programación del día</span>
-                          <h3>{selectedTimelineDay.formattedDate}</h3>
-                        </div>
-                        <button className="campus-teacher__ghost-btn" onClick={() => setSelectedTimelineDate('')} type="button">
-                          Cerrar
-                        </button>
-                      </div>
-
-                      <div className="campus-teacher__timeline-modal-body">
-                        {selectedTimelineDay.items.length > 0 ? selectedTimelineDay.items.map((item) => (
-                          <article className={`campus-teacher__timeline-modal-item is-${item.kind}`} key={item.key}>
-                            <span className="campus-teacher__timeline-modal-item-kind">{item.kind === 'class' ? 'Clase' : 'Actividad'}</span>
-                            <strong>{item.label}</strong>
-                            <span>{item.meta}</span>
-                            <p>{item.description}</p>
-                          </article>
-                        )) : <p className="campus-panel__meta">No hay actividades ni clases programadas para este día.</p>}
-                      </div>
-                    </div>
-                  </div>
                 ) : null}
 
                 {activeTeacherSection === 'academic_management' && selectedCourse && showSelectedCourseWorkspace ? (
@@ -6432,39 +8033,6 @@ function TeacherCampusHome({ forcePreview = false }) {
                         </div>
                       </div>
                     </article>
-
-                    {selectedTimelineDay ? (
-                      <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setSelectedTimelineDate('')} role="presentation">
-                        <div
-                          aria-label={`Programación del ${selectedTimelineDay.formattedDate}`}
-                          aria-modal="true"
-                          className="campus-teacher__timeline-modal"
-                          onClick={(event) => event.stopPropagation()}
-                          role="dialog"
-                        >
-                          <div className="campus-teacher__timeline-modal-head">
-                            <div>
-                              <span className="campus-panel__kicker">Programación del día</span>
-                              <h3>{selectedTimelineDay.formattedDate}</h3>
-                            </div>
-                            <button className="campus-teacher__ghost-btn" onClick={() => setSelectedTimelineDate('')} type="button">
-                              Cerrar
-                            </button>
-                          </div>
-
-                          <div className="campus-teacher__timeline-modal-body">
-                            {selectedTimelineDay.items.length > 0 ? selectedTimelineDay.items.map((item) => (
-                              <article className={`campus-teacher__timeline-modal-item is-${item.kind}`} key={item.key}>
-                                <span className="campus-teacher__timeline-modal-item-kind">{item.kind === 'class' ? 'Clase' : 'Actividad'}</span>
-                                <strong>{item.label}</strong>
-                                <span>{item.meta}</span>
-                                <p>{item.description}</p>
-                              </article>
-                            )) : <p className="campus-panel__meta">No hay actividades ni clases programadas para este día.</p>}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
 
                     <div className="campus-teacher__subnav campus-teacher__subnav--classroom">
                       {teacherCourseWorkspaceTabs.map((tab) => {
@@ -7121,14 +8689,34 @@ function TeacherCampusHome({ forcePreview = false }) {
                               </div>
                               <div className="campus-teacher__grading-stack">
                                 {(period.gradingComponents || []).map((component, componentIndex) => (
-                                  <div className="campus-teacher__grading-component-card" key={`${component.key || 'component'}-${componentIndex}`}>
+                                  <div
+                                    className={`campus-teacher__grading-component-card${expandedGradingComponentKey === buildSubcomponentDraftKey(periodIndex, componentIndex) ? ' is-expanded' : ''}`}
+                                    key={`${component.key || 'component'}-${componentIndex}`}
+                                  >
                                     {(() => {
                                       const draftKey = buildSubcomponentDraftKey(periodIndex, componentIndex);
+                                      const isExpanded = expandedGradingComponentKey === draftKey;
                                       const newSubcomponentDraft = subcomponentDrafts[draftKey]
                                         || createSubcomponentDraft((component.subcomponents?.length || 0) + 1);
+                                      const subcomponentCount = (component.subcomponents || []).length;
 
                                       return (
                                         <>
+                                    <button
+                                      aria-expanded={isExpanded}
+                                      className="campus-teacher__grading-component-toggle"
+                                      onClick={() => setExpandedGradingComponentKey((current) => (current === draftKey ? '' : draftKey))}
+                                      type="button"
+                                    >
+                                      <span className="campus-teacher__grading-component-chevron" aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                                      <span className="campus-teacher__grading-component-summary-copy">
+                                        <strong>{component.name || `Componente ${componentIndex + 1}`}</strong>
+                                        <span>{subcomponentCount} subcomponente{subcomponentCount === 1 ? '' : 's'}</span>
+                                      </span>
+                                      <span className="campus-teacher__grading-component-weight">{Number(component.weight || 0)}%</span>
+                                    </button>
+                                    {isExpanded ? (
+                                      <>
                                     <div className="campus-teacher__grading-component-main">
                                       <label>
                                         Nombre
@@ -7253,6 +8841,8 @@ function TeacherCampusHome({ forcePreview = false }) {
                                         <p className="campus-teacher__grading-subcomponents-empty">Aun no hay subcomponentes para este componente.</p>
                                       )}
                                     </div>
+                                      </>
+                                    ) : null}
                                         </>
                                       );
                                     })()}
@@ -7324,7 +8914,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   const studentFinalScore = calculateFinalScore(studentPeriods);
 
                                   return (
-                                  <div className="campus-teacher__gradebook-student-item" key={student.studentId}>
+                                  <div className="campus-teacher__gradebook-student-item" data-gradebook-student-id={student.studentId} key={student.studentId}>
                                     <button
                                       className="campus-teacher__gradebook-student-row"
                                       onClick={() => setOpenGradebookRows((open) => ({ ...open, [student.studentId]: !open[student.studentId] }))}
@@ -7709,151 +9299,308 @@ function TeacherCampusHome({ forcePreview = false }) {
             ) : null}
 
             {isAttendanceLikeSection ? (
-              <article className="campus-teacher__attendance-panel campus-teacher__embedded-panel">
-                <div className="campus-teacher__section-head">
+              <article className="campus-teacher__asistencia-panel campus-teacher__embedded-panel">
+                <header className="campus-teacher__asistencia-hero">
                   <div>
-                    <span className="campus-panel__kicker">{activeTeacherSection === 'guidance_routine' ? 'Guidance Routine' : 'Asistencia a clase'}</span>
-                    <h3>{activeTeacherSection === 'guidance_routine' ? 'Planilla de llegada a la jornada' : 'Registro de asistencia por materia'}</h3>
-                    <p className="campus-panel__meta">
+                    <span className="campus-teacher__asistencia-kicker">
+                      {activeTeacherSection === 'guidance_routine' ? 'Guidance Routine' : 'Asistencia a clase'}
+                    </span>
+                    <h2>
+                      {activeTeacherSection === 'guidance_routine'
+                        ? 'Planilla de llegada a la jornada.'
+                        : 'Registro de asistencia por materia.'}
+                    </h2>
+                    <p>
                       {activeTeacherSection === 'guidance_routine'
                         ? 'Marca si el alumno llegó a tiempo al colegio, llegó tarde, faltó o presentó excusa en la jornada.'
-                        : 'Marca si el alumno entró a tiempo, llegó tarde o no ingresó a tu clase en esta asignatura.'}
+                        : 'Selecciona asignatura, curso y bloque. Luego marca si cada alumno entró a tiempo, llegó tarde o no asistió.'}
                     </p>
                   </div>
                   <button
-                    className="campus-teacher__ghost-btn"
+                    className="campus-teacher__asistencia-refresh"
                     disabled={teacherAttendanceQuery.isFetching || !teacherAttendanceCourseId}
                     onClick={() => teacherAttendanceQuery.refetch()}
                     type="button"
                   >
+                    <span aria-hidden="true" className={teacherAttendanceQuery.isFetching ? 'is-spinning' : ''}>↻</span>
                     Actualizar
                   </button>
-                </div>
+                </header>
 
-                <form className="campus-teacher__attendance-form" onSubmit={onSubmitTeacherAttendance}>
-                  <div className="campus-teacher__attendance-controls">
+                <form className="campus-teacher__asistencia-form" onSubmit={onSubmitTeacherAttendance}>
+                  <section className="campus-teacher__asistencia-filters">
                     {teacherAttendanceType === 'subject_class' ? (
                       <>
                         <label>
-                          Asignatura
-                          <select value={teacherAttendanceSubjectKey} onChange={(event) => onTeacherAttendanceSubjectChange(event.target.value)}>
-                            <option value="">Seleccionar asignatura</option>
-                            {attendanceSubjectGroups.map((subject) => (
-                              <option key={subject.key} value={subject.key}>{subject.label}</option>
-                            ))}
-                          </select>
+                          <span>Asignatura</span>
+                          <div className="campus-teacher__asistencia-control">
+                            <svg aria-hidden="true" className="campus-teacher__asistencia-control-icon" fill="none" viewBox="0 0 24 24">
+                              <path d="M4 16c2-1 4 1 6 0s3-3 5-2 4 2 5 1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                              <circle cx="8" cy="8" fill="currentColor" r="2" />
+                              <circle cx="14" cy="7" fill="currentColor" opacity="0.55" r="1.6" />
+                              <circle cx="18" cy="10" fill="currentColor" opacity="0.35" r="1.4" />
+                            </svg>
+                            <select value={teacherAttendanceSubjectKey} onChange={(event) => onTeacherAttendanceSubjectChange(event.target.value)}>
+                              <option value="">Seleccionar asignatura</option>
+                              {attendanceSubjectGroups.map((subject) => (
+                                <option key={subject.key} value={subject.key}>{subject.label}</option>
+                              ))}
+                            </select>
+                          </div>
                         </label>
                         <label>
-                          Curso
-                          <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)} disabled={!teacherAttendanceCoursesForSubject.length}>
-                            <option value="">{teacherAttendanceCoursesForSubject.length ? 'Seleccionar curso' : 'Sin cursos'}</option>
-                            {teacherAttendanceCoursesForSubject.map((course) => (
-                              <option key={course.id} value={course.id}>{getCourseGroupLabel(course)}</option>
-                            ))}
-                          </select>
+                          <span>Curso</span>
+                          <div className="campus-teacher__asistencia-control">
+                            <svg aria-hidden="true" className="campus-teacher__asistencia-control-icon" fill="none" viewBox="0 0 24 24">
+                              <path d="M3 10.5 12 6l9 4.5-9 4.5-9-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                              <path d="M7 13.2v3.3c0 .8 2.2 2 5 2s5-1.2 5-2v-3.3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                            </svg>
+                            <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)} disabled={!teacherAttendanceCoursesForSubject.length}>
+                              <option value="">{teacherAttendanceCoursesForSubject.length ? 'Seleccionar curso' : 'Sin cursos'}</option>
+                              {teacherAttendanceCoursesForSubject.map((course) => (
+                                <option key={course.id} value={course.id}>{getCourseGroupLabel(course)}</option>
+                              ))}
+                            </select>
+                          </div>
                         </label>
                       </>
                     ) : (
                       <label>
-                        Curso
-                        <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)}>
-                          <option value="">Seleccionar curso</option>
-                          {attendanceCourses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
-                        </select>
+                        <span>Curso</span>
+                        <div className="campus-teacher__asistencia-control">
+                          <svg aria-hidden="true" className="campus-teacher__asistencia-control-icon" fill="none" viewBox="0 0 24 24">
+                            <path d="M3 10.5 12 6l9 4.5-9 4.5-9-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                            <path d="M7 13.2v3.3c0 .8 2.2 2 5 2s5-1.2 5-2v-3.3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                          <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)}>
+                            <option value="">Seleccionar curso</option>
+                            {attendanceCourses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
+                          </select>
+                        </div>
                       </label>
                     )}
                     <label>
-                      Fecha
-                      <input type="date" value={teacherAttendanceDate} onChange={(event) => setTeacherAttendanceDate(event.target.value)} />
+                      <span>Fecha</span>
+                      <div className="campus-teacher__asistencia-control">
+                        <svg aria-hidden="true" className="campus-teacher__asistencia-control-icon" fill="none" viewBox="0 0 24 24">
+                          <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                          <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                        </svg>
+                        <input type="date" value={teacherAttendanceDate} onChange={(event) => setTeacherAttendanceDate(event.target.value)} />
+                      </div>
                     </label>
                     {teacherAttendanceType === 'subject_class' ? (
                       <label>
-                        Hora
-                        <select value={teacherAttendanceClassSessionKey} onChange={(event) => setTeacherAttendanceClassSessionKey(event.target.value)}>
-                          <option value="">Sin hora específica</option>
-                          {teacherAttendanceClassSessions.map((session) => (
-                            <option key={buildSessionKey(session)} value={buildSessionKey(session)}>
-                              {weekdayShortLabels[Number(session.weekday)] || 'Dia'} · {session.startTime}-{session.endTime}{session.label ? ` · ${session.label}` : ''}
-                            </option>
-                          ))}
-                        </select>
+                        <span>Hora / Bloque</span>
+                        <div className="campus-teacher__asistencia-control">
+                          <svg aria-hidden="true" className="campus-teacher__asistencia-control-icon" fill="none" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                          <select value={teacherAttendanceClassSessionKey} onChange={(event) => setTeacherAttendanceClassSessionKey(event.target.value)}>
+                            <option value="">Sin hora específica</option>
+                            {teacherAttendanceClassSessions.map((session) => (
+                              <option key={buildSessionKey(session)} value={buildSessionKey(session)}>
+                                {weekdayShortLabels[Number(session.weekday)] || 'Dia'} · {session.startTime}-{session.endTime}{session.label ? ` · ${session.label}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </label>
                     ) : null}
-                  </div>
+                  </section>
 
-                  <div className="campus-teacher__attendance-summary">
-                    <div><strong>{teacherAttendanceSummary.total}</strong><span>Alumnos</span></div>
-                    <div><strong>{teacherAttendanceSummary.present}</strong><span>Presentes</span></div>
-                    <div><strong>{teacherAttendanceSummary.late}</strong><span>Tarde</span></div>
-                    <div><strong>{teacherAttendanceSummary.absent}</strong><span>Ausentes</span></div>
-                    <div><strong>{teacherAttendanceSummary.excused}</strong><span>Excusados</span></div>
-                  </div>
-
-                  <div className="campus-teacher__attendance-actions">
-                    {teacherAttendanceStatusOptions.map((option) => (
-                      <button className="campus-teacher__ghost-btn" disabled={teacherAttendanceLocked} key={option.value} onClick={() => onMarkAllTeacherAttendance(option.value)} type="button">
-                        Marcar {option.label.toLowerCase()}
-                      </button>
+                  <section className="campus-teacher__asistencia-stats" aria-label="Resumen de asistencia">
+                    {[
+                      {
+                        key: 'total',
+                        label: 'Alumnos',
+                        value: teacherAttendanceSummary.total,
+                        tone: 'total',
+                        icon: (
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            <path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" stroke="currentColor" strokeWidth="1.7" />
+                            <circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="M19 19v-1a3.5 3.5 0 0 0-2.5-3.3M16.5 5.2a3 3 0 0 1 0 5.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: 'present',
+                        label: 'Presentes',
+                        value: teacherAttendanceSummary.present,
+                        tone: 'present',
+                        icon: (
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="m8.5 12.2 2.3 2.3 4.7-4.8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: 'late',
+                        label: 'Tarde',
+                        value: teacherAttendanceSummary.late,
+                        tone: 'late',
+                        icon: (
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: 'absent',
+                        label: 'Ausentes',
+                        value: teacherAttendanceSummary.absent,
+                        tone: 'absent',
+                        icon: (
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            <path d="M15.5 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" stroke="currentColor" strokeWidth="1.7" />
+                            <circle cx="9.5" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="m16.5 9.5 4 4M20.5 9.5l-4 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                        ),
+                      },
+                      {
+                        key: 'excused',
+                        label: 'Excusados',
+                        value: teacherAttendanceSummary.excused,
+                        tone: 'excused',
+                        icon: (
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="m9 9 6 6M15 9l-6 6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                        ),
+                      },
+                    ].map((stat) => (
+                      <div className={`campus-teacher__asistencia-stat tone-${stat.tone}`} key={stat.key}>
+                        <span className="campus-teacher__asistencia-stat-icon" aria-hidden="true">{stat.icon}</span>
+                        <div>
+                          <strong>{stat.value}</strong>
+                          <span>{stat.label}</span>
+                        </div>
+                      </div>
                     ))}
-                  </div>
+                  </section>
 
-                  {teacherAttendanceQuery.isLoading ? <p className="campus-panel__meta">Cargando planilla...</p> : null}
-                  {!teacherAttendanceQuery.isLoading && teacherAttendanceRecords.length === 0 ? (
-                    <p className="campus-panel__meta">
-                      {attendanceCourses.length
-                        ? (teacherAttendanceType === 'subject_class'
-                          ? 'Selecciona asignatura y curso para cargar sus alumnos.'
-                          : 'Selecciona un curso para cargar sus alumnos.')
-                        : 'No tienes cursos asignados para esta planilla.'}
-                    </p>
-                  ) : null}
-
-                  {teacherAttendanceRecords.length > 0 ? (
-                    <div className="campus-teacher__attendance-roster">
-                      {teacherAttendanceRecords.map((record) => (
-                        <article className={`campus-teacher__attendance-row status-${record.status || 'present'}`} key={record.studentId}>
-                          <div className="campus-teacher__attendance-student">
-                            <strong>{record.studentName || record.name}</strong>
-                            <span>{[record.schoolCode, selectedTeacherAttendanceCourse?.title].filter(Boolean).join(' · ')}</span>
-                          </div>
-                          <div className="campus-teacher__attendance-statuses">
-                            {teacherAttendanceStatusOptions.map((option) => (
-                              <label className={`campus-teacher__attendance-status${record.status === option.value ? ' is-selected' : ''}`} key={`${record.studentId}-${option.value}`}>
-                                <input
-                                  checked={(record.status || 'present') === option.value}
-                                  disabled={teacherAttendanceLocked}
-                                  name={`attendance-${record.studentId}`}
-                                  onChange={() => onTeacherAttendanceRecordChange(record.studentId, 'status', option.value)}
-                                  type="radio"
-                                  value={option.value}
-                                />
-                                <span>{option.label}</span>
-                              </label>
-                            ))}
-                          </div>
-                          <input
-                            className="campus-teacher__attendance-note"
-                            disabled={teacherAttendanceLocked}
-                            placeholder="Nota opcional"
-                            value={record.notes || ''}
-                            onChange={(event) => onTeacherAttendanceRecordChange(record.studentId, 'notes', event.target.value)}
-                          />
-                        </article>
+                  <section className="campus-teacher__asistencia-bulk">
+                    <div>
+                      <strong>Acciones rápidas</strong>
+                      <p>Aplica el mismo estado a toda la planilla.</p>
+                    </div>
+                    <div className="campus-teacher__asistencia-bulk-actions">
+                      {teacherAttendanceStatusOptions.map((option) => (
+                        <button
+                          className={`campus-teacher__asistencia-bulk-btn tone-${option.value}`}
+                          disabled={teacherAttendanceLocked || teacherAttendanceRecords.length === 0}
+                          key={option.value}
+                          onClick={() => onMarkAllTeacherAttendance(option.value)}
+                          type="button"
+                        >
+                          Marcar {option.label.toLowerCase()}
+                        </button>
                       ))}
                     </div>
-                  ) : null}
+                  </section>
 
-                  <div className="campus-teacher__card-actions">
-                    <span className="campus-panel__meta">
-                      {selectedTeacherAttendanceCourse
-                        ? [
-                          teacherAttendanceType === 'subject_class'
+                  <section className="campus-teacher__asistencia-board">
+                    <div className="campus-teacher__asistencia-board-head">
+                      <div>
+                        <strong>Planilla de alumnos</strong>
+                        <p>
+                          {teacherAttendanceRecords.length > 0
+                            ? `${teacherAttendanceRecords.length} estudiante${teacherAttendanceRecords.length === 1 ? '' : 's'} en esta clase`
+                            : 'La lista aparece cuando el curso está listo'}
+                        </p>
+                      </div>
+                      {teacherAttendanceLocked ? (
+                        <span className="campus-teacher__asistencia-locked-pill">Guardada</span>
+                      ) : null}
+                    </div>
+
+                    {teacherAttendanceQuery.isLoading ? (
+                      <div className="campus-teacher__asistencia-empty">
+                        <p>Cargando planilla...</p>
+                      </div>
+                    ) : null}
+
+                    {!teacherAttendanceQuery.isLoading && teacherAttendanceRecords.length === 0 ? (
+                      <div className="campus-teacher__asistencia-empty">
+                        <div className="campus-teacher__asistencia-empty-icon" aria-hidden="true">✓</div>
+                        <strong>Listo para registrar asistencia</strong>
+                        <p>
+                          {attendanceCourses.length
+                            ? (teacherAttendanceType === 'subject_class'
+                              ? 'Selecciona asignatura, curso, fecha y bloque para cargar a tus alumnos.'
+                              : 'Selecciona un curso y la fecha para cargar a tus alumnos.')
+                            : 'No tienes cursos asignados para esta planilla.'}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {teacherAttendanceRecords.length > 0 ? (
+                      <div className="campus-teacher__asistencia-roster">
+                        {teacherAttendanceRecords.map((record) => {
+                          const studentName = record.studentName || record.name || 'Alumno';
+                          const initial = String(studentName).trim().charAt(0).toUpperCase() || 'A';
+                          return (
+                            <article className={`campus-teacher__asistencia-row status-${record.status || 'present'}`} key={record.studentId}>
+                              <div className="campus-teacher__asistencia-student">
+                                <span className="campus-teacher__asistencia-avatar" aria-hidden="true">{initial}</span>
+                                <div>
+                                  <strong>{studentName}</strong>
+                                  <span>{[record.schoolCode, getCourseGroupLabel(selectedTeacherAttendanceCourse) || selectedTeacherAttendanceCourse?.title].filter(Boolean).join(' · ') || 'Sin código'}</span>
+                                </div>
+                              </div>
+                              <div className="campus-teacher__asistencia-statuses">
+                                {teacherAttendanceStatusOptions.map((option) => (
+                                  <label
+                                    className={`campus-teacher__asistencia-status tone-${option.value}${(record.status || 'present') === option.value ? ' is-selected' : ''}`}
+                                    key={`${record.studentId}-${option.value}`}
+                                  >
+                                    <input
+                                      checked={(record.status || 'present') === option.value}
+                                      disabled={teacherAttendanceLocked}
+                                      name={`attendance-${record.studentId}`}
+                                      onChange={() => onTeacherAttendanceRecordChange(record.studentId, 'status', option.value)}
+                                      type="radio"
+                                      value={option.value}
+                                    />
+                                    <span>{option.label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <input
+                                className="campus-teacher__asistencia-note"
+                                disabled={teacherAttendanceLocked}
+                                placeholder="Nota opcional"
+                                value={record.notes || ''}
+                                onChange={(event) => onTeacherAttendanceRecordChange(record.studentId, 'notes', event.target.value)}
+                              />
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <footer className="campus-teacher__asistencia-footer">
+                    <div>
+                      <strong>
+                        {selectedTeacherAttendanceCourse
+                          ? (teacherAttendanceType === 'subject_class'
                             ? [selectedAttendanceSubject?.label, getCourseGroupLabel(selectedTeacherAttendanceCourse)].filter(Boolean).join(' · ')
-                            : getCourseOptionLabel(selectedTeacherAttendanceCourse),
-                          teacherAttendanceDate || 'Sin fecha',
-                        ].filter(Boolean).join(' · ')
-                        : (teacherAttendanceType === 'subject_class' ? 'Selecciona asignatura, curso y fecha.' : 'Selecciona curso y fecha.')}
-                    </span>
+                            : getCourseOptionLabel(selectedTeacherAttendanceCourse))
+                          : 'Sin curso seleccionado'}
+                      </strong>
+                      <span>
+                        {selectedTeacherAttendanceCourse
+                          ? (teacherAttendanceDate || 'Sin fecha')
+                          : (teacherAttendanceType === 'subject_class' ? 'Selecciona asignatura, curso y fecha.' : 'Selecciona curso y fecha.')}
+                      </span>
+                    </div>
                     {teacherAttendanceLocked ? (
                       <button className="campus-teacher__ghost-btn" onClick={() => setTeacherAttendanceLocked(false)} type="button">
                         Editar asistencia
@@ -7863,242 +9610,626 @@ function TeacherCampusHome({ forcePreview = false }) {
                         {saveTeacherAttendanceMutation.isPending ? 'Guardando...' : 'Guardar asistencia'}
                       </button>
                     )}
-                  </div>
+                  </footer>
                 </form>
               </article>
             ) : null}
 
             {activeTeacherSection === 'school_coexistence' ? (
-              <article className="campus-teacher__resource-panel campus-teacher__embedded-panel">
-                <div className="campus-teacher__section-head">
+              <article className="campus-teacher__convivencia-panel campus-teacher__embedded-panel">
+                <header className="campus-teacher__convivencia-hero">
                   <div>
-                    <span className="campus-panel__kicker">Convivencia escolar</span>
-                    <h3>Observación de comportamiento</h3>
-                    <p className="campus-panel__meta">El reporte queda disponible para Coordinación, Dirección, Psicología y Rectoría.</p>
+                    <span className="campus-teacher__convivencia-kicker">Convivencia escolar</span>
+                    <h2>Registrar observación de comportamiento</h2>
+                    <p>Registra y documenta situaciones para el seguimiento institucional.</p>
                   </div>
                   <button
-                    className="campus-teacher__ghost-btn"
-                    disabled={teacherDisciplineObservationsQuery.isFetching}
-                    onClick={() => teacherDisciplineObservationsQuery.refetch()}
+                    className="campus-teacher__convivencia-history-btn"
+                    onClick={() => document.getElementById('teacher-coexistence-history')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })}
                     type="button"
                   >
-                    Actualizar
+                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                      <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                    </svg>
+                    Ver historial
                   </button>
-                </div>
+                </header>
 
-                <form className="campus-teacher__resource-form" onSubmit={onSubmitTeacherDisciplineObservation}>
-                  <label>
-                    Curso o asignatura
-                    <select
-                      value={teacherDisciplineDraft.courseId}
-                      onChange={(event) => onTeacherDisciplineDraftChange('courseId', event.target.value)}
+                <form className="campus-teacher__convivencia-card" onSubmit={onSubmitTeacherDisciplineObservation}>
+                  <div className="campus-teacher__convivencia-card-head">
+                    <div>
+                      <h3>Nueva observación</h3>
+                      <p>El reporte queda disponible para Coordinación, Dirección, Psicología y Rectoría.</p>
+                    </div>
+                    <button
+                      className="campus-teacher__convivencia-refresh"
+                      disabled={teacherDisciplineObservationsQuery.isFetching}
+                      onClick={() => teacherDisciplineObservationsQuery.refetch()}
+                      type="button"
                     >
-                      <option value="">Seleccionar curso</option>
-                      {courses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    Alumno
-                    <select
-                      disabled={!teacherDisciplineDraft.courseId || teacherDisciplineCourseDetailQuery.isFetching}
-                      value={teacherDisciplineDraft.studentId}
-                      onChange={(event) => onTeacherDisciplineDraftChange('studentId', event.target.value)}
-                    >
-                      <option value="">Seleccionar alumno</option>
-                      {disciplineStudentOptions.map((student) => (
-                        <option key={student.studentId} value={student.studentId}>{student.name}{student.schoolCode ? ` · ${student.schoolCode}` : ''}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="campus-teacher__resource-field-wide">
-                    Observación
-                    <textarea
-                      placeholder="Describe de forma objetiva la situación, el contexto de clase y cualquier acción inmediata realizada."
-                      rows={5}
-                      value={teacherDisciplineDraft.observation}
-                      onChange={(event) => onTeacherDisciplineDraftChange('observation', event.target.value)}
-                    />
+                      <span aria-hidden="true" className={teacherDisciplineObservationsQuery.isFetching ? 'is-spinning' : ''}>↻</span>
+                      Actualizar
+                    </button>
+                  </div>
+
+                  <div className="campus-teacher__convivencia-fields">
+                    <label className="campus-teacher__convivencia-field">
+                      <span>Curso o asignatura</span>
+                      <div className="campus-teacher__convivencia-select-shell">
+                        <svg aria-hidden="true" className="campus-teacher__convivencia-field-icon" fill="none" viewBox="0 0 24 24">
+                          <path d="M4 7.5 12 4l8 3.5v2.2c0 4.6-3.3 8.8-8 9.8-4.7-1-8-5.2-8-9.8V7.5Z" stroke="currentColor" strokeWidth="1.7" />
+                          <path d="M9 12.2 11 14l4-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                        </svg>
+                        <select
+                          value={teacherDisciplineDraft.courseId}
+                          onChange={(event) => onTeacherDisciplineDraftChange('courseId', event.target.value)}
+                        >
+                          <option value="">Seleccionar curso</option>
+                          {courses.map((course) => (
+                            <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </label>
+
+                    <div className="campus-teacher__convivencia-field" ref={disciplineStudentComboboxRef}>
+                      <span>Alumno</span>
+                      <div className={`campus-teacher__convivencia-combobox${showDisciplineStudentMenu ? ' is-open' : ''}`}>
+                        <svg aria-hidden="true" className="campus-teacher__convivencia-field-icon" fill="none" viewBox="0 0 24 24">
+                          <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+                          <path d="M5.5 19a6.5 6.5 0 0 1 13 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                        </svg>
+                        <input
+                          aria-autocomplete="list"
+                          aria-expanded={showDisciplineStudentMenu}
+                          aria-haspopup="listbox"
+                          disabled={!teacherDisciplineDraft.courseId || teacherDisciplineCourseDetailQuery.isFetching}
+                          onChange={(event) => {
+                            setDisciplineStudentSearch(event.target.value);
+                            setShowDisciplineStudentMenu(true);
+                            if (teacherDisciplineDraft.studentId) {
+                              onTeacherDisciplineDraftChange('studentId', '');
+                            }
+                          }}
+                          onFocus={() => {
+                            setShowDisciplineStudentMenu(true);
+                            setDisciplineStudentSearch('');
+                          }}
+                          placeholder={
+                            !teacherDisciplineDraft.courseId
+                              ? 'Selecciona un curso primero'
+                              : (teacherDisciplineCourseDetailQuery.isFetching ? 'Cargando alumnos...' : 'Buscar alumno por nombre o código')
+                          }
+                          role="combobox"
+                          type="text"
+                          value={showDisciplineStudentMenu ? disciplineStudentSearch : selectedDisciplineStudentLabel}
+                        />
+                        <button
+                          aria-label="Abrir lista de alumnos"
+                          className="campus-teacher__convivencia-combobox-caret"
+                          disabled={!teacherDisciplineDraft.courseId || teacherDisciplineCourseDetailQuery.isFetching}
+                          onClick={() => {
+                            setShowDisciplineStudentMenu((current) => !current);
+                            setDisciplineStudentSearch('');
+                          }}
+                          type="button"
+                        >
+                          ▾
+                        </button>
+                        {showDisciplineStudentMenu ? (
+                          <div className="campus-teacher__convivencia-combobox-menu" role="listbox">
+                            {filteredDisciplineStudentOptions.length === 0 ? (
+                              <p className="campus-teacher__convivencia-combobox-empty">
+                                {disciplineStudentOptions.length === 0
+                                  ? 'Este curso no tiene alumnos cargados.'
+                                  : 'No hay alumnos que coincidan con la búsqueda.'}
+                              </p>
+                            ) : filteredDisciplineStudentOptions.map((student) => {
+                              const isSelected = student.studentId === teacherDisciplineDraft.studentId;
+                              return (
+                                <button
+                                  aria-selected={isSelected}
+                                  className={`campus-teacher__convivencia-combobox-option${isSelected ? ' is-selected' : ''}`}
+                                  key={student.studentId}
+                                  onClick={() => onSelectDisciplineStudent(student)}
+                                  role="option"
+                                  type="button"
+                                >
+                                  <strong>{student.name || 'Alumno'}</strong>
+                                  <span>{student.schoolCode || 'Sin código'}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <label className="campus-teacher__convivencia-field">
+                      <span>Fecha del caso</span>
+                      <div className="campus-teacher__convivencia-select-shell">
+                        <svg aria-hidden="true" className="campus-teacher__convivencia-field-icon" fill="none" viewBox="0 0 24 24">
+                          <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                          <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                        </svg>
+                        <input
+                          type="date"
+                          value={teacherDisciplineDraft.incidentDate}
+                          onChange={(event) => onTeacherDisciplineDraftChange('incidentDate', event.target.value)}
+                        />
+                      </div>
+                    </label>
+
+                    <label className="campus-teacher__convivencia-field">
+                      <span>Hora del caso</span>
+                      <div className="campus-teacher__convivencia-select-shell">
+                        <svg aria-hidden="true" className="campus-teacher__convivencia-field-icon" fill="none" viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                          <path d="M12 8v4.5l3 1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                        </svg>
+                        <input
+                          type="time"
+                          value={teacherDisciplineDraft.incidentTime}
+                          onChange={(event) => onTeacherDisciplineDraftChange('incidentTime', event.target.value)}
+                        />
+                      </div>
+                    </label>
+                  </div>
+
+                  <label className="campus-teacher__convivencia-field is-wide">
+                    <span>Observación</span>
+                    <small>Describe de forma objetiva la situación, el contexto y cualquier acción inmediata.</small>
+                    <div className="campus-teacher__convivencia-textarea-shell">
+                      <textarea
+                        maxLength={1000}
+                        placeholder="Escribe aquí la observación de comportamiento..."
+                        rows={5}
+                        value={teacherDisciplineDraft.observation}
+                        onChange={(event) => onTeacherDisciplineDraftChange('observation', event.target.value.slice(0, 1000))}
+                      />
+                      <em>{disciplineObservationLength} / 1000</em>
+                    </div>
                   </label>
 
-                  <div className="campus-teacher__card-actions">
-                    <span className="campus-panel__meta">
-                      {[selectedDisciplineStudent?.name, selectedDisciplineCourse?.subject || selectedDisciplineCourse?.title].filter(Boolean).join(' · ') || 'Selecciona alumno y curso para continuar.'}
-                    </span>
-                    <button className="campus-teacher__action-btn" disabled={isBusy || !teacherDisciplineDraft.courseId || !teacherDisciplineDraft.studentId} type="submit">
+                  <div className="campus-teacher__convivencia-tip">
+                    <span aria-hidden="true">i</span>
+                    <p>Sé objetivo: describe hechos concretos, evita juicios y registra el contexto de clase cuando sea relevante.</p>
+                  </div>
+
+                  <div className="campus-teacher__convivencia-footer">
+                    <div className="campus-teacher__convivencia-summary">
+                      <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                        <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+                        <path d="M5.5 19a6.5 6.5 0 0 1 13 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                      </svg>
+                      <span>
+                        {[selectedDisciplineStudent?.name, selectedDisciplineCourse?.subject || selectedDisciplineCourse?.title].filter(Boolean).join(' · ')
+                          || 'Selecciona alumno y curso para continuar.'}
+                      </span>
+                    </div>
+                    <button
+                      className="campus-teacher__action-btn campus-teacher__convivencia-submit"
+                      disabled={isBusy || !teacherDisciplineDraft.courseId || !teacherDisciplineDraft.studentId || !teacherDisciplineDraft.incidentDate || !teacherDisciplineDraft.incidentTime}
+                      type="submit"
+                    >
+                      <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                        <path d="M4 11.5 20 4l-3.5 16L11 13 4 11.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                        <path d="M11 13 20 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                      </svg>
                       {createTeacherDisciplineObservationMutation.isPending ? 'Enviando...' : 'Enviar observación'}
                     </button>
                   </div>
                 </form>
 
-                <div className="campus-teacher__resource-history">
-                  <div className="campus-teacher__section-head">
-                    <div>
-                      <span className="campus-panel__kicker">Trazabilidad</span>
-                      <h3>Observaciones enviadas</h3>
-                    </div>
+                <section className="campus-teacher__convivencia-history" id="teacher-coexistence-history">
+                  <div className="campus-teacher__convivencia-history-head">
+                    <span className="campus-teacher__convivencia-kicker">Trazabilidad</span>
+                    <h3>Observaciones enviadas</h3>
                   </div>
-                  {teacherDisciplineCourseDetailQuery.isFetching ? <p className="campus-panel__meta">Cargando alumnos del curso...</p> : null}
-                  {teacherDisciplineObservationsQuery.isLoading ? <p className="campus-panel__meta">Cargando historial...</p> : null}
-                  {teacherDisciplineObservations.length === 0 && !teacherDisciplineObservationsQuery.isLoading ? <p className="campus-panel__meta">Todavía no tienes observaciones registradas.</p> : null}
-                  {teacherDisciplineObservations.map((item) => (
-                    <article className={`campus-teacher__resource-request status-${item.status}`} key={item.id}>
+
+                  {teacherDisciplineCourseDetailQuery.isFetching ? (
+                    <p className="campus-panel__meta">Cargando alumnos del curso...</p>
+                  ) : null}
+                  {teacherDisciplineObservationsQuery.isLoading ? (
+                    <p className="campus-panel__meta">Cargando historial...</p>
+                  ) : null}
+
+                  {teacherDisciplineObservations.length === 0 && !teacherDisciplineObservationsQuery.isLoading ? (
+                    <div className="campus-teacher__convivencia-history-empty">
+                      <div className="campus-teacher__convivencia-history-empty-icon" aria-hidden="true">📋</div>
                       <div>
-                        <span className="campus-teacher__status-pill is-active">{teacherDisciplineStatusLabels[item.status] || item.status}</span>
-                        <h4>{item.studentName}</h4>
-                        <p>{item.observation}</p>
+                        <strong>Aún no hay observaciones registradas</strong>
+                        <p>Cuando envíes una observación, quedará aquí para seguimiento institucional.</p>
                       </div>
-                      <div className="campus-teacher__resource-request-meta">
-                        <span>{formatDateLabel(item.submittedAt)}</span>
-                        {item.courseTitle ? <span>{item.courseTitle}</span> : null}
-                        {item.studentGrade ? <span>{item.studentGrade}</span> : null}
-                      </div>
-                    </article>
-                  ))}
-                </div>
+                    </div>
+                  ) : null}
+
+                  {teacherDisciplineObservations.length > 0 ? (
+                    <div className="campus-teacher__convivencia-history-list">
+                      {teacherDisciplineObservations.map((item) => (
+                        <article className={`campus-teacher__convivencia-history-item status-${item.status}`} key={item.id}>
+                          <div>
+                            <span className="campus-teacher__status-pill is-active">{teacherDisciplineStatusLabels[item.status] || item.status}</span>
+                            <h4>{item.studentName}</h4>
+                            <p>{item.observation}</p>
+                          </div>
+                          <div className="campus-teacher__convivencia-history-meta">
+                            <span>{formatDateTimeLabel(item.incidentAt || item.submittedAt)}</span>
+                            {item.courseTitle ? <span>{item.courseTitle}</span> : null}
+                            {item.studentGrade ? <span>{item.studentGrade}</span> : null}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </section>
               </article>
             ) : null}
 
             {activeTeacherSection === 'social_publications' ? (
-              <article className="campus-teacher__resource-panel campus-teacher__social-panel campus-teacher__embedded-panel">
-                <div className="campus-teacher__section-head">
+              <article className="campus-teacher__publications-panel campus-teacher__embedded-panel">
+                <header className="campus-teacher__publications-hero">
                   <div>
-                    <span className="campus-panel__kicker">Publicaciones</span>
-                    <h3>Enviar al feed de padres</h3>
-                    <p className="campus-panel__meta">Secretaría Académica revisa y autoriza antes de publicar en la app de acudientes.</p>
+                    <span className="campus-teacher__publications-kicker">Publicaciones</span>
+                    <h2>Enviar publicación</h2>
+                    <p>Comparte fotos, videos y relatos con la comunidad de padres.</p>
                   </div>
                   <button
-                    className="campus-teacher__ghost-btn"
-                    disabled={teacherSocialPublicationRequestsQuery.isFetching}
-                    onClick={() => teacherSocialPublicationRequestsQuery.refetch()}
+                    className="campus-teacher__publications-history-btn"
+                    onClick={() => document.getElementById('teacher-publications-history')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })}
                     type="button"
                   >
-                    Actualizar
+                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                      <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                    </svg>
+                    Ver historial
                   </button>
-                </div>
+                </header>
 
-                <form className="campus-teacher__resource-form campus-teacher__social-form" onSubmit={onSubmitTeacherSocialPublication}>
-                  <label>
-                    Curso o grupo
-                    <select
-                      value={teacherSocialPublicationDraft.courseId}
-                      onChange={(event) => onTeacherSocialPublicationDraftChange('courseId', event.target.value)}
-                    >
-                      <option value="">Seleccionar grupo</option>
-                      {courses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    Título
-                    <input
-                      placeholder="Ej. Proyecto de ciencias terminado"
-                      value={teacherSocialPublicationDraft.title}
-                      onChange={(event) => onTeacherSocialPublicationDraftChange('title', event.target.value)}
-                    />
-                  </label>
-                  <label className="campus-teacher__resource-field-wide">
-                    Descripción
-                    <textarea
-                      placeholder="Cuenta qué hicieron los estudiantes y por qué es importante compartirlo con las familias."
-                      rows={4}
-                      value={teacherSocialPublicationDraft.body}
-                      onChange={(event) => onTeacherSocialPublicationDraftChange('body', event.target.value)}
-                    />
-                  </label>
+                <div className="campus-teacher__publications-layout">
+                  <form className="campus-teacher__publications-card" onSubmit={onSubmitTeacherSocialPublication}>
+                    <div className="campus-teacher__publications-card-head">
+                      <div>
+                        <h3>Detalles de la publicación</h3>
+                        <p>Secretaría Académica revisa y autoriza antes de publicar en la app de acudientes.</p>
+                      </div>
+                      <button
+                        className="campus-teacher__publications-refresh"
+                        disabled={teacherSocialPublicationRequestsQuery.isFetching}
+                        onClick={() => teacherSocialPublicationRequestsQuery.refetch()}
+                        type="button"
+                      >
+                        <span aria-hidden="true" className={teacherSocialPublicationRequestsQuery.isFetching ? 'is-spinning' : ''}>↻</span>
+                        Actualizar
+                      </button>
+                    </div>
 
-                  <div className="campus-teacher__social-upload campus-teacher__resource-field-wide">
-                    <label>
-                      Fotos o videos
+                    <div className="campus-teacher__publications-fields">
+                      <label className="campus-teacher__publications-field">
+                        <span>Asignatura</span>
+                        <div className="campus-teacher__publications-input-shell">
+                          <svg aria-hidden="true" className="campus-teacher__publications-field-icon" fill="none" viewBox="0 0 24 24">
+                            <path d="M4 16c2-1 4 1 6 0s3-3 5-2 4 2 5 1" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                            <circle cx="8" cy="8" fill="currentColor" r="2" />
+                            <circle cx="14" cy="7" fill="currentColor" opacity="0.55" r="1.6" />
+                            <circle cx="18" cy="10" fill="currentColor" opacity="0.35" r="1.4" />
+                          </svg>
+                          <select
+                            value={teacherSocialPublicationDraft.subjectKey}
+                            onChange={(event) => onTeacherSocialPublicationDraftChange('subjectKey', event.target.value)}
+                          >
+                            <option value="">Seleccionar asignatura</option>
+                            {socialPublicationSubjectGroups.map((subject) => (
+                              <option key={subject.key} value={subject.key}>{subject.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </label>
+
+                      <label className="campus-teacher__publications-field">
+                        <span>Curso</span>
+                        <div className="campus-teacher__publications-input-shell">
+                          <svg aria-hidden="true" className="campus-teacher__publications-field-icon" fill="none" viewBox="0 0 24 24">
+                            <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
+                            <circle cx="16.5" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+                            <path d="M3.8 18.5a5.2 5.2 0 0 1 10.4 0M13.2 18.5a4.2 4.2 0 0 1 7 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                          <select
+                            disabled={!teacherSocialPublicationDraft.subjectKey || socialPublicationCoursesForSubject.length === 0}
+                            value={teacherSocialPublicationDraft.courseId}
+                            onChange={(event) => onTeacherSocialPublicationDraftChange('courseId', event.target.value)}
+                          >
+                            <option value="">
+                              {!teacherSocialPublicationDraft.subjectKey
+                                ? 'Selecciona una asignatura primero'
+                                : (socialPublicationCoursesForSubject.length ? 'Seleccionar curso' : 'Sin cursos')}
+                            </option>
+                            {socialPublicationCoursesForSubject.map((course) => (
+                              <option key={course.id} value={course.id}>{getCourseGroupLabel(course)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </label>
+                    </div>
+
+                    <label className="campus-teacher__publications-field is-wide">
+                      <span>Título</span>
+                      <div className="campus-teacher__publications-input-shell">
+                        <svg aria-hidden="true" className="campus-teacher__publications-field-icon" fill="none" viewBox="0 0 24 24">
+                          <path d="M5 7h14M8 12h8M10 17h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                        </svg>
+                        <input
+                          placeholder="Ej. Proyecto de ciencias terminado"
+                          value={teacherSocialPublicationDraft.title}
+                          onChange={(event) => onTeacherSocialPublicationDraftChange('title', event.target.value)}
+                        />
+                      </div>
+                    </label>
+
+                    <label className="campus-teacher__publications-field is-wide">
+                      <span>Descripción</span>
+                      <div className="campus-teacher__publications-editor">
+                        <textarea
+                          maxLength={1000}
+                          placeholder="Cuenta qué hicieron los estudiantes y por qué es importante compartirlo con las familias."
+                          rows={6}
+                          value={teacherSocialPublicationDraft.body}
+                          onChange={(event) => onTeacherSocialPublicationDraftChange('body', event.target.value.slice(0, 1000))}
+                        />
+                        <em>{socialPublicationBodyLength} / 1000</em>
+                      </div>
+                    </label>
+
+                    <div className="campus-teacher__publications-field is-wide">
+                      <span>Fotos o videos</span>
+                      <button
+                        className={`campus-teacher__publications-dropzone${teacherSocialMediaDragActive ? ' is-dragging' : ''}${teacherSocialMediaUploading ? ' is-uploading' : ''}`}
+                        disabled={teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= 8}
+                        onClick={() => teacherSocialMediaInputRef.current?.click()}
+                        onDragEnter={(event) => {
+                          event.preventDefault();
+                          setTeacherSocialMediaDragActive(true);
+                        }}
+                        onDragLeave={(event) => {
+                          event.preventDefault();
+                          if (!event.currentTarget.contains(event.relatedTarget)) {
+                            setTeacherSocialMediaDragActive(false);
+                          }
+                        }}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={onTeacherSocialMediaDrop}
+                        type="button"
+                      >
+                        <span className="campus-teacher__publications-dropzone-icon" aria-hidden="true">
+                          <svg fill="none" viewBox="0 0 24 24">
+                            <path d="M12 16V6M12 6l-3.5 3.5M12 6l3.5 3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                            <path d="M5 16.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+                          </svg>
+                        </span>
+                        <strong>{teacherSocialMediaUploading ? 'Subiendo archivos...' : 'Arrastra archivos aquí o selecciona'}</strong>
+                        <span>JPG, PNG, MP4 hasta 100 MB c/u · Máximo 8 archivos</span>
+                      </button>
                       <input
                         accept="image/*,video/*"
                         disabled={teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= 8}
+                        hidden
                         multiple
                         onChange={onTeacherSocialMediaSelected}
+                        ref={teacherSocialMediaInputRef}
                         type="file"
                       />
-                    </label>
-                    <span className="campus-panel__meta">Hasta 8 archivos por publicación.</span>
-                  </div>
 
-                  <div className="campus-teacher__social-media-grid campus-teacher__resource-field-wide">
-                    {(teacherSocialPublicationDraft.media || []).length === 0 ? <p className="campus-panel__meta">Puedes enviar solo texto o adjuntar evidencia visual del trabajo en clase.</p> : null}
-                    {(teacherSocialPublicationDraft.media || []).map((item, index) => (
-                      <article className="campus-teacher__social-media-card" key={`${item.kind}-${item.src}-${index}`}>
-                        <div className="campus-teacher__social-media-preview">
-                          {item.kind === 'video'
-                            ? <video controls src={item.src} />
-                            : <img alt={item.alt || `Adjunto ${index + 1}`} src={item.thumbUrl || item.src} />}
-                        </div>
-                        <button className="campus-teacher__ghost-btn" onClick={() => onRemoveTeacherSocialMedia(index)} type="button">Quitar</button>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="campus-teacher__card-actions">
-                    <span className="campus-panel__meta">Al aprobarse, aparecerá automáticamente en la red social de los padres.</span>
-                    <button className="campus-teacher__action-btn" disabled={isBusy || !teacherSocialPublicationDraft.courseId} type="submit">
-                      {createTeacherSocialPublicationMutation.isPending ? 'Enviando...' : 'Enviar a revisión'}
-                    </button>
-                  </div>
-                </form>
-
-                <div className="campus-teacher__resource-history">
-                  <div className="campus-teacher__section-head">
-                    <div>
-                      <span className="campus-panel__kicker">Historial</span>
-                      <h3>Mis publicaciones</h3>
-                    </div>
-                  </div>
-                  {teacherSocialPublicationRequestsQuery.isLoading ? <p className="campus-panel__meta">Cargando publicaciones...</p> : null}
-                  {teacherSocialPublicationRequests.length === 0 && !teacherSocialPublicationRequestsQuery.isLoading ? <p className="campus-panel__meta">Todavía no tienes publicaciones enviadas a revisión.</p> : null}
-                  {teacherSocialPublicationRequests.map((request) => (
-                    <article className={`campus-teacher__resource-request status-${request.status}`} key={request._id}>
-                      <div>
-                        <span className="campus-teacher__status-pill is-active">{teacherSocialPublicationStatusLabels[request.status] || request.status}</span>
-                        <h4>{request.title}</h4>
-                        <p>{request.body}</p>
-                      </div>
-                      {(request.media || []).length ? (
-                        <div className="campus-teacher__history-media-grid">
-                          {(request.media || []).map((item, index) => {
-                            const mediaItem = normalizeTeacherPublicationHistoryMedia(item, index);
-                            if (!mediaItem.src) {
-                              return null;
-                            }
-
-                            return (
-                              <div className="campus-teacher__history-media-card" key={`${request._id}-${mediaItem.id}-${index}`}>
-                                <div className="campus-teacher__history-media-preview">
-                                  {mediaItem.kind === 'video'
-                                    ? <video controls preload="metadata" src={mediaItem.src} />
-                                    : <img alt={mediaItem.alt} loading="lazy" src={mediaItem.thumbUrl || mediaItem.src} />}
-                                </div>
+                      {(teacherSocialPublicationDraft.media || []).length > 0 ? (
+                        <div className="campus-teacher__publications-media-grid">
+                          {(teacherSocialPublicationDraft.media || []).map((item, index) => (
+                            <article className="campus-teacher__publications-media-card" key={`${item.kind}-${item.src}-${index}`}>
+                              <div className="campus-teacher__publications-media-preview">
+                                {item.kind === 'video'
+                                  ? <video controls src={item.src} />
+                                  : <img alt={item.alt || `Adjunto ${index + 1}`} src={item.thumbUrl || item.src} />}
                               </div>
-                            );
-                          })}
+                              <button onClick={() => onRemoveTeacherSocialMedia(index)} type="button">Quitar</button>
+                            </article>
+                          ))}
                         </div>
                       ) : null}
-                      <div className="campus-teacher__resource-request-meta">
-                        <span>{formatDateLabel(request.submittedAt)}</span>
-                        {request.courseTitle ? <span>{request.courseTitle}</span> : null}
-                        {(request.media || []).length ? <span>{request.media.length} adjunto(s)</span> : <span>Solo texto</span>}
+                    </div>
+
+                    <div className="campus-teacher__publications-tip">
+                      <span aria-hidden="true">i</span>
+                      <p>Puedes enviar solo texto o adjuntar evidencia visual. Al aprobarse, aparecerá en la red social de los padres.</p>
+                    </div>
+
+                    <div className="campus-teacher__publications-footer">
+                      <div className="campus-teacher__publications-summary">
+                        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                          <path d="M4 7.5 12 4l8 3.5v2.2c0 4.6-3.3 8.8-8 9.8-4.7-1-8-5.2-8-9.8V7.5Z" stroke="currentColor" strokeWidth="1.7" />
+                        </svg>
+                        <span>
+                          {[
+                            selectedSocialPublicationSubject?.label || normalizeSubjectLabel(selectedSocialPublicationCourse?.subject),
+                            selectedSocialPublicationCourse ? getCourseGroupLabel(selectedSocialPublicationCourse) : '',
+                          ].filter(Boolean).join(' · ') || 'Selecciona asignatura y curso para continuar.'}
+                        </span>
                       </div>
-                      {request.reviewNotes ? <p className="campus-teacher__resource-request-purpose">Secretaría: {request.reviewNotes}</p> : null}
-                    </article>
-                  ))}
+                      <button
+                        className="campus-teacher__action-btn campus-teacher__publications-submit"
+                        disabled={isBusy || !teacherSocialPublicationDraft.subjectKey || !teacherSocialPublicationDraft.courseId}
+                        type="submit"
+                      >
+                        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                          <path d="M4 11.5 20 4l-3.5 16L11 13 4 11.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                          <path d="M11 13 20 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                        </svg>
+                        {createTeacherSocialPublicationMutation.isPending ? 'Enviando...' : 'Enviar a revisión'}
+                      </button>
+                    </div>
+                  </form>
+
+                  <aside className="campus-teacher__publications-sidebar">
+                    <section className="campus-teacher__publications-side-card">
+                      <div className="campus-teacher__publications-side-head">
+                        <span className="campus-teacher__publications-side-icon is-tips" aria-hidden="true">💡</span>
+                        <h3>Consejos para publicar</h3>
+                      </div>
+                      <ul className="campus-teacher__publications-tips-list">
+                        <li>
+                          <span aria-hidden="true">◎</span>
+                          <p>Sé claro y objetivo en el título.</p>
+                        </li>
+                        <li>
+                          <span aria-hidden="true">📄</span>
+                          <p>Incluye el contexto del trabajo y lo que aprendieron los estudiantes.</p>
+                        </li>
+                        <li>
+                          <span aria-hidden="true">🎓</span>
+                          <p>Comparte fotos o videos que muestren el proceso o resultado.</p>
+                        </li>
+                        <li>
+                          <span aria-hidden="true">✓</span>
+                          <p>Revisa la información antes de enviar a revisión.</p>
+                        </li>
+                      </ul>
+                    </section>
+
+                    <section className="campus-teacher__publications-side-card">
+                      <div className="campus-teacher__publications-side-head is-split">
+                        <div>
+                          <span className="campus-teacher__publications-side-icon is-recent" aria-hidden="true">📰</span>
+                          <h3>Publicaciones recientes</h3>
+                        </div>
+                        <button
+                          className="campus-teacher__publications-side-link"
+                          onClick={() => document.getElementById('teacher-publications-history')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })}
+                          type="button"
+                        >
+                          Ver todas
+                        </button>
+                      </div>
+
+                      {teacherSocialPublicationRequestsQuery.isLoading ? (
+                        <p className="campus-panel__meta">Cargando publicaciones...</p>
+                      ) : null}
+
+                      {!teacherSocialPublicationRequestsQuery.isLoading && recentTeacherSocialPublications.length === 0 ? (
+                        <p className="campus-panel__meta">Todavía no tienes publicaciones enviadas.</p>
+                      ) : null}
+
+                      <div className="campus-teacher__publications-recent-list">
+                        {recentTeacherSocialPublications.map((request) => {
+                          const thumb = getTeacherSocialPublicationThumb(request);
+                          const tone = getTeacherSocialPublicationStatusTone(request.status);
+                          return (
+                            <article className="campus-teacher__publications-recent-item" key={request._id}>
+                              <div className={`campus-teacher__publications-recent-thumb${thumb ? '' : ' is-empty'}`}>
+                                {thumb ? <img alt="" src={thumb} /> : <span aria-hidden="true">📷</span>}
+                              </div>
+                              <div>
+                                <strong>{request.title || 'Sin título'}</strong>
+                                <div className="campus-teacher__publications-recent-meta">
+                                  <span className={`campus-teacher__publications-status is-${tone}`}>
+                                    {teacherSocialPublicationStatusLabels[request.status] || request.status}
+                                  </span>
+                                  <span>{formatDateLabel(request.submittedAt)}</span>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+
+                      {teacherSocialPublicationRequests.length > 0 ? (
+                        <button
+                          className="campus-teacher__publications-side-footer"
+                          onClick={() => document.getElementById('teacher-publications-history')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })}
+                          type="button"
+                        >
+                          Ver todas mis publicaciones
+                          <span aria-hidden="true">→</span>
+                        </button>
+                      ) : null}
+                    </section>
+                  </aside>
                 </div>
+
+                <section className="campus-teacher__publications-history" id="teacher-publications-history">
+                  <div className="campus-teacher__publications-history-head">
+                    <span className="campus-teacher__publications-kicker">Historial</span>
+                    <h3>Mis publicaciones</h3>
+                  </div>
+
+                  {teacherSocialPublicationRequestsQuery.isLoading ? (
+                    <p className="campus-panel__meta">Cargando publicaciones...</p>
+                  ) : null}
+
+                  {teacherSocialPublicationRequests.length === 0 && !teacherSocialPublicationRequestsQuery.isLoading ? (
+                    <div className="campus-teacher__publications-history-empty">
+                      <div className="campus-teacher__publications-history-empty-icon" aria-hidden="true">📰</div>
+                      <div>
+                        <strong>Aún no hay publicaciones enviadas</strong>
+                        <p>Cuando envíes una publicación a revisión, quedará aquí para seguimiento.</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {teacherSocialPublicationRequests.length > 0 ? (
+                    <div className="campus-teacher__publications-history-list">
+                      {teacherSocialPublicationRequests.map((request) => {
+                        const tone = getTeacherSocialPublicationStatusTone(request.status);
+                        return (
+                          <article className={`campus-teacher__publications-history-item status-${request.status}`} key={request._id}>
+                            <div>
+                              <span className={`campus-teacher__publications-status is-${tone}`}>
+                                {teacherSocialPublicationStatusLabels[request.status] || request.status}
+                              </span>
+                              <h4>{request.title}</h4>
+                              <p>{request.body}</p>
+                            </div>
+                            {(request.media || []).length ? (
+                              <div className="campus-teacher__publications-history-media">
+                                {(request.media || []).map((item, index) => {
+                                  const mediaItem = normalizeTeacherPublicationHistoryMedia(item, index);
+                                  if (!mediaItem.src) return null;
+                                  return (
+                                    <div className="campus-teacher__publications-history-media-card" key={`${request._id}-${mediaItem.id}-${index}`}>
+                                      {mediaItem.kind === 'video'
+                                        ? <video controls preload="metadata" src={mediaItem.src} />
+                                        : <img alt={mediaItem.alt} loading="lazy" src={mediaItem.thumbUrl || mediaItem.src} />}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                            <div className="campus-teacher__publications-history-meta">
+                              <span>{formatDateLabel(request.submittedAt)}</span>
+                              {request.subject ? <span>{request.subject}</span> : null}
+                              {request.courseTitle ? <span>{request.courseTitle}</span> : null}
+                              {(request.media || []).length ? <span>{request.media.length} adjunto(s)</span> : <span>Solo texto</span>}
+                            </div>
+                            {request.reviewNotes ? (
+                              <p className="campus-teacher__publications-history-notes">Secretaría: {request.reviewNotes}</p>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
               </article>
             ) : null}
 
             {activeTeacherSection === 'resource_requests' ? (
-              <article className="campus-teacher__resource-panel campus-teacher__embedded-panel">
-                <div className="campus-teacher__section-head">
+              <article className="campus-teacher__recursos-panel campus-teacher__embedded-panel">
+                <header className="campus-teacher__recursos-hero">
                   <div>
-                    <span className="campus-panel__kicker">Solicitud de recursos</span>
-                    <h3>Planner docente y requerimientos</h3>
-                    <p className="campus-panel__meta">Selecciona un planner activo. Amarillo = pendiente. Verde = ya enviado.</p>
+                    <span className="campus-teacher__recursos-kicker">Solicitud de recursos</span>
+                    <h2>Planner de recursos</h2>
+                    <p>Selecciona un periodo activo y solicita los materiales que necesitas para tus actividades.</p>
                   </div>
                   <button
-                    className="campus-teacher__ghost-btn"
+                    className="campus-teacher__recursos-refresh"
                     disabled={teacherResourceRequestsQuery.isFetching || teacherPlannerCyclesQuery.isFetching}
                     onClick={() => {
                       teacherPlannerCyclesQuery.refetch();
@@ -8106,70 +10237,92 @@ function TeacherCampusHome({ forcePreview = false }) {
                     }}
                     type="button"
                   >
+                    <span aria-hidden="true" className={(teacherResourceRequestsQuery.isFetching || teacherPlannerCyclesQuery.isFetching) ? 'is-spinning' : ''}>↻</span>
                     Actualizar
                   </button>
-                </div>
+                </header>
 
                 {teacherPlannerCyclesQuery.isLoading || teacherResourceRequestsQuery.isLoading ? (
                   <p className="campus-panel__meta">Cargando planners...</p>
                 ) : null}
 
                 {!teacherPlannerCyclesQuery.isLoading && teacherPlannerCycles.length === 0 ? (
-                  <p className="campus-panel__meta">No hay planners activos definidos por coordinación o rectoría.</p>
+                  <div className="campus-teacher__recursos-empty">
+                    <div className="campus-teacher__recursos-empty-icon" aria-hidden="true">📦</div>
+                    <div>
+                      <strong>No hay planners activos</strong>
+                      <p>Cuando coordinación o rectoría publiquen un periodo, aparecerá aquí.</p>
+                    </div>
+                  </div>
                 ) : null}
 
-                <div className="campus-teacher__planner-card-grid">
-                  {teacherPlannerCycles.map((cycle) => {
-                    const existingRequest = getTeacherRequestForCycle(teacherResourceRequests, cycle.id);
-                    const isSubmitted = Boolean(existingRequest);
-                    const isSelected = selectedTeacherPlannerCycleId === cycle.id;
-                    const isOpen = isPlannerSubmissionOpen(cycle);
-                    return (
-                      <button
-                        className={`campus-teacher__planner-card${isSubmitted ? ' is-submitted' : ' is-pending'}${isSelected ? ' is-selected' : ''}${!isOpen ? ' is-closed' : ''}`}
-                        key={cycle.id}
-                        onClick={() => onSelectTeacherPlannerCycle(cycle.id)}
-                        type="button"
-                      >
-                        <span className="campus-teacher__planner-card-status">
-                          {isSubmitted ? 'Enviado' : (isOpen ? 'Pendiente' : 'Cerrado')}
-                        </span>
-                        <strong>{cycle.title}</strong>
-                        <span>{formatDateLabel(cycle.startDate)} – {formatDateLabel(cycle.endDate)}</span>
-                        <span>Límite {formatDateLabel(cycle.submissionDeadline)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                {teacherPlannerCycles.length > 0 ? (
+                  <div className="campus-teacher__recursos-cycles">
+                    {teacherPlannerCycles.map((cycle) => {
+                      const existingRequest = getTeacherRequestForCycle(teacherResourceRequests, cycle.id);
+                      const isSubmitted = Boolean(existingRequest);
+                      const isSelected = selectedTeacherPlannerCycleId === cycle.id;
+                      const isOpen = isPlannerSubmissionOpen(cycle);
+                      return (
+                        <button
+                          className={`campus-teacher__recursos-cycle${isSubmitted ? ' is-submitted' : ' is-pending'}${isSelected ? ' is-selected' : ''}${!isOpen ? ' is-closed' : ''}`}
+                          key={cycle.id}
+                          onClick={() => onSelectTeacherPlannerCycle(cycle.id)}
+                          type="button"
+                        >
+                          <span className="campus-teacher__recursos-cycle-status">
+                            {isSubmitted ? 'Enviado' : (isOpen ? 'Pendiente' : 'Cerrado')}
+                          </span>
+                          <strong>{cycle.title}</strong>
+                          <span>{formatDateLabel(cycle.startDate)} – {formatDateLabel(cycle.endDate)}</span>
+                          <span>Límite {formatDateLabel(cycle.submissionDeadline)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
 
                 {selectedTeacherPlannerCycle ? (
-                  <div className="campus-teacher__planner-workspace">
-                    <div className="campus-teacher__planner-workspace-head">
+                  <div className="campus-teacher__recursos-workspace">
+                    <div className="campus-teacher__recursos-period">
+                      <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                        <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                        <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                      </svg>
                       <div>
-                        <h4>{selectedTeacherPlannerCycle.title}</h4>
-                        <p className="campus-panel__meta">
-                          Periodo: {formatDateLabel(selectedTeacherPlannerCycle.startDate)} - {formatDateLabel(selectedTeacherPlannerCycle.endDate)}.
-                          {' '}Límite de entrega: {formatDateLabel(selectedTeacherPlannerCycle.submissionDeadline)}.
-                          {selectedTeacherPlannerCycle.instructions ? ` ${selectedTeacherPlannerCycle.instructions}` : ''}
-                        </p>
-                        {!isTeacherPlannerEditable ? (
-                          <p className="campus-teacher__planner-locked-note">
-                            {selectedTeacherPlannerRequest && selectedTeacherPlannerRequest.status !== 'pending_coordination_review'
-                              ? 'Este planner ya avanzó en el flujo y no se puede editar aquí.'
-                              : 'La fecha límite ya venció. Solo puedes consultar el historial.'}
-                          </p>
-                        ) : null}
+                        <strong>Periodo: {formatDateLabel(selectedTeacherPlannerCycle.startDate)} – {formatDateLabel(selectedTeacherPlannerCycle.endDate)}</strong>
+                        <span>{selectedTeacherPlannerCycle.title}</span>
                       </div>
                     </div>
 
+                    <div className="campus-teacher__recursos-banner">
+                      <span aria-hidden="true">i</span>
+                      <p>
+                        Límite de entrega: {formatDateLabel(selectedTeacherPlannerCycle.submissionDeadline)}.
+                        {selectedTeacherPlannerCycle.instructions
+                          ? ` ${selectedTeacherPlannerCycle.instructions}`
+                          : ' Solicita aquí los materiales que necesitas para este periodo.'}
+                      </p>
+                    </div>
+
+                    {!isTeacherPlannerEditable ? (
+                      <p className="campus-teacher__recursos-locked">
+                        {selectedTeacherPlannerRequest && selectedTeacherPlannerRequest.status !== 'pending_coordination_review'
+                          ? 'Este planner ya avanzó en el flujo y no se puede editar aquí.'
+                          : 'La fecha límite ya venció. Solo puedes consultar el historial.'}
+                      </p>
+                    ) : null}
+
                     {selectedTeacherPlannerRequest && !isTeacherPlannerEditable ? (
-                      <div className="campus-teacher__planner-history">
-                        <h5>Historial enviado</h5>
+                      <section className="campus-teacher__recursos-card">
+                        <div className="campus-teacher__recursos-card-head">
+                          <h3>Historial enviado</h3>
+                        </div>
                         {selectedTeacherPlannerRequest.noMaterialsNeeded ? (
-                          <p>Marcaste que no necesitas material para este periodo.</p>
+                          <p className="campus-panel__meta">Marcaste que no necesitas material para este periodo.</p>
                         ) : null}
-                        <div className="campus-teacher__planner-table-wrap">
-                          <table className="campus-teacher__planner-table">
+                        <div className="campus-teacher__recursos-table-wrap">
+                          <table className="campus-teacher__recursos-table">
                             <thead>
                               <tr>
                                 <th>Asignatura</th>
@@ -8192,7 +10345,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     <td>{activity.quantity || '—'}</td>
                                     <td>
                                       <strong>{activity.title || '—'}</strong>
-                                      {activity.purpose ? <div className="campus-panel__meta">{activity.purpose}</div> : null}
+                                      {activity.purpose ? <small>{activity.purpose}</small> : null}
                                     </td>
                                     <td>{formatDateLabel(activity.date)}</td>
                                   </tr>
@@ -8207,141 +10360,211 @@ function TeacherCampusHome({ forcePreview = false }) {
                             </tbody>
                           </table>
                         </div>
-                      </div>
+                      </section>
                     ) : null}
 
                     {isTeacherPlannerEditable ? (
-                      <div className="campus-teacher__planner-form">
-                        <label className="campus-teacher__planner-check">
-                          <input
-                            checked={Boolean(teacherResourceRequestDraft.noMaterialsNeeded)}
-                            onChange={(event) => {
-                              const checked = event.target.checked;
-                              onTeacherResourceDraftChange('noMaterialsNeeded', checked);
-                              if (checked) {
-                                setTeacherResourcePlannerActivities([]);
-                              }
-                            }}
-                            type="checkbox"
-                          />
-                          <span>No necesito material para este periodo</span>
-                        </label>
+                      <>
+                        <section className="campus-teacher__recursos-card">
+                          <div className="campus-teacher__recursos-card-head">
+                            <div>
+                              <h3>Solicitar recursos para el periodo</h3>
+                              <p>Completa los datos de cada actividad y agrégala a la lista antes de enviar.</p>
+                            </div>
+                            <label className="campus-teacher__recursos-check">
+                              <input
+                                checked={Boolean(teacherResourceRequestDraft.noMaterialsNeeded)}
+                                onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  onTeacherResourceDraftChange('noMaterialsNeeded', checked);
+                                  if (checked) {
+                                    setTeacherResourcePlannerActivities([]);
+                                  }
+                                }}
+                                type="checkbox"
+                              />
+                              <span>No necesito material para este periodo</span>
+                            </label>
+                          </div>
 
-                        {!teacherResourceRequestDraft.noMaterialsNeeded ? (
-                          <>
-                            <div className="campus-teacher__planner-fields">
-                              <label>
-                                Asignatura
-                                <select
-                                  value={teacherResourceRequestDraft.subjectKey}
-                                  onChange={(event) => onTeacherResourceDraftChange('subjectKey', event.target.value)}
-                                >
-                                  <option value="">Seleccionar asignatura</option>
-                                  {teacherPlannerSubjectOptions.map((subject) => (
-                                    <option key={subject.key} value={subject.key}>{subject.label}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label>
-                                Grado
-                                <select
-                                  disabled={!teacherResourceRequestDraft.subjectKey}
-                                  value={teacherResourceRequestDraft.gradeKey}
-                                  onChange={(event) => onTeacherResourceDraftChange('gradeKey', event.target.value)}
-                                >
-                                  <option value="">Seleccionar grado</option>
-                                  {teacherPlannerGradeOptions.map((grade) => (
-                                    <option key={grade.key} value={grade.key}>{grade.label}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label>
-                                Curso
-                                <select
-                                  disabled={!teacherResourceRequestDraft.gradeKey}
-                                  value={teacherResourceRequestDraft.courseId}
-                                  onChange={(event) => onTeacherResourceDraftChange('courseId', event.target.value)}
-                                >
-                                  <option value="">Seleccionar curso</option>
-                                  {teacherPlannerCourseOptions.map((course) => (
-                                    <option key={course.id} value={course.id}>
-                                      {getCourseGroupLabel(course) || getCourseDisplayTitle(course)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label>
-                                Material
-                                <select
-                                  value={teacherResourceRequestDraft.materialKey}
-                                  onChange={(event) => onTeacherResourceDraftChange('materialKey', event.target.value)}
-                                >
-                                  <option value="">Seleccionar material</option>
-                                  {teacherPlannerMaterialOptions.map((material) => (
-                                    <option key={material} value={material}>{material}</option>
-                                  ))}
-                                  <option value="__other__">Otro</option>
-                                </select>
-                              </label>
+                          {!teacherResourceRequestDraft.noMaterialsNeeded ? (
+                            <>
+                              <div className="campus-teacher__recursos-fields">
+                                <label className="campus-teacher__recursos-field">
+                                  <span>Asignatura</span>
+                                  <div className="campus-teacher__recursos-input-shell">
+                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
+                                      <path d="M5 5.5h6.5A2.5 2.5 0 0 1 14 8v11.5H7A2 2 0 0 1 5 17.5V5.5Z" stroke="currentColor" strokeWidth="1.7" />
+                                      <path d="M14 8h5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-5V8Z" stroke="currentColor" strokeWidth="1.7" />
+                                    </svg>
+                                    <select
+                                      value={teacherResourceRequestDraft.subjectKey}
+                                      onChange={(event) => onTeacherResourceDraftChange('subjectKey', event.target.value)}
+                                    >
+                                      <option value="">Seleccionar asignatura</option>
+                                      {teacherPlannerSubjectOptions.map((subject) => (
+                                        <option key={subject.key} value={subject.key}>{subject.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </label>
+
+                                <label className="campus-teacher__recursos-field">
+                                  <span>Grado</span>
+                                  <div className="campus-teacher__recursos-input-shell">
+                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
+                                      <path d="M3 10.5 12 6l9 4.5-9 4.5-9-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                                      <path d="M7 13.2v3.3c0 .8 2.2 2 5 2s5-1.2 5-2v-3.3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                    </svg>
+                                    <select
+                                      disabled={!teacherResourceRequestDraft.subjectKey}
+                                      value={teacherResourceRequestDraft.gradeKey}
+                                      onChange={(event) => onTeacherResourceDraftChange('gradeKey', event.target.value)}
+                                    >
+                                      <option value="">Seleccionar grado</option>
+                                      {teacherPlannerGradeOptions.map((grade) => (
+                                        <option key={grade.key} value={grade.key}>{grade.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </label>
+
+                                <label className="campus-teacher__recursos-field">
+                                  <span>Curso</span>
+                                  <div className="campus-teacher__recursos-input-shell">
+                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
+                                      <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
+                                      <circle cx="16.5" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+                                      <path d="M3.8 18.5a5.2 5.2 0 0 1 10.4 0M13.2 18.5a4.2 4.2 0 0 1 7 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                    </svg>
+                                    <select
+                                      disabled={!teacherResourceRequestDraft.gradeKey}
+                                      value={teacherResourceRequestDraft.courseId}
+                                      onChange={(event) => onTeacherResourceDraftChange('courseId', event.target.value)}
+                                    >
+                                      <option value="">Seleccionar curso</option>
+                                      {teacherPlannerCourseOptions.map((course) => (
+                                        <option key={course.id} value={course.id}>
+                                          {getCourseGroupLabel(course) || getCourseDisplayTitle(course)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </label>
+
+                                <label className="campus-teacher__recursos-field">
+                                  <span>Material</span>
+                                  <div className="campus-teacher__recursos-input-shell">
+                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
+                                      <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                                      <path d="M12 12v8M4 8.5 12 12l8-3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                    </svg>
+                                    <select
+                                      value={teacherResourceRequestDraft.materialKey}
+                                      onChange={(event) => onTeacherResourceDraftChange('materialKey', event.target.value)}
+                                    >
+                                      <option value="">Seleccionar material</option>
+                                      {teacherPlannerMaterialOptions.map((material) => (
+                                        <option key={material} value={material}>{material}</option>
+                                      ))}
+                                      <option value="__other__">Otro</option>
+                                    </select>
+                                  </div>
+                                </label>
+
+                                <label className="campus-teacher__recursos-field is-qty">
+                                  <span>Cantidad</span>
+                                  <div className="campus-teacher__recursos-input-shell is-plain">
+                                    <input
+                                      min="1"
+                                      type="number"
+                                      value={teacherResourceRequestDraft.quantity}
+                                      onChange={(event) => onTeacherResourceDraftChange('quantity', event.target.value)}
+                                    />
+                                  </div>
+                                </label>
+                              </div>
+
                               {teacherResourceRequestDraft.materialKey === '__other__' ? (
-                                <label>
-                                  Nombre del material
-                                  <input
-                                    placeholder="Escribe el material"
-                                    value={teacherResourceRequestDraft.customMaterialName}
-                                    onChange={(event) => onTeacherResourceDraftChange('customMaterialName', event.target.value)}
-                                  />
+                                <label className="campus-teacher__recursos-field is-wide">
+                                  <span>Nombre del material</span>
+                                  <div className="campus-teacher__recursos-input-shell is-plain">
+                                    <input
+                                      placeholder="Escribe el material"
+                                      value={teacherResourceRequestDraft.customMaterialName}
+                                      onChange={(event) => onTeacherResourceDraftChange('customMaterialName', event.target.value)}
+                                    />
+                                  </div>
                                 </label>
                               ) : null}
-                              <label>
-                                Cantidad
-                                <input
-                                  min="1"
-                                  type="number"
-                                  value={teacherResourceRequestDraft.quantity}
-                                  onChange={(event) => onTeacherResourceDraftChange('quantity', event.target.value)}
-                                />
-                              </label>
-                              <label className="campus-teacher__resource-field-wide">
-                                Título de actividad
-                                <input
-                                  placeholder="Ej. Collage de ecosistemas"
-                                  value={teacherResourceRequestDraft.activityTitle}
-                                  onChange={(event) => onTeacherResourceDraftChange('activityTitle', event.target.value)}
-                                />
-                              </label>
-                              <label className="campus-teacher__resource-field-wide">
-                                Motivo pedagógico
-                                <textarea
-                                  placeholder="Actividad, proyecto o necesidad del aula"
-                                  rows={3}
-                                  value={teacherResourceRequestDraft.purpose}
-                                  onChange={(event) => onTeacherResourceDraftChange('purpose', event.target.value)}
-                                />
-                              </label>
-                              <label>
-                                Fecha de la actividad
-                                <input
-                                  max={toDateInputValue(selectedTeacherPlannerCycle.endDate) || undefined}
-                                  min={toDateInputValue(selectedTeacherPlannerCycle.startDate) || undefined}
-                                  type="date"
-                                  value={teacherResourceRequestDraft.activityDate}
-                                  onChange={(event) => onTeacherResourceDraftChange('activityDate', event.target.value)}
-                                />
-                                <span className="campus-panel__meta">
-                                  Rango permitido: {formatDateLabel(selectedTeacherPlannerCycle.startDate)} - {formatDateLabel(selectedTeacherPlannerCycle.endDate)}
-                                </span>
-                              </label>
-                            </div>
 
-                            <div className="campus-teacher__card-actions">
-                              <button className="campus-teacher__action-btn" onClick={onAddTeacherResourceActivity} type="button">
-                                Agregar actividad
-                              </button>
-                            </div>
+                              <label className="campus-teacher__recursos-field is-wide">
+                                <span>Título de actividad</span>
+                                <div className="campus-teacher__recursos-input-shell is-plain">
+                                  <input
+                                    placeholder="Ej. Collage de ecosistemas"
+                                    value={teacherResourceRequestDraft.activityTitle}
+                                    onChange={(event) => onTeacherResourceDraftChange('activityTitle', event.target.value)}
+                                  />
+                                </div>
+                              </label>
 
-                            <div className="campus-teacher__planner-table-wrap">
-                              <table className="campus-teacher__planner-table">
+                              <label className="campus-teacher__recursos-field is-wide">
+                                <span>Motivo pedagógico</span>
+                                <div className="campus-teacher__recursos-textarea-shell">
+                                  <textarea
+                                    placeholder="Actividad, proyecto o necesidad del aula"
+                                    rows={3}
+                                    value={teacherResourceRequestDraft.purpose}
+                                    onChange={(event) => onTeacherResourceDraftChange('purpose', event.target.value)}
+                                  />
+                                </div>
+                              </label>
+
+                              <div className="campus-teacher__recursos-date-row">
+                                <label className="campus-teacher__recursos-field">
+                                  <span>Fecha de la actividad</span>
+                                  <div className="campus-teacher__recursos-input-shell">
+                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
+                                      <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                                      <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                                    </svg>
+                                    <input
+                                      max={toDateInputValue(selectedTeacherPlannerCycle.endDate) || undefined}
+                                      min={toDateInputValue(selectedTeacherPlannerCycle.startDate) || undefined}
+                                      type="date"
+                                      value={teacherResourceRequestDraft.activityDate}
+                                      onChange={(event) => onTeacherResourceDraftChange('activityDate', event.target.value)}
+                                    />
+                                  </div>
+                                </label>
+                                <div className="campus-teacher__recursos-range">
+                                  <span>Rango permitido</span>
+                                  <strong>{formatDateLabel(selectedTeacherPlannerCycle.startDate)} – {formatDateLabel(selectedTeacherPlannerCycle.endDate)}</strong>
+                                </div>
+                              </div>
+
+                              <div className="campus-teacher__recursos-add-row">
+                                <button className="campus-teacher__action-btn campus-teacher__recursos-add" onClick={onAddTeacherResourceActivity} type="button">
+                                  + Agregar actividad
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <p className="campus-panel__meta">
+                              Confirmaste que no necesitas material. Envía el planner para notificar a coordinación.
+                            </p>
+                          )}
+                        </section>
+
+                        {!teacherResourceRequestDraft.noMaterialsNeeded ? (
+                          <section className="campus-teacher__recursos-card">
+                            <div className="campus-teacher__recursos-card-head">
+                              <h3>Actividades solicitadas</h3>
+                              <span className="campus-teacher__recursos-count">{teacherResourcePlannerActivities.length}</span>
+                            </div>
+                            <div className="campus-teacher__recursos-table-wrap">
+                              <table className="campus-teacher__recursos-table">
                                 <thead>
                                   <tr>
                                     <th>Asignatura</th>
@@ -8351,7 +10574,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     <th>Cant.</th>
                                     <th>Actividad</th>
                                     <th>Fecha</th>
-                                    <th></th>
+                                    <th>Acciones</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -8368,16 +10591,19 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       <td>{activity.quantity}</td>
                                       <td>
                                         <strong>{activity.title}</strong>
-                                        {activity.purpose ? <div className="campus-panel__meta">{activity.purpose}</div> : null}
+                                        {activity.purpose ? <small>{activity.purpose}</small> : null}
                                       </td>
                                       <td>{formatDateLabel(activity.date)}</td>
                                       <td>
                                         <button
-                                          className="campus-teacher__ghost-btn"
+                                          aria-label="Quitar actividad"
+                                          className="campus-teacher__recursos-delete"
                                           onClick={() => onRemoveTeacherResourceActivity(activity.key)}
                                           type="button"
                                         >
-                                          Quitar
+                                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                                            <path d="M5 7h14M10 11v6M14 11v6M9 7l1-2h4l1 2M8 7l1 12h6l1-12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                                          </svg>
                                         </button>
                                       </td>
                                     </tr>
@@ -8385,41 +10611,58 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 </tbody>
                               </table>
                             </div>
-                          </>
-                        ) : (
-                          <p className="campus-panel__meta">
-                            Confirmaste que no necesitas material. Guarda para notificar a coordinación.
-                          </p>
-                        )}
+                          </section>
+                        ) : null}
 
-                        <div className="campus-teacher__card-actions">
+                        <div className="campus-teacher__recursos-footer">
                           <button
-                            className="campus-teacher__action-btn"
+                            className="campus-teacher__recursos-secondary"
+                            disabled={teacherResourceRequestsQuery.isFetching || teacherPlannerCyclesQuery.isFetching}
+                            onClick={() => {
+                              teacherPlannerCyclesQuery.refetch();
+                              teacherResourceRequestsQuery.refetch();
+                            }}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                              <path d="M4.5 12a7.5 7.5 0 0 1 13.2-4.8M19.5 12a7.5 7.5 0 0 1-13.2 4.8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                              <path d="M17 4.8V7.5h-2.7M7 19.2V16.5h2.7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                            </svg>
+                            Actualizar planner
+                          </button>
+                          <button
+                            className="campus-teacher__action-btn campus-teacher__recursos-submit"
                             disabled={isBusy || (!teacherResourceRequestDraft.noMaterialsNeeded && teacherResourcePlannerActivities.length === 0)}
                             onClick={() => setTeacherPlannerConfirmOpen(true)}
                             type="button"
                           >
+                            <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                              <path d="M4 11.5 20 4l-3.5 16L11 13 4 11.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                              <path d="M11 13 20 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                            </svg>
                             {createTeacherResourceRequestMutation.isPending
                               ? 'Enviando...'
-                              : (selectedTeacherPlannerRequest ? 'Actualizar planner' : 'Enviar a coordinación')}
+                              : (selectedTeacherPlannerRequest ? 'Actualizar y enviar' : 'Enviar planner')}
                           </button>
                         </div>
-                      </div>
+                      </>
                     ) : null}
                   </div>
+                ) : teacherPlannerCycles.length > 0 ? (
+                  <p className="campus-panel__meta">Selecciona un periodo para solicitar materiales.</p>
                 ) : null}
 
                 {teacherPlannerConfirmOpen ? (
-                  <div className="campus-teacher__planner-modal" role="dialog" aria-modal="true">
-                    <div className="campus-teacher__planner-modal-card">
+                  <div className="campus-teacher__recursos-modal" role="dialog" aria-modal="true">
+                    <div className="campus-teacher__recursos-modal-card">
                       <h4>¿Confirmas el envío?</h4>
                       <p>
                         {teacherResourceRequestDraft.noMaterialsNeeded
                           ? '¿Confirmas que no necesitas material para este rango de fechas?'
                           : '¿Esta es toda la solicitud de materiales que necesitas para este rango de fechas?'}
                       </p>
-                      <div className="campus-teacher__card-actions">
-                        <button className="campus-teacher__ghost-btn" onClick={() => setTeacherPlannerConfirmOpen(false)} type="button">
+                      <div className="campus-teacher__recursos-modal-actions">
+                        <button className="campus-teacher__recursos-secondary" onClick={() => setTeacherPlannerConfirmOpen(false)} type="button">
                           Revisar otra vez
                         </button>
                         <button className="campus-teacher__action-btn" disabled={isBusy} onClick={onSubmitTeacherResourceRequest} type="button">
@@ -8596,9 +10839,9 @@ function TeacherCampusHome({ forcePreview = false }) {
             ) : null}
 
             {activeTeacherSection === 'staff_announcements' ? (
-              <article className="campus-teacher__resource-panel campus-teacher__embedded-panel">
+              <article className="campus-teacher__embedded-panel">
                 <StaffAnnouncementsPanel
-                  description="Consulta los mensajes internos de rectoría y coordinación, y confirma cuando los hayas leído."
+                  description="Recibe y confirma mensajes internos de rectoría y coordinación."
                   mode="inbox"
                   title="Comunicados internos"
                 />
@@ -8606,183 +10849,311 @@ function TeacherCampusHome({ forcePreview = false }) {
             ) : null}
 
             {activeTeacherSection === 'dashboard' ? (
-              <article className="campus-teacher__integral-panel campus-teacher__embedded-panel">
-                <div className={`campus-teacher__integral-kpi-grid${isOverviewMetricsLoading ? ' is-loading' : ''}`}>
-                  {isOverviewMetricsLoading ? Array.from({ length: 6 }, (_, index) => (
-                    <article className="campus-teacher__integral-kpi-card campus-teacher__integral-kpi-card--skeleton" key={`teacher-kpi-skeleton-${index}`} aria-hidden="true">
-                      <div className="campus-teacher__integral-kpi-skeleton-icon" />
-                      <div className="campus-teacher__integral-kpi-skeleton-copy">
-                        <span />
-                        <strong />
-                        <p />
-                      </div>
+              <article className="campus-teacher__home-panel campus-teacher__embedded-panel">
+                <header className="campus-teacher__home-hero">
+                  <div>
+                    <h2>Bienvenido, {teacherWelcomeName} 👋</h2>
+                    <p>Un resumen claro de tus cursos, alumnos y pendientes de hoy.</p>
+                  </div>
+                  <div className="campus-teacher__home-hero-date">
+                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                      <rect height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                      <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                    </svg>
+                    <span>{todayWelcomeLabel}</span>
+                  </div>
+                </header>
+
+                <div className={`campus-teacher__home-kpi-grid${isOverviewMetricsLoading ? ' is-loading' : ''}`}>
+                  {isOverviewMetricsLoading ? Array.from({ length: 5 }, (_, index) => (
+                    <article className="campus-teacher__home-kpi-card is-skeleton" key={`teacher-home-kpi-skeleton-${index}`} aria-hidden="true">
+                      <span />
+                      <strong />
+                      <p />
+                      <em />
                     </article>
                   )) : (
                     <>
-                  <article className="campus-teacher__integral-kpi-card tone-neutral">
-                    <div aria-hidden="true" className="campus-teacher__integral-kpi-icon tone-neutral">
-                      <TeacherDashboardKpiIcon kind="students" />
-                    </div>
-                    <div className="campus-teacher__integral-kpi-copy">
-                      <span className="campus-teacher__integral-kpi-label">Alumnos</span>
-                      <strong>{integralOverview.totalStudents}</strong>
-                      <p>Total en tus cursos activos.</p>
-                    </div>
-                  </article>
+                      <article className="campus-teacher__home-kpi-card tone-students">
+                        <span className="campus-teacher__home-kpi-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="students" />
+                        </span>
+                        <span className="campus-teacher__home-kpi-label">Alumnos</span>
+                        <strong>{integralOverview.totalStudents}</strong>
+                        <p>En tus cursos activos</p>
+                        <button
+                          className="campus-teacher__home-kpi-link"
+                          onClick={() => setActiveTeacherSection('courses')}
+                          type="button"
+                        >
+                          Ver todos →
+                        </button>
+                      </article>
 
-                  <article className={`campus-teacher__integral-kpi-card${integralOverview.averageTrendDelta !== null && integralOverview.averageTrendDelta < 0 ? ' tone-danger' : ' tone-good'}`}>
-                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.averageTrendDelta !== null && integralOverview.averageTrendDelta < 0 ? ' tone-danger' : ' tone-good'}`}>
-                      <TeacherDashboardKpiIcon kind="average" />
-                    </div>
-                    <div className="campus-teacher__integral-kpi-copy">
-                      <span className="campus-teacher__integral-kpi-label">Promedio general</span>
-                      <strong>{integralOverview.averageScore === null ? 'Sin notas' : integralOverview.averageScore}</strong>
-                      <p>
-                        {integralOverview.averageTrendDelta === null
-                          ? 'Aún no hay tendencia entre periodos.'
-                          : `${integralOverview.averageTrendDelta >= 0 ? 'Subió' : 'Bajó'} ${Math.abs(integralOverview.averageTrendDelta)} pts vs. el primer periodo.`}
-                      </p>
-                    </div>
-                  </article>
+                      <article className="campus-teacher__home-kpi-card tone-average">
+                        <span className="campus-teacher__home-kpi-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="average" />
+                        </span>
+                        <span className="campus-teacher__home-kpi-label">Promedio general</span>
+                        <strong>{integralOverview.averageScore === null ? '—' : integralOverview.averageScore}</strong>
+                        <p>
+                          {integralOverview.averageTrendDelta === null
+                            ? 'Aún no hay tendencia'
+                            : `${integralOverview.averageTrendDelta >= 0 ? 'Subió' : 'Bajó'} ${Math.abs(integralOverview.averageTrendDelta)} pts`}
+                        </p>
+                        <button
+                          className="campus-teacher__home-kpi-link"
+                          onClick={() => {
+                            document.getElementById('teacher-home-performance')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }}
+                          type="button"
+                        >
+                          Ver detalle →
+                        </button>
+                      </article>
 
-                  <button
-                    className={`campus-teacher__integral-kpi-card campus-teacher__integral-kpi-card--button${integralOverview.atRiskCount > 0 ? ' tone-danger' : ' tone-good'}`}
-                    onClick={() => setActiveIntegralModal('risk')}
-                    type="button"
-                  >
-                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.atRiskCount > 0 ? ' tone-danger' : ' tone-good'}`}>
-                      <TeacherDashboardKpiIcon kind="risk" />
-                    </div>
-                    <div className="campus-teacher__integral-kpi-copy">
-                      <span className="campus-teacher__integral-kpi-label">En riesgo</span>
-                      <strong>{integralOverview.atRiskCount}</strong>
-                      <p>{integralOverview.lowPerformanceRate === null ? 'Sin calificaciones registradas aún.' : `${integralOverview.lowPerformanceRate}% con bajo rendimiento.`}</p>
-                    </div>
-                  </button>
+                      <button
+                        className={`campus-teacher__home-kpi-card tone-risk${integralOverview.atRiskCount > 0 ? ' has-alert' : ''}`}
+                        onClick={() => setActiveIntegralModal('risk')}
+                        type="button"
+                      >
+                        <span className="campus-teacher__home-kpi-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="risk" />
+                        </span>
+                        <span className="campus-teacher__home-kpi-label">En riesgo</span>
+                        <strong>{integralOverview.atRiskCount}</strong>
+                        <p>
+                          {integralOverview.lowPerformanceRate === null
+                            ? 'Sin calificaciones aún'
+                            : `${integralOverview.lowPerformanceRate}% bajo rendimiento`}
+                        </p>
+                        <span className="campus-teacher__home-kpi-link">Ver alumnos →</span>
+                      </button>
 
-                  <button
-                    className={`campus-teacher__integral-kpi-card campus-teacher__integral-kpi-card--button${integralOverview.pendingGradingCount > 0 ? ' tone-warn' : ' tone-good'}`}
-                    onClick={() => setActiveIntegralModal('pending')}
-                    type="button"
-                  >
-                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.pendingGradingCount > 0 ? ' tone-warn' : ' tone-good'}`}>
-                      <TeacherDashboardKpiIcon kind="pending" />
-                    </div>
-                    <div className="campus-teacher__integral-kpi-copy">
-                      <span className="campus-teacher__integral-kpi-label">Por calificar</span>
-                      <strong>{integralOverview.pendingGradingCount}</strong>
-                      <p>{integralOverview.pendingGradingCount > 0 ? 'Actividades esperando tu revisión.' : 'Todo al día en tus cursos.'}</p>
-                    </div>
-                  </button>
+                      <button
+                        className={`campus-teacher__home-kpi-card tone-pending${integralOverview.pendingGradingCount > 0 ? ' has-alert' : ''}`}
+                        onClick={() => setActiveIntegralModal('pending')}
+                        type="button"
+                      >
+                        <span className="campus-teacher__home-kpi-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="pending" />
+                        </span>
+                        <span className="campus-teacher__home-kpi-label">Por calificar</span>
+                        <strong>{integralOverview.pendingGradingCount}</strong>
+                        <p>{integralOverview.pendingGradingCount > 0 ? 'Actividades pendientes' : 'Todo al día'}</p>
+                        <span className="campus-teacher__home-kpi-link">Calificar ahora →</span>
+                      </button>
 
-                  <button
-                    className={`campus-teacher__integral-kpi-card campus-teacher__integral-kpi-card--button${integralOverview.tomorrowActivitiesCount > 0 ? ' tone-warn' : ' tone-neutral'}`}
-                    onClick={() => setActiveIntegralModal('tomorrow')}
-                    type="button"
-                  >
-                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon${integralOverview.tomorrowActivitiesCount > 0 ? ' tone-warn' : ' tone-neutral'}`}>
-                      <TeacherDashboardKpiIcon kind="tomorrow" />
-                    </div>
-                    <div className="campus-teacher__integral-kpi-copy">
-                      <span className="campus-teacher__integral-kpi-label">Para mañana</span>
-                      <strong>{integralOverview.tomorrowActivitiesCount}</strong>
-                      <p>{integralOverview.tomorrowActivitiesCount > 0 ? integralOverview.tomorrowLabel : 'Nada programado por ahora.'}</p>
-                    </div>
-                  </button>
-
-                  <article className={`campus-teacher__integral-kpi-card tone-${integralOverview.healthTone}`}>
-                    <div aria-hidden="true" className={`campus-teacher__integral-kpi-icon tone-${integralOverview.healthTone}`}>
-                      <TeacherDashboardKpiIcon kind="health" />
-                    </div>
-                    <div className="campus-teacher__integral-kpi-copy">
-                      <span className="campus-teacher__integral-kpi-label">Estado general</span>
-                      <strong>{integralOverview.healthStatus}</strong>
-                      <p>{integralOverview.healthScore === null ? 'Aparecerá cuando registres las primeras notas.' : `Índice ${integralOverview.healthScore} según notas, riesgo y cobertura.`}</p>
-                    </div>
-                  </article>
+                      <button
+                        className="campus-teacher__home-kpi-card tone-tomorrow"
+                        onClick={() => {
+                          const tomorrow = new Date();
+                          tomorrow.setDate(tomorrow.getDate() + 1);
+                          const tomorrowValue = buildLocalDateValue(tomorrow);
+                          setDashboardCalendarMonth(new Date(tomorrow.getFullYear(), tomorrow.getMonth(), 1));
+                          setSelectedDashboardCalendarDate(tomorrowValue);
+                          setActiveIntegralModal('tomorrow');
+                        }}
+                        type="button"
+                      >
+                        <span className="campus-teacher__home-kpi-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="tomorrow" />
+                        </span>
+                        <span className="campus-teacher__home-kpi-label">Para mañana</span>
+                        <strong>{integralOverview.tomorrowActivitiesCount}</strong>
+                        <p>{integralOverview.tomorrowActivitiesCount > 0 ? integralOverview.tomorrowLabel : 'Nada programado'}</p>
+                        <span className="campus-teacher__home-kpi-link">Ver agenda →</span>
+                      </button>
                     </>
                   )}
                 </div>
 
-                {isOverviewMetricsLoading ? (
-                  <p className="campus-teacher__metrics-loading-note">Calculando indicadores académicos en segundo plano...</p>
-                ) : null}
+                <div className={`campus-teacher__home-main${isDashboardCalendarExpanded ? ' is-calendar-expanded' : ''}`}>
+                  <article className="campus-teacher__home-calendar">
+                    <header className="campus-teacher__home-card-head">
+                      <div className="campus-teacher__home-card-title">
+                        <span className="campus-teacher__home-card-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="tomorrow" />
+                        </span>
+                        <div>
+                          <strong>Calendario de actividades</strong>
+                          <p>Tus próximas actividades y entregas</p>
+                        </div>
+                      </div>
+                      <div className="campus-teacher__home-calendar-tools">
+                        <button
+                          className="campus-teacher__home-icon-btn"
+                          onClick={() => setDashboardCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
+                          type="button"
+                          aria-label="Mes anterior"
+                        >
+                          ‹
+                        </button>
+                        <span className="campus-teacher__home-calendar-month">{formatMonthLabel(dashboardCalendarMonth)}</span>
+                        <button
+                          className="campus-teacher__home-icon-btn"
+                          onClick={() => setDashboardCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                          type="button"
+                          aria-label="Mes siguiente"
+                        >
+                          ›
+                        </button>
+                        <button
+                          aria-expanded={isDashboardCalendarExpanded}
+                          aria-label={isDashboardCalendarExpanded ? 'Contraer calendario' : 'Expandir calendario'}
+                          className={`campus-teacher__home-icon-btn campus-teacher__home-expand-btn${isDashboardCalendarExpanded ? ' is-expanded' : ''}`}
+                          onClick={() => setIsDashboardCalendarExpanded((current) => !current)}
+                          type="button"
+                        >
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            {isDashboardCalendarExpanded ? (
+                              <path d="M9 3H3v6M15 3h6v6M9 21H3v-6M21 15v6h-6M14 10l7-7M10 14l-7 7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                            ) : (
+                              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                            )}
+                          </svg>
+                        </button>
+                      </div>
+                    </header>
 
-                <article className="campus-teacher__integral-card campus-teacher__panel-surface campus-teacher__dashboard-calendar">
-                  <div className="campus-teacher__section-head">
-                    <div>
-                      <span className="campus-panel__kicker">Calendario de actividades</span>
-                      <h3>Tus asignaciones en todos los cursos</h3>
-                    </div>
-                    <div className="campus-teacher__activity-timeline-nav">
-                      <button className="campus-teacher__ghost-btn" onClick={() => setDashboardCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))} type="button">
-                        Mes anterior
-                      </button>
-                      <button className="campus-teacher__ghost-btn" onClick={() => setDashboardCalendarMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))} type="button">
-                        Mes siguiente
-                      </button>
-                    </div>
-                  </div>
-                  <p className="campus-panel__meta">Revisa en un solo lugar las tareas, quices, proyectos y demás actividades evaluativas que publicaste en todos tus cursos.</p>
-                  {!previewEnabled && teacherDashboardCalendarQuery.isLoading ? <p className="campus-panel__meta">Cargando calendario...</p> : null}
-                  {!previewEnabled && teacherDashboardCalendarQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el calendario de actividades.</p> : null}
-                  <div className="campus-teacher__activity-calendar-shell">
-                    <div className="campus-teacher__activity-calendar-header">
-                      <p>Calendario mensual</p>
-                      <strong>{formatMonthLabel(dashboardCalendarMonth)}</strong>
-                    </div>
-                    <div className="campus-teacher__activity-calendar-grid" role="list" aria-label={`Calendario de actividades del docente para ${formatMonthLabel(dashboardCalendarMonth)}`}>
+                    {!previewEnabled && teacherDashboardCalendarQuery.isLoading ? <p className="campus-panel__meta">Cargando calendario...</p> : null}
+                    {!previewEnabled && teacherDashboardCalendarQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el calendario de actividades.</p> : null}
+
+                    <div className="campus-teacher__home-month-grid" role="list" aria-label={`Calendario de actividades del docente para ${formatMonthLabel(dashboardCalendarMonth)}`}>
                       {weekdayShortLabels.map((label) => (
-                        <div className="campus-teacher__activity-calendar-weekday" key={`dashboard-calendar-weekday-${label}`} role="listitem" aria-hidden="true">
+                        <div className="campus-teacher__home-month-weekday" key={`home-calendar-weekday-${label}`} role="listitem" aria-hidden="true">
                           {label}
                         </div>
                       ))}
                       {dashboardCalendarGrid.map((cell) => (
                         cell.empty ? (
-                          <div className="campus-teacher__activity-calendar-empty" key={cell.key} aria-hidden="true" />
+                          <div className="campus-teacher__home-month-empty" key={cell.key} aria-hidden="true" />
                         ) : (
                           <button
-                            className={`campus-teacher__activity-calendar-day${cell.isToday ? ' is-today' : ''}${cell.hasActivity ? ' has-activity' : ''}`}
+                            className={[
+                              'campus-teacher__home-month-day',
+                              cell.isToday ? 'is-today' : '',
+                              cell.hasActivity ? 'has-activity' : '',
+                              selectedDashboardCalendarDate === cell.dateValue ? 'is-selected' : '',
+                            ].filter(Boolean).join(' ')}
                             key={cell.key}
                             onClick={() => setSelectedDashboardCalendarDate(cell.dateValue)}
                             role="listitem"
                             title={cell.title || undefined}
                             type="button"
                           >
-                            <div className="day-number-row">
-                              <span className="day-number">{cell.dayNumber}</span>
-                              {cell.itemCount > 0 ? <span className="day-count">({cell.itemCount})</span> : null}
-                            </div>
-                            {cell.primaryChip ? <span className="day-chip primary" title={cell.primaryChip.title}>{cell.primaryChip.label}</span> : null}
-                            {cell.secondaryChip ? <span className="day-chip secondary" title={cell.secondaryChip.title}>{cell.secondaryChip.label}</span> : null}
-                            {!cell.primaryChip && !cell.secondaryChip ? <span className="day-chip empty">Sin act.</span> : null}
+                            <span>{cell.dayNumber}</span>
+                            {cell.hasActivity ? <i aria-hidden="true" /> : null}
                           </button>
                         )
                       ))}
                     </div>
-                  </div>
-                  <div className="campus-teacher__dashboard-calendar-upcoming">
-                    <header className="campus-teacher__integral-card-head">
-                      <span className="campus-teacher__integral-card-label">Próximas actividades</span>
-                      <h3>Lo que viene este mes</h3>
-                      <p className="campus-teacher__integral-card-lead">Tareas, quices y evaluaciones programadas en tus cursos.</p>
-                    </header>
-                    <div className="campus-teacher__integral-activity-list">
-                      {upcomingDashboardActivities.length > 0 ? upcomingDashboardActivities.map((item) => (
-                        <article className="campus-teacher__integral-activity" key={item.id}>
-                          <div className="campus-teacher__integral-activity-copy">
-                            <span className="campus-teacher__integral-activity-type">{item.typeLabel}</span>
-                            <strong>{item.title}</strong>
-                            <p>{item.courseTitle}</p>
-                          </div>
-                          <div className="campus-teacher__integral-activity-meta">
-                            <span>{item.dateLabel}</span>
-                          </div>
-                        </article>
-                      )) : <p className="campus-teacher__integral-empty">No hay actividades evaluativas próximas en este mes.</p>}
+
+                    <div className="campus-teacher__home-day-panel">
+                      <header>
+                        <strong>
+                          {selectedDashboardCalendarDay
+                            ? selectedDashboardCalendarDay.formattedDate
+                            : 'Selecciona un día'}
+                        </strong>
+                        <span>
+                          {selectedDashboardCalendarDay
+                            ? `${selectedDashboardCalendarDay.itemCount} actividad${selectedDashboardCalendarDay.itemCount === 1 ? '' : 'es'}`
+                            : 'Del mes'}
+                        </span>
+                      </header>
+                      <div className="campus-teacher__home-day-list">
+                        {selectedDashboardCalendarDay?.items?.length ? selectedDashboardCalendarDay.items.map((item) => (
+                          item.kind === 'activity' ? (
+                            <button
+                              className="campus-teacher__home-day-item"
+                              key={item.key}
+                              onClick={() => openAssignmentDetail(item)}
+                              type="button"
+                            >
+                              <div className="campus-teacher__home-day-item-copy">
+                                <strong>{getTimelineActivityCourseContext(item, academicCourses)}</strong>
+                                <p>{item.label}</p>
+                              </div>
+                              <span className="campus-teacher__home-day-tag">{item.typeLabel || 'Actividad'}</span>
+                            </button>
+                          ) : (
+                            <article className="campus-teacher__home-day-item is-static" key={item.key}>
+                              <div className="campus-teacher__home-day-item-copy">
+                                <strong>{item.label}</strong>
+                                <p>{item.description}</p>
+                              </div>
+                              <span className="campus-teacher__home-day-tag tone-class">{item.meta || 'Clase'}</span>
+                            </article>
+                          )
+                        )) : (
+                          <p className="campus-teacher__home-day-empty">
+                            {selectedDashboardCalendarDay
+                              ? 'No hay actividades programadas para este día.'
+                              : 'Elige un día del calendario para ver sus actividades.'}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </article>
+                  </article>
+
+                  <article className="campus-teacher__home-performance" id="teacher-home-performance">
+                    <header className="campus-teacher__home-card-head">
+                      <div className="campus-teacher__home-card-title">
+                        <span className="campus-teacher__home-card-icon tone-performance" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="average" />
+                        </span>
+                        <div>
+                          <strong>Rendimiento por curso</strong>
+                          <p>Promedio general por curso</p>
+                        </div>
+                      </div>
+                      <button
+                        className="campus-teacher__home-text-link"
+                        onClick={() => setActiveTeacherSection('academic_management')}
+                        type="button"
+                      >
+                        Ver reporte completo →
+                      </button>
+                    </header>
+
+                    <div className="campus-teacher__home-performance-list">
+                      {visibleDashboardCoursePerformance.length > 0 ? visibleDashboardCoursePerformance.map((course) => (
+                        <button
+                          className={`campus-teacher__home-performance-row tone-${course.tone}`}
+                          key={course.id}
+                          onClick={() => openCourseFromSearch(course.id)}
+                          type="button"
+                        >
+                          <div className="campus-teacher__home-performance-meta">
+                            <strong>{course.label}</strong>
+                            <span
+                              style={course.color ? { color: course.color } : undefined}
+                              title={course.levelLabel || undefined}
+                            >
+                              {course.averageScore === null ? 'Sin notas' : course.averageScore}
+                            </span>
+                          </div>
+                          <div className="campus-teacher__home-performance-track" aria-hidden="true">
+                            <span
+                              style={{
+                                width: `${course.percent}%`,
+                                ...(course.color ? { background: course.color } : {}),
+                              }}
+                            />
+                          </div>
+                        </button>
+                      )) : (
+                        <p className="campus-teacher__home-day-empty">Todavía no tienes cursos con promedio para mostrar.</p>
+                      )}
+                      {dashboardCoursePerformance.length > 8 ? (
+                        <p className="campus-teacher__home-performance-more">
+                          Mostrando 8 de {dashboardCoursePerformance.length}. Usa “Ver reporte completo” para el resto.
+                        </p>
+                      ) : null}
+                    </div>
+                  </article>
+                </div>
 
                 {activeIntegralModal === 'risk' ? (
                   <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setActiveIntegralModal('')} role="presentation">
@@ -8891,224 +11262,211 @@ function TeacherCampusHome({ forcePreview = false }) {
                     </div>
                   </div>
                 ) : null}
-
-                {activeTeacherSection === 'dashboard' && selectedDashboardCalendarDay ? (
-                  <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setSelectedDashboardCalendarDate('')} role="presentation">
-                    <div
-                      aria-label={`Actividades del ${selectedDashboardCalendarDay.formattedDate}`}
-                      aria-modal="true"
-                      className="campus-teacher__timeline-modal"
-                      onClick={(event) => event.stopPropagation()}
-                      role="dialog"
-                    >
-                      <div className="campus-teacher__timeline-modal-head">
-                        <div>
-                          <span className="campus-panel__kicker">Actividades del día</span>
-                          <h3>{selectedDashboardCalendarDay.formattedDate}</h3>
-                        </div>
-                        <button className="campus-teacher__ghost-btn" onClick={() => setSelectedDashboardCalendarDate('')} type="button">
-                          Cerrar
-                        </button>
-                      </div>
-
-                      <div className="campus-teacher__timeline-modal-body">
-                        {selectedDashboardCalendarDay.items.length > 0 ? selectedDashboardCalendarDay.items.map((item) => (
-                          item.kind === 'activity' ? (
-                            <button
-                              className="campus-teacher__timeline-modal-item is-activity is-clickable"
-                              key={item.key}
-                              onClick={() => openAssignmentDetail(item)}
-                              type="button"
-                            >
-                              <span className="campus-teacher__timeline-modal-item-kind">Actividad</span>
-                              <strong>{item.label}</strong>
-                              <span>{item.meta}</span>
-                              <p>{item.description}</p>
-                              <span className="campus-teacher__timeline-modal-item-action">Ver asignación</span>
-                            </button>
-                          ) : (
-                            <article className="campus-teacher__timeline-modal-item is-class" key={item.key}>
-                              <span className="campus-teacher__timeline-modal-item-kind">Clase</span>
-                              <strong>{item.label}</strong>
-                              <span>{item.meta}</span>
-                              <p>{item.description}</p>
-                            </article>
-                          )
-                        )) : <p className="campus-panel__meta">No hay actividades programadas para este día.</p>}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {isOverviewMetricsLoading ? (
-                  <div className="campus-teacher__integral-grid campus-teacher__integral-grid--loading">
-                    {Array.from({ length: 4 }, (_, index) => (
-                      <article className="campus-teacher__integral-card campus-teacher__integral-card--skeleton" key={`teacher-integral-skeleton-${index}`} aria-hidden="true">
-                        <div className="campus-teacher__integral-skeleton-line is-wide" />
-                        <div className="campus-teacher__integral-skeleton-line" />
-                        <div className="campus-teacher__integral-skeleton-block" />
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                <div className="campus-teacher__integral-grid">
-                  <article className="campus-teacher__integral-card campus-teacher__integral-card--performance">
-                    <header className="campus-teacher__integral-card-head">
-                      <span className="campus-teacher__integral-card-label">Rendimiento académico</span>
-                      <h3>Cómo van tus estudiantes</h3>
-                      <p className="campus-teacher__integral-card-lead">Promedios y tendencias con base en las notas que ya registraste.</p>
-                    </header>
-                    <div className="campus-teacher__integral-stat-grid">
-                      <div className="campus-teacher__integral-stat-tile">
-                        <span className="campus-teacher__integral-stat-label">Promedio general</span>
-                        <strong>{integralOverview.averageScore === null ? 'Sin notas' : integralOverview.averageScore}</strong>
-                      </div>
-                      <div className="campus-teacher__integral-stat-tile">
-                        <span className="campus-teacher__integral-stat-label">Evolución del promedio</span>
-                        <strong>{integralOverview.averageTrendDelta === null ? 'Sin tendencia' : `${integralOverview.averageTrendDelta >= 0 ? 'Subió' : 'Bajó'} ${Math.abs(integralOverview.averageTrendDelta)}`}</strong>
-                      </div>
-                      <div className="campus-teacher__integral-stat-tile">
-                        <span className="campus-teacher__integral-stat-label">Estudiantes aprobando</span>
-                        <strong>{integralOverview.approvedRate === null ? 'Sin datos' : `${integralOverview.approvedRate}%`}</strong>
-                      </div>
-                      <div className="campus-teacher__integral-stat-tile">
-                        <span className="campus-teacher__integral-stat-label">Bajo rendimiento</span>
-                        <strong>{integralOverview.lowPerformanceRate === null ? 'Sin datos' : `${integralOverview.lowPerformanceRate}%`}</strong>
-                      </div>
-                    </div>
-                  </article>
-
-                  <article className="campus-teacher__integral-card campus-teacher__integral-card--risk">
-                    <header className="campus-teacher__integral-card-head">
-                      <span className="campus-teacher__integral-card-label">Riesgo académico</span>
-                      <h3>Estudiantes que necesitan apoyo</h3>
-                      <p className="campus-teacher__integral-card-lead">Alertas que se actualizan automáticamente con cada calificación.</p>
-                    </header>
-                    <div className="campus-teacher__integral-alerts">
-                      <article className="campus-teacher__integral-alert-chip tone-danger">
-                        <strong>{integralOverview.atRiskCount}</strong>
-                        <span>en riesgo académico</span>
-                      </article>
-                      <article className="campus-teacher__integral-alert-chip tone-warn">
-                        <strong>{integralOverview.droppingStudentsCount}</strong>
-                        <span>con tendencia a la baja</span>
-                      </article>
-                    </div>
-                    <div className="campus-teacher__integral-insights">
-                      {integralOverview.riskAlerts.length > 0 ? integralOverview.riskAlerts.map((alertText) => (
-                        <div className="campus-teacher__integral-insight" key={alertText}>{alertText}</div>
-                      )) : <p className="campus-teacher__integral-empty">Todo tranquilo por ahora. No hay alertas críticas activas.</p>}
-                    </div>
-                  </article>
-
-                  <article className="campus-teacher__integral-card campus-teacher__integral-card--topics">
-                    <header className="campus-teacher__integral-card-head">
-                      <span className="campus-teacher__integral-card-label">Comprensión del curso</span>
-                      <h3>Temas donde conviene reforzar</h3>
-                      <p className="campus-teacher__integral-card-lead">Componentes con mayor dificultad según las calificaciones registradas.</p>
-                    </header>
-                    <div className="campus-teacher__integral-topics">
-                      {integralOverview.weakestTopics.length > 0 ? integralOverview.weakestTopics.map((topic) => (
-                        <article className="campus-teacher__integral-topic" key={topic.key}>
-                          <div className="campus-teacher__integral-topic-copy">
-                            <strong>{topic.label}</strong>
-                            <p>{topic.failedRate}% de estudiantes con dificultad</p>
-                          </div>
-                          <div className="campus-teacher__integral-topic-metrics">
-                            <span>Promedio {topic.averageScore}</span>
-                            <span>Dominio {topic.masteryRate}%</span>
-                          </div>
-                        </article>
-                      )) : <p className="campus-teacher__integral-empty">Todavía no hay suficientes calificaciones para detectar temas críticos.</p>}
-                    </div>
-                  </article>
-
-                  <article className="campus-teacher__integral-card campus-teacher__integral-card--activity">
-                    <header className="campus-teacher__integral-card-head">
-                      <span className="campus-teacher__integral-card-label">Actividad reciente</span>
-                      <h3>Lo último en tus cursos</h3>
-                      <p className="campus-teacher__integral-card-lead">Publicaciones y evaluaciones más recientes en el aula.</p>
-                    </header>
-                    <div className="campus-teacher__integral-activity-list">
-                      {integralOverview.recentActivity.length > 0 ? integralOverview.recentActivity.map((item) => (
-                        <article className="campus-teacher__integral-activity" key={item.id}>
-                          <div className="campus-teacher__integral-activity-copy">
-                            <span className="campus-teacher__integral-activity-type">{item.typeLabel}</span>
-                            <strong>{item.title}</strong>
-                            <p>{item.courseTitle}</p>
-                          </div>
-                          <div className="campus-teacher__integral-activity-meta">
-                            <span>{item.dateLabel}</span>
-                          </div>
-                        </article>
-                      )) : <p className="campus-teacher__integral-empty">Todavía no hay eventos recientes para mostrar.</p>}
-                    </div>
-                  </article>
-                </div>
-                )}
               </article>
             ) : null}
 
             {activeTeacherSection === 'schedule' ? (
-              <article className="campus-teacher__schedule-panel campus-teacher__panel-surface campus-teacher__embedded-panel">
-                <div className="campus-teacher__course-detail-card campus-teacher__course-detail-card--portal">
-                  <div className="campus-teacher__course-top">
-                    <div>
-                      <h4>Horario semanal designado</h4>
-                      <p>Rectoría define estos bloques según tus asignaturas y cursos asignados.</p>
-                    </div>
-                    <span className="campus-teacher__mode-pill">{teacherWeeklySchedule?.totalBlocks || 0} bloques</span>
+              <article className="campus-teacher__horario-panel campus-teacher__embedded-panel">
+                <header className="campus-teacher__horario-hero">
+                  <div>
+                    <span className="campus-teacher__horario-kicker">Horario</span>
+                    <h2>Consultar el horario asignado desde Rectoría.</h2>
+                    <p>Aquí puedes ver tus clases, espacios y bloques asignados para la semana.</p>
                   </div>
+                  <button
+                    className="campus-teacher__horario-export"
+                    disabled={(teacherWeeklySchedule?.slots || []).length === 0}
+                    onClick={() => {
+                      exportTeacherWeeklyScheduleCsv(teacherWeeklySchedule, teacherWeeklySchedule?.weekdays || []);
+                      setNotice({ type: 'success', text: 'Horario exportado en CSV.' });
+                    }}
+                    type="button"
+                  >
+                    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                      <path d="M12 3v12M8 11l4 4 4-4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                      <path d="M5 19h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+                    </svg>
+                    Exportar horario
+                  </button>
+                </header>
+
+                <div className="campus-teacher__horario-tiles">
+                  <article className="campus-teacher__horario-tile tone-blue">
+                    <span aria-hidden="true">
+                      <svg fill="none" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                        <path d="M12 8v4.5l3 1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                      </svg>
+                    </span>
+                    <div>
+                      <strong>Jornada base</strong>
+                      <p>{scheduleBaseRangeLabel}</p>
+                    </div>
+                  </article>
+                  <article className="campus-teacher__horario-tile tone-purple">
+                    <span aria-hidden="true">
+                      <svg fill="none" viewBox="0 0 24 24">
+                        <rect height="14" rx="2.5" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="5" />
+                        <path d="M9 3v4M15 3v4M5 10h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                      </svg>
+                    </span>
+                    <div>
+                      <strong>Los espacios sin clase</strong>
+                      <p>se muestran dentro de la jornada.</p>
+                    </div>
+                  </article>
+                  <article className="campus-teacher__horario-tile tone-green">
+                    <span aria-hidden="true">
+                      <svg fill="none" viewBox="0 0 24 24">
+                        <path d="M9 11l3 3L20 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                        <path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                      </svg>
+                    </span>
+                    <div>
+                      <strong>Horario semanal designado</strong>
+                      <p>Rectoría define estos bloques según tus asignaturas y cursos.</p>
+                    </div>
+                  </article>
                 </div>
+
                 {(teacherWeeklySchedule?.slots || []).length > 0 ? (
                   <>
-                    <div className="campus-teacher__schedule-meta-strip">
-                      <span>Jornada base: {teacherWeeklySchedule?.timeRange?.startTime || '06:00'} - {teacherWeeklySchedule?.timeRange?.endTime || '16:00'}</span>
-                      <span>Los espacios sin clase se muestran dentro de la jornada.</span>
+                    <div className="campus-teacher__horario-toolbar">
+                      <div className="campus-teacher__horario-week-nav">
+                        <button
+                          aria-label="Semana anterior"
+                          className="campus-teacher__horario-icon-btn"
+                          onClick={() => setScheduleWeekAnchor((current) => addDaysToDate(current, -7))}
+                          type="button"
+                        >
+                          ‹
+                        </button>
+                        <button
+                          aria-label="Semana siguiente"
+                          className="campus-teacher__horario-icon-btn"
+                          onClick={() => setScheduleWeekAnchor((current) => addDaysToDate(current, 7))}
+                          type="button"
+                        >
+                          ›
+                        </button>
+                        <div className="campus-teacher__horario-week-label">
+                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                            <rect height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
+                            <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                          </svg>
+                          <strong>{scheduleWeekRangeLabel}</strong>
+                        </div>
+                      </div>
+
+                      <div className="campus-teacher__horario-toolbar-actions">
+                        <div className="campus-teacher__horario-mode" role="group" aria-label="Vista del horario">
+                          <button
+                            className={scheduleViewMode === 'week' ? 'is-active' : ''}
+                            onClick={() => setScheduleViewMode('week')}
+                            type="button"
+                          >
+                            Semana
+                          </button>
+                          <button
+                            className={scheduleViewMode === 'day' ? 'is-active' : ''}
+                            onClick={() => {
+                              setScheduleViewMode('day');
+                              const today = new Date().getDay();
+                              setScheduleSelectedWeekday(today >= 1 && today <= 5 ? today : 1);
+                            }}
+                            type="button"
+                          >
+                            Día
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="campus-teacher__schedule-table-wrap">
-                      <table className="campus-teacher__schedule-table">
+
+                    {scheduleViewMode === 'day' ? (
+                      <div className="campus-teacher__horario-day-picker" role="tablist" aria-label="Día de la semana">
+                        {scheduleWeekdays.map((day) => (
+                          <button
+                            className={Number(scheduleSelectedWeekday) === Number(day.key) ? 'is-active' : ''}
+                            key={`schedule-day-pick-${day.key}`}
+                            onClick={() => setScheduleSelectedWeekday(day.key)}
+                            type="button"
+                          >
+                            <strong>{day.shortLabel || day.label}</strong>
+                            <span>{day.dateLabel}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="campus-teacher__horario-table-wrap">
+                      <table className={`campus-teacher__horario-table${scheduleViewMode === 'day' ? ' is-day' : ''}`}>
                         <thead>
                           <tr>
                             <th scope="col">Hora</th>
-                            {(teacherWeeklySchedule.weekdays || []).map((day) => (
-                              <th key={day.key} scope="col">{day.label}</th>
+                            {visibleScheduleWeekdays.map((day) => (
+                              <th key={day.key} scope="col">
+                                <span>{day.label}</span>
+                                <strong>{day.dateLabel}</strong>
+                              </th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {(teacherWeeklySchedule.slots || []).map((slot) => (
-                            <tr key={slot.key}>
-                              <th scope="row">{slot.label}</th>
-                              {(slot.days || []).map((day) => (
-                                <td key={`${slot.key}-${day.weekday}`}>
-                                  {(day.items || []).length > 0 ? (
-                                    <div className="campus-teacher__schedule-cell-stack">
-                                      {day.items.map((item) => (
-                                        <article
-                                          className="campus-teacher__schedule-class-card"
-                                          key={item.key}
-                                          style={{ '--campus-schedule-accent': item.colorToken || '#2a6f97' }}
-                                        >
-                                          <strong>{getCourseDisplayTitle({ ...item, title: item.courseTitle })}</strong>
-                                          <span>{[item.subject, getCourseGroupLabel(item) || getCourseGradeLabel(item)].filter(Boolean).join(' · ')}</span>
-                                          <small>{[formatTimeRange(item.startTime, item.endTime), item.label || 'Bloque de clase'].filter(Boolean).join(' · ')}</small>
-                                        </article>
-                                      ))}
-                                    </div>
-                                  ) : <span className="campus-teacher__schedule-empty">-</span>}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
+                          {(teacherWeeklySchedule.slots || []).map((slot) => {
+                            const visibleDays = (slot.days || []).filter((day) => (
+                              visibleScheduleWeekdays.some((weekday) => Number(weekday.key) === Number(day.weekday))
+                            ));
+
+                            return (
+                              <tr key={slot.key}>
+                                <th scope="row">{slot.label}</th>
+                                {visibleDays.map((day) => (
+                                  <td key={`${slot.key}-${day.weekday}`}>
+                                    {(day.items || []).length > 0 ? (
+                                      <div className="campus-teacher__horario-cell-stack">
+                                        {day.items.map((item) => {
+                                          const groupLabel = getCourseGroupLabel(item) || getCourseGradeLabel(item) || item.studentGradeKey || 'Grupo';
+                                          const subjectLine = [item.subject, getCourseGradeLabel(item) || item.studentGradeKey]
+                                            .filter(Boolean)
+                                            .join(' · ');
+                                          return (
+                                            <article
+                                              className="campus-teacher__horario-class-card"
+                                              key={item.key}
+                                              style={{ '--campus-schedule-accent': item.colorToken || '#2a6f97' }}
+                                            >
+                                              <span>{subjectLine || item.courseTitle || 'Curso'}</span>
+                                              <strong>{String(groupLabel).toUpperCase()}</strong>
+                                              <small>{formatTimeRange(item.startTime, item.endTime)}</small>
+                                              <em>{item.label || 'Bloque de clase'}</em>
+                                            </article>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <span className="campus-teacher__horario-empty">—</span>
+                                    )}
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
-                    <div className="campus-teacher__card-actions">
-                      <span className="campus-panel__meta">Este horario sale de lo que coordinación guarda por curso en backend. Si falta un bloque o un curso, debe ajustarse desde coordinación académica.</span>
-                    </div>
                   </>
-                ) : <p className="campus-panel__meta">Coordinación aún no ha asignado jornadas de clase para este docente.</p>}
+                ) : (
+                  <p className="campus-panel__meta">Coordinación aún no ha asignado jornadas de clase para este docente.</p>
+                )}
+              </article>
+            ) : null}
+
+            {isComergioAcademySection(activeTeacherSection) ? (
+              <article className="campus-teacher__academy-panel campus-teacher__embedded-panel">
+                <ComergioAcademyPanel
+                  activeKey={activeTeacherSection}
+                  onNavigate={setActiveTeacherSection}
+                />
               </article>
             ) : null}
 
@@ -9119,7 +11477,68 @@ function TeacherCampusHome({ forcePreview = false }) {
             ) : null}
           </section>
         </div>
+        </div>
       </div>
+
+      <button
+        aria-label="Abrir ayuda por WhatsApp"
+        className="campus-teacher__support-fab"
+        onClick={() => setShowTeacherSupportHelp(true)}
+        title="Ayuda / reportar inconsistencia"
+        type="button"
+      >
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M12 21a9 9 0 1 0-7.8-4.5L3 21l4.6-1.2A8.9 8.9 0 0 0 12 21Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M8.4 10.2c.4-1 1.1-1.7 2-1.9.5-.1 1 .2 1.1.7l.3 1.1c.1.4 0 .8-.3 1L10.8 12c.5 1 1.4 1.9 2.4 2.4l.9-.7c.3-.2.7-.3 1-.3l1.1.3c.5.1.8.6.7 1.1-.2.9-.9 1.6-1.9 2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+        </svg>
+        <span>Ayuda</span>
+      </button>
+
+      {showTeacherSupportHelp ? (
+        <div
+          className="campus-teacher__support-modal-backdrop"
+          onClick={() => setShowTeacherSupportHelp(false)}
+          role="presentation"
+        >
+          <div
+            aria-labelledby="teacher-support-help-title"
+            aria-modal="true"
+            className="campus-teacher__support-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <span className="campus-teacher__support-modal-kicker">Soporte Comergio</span>
+            <h3 id="teacher-support-help-title">¿Para qué es este botón?</h3>
+            <p>
+              Úsalo para pedir ayuda con el portal docente o para reportar una inconsistencia del software.
+              Te llevaremos a WhatsApp para escribirle al equipo de soporte.
+            </p>
+            <ul>
+              <li>Dudas de uso del portal</li>
+              <li>Errores o comportamientos inesperados</li>
+              <li>Sugerencias rápidas de mejora</li>
+            </ul>
+            <div className="campus-teacher__support-modal-actions">
+              <button
+                className="campus-teacher__support-modal-cancel"
+                onClick={() => setShowTeacherSupportHelp(false)}
+                type="button"
+              >
+                Cancelar
+              </button>
+              <a
+                className="campus-teacher__support-modal-continue"
+                href={COMERGIO_TEACHER_SUPPORT_WHATSAPP_URL}
+                onClick={() => setShowTeacherSupportHelp(false)}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                Continuar a WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

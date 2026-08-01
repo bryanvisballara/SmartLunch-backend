@@ -11,6 +11,8 @@ import {
 import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
 import TeEscuchamosLabel from '../components/community/TeEscuchamosLabel';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
 
 const caseTypeOptions = [
   { value: 'bullying', label: 'Bullying' },
@@ -341,7 +343,14 @@ function PsychologyPortal() {
           Comunicados internos
           <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
         </button>
+        <button className={activePortalView === COMERGIO_ACADEMY_PARENT.key ? 'is-active' : ''} onClick={() => setActivePortalView(COMERGIO_ACADEMY_PARENT.key)} type="button">
+          {COMERGIO_ACADEMY_PARENT.label}
+        </button>
       </div>
+
+      {activePortalView === COMERGIO_ACADEMY_PARENT.key ? (
+        <ComergioAcademyPanel className="psychology-panel" showInternalNav />
+      ) : null}
 
       {activePortalView === 'staff_announcements' ? (
         <StaffAnnouncementsPanel
@@ -389,7 +398,7 @@ function PsychologyPortal() {
             <article className="psychology-timeline-card visibility-institutional" key={item.id}>
               <div className="psychology-timeline-top">
                 <strong>{item.studentName}</strong>
-                <span>{formatDateTime(item.submittedAt)}</span>
+                <span>{formatDateTime(item.incidentAt || item.submittedAt)}</span>
               </div>
               <small>{[item.courseTitle, item.teacherName].filter(Boolean).join(' · ')}</small>
               <p>{item.observation}</p>

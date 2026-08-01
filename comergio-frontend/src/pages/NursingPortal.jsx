@@ -3,6 +3,8 @@ import useAuthStore from '../store/auth.store';
 import { createNursingVisit, getNursingStudentHistory, getNursingStudentMedicalProfileHistory, searchNursingStudents } from '../services/nursing.service';
 import StudentMedicalProfileHistory from '../components/StudentMedicalProfileHistory';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
 
 const dispositionOptions = [
   { value: 'observation', label: 'Queda en observación' },
@@ -261,7 +263,14 @@ function NursingPortal() {
           Comunicados internos
           <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
         </button>
+        <button className={activePortalView === COMERGIO_ACADEMY_PARENT.key ? 'is-active' : ''} onClick={() => setActivePortalView(COMERGIO_ACADEMY_PARENT.key)} type="button">
+          {COMERGIO_ACADEMY_PARENT.label}
+        </button>
       </div>
+
+      {activePortalView === COMERGIO_ACADEMY_PARENT.key ? (
+        <ComergioAcademyPanel className="nursing-panel" showInternalNav />
+      ) : null}
 
       {activePortalView === 'staff_announcements' ? (
         <StaffAnnouncementsPanel
@@ -270,7 +279,9 @@ function NursingPortal() {
           mode="inbox"
           title="Comunicados internos"
         />
-      ) : (
+      ) : null}
+
+      {activePortalView === 'attention' ? (
       <div className="nursing-layout">
         <aside className="nursing-panel nursing-student-search">
           <div className="nursing-panel-head">
@@ -452,7 +463,7 @@ function NursingPortal() {
           </section>
         </main>
       </div>
-      )}
+      ) : null}
     </section>
   );
 }

@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import {
   RECTORIA_PORTAL_NAV,
 } from './rectoriaPortalNav';
+import { COMERGIO_ACADEMY_NAV_GROUP } from '../comergio-academy/academyNav';
+import { AcademyNotificationBadge } from '../comergio-academy/AcademyNotificationBadge';
+import { useComergioAcademyNotificationCounts } from '../comergio-academy/useComergioAcademyNotificationCounts';
+import '../comergio-academy/ComergioAcademyPanel.css';
 import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
 import { StaffAnnouncementsUnreadBadge } from '../staff-announcements/StaffAnnouncementsPanel';
 import './RectoriaPortalSidebar.css';
@@ -15,6 +19,7 @@ const COORDINATION_NAV = [
   { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
   { type: 'item', key: 'resources', label: 'Recursos y compras' },
   { type: 'item', key: 'schedule', label: 'Horario académico' },
+  COMERGIO_ACADEMY_NAV_GROUP,
 ];
 
 function ChevronIcon({ expanded }) {
@@ -51,6 +56,9 @@ function resolveGroupBadgeCount(groupKey, counts = {}) {
   if (groupKey === 'control_center') {
     return Number(counts.communityReports || 0);
   }
+  if (groupKey === 'comergio_academy_group') {
+    return Number(counts.academyTotal || 0);
+  }
   return 0;
 }
 
@@ -63,6 +71,12 @@ function resolveItemBadgeCount(itemKey, counts = {}) {
   }
   if (itemKey === 'control_community_reports' || itemKey === 'community_reports') {
     return Number(counts.communityReports || 0);
+  }
+  if (itemKey === 'conecta') {
+    return Number(counts.academyConecta || 0);
+  }
+  if (itemKey === 'informa') {
+    return Number(counts.academyInforma || 0);
   }
   return 0;
 }
@@ -84,10 +98,14 @@ export default function RectoriaPortalSidebar({
   const nav = isCoordinationPortal ? COORDINATION_NAV : RECTORIA_PORTAL_NAV;
   const [expandedNestedSection, setExpandedNestedSection] = useState('');
   const previousActiveSectionRef = useRef(activeSection);
+  const academyCounts = useComergioAcademyNotificationCounts();
   const badgeCounts = {
     matriculaAuthorizations: matriculaAuthorizationPendingCount,
     studentsMissingPlacement: studentsMissingPlacementCount,
     communityReports: communityReportsPendingCount,
+    academyConecta: academyCounts.conecta,
+    academyInforma: academyCounts.informa,
+    academyTotal: academyCounts.total,
   };
 
   useEffect(() => {
@@ -207,9 +225,10 @@ export default function RectoriaPortalSidebar({
           const isGroupOpen = expandedGroup === entry.key;
           const hasActiveChild = (entry.items || []).some((item) => item.key === activeSection);
           const groupBadgeCount = resolveGroupBadgeCount(entry.key, badgeCounts);
+          const isAcademyGroup = entry.key === 'comergio_academy_group' || entry.tone === 'academy';
 
           return (
-            <div className={`rectoria-rail__group${isGroupOpen ? ' is-open' : ''}${hasActiveChild ? ' has-active-child' : ''}`} key={entry.key}>
+            <div className={`rectoria-rail__group${isGroupOpen ? ' is-open' : ''}${hasActiveChild ? ' has-active-child' : ''}${isAcademyGroup ? ' rectoria-rail__group--academy' : ''}`} key={entry.key}>
               <button
                 aria-expanded={isGroupOpen}
                 className={`rectoria-rail__group-toggle${hasActiveChild ? ' is-active' : ''}`}
@@ -218,7 +237,11 @@ export default function RectoriaPortalSidebar({
               >
                 <span className="rectoria-rail__item-label">
                   {entry.label}
-                  <RectoriaNavCountBadge count={groupBadgeCount} />
+                  {isAcademyGroup ? (
+                    <AcademyNotificationBadge count={groupBadgeCount} />
+                  ) : (
+                    <RectoriaNavCountBadge count={groupBadgeCount} />
+                  )}
                 </span>
                 <ChevronIcon expanded={isGroupOpen} />
               </button>
@@ -231,18 +254,23 @@ export default function RectoriaPortalSidebar({
                     const hasNestedSubnav = itemHasNestedSubnav(entry.key, item.key);
                     const nestedSubnav = hasNestedSubnav ? resolveNestedSubnavContent(entry.key, item.key) : null;
                     const isNestedOpen = isActive && expandedNestedSection === item.key && Boolean(nestedSubnav);
+                    const childTone = item.tone ? ` tone-${item.tone}` : '';
 
                     return (
                       <div className={`rectoria-rail__child-block${hasNestedSubnav ? ' has-nested' : ''}`} key={item.key}>
                         <button
                           aria-expanded={hasNestedSubnav ? isNestedOpen : undefined}
-                          className={`rectoria-rail__child${isActive ? ' is-active' : ''}${hasNestedSubnav ? ' rectoria-rail__child--expandable' : ''}`}
+                          className={`rectoria-rail__child${isActive ? ' is-active' : ''}${hasNestedSubnav ? ' rectoria-rail__child--expandable' : ''}${childTone}`}
                           onClick={() => handleChildClick(item.key, entry.key)}
                           type="button"
                         >
                           <span className="rectoria-rail__child-label">
                             {item.key === 'control_community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : item.label}
-                            <RectoriaNavCountBadge count={itemBadgeCount} />
+                            {isAcademyGroup ? (
+                              <AcademyNotificationBadge count={itemBadgeCount} />
+                            ) : (
+                              <RectoriaNavCountBadge count={itemBadgeCount} />
+                            )}
                           </span>
                           {hasNestedSubnav ? <ChevronIcon expanded={isNestedOpen} /> : null}
                         </button>

@@ -91,6 +91,8 @@ import {
 import { getDailyClosures } from '../services/dailyClosure.service';
 import { getNotificationsAudit } from '../services/notifications.service';
 import DismissibleNotice from '../components/DismissibleNotice';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
 
 const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
@@ -469,6 +471,7 @@ const modules = [
   { id: 'inventory', label: 'Inventario' },
   { id: 'approvals', label: 'Autorizaciones' },
   { id: 'closure', label: 'Cierre diario' },
+  { id: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label },
 ];
 
 const MERIENDAS_WEEK_DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -8757,6 +8760,12 @@ function AdminDashboard() {
               </table>
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {activeModule === COMERGIO_ACADEMY_PARENT.key ? (
+        <section className="panel admin-section">
+          <ComergioAcademyPanel showInternalNav />
         </section>
       ) : null}
 

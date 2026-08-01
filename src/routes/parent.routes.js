@@ -163,6 +163,7 @@ function serializeParentCoexistenceObservation(item = {}) {
     studentGrade: normalizeText(rawObservation.studentGrade),
     studentCourse: normalizeText(rawObservation.studentCourse),
     observation: normalizeText(rawObservation.observation),
+    incidentAt: rawObservation.incidentAt || null,
     status: normalizeText(rawObservation.status) || 'submitted',
     submittedAt: rawObservation.submittedAt || rawObservation.createdAt || null,
     createdAt: rawObservation.createdAt || null,

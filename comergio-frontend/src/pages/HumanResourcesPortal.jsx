@@ -13,6 +13,8 @@ import {
 } from '../services/hr.service';
 import useAuthStore from '../store/auth.store';
 import { PortalBootSplash } from '../components/PortalBootSplash';
+import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
+import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
 
 const categoryOptions = [
   { value: 'stationery', label: 'Papeleria' },
@@ -104,6 +106,7 @@ function HumanResourcesPortal() {
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [activePortalView, setActivePortalView] = useState('operations');
 
   const lowStockItems = useMemo(() => items.filter((item) => item.lowStock), [items]);
   const activeItems = useMemo(() => items.filter((item) => item.status === 'active'), [items]);
@@ -357,6 +360,21 @@ function HumanResourcesPortal() {
 
       {message && <div className="hr-portal__notice">{message}</div>}
 
+      <div className="nursing-portal-tabs psychology-portal-tabs" style={{ marginBottom: '1rem' }}>
+        <button className={activePortalView === 'operations' ? 'is-active' : ''} onClick={() => setActivePortalView('operations')} type="button">
+          Operaciones
+        </button>
+        <button className={activePortalView === COMERGIO_ACADEMY_PARENT.key ? 'is-active' : ''} onClick={() => setActivePortalView(COMERGIO_ACADEMY_PARENT.key)} type="button">
+          {COMERGIO_ACADEMY_PARENT.label}
+        </button>
+      </div>
+
+      {activePortalView === COMERGIO_ACADEMY_PARENT.key ? (
+        <ComergioAcademyPanel className="hr-portal__panel" showInternalNav />
+      ) : null}
+
+      {activePortalView === 'operations' ? (
+      <>
       {isManager && (
         <section className="hr-portal__kpis" aria-label="Resumen de recursos y gestion de compras">
           <article><span>Materiales</span><strong>{dashboard?.summary?.totalItems || items.length}</strong></article>
@@ -561,6 +579,8 @@ function HumanResourcesPortal() {
           ))}
         </div>
       </section>
+      </>
+      ) : null}
     </div>
   );
 }
