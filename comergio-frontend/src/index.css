@@ -2169,6 +2169,21 @@ body.login-boot-active main.container {
   touch-action: pan-y;
 }
 
+/* Next-step form is taller; keep a bounded scrollport on mobile shells. */
+.platform-ios .register-page-auth.register-next-step-auth.login-page-auth,
+.platform-android .register-page-auth.register-next-step-auth.login-page-auth {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+.platform-ios .register-page-auth.register-next-step-auth .register-auth-bottom-spacer,
+.platform-android .register-page-auth.register-next-step-auth .register-auth-bottom-spacer {
+  display: block;
+  height: calc(env(safe-area-inset-bottom, 0px) + 3.25rem);
+}
+
 .register-page-auth .register-back-login {
   display: inline-flex;
   align-items: center;

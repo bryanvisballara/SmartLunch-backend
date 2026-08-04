@@ -105,7 +105,7 @@ function RegisterVerifiedNext() {
   };
 
   return (
-    <div className="page-center login-page login-page-auth">
+    <div className="page-center login-page login-page-auth register-page-auth register-next-step-auth">
       <div className="login-auth-content">
         <section className="login-auth-hero" aria-label="Identidad de Comergio">
           <div className="login-auth-logo-wrap" aria-hidden="true">
@@ -182,7 +182,7 @@ function RegisterVerifiedNext() {
             .
           </p>
         </form>
-        <div aria-hidden="true" className="login-auth-bottom-spacer" />
+        <div aria-hidden="true" className="register-auth-bottom-spacer" />
       </div>
 
       {showSuccessModal ? (

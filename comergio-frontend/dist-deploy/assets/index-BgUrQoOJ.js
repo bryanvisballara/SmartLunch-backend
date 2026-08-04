@@ -1,2 +1,2 @@
-export * from './index--Li1ij1X.js';
-import './index--Li1ij1X.js';
+export * from './index-Tspyc3IB.js';
+import './index-Tspyc3IB.js';
