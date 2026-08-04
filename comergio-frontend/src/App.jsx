@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, Component } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
@@ -46,6 +46,62 @@ import TeacherCampusHome from './campus/pages/TeacherCampusHome';
 import CampusUnavailable from './campus/pages/CampusUnavailable';
 
 const campusPreviewEnabled = String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
+
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      hasError: true,
+      message: error?.message || 'Error inesperado al cargar Comergio.',
+    };
+  }
+
+  componentDidCatch(error) {
+    console.error('[APP_ERROR_BOUNDARY]', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          padding: '24px',
+          background: '#00122e',
+          color: '#eef6ff',
+          textAlign: 'center',
+          gap: '12px',
+        }}
+        >
+          <strong>No pudimos cargar la pantalla</strong>
+          <p style={{ margin: 0, opacity: 0.85 }}>{this.state.message}</p>
+          <button
+            type="button"
+            onClick={() => window.location.assign('/')}
+            style={{
+              marginTop: '8px',
+              border: 0,
+              borderRadius: '12px',
+              padding: '12px 18px',
+              background: '#00d2ff',
+              color: '#00122e',
+              fontWeight: 800,
+            }}
+          >
+            Reintentar
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 function RequireAuth({ isAuthenticated, loginPath = LOGIN_PATH, children }) {
   if (!isAuthenticated) {
@@ -366,7 +422,45 @@ function App() {
     };
   }, [isAndroidRootRoute, isNativeAndroid]);
 
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let listenerHandle = null;
+
+    const recoverIfBlank = () => {
+      if (cancelled) return;
+      const root = document.getElementById('root');
+      const hasUi = Boolean(root?.querySelector('form, main, .login-page-auth, .campus-app-main, .parent-mobile-page, .staff-teacher-chrome__frame'));
+      if (!hasUi) {
+        console.warn('[NATIVE_BLANK_RECOVERY] reloading shell');
+        window.location.reload();
+      }
+    };
+
+    const bootTimer = window.setTimeout(recoverIfBlank, 5000);
+
+    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) {
+        window.setTimeout(recoverIfBlank, 700);
+      }
+    })
+      .then((handle) => {
+        listenerHandle = handle;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(bootTimer);
+      listenerHandle?.remove();
+    };
+  }, []);
+
   return (
+    <AppErrorBoundary>
     <div>
       {showNavbar ? <Navbar /> : null}
       <main className={isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isStaffPortalChromeRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
@@ -665,6 +759,7 @@ function App() {
       </main>
       {!hideFooter ? <AppFooter /> : null}
     </div>
+    </AppErrorBoundary>
   );
 }
 
