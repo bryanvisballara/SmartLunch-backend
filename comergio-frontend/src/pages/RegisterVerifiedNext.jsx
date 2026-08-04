@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../lib/authNavigation';
 import { completeRegister } from '../services/auth.service';
+import DismissibleNotice from '../components/DismissibleNotice';
 import colibriLogo from '../assets/colibrisinfondo.png';
 
 function createStudentDraft() {
@@ -23,7 +24,16 @@ function RegisterField({ label, children }) {
 
 function RegisterVerifiedNext() {
   const navigate = useNavigate();
-  const profile = useMemo(() => JSON.parse(localStorage.getItem('pendingRegistrationProfile') || 'null'), []);
+  const profile = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('pendingRegistrationProfile');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }, []);
   const [password, setPassword] = useState('');
   const [students, setStudents] = useState([createStudentDraft()]);
   const [saving, setSaving] = useState(false);

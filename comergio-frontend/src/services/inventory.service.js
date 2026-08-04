@@ -7,3 +7,5 @@ export const applyInventoryMovement = (data) => api.post('/inventory/apply', dat
 export const getInventoryRequests = (params = {}) => api.get('/inventory/requests', { params });
 export const approveInventoryRequest = (id) => api.post(`/inventory/approve/${id}`);
 export const rejectInventoryRequest = (id) => api.post(`/inventory/reject/${id}`);
+export const getInventorySuppliers = () => api.get('/inventory/suppliers');
+export const createInventorySupplier = (data) => api.post('/inventory/suppliers', data);

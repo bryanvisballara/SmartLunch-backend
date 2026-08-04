@@ -34,6 +34,7 @@ require('./campusGradeEntry.model');
 require('./nursingVisit.model');
 require('./studentMedicalProfileRevision.model');
 require('./psychologyCase.model');
+require('./hrPurchaseArea.model');
 require('./hrSupplyItem.model');
 require('./hrPlannerCycle.model');
 require('./hrSupplyRequest.model');

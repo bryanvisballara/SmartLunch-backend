@@ -427,11 +427,12 @@ router.get('/operator/subscriptions', roleMiddleware('admin', 'merienda_operator
     const month = String(date).slice(0, 7);
     const query = String(req.query.q || '').trim();
 
+    // Align with admin "Alumnos suscritos": active + paid.
+    // Date is used for intake records; do not hide students due to billing period mismatch.
     const subscriptionFilter = {
       schoolId,
       status: 'active',
       paymentStatus: true,
-      currentPeriodMonth: month,
     };
 
     if (query) {
@@ -496,17 +497,15 @@ router.put('/operator/intake/:subscriptionId', roleMiddleware('admin', 'merienda
       return res.status(400).json({ message: 'date must be YYYY-MM-DD' });
     }
 
-    const month = rawDate.slice(0, 7);
     const subscription = await MeriendaSubscription.findOne({
       _id: subscriptionId,
       schoolId,
       status: 'active',
       paymentStatus: true,
-      currentPeriodMonth: month,
     });
 
     if (!subscription) {
-      return res.status(404).json({ message: 'Subscribed student not found for selected month' });
+      return res.status(404).json({ message: 'Subscribed student not found' });
     }
 
     const existingRecord = await MeriendaIntakeRecord.findOne({ schoolId, subscriptionId, date: rawDate }).lean();

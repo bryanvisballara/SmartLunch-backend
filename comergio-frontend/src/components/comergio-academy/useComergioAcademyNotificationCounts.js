@@ -7,23 +7,31 @@ export function useComergioAcademyNotificationCounts(enabled = true) {
   const conectaQuery = useQuery({
     queryKey: ['conecta-unread-count'],
     queryFn: async () => {
-      const response = await getConectaUnreadCount();
-      return Number(response.data?.unreadCount || 0);
+      try {
+        const response = await getConectaUnreadCount();
+        return Number(response.data?.unreadCount || 0);
+      } catch {
+        return 0;
+      }
     },
     enabled,
     refetchInterval: 60_000,
-    retry: 1,
+    retry: false,
   });
 
   const informaQuery = useQuery({
     queryKey: ['informa-unread-count'],
     queryFn: async () => {
-      const response = await getInformaUnreadCount();
-      return Number(response.data?.unreadCount || 0);
+      try {
+        const response = await getInformaUnreadCount();
+        return Number(response.data?.unreadCount || 0);
+      } catch {
+        return 0;
+      }
     },
     enabled,
     refetchInterval: 60_000,
-    retry: 1,
+    retry: false,
   });
 
   const counts = getComergioAcademyNotificationCounts({

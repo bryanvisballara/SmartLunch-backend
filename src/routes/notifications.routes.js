@@ -5,6 +5,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const DeviceToken = require('../models/deviceToken.model');
 const Notification = require('../models/notification.model');
+const { queueCafeteriaPromoNotifications } = require('../services/notification.service');
 
 const router = express.Router();
 
@@ -117,6 +118,46 @@ router.post('/device-tokens/revoke', async (req, res) => {
     return res.status(200).json(updated);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/admin/promo', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const title = String(req.body?.title || '').trim();
+    const body = String(req.body?.body || '').trim();
+    const studentId = String(req.body?.studentId || '').trim();
+
+    if (!title || !body) {
+      return res.status(400).json({ message: 'El título y el mensaje son obligatorios.' });
+    }
+
+    if (studentId && !mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({ message: 'studentId is invalid' });
+    }
+
+    const result = await queueCafeteriaPromoNotifications({
+      schoolId,
+      title,
+      body,
+      studentId: studentId || null,
+    });
+
+    if (!result.notificationsCreated) {
+      return res.status(400).json({
+        message: result.reason || 'No hay acudientes para enviar la promoción.',
+        result,
+      });
+    }
+
+    return res.status(201).json({
+      message: result.queued
+        ? `Promoción encolada para ${result.parentsTargeted} acudiente(s).`
+        : `Promoción enviada a ${result.parentsTargeted} acudiente(s).`,
+      result,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
   }
 });
 

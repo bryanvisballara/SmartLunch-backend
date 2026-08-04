@@ -70,6 +70,7 @@ function normalizeDocumentNumber(value) {
 }
 
 const ADMIN_MANAGED_USER_ROLES = ['parent', 'vendor', 'admin', 'rectoria', 'direccion', 'merienda_operator', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'];
+const CAFETERIA_ADMIN_CREATABLE_USER_ROLES = ['vendor', 'admin', 'merienda_operator', 'parent'];
 const HARD_DELETE_USER_ROLES = ADMIN_MANAGED_USER_ROLES.filter((role) => role !== 'parent');
 function normalizeText(value) {
   return String(value || '').trim();
@@ -1181,22 +1182,17 @@ router.get('/users', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   try {
-    const { schoolId, role: requesterRole } = req.user;
-  const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber, coordinationScope = '', assignedSubjects = [] } = req.body;
+    const { schoolId } = req.user;
+    const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber } = req.body;
 
     if (!name || !username || !password || !role) {
       return res.status(400).json({ message: 'name, username, password and role are required' });
     }
 
-    if (!ADMIN_MANAGED_USER_ROLES.includes(role)) {
-      return res.status(400).json({ message: 'Invalid role' });
-    }
-
-    const normalizedCoordinationScope = normalizeCoordinationScope(coordinationScope);
-    const normalizedAssignedSubjects = normalizeStringArray(assignedSubjects);
-
-    if (String(role) === 'coordination' && !normalizedCoordinationScope) {
-      return res.status(400).json({ message: 'coordinationScope is required for coordination users' });
+    if (!CAFETERIA_ADMIN_CREATABLE_USER_ROLES.includes(role)) {
+      return res.status(400).json({
+        message: 'Desde cafetería solo puedes crear vendedor, administrador, tutor de alimentación o acudiente externo.',
+      });
     }
 
     let resolvedAssignedStoreId = null;
@@ -1247,8 +1243,8 @@ router.post('/users', async (req, res) => {
       documentType: normalizedDocumentType,
       documentNumber: normalizedDocumentNumber,
       assignedStoreId: resolvedAssignedStoreId,
-      coordinationScope: String(role) === 'coordination' ? normalizedCoordinationScope : '',
-      assignedSubjects: String(role) === 'teacher' ? normalizedAssignedSubjects : [],
+      coordinationScope: '',
+      assignedSubjects: [],
       passwordHash,
       role,
       status: 'active',

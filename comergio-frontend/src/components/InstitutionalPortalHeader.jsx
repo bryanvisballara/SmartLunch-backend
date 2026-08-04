@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../lib/authNavigation';
 import useAuthStore from '../store/auth.store';
+import './staff-chrome/StaffTeacherChrome.css';
 
 function getInitials(value = '') {
   const parts = String(value || '').trim().split(/\s+/).filter(Boolean);
@@ -13,8 +14,7 @@ export default function InstitutionalPortalHeader({
   portalKicker = 'Portal institucional',
   userName = 'Usuario',
   helperText = '',
-  logoSrc = '/campus/comergio-rectoria-colibri.png',
-  logoAlt = 'Comergio',
+  onLogout,
   onRefresh,
   refreshDisabled = false,
   refreshLabel = 'Actualizar portal',
@@ -37,8 +37,12 @@ export default function InstitutionalPortalHeader({
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, [showMenu]);
 
-  const onLogout = () => {
+  const handleLogout = () => {
     setShowMenu(false);
+    if (typeof onLogout === 'function') {
+      onLogout();
+      return;
+    }
     logout();
     navigate(LOGIN_PATH, { replace: true });
   };
@@ -49,61 +53,58 @@ export default function InstitutionalPortalHeader({
   };
 
   return (
-    <header className="institutional-portal-header">
-      <div className="institutional-portal-header__side institutional-portal-header__side--left">
-        <div aria-hidden="true" className="institutional-portal-header__avatar">
-          {getInitials(userName)}
-        </div>
-        <div className="institutional-portal-header__identity">
-          <span className="institutional-portal-header__kicker">{portalKicker}</span>
-          <strong>{userName}</strong>
-          {helperText ? <span className="institutional-portal-header__helper">{helperText}</span> : null}
-        </div>
+    <header className="staff-teacher-chrome__topbar institutional-portal-header">
+      <div className="staff-teacher-chrome__topbar-spacer">
+        {helperText ? (
+          <div className="institutional-portal-header__helper-inline">
+            <strong>{portalKicker}</strong>
+            <span>{helperText}</span>
+          </div>
+        ) : null}
       </div>
 
-      <div className="institutional-portal-header__brand">
-        <img alt={logoAlt} className="institutional-portal-header__brand-image" src={logoSrc} />
-      </div>
-
-      <div className="institutional-portal-header__side institutional-portal-header__side--right">
-        <div className="institutional-portal-header__menu" ref={menuRef}>
+      <div className="staff-teacher-chrome__topbar-actions">
+        <div className="staff-teacher-chrome__topbar-profile" ref={menuRef}>
           <button
             aria-expanded={showMenu}
             aria-haspopup="menu"
             aria-label="Abrir menú de usuario"
-            className="institutional-portal-header__menu-button"
+            className="staff-teacher-chrome__topbar-profile-btn"
             onClick={() => setShowMenu((current) => !current)}
             type="button"
           >
-            <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-              <path d="M4 20.5a8 8 0 0 1 16 0" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+            <span className="staff-teacher-chrome__topbar-avatar" aria-hidden="true">
+              {getInitials(userName)}
+            </span>
+            <span className="staff-teacher-chrome__topbar-profile-copy">
+              <strong>{userName}</strong>
+              <span>{portalKicker}</span>
+            </span>
+            <svg aria-hidden="true" className="staff-teacher-chrome__topbar-chevron" fill="none" viewBox="0 0 24 24">
+              <path d="m7 10 5 5 5-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
             </svg>
           </button>
 
           {showMenu ? (
-            <div className="institutional-portal-header__dropdown" role="menu">
+            <div className="staff-teacher-chrome__topbar-dropdown" role="menu">
               {onRefresh ? (
                 <button
-                  className="institutional-portal-header__dropdown-item"
+                  className="staff-teacher-chrome__topbar-dropdown-item"
                   disabled={refreshDisabled}
                   onClick={onRefreshClick}
                   role="menuitem"
                   type="button"
                 >
-                  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                    <path d="M20 4v6h-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                  </svg>
-                  <span>{refreshLabel}</span>
+                  {refreshLabel}
                 </button>
               ) : null}
-              <button className="institutional-portal-header__dropdown-item" onClick={onLogout} role="menuitem" type="button">
-                <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M14 7V5.75A1.75 1.75 0 0 0 12.25 4h-5.5A1.75 1.75 0 0 0 5 5.75v12.5A1.75 1.75 0 0 0 6.75 20h5.5A1.75 1.75 0 0 0 14 18.25V17" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                  <path d="M10 12h9m0 0-2.75-2.75M19 12l-2.75 2.75" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-                </svg>
-                <span>Cerrar sesión</span>
+              <button
+                className="staff-teacher-chrome__topbar-dropdown-item is-danger"
+                onClick={handleLogout}
+                role="menuitem"
+                type="button"
+              >
+                Cerrar sesión
               </button>
             </div>
           ) : null}

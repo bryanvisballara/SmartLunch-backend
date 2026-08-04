@@ -167,12 +167,33 @@ function createEmptyForm() {
     guardianPhone: '',
     grade: '',
     academicYear: '2026-2027',
+    howHeard: '',
+    howHeardOther: '',
     appointmentType: '',
     locationKey: '',
     appointmentDate: '',
     appointmentTime: '',
-    referenceOrigin: 'Primer contacto — comergio.com/berckleyprimercontacto',
   };
+}
+
+const HOW_HEARD_OPTIONS = [
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'youtube', label: 'YouTube' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'google', label: 'Google' },
+  { value: 'referido', label: 'Referido' },
+  { value: 'otro', label: 'Otro' },
+];
+
+function resolveHowHeardReference(howHeard, howHeardOther) {
+  const selected = HOW_HEARD_OPTIONS.find((option) => option.value === String(howHeard || '').trim());
+  if (!selected) return '';
+  if (selected.value === 'otro') {
+    return String(howHeardOther || '').trim();
+  }
+  return selected.label;
 }
 
 function calcAgeFromBirthDate(birthDate) {
@@ -349,6 +370,8 @@ export default function PrimerContactoPage() {
     && form.guardianName.trim()
     && form.guardianEmail.trim()
     && form.guardianPhone.trim()
+    && form.howHeard
+    && (form.howHeard !== 'otro' || form.howHeardOther.trim())
     && form.grade
     && form.appointmentType
     && form.appointmentDate
@@ -366,9 +389,13 @@ export default function PrimerContactoPage() {
     setSuccess('');
 
     try {
+      const referenceOrigin = resolveHowHeardReference(form.howHeard, form.howHeardOther);
       const payload = {
         ...form,
         previousSchool: form.noSchooling ? 'Sin escolaridad' : form.previousSchool.trim(),
+        referenceOrigin,
+        howHeard: form.howHeard,
+        howHeardOther: form.howHeard === 'otro' ? form.howHeardOther.trim() : '',
       };
       const result = await submitPrimerContacto(payload);
       setSuccess('Registro guardado. Te enviamos el recordatorio al correo y te llevamos a WhatsApp.');
@@ -634,6 +661,41 @@ export default function PrimerContactoPage() {
                     required
                   />
                 </div>
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-howHeard">¿Cómo llegaste al Berckley?</label>
+                  <select
+                    id="pc-howHeard"
+                    value={form.howHeard}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setForm((previous) => ({
+                        ...previous,
+                        howHeard: value,
+                        howHeardOther: value === 'otro' ? previous.howHeardOther : '',
+                      }));
+                      if (error) setError('');
+                      if (success) setSuccess('');
+                    }}
+                    required
+                  >
+                    <option value="">Selecciona una opción</option>
+                    {HOW_HEARD_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {form.howHeard === 'otro' ? (
+                  <div className="primer-contacto-field">
+                    <label htmlFor="pc-howHeardOther">Cuéntanos cómo nos conociste</label>
+                    <input
+                      id="pc-howHeardOther"
+                      placeholder="Escribe tu respuesta"
+                      value={form.howHeardOther}
+                      onChange={(event) => updateField('howHeardOther')(event.target.value)}
+                      required
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
 

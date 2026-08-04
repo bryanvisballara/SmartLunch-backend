@@ -125,12 +125,14 @@ export function resolveParentNotificationPath(payload = {}) {
     case 'school_route.arrived':
     case 'school_route.picked_up':
     case 'school_route.skipped':
+    case 'school_route.waiting_alert':
       return withStudent(buildParentNotificationSectionPath('transport'));
 
     case 'order.created':
     case 'wallet.recharge':
     case 'wallet.low_balance':
     case 'meriendas.tutor_comment':
+    case 'cafeteria.promo':
       return withStudent(buildParentNotificationSectionPath('cafeteria'));
 
     default:

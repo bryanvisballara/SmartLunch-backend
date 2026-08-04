@@ -48,6 +48,7 @@ const {
   rectoriaEnrollmentMatriculaRouter,
 } = require('./routes/enrollmentMatricula.routes');
 const schoolContextMiddleware = require('./middleware/schoolContextMiddleware');
+const { connectDB, mongoose } = require('./config/db');
 const { ensureBootstrapData: ensureWwtecnoBootstrap } = require('./routes/wwtecno.routes');
 
 const app = express();
@@ -184,6 +185,19 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(morgan('dev'));
+app.use(async (req, res, next) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      await connectDB();
+    }
+    return next();
+  } catch (error) {
+    return res.status(503).json({
+      message: 'Base de datos no disponible. Si acabas de pasar el cluster a M10, actualiza MONGO_URI en Render con el connection string nuevo de Atlas y redespliega.',
+      detail: error.message,
+    });
+  }
+});
 app.use(schoolContextMiddleware);
 app.use(['/assets/admissions-marketing/:fileName', '/uploads/admissions-marketing/:fileName'], async (req, res, next) => {
   const method = String(req.method || '').toUpperCase();

@@ -182,8 +182,8 @@ export function reorderCampusSchoolRouteStops(stopIds) {
   return api.post('/campus/school-route/reorder', { stopIds }).then((response) => response.data);
 }
 
-export function runCampusSchoolRouteStopAction(stopId, action) {
-  return api.post(`/campus/school-route/stops/${stopId}/action`, { action }).then((response) => response.data);
+export function runCampusSchoolRouteStopAction(stopId, action, extra = {}) {
+  return api.post(`/campus/school-route/stops/${stopId}/action`, { action, ...extra }).then((response) => response.data);
 }
 
 export function resetCampusSchoolRouteDay() {

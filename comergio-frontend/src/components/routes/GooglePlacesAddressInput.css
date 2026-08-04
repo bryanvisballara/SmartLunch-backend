@@ -1,0 +1,53 @@
+.google-places-address {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.google-places-address input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #dfe5ed;
+  border-radius: 0.72rem;
+  background: #fff;
+  color: #27354a;
+  font: inherit;
+}
+
+.google-places-address input:focus {
+  border-color: #77aaf8;
+  outline: 3px solid rgba(37, 99, 235, 0.1);
+}
+
+.google-places-address__hint {
+  color: #7b889c;
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.google-places-address__hint.is-error {
+  color: #b45309;
+}
+
+.pac-container {
+  z-index: 10050 !important;
+  margin-top: 4px;
+  border: 1px solid #dfe5ed;
+  border-radius: 0.75rem;
+  box-shadow: 0 16px 36px rgba(15, 39, 68, 0.16);
+  overflow: hidden;
+}
+
+.pac-item {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.pac-item:hover,
+.pac-item-selected {
+  background: #eff6ff;
+}

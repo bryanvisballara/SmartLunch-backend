@@ -100,6 +100,13 @@ function buildParentPushUrl(notificationType = '', options = {}) {
   case 'school_route.skipped':
     return withStudentQuery('/parent/transport', studentId);
 
+    case 'order.created':
+    case 'wallet.recharge':
+    case 'wallet.low_balance':
+    case 'meriendas.tutor_comment':
+    case 'cafeteria.promo':
+      return withStudentQuery('/parent/cafeteria', studentId);
+
     default:
       return withStudentQuery('/parent', studentId);
   }

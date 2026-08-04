@@ -1,8 +1,24 @@
+const isLocalDevHost = ['localhost', '127.0.0.1'].includes(self.location.hostname);
+
 self.addEventListener('install', (event) => {
+  // On local Vite, unregister immediately so Chrome does not keep an old controller.
+  if (isLocalDevHost) {
+    event.waitUntil(self.skipWaiting().then(() => self.registration.unregister()));
+    return;
+  }
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
+  if (isLocalDevHost) {
+    event.waitUntil(
+      self.registration.unregister().then(async () => {
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        await Promise.all(clients.map((client) => client.navigate(client.url)));
+      })
+    );
+    return;
+  }
   event.waitUntil(self.clients.claim());
 });
 

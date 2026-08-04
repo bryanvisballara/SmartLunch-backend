@@ -89,10 +89,13 @@ import {
   cancelRechargeTransaction,
 } from '../services/wallet.service';
 import { getDailyClosures } from '../services/dailyClosure.service';
-import { getNotificationsAudit } from '../services/notifications.service';
+import { getNotificationsAudit, sendCafeteriaPromoPush } from '../services/notifications.service';
 import DismissibleNotice from '../components/DismissibleNotice';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
-import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
+import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
+import useAuthStore from '../store/auth.store';
+import { getSchoolDisplayName } from '../lib/schools';
+import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
 
 const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
@@ -145,10 +148,14 @@ const paymentMethodLabel = {
 
 const pushTypeLabel = {
   order_created: 'Compra POS',
+  'order.created': 'Compra POS',
   low_balance_lt20: 'Saldo bajo < 20k',
   low_balance_lt10: 'Saldo bajo < 10k',
   auto_debit_recharge: 'Recarga automática',
   tutor_comment: 'Comentario tutor',
+  'cafeteria.promo': 'Promoción cafetería',
+  'wallet.recharge': 'Recarga',
+  'wallet.low_balance': 'Saldo bajo',
 };
 
 const USER_ROLE_OPTIONS = [
@@ -169,7 +176,291 @@ const USER_ROLE_OPTIONS = [
   { value: 'school_route', label: 'Ruta escolar' },
 ];
 
+const CAFETERIA_CREATE_USER_ROLE_OPTIONS = [
+  { value: 'vendor', label: 'Vendedor' },
+  { value: 'admin', label: 'Administrador' },
+  { value: 'merienda_operator', label: 'Tutor de alimentación' },
+  { value: 'parent', label: 'Acudiente externo' },
+];
+
+const CAFETERIA_RECORD_TYPE_OPTIONS = [
+  { value: 'product', label: 'Producto' },
+  { value: 'category', label: 'Categoría' },
+  { value: 'store', label: 'Tienda' },
+  { value: 'student', label: 'Alumno' },
+  { value: 'parent', label: 'Acudientes' },
+  { value: 'vendor', label: 'Vendedores' },
+  { value: 'merienda_operator', label: 'Tutores de alimentación' },
+];
+
 const getUserRoleLabel = (role) => USER_ROLE_OPTIONS.find((option) => option.value === role)?.label || role || 'N/A';
+
+function AccountingIcon({ name }) {
+  const common = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  };
+
+  if (name === 'wallet') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect {...common} x="3" y="6" width="18" height="13" rx="2.5" />
+        <path {...common} d="M16 12h5v3h-5a1.5 1.5 0 0 1 0-3z" />
+        <path {...common} d="M3 10h12" />
+      </svg>
+    );
+  }
+  if (name === 'calendar') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect {...common} x="3.5" y="5" width="17" height="15" rx="2" />
+        <path {...common} d="M8 3.5v3M16 3.5v3M3.5 10h17" />
+      </svg>
+    );
+  }
+  if (name === 'chart') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 19V5M4 19h16" />
+        <path {...common} d="M8 16v-5M12 16V8M16 16v-3" />
+      </svg>
+    );
+  }
+  if (name === 'cap') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M3 10l9-5 9 5-9 5-9-5z" />
+        <path {...common} d="M7 12.5v4c2 1.5 8 1.5 10 0v-4" />
+      </svg>
+    );
+  }
+  if (name === 'pie') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 3a9 9 0 1 0 9 9h-9V3z" />
+        <path {...common} d="M13.5 3.2A9 9 0 0 1 20.8 10.5H13.5V3.2z" />
+      </svg>
+    );
+  }
+  if (name === 'trend') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 16l5-5 4 4 7-8" />
+        <path {...common} d="M15 7h5v5" />
+      </svg>
+    );
+  }
+  if (name === 'qr') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect {...common} x="4" y="4" width="6.5" height="6.5" rx="1" />
+        <rect {...common} x="13.5" y="4" width="6.5" height="6.5" rx="1" />
+        <rect {...common} x="4" y="13.5" width="6.5" height="6.5" rx="1" />
+        <path {...common} d="M14 14h2.5v2.5H14zM18.5 14H20v6h-6v-1.5" />
+      </svg>
+    );
+  }
+  if (name === 'cart') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 5h2l2.2 10.2a1.5 1.5 0 0 0 1.5 1.2H17a1.5 1.5 0 0 0 1.5-1.1L20 8H8" />
+        <circle {...common} cx="10" cy="19.5" r="1.2" />
+        <circle {...common} cx="17" cy="19.5" r="1.2" />
+      </svg>
+    );
+  }
+  if (name === 'swap') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M7 7h11l-2.5-2.5M17 17H6l2.5 2.5" />
+      </svg>
+    );
+  }
+  if (name === 'save') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M5 4h11l3 3v13H5V4z" />
+        <path {...common} d="M9 4v5h7V4M9 20v-7h6v7" />
+      </svg>
+    );
+  }
+  if (name === 'info') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle {...common} cx="12" cy="12" r="8.5" />
+        <path {...common} d="M12 11v5M12 8h.01" />
+      </svg>
+    );
+  }
+  if (name === 'inbox') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 13l2-7h12l2 7v5H4v-5z" />
+        <path {...common} d="M4 13h5a3 3 0 0 0 6 0h5" />
+      </svg>
+    );
+  }
+  if (name === 'doc') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M7 3.5h7l4 4V20.5H7z" />
+        <path {...common} d="M14 3.5V8h4.5M10 12h5M10 15.5h5" />
+      </svg>
+    );
+  }
+  if (name === 'users') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M16 19v-1.2a3.3 3.3 0 0 0-3.3-3.3H7.3A3.3 3.3 0 0 0 4 17.8V19" />
+        <circle {...common} cx="9.2" cy="8.2" r="2.7" />
+        <path {...common} d="M20 19v-1a2.8 2.8 0 0 0-2.2-2.7M15.7 5.7a2.5 2.5 0 0 1 0 4.8" />
+      </svg>
+    );
+  }
+  if (name === 'userAlert') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M15.5 19v-1.1A3.1 3.1 0 0 0 12.4 15H7.1A3.1 3.1 0 0 0 4 17.9V19" />
+        <circle {...common} cx="9.3" cy="8.2" r="2.6" />
+        <path {...common} d="M18 8v4M18 15.5h.01" />
+      </svg>
+    );
+  }
+  if (name === 'spark') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 3l1.6 5.2L19 10l-5.4 1.8L12 17l-1.6-5.2L5 10l5.4-1.8L12 3z" />
+        <path {...common} d="M19 15l.7 2.1L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.9L19 15z" />
+      </svg>
+    );
+  }
+  if (name === 'alert') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 4.5L21 19H3L12 4.5z" />
+        <path {...common} d="M12 10v4M12 16.5h.01" />
+      </svg>
+    );
+  }
+  if (name === 'gear') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle {...common} cx="12" cy="12" r="3" />
+        <path {...common} d="M12 4.5v2M12 17.5v2M4.5 12h2M17.5 12h2M6.5 6.5l1.4 1.4M16.1 16.1l1.4 1.4M17.5 6.5l-1.4 1.4M7.9 16.1l-1.4 1.4" />
+      </svg>
+    );
+  }
+  if (name === 'arrowUp') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 19V6M7.5 10.5 12 6l4.5 4.5" />
+      </svg>
+    );
+  }
+  if (name === 'arrowDown') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 5v13M7.5 13.5 12 18l4.5-4.5" />
+      </svg>
+    );
+  }
+  if (name === 'gift') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 11h16v9H4zM3 7h18v4H3zM12 7v13" />
+        <path {...common} d="M12 7c-1.8-2.4-4.8-2.2-5.5-.4C5.7 8.5 8.2 9.8 12 7c3.8 2.8 6.3 1.5 5.5-.4C16.8 4.8 13.8 4.6 12 7z" />
+      </svg>
+    );
+  }
+  if (name === 'utensils') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M7 4v7a2 2 0 0 0 2 2v7M7 4c0 2.5 0 4 2 5M11 4v5a2 2 0 0 1-2 2M17 4v16M17 4c2 0 3 2 3 4.5S19 13 17 13" />
+      </svg>
+    );
+  }
+  if (name === 'cup') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M6 7h10v7a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V7z" />
+        <path {...common} d="M16 9h2.5A2.5 2.5 0 0 1 21 11.5v0A2.5 2.5 0 0 1 18.5 14H16M8 20h8" />
+      </svg>
+    );
+  }
+  if (name === 'shield') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 3.5l7 2.5v5.8c0 4.2-2.8 7.2-7 8.7-4.2-1.5-7-4.5-7-8.7V6l7-2.5z" />
+        <path {...common} d="M9.5 12.2l1.8 1.8 3.4-3.6" />
+      </svg>
+    );
+  }
+  if (name === 'pencil') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M13.5 5.5l5 5L8 21H3v-5L13.5 5.5z" />
+        <path {...common} d="M12 7l5 5" />
+      </svg>
+    );
+  }
+  if (name === 'plus') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 5v14M5 12h14" />
+      </svg>
+    );
+  }
+  if (name === 'snack') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 10c0-3.3 3.6-6 8-6s8 2.7 8 6v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7z" />
+        <path {...common} d="M8 10h.01M12 10h.01M16 10h.01" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle {...common} cx="12" cy="12" r="7.5" />
+    </svg>
+  );
+}
+
+function getPersonInitials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '??';
+  const first = parts[0][0] || '';
+  const second = parts[1]?.[0] || parts[0][1] || '';
+  return `${first}${second}`.toUpperCase();
+}
+
+function formatMonthLabel(monthIso) {
+  const [year, month] = String(monthIso || '').split('-').map(Number);
+  if (!year || !month) return String(monthIso || '');
+  const date = new Date(year, month - 1, 1);
+  if (Number.isNaN(date.getTime())) return String(monthIso || '');
+  const label = date.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function resolveSalesDelta(current, previous) {
+  const currentValue = Number(current || 0);
+  const previousValue = Number(previous || 0);
+  if (!Number.isFinite(currentValue) || !Number.isFinite(previousValue)) {
+    return { percent: 0, direction: 'flat' };
+  }
+  if (previousValue === 0) {
+    if (currentValue === 0) return { percent: 0, direction: 'flat' };
+    return { percent: 100, direction: 'up' };
+  }
+  const percent = ((currentValue - previousValue) / previousValue) * 100;
+  if (percent > 0.05) return { percent, direction: 'up' };
+  if (percent < -0.05) return { percent, direction: 'down' };
+  return { percent: 0, direction: 'flat' };
+}
 
 const parseSubjectsInput = (value) => Array.from(new Set(
   String(value || '')
@@ -471,7 +762,6 @@ const modules = [
   { id: 'inventory', label: 'Inventario' },
   { id: 'approvals', label: 'Autorizaciones' },
   { id: 'closure', label: 'Cierre diario' },
-  { id: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label },
 ];
 
 const MERIENDAS_WEEK_DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -482,6 +772,7 @@ const MERIENDAS_INTAKE_STATUS_LABEL = {
 };
 
 function AdminDashboard() {
+  const authUser = useAuthStore((state) => state.user);
   const legacyMigrationInputRef = useRef(null);
   const legacyParentMigrationInputRef = useRef(null);
   const [activeModule, setActiveModule] = useState('home');
@@ -569,6 +860,11 @@ function AdminDashboard() {
     totalPages: 1,
     limit: 50,
   });
+  const [promoPushForm, setPromoPushForm] = useState({
+    title: '',
+    body: '',
+    studentId: '',
+  });
 
   const [manualTopup, setManualTopup] = useState({ studentId: '', amount: '', method: 'cash', notes: '' });
   const [topupStudentQuery, setTopupStudentQuery] = useState('');
@@ -631,7 +927,7 @@ function AdminDashboard() {
     documentType: 'CC',
     documentNumber: '',
     password: '',
-    role: 'parent',
+    role: 'vendor',
     assignedStoreId: '',
     coordinationScope: '',
     assignedSubjectsText: '',
@@ -966,6 +1262,15 @@ function AdminDashboard() {
     return editEntityItems.filter((item) => getEditItemLabel(item).toLowerCase().includes(query));
   }, [editEntityItems, editSearchQuery, isUserRecordEntity]);
 
+  useEffect(() => {
+    if (activeModule !== 'edit' && activeModule !== 'modify') {
+      return;
+    }
+    if (!CAFETERIA_RECORD_TYPE_OPTIONS.some((option) => option.value === editEntity)) {
+      setEditEntity('product');
+    }
+  }, [activeModule, editEntity]);
+
   const editTableTotalPages = useMemo(() => {
     return Math.max(1, Math.ceil((filteredEditEntityItems.length || 0) / 20));
   }, [filteredEditEntityItems]);
@@ -1012,6 +1317,8 @@ function AdminDashboard() {
               targetStore: req.targetStoreId,
               requestedBy: req.requestedBy,
               notes: req.notes || '',
+              invoiceAmount: req.invoiceAmount,
+              supplierName: req.supplierName || req.supplierId?.name || '',
               requests: [],
             };
           }
@@ -3220,18 +3527,18 @@ function AdminDashboard() {
       return;
     }
 
+    if (!CAFETERIA_CREATE_USER_ROLE_OPTIONS.some((option) => option.value === userForm.role)) {
+      setError('Solo puedes crear vendedor, administrador, tutor de alimentación o acudiente externo.');
+      return;
+    }
+
     if (userForm.role === 'parent' && !String(userForm.email || '').trim()) {
-      setError('Debes registrar el correo del acudiente.');
+      setError('Debes registrar el correo del acudiente externo.');
       return;
     }
 
     if (userForm.role === 'parent' && String(userForm.documentNumber || '').replace(/\D/g, '').trim().length < 5) {
-      setError('Debes registrar un documento valido para el acudiente.');
-      return;
-    }
-
-    if (userForm.role === 'coordination' && !userForm.coordinationScope) {
-      setError('Debes definir el alcance de la coordinación.');
+      setError('Debes registrar un documento valido para el acudiente externo.');
       return;
     }
 
@@ -3245,8 +3552,6 @@ function AdminDashboard() {
       password: userForm.password,
       role: userForm.role,
       assignedStoreId: userForm.role === 'vendor' ? userForm.assignedStoreId : undefined,
-      coordinationScope: userForm.role === 'coordination' ? userForm.coordinationScope : undefined,
-      assignedSubjects: userForm.role === 'teacher' ? parseSubjectsInput(userForm.assignedSubjectsText) : undefined,
     };
 
     runAction(() => createAdminUser(payload), 'Usuario creado.', async () => {
@@ -3260,7 +3565,7 @@ function AdminDashboard() {
         documentType: 'CC',
         documentNumber: '',
         password: '',
-        role: 'parent',
+        role: 'vendor',
         assignedStoreId: '',
         coordinationScope: '',
         assignedSubjectsText: '',
@@ -3648,6 +3953,38 @@ function AdminDashboard() {
     runAction(
       () => loadNotificationAudit(notificationAuditFilters, nextPage),
       'Notificaciones filtradas.'
+    );
+  };
+
+  const onSendPromoPush = (event) => {
+    event.preventDefault();
+    const title = String(promoPushForm.title || '').trim();
+    const body = String(promoPushForm.body || '').trim();
+    if (!title || !body) {
+      setError('Escribe un título y un mensaje para la promoción.');
+      return;
+    }
+
+    const audienceLabel = promoPushForm.studentId
+      ? 'los acudientes del alumno seleccionado'
+      : 'todos los acudientes del colegio';
+    if (!window.confirm(`¿Enviar esta promoción push a ${audienceLabel}?`)) {
+      return;
+    }
+
+    runAction(
+      async () => {
+        const response = await sendCafeteriaPromoPush({
+          title,
+          body,
+          studentId: promoPushForm.studentId || undefined,
+        });
+        setPromoPushForm({ title: '', body: '', studentId: '' });
+        await loadNotificationAudit(notificationAuditFilters, 1);
+        setNotificationAuditPage(1);
+        return response;
+      },
+      'Promoción push enviada a los padres.'
     );
   };
 
@@ -4822,35 +5159,24 @@ function AdminDashboard() {
   };
 
   return (
+    <StaffPortalShell
+      activeKey={activeModule}
+      navItems={modules.map((moduleItem) => ({
+        key: moduleItem.id,
+        label: moduleItem.id === 'approvals' && pendingApprovalsCount > 0
+          ? `${moduleItem.label} (${pendingApprovalsCount})`
+          : moduleItem.label,
+      }))}
+      navLabel="Admin"
+      onNavigate={setActiveModule}
+      onRefresh={loadBaseData}
+      portalLabel="Admin"
+      refreshDisabled={loading}
+      refreshLabel={loading ? 'Cargando...' : 'Actualizar portal'}
+      schoolName={getSchoolDisplayName(authUser, 'Colegio')}
+      userName={authUser?.name || authUser?.username || 'Admin'}
+    >
     <div className="admin-portal">
-      <section className="admin-hero">
-        <div className="admin-hero-main">
-          <p className="admin-kicker">Comergio Admin</p>
-          <h2>Portal administrativo operativo</h2>
-          <p>Gestiona KPI, ventas, recargas, creaciones, inventario, autorizaciones y cierres por tienda.</p>
-        </div>
-        <div className="admin-hero-side">
-          <button className="btn btn-primary" onClick={loadBaseData} type="button">
-            {loading ? 'Cargando...' : 'Actualizar portal'}
-          </button>
-        </div>
-      </section>
-
-      <section className="admin-view-switch">
-        {modules.map((moduleItem) => (
-          <button
-            className={`btn btn-chip ${activeModule === moduleItem.id ? 'is-active' : ''}`}
-            key={moduleItem.id}
-            onClick={() => setActiveModule(moduleItem.id)}
-            type="button"
-          >
-            {moduleItem.id === 'approvals'
-              ? `${moduleItem.label}${pendingApprovalsCount > 0 ? ` (${pendingApprovalsCount})` : ''}`
-              : moduleItem.label}
-          </button>
-        ))}
-      </section>
-
       <DismissibleNotice text={error} type="error" onClose={() => setError('')} />
 
       {ok ? (
@@ -4874,357 +5200,534 @@ function AdminDashboard() {
       ) : null}
 
       {activeModule === 'home' ? (
-        <section className="panel admin-section">
-          <form className="admin-form-grid" onSubmit={(event) => event.preventDefault()}>
-            <label>
-              Tienda para KPIs
-              <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
-                <option value="">Todas las tiendas</option>
-                {stores.map((store) => (
-                  <option key={store._id} value={store._id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </form>
+        <section className="panel admin-section admin-home">
+          {(() => {
+            const institutionalUsersCount = Object.values(homeData?.academicUsersByRole || {})
+              .reduce((sum, count) => sum + Number(count || 0), 0);
+            const dayDelta = resolveSalesDelta(homeData?.salesToday, homeData?.salesYesterday);
+            const weekDelta = resolveSalesDelta(homeData?.salesWeek, homeData?.salesPreviousWeek);
+            const monthDelta = resolveSalesDelta(homeData?.salesMonth, homeData?.salesPreviousMonth);
+            const summaryCards = [
+              {
+                tone: 'green',
+                icon: 'trend',
+                label: 'Ventas del día',
+                value: formatCurrency(homeData?.salesToday),
+                meta: `${Math.abs(dayDelta.percent).toFixed(0)}% vs ayer`,
+                direction: dayDelta.direction,
+              },
+              {
+                tone: 'blue',
+                icon: 'calendar',
+                label: 'Ventas de la semana',
+                value: formatCurrency(homeData?.salesWeek),
+                meta: `${Math.abs(weekDelta.percent).toFixed(0)}% vs semana pasada`,
+                direction: weekDelta.direction,
+              },
+              {
+                tone: 'violet',
+                icon: 'chart',
+                label: 'Ventas del mes',
+                value: formatCurrency(homeData?.salesMonth),
+                meta: `${Math.abs(monthDelta.percent).toFixed(0)}% vs mes pasado`,
+                direction: monthDelta.direction,
+              },
+              {
+                tone: 'sky',
+                icon: 'users',
+                label: 'Usuarios institucionales',
+                value: String(institutionalUsersCount),
+                meta: 'Activos',
+                direction: 'flat',
+              },
+            ];
 
-          <div className="cards">
-            <div className="card admin-kpi-card">
-              <h4>Ventas del día</h4>
-              <p>{formatCurrency(homeData?.salesToday)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Ventas de la semana</h4>
-              <p>{formatCurrency(homeData?.salesWeek)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Ventas del mes</h4>
-              <p>{formatCurrency(homeData?.salesMonth)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Usuarios institucionales</h4>
-              <p>{Object.values(homeData?.academicUsersByRole || {}).reduce((sum, count) => sum + Number(count || 0), 0)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Alumnos sin curso</h4>
-              <p>{Number(homeData?.studentsWithoutCourseCount || 0)}</p>
-            </div>
-          </div>
+            return (
+              <>
+                <div className="admin-home__toolbar">
+                  <div>
+                    <h3>Homepage KPI</h3>
+                    <p>Resumen operativo de ventas, inventario y consumo.</p>
+                  </div>
+                  <label className="admin-home__store">
+                    Tienda para KPIs
+                    <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
+                      <option value="">Todas las tiendas</option>
+                      {stores.map((store) => (
+                        <option key={store._id} value={store._id}>{store.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
 
-          <div className="cards admin-list-cards">
-            <div className="card">
-              <h4>Equipo institucional por rol</h4>
-              {USER_ROLE_OPTIONS
-                .filter((option) => ['rectoria', 'direccion', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'].includes(option.value))
-                .map((option) => (
-                  <p key={option.value}>
-                    {option.label}: {Number(homeData?.academicUsersByRole?.[option.value] || 0)}
-                  </p>
-                ))}
-            </div>
-            <div className="card">
-              <h4>Alumnos pendientes por curso</h4>
-              {(homeData?.studentsWithoutCourse || []).length === 0 ? <p>No hay alumnos pendientes de asignación.</p> : null}
-              {(homeData?.studentsWithoutCourse || []).map((student) => (
-                <p key={String(student._id)}>
-                  {student.name || 'Alumno'}
-                  {student.schoolCode ? ` (${student.schoolCode})` : ''}
-                  {student.grade ? ` - grado ${student.grade}` : ' - sin grado'}
-                </p>
-              ))}
-            </div>
-            <div className="card">
-              <h4>Alumnos con mayor consumo (promedio diario)</h4>
-              {(homeData?.topStudents || []).map((item) => (
-                <p key={String(item.studentId)}>
-                  {(item.studentName || 'Alumno')} - {formatCurrency(item.averageDailySpent)} / día ({Number(item.daysWithOrders || 0)} días)
-                </p>
-              ))}
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Suscripción Comergio</h4>
-              <p>{Number(homeData?.totalSubscribedStudents || 0)} alumnos suscritos</p>
-              <small>{Number(homeData?.totalAutoDebitActiveStudents || 0)} con débito automático activo</small>
-            </div>
-            <div className="card">
-              <h4>Productos más rentables por % (Top 10)</h4>
-              {(homeData?.topProductsByPercent || []).length === 0 ? <p>Sin productos para mostrar.</p> : null}
-              {(homeData?.topProductsByPercent || []).length > 0 ? (
-                <div className="admin-low-balance-table-wrap">
-                  <table className="admin-low-balance-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Rentabilidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(homeData?.topProductsByPercent || []).map((item) => (
-                        <tr key={String(item.productId)}>
-                          <td>{item.productName || 'Producto'}</td>
-                          <td>{Number(item.utilityPercent || 0).toFixed(2)}% ({formatCurrency(item.utilityValue)})</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="admin-home__summary-grid">
+                  {summaryCards.map((card) => (
+                    <article className={`admin-home__summary-card tone-${card.tone}`} key={card.label}>
+                      <span className="admin-home__icon" aria-hidden="true">
+                        <AccountingIcon name={card.icon} />
+                      </span>
+                      <div>
+                        <span className="admin-home__label">{card.label}</span>
+                        <strong>{card.value}</strong>
+                        <small className={`is-${card.direction}`}>
+                          {card.direction === 'up' ? <AccountingIcon name="arrowUp" /> : null}
+                          {card.direction === 'down' ? <AccountingIcon name="arrowDown" /> : null}
+                          {card.meta}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-              ) : null}
-            </div>
-            <div className="card">
-              <h4>Productos más rentables por valor (Top 10)</h4>
-              {(homeData?.topProductsByValue || []).length === 0 ? <p>Sin productos para mostrar.</p> : null}
-              {(homeData?.topProductsByValue || []).length > 0 ? (
-                <div className="admin-low-balance-table-wrap">
-                  <table className="admin-low-balance-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Utilidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(homeData?.topProductsByValue || []).map((item) => (
-                        <tr key={String(item.productId)}>
-                          <td>{item.productName || 'Producto'}</td>
-                          <td>{formatCurrency(item.utilityValue)} ({Number(item.utilityPercent || 0).toFixed(2)}%)</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                <div className="admin-home__insight-grid">
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-violet" aria-hidden="true"><AccountingIcon name="cart" /></span>
+                        <h4>Alumnos con mayor consumo</h4>
+                      </div>
+                      <button className="admin-home__link" onClick={() => setActiveModule('sales')} type="button">Ver más</button>
+                    </header>
+                    {(homeData?.topStudents || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin consumo destacado.</p>
+                    ) : (
+                      <ol className="admin-home__rank-list">
+                        {(homeData?.topStudents || []).slice(0, 8).map((item, index) => (
+                          <li key={String(item.studentId || index)}>
+                            <em>{index + 1}</em>
+                            <div>
+                              <strong>{item.studentName || 'Alumno'}</strong>
+                              <small>
+                                {Number(item.daysWithOrders || 0)} días con compras
+                                {item.grade ? ` · grado ${item.grade}` : ''}
+                              </small>
+                            </div>
+                            <span>{formatCurrency(item.averageDailySpent)}/día</span>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </article>
                 </div>
-              ) : null}
-            </div>
-            <div className="card">
-              <h4>Productos menos rentables por % (Top 10)</h4>
-              {(homeData?.leastProfitableProductsByPercent || []).length === 0 ? <p>Sin productos para mostrar.</p> : null}
-              {(homeData?.leastProfitableProductsByPercent || []).length > 0 ? (
-                <div className="admin-low-balance-table-wrap">
-                  <table className="admin-low-balance-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Rentabilidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(homeData?.leastProfitableProductsByPercent || []).map((item) => (
-                        <tr key={String(item.productId)}>
-                          <td>{item.productName || 'Producto'}</td>
-                          <td>{Number(item.utilityPercent || 0).toFixed(2)}% ({formatCurrency(item.utilityValue)})</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                <div className="admin-home__table-grid">
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-green" aria-hidden="true"><AccountingIcon name="trend" /></span>
+                        <h4>Productos más rentables por % (Top 10)</h4>
+                      </div>
+                    </header>
+                    {(homeData?.topProductsByPercent || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin productos para mostrar.</p>
+                    ) : (
+                      <div className="admin-home__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Rentabilidad</th>
+                              <th>Utilidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(homeData?.topProductsByPercent || []).map((item) => (
+                              <tr key={String(item.productId)}>
+                                <td>{item.productName || 'Producto'}</td>
+                                <td className="is-positive">{Number(item.utilityPercent || 0).toFixed(1)}%</td>
+                                <td>{formatCurrency(item.utilityValue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-blue" aria-hidden="true"><AccountingIcon name="chart" /></span>
+                        <h4>Productos más rentables por valor (Top 10)</h4>
+                      </div>
+                    </header>
+                    {(homeData?.topProductsByValue || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin productos para mostrar.</p>
+                    ) : (
+                      <div className="admin-home__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Utilidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(homeData?.topProductsByValue || []).map((item) => (
+                              <tr key={String(item.productId)}>
+                                <td>{item.productName || 'Producto'}</td>
+                                <td className="is-positive">{formatCurrency(item.utilityValue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-rose" aria-hidden="true"><AccountingIcon name="arrowDown" /></span>
+                        <h4>Productos menos rentables por % (Top 10)</h4>
+                      </div>
+                    </header>
+                    {(homeData?.leastProfitableProductsByPercent || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin productos para mostrar.</p>
+                    ) : (
+                      <div className="admin-home__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Rentabilidad</th>
+                              <th>Utilidad</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(homeData?.leastProfitableProductsByPercent || []).map((item) => (
+                              <tr key={String(item.productId)}>
+                                <td>{item.productName || 'Producto'}</td>
+                                <td className="is-negative">{Number(item.utilityPercent || 0).toFixed(1)}%</td>
+                                <td>{formatCurrency(item.utilityValue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-amber" aria-hidden="true"><AccountingIcon name="wallet" /></span>
+                        <h4>Alumnos con poco saldo</h4>
+                      </div>
+                      <button className="admin-home__link" onClick={() => setActiveModule('topups')} type="button">Ver más</button>
+                    </header>
+                    {(homeData?.lowBalanceStudents || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin alumnos con poco saldo.</p>
+                    ) : (
+                      <div className="admin-home__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Nombre alumno</th>
+                              <th>Saldo</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(homeData?.lowBalanceStudents || []).slice(0, 10).map((item) => (
+                              <tr key={String(item.studentId)}>
+                                <td>{item.studentName || 'Alumno'}</td>
+                                <td className={Number(item.balance || 0) < 0 ? 'is-negative' : ''}>
+                                  {formatCurrency(item.balance)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
                 </div>
-              ) : null}
-            </div>
-            <div className="card">
-              <h4>Alumnos con poco saldo</h4>
-              {(homeData?.lowBalanceStudents || []).length === 0 ? <p>Sin alumnos con poco saldo.</p> : null}
-              {(homeData?.lowBalanceStudents || []).length > 0 ? (
-                <div className="admin-low-balance-table-wrap admin-card-scroll">
-                  <table className="admin-low-balance-table">
-                    <thead>
-                      <tr>
-                        <th>Nombre alumno</th>
-                        <th>Saldo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(homeData?.lowBalanceStudents || []).map((item) => (
-                        <tr key={String(item.studentId)}>
-                          <td>{item.studentName || 'Alumno'}</td>
-                          <td>{formatCurrency(item.balance)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                <div className="admin-home__bottom-grid">
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-violet" aria-hidden="true"><AccountingIcon name="cart" /></span>
+                        <h4>Productos más consumidos</h4>
+                      </div>
+                      <button className="admin-home__link" onClick={() => setActiveModule('sales')} type="button">Ver más</button>
+                    </header>
+                    {(homeData?.topProducts || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin productos consumidos.</p>
+                    ) : (
+                      <div className="admin-home__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Cantidad</th>
+                              <th>Ventas</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(homeData?.topProducts || []).slice(0, 10).map((item) => (
+                              <tr key={String(item.productId)}>
+                                <td>{item.productName || 'Producto'}</td>
+                                <td>{Number(item.quantity || 0)}</td>
+                                <td>{formatCurrency(item.revenue)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-green" aria-hidden="true"><AccountingIcon name="spark" /></span>
+                        <h4>Recomendaciones por IA</h4>
+                      </div>
+                      <span className="admin-home__status-pill is-new">Nuevo</span>
+                    </header>
+                    {(homeData?.aiRecommendations || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin recomendaciones disponibles.</p>
+                    ) : (
+                      <ul className="admin-home__ai-list">
+                        {(homeData?.aiRecommendations || []).slice(0, 5).map((item, index) => (
+                          <li key={`${item.type || 'rec'}-${index}`}>
+                            <i aria-hidden="true" />
+                            <div>
+                              <strong>{item.title || 'Recomendación'}</strong>
+                              <small>{item.detail || item.action || 'Sin detalle'}</small>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <button className="admin-home__link is-footer" onClick={() => setActiveModule('ai')} type="button">
+                      Abrir GIO - IA
+                    </button>
+                  </article>
+
+                  <article className="admin-home__panel">
+                    <header>
+                      <div>
+                        <span className="admin-home__icon tone-rose" aria-hidden="true"><AccountingIcon name="alert" /></span>
+                        <h4>Alertas de inventario</h4>
+                      </div>
+                      <button className="admin-home__link" onClick={() => setActiveModule('inventory')} type="button">Ver más</button>
+                    </header>
+                    {(homeData?.lowStockProducts || []).length === 0 ? (
+                      <p className="admin-home__empty">Sin alertas de inventario.</p>
+                    ) : (
+                      <div className="admin-home__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Tienda</th>
+                              <th>Producto</th>
+                              <th>Stock</th>
+                              <th>Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(homeData?.lowStockProducts || []).slice(0, 10).map((item) => {
+                              const stock = Number(item.stock || 0);
+                              const alertAt = Number(item.inventoryAlertStock || 10);
+                              const status = stock <= 0 ? 'Agotado' : stock <= alertAt ? 'Bajo' : 'Alerta';
+                              return (
+                                <tr key={String(item._id)}>
+                                  <td>{item.storeId?.name || 'Tienda'}</td>
+                                  <td>{item.name || 'Producto'}</td>
+                                  <td>{stock}</td>
+                                  <td>
+                                    <span className={`admin-home__stock-pill is-${status === 'Agotado' ? 'critical' : 'warn'}`}>
+                                      {status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
                 </div>
-              ) : null}
-            </div>
-            <div className="card">
-              <h4>Productos más consumidos</h4>
-              {(homeData?.topProducts || []).map((item) => (
-                <p key={String(item.productId)}>
-                  {(item.productName || 'Producto')} - {item.quantity} und
-                </p>
-              ))}
-            </div>
-            <div className="card">
-              <h4>Recomendaciones por IA</h4>
-              {(homeData?.aiRecommendations || []).length === 0 ? <p>Sin recomendaciones disponibles.</p> : null}
-              {(homeData?.aiRecommendations || []).map((item, index) => (
-                <div key={`${item.type || 'rec'}-${index}`}>
-                  <p><strong>{item.title || 'Recomendación'}</strong></p>
-                  <p>{item.detail || ''}</p>
-                  <p><em>Acción sugerida:</em> {item.action || 'N/A'}</p>
-                </div>
-              ))}
-            </div>
-            <div className="card">
-              <h4>Alertas de inventario</h4>
-              {(homeData?.lowStockProducts || []).length === 0 ? <p>Sin alertas de inventario.</p> : null}
-              {(homeData?.lowStockProducts || []).length > 0 ? (
-                <div className="admin-low-balance-table-wrap admin-card-scroll">
-                  <table className="admin-low-balance-table">
-                    <thead>
-                      <tr>
-                        <th>Tienda</th>
-                        <th>Producto</th>
-                        <th>Stock</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(homeData?.lowStockProducts || []).slice(0, 10).map((item) => (
-                        <tr key={String(item._id)}>
-                          <td>{item.storeId?.name || 'Tienda'}</td>
-                          <td>{item.name || 'Producto'}</td>
-                          <td>{Number(item.stock || 0)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-            </div>
-          </div>
+              </>
+            );
+          })()}
         </section>
       ) : null}
 
       {activeModule === 'accounting' ? (
-        <section className="panel admin-section">
-          <h3>Contabilidad</h3>
-          <p>Registra costos por semana y consolida automáticamente los acumulados del mes.</p>
-
-          <form className="admin-form-grid" onSubmit={(event) => event.preventDefault()}>
-            <label>
-              Tienda para contabilidad
-              <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
-                <option value="">Todas las tiendas</option>
-                {stores.map((store) => (
-                  <option key={store._id} value={store._id}>
-                    {store.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Mes contable
-              <input
-                type="month"
-                value={accountingMonthFilter}
-                onChange={(event) => onChangeAccountingMonth(event.target.value)}
-              />
-            </label>
-          </form>
-
-          <div className="cards">
-            <div className="card admin-kpi-card">
-              <h4>Utilidades del día</h4>
-              <p>{formatCurrency(homeData?.utilityToday)}</p>
+        <section className="panel admin-section admin-accounting">
+          <div className="admin-accounting__toolbar">
+            <div>
+              <h3>Contabilidad</h3>
+              <p>Control financiero de cafetería con consolidado semanal y mensual.</p>
             </div>
-            <div className="card admin-kpi-card">
-              <h4>Utilidades de la semana</h4>
-              <p>{formatCurrency(homeData?.utilityWeek)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Utilidades del mes</h4>
-              <p>{formatCurrency(homeData?.utilityMonth)}</p>
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Utilidad teorica del mes</h4>
-              <p>{formatCurrency(homeData?.utilityTheoreticalMonth ?? homeData?.utilityMonth)}</p>
-              <small>Utilidades del mes - costos fijos - costos variables</small>
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Costos fijos</h4>
-              <p>{formatCurrency(homeData?.totalFixedCosts)}</p>
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Costos variables</h4>
-              <p>{formatCurrency(homeData?.totalVariableCosts)}</p>
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Comisiones QR + datáfono (mes)</h4>
-              <p>{formatCurrency(homeData?.paymentFeesMonthTotal)}</p>
-              <small>Se descuentan para calcular ingresos netos reales</small>
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Ventas netas del mes</h4>
-              <p>{formatCurrency(homeData?.salesMonthNet ?? homeData?.salesMonth)}</p>
-              <small>Ventas del mes - comisiones QR/datáfono</small>
-            </div>
-            <div className="card admin-compact-value-card">
-              <h4>Ingresos - egresos</h4>
-              <p>{formatCurrency(homeData?.utilityNetMonth)}</p>
-              <small>Ventas netas del mes - costos fijos - costos variables</small>
-            </div>
+            <form className="admin-accounting__filters" onSubmit={(event) => event.preventDefault()}>
+              <label>
+                Tienda
+                <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
+                  <option value="">Todas las tiendas</option>
+                  {stores.map((store) => (
+                    <option key={store._id} value={store._id}>{store.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Mes contable
+                <input
+                  type="month"
+                  value={accountingMonthFilter}
+                  onChange={(event) => onChangeAccountingMonth(event.target.value)}
+                />
+              </label>
+            </form>
           </div>
 
-          <div className="card">
-            <h4>Comisiones de medios de pago</h4>
-            <form className="admin-form-grid" onSubmit={onSaveAccountingFees}>
+          <article className="admin-accounting__panel">
+            <header className="admin-accounting__panel-head">
+              <div>
+                <h4>Resumen financiero</h4>
+                <p>Registro de costos por semana y consolidado automático de los acumulados del mes.</p>
+              </div>
+            </header>
+            <div className="admin-accounting__kpi-grid">
+              {[
+                { tone: 'blue', icon: 'wallet', label: 'Utilidades del día', value: homeData?.utilityToday },
+                { tone: 'green', icon: 'calendar', label: 'Utilidades de la semana', value: homeData?.utilityWeek },
+                { tone: 'violet', icon: 'chart', label: 'Utilidades del mes', value: homeData?.utilityMonth },
+                {
+                  tone: 'orange',
+                  icon: 'cap',
+                  label: 'Utilidad teórica del mes',
+                  value: homeData?.utilityTheoreticalMonth ?? homeData?.utilityMonth,
+                  hint: 'Utilidades del mes - costos fijos - variables',
+                },
+                { tone: 'sky', icon: 'pie', label: 'Costos fijos', value: homeData?.totalFixedCosts },
+                { tone: 'rose', icon: 'trend', label: 'Costos variables', value: homeData?.totalVariableCosts },
+                {
+                  tone: 'teal',
+                  icon: 'qr',
+                  label: 'Comisiones QR + datáfono (mes)',
+                  value: homeData?.paymentFeesMonthTotal,
+                  hint: 'Se descuentan para calcular ingresos netos reales',
+                },
+                {
+                  tone: 'amber',
+                  icon: 'cart',
+                  label: 'Ventas netas del mes',
+                  value: homeData?.salesMonthNet ?? homeData?.salesMonth,
+                  hint: 'Ventas del mes - comisiones QR/datáfono',
+                },
+                {
+                  tone: 'purple',
+                  icon: 'swap',
+                  label: 'Ingresos - egresos',
+                  value: homeData?.utilityNetMonth,
+                  hint: 'Ventas netas del mes - costos fijos - variables',
+                },
+              ].map((metric) => (
+                <div className={`admin-accounting__kpi tone-${metric.tone}`} key={metric.label}>
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true">
+                    <AccountingIcon name={metric.icon} />
+                  </span>
+                  <span className="admin-accounting__kpi-label">{metric.label}</span>
+                  <strong>{formatCurrency(metric.value)}</strong>
+                  <small>{metric.hint || '—'}</small>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="admin-accounting__panel">
+            <header className="admin-accounting__panel-head">
+              <div>
+                <h4>Comisiones de medios de pago</h4>
+                <p>Configura los porcentajes y valores para el cálculo automático de comisiones.</p>
+              </div>
+            </header>
+            <form className="admin-accounting__inline-form" onSubmit={onSaveAccountingFees}>
               <label>
                 Datáfono %
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={accountingFeeForm.dataphonePercent}
-                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphonePercent: event.target.value }))}
-                  required
-                />
+                <span className="admin-accounting__affix-field">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={accountingFeeForm.dataphonePercent}
+                    onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphonePercent: event.target.value }))}
+                    required
+                  />
+                  <em>%</em>
+                </span>
               </label>
               <label>
                 Datáfono fijo por transacción
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={accountingFeeForm.dataphoneFixedFee}
-                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphoneFixedFee: event.target.value }))}
-                  required
-                />
+                <span className="admin-accounting__affix-field">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={accountingFeeForm.dataphoneFixedFee}
+                    onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphoneFixedFee: event.target.value }))}
+                    required
+                  />
+                  <em>$</em>
+                </span>
               </label>
               <label>
                 Retenciones datáfono %
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={accountingFeeForm.dataphoneRetentionPercent}
-                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphoneRetentionPercent: event.target.value }))}
-                  required
-                />
+                <span className="admin-accounting__affix-field">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={accountingFeeForm.dataphoneRetentionPercent}
+                    onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, dataphoneRetentionPercent: event.target.value }))}
+                    required
+                  />
+                  <em>%</em>
+                </span>
               </label>
               <label>
                 QR %
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={accountingFeeForm.qrPercent}
-                  onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, qrPercent: event.target.value }))}
-                  required
-                />
+                <span className="admin-accounting__affix-field">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={accountingFeeForm.qrPercent}
+                    onChange={(event) => setAccountingFeeForm((prev) => ({ ...prev, qrPercent: event.target.value }))}
+                    required
+                  />
+                  <em>%</em>
+                </span>
               </label>
-              <button className="btn btn-primary" type="submit">
+              <button className="btn btn-primary admin-accounting__save-btn" type="submit">
+                <AccountingIcon name="save" />
                 Guardar comisiones
               </button>
             </form>
+            <div className="admin-accounting__info-banner">
+              <AccountingIcon name="info" />
+              <p>
+                Ejemplo datáfono: 2.99% + 300 + retenciones 1.92%. Estos valores se descuentan automáticamente
+                en &quot;Total ingresos&quot; y utilidades del consolidado.
+              </p>
+            </div>
+          </article>
 
-            <p className="admin-accounting-fees-help">
-              Ejemplo datáfono: 2.99% + 300 + retenciones 1.92%. Estos valores se descuentan automáticamente
-              en "Total ingresos" y utilidades del consolidado.
-            </p>
-          </div>
-
-          <div className="card">
-            <h4>Costos operativos (diarios)</h4>
-            <form className="admin-form-grid" onSubmit={onCreateFixedCost}>
+          <article className="admin-accounting__panel">
+            <header className="admin-accounting__panel-head">
+              <div>
+                <h4>Costos operativos (diarios)</h4>
+                <p>Registra los costos operativos del día a día de tu colegio.</p>
+              </div>
+            </header>
+            <form className="admin-accounting__inline-form is-costs" onSubmit={onCreateFixedCost}>
               <label>
-                Dia
+                Día
                 <input
                   type="date"
                   value={fixedCostForm.weekStart}
@@ -5251,7 +5754,7 @@ function AdminDashboard() {
                 </select>
               </label>
               {fixedCostForm.type === 'variable' ? (
-                <label>
+                <label className="is-grow">
                   Concepto / Proveedor
                   <select
                     value={fixedCostForm.supplierId}
@@ -5260,26 +5763,24 @@ function AdminDashboard() {
                   >
                     <option value="">Selecciona proveedor</option>
                     {suppliers.map((supplier) => (
-                      <option key={supplier._id} value={supplier._id}>
-                        {supplier.name}
-                      </option>
+                      <option key={supplier._id} value={supplier._id}>{supplier.name}</option>
                     ))}
                     <option value="other">Otro</option>
                   </select>
                 </label>
               ) : (
-                <label>
+                <label className="is-grow">
                   Concepto
                   <input
                     value={fixedCostForm.name}
                     onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="Ej: Nomina dia sabado"
+                    placeholder="Ej: Nómina día sábado"
                     required
                   />
                 </label>
               )}
               {fixedCostForm.type === 'variable' && fixedCostForm.supplierId === 'other' ? (
-                <label>
+                <label className="is-grow">
                   Concepto (otro)
                   <input
                     value={fixedCostForm.supplierOtherName}
@@ -5291,14 +5792,17 @@ function AdminDashboard() {
               ) : null}
               <label>
                 Valor
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
-                  value={fixedCostForm.amount}
-                  onChange={(event) => setFixedCostForm((prev) => ({ ...prev, amount: event.target.value }))}
-                  required
-                />
+                <span className="admin-accounting__affix-field is-prefix">
+                  <em>$</em>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={fixedCostForm.amount}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, amount: event.target.value }))}
+                    required
+                  />
+                </span>
               </label>
               <label>
                 Tienda (opcional)
@@ -5308,175 +5812,234 @@ function AdminDashboard() {
                 >
                   <option value="">Global (todas)</option>
                   {stores.map((store) => (
-                    <option key={store._id} value={store._id}>
-                      {store.name}
-                    </option>
+                    <option key={store._id} value={store._id}>{store.name}</option>
                   ))}
                 </select>
               </label>
-              <button className="btn btn-primary" type="submit">
+              <button className="btn btn-primary admin-accounting__save-btn" type="submit">
+                <AccountingIcon name="save" />
                 Guardar costo diario
               </button>
             </form>
-
-            <div className="admin-cost-summary-row">
-              <p>Total costos fijos del mes: <strong>{formatCurrency(homeData?.totalFixedCosts)}</strong></p>
-              <p>Total costos variables del mes: <strong>{formatCurrency(homeData?.totalVariableCosts)}</strong></p>
+            <div className="admin-accounting__cost-totals">
+              <div className="tone-blue">
+                <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="inbox" /></span>
+                <div>
+                  <span>Total costos fijos del mes</span>
+                  <strong>{formatCurrency(homeData?.totalFixedCosts)}</strong>
+                </div>
+              </div>
+              <div className="tone-green">
+                <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="doc" /></span>
+                <div>
+                  <span>Total costos variables del mes</span>
+                  <strong>{formatCurrency(homeData?.totalVariableCosts)}</strong>
+                </div>
+              </div>
             </div>
+          </article>
 
-            <h5 className="admin-cost-list-title">Consolidado semanal del mes</h5>
-            {accountingWeeklyRows.length === 0 ? <p>No hay costos semanales registrados para este mes.</p> : null}
-            {accountingWeeklyRows.length > 0 ? (
-              <div className="approval-history-scroll approval-history-table-scroll">
-                <table className="simple-table">
-                  <thead>
-                    <tr>
-                      <th>Semana</th>
-                      <th>Ventas efectivo</th>
-                      <th>Ventas QR</th>
-                      <th>Ventas datáfono</th>
-                      <th>Recargas semana</th>
-                      <th>Total ingresos netos semana</th>
-                      <th>Costos fijos</th>
-                      <th>Costos variables</th>
-                      <th>Total costos semana</th>
-                      <th>Utilidades semana</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {accountingWeeklyRows.map((row) => {
-                      const startDate = parseWeekKeyDateSafe(row.weekKey);
-                      if (!startDate) {
-                        return null;
-                      }
+          <div className="admin-accounting__split">
+            <article className="admin-accounting__panel">
+              <header className="admin-accounting__panel-head">
+                <div>
+                  <h4>Consolidado semanal del mes</h4>
+                  <p>Ventas, costos y utilidades por semana.</p>
+                </div>
+                <span className="admin-accounting__panel-badge tone-blue" aria-hidden="true">
+                  <AccountingIcon name="calendar" />
+                </span>
+              </header>
+              {accountingWeeklyRows.length === 0 ? (
+                <p className="admin-accounting__empty">No hay costos semanales registrados para este mes.</p>
+              ) : (
+                <div className="approval-history-scroll approval-history-table-scroll admin-accounting__table-wrap">
+                  <table className="simple-table">
+                    <thead>
+                      <tr>
+                        <th>Semana</th>
+                        <th>Ventas efectivo</th>
+                        <th>Ventas QR</th>
+                        <th>Ventas datáfono</th>
+                        <th>Recargas semana</th>
+                        <th>Total ingresos netos semana</th>
+                        <th>Costos fijos</th>
+                        <th>Costos variables</th>
+                        <th>Total costos semana</th>
+                        <th>Utilidades semana</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accountingWeeklyRows.map((row) => {
+                        const startDate = parseWeekKeyDateSafe(row.weekKey);
+                        if (!startDate) return null;
 
-                      const endDate = new Date(startDate.getTime());
-                      endDate.setUTCDate(endDate.getUTCDate() + 6);
-                      const isExpanded = expandedAccountingWeekKeys.includes(row.weekKey);
-                      const dailyRows = buildAccountingWeekDayRows(row.weekKey, row.dailyBreakdown);
+                        const endDate = new Date(startDate.getTime());
+                        endDate.setUTCDate(endDate.getUTCDate() + 6);
+                        const isExpanded = expandedAccountingWeekKeys.includes(row.weekKey);
+                        const dailyRows = buildAccountingWeekDayRows(row.weekKey, row.dailyBreakdown);
 
-                      return (
-                        [
-                          <tr key={`${row.weekKey}-summary`}>
-                            <td>
-                              <button
-                                className="admin-accounting-week-toggle"
-                                onClick={() => {
-                                  setExpandedAccountingWeekKeys((prev) => (
-                                    prev.includes(row.weekKey)
-                                      ? prev.filter((weekKey) => weekKey !== row.weekKey)
-                                      : [...prev, row.weekKey]
-                                  ));
-                                }}
-                                type="button"
-                              >
-                                <span>
-                                  {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
-                                  {' - '}
-                                  {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
-                                </span>
-                                <span>{isExpanded ? 'Ocultar dias' : 'Ver dias'}</span>
-                              </button>
-                            </td>
-                            <td>{formatCurrency(row.salesCashTotal)}</td>
-                            <td>{formatCurrency(row.salesQrTotal)}</td>
-                            <td>{formatCurrency(row.salesDataphoneTotal)}</td>
-                            <td>{formatCurrency(row.topupsTotal)}</td>
-                            <td>{formatCurrency(row.totalIncomeNetTotal)}</td>
-                            <td>{formatCurrency(row.fixedTotal)}</td>
-                            <td>{formatCurrency(row.variableTotal)}</td>
-                            <td>{formatCurrency(row.totalCostsTotal)}</td>
-                            <td>{formatCurrency(row.utilityTotal)}</td>
-                          </tr>,
-                          isExpanded ? (
-                            <tr className="admin-accounting-week-detail-row" key={`${row.weekKey}-detail`}>
-                              <td colSpan={10}>
-                                <div className="approval-history-scroll approval-history-table-scroll admin-accounting-week-detail-wrap">
-                                  <table className="simple-table">
-                                    <thead>
-                                      <tr>
-                                        <th>Dia</th>
-                                        <th>Ventas efectivo</th>
-                                        <th>Ventas QR</th>
-                                        <th>Ventas datáfono</th>
-                                        <th>Recargas del dia</th>
-                                        <th>Total ingresos netos del dia</th>
-                                        <th>Costos fijos</th>
-                                        <th>Costos variables</th>
-                                        <th>Total costos dia</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {dailyRows.map((dayRow) => (
-                                        <tr key={`${row.weekKey}-${dayRow.dayLabel}`}>
-                                          <td>{dayRow.dayLabel}</td>
-                                          <td>{formatCurrency(dayRow.salesCashTotal)}</td>
-                                          <td>{formatCurrency(dayRow.salesQrTotal)}</td>
-                                          <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
-                                          <td>{formatCurrency(dayRow.topupsTotal)}</td>
-                                          <td>{formatCurrency(dayRow.totalIncomeNetTotal)}</td>
-                                          <td>
-                                            <button
-                                              className="admin-accounting-cost-trigger"
-                                              onClick={() => openAccountingCostDetailModal(dayRow, 'fixed')}
-                                              type="button"
-                                            >
-                                              {formatCurrency(dayRow.fixedTotal)}
-                                            </button>
-                                          </td>
-                                          <td>
-                                            <button
-                                              className="admin-accounting-cost-trigger"
-                                              onClick={() => openAccountingCostDetailModal(dayRow, 'variable')}
-                                              type="button"
-                                            >
-                                              {formatCurrency(dayRow.variableTotal)}
-                                            </button>
-                                          </td>
-                                          <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
+                        return (
+                          [
+                            <tr key={`${row.weekKey}-summary`}>
+                              <td>
+                                <button
+                                  className="admin-accounting-week-toggle"
+                                  onClick={() => {
+                                    setExpandedAccountingWeekKeys((prev) => (
+                                      prev.includes(row.weekKey)
+                                        ? prev.filter((weekKey) => weekKey !== row.weekKey)
+                                        : [...prev, row.weekKey]
+                                    ));
+                                  }}
+                                  type="button"
+                                >
+                                  <span>
+                                    {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                                    {' - '}
+                                    {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                                  </span>
+                                  <span>{isExpanded ? 'Ocultar días' : 'Ver días'}</span>
+                                </button>
                               </td>
-                            </tr>
-                          ) : null,
-                        ]
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
+                              <td>{formatCurrency(row.salesCashTotal)}</td>
+                              <td>{formatCurrency(row.salesQrTotal)}</td>
+                              <td>{formatCurrency(row.salesDataphoneTotal)}</td>
+                              <td>{formatCurrency(row.topupsTotal)}</td>
+                              <td>{formatCurrency(row.totalIncomeNetTotal)}</td>
+                              <td>{formatCurrency(row.fixedTotal)}</td>
+                              <td>{formatCurrency(row.variableTotal)}</td>
+                              <td>{formatCurrency(row.totalCostsTotal)}</td>
+                              <td>{formatCurrency(row.utilityTotal)}</td>
+                            </tr>,
+                            isExpanded ? (
+                              <tr className="admin-accounting-week-detail-row" key={`${row.weekKey}-detail`}>
+                                <td colSpan={10}>
+                                  <div className="approval-history-scroll approval-history-table-scroll admin-accounting-week-detail-wrap">
+                                    <table className="simple-table">
+                                      <thead>
+                                        <tr>
+                                          <th>Día</th>
+                                          <th>Ventas efectivo</th>
+                                          <th>Ventas QR</th>
+                                          <th>Ventas datáfono</th>
+                                          <th>Recargas del día</th>
+                                          <th>Total ingresos netos del día</th>
+                                          <th>Costos fijos</th>
+                                          <th>Costos variables</th>
+                                          <th>Total costos día</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {dailyRows.map((dayRow) => (
+                                          <tr key={`${row.weekKey}-${dayRow.dayLabel}`}>
+                                            <td>{dayRow.dayLabel}</td>
+                                            <td>{formatCurrency(dayRow.salesCashTotal)}</td>
+                                            <td>{formatCurrency(dayRow.salesQrTotal)}</td>
+                                            <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
+                                            <td>{formatCurrency(dayRow.topupsTotal)}</td>
+                                            <td>{formatCurrency(dayRow.totalIncomeNetTotal)}</td>
+                                            <td>
+                                              <button
+                                                className="admin-accounting-cost-trigger"
+                                                onClick={() => openAccountingCostDetailModal(dayRow, 'fixed')}
+                                                type="button"
+                                              >
+                                                {formatCurrency(dayRow.fixedTotal)}
+                                              </button>
+                                            </td>
+                                            <td>
+                                              <button
+                                                className="admin-accounting-cost-trigger"
+                                                onClick={() => openAccountingCostDetailModal(dayRow, 'variable')}
+                                                type="button"
+                                              >
+                                                {formatCurrency(dayRow.variableTotal)}
+                                              </button>
+                                            </td>
+                                            <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null,
+                          ]
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </article>
 
-            <h5 className="admin-cost-list-title">Detalle costos fijos del mes</h5>
-            {(homeData?.fixedCosts || []).length === 0 ? <p>No hay costos fijos registrados.</p> : null}
-            {(homeData?.fixedCosts || []).map((item) => (
-              <div className="admin-row-actions" key={item._id}>
-                <p>
-                  {item.name} - {formatCurrency(item.amount)} ({item.storeId?.name || 'Global'})
-                  {' | '}Dia: {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
-                </p>
-                <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
-                  Eliminar
-                </button>
-              </div>
-            ))}
+            <div className="admin-accounting__detail-stack">
+              <article className="admin-accounting__panel">
+                <header className="admin-accounting__panel-head">
+                  <div>
+                    <h4>Detalle costos fijos del mes</h4>
+                    <p>Listado de costos fijos registrados.</p>
+                  </div>
+                  <span className="admin-accounting__panel-badge tone-sky" aria-hidden="true">
+                    <AccountingIcon name="doc" />
+                  </span>
+                </header>
+                {(homeData?.fixedCosts || []).length === 0 ? (
+                  <p className="admin-accounting__empty">No hay costos fijos registrados.</p>
+                ) : (
+                  <div className="admin-accounting__cost-list">
+                    {(homeData?.fixedCosts || []).map((item) => (
+                      <div className="admin-accounting__cost-row" key={item._id}>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <small>
+                            {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} · Día{' '}
+                            {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
+                          </small>
+                        </div>
+                        <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
 
-            <h5 className="admin-cost-list-title">Detalle costos variables del mes</h5>
-            {(homeData?.variableCosts || []).length === 0 ? <p>No hay costos variables registrados.</p> : null}
-            {(homeData?.variableCosts || []).map((item) => (
-              <div className="admin-row-actions" key={item._id}>
-                <p>
-                  {item.name} - {formatCurrency(item.amount)} ({item.storeId?.name || 'Global'})
-                  {' | '}Dia: {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
-                </p>
-                <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
-                  Eliminar
-                </button>
-              </div>
-            ))}
+              <article className="admin-accounting__panel">
+                <header className="admin-accounting__panel-head">
+                  <div>
+                    <h4>Detalle costos variables del mes</h4>
+                    <p>Listado de costos variables registrados.</p>
+                  </div>
+                  <span className="admin-accounting__panel-badge tone-rose" aria-hidden="true">
+                    <AccountingIcon name="trend" />
+                  </span>
+                </header>
+                {(homeData?.variableCosts || []).length === 0 ? (
+                  <p className="admin-accounting__empty">No hay costos variables registrados.</p>
+                ) : (
+                  <div className="admin-accounting__cost-list">
+                    {(homeData?.variableCosts || []).map((item) => (
+                      <div className="admin-accounting__cost-row" key={item._id}>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <small>
+                            {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} · Día{' '}
+                            {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
+                          </small>
+                        </div>
+                        <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
+                          Eliminar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
+            </div>
           </div>
         </section>
       ) : null}
@@ -5703,10 +6266,10 @@ function AdminDashboard() {
       ) : null}
 
       {activeModule === 'school_billing' ? (
-        <section className="panel admin-section">
+        <section className="panel admin-section admin-school-billing">
           <h3>Cuentas de cobro colegio</h3>
 
-          <form className="admin-form-grid" onSubmit={onApplySchoolBillingFilters}>
+          <form className="admin-school-billing__filters" onSubmit={onApplySchoolBillingFilters}>
             <label>
               Desde
               <input
@@ -5723,7 +6286,7 @@ function AdminDashboard() {
                 onChange={(event) => setSchoolBillingFilters((prev) => ({ ...prev, to: event.target.value }))}
               />
             </label>
-            <label>
+            <label className="is-search">
               Buscar
               <input
                 value={schoolBillingFilters.q}
@@ -5731,21 +6294,22 @@ function AdminDashboard() {
                 placeholder="Orden, tienda, vendedor, dirigido a, responsable o producto"
               />
             </label>
-            <button className="btn btn-primary" type="submit">
-              Filtrar
-            </button>
+            <div className="admin-school-billing__actions">
+              <button className="btn btn-primary" type="submit">
+                Filtrar
+              </button>
+              <button className="btn" type="button" onClick={() => runAction(() => loadSchoolBillingOrders(schoolBillingFilters), 'Cuentas de cobro actualizadas.') }>
+                Actualizar
+              </button>
+            </div>
           </form>
 
-          <button className="btn" type="button" onClick={() => runAction(() => loadSchoolBillingOrders(schoolBillingFilters), 'Cuentas de cobro actualizadas.') }>
-            Actualizar
-          </button>
-
-          <div className="card">
+          <div className="card admin-school-billing__card">
             <h4>Cuenta consolidada del periodo</h4>
             <p className="helper">
               Genera un solo PDF con todas las órdenes de cuenta de cobro colegio del rango de fechas, como la cuenta mensual que se envía al colegio.
             </p>
-            <div className="admin-form-grid">
+            <div className="admin-school-billing__form-grid">
               <label>
                 Desde
                 <input
@@ -5779,7 +6343,7 @@ function AdminDashboard() {
                 />
               </label>
             </div>
-            <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="admin-school-billing__action-row">
               <button className="btn btn-primary" onClick={onGenerateConsolidatedSchoolBillingStatement} type="button">
                 Generar cuenta consolidada
               </button>
@@ -5793,12 +6357,12 @@ function AdminDashboard() {
             </div>
           </div>
 
-          <div className="card">
+          <div className="card admin-school-billing__card">
             <h4>Generar cuenta de cobro</h4>
             <p className="helper">
               Selecciona órdenes pendientes con el mismo dirigido a y responsable. El PDF quedará guardado en el historial.
             </p>
-            <div className="row gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <div className="admin-school-billing__action-row">
               <button
                 className="btn btn-primary"
                 disabled={selectedSchoolBillingOrderIds.length === 0}
@@ -5822,147 +6386,131 @@ function AdminDashboard() {
           {schoolBillingOrders.length === 0 ? <p>No hay cuentas de cobro colegio para los filtros seleccionados.</p> : null}
 
           {pendingSchoolBillingOrders.length > 0 ? (
-            <div className="card">
+            <div className="card admin-school-billing__card">
               <h4>Ordenes pendientes</h4>
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>
-                      <input
-                        aria-label="Seleccionar todas las órdenes pendientes disponibles"
-                        checked={selectableSchoolBillingOrders.length > 0 && selectableSchoolBillingOrders.every((order) => selectedSchoolBillingOrderIds.includes(String(order._id)))}
-                        onChange={(event) => onToggleAllSelectableSchoolBillingOrders(event.target.checked)}
-                        type="checkbox"
-                      />
-                    </th>
-                    <th>Orden</th>
-                    <th>Tienda</th>
-                    <th>Vendedor</th>
-                    <th>Alumno</th>
-                    <th>Dirigido a</th>
-                    <th>Responsable</th>
-                    <th>Total</th>
-                    <th>Fecha y hora</th>
-                    <th>Detalle de productos</th>
-                    <th>Estado</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingSchoolBillingOrders.map((order) => (
-                    <tr key={`summary-${order._id}`} className="school-billing-row-detail">
-                      <td>
-                        {order.schoolBillingStatementId ? (
-                          <span className="helper">En historial</span>
-                        ) : (
-                          <input
-                            aria-label={`Seleccionar orden ${order.orderNumber || order._id}`}
-                            checked={selectedSchoolBillingOrderIds.includes(String(order._id))}
-                            onChange={(event) => onToggleSchoolBillingOrderSelection(order._id, event.target.checked)}
-                            type="checkbox"
-                          />
-                        )}
-                      </td>
-                      <td>{order.orderNumber || order._id}</td>
-                      <td>{order.storeId?.name || 'N/A'}</td>
-                      <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
-                      <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
-                      <td>{order.schoolBillingFor || 'N/A'}</td>
-                      <td>{order.schoolBillingResponsible || 'N/A'}</td>
-                      <td>{formatCurrency(order.total)}</td>
-                      <td>{formatDateTime(order.createdAt)}</td>
-                      <td>
-                        <table className="simple-table school-billing-items-table">
-                          <thead>
-                            <tr>
-                              <th>Producto</th>
-                              <th>Cantidad</th>
-                              <th>Subtotal</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(order.items || []).map((item, index) => (
-                              <tr key={`${order._id}-pending-item-${index}`}>
-                                <td>{item.nameSnapshot || 'Producto'}</td>
-                                <td>{item.quantity}</td>
-                                <td>{formatCurrency(item.subtotal)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </td>
-                      <td>PENDIENTE</td>
-                      <td>
-                        <button className="btn btn-primary" type="button" onClick={() => onMarkSchoolBillingCollected(order._id)}>
-                          Cobrado
-                        </button>
-                      </td>
+              <div className="admin-school-billing__table-wrap">
+                <table className="simple-table admin-school-billing__table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <input
+                          aria-label="Seleccionar todas las órdenes pendientes disponibles"
+                          checked={selectableSchoolBillingOrders.length > 0 && selectableSchoolBillingOrders.every((order) => selectedSchoolBillingOrderIds.includes(String(order._id)))}
+                          onChange={(event) => onToggleAllSelectableSchoolBillingOrders(event.target.checked)}
+                          type="checkbox"
+                        />
+                      </th>
+                      <th>Orden</th>
+                      <th>Tienda</th>
+                      <th>Vendedor</th>
+                      <th>Alumno</th>
+                      <th>Dirigido a</th>
+                      <th>Responsable</th>
+                      <th>Total</th>
+                      <th>Fecha y hora</th>
+                      <th>Detalle de productos</th>
+                      <th>Estado</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {pendingSchoolBillingOrders.map((order) => (
+                      <tr key={`summary-${order._id}`} className="school-billing-row-detail">
+                        <td>
+                          {order.schoolBillingStatementId ? (
+                            <span className="helper">En historial</span>
+                          ) : (
+                            <input
+                              aria-label={`Seleccionar orden ${order.orderNumber || order._id}`}
+                              checked={selectedSchoolBillingOrderIds.includes(String(order._id))}
+                              onChange={(event) => onToggleSchoolBillingOrderSelection(order._id, event.target.checked)}
+                              type="checkbox"
+                            />
+                          )}
+                        </td>
+                        <td>{order.orderNumber || order._id}</td>
+                        <td>{order.storeId?.name || 'N/A'}</td>
+                        <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
+                        <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
+                        <td>{order.schoolBillingFor || 'N/A'}</td>
+                        <td>{order.schoolBillingResponsible || 'N/A'}</td>
+                        <td>{formatCurrency(order.total)}</td>
+                        <td>{formatDateTime(order.createdAt)}</td>
+                        <td>
+                          <ul className="admin-school-billing__items">
+                            {(order.items || []).map((item, index) => (
+                              <li key={`${order._id}-pending-item-${index}`}>
+                                <span>{item.nameSnapshot || 'Producto'}</span>
+                                <small>x{item.quantity} · {formatCurrency(item.subtotal)}</small>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                        <td>PENDIENTE</td>
+                        <td>
+                          <button className="btn btn-primary" type="button" onClick={() => onMarkSchoolBillingCollected(order._id)}>
+                            Cobrado
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
 
           {collectedSchoolBillingOrders.length > 0 ? (
-            <div className="card">
+            <div className="card admin-school-billing__card">
               <h4>Ordenes cobradas</h4>
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>Orden</th>
-                    <th>Tienda</th>
-                    <th>Vendedor</th>
-                    <th>Alumno</th>
-                    <th>Dirigido a</th>
-                    <th>Responsable</th>
-                    <th>Total</th>
-                    <th>Fecha y hora</th>
-                    <th>Detalle de productos</th>
-                    <th>Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {collectedSchoolBillingOrders.map((order) => (
-                    <tr key={`collected-${order._id}`} className="school-billing-row-detail">
-                      <td>{order.orderNumber || order._id}</td>
-                      <td>{order.storeId?.name || 'N/A'}</td>
-                      <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
-                      <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
-                      <td>{order.schoolBillingFor || 'N/A'}</td>
-                      <td>{order.schoolBillingResponsible || 'N/A'}</td>
-                      <td>{formatCurrency(order.total)}</td>
-                      <td>{formatDateTime(order.createdAt)}</td>
-                      <td>
-                        <table className="simple-table school-billing-items-table">
-                          <thead>
-                            <tr>
-                              <th>Producto</th>
-                              <th>Cantidad</th>
-                              <th>Subtotal</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(order.items || []).map((item, index) => (
-                              <tr key={`${order._id}-collected-item-${index}`}>
-                                <td>{item.nameSnapshot || 'Producto'}</td>
-                                <td>{item.quantity}</td>
-                                <td>{formatCurrency(item.subtotal)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </td>
-                      <td>COBRADO</td>
+              <div className="admin-school-billing__table-wrap">
+                <table className="simple-table admin-school-billing__table">
+                  <thead>
+                    <tr>
+                      <th>Orden</th>
+                      <th>Tienda</th>
+                      <th>Vendedor</th>
+                      <th>Alumno</th>
+                      <th>Dirigido a</th>
+                      <th>Responsable</th>
+                      <th>Total</th>
+                      <th>Fecha y hora</th>
+                      <th>Detalle de productos</th>
+                      <th>Estado</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {collectedSchoolBillingOrders.map((order) => (
+                      <tr key={`collected-${order._id}`} className="school-billing-row-detail">
+                        <td>{order.orderNumber || order._id}</td>
+                        <td>{order.storeId?.name || 'N/A'}</td>
+                        <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
+                        <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
+                        <td>{order.schoolBillingFor || 'N/A'}</td>
+                        <td>{order.schoolBillingResponsible || 'N/A'}</td>
+                        <td>{formatCurrency(order.total)}</td>
+                        <td>{formatDateTime(order.createdAt)}</td>
+                        <td>
+                          <ul className="admin-school-billing__items">
+                            {(order.items || []).map((item, index) => (
+                              <li key={`${order._id}-collected-item-${index}`}>
+                                <span>{item.nameSnapshot || 'Producto'}</span>
+                                <small>x{item.quantity} · {formatCurrency(item.subtotal)}</small>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                        <td>COBRADO</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
 
-          <div className="card">
-            <div className="row gap" style={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div className="card admin-school-billing__card">
+            <div className="admin-school-billing__action-row">
               <h4 style={{ margin: 0 }}>Historial de cuentas generadas</h4>
               <button className="btn btn-primary" onClick={onRebuildSchoolBillingStatementsFromCollectionDates} type="button">
                 Reconstruir cuentas por fecha de cobro
@@ -5974,38 +6522,40 @@ function AdminDashboard() {
             {schoolBillingStatements.length === 0 ? (
               <p>No hay cuentas de cobro guardadas en el historial.</p>
             ) : (
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>Número</th>
-                    <th>Dirigido a</th>
-                    <th>Responsable</th>
-                    <th>Órdenes</th>
-                    <th>Total</th>
-                    <th>Generada por</th>
-                    <th>Fecha</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schoolBillingStatements.map((statement) => (
-                    <tr key={statement._id}>
-                      <td>{statement.statementNumber}</td>
-                      <td>{statement.billingFor || 'N/A'}</td>
-                      <td>{statement.billingResponsible || 'N/A'}</td>
-                      <td>{statement.orderCount || 0}</td>
-                      <td>{formatCurrency(statement.totalAmount)}</td>
-                      <td>{statement.generatedByName || 'Administración'}</td>
-                      <td>{formatDateTime(statement.createdAt)}</td>
-                      <td>
-                        <button className="btn btn-primary" onClick={() => onOpenSchoolBillingStatement(statement._id)} type="button">
-                          Ver PDF
-                        </button>
-                      </td>
+              <div className="admin-school-billing__table-wrap">
+                <table className="simple-table admin-school-billing__table">
+                  <thead>
+                    <tr>
+                      <th>Número</th>
+                      <th>Dirigido a</th>
+                      <th>Responsable</th>
+                      <th>Órdenes</th>
+                      <th>Total</th>
+                      <th>Generada por</th>
+                      <th>Fecha</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {schoolBillingStatements.map((statement) => (
+                      <tr key={statement._id}>
+                        <td>{statement.statementNumber}</td>
+                        <td>{statement.billingFor || 'N/A'}</td>
+                        <td>{statement.billingResponsible || 'N/A'}</td>
+                        <td>{statement.orderCount || 0}</td>
+                        <td>{formatCurrency(statement.totalAmount)}</td>
+                        <td>{statement.generatedByName || 'Administración'}</td>
+                        <td>{formatDateTime(statement.createdAt)}</td>
+                        <td>
+                          <button className="btn btn-primary" onClick={() => onOpenSchoolBillingStatement(statement._id)} type="button">
+                            Ver PDF
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </section>
@@ -6014,6 +6564,58 @@ function AdminDashboard() {
       {activeModule === 'notifications' ? (
         <section className="panel admin-section">
           <h3>Auditoria de notificaciones push</h3>
+
+          <div className="card" style={{ marginBottom: '1.25rem' }}>
+            <h4 style={{ marginTop: 0 }}>Enviar promoción a padres</h4>
+            <p style={{ marginTop: 0, color: '#5b6b7f' }}>
+              Escribe el título y el mensaje del push para enviar promociones de cafetería a los acudientes.
+            </p>
+            <form className="admin-form-grid" onSubmit={onSendPromoPush}>
+              <label>
+                Destino
+                <select
+                  value={promoPushForm.studentId}
+                  onChange={(event) =>
+                    setPromoPushForm((prev) => ({ ...prev, studentId: event.target.value }))
+                  }
+                >
+                  <option value="">Todos los acudientes del colegio</option>
+                  {students.map((student) => (
+                    <option key={student._id} value={student._id}>
+                      Acudientes de {student.name || 'Alumno'} {student.schoolCode ? `(${student.schoolCode})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Título del push
+                <input
+                  maxLength={120}
+                  onChange={(event) =>
+                    setPromoPushForm((prev) => ({ ...prev, title: event.target.value }))
+                  }
+                  placeholder="Ej: Combo del día en cafetería"
+                  value={promoPushForm.title}
+                />
+              </label>
+              <label style={{ gridColumn: '1 / -1' }}>
+                Mensaje del push
+                <textarea
+                  maxLength={500}
+                  onChange={(event) =>
+                    setPromoPushForm((prev) => ({ ...prev, body: event.target.value }))
+                  }
+                  placeholder="Escribe el texto de la promoción que verán los padres…"
+                  rows={4}
+                  value={promoPushForm.body}
+                />
+              </label>
+              <button className="btn btn-primary" disabled={loading} type="submit">
+                {loading ? 'Enviando…' : 'Enviar promoción push'}
+              </button>
+            </form>
+          </div>
+
           <form className="admin-form-grid" onSubmit={onApplyNotificationAuditFilters}>
             <label>
               Alumno
@@ -6041,6 +6643,7 @@ function AdminDashboard() {
               >
                 <option value="">Todos</option>
                 <option value="order_created">Compra POS</option>
+                <option value="cafeteria.promo">Promoción cafetería</option>
                 <option value="low_balance_lt20">Saldo bajo &lt; 20k</option>
                 <option value="low_balance_lt10">Saldo bajo &lt; 10k</option>
                 <option value="auto_debit_recharge">Recarga automática</option>
@@ -6832,12 +7435,12 @@ function AdminDashboard() {
                       ...prev,
                       role: event.target.value,
                       assignedStoreId: event.target.value === 'vendor' ? prev.assignedStoreId : '',
-                      coordinationScope: event.target.value === 'coordination' ? prev.coordinationScope : '',
-                      assignedSubjectsText: event.target.value === 'teacher' ? prev.assignedSubjectsText : '',
+                      coordinationScope: '',
+                      assignedSubjectsText: '',
                     }))
                   }
                 >
-                  {USER_ROLE_OPTIONS.map((option) => (
+                  {CAFETERIA_CREATE_USER_ROLE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
@@ -6859,27 +7462,6 @@ function AdminDashboard() {
                   </select>
                 </label>
               ) : null}
-              {userForm.role === 'coordination' ? (
-                <label>
-                  Alcance de coordinación
-                  <input
-                    value={userForm.coordinationScope}
-                    onChange={(event) => setUserForm((prev) => ({ ...prev, coordinationScope: event.target.value }))}
-                    placeholder="Nivel educativo, por ejemplo Elementary"
-                    required
-                  />
-                </label>
-              ) : null}
-              {userForm.role === 'teacher' ? (
-                <label>
-                  Asignaturas
-                  <input
-                    placeholder="Ej: Matemáticas, Ciencias, Inglés"
-                    value={userForm.assignedSubjectsText}
-                    onChange={(event) => setUserForm((prev) => ({ ...prev, assignedSubjectsText: event.target.value }))}
-                  />
-                </label>
-              ) : null}
               <button className="btn btn-primary admin-create-btn" type="submit">Crear</button>
             </form>
 
@@ -6898,7 +7480,7 @@ function AdminDashboard() {
                 />
               </label>
               <label>
-                Acudiente (opcional)
+                Acudiente externo (opcional)
                 <select value={studentForm.parentId} onChange={(event) => setStudentForm((prev) => ({ ...prev, parentId: event.target.value }))}>
                   <option value="">Sin asignar</option>
                   {parentUsers.map((parent) => (
@@ -6918,25 +7500,13 @@ function AdminDashboard() {
           <div className="row gap">
             <label>
               Tipo de registro
-              <select value={editEntity} onChange={(event) => setEditEntity(event.target.value)}>
-                <option value="product">Producto</option>
-                <option value="category">Categoría</option>
-                <option value="store">Tienda</option>
-                <option value="student">Alumno</option>
-                <option value="parent">Acudientes</option>
-                <option value="vendor">Vendedores</option>
-                <option value="admin">Administradores</option>
-                <option value="rectoria">Rectoría</option>
-                <option value="direccion">Dirección</option>
-                <option value="merienda_operator">Tutores de alimentación</option>
-                <option value="academic_secretary">Secretaría académica</option>
-                <option value="billing">Cartera</option>
-                <option value="human_resources">Recursos y gestion de compras</option>
-                <option value="coordination">Coordinación</option>
-                <option value="teacher">Docentes</option>
-                <option value="nursing">Enfermería</option>
-                <option value="psychology">Psicología</option>
-                <option value="school_route">Ruta escolar</option>
+              <select
+                value={CAFETERIA_RECORD_TYPE_OPTIONS.some((option) => option.value === editEntity) ? editEntity : 'product'}
+                onChange={(event) => setEditEntity(event.target.value)}
+              >
+                {CAFETERIA_RECORD_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </label>
             {(activeModule === 'edit' || activeModule === 'modify') && editEntity === 'product' ? (
@@ -7600,562 +8170,765 @@ function AdminDashboard() {
       ) : null}
 
       {activeModule === 'meriendas' ? (
-        <section className="panel admin-section">
-          <h3>Meriendas (contabilidad y programación)</h3>
+        <section className="panel admin-section admin-meriendas">
+          {(() => {
+            const snackTypeMeta = {
+              first: { label: '1er snack', tone: 'blue', icon: 'snack' },
+              second: { label: '2do snack', tone: 'green', icon: 'utensils' },
+              drink: { label: 'Bebida', tone: 'violet', icon: 'cup' },
+            };
+            const kpiCards = [
+              {
+                tone: 'blue',
+                icon: 'gift',
+                label: 'Alumnos suscritos',
+                value: String(meriendaKpis.subscribedStudents || 0),
+                meta: 'Activos',
+              },
+              {
+                tone: 'green',
+                icon: 'wallet',
+                label: 'Ingresos mensuales',
+                value: formatCurrency(meriendaKpis.monthlyIncome),
+                meta: 'Total del mes',
+              },
+              {
+                tone: 'orange',
+                icon: 'wallet',
+                label: 'Costos fijos',
+                value: formatCurrency(meriendaKpis.fixedCostsTotal),
+                meta: 'Total del mes',
+              },
+              {
+                tone: 'violet',
+                icon: 'trend',
+                label: 'Costos variables del mes',
+                value: formatCurrency(meriendaKpis.variableCostsTotal),
+                meta: 'Total del mes',
+              },
+              {
+                tone: 'teal',
+                icon: 'pie',
+                label: 'Utilidades del mes',
+                value: formatCurrency(meriendaKpis.monthlyUtility),
+                meta: 'Resultado del mes',
+              },
+            ];
+            const visibleSubscriptions = filteredMeriendaSubscriptions.slice(0, 8);
 
-          <div className="card">
-            <h4>Configuración mensual ({meriendasMonth})</h4>
-            <div className="admin-form-grid">
-              <label>
-                Costo de la suscripción mensual
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
-                  placeholder="Escribe y guarda el costo mensual"
-                  value={meriendaSubscriptionMonthlyCost}
-                  onChange={(event) => setMeriendaSubscriptionMonthlyCost(event.target.value)}
-                />
-              </label>
-              <button className="btn btn-primary" type="button" onClick={onSaveMeriendaSubscriptionMonthlyCost}>
-                Guardar costo mensual
-              </button>
-            </div>
-          </div>
+            return (
+              <>
+                <div className="admin-meriendas__toolbar">
+                  <div>
+                    <h3>Meriendas</h3>
+                    <p>Contabilidad, suscripciones y programación del menú mensual.</p>
+                  </div>
+                  <label className="admin-meriendas__month">
+                    Mes operativo
+                    <input type="month" value={meriendasMonth} onChange={(event) => setMeriendasMonth(event.target.value)} />
+                  </label>
+                </div>
 
-          <div className="cards">
-            <div className="card admin-kpi-card">
-              <h4>Alumnos suscritos</h4>
-              <p>{meriendaKpis.subscribedStudents}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Ingresos mensuales</h4>
-              <p>{formatCurrency(meriendaKpis.monthlyIncome)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Costos fijos</h4>
-              <p>{formatCurrency(meriendaKpis.fixedCostsTotal)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Costos variables del mes</h4>
-              <p>{formatCurrency(meriendaKpis.variableCostsTotal)}</p>
-            </div>
-            <div className="card admin-kpi-card">
-              <h4>Utilidades del mes</h4>
-              <p>{formatCurrency(meriendaKpis.monthlyUtility)}</p>
-            </div>
-          </div>
-
-          <div className="card">
-            <h4>Costos operativos ({meriendasMonth})</h4>
-            <p>Los costos variables se manejan por mes, por lo que se reinician automáticamente al cambiar de mes.</p>
-            <div className="admin-creation-grid">
-              <div className="card">
-                <h4>Añadir costo fijo</h4>
-                <label>
-                  Nombre
-                  <input
-                    placeholder="Ej: Arriendo cocina"
-                    value={meriendaFixedCostDraft.name}
-                    onChange={(event) => setMeriendaFixedCostDraft((prev) => ({ ...prev, name: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Valor
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
-                    placeholder="0"
-                    value={meriendaFixedCostDraft.amount}
-                    onChange={(event) => setMeriendaFixedCostDraft((prev) => ({ ...prev, amount: event.target.value }))}
-                  />
-                </label>
-                <button className="btn btn-primary" type="button" onClick={() => onAddMeriendaOperationCost('fixed')}>
-                  Guardar costo fijo
-                </button>
-              </div>
-
-              <div className="card">
-                <h4>Añadir costo variable</h4>
-                <label>
-                  Nombre
-                  <input
-                    placeholder="Ej: Frutas semana 1"
-                    value={meriendaVariableCostDraft.name}
-                    onChange={(event) => setMeriendaVariableCostDraft((prev) => ({ ...prev, name: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Valor
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
-                    placeholder="0"
-                    value={meriendaVariableCostDraft.amount}
-                    onChange={(event) => setMeriendaVariableCostDraft((prev) => ({ ...prev, amount: event.target.value }))}
-                  />
-                </label>
-                <button className="btn btn-primary" type="button" onClick={() => onAddMeriendaOperationCost('variable')}>
-                  Guardar costo variable
-                </button>
-              </div>
-            </div>
-
-            <div className="admin-creation-grid">
-              <div className="card">
-                <h4>Detalle costos fijos del mes</h4>
-                {(meriendaKpis.fixedCosts || []).length === 0 ? <p>Sin costos fijos registrados.</p> : null}
-                {(meriendaKpis.fixedCosts || []).map((item) => (
-                  <div className="admin-row-actions" key={item._id || `${item.name}-${item.createdAt}`}>
-                    <p>{item.name || 'Costo fijo'}: {formatCurrency(item.amount)}</p>
-                    <button className="btn btn-ghost" type="button" onClick={() => onDeleteMeriendaOperationCost('fixed', item._id)}>
-                      Eliminar
+                <article className="admin-meriendas__panel">
+                  <header>
+                    <div>
+                      <span className="admin-meriendas__icon tone-green" aria-hidden="true"><AccountingIcon name="wallet" /></span>
+                      <div>
+                        <h4>Configuración mensual ({meriendasMonth})</h4>
+                        <p>Define el valor de suscripción vigente para {formatMonthLabel(meriendasMonth)}.</p>
+                      </div>
+                    </div>
+                  </header>
+                  <div className="admin-meriendas__config-row">
+                    <label>
+                      Costo de la suscripción mensual
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        placeholder="0"
+                        value={meriendaSubscriptionMonthlyCost}
+                        onChange={(event) => setMeriendaSubscriptionMonthlyCost(event.target.value)}
+                      />
+                    </label>
+                    <button className="btn btn-primary" type="button" onClick={onSaveMeriendaSubscriptionMonthlyCost}>
+                      <AccountingIcon name="save" />
+                      Guardar costo mensual
                     </button>
                   </div>
-                ))}
-              </div>
-              <div className="card">
-                <h4>Detalle costos variables del mes</h4>
-                {(meriendaKpis.variableCosts || []).length === 0 ? <p>Sin costos variables registrados.</p> : null}
-                {(meriendaKpis.variableCosts || []).map((item) => (
-                  <div className="admin-row-actions" key={item._id || `${item.name}-${item.createdAt}`}>
-                    <p>{item.name || 'Costo variable'}: {formatCurrency(item.amount)}</p>
-                    <button className="btn btn-ghost" type="button" onClick={() => onDeleteMeriendaOperationCost('variable', item._id)}>
-                      Eliminar
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+                </article>
 
-          <div className="card">
-            <h4>Historial de operaciones</h4>
-            <div className="admin-form-grid">
-              <label>
-                Mes
-                <select
-                  value={selectedMeriendaHistoryMonth}
-                  onChange={(event) => setSelectedMeriendaHistoryMonth(event.target.value)}
-                >
-                  <option value="">Selecciona un mes</option>
-                  {meriendaOperationsHistory.map((item) => (
-                    <option key={item.month} value={item.month}>{item.month}</option>
+                <div className="admin-meriendas__kpi-grid">
+                  {kpiCards.map((card) => (
+                    <article className={`admin-meriendas__kpi tone-${card.tone}`} key={card.label}>
+                      <span className="admin-meriendas__icon" aria-hidden="true"><AccountingIcon name={card.icon} /></span>
+                      <span className="admin-meriendas__kpi-label">{card.label}</span>
+                      <strong>{card.value}</strong>
+                      <small>{card.meta}</small>
+                    </article>
                   ))}
-                </select>
-              </label>
-            </div>
+                </div>
 
-            {!selectedMeriendaHistory ? <p>No hay operaciones historicas para mostrar.</p> : null}
-            {selectedMeriendaHistory ? (
-              <div className="cards">
-                <div className="card admin-kpi-card">
-                  <h4>Alumnos suscritos</h4>
-                  <p>{selectedMeriendaHistory.subscribedStudents || 0}</p>
-                </div>
-                <div className="card admin-kpi-card">
-                  <h4>Ingresos mensuales</h4>
-                  <p>{formatCurrency(selectedMeriendaHistory.monthlyIncome)}</p>
-                </div>
-                <div className="card admin-kpi-card">
-                  <h4>Costos fijos</h4>
-                  <p>{formatCurrency(selectedMeriendaHistory.fixedCostsTotal)}</p>
-                </div>
-                <div className="card admin-kpi-card">
-                  <h4>Costos variables del mes</h4>
-                  <p>{formatCurrency(selectedMeriendaHistory.variableCostsTotal)}</p>
-                </div>
-                <div className="card admin-kpi-card">
-                  <h4>Utilidades del mes</h4>
-                  <p>{formatCurrency(selectedMeriendaHistory.monthlyUtility)}</p>
-                </div>
-              </div>
-            ) : null}
-          </div>
+                <article className="admin-meriendas__panel">
+                  <header>
+                    <div>
+                      <span className="admin-meriendas__icon tone-blue" aria-hidden="true"><AccountingIcon name="users" /></span>
+                      <div>
+                        <h4>Costos operativos ({meriendasMonth})</h4>
+                        <p>Los costos variables se manejan por mes y se reinician al cambiar de mes.</p>
+                      </div>
+                    </div>
+                  </header>
+                  <div className="admin-meriendas__cost-actions">
+                    <div className="admin-meriendas__cost-card tone-blue">
+                      <span className="admin-meriendas__icon tone-blue" aria-hidden="true"><AccountingIcon name="wallet" /></span>
+                      <h5>Añadir costo fijo</h5>
+                      <p>Registra los costos operativos fijos del mes.</p>
+                      <label>
+                        Nombre
+                        <input
+                          placeholder="Ej: Arriendo cocina"
+                          value={meriendaFixedCostDraft.name}
+                          onChange={(event) => setMeriendaFixedCostDraft((prev) => ({ ...prev, name: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        Valor
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          placeholder="0"
+                          value={meriendaFixedCostDraft.amount}
+                          onChange={(event) => setMeriendaFixedCostDraft((prev) => ({ ...prev, amount: event.target.value }))}
+                        />
+                      </label>
+                      <button className="btn btn-primary" type="button" onClick={() => onAddMeriendaOperationCost('fixed')}>
+                        <AccountingIcon name="plus" />
+                        Nuevo costo fijo
+                      </button>
+                    </div>
+                    <div className="admin-meriendas__cost-card tone-green">
+                      <span className="admin-meriendas__icon tone-green" aria-hidden="true"><AccountingIcon name="doc" /></span>
+                      <h5>Añadir costo variable</h5>
+                      <p>Registra los costos variables del mes.</p>
+                      <label>
+                        Nombre
+                        <input
+                          placeholder="Ej: Frutas semana 1"
+                          value={meriendaVariableCostDraft.name}
+                          onChange={(event) => setMeriendaVariableCostDraft((prev) => ({ ...prev, name: event.target.value }))}
+                        />
+                      </label>
+                      <label>
+                        Valor
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          placeholder="0"
+                          value={meriendaVariableCostDraft.amount}
+                          onChange={(event) => setMeriendaVariableCostDraft((prev) => ({ ...prev, amount: event.target.value }))}
+                        />
+                      </label>
+                      <button className="btn btn-primary" type="button" onClick={() => onAddMeriendaOperationCost('variable')}>
+                        <AccountingIcon name="plus" />
+                        Nuevo costo variable
+                      </button>
+                    </div>
+                  </div>
+                  <div className="admin-meriendas__cost-lists">
+                    <div>
+                      <h5>Detalle costos fijos</h5>
+                      {(meriendaKpis.fixedCosts || []).length === 0 ? (
+                        <p className="admin-meriendas__empty">Sin costos fijos registrados.</p>
+                      ) : (
+                        <ul>
+                          {(meriendaKpis.fixedCosts || []).map((item) => (
+                            <li key={item._id || `${item.name}-${item.createdAt}`}>
+                              <span>{item.name || 'Costo fijo'}</span>
+                              <strong>{formatCurrency(item.amount)}</strong>
+                              <button className="admin-meriendas__text-btn" type="button" onClick={() => onDeleteMeriendaOperationCost('fixed', item._id)}>
+                                Eliminar
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <h5>Detalle costos variables</h5>
+                      {(meriendaKpis.variableCosts || []).length === 0 ? (
+                        <p className="admin-meriendas__empty">Sin costos variables registrados.</p>
+                      ) : (
+                        <ul>
+                          {(meriendaKpis.variableCosts || []).map((item) => (
+                            <li key={item._id || `${item.name}-${item.createdAt}`}>
+                              <span>{item.name || 'Costo variable'}</span>
+                              <strong>{formatCurrency(item.amount)}</strong>
+                              <button className="admin-meriendas__text-btn" type="button" onClick={() => onDeleteMeriendaOperationCost('variable', item._id)}>
+                                Eliminar
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </article>
 
-          <div className="card">
-            <h4>Alumnos suscritos</h4>
-            <div className="admin-form-grid">
-              <label>
-                Buscar suscritos
-                <input
-                  placeholder="Nombre de nino, padre, usuario, grado o documento"
-                  value={meriendaStudentQuery}
-                  onChange={(event) => setMeriendaStudentQuery(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="admin-links-grid">
-              {filteredMeriendaSubscriptions.map((subscription) => (
-                <div className="card admin-link-card" key={subscription._id || subscription.id}>
-                  <p>Alumno: {subscription.childName || 'N/A'}</p>
-                  <p>Grado: {subscription.childGrade || 'N/A'}</p>
-                  <p>Documento: {subscription.childDocument || 'N/A'}</p>
-                  <p>Acudiente: {subscription.parentName || 'N/A'}</p>
-                  <p>Usuario: {subscription.parentUsername || 'N/A'}</p>
-                  <p>Recomendaciones: {subscription.parentRecommendations || 'Sin recomendaciones'}</p>
-                  <p>Restricciones alimentarias: {subscription.childFoodRestrictions || subscription.childAllergies || 'Sin restricciones alimentarias reportadas'}</p>
-                  <p>Mes vigente: {subscription.currentPeriodMonth || 'N/A'}</p>
-                </div>
-              ))}
-            </div>
-            {filteredMeriendaSubscriptions.length === 0 ? <p>No hay alumnos suscritos en meriendas.</p> : null}
-          </div>
-
-          <div className="card">
-            <h4>Lista de espera — Meriendas</h4>
-            <p>{meriendaWaitlist.length} {meriendaWaitlist.length === 1 ? 'padre interesado' : 'padres interesados'}</p>
-            <div className="admin-links-grid">
-              {meriendaWaitlist.map((entry) => (
-                <div className="card admin-link-card" key={entry._id}>
-                  <p>Acudiente: {entry.parentName || 'N/A'}</p>
-                  <p>Usuario: {entry.parentUsername || 'N/A'}</p>
-                  <p>Alumno: {entry.childName || 'N/A'}</p>
-                  <p>Grado: {entry.childGrade || 'N/A'}</p>
-                </div>
-              ))}
-            </div>
-            {meriendaWaitlist.length === 0 ? <p>No hay padres en la lista de espera.</p> : null}
-          </div>
-
-          <div className="card">
-            <h4>Restricciones alimentarias</h4>
-            <p>Este resumen debe revisarse antes de entregar los snacks del día.</p>
-            <div className="admin-links-grid">
-              {filteredMeriendaSubscriptions.map((subscription) => (
-                <div className="card admin-link-card" key={`feeding-restrictions-${subscription._id || subscription.id}`}>
-                  <p><strong>{subscription.childName || 'Alumno'}</strong> ({subscription.childGrade || 'N/A'})</p>
-                  <p>{subscription.childFoodRestrictions || subscription.childAllergies || 'Sin restricciones alimentarias reportadas'}</p>
-                </div>
-              ))}
-            </div>
-            {filteredMeriendaSubscriptions.length === 0 ? <p>No hay alumnos suscritos para mostrar restricciones.</p> : null}
-          </div>
-
-          <div className="card">
-            <h4>Recomendaciones de padres</h4>
-            <p>Este resumen debe revisarse antes de entregar los snacks del día.</p>
-            <div className="admin-links-grid">
-              {filteredMeriendaSubscriptions.map((subscription) => (
-                <div className="card admin-link-card" key={`feeding-recommendations-${subscription._id || subscription.id}`}>
-                  <p><strong>{subscription.childName || 'Alumno'}</strong> ({subscription.childGrade || 'N/A'})</p>
-                  <p>{subscription.parentRecommendations || 'Sin recomendaciones'}</p>
-                </div>
-              ))}
-            </div>
-            {filteredMeriendaSubscriptions.length === 0 ? <p>No hay alumnos suscritos para mostrar recomendaciones.</p> : null}
-          </div>
-
-          <div className="card">
-            <h4>Suscripciones fallidas</h4>
-            <p>Estas fallas llegan automáticamente cuando la renovación del siguiente mes se rechaza en la app de padres.</p>
-
-            <table className="simple-table">
-              <thead>
-                <tr>
-                  <th>Alumno</th>
-                  <th>Grado</th>
-                  <th>Acudiente</th>
-                  <th>Monto</th>
-                  <th>Mes objetivo</th>
-                  <th>Motivo</th>
-                  <th>Estado</th>
-                  <th>Fecha</th>
-                </tr>
-              </thead>
-              <tbody>
-                {meriendaFailedPayments.map((failedItem) => (
-                  <tr key={failedItem._id || failedItem.id}>
-                    <td>{failedItem.childName || 'N/A'}</td>
-                    <td>{failedItem.childGrade || 'N/A'}</td>
-                    <td>{failedItem.parentName || 'N/A'} ({failedItem.parentUsername || 'N/A'})</td>
-                    <td>{formatCurrency(failedItem.amount)}</td>
-                    <td>{failedItem.targetMonth || 'N/A'}</td>
-                    <td>{failedItem.reason}</td>
-                    <td>
+                <div className="admin-meriendas__middle-grid">
+                  <article className="admin-meriendas__panel admin-meriendas__history-panel">
+                    <header>
+                      <div>
+                        <span className="admin-meriendas__icon tone-sky" aria-hidden="true"><AccountingIcon name="calendar" /></span>
+                        <div>
+                          <h4>Historial de operaciones</h4>
+                          <p>Resumen financiero por mes cerrado.</p>
+                        </div>
+                      </div>
+                    </header>
+                    <label className="admin-meriendas__field">
+                      Mes
                       <select
-                        value={failedItem.status}
-                        onChange={(event) => onUpdateMeriendaFailedStatus(failedItem._id || failedItem.id, event.target.value)}
+                        value={selectedMeriendaHistoryMonth}
+                        onChange={(event) => setSelectedMeriendaHistoryMonth(event.target.value)}
                       >
-                        <option value="pending_contact">Pendiente de contacto</option>
-                        <option value="contacted">Contactado</option>
-                        <option value="resolved">Resuelto</option>
+                        <option value="">Selecciona un mes</option>
+                        {meriendaOperationsHistory.map((item) => (
+                          <option key={item.month} value={item.month}>{formatMonthLabel(item.month)}</option>
+                        ))}
                       </select>
-                    </td>
-                    <td>{failedItem.failedAt}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {meriendaFailedPayments.length === 0 ? <p>No hay suscripciones fallidas registradas.</p> : null}
-          </div>
+                    </label>
+                    {!selectedMeriendaHistory ? (
+                      <p className="admin-meriendas__empty">No hay operaciones históricas para mostrar.</p>
+                    ) : (
+                      <div className="admin-meriendas__mini-kpis">
+                        <div><span>Alumnos suscritos</span><strong>{selectedMeriendaHistory.subscribedStudents || 0}</strong></div>
+                        <div><span>Ingresos</span><strong>{formatCurrency(selectedMeriendaHistory.monthlyIncome)}</strong></div>
+                        <div><span>Costos fijos</span><strong>{formatCurrency(selectedMeriendaHistory.fixedCostsTotal)}</strong></div>
+                        <div><span>Costos variables</span><strong>{formatCurrency(selectedMeriendaHistory.variableCostsTotal)}</strong></div>
+                        <div className="is-highlight"><span>Utilidades</span><strong>{formatCurrency(selectedMeriendaHistory.monthlyUtility)}</strong></div>
+                      </div>
+                    )}
+                  </article>
 
-          <div className="card">
-            <h4>Historial de control</h4>
-            <form className="admin-form-grid" onSubmit={onApplyMeriendaControlFilters}>
-              <label>
-                Desde
-                <input
-                  type="date"
-                  value={meriendaControlFilters.from}
-                  onChange={(event) =>
-                    setMeriendaControlFilters((prev) => ({ ...prev, from: event.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                Hasta
-                <input
-                  type="date"
-                  value={meriendaControlFilters.to}
-                  onChange={(event) =>
-                    setMeriendaControlFilters((prev) => ({ ...prev, to: event.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                Buscar
-                <input
-                  placeholder="Alumno, padre, recomendaciones, restricciones u observaciones"
-                  value={meriendaControlFilters.q}
-                  onChange={(event) =>
-                    setMeriendaControlFilters((prev) => ({ ...prev, q: event.target.value }))
-                  }
-                />
-              </label>
-              <button className="btn btn-primary" type="submit">
-                {loading ? 'Cargando...' : 'Filtrar historial'}
-              </button>
-            </form>
+                  <article className="admin-meriendas__panel admin-meriendas__students-panel">
+                    <header>
+                      <div>
+                        <span className="admin-meriendas__icon tone-blue" aria-hidden="true"><AccountingIcon name="users" /></span>
+                        <div>
+                          <h4>Alumnos suscritos</h4>
+                          <p>
+                            {filteredMeriendaSubscriptions.length}
+                            {' '}
+                            {filteredMeriendaSubscriptions.length === 1 ? 'alumno activo' : 'alumnos activos'}
+                          </p>
+                        </div>
+                      </div>
+                      <label className="admin-meriendas__search">
+                        <span className="sr-only">Buscar suscritos</span>
+                        <input
+                          placeholder="Buscar por nombre, grado o documento..."
+                          value={meriendaStudentQuery}
+                          onChange={(event) => setMeriendaStudentQuery(event.target.value)}
+                        />
+                      </label>
+                    </header>
 
-            <table className="simple-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Alumno</th>
-                  <th>Padre</th>
-                  <th>Estado</th>
-                  <th>Observaciones</th>
-                  <th>Tutor de alimentación</th>
-                  <th className="followup-cell">Seguimiento</th>
-                </tr>
-              </thead>
-              <tbody>
-                {meriendaControlHistory.map((item) => (
-                  <tr key={item._id}>
-                    <td>{item.date || 'N/A'}</td>
-                    <td>{item.subscription?.childName || 'N/A'}</td>
-                    <td>{item.subscription?.parentName || 'N/A'} ({item.subscription?.parentUsername || 'N/A'})</td>
-                    <td>{MERIENDAS_INTAKE_STATUS_LABEL[item.ateStatus] || MERIENDAS_INTAKE_STATUS_LABEL.pending}</td>
-                    <td>{item.observations || 'Sin observaciones'}</td>
-                    <td>{item.handledByName || 'N/A'}</td>
-                    <td className="followup-cell">{item.followUpDone ? <span className="followup-check">✓</span> : <span>-</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {meriendaControlHistory.length === 0 ? <p>No hay controles registrados para el rango seleccionado.</p> : null}
-          </div>
-
-          <div className="card">
-            <h4>Crear meriendas</h4>
-            <div className="admin-creation-grid">
-              <div className="card">
-                <h4>1er snack</h4>
-                <label>
-                  Titulo
-                  <input
-                    value={firstSnackDraft.title}
-                    onChange={(event) => setFirstSnackDraft((prev) => ({ ...prev, title: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Descripcion
-                  <textarea
-                    rows={3}
-                    value={firstSnackDraft.description}
-                    onChange={(event) => setFirstSnackDraft((prev) => ({ ...prev, description: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Foto
-                  <input key={`first-snack-file-${snackInputResetVersion.first}`} type="file" accept="image/*" onChange={(event) => onSnackImageSelected('first', event)} />
-                </label>
-                {firstSnackDraft.imageUrl ? <img alt="Primer snack" className="admin-product-preview" src={firstSnackDraft.imageUrl} /> : null}
-                <button className="btn btn-primary" onClick={() => onSaveSnackByType('first')} type="button">
-                  Guardar 1er snack
-                </button>
-              </div>
-
-              <div className="card">
-                <h4>2do snack</h4>
-                <label>
-                  Titulo
-                  <input
-                    value={secondSnackDraft.title}
-                    onChange={(event) => setSecondSnackDraft((prev) => ({ ...prev, title: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Descripcion
-                  <textarea
-                    rows={3}
-                    value={secondSnackDraft.description}
-                    onChange={(event) => setSecondSnackDraft((prev) => ({ ...prev, description: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Foto
-                  <input key={`second-snack-file-${snackInputResetVersion.second}`} type="file" accept="image/*" onChange={(event) => onSnackImageSelected('second', event)} />
-                </label>
-                {secondSnackDraft.imageUrl ? <img alt="Segundo snack" className="admin-product-preview" src={secondSnackDraft.imageUrl} /> : null}
-                <button className="btn btn-primary" onClick={() => onSaveSnackByType('second')} type="button">
-                  Guardar 2do snack
-                </button>
-              </div>
-
-              <div className="card">
-                <h4>Bebidas</h4>
-                <label>
-                  Titulo
-                  <input
-                    value={drinkSnackDraft.title}
-                    onChange={(event) => setDrinkSnackDraft((prev) => ({ ...prev, title: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Descripcion
-                  <textarea
-                    rows={3}
-                    value={drinkSnackDraft.description}
-                    onChange={(event) => setDrinkSnackDraft((prev) => ({ ...prev, description: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  Foto
-                  <input key={`drink-snack-file-${snackInputResetVersion.drink}`} type="file" accept="image/*" onChange={(event) => onSnackImageSelected('drink', event)} />
-                </label>
-                {drinkSnackDraft.imageUrl ? <img alt="Bebida" className="admin-product-preview" src={drinkSnackDraft.imageUrl} /> : null}
-                <button className="btn btn-primary" onClick={() => onSaveSnackByType('drink')} type="button">
-                  Guardar bebida
-                </button>
-              </div>
-            </div>
-
-            <div className="admin-links-grid">
-              {meriendasSnacks.map((snack) => (
-                <div className="card" key={snack._id || snack.id}>
-                  <p>{snack.type === 'first' ? '1er snack' : snack.type === 'second' ? '2do snack' : 'Bebida'}</p>
-                  <p><strong>{snack.title || 'Sin titulo'}</strong></p>
-                  <p>{snack.description || 'Sin descripcion'}</p>
-                  {snack.imageUrl ? <img alt={snack.title || 'Snack'} className="admin-product-preview" src={snack.imageUrl} /> : null}
-                  <button className="btn" onClick={() => onLoadSnackDraft(snack)} type="button">
-                    Modificar
-                  </button>
+                    {visibleSubscriptions.length === 0 ? (
+                      <p className="admin-meriendas__empty">No hay alumnos suscritos en meriendas.</p>
+                    ) : (
+                      <ul className="admin-meriendas__student-cards">
+                        {visibleSubscriptions.map((subscription) => (
+                          <li key={subscription._id || subscription.id}>
+                            <em aria-hidden="true">{getPersonInitials(subscription.childName)}</em>
+                            <div className="admin-meriendas__student-main">
+                              <div className="admin-meriendas__student-head">
+                                <strong>{subscription.childName || 'Alumno'}</strong>
+                                <small>
+                                  Grado {subscription.childGrade || 'N/A'}
+                                  {' · '}
+                                  Doc. {subscription.childDocument || 'N/A'}
+                                  {subscription.parentName ? ` · ${subscription.parentName}` : ''}
+                                </small>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {filteredMeriendaSubscriptions.length > visibleSubscriptions.length ? (
+                      <p className="admin-meriendas__footer-note">
+                        Mostrando {visibleSubscriptions.length} de {filteredMeriendaSubscriptions.length}
+                      </p>
+                    ) : null}
+                  </article>
                 </div>
-              ))}
-            </div>
-            {meriendasSnacks.length === 0 ? <p>No hay snacks guardados todavia.</p> : null}
-          </div>
 
-          <div className="card">
-            <h4>Cronograma de comidas</h4>
-            <div className="admin-form-grid">
-              <label>
-                Mes
-                <input type="month" value={meriendasMonth} onChange={(event) => setMeriendasMonth(event.target.value)} />
-              </label>
-              <button className="btn btn-primary" onClick={onSaveMeriendasScheduleMonth} type="button">
-                Guardar mes completo
-              </button>
-              <button className="btn" onClick={onSaveScheduleDay} type="button">
-                Guardar día seleccionado
-              </button>
-            </div>
+                <div className="admin-meriendas__notes-grid">
+                  <article className="admin-meriendas__panel">
+                    <header>
+                      <div>
+                        <span className="admin-meriendas__icon tone-orange" aria-hidden="true"><AccountingIcon name="shield" /></span>
+                        <div>
+                          <h4>Restricciones alimentarias</h4>
+                          <p>Revisar antes de entregar los snacks del día.</p>
+                        </div>
+                      </div>
+                    </header>
+                    {filteredMeriendaSubscriptions.length === 0 ? (
+                      <p className="admin-meriendas__empty">No hay alumnos suscritos para mostrar restricciones.</p>
+                    ) : (
+                      <ul className="admin-meriendas__note-list">
+                        {visibleSubscriptions.map((subscription) => {
+                          const restriction = subscription.childFoodRestrictions || subscription.childAllergies || '';
+                          const hasRestriction = Boolean(String(restriction).trim());
+                          return (
+                            <li key={`feeding-restrictions-${subscription._id || subscription.id}`}>
+                              <strong>
+                                {subscription.childName || 'Alumno'}
+                                <span> ({subscription.childGrade || 'N/A'})</span>
+                              </strong>
+                              <small className={hasRestriction ? 'is-active' : ''}>
+                                {hasRestriction ? restriction : 'Sin restricciones'}
+                              </small>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </article>
 
-            <div className="meriendas-calendar">
-              <div className="meriendas-week-header">
-                {MERIENDAS_WEEK_DAYS.map((day) => (
-                  <div className="meriendas-week-day" key={day}>{day}</div>
-                ))}
-              </div>
-              <div className="meriendas-calendar-grid">
-                {calendarDays.map((cell) => {
-                  if (cell.empty) {
-                    return <div className="meriendas-calendar-cell empty" key={cell.key} />;
-                  }
+                  <article className="admin-meriendas__panel">
+                    <header>
+                      <div>
+                        <span className="admin-meriendas__icon tone-violet" aria-hidden="true"><AccountingIcon name="spark" /></span>
+                        <div>
+                          <h4>Recomendaciones de padres</h4>
+                          <p>Notas del acudiente para la entrega diaria.</p>
+                        </div>
+                      </div>
+                    </header>
+                    {filteredMeriendaSubscriptions.length === 0 ? (
+                      <p className="admin-meriendas__empty">No hay alumnos suscritos para mostrar recomendaciones.</p>
+                    ) : (
+                      <ul className="admin-meriendas__note-list">
+                        {visibleSubscriptions.map((subscription) => {
+                          const recommendation = subscription.parentRecommendations || '';
+                          const hasRecommendation = Boolean(String(recommendation).trim());
+                          return (
+                            <li key={`feeding-recommendations-${subscription._id || subscription.id}`}>
+                              <strong>
+                                {subscription.childName || 'Alumno'}
+                                <span> ({subscription.childGrade || 'N/A'})</span>
+                              </strong>
+                              <small className={hasRecommendation ? 'is-active' : ''}>
+                                {hasRecommendation ? recommendation : 'Sin recomendaciones'}
+                              </small>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </article>
+                </div>
 
-                  const isSelected = String(selectedScheduleDay) === String(cell.day);
-                  return (
-                    <button
-                      className={`meriendas-calendar-cell ${isSelected ? 'selected' : ''}`}
-                      key={cell.key}
-                      onClick={() => setSelectedScheduleDay(cell.day)}
-                      type="button"
-                    >
-                      <strong>{cell.day}</strong>
-                      <span>{cell.firstSnackId ? snackTitleById[cell.firstSnackId] || '1er snack' : 'Sin 1er snack'}</span>
-                      <span>{cell.secondSnackId ? snackTitleById[cell.secondSnackId] || '2do snack' : 'Sin 2do snack'}</span>
-                      <span>{cell.drinkSnackId ? snackTitleById[cell.drinkSnackId] || 'Bebida' : 'Sin bebida'}</span>
+                <div className="admin-meriendas__ops-grid">
+                  <article className="admin-meriendas__panel">
+                    <header>
+                      <div>
+                        <span className="admin-meriendas__icon tone-amber" aria-hidden="true"><AccountingIcon name="inbox" /></span>
+                        <div>
+                          <h4>Lista de espera</h4>
+                          <p>{meriendaWaitlist.length} {meriendaWaitlist.length === 1 ? 'padre interesado' : 'padres interesados'}</p>
+                        </div>
+                      </div>
+                    </header>
+                    {meriendaWaitlist.length === 0 ? (
+                      <p className="admin-meriendas__empty">No hay padres en la lista de espera.</p>
+                    ) : (
+                      <ul className="admin-meriendas__people-list">
+                        {meriendaWaitlist.slice(0, 6).map((entry) => (
+                          <li key={entry._id}>
+                            <em aria-hidden="true">{getPersonInitials(entry.childName || entry.parentName)}</em>
+                            <div>
+                              <strong>{entry.childName || 'Alumno'}</strong>
+                              <small>
+                                {entry.parentName || 'N/A'} · Grado {entry.childGrade || 'N/A'}
+                              </small>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </article>
+
+                  <article className="admin-meriendas__panel">
+                    <header>
+                      <div>
+                        <span className="admin-meriendas__icon tone-rose" aria-hidden="true"><AccountingIcon name="alert" /></span>
+                        <div>
+                          <h4>Suscripciones fallidas</h4>
+                          <p>Renovaciones rechazadas desde la app de padres.</p>
+                        </div>
+                      </div>
+                    </header>
+                    {meriendaFailedPayments.length === 0 ? (
+                      <p className="admin-meriendas__empty">No hay suscripciones fallidas registradas.</p>
+                    ) : (
+                      <div className="admin-meriendas__table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Alumno</th>
+                              <th>Monto</th>
+                              <th>Mes</th>
+                              <th>Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {meriendaFailedPayments.slice(0, 8).map((failedItem) => (
+                              <tr key={failedItem._id || failedItem.id}>
+                                <td>
+                                  <strong>{failedItem.childName || 'N/A'}</strong>
+                                  <small>{failedItem.childGrade || 'N/A'} · {failedItem.parentName || 'N/A'}</small>
+                                </td>
+                                <td>{formatCurrency(failedItem.amount)}</td>
+                                <td>{failedItem.targetMonth || 'N/A'}</td>
+                                <td>
+                                  <select
+                                    value={failedItem.status}
+                                    onChange={(event) => onUpdateMeriendaFailedStatus(failedItem._id || failedItem.id, event.target.value)}
+                                  >
+                                    <option value="pending_contact">Pendiente</option>
+                                    <option value="contacted">Contactado</option>
+                                    <option value="resolved">Resuelto</option>
+                                  </select>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
+                </div>
+
+                <article className="admin-meriendas__panel">
+                  <header>
+                    <div>
+                      <span className="admin-meriendas__icon tone-sky" aria-hidden="true"><AccountingIcon name="doc" /></span>
+                      <div>
+                        <h4>Historial de control</h4>
+                        <p>Seguimiento diario de entrega y observaciones del tutor.</p>
+                      </div>
+                    </div>
+                  </header>
+                  <form className="admin-meriendas__filters" onSubmit={onApplyMeriendaControlFilters}>
+                    <label>
+                      Desde
+                      <input
+                        type="date"
+                        value={meriendaControlFilters.from}
+                        onChange={(event) => setMeriendaControlFilters((prev) => ({ ...prev, from: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Hasta
+                      <input
+                        type="date"
+                        value={meriendaControlFilters.to}
+                        onChange={(event) => setMeriendaControlFilters((prev) => ({ ...prev, to: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Buscar
+                      <input
+                        placeholder="Alumno, padre, observaciones..."
+                        value={meriendaControlFilters.q}
+                        onChange={(event) => setMeriendaControlFilters((prev) => ({ ...prev, q: event.target.value }))}
+                      />
+                    </label>
+                    <button className="btn btn-primary" type="submit">
+                      {loading ? 'Cargando...' : 'Filtrar'}
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  </form>
+                  {meriendaControlHistory.length === 0 ? (
+                    <p className="admin-meriendas__empty">No hay controles registrados para el rango seleccionado.</p>
+                  ) : (
+                    <div className="admin-meriendas__table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Alumno</th>
+                            <th>Estado</th>
+                            <th>Observaciones</th>
+                            <th>Tutor</th>
+                            <th>Seguimiento</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {meriendaControlHistory.map((item) => (
+                            <tr key={item._id}>
+                              <td>{item.date || 'N/A'}</td>
+                              <td>
+                                <strong>{item.subscription?.childName || 'N/A'}</strong>
+                                <small>{item.subscription?.parentName || 'N/A'}</small>
+                              </td>
+                              <td>{MERIENDAS_INTAKE_STATUS_LABEL[item.ateStatus] || MERIENDAS_INTAKE_STATUS_LABEL.pending}</td>
+                              <td>{item.observations || 'Sin observaciones'}</td>
+                              <td>{item.handledByName || 'N/A'}</td>
+                              <td>{item.followUpDone ? <span className="followup-check">✓</span> : '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </article>
 
-            <div className="card">
-              <h4>Editar día {selectedScheduleDay || '-'}</h4>
-              <div className="admin-form-grid">
-                <label>
-                  1er snack
-                  <select
-                    value={selectedDaySchedule.firstSnackId}
-                    onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'firstSnackId', event.target.value)}
-                    disabled={!selectedScheduleDay}
-                  >
-                    <option value="">Selecciona snack</option>
-                    {meriendasFirstSnackOptions.map((snack) => (
-                      <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  2do snack
-                  <select
-                    value={selectedDaySchedule.secondSnackId}
-                    onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'secondSnackId', event.target.value)}
-                    disabled={!selectedScheduleDay}
-                  >
-                    <option value="">Selecciona snack</option>
-                    {meriendasSecondSnackOptions.map((snack) => (
-                      <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Bebida
-                  <select
-                    value={selectedDaySchedule.drinkSnackId}
-                    onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'drinkSnackId', event.target.value)}
-                    disabled={!selectedScheduleDay}
-                  >
-                    <option value="">Selecciona bebida</option>
-                    {meriendasDrinkSnackOptions.map((snack) => (
-                      <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="row gap">
-                <button className="btn btn-primary" onClick={onSaveScheduleDay} type="button" disabled={!selectedScheduleDay || loading}>
-                  {loading ? 'Guardando...' : 'Guardar'}
-                </button>
-              </div>
-            </div>
-          </div>
+                <article className="admin-meriendas__panel">
+                  <header>
+                    <div>
+                      <span className="admin-meriendas__icon tone-blue" aria-hidden="true"><AccountingIcon name="utensils" /></span>
+                      <div>
+                        <h4>Crear meriendas</h4>
+                        <p>Define snacks y bebidas para programar en el calendario.</p>
+                      </div>
+                    </div>
+                  </header>
+                  <div className="admin-meriendas__create-grid">
+                    {[
+                      {
+                        key: 'first',
+                        draft: firstSnackDraft,
+                        setDraft: setFirstSnackDraft,
+                        placeholderTitle: 'Ej: Fruta o ensalada',
+                        placeholderDescription: 'Ej: Ensalada de frutas naturales',
+                        fileKey: `first-snack-file-${snackInputResetVersion.first}`,
+                      },
+                      {
+                        key: 'second',
+                        draft: secondSnackDraft,
+                        setDraft: setSecondSnackDraft,
+                        placeholderTitle: 'Ej: Snack principal',
+                        placeholderDescription: 'Ej: Sandwich de pollo y vegetales',
+                        fileKey: `second-snack-file-${snackInputResetVersion.second}`,
+                      },
+                      {
+                        key: 'drink',
+                        draft: drinkSnackDraft,
+                        setDraft: setDrinkSnackDraft,
+                        placeholderTitle: 'Ej: Jugo natural',
+                        placeholderDescription: 'Ej: Jugo de naranja natural',
+                        fileKey: `drink-snack-file-${snackInputResetVersion.drink}`,
+                      },
+                    ].map((form) => {
+                      const meta = snackTypeMeta[form.key];
+                      return (
+                        <div className={`admin-meriendas__snack-form tone-${meta.tone}`} key={form.key}>
+                          <header>
+                            <span className={`admin-meriendas__icon tone-${meta.tone}`} aria-hidden="true">
+                              <AccountingIcon name={meta.icon} />
+                            </span>
+                            <h5>{meta.label}</h5>
+                          </header>
+                          <label>
+                            Título
+                            <input
+                              placeholder={form.placeholderTitle}
+                              value={form.draft.title}
+                              onChange={(event) => form.setDraft((prev) => ({ ...prev, title: event.target.value }))}
+                            />
+                          </label>
+                          <label>
+                            Descripción
+                            <textarea
+                              rows={3}
+                              placeholder={form.placeholderDescription}
+                              value={form.draft.description}
+                              onChange={(event) => form.setDraft((prev) => ({ ...prev, description: event.target.value }))}
+                            />
+                          </label>
+                          <label>
+                            Foto
+                            <input
+                              key={form.fileKey}
+                              type="file"
+                              accept="image/*"
+                              onChange={(event) => onSnackImageSelected(form.key, event)}
+                            />
+                          </label>
+                          {form.draft.imageUrl ? (
+                            <img alt={meta.label} className="admin-meriendas__snack-preview" src={form.draft.imageUrl} />
+                          ) : null}
+                          <button
+                            className={`btn btn-primary admin-meriendas__snack-save tone-${meta.tone}`}
+                            onClick={() => onSaveSnackByType(form.key)}
+                            type="button"
+                          >
+                            Guardar {meta.label.toLowerCase()}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {meriendasSnacks.length === 0 ? (
+                    <p className="admin-meriendas__empty">No hay snacks guardados todavía.</p>
+                  ) : (
+                    <div className="admin-meriendas__snack-cards">
+                      {meriendasSnacks.map((snack) => {
+                        const meta = snackTypeMeta[snack.type] || snackTypeMeta.drink;
+                        return (
+                          <article className={`admin-meriendas__snack-card tone-${meta.tone}`} key={snack._id || snack.id}>
+                            <div className="admin-meriendas__snack-card-body">
+                              <span className={`admin-meriendas__chip tone-${meta.tone}`}>
+                                <AccountingIcon name={meta.icon} />
+                                {meta.label}
+                              </span>
+                              <strong>{snack.title || 'Sin título'}</strong>
+                              <p>{snack.description || 'Sin descripción'}</p>
+                              <button className="admin-meriendas__text-btn" onClick={() => onLoadSnackDraft(snack)} type="button">
+                                <AccountingIcon name="pencil" />
+                                Modificar
+                              </button>
+                            </div>
+                            {snack.imageUrl ? (
+                              <img alt={snack.title || meta.label} src={snack.imageUrl} />
+                            ) : (
+                              <div className="admin-meriendas__snack-placeholder" aria-hidden="true">
+                                <AccountingIcon name={meta.icon} />
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </article>
+
+                <article className="admin-meriendas__panel">
+                  <header>
+                    <div>
+                      <span className="admin-meriendas__icon tone-green" aria-hidden="true"><AccountingIcon name="calendar" /></span>
+                      <div>
+                        <h4>Cronograma de comidas</h4>
+                        <p>Programa 1er snack, 2do snack y bebida por día en {formatMonthLabel(meriendasMonth)}.</p>
+                      </div>
+                    </div>
+                    <div className="admin-meriendas__schedule-actions">
+                      <button className="btn" onClick={onSaveScheduleDay} type="button" disabled={!selectedScheduleDay || loading}>
+                        Guardar día
+                      </button>
+                      <button className="btn btn-primary" onClick={onSaveMeriendasScheduleMonth} type="button">
+                        <AccountingIcon name="save" />
+                        Guardar mes completo
+                      </button>
+                    </div>
+                  </header>
+
+                  <div className="admin-meriendas__calendar">
+                    <div className="admin-meriendas__week-header">
+                      {MERIENDAS_WEEK_DAYS.map((day) => (
+                        <div className="admin-meriendas__week-day" key={day}>{day}</div>
+                      ))}
+                    </div>
+                    <div className="admin-meriendas__calendar-grid">
+                      {calendarDays.map((cell) => {
+                        if (cell.empty) {
+                          return <div className="admin-meriendas__calendar-cell is-empty" key={cell.key} />;
+                        }
+
+                        const isSelected = String(selectedScheduleDay) === String(cell.day);
+                        const firstLabel = cell.firstSnackId ? snackTitleById[cell.firstSnackId] || '1er snack' : 'Sin 1er snack';
+                        const secondLabel = cell.secondSnackId ? snackTitleById[cell.secondSnackId] || '2do snack' : 'Sin 2do snack';
+                        const drinkLabel = cell.drinkSnackId ? snackTitleById[cell.drinkSnackId] || 'Bebida' : 'Sin bebida';
+
+                        return (
+                          <button
+                            className={`admin-meriendas__calendar-cell ${isSelected ? 'is-selected' : ''}`}
+                            key={cell.key}
+                            onClick={() => setSelectedScheduleDay(cell.day)}
+                            type="button"
+                          >
+                            <strong>{cell.day}</strong>
+                            <span className={`tone-first ${cell.firstSnackId ? 'is-filled' : ''}`}>
+                              <i aria-hidden="true" />
+                              {firstLabel}
+                            </span>
+                            <span className={`tone-second ${cell.secondSnackId ? 'is-filled' : ''}`}>
+                              <i aria-hidden="true" />
+                              {secondLabel}
+                            </span>
+                            <span className={`tone-drink ${cell.drinkSnackId ? 'is-filled' : ''}`}>
+                              <i aria-hidden="true" />
+                              {drinkLabel}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="admin-meriendas__legend">
+                      <span><i className="tone-first" aria-hidden="true" /> 1er snack</span>
+                      <span><i className="tone-second" aria-hidden="true" /> 2do snack</span>
+                      <span><i className="tone-drink" aria-hidden="true" /> Bebida</span>
+                    </div>
+                  </div>
+
+                  <div className="admin-meriendas__day-editor">
+                    <h5>Editar día {selectedScheduleDay || '—'}</h5>
+                    <div className="admin-meriendas__day-fields">
+                      <label>
+                        1er snack
+                        <select
+                          value={selectedDaySchedule.firstSnackId}
+                          onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'firstSnackId', event.target.value)}
+                          disabled={!selectedScheduleDay}
+                        >
+                          <option value="">Selecciona snack</option>
+                          {meriendasFirstSnackOptions.map((snack) => (
+                            <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        2do snack
+                        <select
+                          value={selectedDaySchedule.secondSnackId}
+                          onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'secondSnackId', event.target.value)}
+                          disabled={!selectedScheduleDay}
+                        >
+                          <option value="">Selecciona snack</option>
+                          {meriendasSecondSnackOptions.map((snack) => (
+                            <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Bebida
+                        <select
+                          value={selectedDaySchedule.drinkSnackId}
+                          onChange={(event) => onScheduleDaySnackChange(selectedScheduleDay, 'drinkSnackId', event.target.value)}
+                          disabled={!selectedScheduleDay}
+                        >
+                          <option value="">Selecciona bebida</option>
+                          {meriendasDrinkSnackOptions.map((snack) => (
+                            <option key={snack._id || snack.id} value={snack._id || snack.id}>{snack.title}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <button className="btn btn-primary" onClick={onSaveScheduleDay} type="button" disabled={!selectedScheduleDay || loading}>
+                      {loading ? 'Guardando...' : 'Guardar día seleccionado'}
+                    </button>
+                  </div>
+                </article>
+              </>
+            );
+          })()}
         </section>
       ) : null}
 
@@ -8339,6 +9112,14 @@ function AdminDashboard() {
             <div className="card" key={group.key}>
               <p>Tienda: {group.store?.name || 'N/A'} {group.targetStore?.name ? `-> ${group.targetStore.name}` : ''}</p>
               <p>Solicitado por: {group.requestedBy?.name || 'N/A'}</p>
+              {group.type === 'in' && Number(group.invoiceAmount) > 0 ? (
+                <p>
+                  Factura: {formatCurrency(group.invoiceAmount)}
+                  {group.supplierName ? ` · Proveedor: ${group.supplierName}` : ''}
+                  {' · '}
+                  Registrada en costos variables
+                </p>
+              ) : null}
               <p>Observaciones: {group.notes || 'Sin observaciones'}</p>
               <table className="simple-table">
                 <thead>
@@ -8763,9 +9544,13 @@ function AdminDashboard() {
         </section>
       ) : null}
 
-      {activeModule === COMERGIO_ACADEMY_PARENT.key ? (
+      {isComergioAcademySection(activeModule) ? (
         <section className="panel admin-section">
-          <ComergioAcademyPanel showInternalNav />
+          <ComergioAcademyPanel
+            activeKey={activeModule}
+            onNavigate={setActiveModule}
+            showLandingCards={false}
+          />
         </section>
       ) : null}
 
@@ -9429,6 +10214,7 @@ function AdminDashboard() {
         </div>
       ) : null}
     </div>
+    </StaffPortalShell>
   );
 }
 

@@ -7,6 +7,8 @@ export const ACADEMY_TUTORIAL_PORTALS = [
   { key: 'academic_secretary', label: 'Secretaría académica', tone: 'secretary', icon: 'folder' },
   { key: 'admissions', label: 'Admisiones', tone: 'admissions', icon: 'person' },
   { key: 'cartera', label: 'Cartera', tone: 'cartera', icon: 'wallet' },
+  { key: 'cafeteria', label: 'Cafetería', tone: 'cafeteria', icon: 'food' },
+  { key: 'ruta_escolar', label: 'Ruta escolar', tone: 'ruta', icon: 'bus' },
   { key: 'enfermeria', label: 'Enfermería', tone: 'enfermeria', icon: 'cross' },
   { key: 'psicologia', label: 'Psicología', tone: 'psicologia', icon: 'brain' },
   { key: 'recursos_humanos', label: 'Recursos humanos', tone: 'hr', icon: 'people' },

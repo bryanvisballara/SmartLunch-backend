@@ -32,6 +32,12 @@ const {
 } = require('../utils/campusMaterialUpload');
 const { buildCoordinationDashboard } = require('../services/coordinationDashboard.service');
 const {
+  parseLinkToCartera,
+  parseRouteCost,
+  syncSchoolRouteStopCartera,
+  unlinkSchoolRouteStopCartera,
+} = require('../services/schoolRouteCartera.service');
+const {
   buildParentPushUrl,
   getCampusPostCategoryLabel,
 } = require('../utils/parentPushTargets');
@@ -65,6 +71,31 @@ function isValidObjectId(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function parsePickupCoordinate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function applyPickupLocationFields(target, body = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'pickupAddress')) {
+    target.pickupAddress = normalizeText(body.pickupAddress).slice(0, 220);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'latitude') || Object.prototype.hasOwnProperty.call(body, 'longitude')) {
+    const latitude = parsePickupCoordinate(body.latitude);
+    const longitude = parsePickupCoordinate(body.longitude);
+    const valid = latitude !== null
+      && longitude !== null
+      && Math.abs(latitude) <= 90
+      && Math.abs(longitude) <= 180;
+    target.latitude = valid ? latitude : null;
+    target.longitude = valid ? longitude : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'placeId')) {
+    target.placeId = normalizeText(body.placeId).slice(0, 220);
+  }
 }
 
 function sameCampusObjectId(left, right) {
@@ -681,6 +712,12 @@ function serializeSchoolRouteStop(stop) {
     studentGrade: normalizeText(student?.grade || stop.studentGrade),
     studentCourse: normalizeText(student?.course || stop.studentCourse),
     pickupAddress: normalizeText(stop.pickupAddress),
+    latitude: parsePickupCoordinate(stop.latitude),
+    longitude: parsePickupCoordinate(stop.longitude),
+    placeId: normalizeText(stop.placeId),
+    routeCost: parseRouteCost(stop.routeCost),
+    linkToCartera: Boolean(stop.linkToCartera),
+    carteraChargeId: stop.carteraChargeId ? String(stop.carteraChargeId) : '',
     notes: normalizeText(stop.notes),
     order: Number(stop.order || 0),
     status: normalizeText(stop.status) || 'pending',
@@ -695,6 +732,9 @@ function serializeSchoolRoute(route) {
 
   return {
     id: route?._id ? String(route._id) : '',
+    driverUserId: route?.driverUserId?._id
+      ? String(route.driverUserId._id)
+      : String(route?.driverUserId || ''),
     routeName: normalizeText(route?.routeName) || 'Ruta escolar',
     status: normalizeText(route?.status) || 'draft',
     startedAt: route?.startedAt || null,
@@ -771,7 +811,7 @@ async function getOrCreateSchoolRoute({ schoolId, driverUserId }) {
   return route;
 }
 
-async function notifySchoolRouteParents({ schoolId, stop, route, eventType }) {
+async function notifySchoolRouteParents({ schoolId, stop, route, eventType, minutes = null }) {
   const studentId = stop?.studentId?._id || stop?.studentId;
   if (!studentId) {
     return { notificationsCreated: 0, tokensFound: 0 };
@@ -790,6 +830,7 @@ async function notifySchoolRouteParents({ schoolId, stop, route, eventType }) {
 
   const studentName = normalizeText(stop?.studentNameSnapshot || stop?.studentId?.name) || 'tu hijo';
   const routeName = normalizeText(route?.routeName) || 'Ruta escolar';
+  const safeMinutes = Math.min(5, Math.max(1, Number(minutes || 0)));
   const messages = {
     on_way: {
       title: 'La ruta va en camino',
@@ -803,9 +844,13 @@ async function notifySchoolRouteParents({ schoolId, stop, route, eventType }) {
       title: 'Recogida confirmada',
       body: `${studentName} ya fue recogido por ${routeName}.`,
     },
+    waiting_alert: {
+      title: 'La ruta esta en la puerta',
+      body: `${routeName} ya llego a la direccion de recogida de ${studentName}. Tienen ${safeMinutes} minuto${safeMinutes === 1 ? '' : 's'} para salir; si no, la ruta continuara.`,
+    },
     skipped: {
-      title: 'Parada omitida',
-      body: `${routeName} marco como omitida la parada de ${studentName}.`,
+      title: 'La ruta continuo sin el alumno',
+      body: `${routeName} espero en la parada de ${studentName} y continuo el recorrido porque no salio a tiempo.`,
     },
   };
   const message = messages[eventType] || messages.on_way;
@@ -821,6 +866,7 @@ async function notifySchoolRouteParents({ schoolId, stop, route, eventType }) {
       routeId: route?._id ? String(route._id) : '',
       stopId: stop?._id ? String(stop._id) : '',
       studentId: String(studentId),
+      minutes: eventType === 'waiting_alert' ? safeMinutes : undefined,
       url: buildParentPushUrl(`school_route.${eventType}`, { studentId }),
     },
   });
@@ -4929,6 +4975,13 @@ router.post('/school-route/stops', async (req, res) => {
     const studentId = normalizeText(req.body?.studentId);
     const pickupAddress = normalizeText(req.body?.pickupAddress).slice(0, 220);
     const notes = normalizeText(req.body?.notes).slice(0, 220);
+    const latitude = parsePickupCoordinate(req.body?.latitude);
+    const longitude = parsePickupCoordinate(req.body?.longitude);
+    const placeId = normalizeText(req.body?.placeId).slice(0, 220);
+    const hasValidCoordinates = latitude !== null
+      && longitude !== null
+      && Math.abs(latitude) <= 90
+      && Math.abs(longitude) <= 180;
 
     if (!isValidObjectId(studentId)) {
       return res.status(400).json({ message: 'Selecciona un alumno valido.' });
@@ -4946,6 +4999,8 @@ router.post('/school-route/stops', async (req, res) => {
 
     const route = await getOrCreateSchoolRoute({ schoolId, driverUserId });
 
+    const routeCost = parseRouteCost(req.body?.routeCost);
+    const linkToCartera = parseLinkToCartera(req.body?.linkToCartera);
     const nextOrder = Math.max(0, ...(route.stops || []).map((stop) => Number(stop.order || 0))) + 1;
     route.stops.push({
       studentId: student._id,
@@ -4953,10 +5008,24 @@ router.post('/school-route/stops', async (req, res) => {
       studentGrade: student.grade,
       studentCourse: student.course,
       pickupAddress: pickupAddress || normalizeText(student.address).slice(0, 220),
+      latitude: hasValidCoordinates ? latitude : null,
+      longitude: hasValidCoordinates ? longitude : null,
+      placeId: hasValidCoordinates ? placeId : '',
+      routeCost,
+      linkToCartera,
+      carteraChargeId: null,
       notes,
       order: nextOrder,
       status: 'pending',
       statusUpdatedAt: null,
+    });
+    const createdStop = route.stops[route.stops.length - 1];
+    await syncSchoolRouteStopCartera({
+      schoolId,
+      stop: createdStop,
+      routeName: route.routeName,
+      createdByUserId: req.user.userId,
+      createdByRole: req.user.role,
     });
     await route.save();
 
@@ -4984,12 +5053,23 @@ router.patch('/school-route/stops/:stopId', async (req, res) => {
       return res.status(404).json({ message: 'Parada no encontrada.' });
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'pickupAddress')) {
-      stop.pickupAddress = normalizeText(req.body.pickupAddress).slice(0, 220);
-    }
+    applyPickupLocationFields(stop, req.body || {});
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'notes')) {
       stop.notes = normalizeText(req.body.notes).slice(0, 220);
     }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'routeCost')) {
+      stop.routeCost = parseRouteCost(req.body.routeCost);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'linkToCartera')) {
+      stop.linkToCartera = parseLinkToCartera(req.body.linkToCartera);
+    }
+    await syncSchoolRouteStopCartera({
+      schoolId,
+      stop,
+      routeName: route.routeName,
+      createdByUserId: req.user.userId,
+      createdByRole: req.user.role,
+    });
     await route.save();
 
     const populatedRoute = await CampusSchoolRoute.findById(route._id)
@@ -5015,6 +5095,7 @@ router.delete('/school-route/stops/:stopId', async (req, res) => {
     if (!stop) {
       return res.status(404).json({ message: 'Parada no encontrada.' });
     }
+    await unlinkSchoolRouteStopCartera({ schoolId, stop });
     stop.deleteOne();
     route.stops
       .sort((left, right) => Number(left.order || 0) - Number(right.order || 0))
@@ -5071,8 +5152,13 @@ router.post('/school-route/stops/:stopId/action', async (req, res) => {
     }
 
     const action = normalizeText(req.body?.action);
-    if (!['on_way', 'arrived', 'picked_up', 'skipped'].includes(action)) {
+    if (!['on_way', 'arrived', 'picked_up', 'skipped', 'waiting_alert'].includes(action)) {
       return res.status(400).json({ message: 'Accion de ruta no valida.' });
+    }
+
+    const alertMinutes = Math.min(5, Math.max(0, Math.floor(Number(req.body?.minutes || 0))));
+    if (action === 'waiting_alert' && ![1, 2, 3, 4, 5].includes(alertMinutes)) {
+      return res.status(400).json({ message: 'Elige un tiempo de 1 a 5 minutos para la alerta.' });
     }
 
     const { schoolId, userId } = req.user;
@@ -5088,6 +5174,36 @@ router.post('/school-route/stops/:stopId/action', async (req, res) => {
       route.status = 'active';
       route.startedAt = route.startedAt || now;
     }
+
+    // waiting_alert only notifies — keep operational status (prefer arrived if still pending).
+    if (action === 'waiting_alert') {
+      if (stop.status === 'pending' || stop.status === 'on_way') {
+        stop.status = 'arrived';
+      }
+      stop.statusUpdatedAt = now;
+      await route.save();
+
+      const notificationResults = [
+        await notifySchoolRouteParents({
+          schoolId,
+          stop,
+          route,
+          eventType: 'waiting_alert',
+          minutes: alertMinutes,
+        }),
+      ];
+
+      const populatedRoute = await CampusSchoolRoute.findById(route._id)
+        .populate('stops.studentId', 'name grade course address schoolCode')
+        .lean();
+
+      return res.json({
+        route: serializeSchoolRoute(populatedRoute),
+        notificationResults,
+        alertMinutes,
+      });
+    }
+
     stop.status = action;
     stop.statusUpdatedAt = now;
 

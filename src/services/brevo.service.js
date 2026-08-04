@@ -460,6 +460,125 @@ async function sendAdmissionMarketingEmail({ toEmail, toName, schoolName, subjec
   });
 }
 
+async function sendPsychologyWellbeingAppointmentEmail({
+  toEmail,
+  toName,
+  schoolName,
+  studentName,
+  grade = '',
+  caseTitle,
+  caseSummary,
+  appointmentDate,
+  appointmentTime,
+  appointmentDateLabel = '',
+  modalityLabel = 'Presencial',
+  location = '',
+  durationMinutes = 45,
+  professionalName = '',
+}) {
+  const safeSchoolName = schoolName || 'Colegio';
+  const safeStudentName = studentName || 'el estudiante';
+  const safeTitle = caseTitle || 'Seguimiento de bienestar';
+  const safeSummary = caseSummary || 'Conversación de acompañamiento desde Bienestar Escolar.';
+  const safeDateLabel = appointmentDateLabel || appointmentDate || 'Fecha por confirmar';
+  const safeTime = appointmentTime || 'Hora por confirmar';
+  const safeLocation = location || `${safeSchoolName} · Área de Bienestar`;
+  const safeModality = modalityLabel || 'Presencial';
+  const subject = `${safeSchoolName} | Citación de Bienestar`;
+  const calendarDetails = [
+    `Citación de Bienestar para ${safeStudentName}`,
+    `Colegio: ${safeSchoolName}`,
+    `Motivo: ${safeTitle}`,
+    `Resumen: ${safeSummary}`,
+    grade ? `Curso: ${grade}` : '',
+    `Modalidad: ${safeModality}`,
+    professionalName ? `Profesional: ${professionalName}` : '',
+    'Este evento fue generado desde Comergio · Bienestar Escolar.',
+  ].filter(Boolean).join('\n');
+  const calendarLink = buildGoogleCalendarLink({
+    title: `${safeSchoolName} · Citación de Bienestar`,
+    details: calendarDetails,
+    location: safeLocation,
+    date: appointmentDate,
+    time: appointmentTime,
+    durationMinutes: Number(durationMinutes) || 45,
+  });
+  const calendarButton = calendarLink ? `
+    <a href="${calendarLink}" style="display:inline-block;margin-top:22px;background:#6d28d9;color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 22px;font-size:14px;font-weight:900;box-shadow:0 12px 24px rgba(109,40,217,0.28);">Añadir a Google Calendar</a>
+  ` : '';
+
+  const htmlContent = `
+    <div style="margin:0;padding:0;background:#f3eefc;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f3eefc;padding:28px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:650px;background:#ffffff;border-radius:26px;overflow:hidden;box-shadow:0 22px 55px rgba(76,29,149,0.16);">
+              <tr>
+                <td style="background:#4c1d95;background-image:linear-gradient(140deg,#312e81 0%,#6d28d9 55%,#a78bfa 120%);padding:34px 30px 38px;color:#ffffff;">
+                  <p style="margin:0 0 10px 0;font-size:12px;letter-spacing:1.8px;text-transform:uppercase;opacity:0.92;">Bienestar escolar</p>
+                  <h1 style="margin:0;font-size:32px;line-height:1.12;font-weight:800;">${escapeHtml(safeSchoolName)}</h1>
+                  <p style="margin:14px 0 0 0;font-size:16px;line-height:1.65;opacity:0.96;">Te invitamos a una cita de acompañamiento. Queremos escucharte y construir juntos el mejor camino para ${escapeHtml(safeStudentName)}.</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:30px;color:#102033;">
+                  <p style="margin:0 0 16px 0;font-size:16px;line-height:1.65;">Hola${toName ? ` ${escapeHtml(toName)}` : ''},</p>
+                  <p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:#475569;">
+                    El área de <strong style="color:#0f172a;">Bienestar / Psicología</strong> ha abierto un seguimiento para
+                    <strong style="color:#0f172a;"> ${escapeHtml(safeStudentName)}</strong>${grade ? ` (${escapeHtml(grade)})` : ''} y desea citarte:
+                  </p>
+                  <div style="background:linear-gradient(180deg,#faf5ff 0%,#f5f3ff 100%);border:1px solid #ddd6fe;border-radius:20px;padding:18px 20px;margin:0 0 18px 0;">
+                    <p style="margin:0 0 6px 0;font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#6d28d9;">Caso registrado</p>
+                    <p style="margin:0 0 8px 0;font-size:18px;font-weight:800;color:#0f172a;">${escapeHtml(safeTitle)}</p>
+                    <p style="margin:0;font-size:14px;line-height:1.65;color:#475569;">${escapeHtml(safeSummary)}</p>
+                  </div>
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;border-spacing:0 10px;">
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f5f3ff;border:1px solid #ddd6fe;border-right:0;border-radius:16px 0 0 16px;color:#6d28d9;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Fecha</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #ddd6fe;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeDateLabel)}</td>
+                    </tr>
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f5f3ff;border:1px solid #ddd6fe;border-right:0;border-radius:16px 0 0 16px;color:#6d28d9;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Hora</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #ddd6fe;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeTime)} · ${Number(durationMinutes) || 45} min</td>
+                    </tr>
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f5f3ff;border:1px solid #ddd6fe;border-right:0;border-radius:16px 0 0 16px;color:#6d28d9;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Modalidad</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #ddd6fe;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeModality)}</td>
+                    </tr>
+                    <tr>
+                      <td style="width:34%;padding:14px 16px;background:#f5f3ff;border:1px solid #ddd6fe;border-right:0;border-radius:16px 0 0 16px;color:#6d28d9;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;">Lugar</td>
+                      <td style="padding:14px 16px;background:#ffffff;border:1px solid #ddd6fe;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:800;">${escapeHtml(safeLocation)}</td>
+                    </tr>
+                  </table>
+                  ${calendarButton}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:0 30px 30px;color:#64748b;font-size:12px;line-height:1.65;">
+                  Este correo fue enviado por Bienestar Escolar de ${escapeHtml(safeSchoolName)} a través de Comergio.
+                  Si necesitas reprogramar, responde este mensaje o contacta al colegio.
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+
+  const result = await sendBrevoEmail({
+    toEmail,
+    toName,
+    subject,
+    senderEmail: process.env.WELLBEING_SENDER_EMAIL || process.env.ADMISSIONS_SENDER_EMAIL || 'berckley@comergio.com',
+    senderName: `${safeSchoolName} Bienestar`,
+    htmlContent,
+    textContent: `${safeSchoolName}\nBienestar Escolar\n\nCitación confirmada\n\nEstudiante: ${safeStudentName}\nCaso: ${safeTitle}\nResumen: ${safeSummary}\nFecha: ${safeDateLabel}\nHora: ${safeTime}\nModalidad: ${safeModality}\nLugar: ${safeLocation}${calendarLink ? `\n\nGoogle Calendar: ${calendarLink}` : ''}`,
+  });
+
+  return { ...result, calendarLink };
+}
+
 module.exports = {
   sendRegistrationVerificationEmail,
   sendPasswordResetCodeEmail,
@@ -468,4 +587,6 @@ module.exports = {
   sendAcademicBillingEmail,
   sendAdmissionAppointmentEmail,
   sendAdmissionMarketingEmail,
+  sendPsychologyWellbeingAppointmentEmail,
+  buildGoogleCalendarLink,
 };

@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createInventoryRequest, getInventoryRequests } from '../services/inventory.service';
+import {
+  createInventoryRequest,
+  createInventorySupplier,
+  getInventoryRequests,
+  getInventorySuppliers,
+} from '../services/inventory.service';
 import { getProducts } from '../services/products.service';
 import { getStores } from '../services/stores.service';
 import useAuthStore from '../store/auth.store';
@@ -11,16 +16,25 @@ const modeTitle = {
   transfer: 'traslados',
 };
 
+const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
+
 function InventoryRequestPage({ mode }) {
   const { currentStore, setCurrentStore, user } = useAuthStore();
   const isVendorTransfer = mode === 'transfer' && user?.role === 'vendor';
+  const isIncomeMode = mode === 'in';
   const [products, setProducts] = useState([]);
   const [stores, setStores] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [sourceStoreId, setSourceStoreId] = useState('');
   const [requestItems, setRequestItems] = useState([]);
   const [currentItem, setCurrentItem] = useState({ productId: '', quantity: '1', productQuery: '', showOptions: false });
   const [targetStoreId, setTargetStoreId] = useState('');
   const [observations, setObservations] = useState('');
+  const [invoiceAmount, setInvoiceAmount] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [showNewSupplier, setShowNewSupplier] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState('');
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [historyRequests, setHistoryRequests] = useState([]);
   const [expandedHistoryBatchKeys, setExpandedHistoryBatchKeys] = useState([]);
@@ -58,13 +72,18 @@ function InventoryRequestPage({ mode }) {
           ...(nextStore?._id ? { storeId: String(nextStore._id) } : {}),
         });
         setProducts(productsRes.data || []);
+
+        if (mode === 'in') {
+          const suppliersRes = await getInventorySuppliers();
+          setSuppliers(suppliersRes.data || []);
+        }
       } catch (error) {
         setMessage(error?.response?.data?.message || 'No se pudo cargar inventario');
       }
     };
 
     load();
-  }, [currentStore?._id, setCurrentStore, user?.role, user?.assignedStore?._id, user?.assignedStoreId]);
+  }, [currentStore?._id, mode, setCurrentStore, user?.role, user?.assignedStore?._id, user?.assignedStoreId]);
 
   useEffect(() => {
     if (!successModal.open) {
@@ -178,6 +197,8 @@ function InventoryRequestPage({ mode }) {
               store: request.storeId,
               targetStore: request.targetStoreId,
               createdAt: request.createdAt,
+              invoiceAmount: request.invoiceAmount,
+              supplierName: request.supplierName || request.supplierId?.name || '',
               requests: [],
             };
           }
@@ -205,6 +226,8 @@ function InventoryRequestPage({ mode }) {
               targetStore: request.targetStoreId,
               createdAt: request.createdAt,
               resolvedAt: request.approvedAt || request.rejectedAt || request.updatedAt,
+              invoiceAmount: request.invoiceAmount,
+              supplierName: request.supplierName || request.supplierId?.name || '',
               requests: [],
             };
           }
@@ -261,9 +284,51 @@ function InventoryRequestPage({ mode }) {
     setRequestItems([]);
     setCurrentItem({ productId: '', quantity: '1', productQuery: '', showOptions: false });
     setObservations('');
+    setInvoiceAmount('');
+    setSupplierId('');
+    setShowNewSupplier(false);
+    setNewSupplierName('');
     setTargetStoreId('');
     if (mode === 'transfer' && !isVendorTransfer) {
       setSourceStoreId('');
+    }
+  };
+
+  const onCreateSupplierQuick = async () => {
+    const name = String(newSupplierName || '').trim();
+    if (!name) {
+      setMessage('Escribe el nombre del proveedor.');
+      return;
+    }
+
+    try {
+      setCreatingSupplier(true);
+      const response = await createInventorySupplier({ name });
+      const created = response.data || null;
+      if (!created?._id) {
+        setMessage('No se pudo crear el proveedor.');
+        return;
+      }
+
+      setSuppliers((previous) => {
+        const exists = previous.some((item) => String(item._id) === String(created._id));
+        if (exists) {
+          return previous.map((item) => (
+            String(item._id) === String(created._id)
+              ? { ...item, name: created.name || item.name }
+              : item
+          ));
+        }
+        return [...previous, created].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+      });
+      setSupplierId(String(created._id));
+      setShowNewSupplier(false);
+      setNewSupplierName('');
+      setMessage(created.reused ? 'Proveedor ya existía; se seleccionó automáticamente.' : 'Proveedor creado y seleccionado.');
+    } catch (error) {
+      setMessage(error?.response?.data?.message || 'No se pudo crear el proveedor.');
+    } finally {
+      setCreatingSupplier(false);
     }
   };
 
@@ -315,12 +380,29 @@ function InventoryRequestPage({ mode }) {
       return;
     }
 
+    let normalizedInvoiceAmount = null;
+    if (isIncomeMode && String(invoiceAmount || '').trim() !== '') {
+      normalizedInvoiceAmount = Number(invoiceAmount);
+      if (!Number.isFinite(normalizedInvoiceAmount) || normalizedInvoiceAmount < 0) {
+        setMessage('El valor de la factura debe ser un número válido.');
+        return;
+      }
+      if (normalizedInvoiceAmount > 0 && !supplierId) {
+        setMessage('Selecciona o crea el proveedor de la factura.');
+        return;
+      }
+    }
+
     const payload = {
       storeId: requestStoreId,
       targetStoreId: mode === 'transfer' ? targetStoreId : null,
       type: mode,
       items: normalizedItems,
       notes: observations,
+      ...(isIncomeMode ? {
+        invoiceAmount: normalizedInvoiceAmount,
+        supplierId: supplierId || null,
+      } : {}),
     };
 
     // Reset immediately after clicking submit so the vendor starts a fresh request.
@@ -330,7 +412,11 @@ function InventoryRequestPage({ mode }) {
       setSubmitting(true);
       await createInventoryRequest(payload);
       setSuccessModal({ open: true, fading: false });
-      setMessage('Solicitud enviada. Debe ser autorizada por el administrador.');
+      setMessage(
+        isIncomeMode && normalizedInvoiceAmount > 0
+          ? 'Solicitud enviada. La factura quedó registrada en Contabilidad (costo variable diario).'
+          : 'Solicitud enviada. Debe ser autorizada por el administrador.'
+      );
       // Refresh in background so UI loading state is tied only to submission.
       loadRequestsData().catch(() => {});
     } catch (error) {
@@ -464,6 +550,77 @@ function InventoryRequestPage({ mode }) {
           </label>
         ) : null}
 
+        {isIncomeMode ? (
+          <div className="card inventory-invoice-card">
+            <h4>Factura del proveedor</h4>
+            <p className="inventory-invoice-hint">
+              Si el ingreso llega con factura, registra el valor y el proveedor. El monto se carga automáticamente en Contabilidad como costo variable del día.
+            </p>
+            <label>
+              Valor de la factura
+              <input
+                type="number"
+                min="0"
+                step="100"
+                placeholder="Ej: 250000"
+                value={invoiceAmount}
+                onChange={(event) => setInvoiceAmount(event.target.value)}
+              />
+            </label>
+            <label>
+              Proveedor
+              <select
+                value={supplierId}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === '__new__') {
+                    setShowNewSupplier(true);
+                    setSupplierId('');
+                    return;
+                  }
+                  setShowNewSupplier(false);
+                  setSupplierId(value);
+                }}
+              >
+                <option value="">Selecciona proveedor</option>
+                {suppliers.map((supplier) => (
+                  <option key={supplier._id} value={supplier._id}>
+                    {supplier.name}
+                  </option>
+                ))}
+                <option value="__new__">+ Crear proveedor nuevo</option>
+              </select>
+            </label>
+            {showNewSupplier ? (
+              <div className="inventory-new-supplier">
+                <label>
+                  Nombre del proveedor
+                  <input
+                    placeholder="Ej: Distribuidora La 30"
+                    value={newSupplierName}
+                    onChange={(event) => setNewSupplierName(event.target.value)}
+                  />
+                </label>
+                <div className="row gap">
+                  <button className="btn btn-primary" type="button" onClick={onCreateSupplierQuick} disabled={creatingSupplier}>
+                    {creatingSupplier ? 'Creando...' : 'Crear y seleccionar'}
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => {
+                      setShowNewSupplier(false);
+                      setNewSupplierName('');
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="card">
           <h4>Productos agregados</h4>
           <label>
@@ -535,6 +692,12 @@ function InventoryRequestPage({ mode }) {
                 {group.targetStore?.name ? ` -> ${group.targetStore.name}` : ''}
               </p>
               <p>Solicitado por: {group.requestedBy?.name || 'N/A'}</p>
+              {Number(group.invoiceAmount) > 0 ? (
+                <p>
+                  Factura: {formatCurrency(group.invoiceAmount)}
+                  {group.supplierName ? ` · Proveedor: ${group.supplierName}` : ''}
+                </p>
+              ) : null}
               {group.notes ? <p>Observaciones: {group.notes}</p> : null}
               <table className="simple-table">
                 <thead>
@@ -581,6 +744,12 @@ function InventoryRequestPage({ mode }) {
                       ? group.approvedBy?.name || group.approvedBy?.username || 'N/A'
                       : group.rejectedBy?.name || group.rejectedBy?.username || 'N/A'}
                   </p>
+                  {Number(group.invoiceAmount) > 0 ? (
+                    <p>
+                      Factura: {formatCurrency(group.invoiceAmount)}
+                      {group.supplierName ? ` · Proveedor: ${group.supplierName}` : ''}
+                    </p>
+                  ) : null}
                   {group.notes ? <p>Observaciones: {group.notes}</p> : null}
                   <button className="btn" type="button" onClick={() => toggleHistoryBatch(group.key)}>
                     {expandedHistoryBatchKeys.includes(group.key)

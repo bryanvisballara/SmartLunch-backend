@@ -179,12 +179,112 @@ function serializeMedicalProfile(profile = {}) {
   return serializeStudentMedicalProfile(profile);
 }
 
+function hasCompletedMedicalProfile(student = {}) {
+  const profile = student?.medicalProfile || {};
+  if (profile.completedAt) {
+    return true;
+  }
+
+  return Boolean(
+    normalizeText(student?.bloodType)
+    || normalizeText(profile.allergies)
+    || normalizeText(profile.emergencyMedicalContactName)
+    || normalizeText(profile.emergencyMedicalContactPhone)
+    || normalizeText(profile.healthInsurance)
+  );
+}
+
+function buildEnrollmentMedicalProfileRevision(student = {}) {
+  const medicalProfile = serializeMedicalProfile(student.medicalProfile);
+  const bloodType = normalizeText(student.bloodType);
+  const changedFields = [];
+
+  if (bloodType) {
+    changedFields.push({
+      key: 'bloodType',
+      label: 'Tipo de sangre',
+      previousValue: '',
+      nextValue: bloodType,
+    });
+  }
+
+  const fieldEntries = [
+    ['allergies', 'Alergias o sensibilidad conocida'],
+    ['chronicConditions', 'Condiciones medicas'],
+    ['currentMedications', 'Medicamentos actuales'],
+    ['dietaryRestrictions', 'Restricciones alimentarias'],
+    ['healthInsurance', 'EPS / seguro medico'],
+    ['emergencyMedicalContactName', 'Contacto medico de emergencia'],
+    ['emergencyMedicalContactPhone', 'Telefono contacto medico'],
+    ['physicianName', 'Medico tratante'],
+    ['physicianPhone', 'Telefono medico tratante'],
+  ];
+
+  for (const [key, label] of fieldEntries) {
+    const nextValue = normalizeText(medicalProfile[key]);
+    if (nextValue) {
+      changedFields.push({
+        key,
+        label,
+        previousValue: '',
+        nextValue,
+      });
+    }
+  }
+
+  const authorization = medicalProfile.medicationAuthorization || {};
+  const authorizationStatus = normalizeText(authorization.status);
+  if (authorizationStatus) {
+    const authorizationStatusLabel = authorizationStatus === 'authorized'
+      ? 'Autorizado'
+      : authorizationStatus === 'not_authorized'
+        ? 'No autorizado'
+        : authorizationStatus;
+    changedFields.push({
+      key: 'medicationAuthorization.status',
+      label: 'Autorizacion de medicamentos',
+      previousValue: '',
+      nextValue: authorizationStatusLabel,
+    });
+  }
+  if (normalizeText(authorization.authorizedBy)) {
+    changedFields.push({
+      key: 'medicationAuthorization.authorizedBy',
+      label: 'Responsable que autoriza',
+      previousValue: '',
+      nextValue: normalizeText(authorization.authorizedBy),
+    });
+  }
+
+  if (!changedFields.length) {
+    return null;
+  }
+
+  return {
+    id: `enrollment-${String(student._id)}`,
+    studentId: String(student._id),
+    changedBy: {
+      id: '',
+      name: 'Matricula / ficha clinica',
+      role: 'enrollment',
+    },
+    source: 'enrollment',
+    changedFields,
+    previousBloodType: '',
+    nextBloodType: bloodType,
+    previousMedicalProfile: serializeMedicalProfile({}),
+    nextMedicalProfile: medicalProfile,
+    createdAt: medicalProfile.completedAt || student.updatedAt || student.createdAt || null,
+  };
+}
+
 function serializeStudent(student, { academicStructure = null } = {}) {
   if (!student) {
     return null;
   }
 
   const displayGrade = resolveStudentDisplayGrade(student, academicStructure);
+  const medicalProfile = serializeMedicalProfile(student.medicalProfile);
 
   return {
     id: String(student._id),
@@ -195,7 +295,8 @@ function serializeStudent(student, { academicStructure = null } = {}) {
     displayGrade,
     documentNumber: normalizeText(student.documentNumber),
     bloodType: normalizeText(student.bloodType),
-    medicalProfile: serializeMedicalProfile(student.medicalProfile),
+    medicalProfile,
+    hasMedicalProfile: hasCompletedMedicalProfile({ ...student, medicalProfile }),
     imageUrl: normalizeText(student.imageUrl),
     thumbUrl: normalizeText(student.thumbUrl),
   };
@@ -275,6 +376,13 @@ router.get('/students', roleMiddleware(nursingStaffRoles), async (req, res) => {
     const serializedStudents = students
       .map((student) => serializeStudent(student, { academicStructure }))
       .filter((student) => matchesStudentSearch(student, q, academicStructure))
+      .sort((left, right) => {
+        const byProfile = Number(Boolean(right.hasMedicalProfile)) - Number(Boolean(left.hasMedicalProfile));
+        if (byProfile !== 0) {
+          return byProfile;
+        }
+        return String(left.name || '').localeCompare(String(right.name || ''), 'es', { sensitivity: 'base' });
+      })
       .slice(0, limit);
 
     return res.status(200).json({ students: serializedStudents });
@@ -326,7 +434,9 @@ router.get('/students/:studentId/medical-profile/history', roleMiddleware(nursin
       return res.status(400).json({ message: 'Invalid student id' });
     }
 
-    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('_id').lean();
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null })
+      .select('bloodType medicalProfile createdAt updatedAt')
+      .lean();
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
@@ -336,6 +446,15 @@ router.get('/students/:studentId/medical-profile/history', roleMiddleware(nursin
       studentId,
       limit: req.query.limit,
     });
+
+    // Fichas cargadas en matrícula antes del historial de revisiones no generan filas;
+    // exponemos un snapshot para que enfermería vea el origen de los datos.
+    if (!revisions.length && hasCompletedMedicalProfile(student)) {
+      const enrollmentRevision = buildEnrollmentMedicalProfileRevision(student);
+      if (enrollmentRevision) {
+        return res.status(200).json({ revisions: [enrollmentRevision] });
+      }
+    }
 
     return res.status(200).json({ revisions });
   } catch (error) {

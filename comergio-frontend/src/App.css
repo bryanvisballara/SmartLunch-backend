@@ -58,4 +58,7 @@
   max-width: none;
   margin: 0;
   padding: 0;
+  min-height: calc(100vh / var(--global-page-zoom, 1));
+  min-height: calc(100dvh / var(--global-page-zoom, 1));
+  background: #f5f7fb;
 }

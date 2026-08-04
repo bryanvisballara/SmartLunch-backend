@@ -7,11 +7,78 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const Product = require('../models/product.model');
 const InventoryRequest = require('../models/inventoryRequest.model');
 const InventoryMovement = require('../models/inventoryMovement.model');
+const Supplier = require('../models/supplier.model');
+const FixedCost = require('../models/fixedCost.model');
 const { queueApprovalPendingNotificationForAdmins } = require('../services/notification.service');
 
 const router = express.Router();
 
 router.use(authMiddleware);
+
+const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
+
+function getBogotaShiftedDate(date = new Date()) {
+  return new Date(date.getTime() + BOGOTA_UTC_OFFSET_MS);
+}
+
+function bogotaLocalToUtcDate(year, monthIndex, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
+  return new Date(Date.UTC(year, monthIndex, day, hour, minute, second, millisecond) - BOGOTA_UTC_OFFSET_MS);
+}
+
+function normalizeBogotaDate(value) {
+  const normalizedText = String(value || '').trim();
+  let base;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedText)) {
+    const [yearText, monthText, dayText] = normalizedText.split('-');
+    base = bogotaLocalToUtcDate(Number(yearText), Number(monthText) - 1, Number(dayText));
+  } else {
+    base = value ? new Date(value) : new Date();
+  }
+
+  if (Number.isNaN(base.getTime())) {
+    return null;
+  }
+
+  const shifted = getBogotaShiftedDate(base);
+  return bogotaLocalToUtcDate(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  );
+}
+
+function toBogotaWeekStartDate(value) {
+  const normalizedDay = normalizeBogotaDate(value);
+  if (!normalizedDay) {
+    return null;
+  }
+
+  const shifted = getBogotaShiftedDate(normalizedDay);
+  const day = shifted.getUTCDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+
+  return bogotaLocalToUtcDate(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() + diff
+  );
+}
+
+function monthKeyFromDate(date) {
+  const shifted = getBogotaShiftedDate(date);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function todayBogotaIso() {
+  const shifted = getBogotaShiftedDate(new Date());
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 async function applyInventoryMutation({
   schoolId,
@@ -172,10 +239,95 @@ async function approveInventoryRequest({ schoolId, userId, requestId }) {
   }
 }
 
+router.get('/suppliers', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const suppliers = await Supplier.find({ schoolId, deletedAt: null, status: 'active' })
+      .select('_id name contactName phone')
+      .sort({ name: 1 })
+      .lean();
+    return res.status(200).json(suppliers);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/suppliers', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const name = String(req.body?.name || '').trim();
+
+    if (!name) {
+      return res.status(400).json({ message: 'name is required' });
+    }
+
+    const existing = await Supplier.findOne({
+      schoolId,
+      name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+      deletedAt: null,
+    }).select('_id name contactName phone status').lean();
+
+    if (existing) {
+      if (existing.status !== 'active') {
+        await Supplier.updateOne({ _id: existing._id, schoolId }, { $set: { status: 'active', deletedAt: null } });
+      }
+      return res.status(200).json({
+        _id: existing._id,
+        name: existing.name,
+        contactName: existing.contactName || '',
+        phone: existing.phone || '',
+        reused: true,
+      });
+    }
+
+    const supplier = await Supplier.create({
+      schoolId,
+      name,
+      contactName: String(req.body?.contactName || '').trim(),
+      phone: String(req.body?.phone || '').trim(),
+      email: String(req.body?.email || '').trim().toLowerCase(),
+      notes: String(req.body?.notes || '').trim(),
+      productIds: [],
+      status: 'active',
+    });
+
+    return res.status(201).json({
+      _id: supplier._id,
+      name: supplier.name,
+      contactName: supplier.contactName || '',
+      phone: supplier.phone || '',
+      reused: false,
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      const existing = await Supplier.findOne({
+        schoolId: req.user.schoolId,
+        name: String(req.body?.name || '').trim(),
+        deletedAt: null,
+      }).select('_id name contactName phone').lean();
+      if (existing) {
+        return res.status(200).json({ ...existing, reused: true });
+      }
+      return res.status(409).json({ message: 'Supplier already exists' });
+    }
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.user;
-    const { storeId, targetStoreId = null, productId, type, quantity, notes, items } = req.body;
+    const {
+      storeId,
+      targetStoreId = null,
+      productId,
+      type,
+      quantity,
+      notes,
+      items,
+      invoiceAmount = null,
+      supplierId = null,
+    } = req.body;
 
     if (!storeId || !type) {
       return res.status(400).json({ message: 'storeId and type are required' });
@@ -194,6 +346,78 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
       return res.status(400).json({ message: 'Each item requires productId and positive quantity' });
     }
 
+    let normalizedInvoiceAmount = null;
+    let normalizedSupplierId = null;
+    let normalizedSupplierName = '';
+    let invoiceFixedCostId = null;
+
+    if (type === 'in') {
+      const rawInvoice = invoiceAmount === null || invoiceAmount === undefined || invoiceAmount === ''
+        ? null
+        : Number(invoiceAmount);
+
+      if (rawInvoice !== null) {
+        if (!Number.isFinite(rawInvoice) || rawInvoice < 0) {
+          return res.status(400).json({ message: 'invoiceAmount must be a number >= 0' });
+        }
+        normalizedInvoiceAmount = rawInvoice;
+      }
+
+      if (normalizedInvoiceAmount !== null && normalizedInvoiceAmount > 0) {
+        const supplierIdText = String(supplierId || '').trim();
+        if (!supplierIdText || !mongoose.Types.ObjectId.isValid(supplierIdText)) {
+          return res.status(400).json({ message: 'supplierId is required when invoiceAmount is provided' });
+        }
+
+        const foundSupplier = await Supplier.findOne({
+          _id: supplierIdText,
+          schoolId,
+          deletedAt: null,
+        }).select('_id name').lean();
+
+        if (!foundSupplier) {
+          return res.status(404).json({ message: 'Supplier not found' });
+        }
+
+        normalizedSupplierId = foundSupplier._id;
+        normalizedSupplierName = String(foundSupplier.name || '').trim();
+
+        const effectiveDate = normalizeBogotaDate(todayBogotaIso());
+        const weekStart = toBogotaWeekStartDate(effectiveDate);
+        if (!effectiveDate || !weekStart) {
+          return res.status(400).json({ message: 'Could not resolve invoice date' });
+        }
+
+        const fixedCost = await FixedCost.create({
+          schoolId,
+          storeId: storeId || null,
+          name: normalizedSupplierName || 'Proveedor',
+          supplierId: normalizedSupplierId,
+          supplierName: normalizedSupplierName,
+          amount: normalizedInvoiceAmount,
+          type: 'variable',
+          effectiveDate,
+          weekStart,
+          monthKey: monthKeyFromDate(effectiveDate),
+          status: 'active',
+        });
+        invoiceFixedCostId = fixedCost._id;
+      } else if (supplierId) {
+        const supplierIdText = String(supplierId || '').trim();
+        if (mongoose.Types.ObjectId.isValid(supplierIdText)) {
+          const foundSupplier = await Supplier.findOne({
+            _id: supplierIdText,
+            schoolId,
+            deletedAt: null,
+          }).select('_id name').lean();
+          if (foundSupplier) {
+            normalizedSupplierId = foundSupplier._id;
+            normalizedSupplierName = String(foundSupplier.name || '').trim();
+          }
+        }
+      }
+    }
+
     const documents = payloadItems.map((item) => ({
       batchId: crypto.randomUUID(),
       schoolId,
@@ -204,6 +428,10 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
       quantity: Number(item.quantity),
       requestedBy: userId,
       notes: item.notes || notes,
+      invoiceAmount: normalizedInvoiceAmount,
+      supplierId: normalizedSupplierId,
+      supplierName: normalizedSupplierName,
+      invoiceFixedCostId,
     }));
 
     const batchId = documents[0].batchId;
@@ -222,11 +450,14 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
           transfer: 'traslado',
         };
         const typeLabel = typeLabelMap[type] || 'inventario';
+        const invoiceSuffix = invoiceFixedCostId
+          ? ` Factura ${Number(normalizedInvoiceAmount || 0).toLocaleString('es-CO')} COP · ${normalizedSupplierName}.`
+          : '';
 
         await queueApprovalPendingNotificationForAdmins({
           schoolId,
           title: 'Nueva autorizacion pendiente',
-          body: `Vendedor solicito ${requestCount} movimiento(s) de ${typeLabel}.`,
+          body: `Vendedor solicito ${requestCount} movimiento(s) de ${typeLabel}.${invoiceSuffix}`,
           payload: {
             type: 'approval.inventory.pending',
             batchId,
@@ -235,6 +466,10 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
             storeId: String(storeId || ''),
             targetStoreId: String(targetStoreId || ''),
             requestedBy: String(userId || ''),
+            invoiceAmount: normalizedInvoiceAmount,
+            supplierId: normalizedSupplierId ? String(normalizedSupplierId) : '',
+            supplierName: normalizedSupplierName,
+            invoiceFixedCostId: invoiceFixedCostId ? String(invoiceFixedCostId) : '',
           },
         });
       } catch (notificationError) {
@@ -245,6 +480,7 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
     return res.status(201).json({
       count: requests.length,
       requests,
+      invoiceFixedCostId,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -384,6 +620,7 @@ router.get('/requests', async (req, res) => {
       .populate('requestedBy', 'name username')
       .populate('approvedBy', 'name username')
       .populate('rejectedBy', 'name username')
+      .populate('supplierId', 'name')
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();

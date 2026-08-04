@@ -7,6 +7,12 @@ const campusSchoolRouteStopSchema = new mongoose.Schema(
     studentGrade: { type: String, trim: true, default: '' },
     studentCourse: { type: String, trim: true, default: '' },
     pickupAddress: { type: String, trim: true, default: '' },
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+    placeId: { type: String, trim: true, default: '' },
+    routeCost: { type: Number, min: 0, default: 0 },
+    linkToCartera: { type: Boolean, default: false },
+    carteraChargeId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademicCharge', default: null },
     notes: { type: String, trim: true, default: '' },
     order: { type: Number, default: 0, index: true },
     status: {

@@ -1,9 +1,13 @@
 import api from '../lib/api';
 
-export const getHrDashboard = () => api.get('/hr/dashboard');
+export const getHrDashboard = (params = {}) => api.get('/hr/dashboard', { params });
+export const getHrPurchaseAreas = (params = {}) => api.get('/hr/purchase-areas', { params });
+export const createHrPurchaseArea = (data) => api.post('/hr/purchase-areas', data);
+export const updateHrPurchaseArea = (areaId, data) => api.patch(`/hr/purchase-areas/${areaId}`, data);
 export const getHrSupplyItems = (params = {}) => api.get('/hr/items', { params });
 export const createHrSupplyItem = (data) => api.post('/hr/items', data);
 export const updateHrSupplyItem = (itemId, data) => api.patch(`/hr/items/${itemId}`, data);
+export const adjustHrSupplyItemStock = (itemId, data) => api.post(`/hr/items/${itemId}/adjust-stock`, data);
 export const getHrPlannerCycles = (params = {}) => api.get('/hr/planner-cycles', { params });
 export const createHrPlannerCycle = (data) => api.post('/hr/planner-cycles', data);
 export const updateHrPlannerCycle = (cycleId, data) => api.patch(`/hr/planner-cycles/${cycleId}`, data);

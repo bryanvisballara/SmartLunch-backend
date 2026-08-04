@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const HrPlannerCycle = require('../models/hrPlannerCycle.model');
+const HrPurchaseArea = require('../models/hrPurchaseArea.model');
 const HrSupplyItem = require('../models/hrSupplyItem.model');
 const HrSupplyRequest = require('../models/hrSupplyRequest.model');
 const User = require('../models/user.model');
@@ -16,14 +17,62 @@ router.use(authMiddleware);
 
 const hrManagerRoles = ['human_resources', 'admin', 'rectoria', 'direccion'];
 const coordinationRoles = ['coordination', 'admin', 'rectoria', 'direccion'];
-const requesterRoles = ['teacher', 'human_resources', 'coordination', 'admin', 'rectoria', 'direccion'];
+const nursingSupplyRoles = ['nursing'];
+const requesterRoles = ['teacher', 'human_resources', 'coordination', 'admin', 'rectoria', 'direccion', ...nursingSupplyRoles];
+const itemWriteRoles = [...hrManagerRoles, ...nursingSupplyRoles];
 const approvalRoles = ['rectoria', 'direccion', 'admin'];
 const deliveryRoles = ['human_resources', 'admin'];
-const categories = ['stationery', 'classroom', 'sports', 'technology', 'laboratory', 'music', 'maintenance', 'other'];
+const categories = ['stationery', 'classroom', 'sports', 'technology', 'laboratory', 'music', 'maintenance', 'cleaning', 'construction', 'furniture', 'cafeteria', 'nursing', 'security', 'admin', 'other'];
 const itemTypes = ['consumable', 'asset'];
 const priorities = ['low', 'medium', 'high', 'urgent'];
 const statuses = ['pending_coordination_review', 'consolidated', 'pending_hr_review', 'pending_purchasing_review', 'pending_approval', 'approved', 'rejected', 'delivered', 'partially_delivered', 'cancelled'];
-const requestTypes = ['material', 'replenishment'];
+const requestTypes = ['material', 'purchase', 'replenishment'];
+const serviceAreas = ['teaching', 'cleaning', 'maintenance', 'administration', 'cafeteria', 'nursing', 'sports', 'technology', 'security', 'general'];
+const areaManagerRoles = ['rectoria', 'direccion', 'admin'];
+
+const DEFAULT_PURCHASE_AREAS = [
+  { key: 'cleaning', name: 'Limpieza', order: 10 },
+  { key: 'maintenance', name: 'Mantenimiento', order: 20 },
+  { key: 'teaching', name: 'Academia', order: 30 },
+  { key: 'administration', name: 'Administración', order: 40 },
+  { key: 'cafeteria', name: 'Cafetería', order: 50 },
+  { key: 'nursing', name: 'Enfermería', order: 60 },
+  { key: 'sports', name: 'Deportes', order: 70 },
+  { key: 'technology', name: 'Tecnología', order: 80 },
+  { key: 'security', name: 'Seguridad', order: 90 },
+  { key: 'general', name: 'General', order: 100 },
+];
+
+const LEGACY_AREA_KEY_ALIASES = {
+  academia: 'teaching',
+  limpieza: 'cleaning',
+  mantenimiento: 'maintenance',
+  administracion: 'administration',
+};
+
+function supplyItemQuery(filter = {}) {
+  return {
+    ...filter,
+    hrEntity: { $ne: 'purchase_area' },
+  };
+}
+
+function isCollectionLimitError(error) {
+  return /already using \d+ collections of \d+/i.test(String(error?.message || error || ''));
+}
+
+function isNursingSupplyRole(role) {
+  return nursingSupplyRoles.includes(normalizeText(role));
+}
+
+async function resolveAreaByKey(schoolId, key, { createdByUserId = null } = {}) {
+  const areas = await ensurePurchaseAreas(schoolId, { createdByUserId });
+  return areas.find((area) => normalizeText(area.key) === normalizeText(key) && area.status === 'active') || null;
+}
+
+async function resolveNursingPurchaseArea(schoolId, { createdByUserId = null } = {}) {
+  return resolveAreaByKey(schoolId, 'nursing', { createdByUserId });
+}
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -79,6 +128,156 @@ function serializeUser(user) {
   };
 }
 
+function slugifyAreaKey(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'area';
+}
+
+function serializePurchaseArea(area) {
+  if (!area) return null;
+  const budgetAmount = Math.max(0, Number(area.budgetAmount || 0));
+  const spentAmount = Math.max(0, Number(area.spentAmount || 0));
+  return {
+    id: String(area._id),
+    name: normalizeText(area.name),
+    key: normalizeText(area.key),
+    budgetAmount,
+    spentAmount,
+    availableAmount: Math.max(0, budgetAmount - spentAmount),
+    status: normalizeText(area.status) || 'active',
+    order: Number(area.order || 0),
+    createdAt: area.createdAt,
+    updatedAt: area.updatedAt,
+  };
+}
+
+async function ensurePurchaseAreas(schoolId, { createdByUserId = null } = {}) {
+  // Migrate areas that were temporarily stored inside hrsupplyitems (Atlas Free/Flex 500-cap workaround).
+  try {
+    const embeddedAreas = await HrSupplyItem.collection.find({ schoolId, hrEntity: 'purchase_area' }).toArray();
+    if (embeddedAreas.length) {
+      for (const area of embeddedAreas) {
+        const payload = {
+          _id: area._id,
+          schoolId: area.schoolId,
+          name: area.name,
+          key: area.key,
+          budgetAmount: Math.max(0, Number(area.budgetAmount || 0)),
+          spentAmount: Math.max(0, Number(area.spentAmount || 0)),
+          status: area.status === 'archived' ? 'archived' : 'active',
+          order: Number(area.order || 100),
+          createdByUserId: area.createdByUserId || null,
+          createdAt: area.createdAt,
+          updatedAt: area.updatedAt || new Date(),
+        };
+        await HrPurchaseArea.collection.updateOne(
+          { _id: area._id },
+          { $set: payload },
+          { upsert: true }
+        );
+      }
+      await HrSupplyItem.collection.deleteMany({ schoolId, hrEntity: 'purchase_area' });
+    }
+  } catch (error) {
+    if (!isCollectionLimitError(error)) {
+      console.warn(`[HR_AREAS_MIGRATE_WARNING] school=${schoolId} error=${error.message}`);
+    }
+  }
+
+  let existing = [];
+  try {
+    existing = await HrPurchaseArea.find({ schoolId }).sort({ order: 1, name: 1 }).lean();
+  } catch (error) {
+    if (isCollectionLimitError(error)) {
+      throw new Error(
+        'MongoDB alcanzó el límite de colecciones del clúster. Con Atlas M10+ este límite duro ya no aplica; verifica que el upgrade terminó.'
+      );
+    }
+    throw error;
+  }
+
+  const existingKeys = new Set(existing.map((area) => normalizeText(area.key)));
+
+  // Keep legacy seeded keys (academia, limpieza, …) and only add missing modern keys.
+  const toCreate = DEFAULT_PURCHASE_AREAS.filter((area) => {
+    if (existingKeys.has(area.key)) return false;
+    const legacyUsers = Object.entries(LEGACY_AREA_KEY_ALIASES)
+      .filter(([, modernKey]) => modernKey === area.key)
+      .map(([legacyKey]) => legacyKey);
+    return !legacyUsers.some((legacyKey) => existingKeys.has(legacyKey));
+  });
+
+  if (toCreate.length) {
+    try {
+      await HrPurchaseArea.insertMany(toCreate.map((area) => ({
+        schoolId,
+        key: area.key,
+        name: area.name,
+        order: area.order,
+        budgetAmount: 0,
+        spentAmount: 0,
+        status: 'active',
+        createdByUserId: createdByUserId || null,
+      })));
+    } catch (error) {
+      if (isCollectionLimitError(error)) {
+        if (existing.length) return existing;
+        throw new Error(
+          'No se pudieron crear las áreas de compra por límite de colecciones. Confirma que el cluster ya está en M10.'
+        );
+      }
+      if (error?.code !== 11000) throw error;
+    }
+  }
+
+  const areas = await HrPurchaseArea.find({ schoolId }).sort({ order: 1, name: 1 });
+  const generalArea = areas.find((area) => area.key === 'general') || areas[0];
+  const academiaArea = areas.find((area) => area.key === 'teaching' || area.key === 'academia') || generalArea;
+
+  if (academiaArea) {
+    // Planners / consolidations belong to Academia so they appear in that HR tab.
+    await HrSupplyRequest.updateMany(
+      {
+        schoolId,
+        consolidatedFromRequestIds: { $exists: true, $ne: [] },
+      },
+      { $set: { areaId: academiaArea._id, serviceArea: 'teaching', needCategory: 'classroom' } }
+    );
+    await HrSupplyRequest.updateMany(
+      {
+        schoolId,
+        plannerCycleId: { $ne: null },
+        $or: [{ areaId: null }, { areaId: { $exists: false } }],
+      },
+      { $set: { areaId: academiaArea._id, serviceArea: 'teaching' } }
+    );
+  }
+
+  if (generalArea) {
+    await HrSupplyItem.updateMany(
+      supplyItemQuery({ schoolId, $or: [{ areaId: null }, { areaId: { $exists: false } }] }),
+      { $set: { areaId: generalArea._id, unitCost: 0 } }
+    );
+    await HrSupplyRequest.updateMany(
+      { schoolId, $or: [{ areaId: null }, { areaId: { $exists: false } }] },
+      { $set: { areaId: generalArea._id } }
+    );
+  }
+
+  return areas;
+}
+
+function resolveServiceAreaFromPurchaseArea(area) {
+  const key = normalizeText(area?.key);
+  const modernKey = LEGACY_AREA_KEY_ALIASES[key] || key;
+  return serviceAreas.includes(modernKey) ? modernKey : 'general';
+}
+
 function serializeItem(item) {
   if (!item) {
     return null;
@@ -86,10 +285,12 @@ function serializeItem(item) {
 
   return {
     id: String(item._id),
+    areaId: String(item.areaId?._id || item.areaId || ''),
     name: normalizeText(item.name),
     category: normalizeText(item.category) || 'other',
     itemType: normalizeText(item.itemType) || 'consumable',
     unit: normalizeText(item.unit) || 'unidad',
+    unitCost: Math.max(0, Number(item.unitCost || 0)),
     sku: normalizeText(item.sku),
     stock: Number(item.stock || 0),
     minStock: Number(item.minStock || 0),
@@ -167,11 +368,19 @@ function buildRequestItemsFromPayload(rawItems = [], plannerActivities = [], noM
   }
 
   const fromPayload = (Array.isArray(rawItems) ? rawItems : [])
-    .map((entry) => ({
-      itemId: isValidObjectId(entry.itemId) ? entry.itemId : null,
-      customName: isValidObjectId(entry.itemId) ? '' : normalizeText(entry.customName || entry.materialName),
-      quantity: Math.max(1, Number(entry.quantity || 0)),
-    }))
+    .map((entry) => {
+      const quantity = Math.max(1, Number(entry.quantity || 0));
+      const unitCost = Math.max(0, Number(entry.unitCost || 0));
+      return {
+        itemId: isValidObjectId(entry.itemId) ? entry.itemId : null,
+        customName: isValidObjectId(entry.itemId) ? '' : normalizeText(entry.customName || entry.materialName || entry.name),
+        unit: normalizeText(entry.unit),
+        notes: normalizeText(entry.notes),
+        unitCost,
+        lineTotal: quantity * unitCost,
+        quantity,
+      };
+    })
     .filter((entry) => entry.quantity > 0 && (entry.itemId || entry.customName));
 
   if (fromPayload.length) {
@@ -186,8 +395,9 @@ function buildRequestItemsFromPayload(rawItems = [], plannerActivities = [], noM
       return;
     }
     const key = materialName.toLowerCase();
-    const current = aggregated.get(key) || { itemId: null, customName: materialName, quantity: 0 };
+    const current = aggregated.get(key) || { itemId: null, customName: materialName, unit: '', notes: '', unitCost: 0, lineTotal: 0, quantity: 0 };
     current.quantity += quantity;
+    current.lineTotal = current.quantity * current.unitCost;
     aggregated.set(key, current);
   });
 
@@ -201,6 +411,8 @@ function serializeRequest(request) {
 
   return {
     id: String(request._id),
+    areaId: String(request.areaId?._id || request.areaId || ''),
+    area: request.areaId?._id ? serializePurchaseArea(request.areaId) : null,
     requestType: normalizeText(request.requestType) || 'material',
     requestedBy: request.requestedByUserId?._id ? serializeUser(request.requestedByUserId) : null,
     plannerCycle: request.plannerCycleId?._id ? serializePlannerCycle(request.plannerCycleId) : null,
@@ -222,9 +434,16 @@ function serializeRequest(request) {
     noMaterialsNeeded: Boolean(request.noMaterialsNeeded),
     consolidatedFromRequestIds: Array.isArray(request.consolidatedFromRequestIds) ? request.consolidatedFromRequestIds.map((id) => String(id)) : [],
     consolidatedRequestId: String(request.consolidatedRequestId?._id || request.consolidatedRequestId || ''),
+    serviceArea: normalizeText(request.serviceArea) || 'general',
+    needCategory: normalizeText(request.needCategory) || 'other',
     requestedForArea: normalizeText(request.requestedForArea),
+    requestedForPerson: normalizeText(request.requestedForPerson),
     purpose: normalizeText(request.purpose),
     neededByDate: request.neededByDate || null,
+    estimatedTotal: Math.max(0, Number(request.estimatedTotal || 0)),
+    approvedTotal: Math.max(0, Number(request.approvedTotal || 0)),
+    budgetCharged: Boolean(request.budgetCharged),
+    budgetChargedAt: request.budgetChargedAt || null,
     status: normalizeText(request.status) || 'pending_approval',
     priority: normalizeText(request.priority) || 'medium',
     items: Array.isArray(request.items)
@@ -233,6 +452,10 @@ function serializeRequest(request) {
         itemId: String(entry.itemId?._id || entry.itemId || ''),
         item: entry.itemId?._id ? serializeItem(entry.itemId) : null,
         customName: normalizeText(entry.customName),
+        unit: normalizeText(entry.unit) || normalizeText(entry.itemId?.unit) || 'unidad',
+        notes: normalizeText(entry.notes),
+        unitCost: Math.max(0, Number(entry.unitCost || entry.itemId?.unitCost || 0)),
+        lineTotal: Math.max(0, Number(entry.lineTotal || (Number(entry.quantity || 0) * Number(entry.unitCost || entry.itemId?.unitCost || 0)))),
         quantity: Number(entry.quantity || 0),
         approvedQuantity: Number(entry.approvedQuantity || 0),
         deliveredQuantity: Number(entry.deliveredQuantity || 0),
@@ -255,22 +478,24 @@ function serializeRequest(request) {
 
 async function populateRequest(query) {
   return query
+    .populate('areaId', 'name key budgetAmount spentAmount status order')
     .populate('requestedByUserId', 'name username role')
     .populate('plannerCycleId', 'title startDate endDate submissionDeadline instructions status')
     .populate('approvedByUserId', 'name username role')
     .populate('rejectedByUserId', 'name username role')
     .populate('deliveredByUserId', 'name username role')
-    .populate('items.itemId', 'name category itemType unit sku stock minStock location status notes');
+    .populate('items.itemId', 'name category itemType unit unitCost sku stock minStock location status notes areaId');
 }
 
 async function populateRequestDocument(request) {
   await request.populate([
+    { path: 'areaId', select: 'name key budgetAmount spentAmount status order' },
     { path: 'requestedByUserId', select: 'name username role' },
     { path: 'plannerCycleId', select: 'title startDate endDate submissionDeadline instructions status' },
     { path: 'approvedByUserId', select: 'name username role' },
     { path: 'rejectedByUserId', select: 'name username role' },
     { path: 'deliveredByUserId', select: 'name username role' },
-    { path: 'items.itemId', select: 'name category itemType unit sku stock minStock location status notes' },
+    { path: 'items.itemId', select: 'name category itemType unit unitCost sku stock minStock location status notes areaId' },
   ]);
   return request;
 }
@@ -346,7 +571,7 @@ async function applyDeliveredStock({ request, deliveredItems }) {
 
     if (deliveredQuantity > 0 && request.requestType === 'material') {
       const updatedItem = await HrSupplyItem.findOneAndUpdate(
-        { _id: itemId, schoolId: request.schoolId, stock: { $gte: deliveredQuantity } },
+        supplyItemQuery({ _id: itemId, schoolId: request.schoolId, stock: { $gte: deliveredQuantity } }),
         { $inc: { stock: -deliveredQuantity } },
         { new: true }
       );
@@ -356,8 +581,11 @@ async function applyDeliveredStock({ request, deliveredItems }) {
       }
     }
 
-    if (deliveredQuantity > 0 && request.requestType === 'replenishment') {
-      await HrSupplyItem.updateOne({ _id: itemId, schoolId: request.schoolId }, { $inc: { stock: deliveredQuantity } });
+    if (deliveredQuantity > 0 && (request.requestType === 'replenishment' || request.requestType === 'purchase')) {
+      await HrSupplyItem.updateOne(
+        supplyItemQuery({ _id: itemId, schoolId: request.schoolId }),
+        { $inc: { stock: deliveredQuantity } }
+      );
     }
   }
 }
@@ -365,14 +593,28 @@ async function applyDeliveredStock({ request, deliveredItems }) {
 router.get('/dashboard', roleMiddleware(hrManagerRoles), async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const [items, pendingHrReviewCount, pendingApprovalCount, approvedCount, lowStockCount, recentRequests] = await Promise.all([
-      HrSupplyItem.find({ schoolId, status: 'active' }).sort({ name: 1 }).lean(),
-      HrSupplyRequest.countDocuments({ schoolId, status: 'pending_hr_review' }),
-      HrSupplyRequest.countDocuments({ schoolId, status: 'pending_approval' }),
-      HrSupplyRequest.countDocuments({ schoolId, status: 'approved' }),
-      HrSupplyItem.countDocuments({ schoolId, status: 'active', $expr: { $lte: ['$stock', '$minStock'] } }),
-      populateRequest(HrSupplyRequest.find({ schoolId }).sort({ updatedAt: -1 }).limit(8).lean()),
+    await ensurePurchaseAreas(schoolId, { createdByUserId: req.user.userId });
+    const areaId = isValidObjectId(req.query.areaId) ? req.query.areaId : null;
+    const itemFilter = supplyItemQuery({ schoolId, status: 'active' });
+    const requestFilter = { schoolId };
+    if (areaId) {
+      itemFilter.areaId = areaId;
+      requestFilter.areaId = areaId;
+    }
+
+    const [items, pendingHrReviewCount, pendingApprovalCount, approvedCount, lowStockCount, recentRequests, areas] = await Promise.all([
+      HrSupplyItem.find(itemFilter).sort({ name: 1 }).lean(),
+      HrSupplyRequest.countDocuments({ ...requestFilter, status: 'pending_hr_review' }),
+      HrSupplyRequest.countDocuments({ ...requestFilter, status: 'pending_approval' }),
+      HrSupplyRequest.countDocuments({ ...requestFilter, status: 'approved' }),
+      HrSupplyItem.countDocuments({ ...itemFilter, $expr: { $lte: ['$stock', '$minStock'] } }),
+      populateRequest(HrSupplyRequest.find(requestFilter).sort({ updatedAt: -1 }).limit(8).lean()),
+      HrPurchaseArea.find({ schoolId, status: 'active' }).sort({ order: 1, name: 1 }).lean(),
     ]);
+
+    const selectedArea = areaId
+      ? areas.find((area) => String(area._id) === String(areaId))
+      : null;
 
     return res.status(200).json({
       summary: {
@@ -383,7 +625,11 @@ router.get('/dashboard', roleMiddleware(hrManagerRoles), async (req, res) => {
         approvedCount,
         lowStockCount,
         assetCount: items.filter((item) => item.itemType === 'asset').length,
+        budgetAmount: selectedArea ? Number(selectedArea.budgetAmount || 0) : areas.reduce((sum, area) => sum + Number(area.budgetAmount || 0), 0),
+        spentAmount: selectedArea ? Number(selectedArea.spentAmount || 0) : areas.reduce((sum, area) => sum + Number(area.spentAmount || 0), 0),
       },
+      areas: areas.map(serializePurchaseArea),
+      selectedArea: serializePurchaseArea(selectedArea),
       recentRequests: recentRequests.map(serializeRequest),
     });
   } catch (error) {
@@ -391,12 +637,110 @@ router.get('/dashboard', roleMiddleware(hrManagerRoles), async (req, res) => {
   }
 });
 
-router.get('/items', roleMiddleware(requesterRoles), async (req, res) => {
+router.get('/purchase-areas', roleMiddleware([...hrManagerRoles, 'coordination', 'teacher', ...nursingSupplyRoles]), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const areas = await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
+    const includeArchived = String(req.query.includeArchived || '') === 'true';
+    let filtered = includeArchived ? areas : areas.filter((area) => area.status === 'active');
+    if (isNursingSupplyRole(role)) {
+      filtered = filtered.filter((area) => normalizeText(area.key) === 'nursing');
+    }
+    return res.status(200).json({ areas: filtered.map(serializePurchaseArea) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/purchase-areas', roleMiddleware(areaManagerRoles), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
+    const name = normalizeText(req.body.name);
+    if (!name) {
+      return res.status(400).json({ message: 'El nombre del área es obligatorio.' });
+    }
+
+    const key = slugifyAreaKey(req.body.key || name);
+    const existing = await HrPurchaseArea.findOne({ schoolId, key }).lean();
+    if (existing) {
+      return res.status(409).json({ message: 'Ya existe un área con ese identificador.' });
+    }
+
+    const area = await HrPurchaseArea.create({
+      schoolId,
+      name,
+      key,
+      budgetAmount: Math.max(0, Number(req.body.budgetAmount || 0)),
+      spentAmount: 0,
+      status: 'active',
+      order: Number(req.body.order || ((await HrPurchaseArea.countDocuments({ schoolId })) + 1) * 10),
+      createdByUserId: userId,
+    });
+
+    return res.status(201).json({ area: serializePurchaseArea(area) });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: 'Ya existe un área con ese identificador.' });
+    }
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/purchase-areas/:id', roleMiddleware(areaManagerRoles), async (req, res) => {
   try {
     const { schoolId } = req.user;
-    const q = normalizeText(req.query.q);
-    const filter = { schoolId };
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Área inválida.' });
+    }
 
+    const area = await HrPurchaseArea.findOne({ _id: id, schoolId });
+    if (!area) {
+      return res.status(404).json({ message: 'Área no encontrada.' });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'name')) {
+      const name = normalizeText(req.body.name);
+      if (!name) return res.status(400).json({ message: 'El nombre del área es obligatorio.' });
+      area.name = name;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'budgetAmount')) {
+      area.budgetAmount = Math.max(0, Number(req.body.budgetAmount || 0));
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'order')) {
+      area.order = Number(req.body.order || area.order || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'status')) {
+      area.status = safeEnum(req.body.status, ['active', 'archived'], area.status);
+    }
+
+    await area.save();
+    return res.status(200).json({ area: serializePurchaseArea(area) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/items', roleMiddleware(requesterRoles), async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
+    const q = normalizeText(req.query.q);
+    const filter = supplyItemQuery({ schoolId });
+
+    if (isNursingSupplyRole(role)) {
+      const nursingArea = await resolveNursingPurchaseArea(schoolId, { createdByUserId: userId });
+      if (!nursingArea) {
+        return res.status(404).json({ message: 'Área de Enfermería no configurada.' });
+      }
+      filter.areaId = nursingArea._id;
+    } else if (req.query.areaId) {
+      if (!isValidObjectId(req.query.areaId)) {
+        return res.status(400).json({ message: 'Área inválida.' });
+      }
+      filter.areaId = req.query.areaId;
+    }
     if (req.query.status) {
       filter.status = safeEnum(req.query.status, ['active', 'inactive'], 'active');
     }
@@ -545,23 +889,44 @@ router.delete('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), asy
   }
 });
 
-router.post('/items', roleMiddleware(hrManagerRoles), async (req, res) => {
+router.post('/items', roleMiddleware(itemWriteRoles), async (req, res) => {
   try {
-    const { schoolId } = req.user;
+    const { schoolId, userId, role } = req.user;
+    await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
     const name = normalizeText(req.body.name);
+    let areaId = normalizeText(req.body.areaId);
 
     if (!name) {
       return res.status(400).json({ message: 'name is required' });
     }
 
+    if (isNursingSupplyRole(role)) {
+      const nursingArea = await resolveNursingPurchaseArea(schoolId, { createdByUserId: userId });
+      if (!nursingArea) {
+        return res.status(404).json({ message: 'Área de Enfermería no configurada.' });
+      }
+      areaId = String(nursingArea._id);
+    }
+
+    if (!isValidObjectId(areaId)) {
+      return res.status(400).json({ message: 'Debes seleccionar un área de compra.' });
+    }
+
+    const area = await HrPurchaseArea.findOne({ _id: areaId, schoolId, status: 'active' }).lean();
+    if (!area) {
+      return res.status(404).json({ message: 'Área de compra no encontrada.' });
+    }
+
     const item = await HrSupplyItem.findOneAndUpdate(
-      { schoolId, name },
+      supplyItemQuery({ schoolId, areaId, name }),
       {
         schoolId,
+        areaId,
         name,
-        category: safeEnum(req.body.category, categories, 'other'),
+        category: safeEnum(req.body.category, categories, isNursingSupplyRole(role) ? 'nursing' : 'other'),
         itemType: safeEnum(req.body.itemType, itemTypes, 'consumable'),
         unit: normalizeText(req.body.unit) || 'unidad',
+        unitCost: Math.max(0, Number(req.body.unitCost || 0)),
         sku: normalizeText(req.body.sku),
         stock: Math.max(0, Number(req.body.stock || 0)),
         minStock: Math.max(0, Number(req.body.minStock || 0)),
@@ -581,13 +946,25 @@ router.post('/items', roleMiddleware(hrManagerRoles), async (req, res) => {
   }
 });
 
-router.patch('/items/:id', roleMiddleware(hrManagerRoles), async (req, res) => {
+router.patch('/items/:id', roleMiddleware(itemWriteRoles), async (req, res) => {
   try {
-    const { schoolId } = req.user;
+    const { schoolId, role, userId } = req.user;
     const { id } = req.params;
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({ message: 'Invalid item id' });
+    }
+
+    const existing = await HrSupplyItem.findOne(supplyItemQuery({ _id: id, schoolId })).lean();
+    if (!existing) {
+      return res.status(404).json({ message: 'Item not found' });
+    }
+
+    if (isNursingSupplyRole(role)) {
+      const nursingArea = await resolveNursingPurchaseArea(schoolId, { createdByUserId: userId });
+      if (!nursingArea || String(existing.areaId || '') !== String(nursingArea._id)) {
+        return res.status(403).json({ message: 'Solo puedes editar insumos del área de Enfermería.' });
+      }
     }
 
     const updates = {};
@@ -601,8 +978,22 @@ router.patch('/items/:id', roleMiddleware(hrManagerRoles), async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body, 'status')) updates.status = safeEnum(req.body.status, ['active', 'inactive'], 'active');
     if (Object.prototype.hasOwnProperty.call(req.body, 'stock')) updates.stock = Math.max(0, Number(req.body.stock || 0));
     if (Object.prototype.hasOwnProperty.call(req.body, 'minStock')) updates.minStock = Math.max(0, Number(req.body.minStock || 0));
+    if (Object.prototype.hasOwnProperty.call(req.body, 'unitCost')) updates.unitCost = Math.max(0, Number(req.body.unitCost || 0));
+    if (Object.prototype.hasOwnProperty.call(req.body, 'areaId')) {
+      if (isNursingSupplyRole(role)) {
+        return res.status(403).json({ message: 'No puedes mover insumos fuera del área de Enfermería.' });
+      }
+      if (!isValidObjectId(req.body.areaId)) {
+        return res.status(400).json({ message: 'Área inválida.' });
+      }
+      const area = await HrPurchaseArea.findOne({ _id: req.body.areaId, schoolId, status: 'active' }).lean();
+      if (!area) {
+        return res.status(404).json({ message: 'Área de compra no encontrada.' });
+      }
+      updates.areaId = req.body.areaId;
+    }
 
-    const item = await HrSupplyItem.findOneAndUpdate({ _id: id, schoolId }, updates, { new: true });
+    const item = await HrSupplyItem.findOneAndUpdate(supplyItemQuery({ _id: id, schoolId }), updates, { new: true });
     if (!item) {
       return res.status(404).json({ message: 'Item not found' });
     }
@@ -613,15 +1004,117 @@ router.patch('/items/:id', roleMiddleware(hrManagerRoles), async (req, res) => {
   }
 });
 
+router.post('/items/:id/adjust-stock', roleMiddleware(itemWriteRoles), async (req, res) => {
+  try {
+    const { schoolId, userId, role } = req.user;
+    const { id } = req.params;
+    const direction = safeEnum(req.body.direction, ['in', 'out'], '');
+    const quantity = Math.max(1, Math.floor(Number(req.body.quantity || 0)));
+    const notes = normalizeText(req.body.notes);
+    const receivedByName = normalizeText(req.body.receivedByName);
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Insumo inválido.' });
+    }
+    if (!direction) {
+      return res.status(400).json({ message: 'Indica si es ingreso (in) o entrega (out).' });
+    }
+    if (!quantity) {
+      return res.status(400).json({ message: 'La cantidad debe ser mayor a 0.' });
+    }
+
+    const item = await HrSupplyItem.findOne(supplyItemQuery({ _id: id, schoolId, status: 'active' }));
+    if (!item) {
+      return res.status(404).json({ message: 'Insumo no encontrado.' });
+    }
+
+    if (isNursingSupplyRole(role)) {
+      const nursingArea = await resolveNursingPurchaseArea(schoolId, { createdByUserId: userId });
+      if (!nursingArea || String(item.areaId || '') !== String(nursingArea._id)) {
+        return res.status(403).json({ message: 'Solo puedes ajustar inventario del área de Enfermería.' });
+      }
+    }
+
+    if (direction === 'out' && Number(item.stock || 0) < quantity) {
+      return res.status(400).json({
+        message: `Stock insuficiente. Disponible: ${Number(item.stock || 0)} ${item.unit || 'unidad'}.`,
+      });
+    }
+
+    item.stock = direction === 'in'
+      ? Number(item.stock || 0) + quantity
+      : Number(item.stock || 0) - quantity;
+    await item.save();
+
+    const unitCost = Math.max(0, Number(item.unitCost || 0));
+    const lineTotal = quantity * unitCost;
+    const requestType = direction === 'in' ? 'replenishment' : 'material';
+    const purpose = notes
+      || (direction === 'in'
+        ? `Ingreso manual de inventario: ${item.name}`
+        : `Entrega de material: ${item.name}`);
+
+    const request = await HrSupplyRequest.create({
+      schoolId,
+      areaId: item.areaId || null,
+      requestType,
+      requestedByUserId: userId,
+      serviceArea: isNursingSupplyRole(role) ? 'nursing' : 'general',
+      needCategory: item.category || 'other',
+      requestedForPerson: receivedByName,
+      purpose,
+      priority: 'medium',
+      estimatedTotal: lineTotal,
+      approvedTotal: lineTotal,
+      budgetCharged: false,
+      status: 'delivered',
+      items: [{
+        itemId: item._id,
+        quantity,
+        approvedQuantity: quantity,
+        deliveredQuantity: quantity,
+        unit: item.unit || 'unidad',
+        unitCost,
+        lineTotal,
+        notes,
+      }],
+      approvedByUserId: userId,
+      approvedAt: new Date(),
+      deliveredByUserId: userId,
+      deliveredAt: new Date(),
+      deliveryNotes: purpose,
+      receivedByName: receivedByName || '',
+    });
+
+    await populateRequest(request);
+    return res.status(201).json({
+      item: serializeItem(item),
+      request: serializeRequest(request),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.get('/requests', roleMiddleware(requesterRoles), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
+    await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
     const filter = { schoolId };
 
     if (req.query.status) filter.status = safeEnum(req.query.status, statuses, 'pending_approval');
     if (req.query.requestType) filter.requestType = safeEnum(req.query.requestType, requestTypes, 'material');
     if (req.query.plannerCycleId && isValidObjectId(req.query.plannerCycleId)) filter.plannerCycleId = req.query.plannerCycleId;
+    if (req.query.areaId && isValidObjectId(req.query.areaId)) filter.areaId = req.query.areaId;
     if (role === 'teacher') filter.requestedByUserId = userId;
+
+    if (isNursingSupplyRole(role)) {
+      const nursingArea = await resolveNursingPurchaseArea(schoolId, { createdByUserId: userId });
+      if (!nursingArea) {
+        return res.status(404).json({ message: 'Área de Enfermería no configurada.' });
+      }
+      filter.areaId = nursingArea._id;
+    }
 
     const requests = await populateRequest(HrSupplyRequest.find(filter).sort({ updatedAt: -1 }).limit(100).lean());
     return res.status(200).json({ requests: requests.map(serializeRequest) });
@@ -649,9 +1142,16 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
     const requestType = safeEnum(req.body.requestType, requestTypes, 'material');
     const noMaterialsNeeded = Boolean(req.body.noMaterialsNeeded);
     const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
+    const serviceArea = safeEnum(req.body.serviceArea, serviceAreas, 'general');
+    const needCategory = safeEnum(req.body.needCategory, categories, 'other');
 
-    if (requestType === 'replenishment' && !hrManagerRoles.includes(role)) {
-      return res.status(403).json({ message: 'Only HR can request replenishment' });
+    if (
+      (requestType === 'replenishment' || requestType === 'purchase')
+      && !hrManagerRoles.includes(role)
+      && role !== 'coordination'
+      && !isNursingSupplyRole(role)
+    ) {
+      return res.status(403).json({ message: 'Solo recursos, coordinación, enfermería o dirección pueden crear este tipo de solicitud.' });
     }
 
     const plannerCycleId = normalizeText(req.body.plannerCycleId);
@@ -687,22 +1187,75 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
         });
       }
     } else if (!rawItems.length && !noMaterialsNeeded) {
-      return res.status(400).json({ message: 'items are required' });
+      return res.status(400).json({ message: 'Agrega al menos un producto o material a la solicitud.' });
     }
 
-    const items = buildRequestItemsFromPayload(rawItems, plannerActivities, noMaterialsNeeded);
+    const areas = await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
+    const generalArea = areas.find((area) => area.key === 'general') || areas[0];
+    const academiaArea = areas.find((area) => area.key === 'teaching' || area.key === 'academia') || generalArea;
+    const nursingArea = areas.find((area) => area.key === 'nursing') || null;
+    let areaId = isValidObjectId(req.body.areaId) ? req.body.areaId : null;
+    if (isNursingSupplyRole(role)) {
+      if (!nursingArea) {
+        return res.status(404).json({ message: 'Área de Enfermería no configurada.' });
+      }
+      areaId = String(nursingArea._id);
+    } else if (role === 'teacher' && requestType === 'material' && academiaArea) {
+      areaId = String(academiaArea._id);
+    } else if (!areaId && generalArea) {
+      areaId = String(generalArea._id);
+    }
+
+    if (role !== 'teacher' || requestType !== 'material') {
+      if (!isValidObjectId(areaId)) {
+        return res.status(400).json({ message: 'Debes seleccionar un área de compra.' });
+      }
+      const area = areas.find((entry) => String(entry._id) === String(areaId) && entry.status === 'active');
+      if (!area) {
+        return res.status(404).json({ message: 'Área de compra no encontrada.' });
+      }
+    } else if (academiaArea || generalArea) {
+      areaId = String((academiaArea || generalArea)._id);
+    }
+
+    let items = buildRequestItemsFromPayload(rawItems, plannerActivities, noMaterialsNeeded);
 
     if (!noMaterialsNeeded && !items.length) {
-      return res.status(400).json({ message: 'valid items are required' });
+      return res.status(400).json({ message: 'Agrega productos válidos a la solicitud.' });
+    }
+
+    if (requestType === 'material' && items.some((entry) => !entry.itemId)) {
+      return res.status(400).json({ message: 'Las entregas desde inventario deben usar materiales del catálogo.' });
     }
 
     const catalogItemIds = items.map((entry) => entry.itemId).filter(Boolean);
-    const existingItemsCount = catalogItemIds.length
-      ? await HrSupplyItem.countDocuments({ schoolId, _id: { $in: catalogItemIds }, status: 'active' })
-      : 0;
-    if (existingItemsCount !== catalogItemIds.length) {
+    const catalogItems = catalogItemIds.length
+      ? await HrSupplyItem.find(supplyItemQuery({ schoolId, _id: { $in: catalogItemIds }, status: 'active' })).lean()
+      : [];
+    if (catalogItems.length !== catalogItemIds.length) {
       return res.status(400).json({ message: 'Some items are invalid or inactive' });
     }
+
+    const catalogById = new Map(catalogItems.map((item) => [String(item._id), item]));
+    if (areaId) {
+      const outsideArea = catalogItems.some((item) => String(item.areaId || '') !== String(areaId));
+      if (outsideArea) {
+        return res.status(400).json({ message: 'Todos los insumos deben pertenecer al área seleccionada.' });
+      }
+    }
+
+    items = items.map((entry) => {
+      const catalogItem = entry.itemId ? catalogById.get(String(entry.itemId)) : null;
+      const unitCost = Math.max(0, Number(entry.unitCost || catalogItem?.unitCost || 0));
+      const quantity = Math.max(1, Number(entry.quantity || 0));
+      return {
+        ...entry,
+        unit: entry.unit || catalogItem?.unit || 'unidad',
+        unitCost,
+        lineTotal: quantity * unitCost,
+      };
+    });
+    const estimatedTotal = items.reduce((sum, entry) => sum + Number(entry.lineTotal || 0), 0);
 
     const neededByDate = normalizeText(req.body.neededByDate);
     const parsedNeededByDate = neededByDate ? new Date(neededByDate) : null;
@@ -710,24 +1263,36 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
     const purpose = noMaterialsNeeded
       ? (normalizeText(req.body.purpose) || 'No necesito material para este periodo.')
       : normalizeText(req.body.purpose);
+    const resolvedServiceArea = role === 'teacher'
+      ? 'teaching'
+      : (isNursingSupplyRole(role) ? 'nursing' : serviceArea);
+    const resolvedNeedCategory = role === 'teacher'
+      ? 'classroom'
+      : (isNursingSupplyRole(role) ? safeEnum(needCategory, categories, 'nursing') : needCategory);
 
     const request = await HrSupplyRequest.create({
       schoolId,
+      areaId: areaId || null,
       requestType,
       requestedByUserId: userId,
       plannerCycleId: plannerCycle?._id || null,
       plannerActivities: noMaterialsNeeded ? [] : plannerActivities,
       noMaterialsNeeded,
-      requestedForArea: normalizeText(req.body.requestedForArea),
+      serviceArea: resolvedServiceArea,
+      needCategory: resolvedNeedCategory,
+      requestedForArea: normalizeText(req.body.requestedForArea) || (isNursingSupplyRole(role) ? 'Enfermería' : ''),
+      requestedForPerson: normalizeText(req.body.requestedForPerson),
       purpose,
       neededByDate: parsedNeededByDate && !Number.isNaN(parsedNeededByDate.getTime()) ? parsedNeededByDate : null,
+      estimatedTotal,
+      approvedTotal: 0,
+      budgetCharged: false,
       priority: safeEnum(req.body.priority, priorities, 'medium'),
       items,
       status: initialStatus,
     });
 
-    await request.populate('requestedByUserId', 'name username role');
-    await request.populate('items.itemId', 'name category itemType unit sku stock minStock location status notes');
+    await populateRequestDocument(request);
 
     if (initialStatus === 'pending_coordination_review') {
       await notifyCoordination({
@@ -739,10 +1304,14 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
         payload: { type: 'hr.planner.coordination_review', requestId: String(request._id), requestType, url: '/campus/coordination' },
       }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] request=${request._id} error=${error.message}`));
     } else {
+      const requestTypeLabel = requestType === 'purchase'
+        ? 'compra'
+        : (requestType === 'replenishment' ? 'reposición' : 'materiales');
+      const areaLabel = isNursingSupplyRole(role) ? 'Enfermería' : resolvedServiceArea;
       await notifyHumanResources({
         schoolId,
-        title: requestType === 'replenishment' ? 'Solicitud de reposicion' : 'Solicitud de materiales pendiente',
-        body: `${request.requestedByUserId?.name || 'Un usuario'} solicito ${items.length} material(es).`,
+        title: `Solicitud de ${requestTypeLabel}${isNursingSupplyRole(role) ? ' · Enfermería' : ''}`,
+        body: `${request.requestedByUserId?.name || 'Un usuario'} solicito ${items.length} ítem(s) para ${areaLabel}.`,
         payload: { type: 'hr.supply_request.purchasing_review', requestId: String(request._id), requestType, url: '/recursos-humanos' },
       }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] request=${request._id} error=${error.message}`));
     }
@@ -796,7 +1365,7 @@ router.patch('/requests/:id', roleMiddleware(['teacher']), async (req, res) => {
 
     const catalogItemIds = items.map((entry) => entry.itemId).filter(Boolean);
     const existingItemsCount = catalogItemIds.length
-      ? await HrSupplyItem.countDocuments({ schoolId, _id: { $in: catalogItemIds }, status: 'active' })
+      ? await HrSupplyItem.countDocuments(supplyItemQuery({ schoolId, _id: { $in: catalogItemIds }, status: 'active' }))
       : 0;
     if (existingItemsCount !== catalogItemIds.length) {
       return res.status(400).json({ message: 'Some items are invalid or inactive' });
@@ -848,8 +1417,14 @@ router.post('/coordination/consolidate', roleMiddleware(coordinationRoles), asyn
         const customName = normalizeText(item.customName);
         const key = itemId || `custom:${customName.toLowerCase()}`;
         if (!key || key === 'custom:') continue;
-        const previous = aggregatedItemsByKey.get(key) || { itemId: itemId || null, customName: itemId ? '' : customName, quantity: 0 };
+        const previous = aggregatedItemsByKey.get(key) || {
+          itemId: itemId || null,
+          customName: itemId ? '' : customName,
+          unit: normalizeText(item.unit) || normalizeText(item.itemId?.unit) || 'unidad',
+          quantity: 0,
+        };
         previous.quantity += Number(item.quantity || 0);
+        if (!previous.unit) previous.unit = normalizeText(item.unit) || 'unidad';
         aggregatedItemsByKey.set(key, previous);
       }
     }
@@ -859,11 +1434,19 @@ router.post('/coordination/consolidate', roleMiddleware(coordinationRoles), asyn
       return res.status(400).json({ message: 'Los planners seleccionados no tienen requerimientos validos.' });
     }
 
+    const areas = await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
+    const academiaArea = areas.find((area) => area.key === 'teaching' || area.key === 'academia')
+      || areas.find((area) => area.key === 'general')
+      || areas[0];
+
     const cycleIds = Array.from(new Set(sourceRequests.map((request) => String(request.plannerCycleId?._id || request.plannerCycleId || '')).filter(Boolean)));
     const teachers = sourceRequests.map((request) => request.requestedByUserId?.name || 'Docente').filter(Boolean);
     const consolidatedRequest = await HrSupplyRequest.create({
       schoolId,
+      areaId: academiaArea?._id || null,
       requestType: 'material',
+      serviceArea: 'teaching',
+      needCategory: 'classroom',
       requestedByUserId: userId,
       plannerCycleId: cycleIds.length === 1 ? cycleIds[0] : null,
       consolidatedFromRequestIds: sourceRequests.map((request) => request._id),
@@ -907,6 +1490,22 @@ router.post('/requests/:id/purchasing-accept', roleMiddleware(deliveryRoles), as
     const request = await populateRequest(HrSupplyRequest.findOne({ _id: id, schoolId, status: 'pending_purchasing_review' }));
     if (!request) {
       return res.status(404).json({ message: 'Purchasing request not found' });
+    }
+
+    if (request.requestType === 'purchase') {
+      request.status = 'pending_approval';
+      request.deliveryNotes = normalizeText(req.body.deliveryNotes) || 'Compra revisada por gestión de compras y enviada a aprobación.';
+      await request.save();
+      await populateRequestDocument(request);
+
+      await notifyLeadership({
+        schoolId,
+        title: 'Compra pendiente de aprobación',
+        body: `Gestión de compras envió a aprobación una solicitud de compra (${(request.items || []).length} ítem(s)).`,
+        payload: { type: 'hr.supply_request.pending', requestId: String(request._id), url: '/recursos-humanos' },
+      }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] purchase_accept=${request._id} error=${error.message}`));
+
+      return res.status(200).json({ request: serializeRequest(request) });
     }
 
     const deliveredItems = (request.items || []).map((entry) => ({
@@ -993,12 +1592,41 @@ router.post('/requests/:id/approve', roleMiddleware(approvalRoles), async (req, 
 
     for (const requestItem of request.items) {
       const itemId = String(requestItem.itemId?._id || requestItem.itemId || '');
-      const requestItemKey = itemId || String(requestItem._id || '');
-      requestItem.approvedQuantity = approvedByItemId.has(requestItemKey)
-        ? Math.min(Number(requestItem.quantity || 0), Number(approvedByItemId.get(requestItemKey) || 0))
-        : Number(requestItem.quantity || 0);
+      const requestItemKey = String(requestItem._id || '') || itemId;
+      requestItem.approvedQuantity = approvedByItemId.has(String(requestItem._id || ''))
+        ? Math.min(Number(requestItem.quantity || 0), Number(approvedByItemId.get(String(requestItem._id || '')) || 0))
+        : (approvedByItemId.has(requestItemKey)
+          ? Math.min(Number(requestItem.quantity || 0), Number(approvedByItemId.get(requestItemKey) || 0))
+          : Number(requestItem.quantity || 0));
+      const unitCost = Math.max(0, Number(requestItem.unitCost || requestItem.itemId?.unitCost || 0));
+      requestItem.unitCost = unitCost;
+      requestItem.lineTotal = Number(requestItem.approvedQuantity || 0) * unitCost;
     }
 
+    const approvedTotal = (request.items || []).reduce((sum, entry) => (
+      sum + (Number(entry.approvedQuantity || 0) * Math.max(0, Number(entry.unitCost || 0)))
+    ), 0);
+
+    if (request.requestType === 'purchase' && request.areaId && !request.budgetCharged) {
+      const area = await HrPurchaseArea.findOne({ _id: request.areaId._id || request.areaId, schoolId });
+      if (!area) {
+        return res.status(404).json({ message: 'Área de compra no encontrada.' });
+      }
+      const budgetAmount = Math.max(0, Number(area.budgetAmount || 0));
+      const spentAmount = Math.max(0, Number(area.spentAmount || 0));
+      if (budgetAmount > 0 && (spentAmount + approvedTotal) > budgetAmount) {
+        return res.status(400).json({
+          message: `El área ${area.name} no tiene presupuesto suficiente. Disponible: $${Math.max(0, budgetAmount - spentAmount).toLocaleString('es-CO')}.`,
+        });
+      }
+      area.spentAmount = spentAmount + approvedTotal;
+      await area.save();
+      request.budgetCharged = true;
+      request.budgetChargedAt = new Date();
+    }
+
+    request.approvedTotal = approvedTotal;
+    request.estimatedTotal = Math.max(Number(request.estimatedTotal || 0), approvedTotal);
     request.status = 'approved';
     request.approvedByUserId = userId;
     request.approvedAt = new Date();
@@ -1008,8 +1636,10 @@ router.post('/requests/:id/approve', roleMiddleware(approvalRoles), async (req, 
     await notifyUser({
       schoolId,
       userId: request.requestedByUserId?._id || request.requestedByUserId,
-      title: 'Solicitud de materiales aprobada',
-      body: 'Tu solicitud fue aprobada y queda pendiente de entrega por RRHH.',
+      title: request.requestType === 'purchase' ? 'Compra aprobada' : 'Solicitud de materiales aprobada',
+      body: request.requestType === 'purchase'
+        ? 'La compra fue aprobada y el presupuesto del área quedó actualizado. Pendiente recepción en recursos.'
+        : 'Tu solicitud fue aprobada y queda pendiente de entrega por RRHH.',
       payload: { type: 'hr.supply_request.approved', requestId: String(request._id), url: '/recursos-humanos' },
     }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] approved=${request._id} error=${error.message}`));
 

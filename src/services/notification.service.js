@@ -596,6 +596,156 @@ async function queueApprovalPendingNotificationForAdmins({
   });
 }
 
+async function deliverPendingNotificationsDirectly(notifications = []) {
+  let delivered = 0;
+  let failed = 0;
+  const chunkSize = 15;
+
+  for (let index = 0; index < notifications.length; index += chunkSize) {
+    const chunk = notifications.slice(index, index + chunkSize);
+    // eslint-disable-next-line no-await-in-loop
+    const results = await Promise.all(chunk.map(async (notification) => {
+      try {
+        const delivery = await sendPushToParent({
+          schoolId: notification.schoolId,
+          parentId: notification.parentId,
+          title: notification.title,
+          body: notification.body,
+          payload: notification.payload,
+        });
+
+        if (delivery.delivered) {
+          await Notification.updateOne(
+            { _id: notification._id },
+            { status: 'sent', sentAt: new Date(), lastError: null }
+          );
+          return 'delivered';
+        }
+
+        await Notification.updateOne(
+          { _id: notification._id },
+          { status: 'failed', lastError: delivery.reason || 'Push delivery failed' }
+        );
+        return 'failed';
+      } catch (error) {
+        await Notification.updateOne(
+          { _id: notification._id },
+          { status: 'failed', lastError: error.message || 'Direct push delivery failed' }
+        );
+        return 'failed';
+      }
+    }));
+
+    delivered += results.filter((status) => status === 'delivered').length;
+    failed += results.filter((status) => status === 'failed').length;
+  }
+
+  return { delivered, failed };
+}
+
+async function queueCafeteriaPromoNotifications({
+  schoolId,
+  title,
+  body,
+  studentId = null,
+}) {
+  return runWithSchoolContext(schoolId, async () => {
+    const normalizedTitle = String(title || '').trim().slice(0, 120);
+    const normalizedBody = String(body || '').trim().slice(0, 500);
+    if (!normalizedTitle || !normalizedBody) {
+      const error = new Error('El título y el mensaje son obligatorios.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const linkFilter = { schoolId, status: 'active' };
+    if (studentId) {
+      linkFilter.studentId = studentId;
+      const student = await Student.findOne({ _id: studentId, schoolId, status: 'active', deletedAt: null }).select('_id').lean();
+      if (!student) {
+        const error = new Error('Alumno no encontrado.');
+        error.statusCode = 404;
+        throw error;
+      }
+    }
+
+    const parentLinks = await ParentStudentLink.find(linkFilter).select('parentId').lean();
+    const parentIds = [...new Set(parentLinks.map((link) => String(link.parentId || '')).filter(Boolean))];
+    if (!parentIds.length) {
+      return {
+        notificationsCreated: 0,
+        parentsTargeted: 0,
+        tokensFound: 0,
+        queued: false,
+        delivered: 0,
+        failed: 0,
+        reason: 'No hay acudientes activos para el destino seleccionado.',
+      };
+    }
+
+    const payload = {
+      type: 'cafeteria.promo',
+      url: '/parent/cafeteria',
+      audience: 'parent',
+      ...(studentId ? { studentId: String(studentId) } : {}),
+    };
+
+    const insertedNotifications = await Notification.insertMany(
+      parentIds.map((parentId) => ({
+        schoolId,
+        studentId: studentId || null,
+        parentId,
+        title: normalizedTitle,
+        body: normalizedBody,
+        payload,
+        status: 'pending',
+      }))
+    );
+
+    const tokensFound = await DeviceToken.countDocuments({
+      schoolId,
+      userId: { $in: parentIds },
+      status: 'active',
+    });
+
+    const retryJobs = insertedNotifications.map((notification) => ({
+      notificationId: String(notification._id),
+      schoolId,
+      parentId: String(notification.parentId),
+    }));
+
+    let queueResult = { queued: false, reason: 'not_attempted', count: 0 };
+    try {
+      queueResult = await withTimeout(
+        enqueueNotificationJobs(retryJobs),
+        process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
+        'Notification queue timeout'
+      );
+    } catch (queueError) {
+      queueResult = {
+        queued: false,
+        reason: queueError.message || 'enqueue_failed',
+        count: 0,
+      };
+    }
+
+    let directDelivery = { delivered: 0, failed: 0 };
+    if (!queueResult.queued) {
+      directDelivery = await deliverPendingNotificationsDirectly(insertedNotifications);
+    }
+
+    return {
+      notificationsCreated: insertedNotifications.length,
+      parentsTargeted: parentIds.length,
+      tokensFound,
+      queued: Boolean(queueResult.queued),
+      queueReason: queueResult.reason || null,
+      delivered: directDelivery.delivered,
+      failed: directDelivery.failed,
+    };
+  });
+}
+
 module.exports = {
   queueOrderCreatedNotifications,
   queueNotificationsForParents,
@@ -607,4 +757,5 @@ module.exports = {
   queueAutoDebitRechargeNotification,
   queueTutorCommentNotification,
   queueApprovalPendingNotificationForAdmins,
+  queueCafeteriaPromoNotifications,
 };

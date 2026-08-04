@@ -295,7 +295,7 @@ function MeriendasOperator() {
             </tbody>
           </table>
         </div>
-        {subscriptions.length === 0 ? <p>No hay suscripciones activas para la fecha seleccionada.</p> : null}
+        {subscriptions.length === 0 ? <p>No hay alumnos suscritos activos.</p> : null}
       </section>
 
       <section className="panel admin-section">

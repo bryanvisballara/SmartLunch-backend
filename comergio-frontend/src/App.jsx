@@ -142,6 +142,16 @@ function App() {
     '/meriendas/operator',
     '/pos',
   ].includes(normalizedPathname) || normalizedPathname.startsWith('/student');
+  const isStaffPortalChromeRoute =
+    isAdmissionsRoute
+    || isAcademicSecretaryRoute
+    || isBillingRoute
+    || isNursingRoute
+    || isPsychologyRoute
+    || isHumanResourcesRoute
+    || isInstitutionalPortalRoute
+    || normalizedPathname === '/admin'
+    || normalizedPathname.startsWith('/admin/');
   const showNavbar =
     !isLandingRoute &&
     !isPrimerContactoRoute &&
@@ -152,9 +162,8 @@ function App() {
     !isSchoolCreationRoute &&
     normalizedPathname !== '/bold-resultado' &&
     !isEpaycoReturnRoute &&
-    !isAdmissionsRoute &&
+    !isStaffPortalChromeRoute &&
     !isSuperAdminRoute &&
-    !isInstitutionalPortalRoute &&
     !isCampusLikeRoute &&
     !normalizedPathname.startsWith('/parent') &&
     !normalizedPathname.startsWith('/student') &&
@@ -168,22 +177,28 @@ function App() {
     normalizedPathname === '/register/next-step' ||
     isSchoolCreationRoute ||
     normalizedPathname === '/bold-resultado' ||
-    isAdmissionsRoute ||
+    isStaffPortalChromeRoute ||
     isSuperAdminRoute ||
     isCampusLikeRoute ||
     isParentRoute ||
     isStudentRoute ||
     isEpaycoReturnRoute;
 
+  // Admisiones already looked correct because of admissions-route-active (zoom:1 + full bleed).
+  // Apply that same body treatment to Secretaría, Cartera and the other staff portals.
   useEffect(() => {
-    document.documentElement.classList.toggle('admissions-route-active', isAdmissionsRoute);
-    document.body.classList.toggle('admissions-route-active', isAdmissionsRoute);
+    document.documentElement.classList.toggle('admissions-route-active', isStaffPortalChromeRoute);
+    document.body.classList.toggle('admissions-route-active', isStaffPortalChromeRoute);
+    document.documentElement.classList.toggle('staff-portal-chrome-route-active', isStaffPortalChromeRoute);
+    document.body.classList.toggle('staff-portal-chrome-route-active', isStaffPortalChromeRoute);
 
     return () => {
       document.documentElement.classList.remove('admissions-route-active');
       document.body.classList.remove('admissions-route-active');
+      document.documentElement.classList.remove('staff-portal-chrome-route-active');
+      document.body.classList.remove('staff-portal-chrome-route-active');
     };
-  }, [isAdmissionsRoute]);
+  }, [isStaffPortalChromeRoute]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('login-route-active', isAuthFlowRoute);
@@ -354,7 +369,7 @@ function App() {
   return (
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isAdmissionsRoute || isInstitutionalPortalRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
+      <main className={isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isStaffPortalChromeRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<LandingPage />} path="/landing" />

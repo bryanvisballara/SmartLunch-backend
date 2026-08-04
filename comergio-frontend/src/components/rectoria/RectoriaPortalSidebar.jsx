@@ -1,26 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  COORDINATION_PORTAL_NAV,
+  DIRECCION_PORTAL_NAV,
   RECTORIA_PORTAL_NAV,
 } from './rectoriaPortalNav';
-import { COMERGIO_ACADEMY_NAV_GROUP } from '../comergio-academy/academyNav';
-import { AcademyNotificationBadge } from '../comergio-academy/AcademyNotificationBadge';
 import { useComergioAcademyNotificationCounts } from '../comergio-academy/useComergioAcademyNotificationCounts';
 import '../comergio-academy/ComergioAcademyPanel.css';
 import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
 import { StaffAnnouncementsUnreadBadge } from '../staff-announcements/StaffAnnouncementsPanel';
+import colibriLogo from '../../assets/colibrisinfondo.png';
+import StaffComergioAcademyNav from '../staff-chrome/StaffComergioAcademyNav';
+import '../staff-chrome/StaffTeacherChrome.css';
 import './RectoriaPortalSidebar.css';
 
 const NESTED_CHILD_KEYS = new Set(['team', 'students', 'admissions']);
-
-const COORDINATION_NAV = [
-  { type: 'item', key: 'overview', label: 'Tablero de nivel' },
-  { type: 'item', key: 'community_reports', label: 'Te escuchamos' },
-  { type: 'item', key: 'communications', label: 'Comunicados a familias' },
-  { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
-  { type: 'item', key: 'resources', label: 'Recursos y compras' },
-  { type: 'item', key: 'schedule', label: 'Horario académico' },
-  COMERGIO_ACADEMY_NAV_GROUP,
-];
 
 function ChevronIcon({ expanded }) {
   return (
@@ -85,6 +78,7 @@ export default function RectoriaPortalSidebar({
   activeSection,
   expandedGroup,
   isCoordinationPortal = false,
+  isDireccionPortal = false,
   matriculaAuthorizationPendingCount = 0,
   studentsMissingPlacementCount = 0,
   communityReportsPendingCount = 0,
@@ -94,8 +88,12 @@ export default function RectoriaPortalSidebar({
   teamSubnav = null,
   admissionsSubnav = null,
   academicManagementSubnav = null,
+  schoolName = 'Colegio',
+  portalLabel = 'Rectoría',
 }) {
-  const nav = isCoordinationPortal ? COORDINATION_NAV : RECTORIA_PORTAL_NAV;
+  const nav = isCoordinationPortal
+    ? COORDINATION_PORTAL_NAV
+    : (isDireccionPortal ? DIRECCION_PORTAL_NAV : RECTORIA_PORTAL_NAV);
   const [expandedNestedSection, setExpandedNestedSection] = useState('');
   const previousActiveSectionRef = useRef(activeSection);
   const academyCounts = useComergioAcademyNotificationCounts();
@@ -197,20 +195,32 @@ export default function RectoriaPortalSidebar({
   };
 
   return (
-    <aside className="rectoria-rail" aria-label={isCoordinationPortal ? 'Navegación de coordinación' : 'Navegación de rectoría'}>
-      <nav className="rectoria-rail__nav">
+    <aside
+      className="rectoria-rail staff-teacher-chrome__rail"
+      aria-label={isCoordinationPortal ? 'Navegación de coordinación' : (isDireccionPortal ? 'Navegación de dirección' : 'Navegación de rectoría')}
+    >
+      <div className="staff-teacher-chrome__rail-brand">
+        <div className="staff-teacher-chrome__rail-brand-copy">
+          <img alt="Comergio" className="staff-teacher-chrome__rail-brand-logo" src={colibriLogo} />
+          <div>
+            <strong>Comergio</strong>
+            <span>Conectamos tu colegio</span>
+          </div>
+        </div>
+      </div>
+      <nav className="rectoria-rail__nav staff-teacher-chrome__rail-nav">
         {nav.map((entry) => {
           if (entry.type === 'item') {
             const isActive = activeSection === entry.key;
             const itemBadgeCount = resolveItemBadgeCount(entry.key, badgeCounts);
             return (
               <button
-                className={`rectoria-rail__item${isActive ? ' is-active' : ''}`}
+                className={`rectoria-rail__item staff-teacher-chrome__nav-item${isActive ? ' is-active' : ''}`}
                 key={entry.key}
                 onClick={() => handleItemClick(entry.key)}
                 type="button"
               >
-                <span className="rectoria-rail__item-label">
+                <span className="rectoria-rail__item-label staff-teacher-chrome__nav-item-label">
                   {entry.key === 'community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : entry.label}
                   {entry.key === 'staff_announcements' ? (
                     <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
@@ -222,26 +232,36 @@ export default function RectoriaPortalSidebar({
             );
           }
 
+          const isAcademyGroup = entry.key === 'comergio_academy_group' || entry.tone === 'academy';
+          if (isAcademyGroup) {
+            return (
+              <StaffComergioAcademyNav
+                activeKey={activeSection}
+                counts={{
+                  conecta: badgeCounts.academyConecta,
+                  informa: badgeCounts.academyInforma,
+                }}
+                key={entry.key}
+                onSelect={(sectionKey) => onSectionChange(sectionKey)}
+              />
+            );
+          }
+
           const isGroupOpen = expandedGroup === entry.key;
           const hasActiveChild = (entry.items || []).some((item) => item.key === activeSection);
           const groupBadgeCount = resolveGroupBadgeCount(entry.key, badgeCounts);
-          const isAcademyGroup = entry.key === 'comergio_academy_group' || entry.tone === 'academy';
 
           return (
-            <div className={`rectoria-rail__group${isGroupOpen ? ' is-open' : ''}${hasActiveChild ? ' has-active-child' : ''}${isAcademyGroup ? ' rectoria-rail__group--academy' : ''}`} key={entry.key}>
+            <div className={`rectoria-rail__group${isGroupOpen ? ' is-open' : ''}${hasActiveChild ? ' has-active-child' : ''}`} key={entry.key}>
               <button
                 aria-expanded={isGroupOpen}
-                className={`rectoria-rail__group-toggle${hasActiveChild ? ' is-active' : ''}`}
+                className={`rectoria-rail__group-toggle staff-teacher-chrome__nav-item${hasActiveChild ? ' is-active' : ''}`}
                 onClick={() => handleGroupToggle(entry.key, entry.items || [])}
                 type="button"
               >
-                <span className="rectoria-rail__item-label">
+                <span className="rectoria-rail__item-label staff-teacher-chrome__nav-item-label">
                   {entry.label}
-                  {isAcademyGroup ? (
-                    <AcademyNotificationBadge count={groupBadgeCount} />
-                  ) : (
-                    <RectoriaNavCountBadge count={groupBadgeCount} />
-                  )}
+                  <RectoriaNavCountBadge count={groupBadgeCount} />
                 </span>
                 <ChevronIcon expanded={isGroupOpen} />
               </button>
@@ -254,23 +274,18 @@ export default function RectoriaPortalSidebar({
                     const hasNestedSubnav = itemHasNestedSubnav(entry.key, item.key);
                     const nestedSubnav = hasNestedSubnav ? resolveNestedSubnavContent(entry.key, item.key) : null;
                     const isNestedOpen = isActive && expandedNestedSection === item.key && Boolean(nestedSubnav);
-                    const childTone = item.tone ? ` tone-${item.tone}` : '';
 
                     return (
                       <div className={`rectoria-rail__child-block${hasNestedSubnav ? ' has-nested' : ''}`} key={item.key}>
                         <button
                           aria-expanded={hasNestedSubnav ? isNestedOpen : undefined}
-                          className={`rectoria-rail__child${isActive ? ' is-active' : ''}${hasNestedSubnav ? ' rectoria-rail__child--expandable' : ''}${childTone}`}
+                          className={`rectoria-rail__child${isActive ? ' is-active' : ''}${hasNestedSubnav ? ' rectoria-rail__child--expandable' : ''}`}
                           onClick={() => handleChildClick(item.key, entry.key)}
                           type="button"
                         >
                           <span className="rectoria-rail__child-label">
                             {item.key === 'control_community_reports' ? <TeEscuchamosLabel className="te-escuchamos-label--nav" /> : item.label}
-                            {isAcademyGroup ? (
-                              <AcademyNotificationBadge count={itemBadgeCount} />
-                            ) : (
-                              <RectoriaNavCountBadge count={itemBadgeCount} />
-                            )}
+                            <RectoriaNavCountBadge count={itemBadgeCount} />
                           </span>
                           {hasNestedSubnav ? <ChevronIcon expanded={isNestedOpen} /> : null}
                         </button>
@@ -286,6 +301,20 @@ export default function RectoriaPortalSidebar({
           );
         })}
       </nav>
+      <div className="staff-teacher-chrome__rail-school">
+        <div className="staff-teacher-chrome__rail-school-main">
+          <span className="staff-teacher-chrome__rail-school-icon" aria-hidden="true">
+            <svg fill="none" viewBox="0 0 24 24">
+              <path d="M12 3 4.5 6.5v4.2c0 4.6 3.1 8.8 7.5 10.3 4.4-1.5 7.5-5.7 7.5-10.3V6.5L12 3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+              <path d="M9.5 12.2 11 13.7l3.5-3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+            </svg>
+          </span>
+          <div>
+            <strong>{schoolName}</strong>
+            <span>{portalLabel}</span>
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }

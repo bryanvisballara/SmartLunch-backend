@@ -109,6 +109,24 @@ function PortalToneIcon({ icon }) {
           <circle cx="15.5" cy="14.2" fill="currentColor" r="1.1" />
         </svg>
       );
+    case 'food':
+      return (
+        <svg {...common}>
+          <path d="M8 4v7.5a2 2 0 0 0 2 2V20" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <path d="M6 4v5.5M10 4v5.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <path d="M16 4v6c0 1.5.8 2.5 2 2.8V20" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <path d="M16 4c1.8 0 3 1.2 3 3.2V10" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'bus':
+      return (
+        <svg {...common}>
+          <rect x="4" y="5" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M7 16.5v2M17 16.5v2M4 12h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <circle cx="8" cy="14" fill="currentColor" r="1.1" />
+          <circle cx="16" cy="14" fill="currentColor" r="1.1" />
+        </svg>
+      );
     case 'cross':
       return (
         <svg {...common}>

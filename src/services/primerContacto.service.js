@@ -19,8 +19,34 @@ const LOCATION_OPTIONS = {
   sede_km5: 'Sede km 5 (primaria y secundaria)',
   sede_villacampestre: 'Sede Villacampestre (preescolar)',
 };
+
+const HOW_HEARD_OPTIONS = {
+  instagram: 'Instagram',
+  facebook: 'Facebook',
+  youtube: 'YouTube',
+  tiktok: 'TikTok',
+  whatsapp: 'WhatsApp',
+  google: 'Google',
+  referido: 'Referido',
+  otro: 'Otro',
+};
+
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function resolveHowHeardReference(body = {}) {
+  const howHeard = String(body.howHeard || body.howDidYouHear || '').trim().toLowerCase();
+  const howHeardOther = normalizeText(body.howHeardOther || body.howDidYouHearOther);
+  const explicitReference = normalizeText(body.referenceOrigin || body.source?.referenceOrigin);
+
+  if (howHeard === 'otro') {
+    return howHeardOther || explicitReference;
+  }
+  if (HOW_HEARD_OPTIONS[howHeard]) {
+    return HOW_HEARD_OPTIONS[howHeard];
+  }
+  return explicitReference || 'Primer contacto — comergio.com/berckleyprimercontacto';
 }
 
 function normalizeEmail(value) {
@@ -163,6 +189,7 @@ function buildWhatsAppMessage({
   appointmentDate,
   appointmentTime,
   locationKey,
+  referenceOrigin,
 }) {
   const typeLabel = APPOINTMENT_TYPE_LABELS[appointmentType] || appointmentType;
   const locationLabel = appointmentType === 'in_person'
@@ -180,6 +207,7 @@ function buildWhatsAppMessage({
     `• Teléfono: ${guardianPhone}`,
     `• Grado/programa: ${grade}`,
     `• Periodo: ${academicYear}`,
+    referenceOrigin ? `• Cómo llegaste al Berckley: ${referenceOrigin}` : '',
     `• Tipo de cita: ${typeLabel}`,
     `• Fecha: ${formatAppointmentDateLabel(appointmentDate)}`,
     `• Hora: ${formatTimeLabel(appointmentTime)}`,
@@ -301,8 +329,9 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
   const appointmentDate = normalizeText(body.appointmentDate || body.appointment?.date);
   const appointmentTime = normalizeText(body.appointmentTime || body.appointment?.time);
   const locationKey = normalizeLocationKey(body.locationKey || body.appointmentLocation || body.appointment?.locationKey);
-  const referenceOrigin = normalizeText(body.referenceOrigin || body.source?.referenceOrigin)
-    || 'Primer contacto — comergio.com/berckleyprimercontacto';
+  const howHeard = String(body.howHeard || body.howDidYouHear || '').trim().toLowerCase();
+  const howHeardOther = normalizeText(body.howHeardOther || body.howDidYouHearOther);
+  const referenceOrigin = resolveHowHeardReference(body);
 
   const missing = [];
   if (!fullName) missing.push('nombre del aspirante');
@@ -311,6 +340,8 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
   if (!guardianName) missing.push('nombre del acudiente');
   if (!guardianEmail || !isValidEmail(guardianEmail)) missing.push('email del acudiente');
   if (!guardianPhone) missing.push('teléfono del acudiente');
+  if (!howHeard || !HOW_HEARD_OPTIONS[howHeard]) missing.push('cómo llegaste al Berckley');
+  if (howHeard === 'otro' && !howHeardOther) missing.push('detalle de cómo llegaste al Berckley');
   if (!grade) missing.push('grado');
   if (!appointmentType) missing.push('tipo de cita');
   if (!appointmentDate) missing.push('fecha de la cita');
@@ -368,6 +399,8 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
     appointmentDate,
     appointmentTime,
     locationKey,
+    howHeard,
+    howHeardOther: howHeard === 'otro' ? howHeardOther : '',
     referenceOrigin,
   };
 }

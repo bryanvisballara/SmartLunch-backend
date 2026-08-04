@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Select from 'react-select';
 import * as XLSX from 'xlsx';
 import './AcademicSecretaryDashboard.css';
 import {
@@ -29,6 +30,7 @@ import {
 } from '../lib/millenniumEnrollmentContracts';
 import useAuthStore from '../store/auth.store';
 import { PortalBootSplash } from '../components/PortalBootSplash';
+import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getEnrollmentMatriculaPurgeRequestsMine } from '../services/enrollmentMatricula.service';
 import { getSchoolDisplayName } from '../lib/schools';
@@ -70,14 +72,21 @@ import {
 import { getAdmissionMarketingHistory, getAdmissions, sendAdmissionMarketingCampaign, uploadAdmissionMarketingImage } from '../services/admissions.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
+import GooglePlacesAddressInput from '../components/routes/GooglePlacesAddressInput';
+import GoogleSchoolRouteMap from '../components/routes/GoogleSchoolRouteMap';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
-import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
+import {
+  COMERGIO_ACADEMY_CHILDREN,
+  COMERGIO_ACADEMY_PARENT,
+  isComergioAcademySection,
+} from '../components/comergio-academy/academyNav';
 
 const SECTION_OPTIONS = [
   { key: 'overview', label: 'Dashboard KPI' },
   { key: 'staff_announcements', label: 'Comunicados internos' },
-  { key: 'communications', label: 'Comunicados a familias' },
+  { key: 'communications', label: 'Comunicados (feed)' },
+  { key: 'family_emails', label: 'Correos a familias' },
   { key: 'costs', label: 'Costos' },
   { key: 'marketing', label: 'Marketing' },
   { key: 'enrollments', label: 'Matrículas' },
@@ -85,7 +94,6 @@ const SECTION_OPTIONS = [
   { key: 'routes', label: 'Rutas' },
   { key: 'database', label: 'Base de datos' },
   { key: 'approvals', label: 'Autorización de comunicados' },
-  { key: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label },
 ];
 
 const BILLING_SECTION_OPTIONS = [
@@ -94,7 +102,11 @@ const BILLING_SECTION_OPTIONS = [
   { key: 'enrollments', label: 'Matrículas' },
   { key: 'pensions', label: 'Pensiones' },
   { key: 'payment-history', label: 'Historial de pagos' },
-  { key: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label },
+];
+
+const ACADEMY_SECTION_KEYS = [
+  COMERGIO_ACADEMY_PARENT.key,
+  ...COMERGIO_ACADEMY_CHILDREN.map((child) => child.key),
 ];
 
 const BILLING_PAYMENT_METHOD_OPTIONS = [
@@ -1219,6 +1231,18 @@ const emptyCommunicationForm = {
   parentTargets: [],
   studentTargets: [],
   media: [],
+  alsoSendEmail: false,
+};
+
+const emptyFamilyEmailForm = {
+  title: '',
+  body: '',
+  authorId: '',
+  audienceType: 'general',
+  gradeTargets: [],
+  courseTargets: [],
+  parentTargets: [],
+  studentTargets: [],
 };
 
 const emptyCommunicationAuthorDraft = {
@@ -1341,6 +1365,38 @@ function buildSectionLabel(sectionKey, pendingApprovals, sections = SECTION_OPTI
     );
   }
   return section.label;
+}
+
+function formatAudienceTypeLabel(audienceType = '') {
+  switch (String(audienceType || '').trim()) {
+    case 'general':
+      return 'Todo el colegio';
+    case 'grade':
+      return 'Por grados';
+    case 'course':
+      return 'Por cursos';
+    case 'individual':
+      return 'Individual';
+    default:
+      return audienceType || 'Sin audiencia';
+  }
+}
+
+function formatCommunicationAudienceSummary(item = {}, { gradeLabelByValue = {}, courseLabelByValue = {} } = {}) {
+  const typeLabel = formatAudienceTypeLabel(item.audienceType);
+  if (item.audienceType === 'grade') {
+    const grades = (item.gradeTargets || []).map((grade) => gradeLabelByValue[String(grade)] || grade).filter(Boolean);
+    return grades.length ? `${typeLabel}: ${grades.join(', ')}` : typeLabel;
+  }
+  if (item.audienceType === 'course') {
+    const courses = (item.courseTargets || []).map((course) => courseLabelByValue[String(course)] || course).filter(Boolean);
+    return courses.length ? `${typeLabel}: ${courses.join(', ')}` : typeLabel;
+  }
+  if (item.audienceType === 'individual') {
+    const count = (item.parentTargets?.length || 0) + (item.studentTargets?.length || 0);
+    return count ? `${typeLabel} (${count})` : typeLabel;
+  }
+  return typeLabel;
 }
 
 function AcademicSecretaryMediaPreview({ items = [] }) {
@@ -1673,6 +1729,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     mother: '',
   });
   const [communicationForm, setCommunicationForm] = useState(emptyCommunicationForm);
+  const [familyEmailForm, setFamilyEmailForm] = useState(emptyFamilyEmailForm);
   const [communicationAuthorDraft, setCommunicationAuthorDraft] = useState(emptyCommunicationAuthorDraft);
   const [editingCommunicationAuthorId, setEditingCommunicationAuthorId] = useState('');
   const [editingCommunicationId, setEditingCommunicationId] = useState('');
@@ -1717,8 +1774,15 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     driverUserId: '',
     studentId: '',
     pickupAddress: '',
+    latitude: null,
+    longitude: null,
+    placeId: '',
+    routeCost: '',
+    linkToCartera: false,
     notes: '',
   });
+  const [routeStudentSearch, setRouteStudentSearch] = useState('');
+  const [routeMapMetrics, setRouteMapMetrics] = useState(null);
   const [billingSearch, setBillingSearch] = useState('');
   const [billingEnrollmentSubview, setBillingEnrollmentSubview] = useState('pending');
   const [billingStudentPage, setBillingStudentPage] = useState(1);
@@ -1896,7 +1960,9 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   }, [isBillingPortal]);
 
   useEffect(() => {
-    if (!portalSections.some((section) => section.key === activeSection)) {
+    const isKnownSection = portalSections.some((section) => section.key === activeSection)
+      || ACADEMY_SECTION_KEYS.includes(activeSection);
+    if (!isKnownSection) {
       setActiveSection(normalizedInitialSection);
     }
   }, [activeSection, normalizedInitialSection, portalSections]);
@@ -2174,6 +2240,28 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const assignableRouteStudents = useMemo(() => (routeAssignmentData.availableStudents || [])
     .filter((student) => !assignedRouteStudentIds.has(student.id) || student.id === routeAssignmentForm.studentId)
     .sort((left, right) => `${left.grade || ''}${left.course || ''}${left.name || ''}`.localeCompare(`${right.grade || ''}${right.course || ''}${right.name || ''}`, 'es', { numeric: true })), [routeAssignmentData.availableStudents, assignedRouteStudentIds, routeAssignmentForm.studentId]);
+  const assignableRouteStudentOptions = useMemo(() => assignableRouteStudents.map((student) => ({
+    value: student.id,
+    label: `${student.name} · ${formatGradeLabel(student.grade)}${student.course ? ` · ${student.course}` : ''}`,
+    student,
+  })), [assignableRouteStudents, gradeLabelByValue]);
+  const filteredSelectedRouteStops = useMemo(() => {
+    const query = String(routeStudentSearch || '').trim().toLowerCase();
+    if (!query) return selectedRouteStops;
+    return selectedRouteStops.filter((stop) => [
+      stop.studentName,
+      stop.studentGrade,
+      stop.studentCourse,
+      stop.pickupAddress,
+      stop.notes,
+    ].some((value) => String(value || '').toLowerCase().includes(query)));
+  }, [routeStudentSearch, selectedRouteStops]);
+  const routeDistanceKm = routeMapMetrics?.distanceMeters
+    ? (routeMapMetrics.distanceMeters / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })
+    : '';
+  const estimatedRouteMinutes = routeMapMetrics?.durationSeconds
+    ? Math.max(1, Math.round(routeMapMetrics.durationSeconds / 60))
+    : 0;
   const courseOptions = useMemo(() => {
     const optionMap = new Map();
     (bootstrap.courseOptions || []).forEach((course) => {
@@ -2196,6 +2284,14 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       return accumulator;
     }, {}),
     [courseOptions]
+  );
+  const feedCommunications = useMemo(
+    () => (bootstrap.communications || []).filter((item) => item?.channels?.feed !== false),
+    [bootstrap.communications]
+  );
+  const familyEmailCommunications = useMemo(
+    () => (bootstrap.communications || []).filter((item) => item?.channels?.email === true && item?.channels?.feed === false),
+    [bootstrap.communications]
   );
   const formatRequestedCourseTargets = (courseTargets = [], fallbackCourseTitle = '') => {
     const labels = Array.from(new Set([
@@ -2569,6 +2665,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const defaultCommunicationAuthor = communicationAuthors.find((author) => author.isDefault) || null;
   const selectedCommunicationAuthorId = String(communicationForm.authorId || defaultCommunicationAuthor?._id || '');
   const selectedCommunicationAuthor = communicationAuthors.find((author) => String(author._id) === selectedCommunicationAuthorId) || defaultCommunicationAuthor || null;
+  const selectedFamilyEmailAuthorId = String(familyEmailForm.authorId || defaultCommunicationAuthor?._id || '');
+  const selectedFamilyEmailAuthor = communicationAuthors.find((author) => String(author._id) === selectedFamilyEmailAuthorId) || defaultCommunicationAuthor || null;
   const canDeleteSelectedCommunicationAuthor = Boolean(selectedCommunicationAuthor?._id) && (
     !selectedCommunicationAuthor.isDefault
     || communicationAuthors.some((author) => String(author._id) !== String(selectedCommunicationAuthor._id))
@@ -2877,15 +2975,27 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const onSubmitCommunication = async (event) => {
     event.preventDefault();
     await runAction(async () => {
+      const alsoSendEmail = Boolean(communicationForm.alsoSendEmail);
       const communicationPayload = {
-        ...communicationForm,
+        title: communicationForm.title,
+        body: communicationForm.body,
+        audienceType: communicationForm.audienceType,
+        gradeTargets: communicationForm.gradeTargets,
+        courseTargets: communicationForm.courseTargets,
+        parentTargets: communicationForm.parentTargets,
+        studentTargets: communicationForm.studentTargets,
         authorId: selectedCommunicationAuthor?._id || '',
         authorName: selectedCommunicationAuthor?.name || 'Secretaría académica',
         authorPhotoUrl: selectedCommunicationAuthor?.photoUrl || '',
         authorThumbUrl: selectedCommunicationAuthor?.thumbUrl || selectedCommunicationAuthor?.photoUrl || '',
         emailSubject: communicationForm.title,
         media: stripCommunicationMediaForSubmit(communicationForm.media),
-        channels: { push: true, email: true },
+        schoolName,
+        channels: {
+          feed: true,
+          push: true,
+          email: alsoSendEmail,
+        },
       };
 
       if (editingCommunicationId) {
@@ -2895,7 +3005,40 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       }
       resetCommunicationForm();
       await loadBootstrap();
-    }, editingCommunicationId ? 'Comunicado actualizado correctamente.' : 'Comunicado enviado correctamente.', 'communications');
+    }, editingCommunicationId ? 'Comunicado actualizado correctamente.' : 'Comunicado publicado en el feed correctamente.', 'communications');
+  };
+
+  const resetFamilyEmailForm = () => {
+    setFamilyEmailForm(emptyFamilyEmailForm);
+  };
+
+  const onSubmitFamilyEmail = async (event) => {
+    event.preventDefault();
+    await runAction(async () => {
+      await createAcademicSecretaryCommunication({
+        title: familyEmailForm.title,
+        body: familyEmailForm.body,
+        audienceType: familyEmailForm.audienceType,
+        gradeTargets: familyEmailForm.gradeTargets,
+        courseTargets: familyEmailForm.courseTargets,
+        parentTargets: familyEmailForm.parentTargets,
+        studentTargets: familyEmailForm.studentTargets,
+        authorId: selectedFamilyEmailAuthor?._id || '',
+        authorName: selectedFamilyEmailAuthor?.name || 'Secretaría académica',
+        authorPhotoUrl: selectedFamilyEmailAuthor?.photoUrl || '',
+        authorThumbUrl: selectedFamilyEmailAuthor?.thumbUrl || selectedFamilyEmailAuthor?.photoUrl || '',
+        emailSubject: familyEmailForm.title,
+        media: [],
+        schoolName,
+        channels: {
+          feed: false,
+          push: false,
+          email: true,
+        },
+      });
+      resetFamilyEmailForm();
+      await loadBootstrap();
+    }, 'Correo enviado a las familias seleccionadas.', 'family_emails');
   };
 
   const onEditCommunication = (communication) => {
@@ -2915,6 +3058,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         ...item,
         localId: createCommunicationMediaId(`${item.kind || 'media'}-${index + 1}`),
       })),
+      alsoSendEmail: Boolean(communication.channels?.email),
     });
     setActiveSection('communications');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3727,16 +3871,40 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       setError('Selecciona un conductor y un alumno para asignar la ruta.');
       return;
     }
+    if (!Number.isFinite(Number(routeAssignmentForm.latitude)) || !Number.isFinite(Number(routeAssignmentForm.longitude))) {
+      setError('Elige la dirección de recogida desde las sugerencias de Google Maps.');
+      return;
+    }
+    const routeCost = Math.max(0, Math.round(Number(routeAssignmentForm.routeCost || 0) || 0));
+    if (routeAssignmentForm.linkToCartera && routeCost <= 0) {
+      setError('Para vincular con cartera debes indicar un precio mayor a 0.');
+      return;
+    }
 
     const result = await runAction(async () => addAcademicSecretarySchoolRouteStop(driverUserId, {
       studentId: routeAssignmentForm.studentId,
       pickupAddress: routeAssignmentForm.pickupAddress,
+      latitude: routeAssignmentForm.latitude,
+      longitude: routeAssignmentForm.longitude,
+      placeId: routeAssignmentForm.placeId,
+      routeCost,
+      linkToCartera: Boolean(routeAssignmentForm.linkToCartera),
       notes: routeAssignmentForm.notes,
     }), 'Alumno asignado a la ruta escolar.', 'routes');
 
     if (result) {
       await loadSchoolRouteAssignments();
-      setRouteAssignmentForm((previous) => ({ ...previous, studentId: '', pickupAddress: '', notes: '' }));
+      setRouteAssignmentForm((previous) => ({
+        ...previous,
+        studentId: '',
+        pickupAddress: '',
+        latitude: null,
+        longitude: null,
+        placeId: '',
+        routeCost: '',
+        linkToCartera: false,
+        notes: '',
+      }));
     }
   };
 
@@ -3757,8 +3925,23 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     const driverUserId = selectedRouteDriver?.id || '';
     if (!driverUserId || !stop?.id) return;
 
+    if (!Number.isFinite(Number(stop.latitude)) || !Number.isFinite(Number(stop.longitude))) {
+      setError('Elige la dirección de recogida desde las sugerencias de Google Maps antes de guardar.');
+      return;
+    }
+    const routeCost = Math.max(0, Math.round(Number(stop.routeCost || 0) || 0));
+    if (stop.linkToCartera && routeCost <= 0) {
+      setError('Para vincular con cartera debes indicar un precio mayor a 0.');
+      return;
+    }
+
     const result = await runAction(async () => updateAcademicSecretarySchoolRouteStop(driverUserId, stop.id, {
       pickupAddress: stop.pickupAddress,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      placeId: stop.placeId || '',
+      routeCost,
+      linkToCartera: Boolean(stop.linkToCartera),
       notes: stop.notes,
     }), 'Parada de ruta actualizada.', 'routes');
     if (result) {
@@ -3776,6 +3959,34 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     }
   };
 
+  const onExportSelectedRoute = () => {
+    if (!selectedRouteDriver || selectedRouteStops.length === 0) return;
+    const escapeCsv = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      ['Orden', 'Estudiante', 'Grado', 'Curso', 'Dirección de recogida', 'Nota', 'Precio por alumno', 'Cartera', 'Estado'],
+      ...selectedRouteStops.map((stop) => [
+        stop.order,
+        stop.studentName,
+        formatGradeLabel(stop.studentGrade),
+        stop.studentCourse,
+        stop.pickupAddress,
+        stop.notes,
+        stop.routeCost || 0,
+        stop.linkToCartera ? 'Sí' : 'No',
+        stop.status,
+      ]),
+    ];
+    const csv = `\uFEFF${rows.map((row) => row.map(escapeCsv).join(',')).join('\n')}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ruta-${String(selectedRouteDriver.name || 'escolar').replace(/\s+/g, '-').toLowerCase()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   if (shellLoading) {
     const portalKey = embedded ? 'embedded' : (isBillingPortal ? 'cartera' : 'secretaria');
     return embedded
@@ -3783,23 +3994,9 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       : <PortalBootSplash portal={portalKey} />;
   }
 
-  return (
+  const portalLabel = isBillingPortal ? 'Cartera' : 'Secretaría académica';
+  const secretaryBody = (
     <section className={`academic-secretary${embedded ? ' academic-secretary--embedded' : ''}`}>
-      {!embedded ? <header className="academic-secretary__hero">
-        <div>
-          <span className="academic-secretary__eyebrow">Comergio - {schoolName}</span>
-          <h1>{isBillingPortal ? 'Portal Cartera' : 'Portal Secretaría Académica'}</h1>
-          <p>{isBillingPortal ? 'Consulta obligaciones pendientes y registra el seguimiento financiero de las familias.' : 'Gestiona KPI, feed de acudientes, matrículas y aprobación de comunicados docentes desde un mismo tablero.'}</p>
-        </div>
-        <button className="academic-secretary__refresh" onClick={() => window.location.reload()} type="button">{backgroundLoading ? 'Completando carga...' : 'Actualizar portal'}</button>
-      </header> : null}
-
-      {!embedded ? <nav className="academic-secretary__tabs" aria-label={isBillingPortal ? 'Secciones de cartera' : 'Secciones de secretaría académica'}>
-        {portalSections.map((item) => (
-          <button className={`academic-secretary__tab${activeSection === item.key ? ' is-active' : ''}`} key={item.key} onClick={() => setActiveSection(item.key)} type="button">{buildSectionLabel(item.key, pendingApprovalCount, portalSections, staffAnnouncementsUnreadCount)}</button>
-        ))}
-      </nav> : null}
-
       {error || success ? (
         <div className="academic-secretary__notice-layer" aria-live="assertive">
           <div className={`academic-secretary__message academic-secretary__message--modal ${error ? 'is-error' : 'is-success'}`} role="dialog" aria-modal="false" aria-label={error ? 'Aviso de error' : 'Aviso de éxito'}>
@@ -4402,7 +4599,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       ) : null}
 
       {activeSection === 'staff_announcements' ? (
-        <section className="academic-secretary__grid academic-secretary__grid--content">
+        <section className="academic-secretary__grid academic-secretary__grid--content academic-secretary__grid--full">
           <article className="academic-secretary__panel">
             <StaffAnnouncementsPanel
               description="Mensajes internos de rectoría y coordinación. Confirma la lectura para registrar el acuse."
@@ -4413,10 +4610,14 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         </section>
       ) : null}
 
-      {activeSection === COMERGIO_ACADEMY_PARENT.key ? (
-        <section className="academic-secretary__grid academic-secretary__grid--content">
+      {isComergioAcademySection(activeSection) ? (
+        <section className="academic-secretary__grid academic-secretary__grid--content academic-secretary__grid--academy">
           <article className="academic-secretary__panel">
-            <ComergioAcademyPanel showInternalNav />
+            <ComergioAcademyPanel
+              activeKey={activeSection === COMERGIO_ACADEMY_PARENT.key ? 'video_tutoriales' : activeSection}
+              onNavigate={setActiveSection}
+              showLandingCards={false}
+            />
           </article>
         </section>
       ) : null}
@@ -4426,8 +4627,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           <article className="academic-secretary__panel">
             <div className="academic-secretary__panel-head">
               <div>
-                <h2>{editingCommunicationId ? 'Editar comunicado' : 'Nuevo comunicado'}</h2>
-                {editingCommunicationId ? <p>Actualiza la publicación del historial. Los nuevos comunicados siguen enviando push y correo a los acudientes.</p> : null}
+                <h2>{editingCommunicationId ? 'Editar comunicado del feed' : 'Nuevo comunicado para el feed'}</h2>
+                <p>Publica en el feed de acudientes y envía notificación push. Puedes segmentar por todo el colegio, grados o cursos.</p>
               </div>
               {editingCommunicationId ? <button className="btn" onClick={resetCommunicationForm} type="button">Cancelar edición</button> : null}
             </div>
@@ -4511,18 +4712,275 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   })}
                 </div>
               </div>
-              <div className="academic-secretary__form-grid">
-                <label>Audiencia<select value={communicationForm.audienceType} onChange={(event) => setCommunicationForm((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>
-                {communicationForm.audienceType === 'grade' ? <label>Grados<select className="academic-secretary__multi-select" multiple value={communicationForm.gradeTargets} onChange={(event) => onMultiSelectChange(event, 'gradeTargets', setCommunicationForm)}>{gradeCatalog.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}
-                {communicationForm.audienceType === 'course' ? <label>Cursos<select className="academic-secretary__multi-select" multiple value={communicationForm.courseTargets} onChange={(event) => onMultiSelectChange(event, 'courseTargets', setCommunicationForm)}>{courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}</select></label> : null}
-                {communicationForm.audienceType === 'individual' ? <><label>Acudientes<select className="academic-secretary__multi-select" multiple value={communicationForm.parentTargets} onChange={(event) => onMultiSelectChange(event, 'parentTargets', setCommunicationForm)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select className="academic-secretary__multi-select" multiple value={communicationForm.studentTargets} onChange={(event) => onMultiSelectChange(event, 'studentTargets', setCommunicationForm)}>{studentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></> : null}
+              <div className="academic-secretary__subform">
+                <h4>¿A quién llega este comunicado?</h4>
+                <p>Elige la audiencia del feed. Usa Ctrl/Cmd para seleccionar varios grados o cursos.</p>
+                <div className="academic-secretary__form-grid">
+                  <label>
+                    Segmentación
+                    <select
+                      value={communicationForm.audienceType}
+                      onChange={(event) => setCommunicationForm((previous) => ({
+                        ...previous,
+                        audienceType: event.target.value,
+                        gradeTargets: [],
+                        courseTargets: [],
+                        parentTargets: [],
+                        studentTargets: [],
+                      }))}
+                    >
+                      <option value="general">Todo el colegio</option>
+                      <option value="grade">Grados específicos</option>
+                      <option value="course">Cursos específicos</option>
+                      <option value="individual">Acudientes o alumnos puntuales</option>
+                    </select>
+                  </label>
+                  {communicationForm.audienceType === 'grade' ? (
+                    <label>
+                      Grados
+                      <select className="academic-secretary__multi-select" multiple value={communicationForm.gradeTargets} onChange={(event) => onMultiSelectChange(event, 'gradeTargets', setCommunicationForm)}>
+                        {gradeCatalog.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}
+                      </select>
+                    </label>
+                  ) : null}
+                  {communicationForm.audienceType === 'course' ? (
+                    <label>
+                      Cursos
+                      <select className="academic-secretary__multi-select" multiple value={communicationForm.courseTargets} onChange={(event) => onMultiSelectChange(event, 'courseTargets', setCommunicationForm)}>
+                        {courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}
+                      </select>
+                    </label>
+                  ) : null}
+                  {communicationForm.audienceType === 'individual' ? (
+                    <>
+                      <label>
+                        Acudientes
+                        <select className="academic-secretary__multi-select" multiple value={communicationForm.parentTargets} onChange={(event) => onMultiSelectChange(event, 'parentTargets', setCommunicationForm)}>
+                          {parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        Alumnos
+                        <select className="academic-secretary__multi-select" multiple value={communicationForm.studentTargets} onChange={(event) => onMultiSelectChange(event, 'studentTargets', setCommunicationForm)}>
+                          {studentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+                <label className="academic-secretary__channel-toggle">
+                  <input
+                    checked={Boolean(communicationForm.alsoSendEmail)}
+                    onChange={(event) => setCommunicationForm((previous) => ({ ...previous, alsoSendEmail: event.target.checked }))}
+                    type="checkbox"
+                  />
+                  <span>También enviar este comunicado por correo electrónico a la misma audiencia</span>
+                </label>
               </div>
-              <div className="academic-secretary__actions"><button className="btn btn-primary" disabled={busy} type="submit">{editingCommunicationId ? 'Guardar cambios' : 'Publicar comunicado'}</button></div>
+              <div className="academic-secretary__actions">
+                <button className="btn btn-primary" disabled={busy} type="submit">
+                  {editingCommunicationId ? 'Guardar cambios' : 'Publicar en el feed'}
+                </button>
+              </div>
             </form>
           </article>
           <article className="academic-secretary__panel">
-            <h2>Historial de comunicados</h2>
-            <div className="academic-secretary__table-wrap"><table className="academic-secretary__table"><thead><tr><th>Título</th><th>Autor</th><th>Visual</th><th>Audiencia</th><th>Interacción</th><th>Entrega</th><th>Acciones</th></tr></thead><tbody>{bootstrap.communications.length === 0 ? <tr><td colSpan="7">Aún no hay comunicados enviados.</td></tr> : bootstrap.communications.map((item) => <tr key={item._id}><td><strong>{item.title}</strong><div>{item.body}</div></td><td><div className="academic-secretary__author-mini"><span className="academic-secretary__author-avatar is-small">{item.authorThumbUrl || item.authorPhotoUrl ? <img alt={item.authorName || 'Autor'} src={resolveApiAssetUrl(item.authorThumbUrl || item.authorPhotoUrl)} /> : String(item.authorName || 'SA').slice(0, 2).toUpperCase()}</span><span>{item.authorName || 'Secretaría académica'}</span></div></td><td>{Array.isArray(item.media) && item.media.length ? <span>{item.media.filter((mediaItem) => mediaItem.kind === 'image').length} img · {item.media.some((mediaItem) => mediaItem.kind === 'video') ? 'video' : 'sin video'}</span> : <span>Solo texto</span>}</td><td>{item.audienceType}</td><td><div className="academic-secretary__engagement-actions"><button onClick={() => setCommunicationEngagementModal({ open: true, type: 'likes', item })} type="button">{item.likesCount || item.likes?.length || 0} likes</button><button onClick={() => setCommunicationEngagementModal({ open: true, type: 'comments', item })} type="button">{item.commentsCount || item.comments?.length || 0} comentarios</button></div></td><td>{formatDateTime(item.sentAt || item.createdAt)}</td><td><div className="academic-secretary__row-actions"><button aria-label={`Editar comunicado ${item.title}`} className="academic-secretary__row-icon-button is-primary" disabled={busy} onClick={() => onEditCommunication(item)} title="Editar publicación" type="button"><PencilIcon /></button><button aria-label={`Eliminar comunicado ${item.title}`} className="academic-secretary__row-icon-button is-danger" disabled={busy} onClick={() => onDeleteCommunication(item)} title="Eliminar publicación" type="button"><CloseIcon /></button></div></td></tr>)}</tbody></table></div>
+            <h2>Historial del feed</h2>
+            <div className="academic-secretary__table-wrap">
+              <table className="academic-secretary__table">
+                <thead>
+                  <tr>
+                    <th>Título</th>
+                    <th>Autor</th>
+                    <th>Visual</th>
+                    <th>Audiencia</th>
+                    <th>Interacción</th>
+                    <th>Entrega</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feedCommunications.length === 0 ? (
+                    <tr><td colSpan="7">Aún no hay comunicados publicados en el feed.</td></tr>
+                  ) : feedCommunications.map((item) => (
+                    <tr key={item._id}>
+                      <td><strong>{item.title}</strong><div>{item.body}</div></td>
+                      <td>
+                        <div className="academic-secretary__author-mini">
+                          <span className="academic-secretary__author-avatar is-small">
+                            {item.authorThumbUrl || item.authorPhotoUrl
+                              ? <img alt={item.authorName || 'Autor'} src={resolveApiAssetUrl(item.authorThumbUrl || item.authorPhotoUrl)} />
+                              : String(item.authorName || 'SA').slice(0, 2).toUpperCase()}
+                          </span>
+                          <span>{item.authorName || 'Secretaría académica'}</span>
+                        </div>
+                      </td>
+                      <td>
+                        {Array.isArray(item.media) && item.media.length
+                          ? <span>{item.media.filter((mediaItem) => mediaItem.kind === 'image').length} img · {item.media.some((mediaItem) => mediaItem.kind === 'video') ? 'video' : 'sin video'}</span>
+                          : <span>Solo texto</span>}
+                      </td>
+                      <td>
+                        {formatCommunicationAudienceSummary(item, { gradeLabelByValue, courseLabelByValue })}
+                        {item.channels?.email ? <div><small>También por correo</small></div> : null}
+                      </td>
+                      <td>
+                        <div className="academic-secretary__engagement-actions">
+                          <button onClick={() => setCommunicationEngagementModal({ open: true, type: 'likes', item })} type="button">{item.likesCount || item.likes?.length || 0} likes</button>
+                          <button onClick={() => setCommunicationEngagementModal({ open: true, type: 'comments', item })} type="button">{item.commentsCount || item.comments?.length || 0} comentarios</button>
+                        </div>
+                      </td>
+                      <td>{formatDateTime(item.sentAt || item.createdAt)}</td>
+                      <td>
+                        <div className="academic-secretary__row-actions">
+                          <button aria-label={`Editar comunicado ${item.title}`} className="academic-secretary__row-icon-button is-primary" disabled={busy} onClick={() => onEditCommunication(item)} title="Editar publicación" type="button"><PencilIcon /></button>
+                          <button aria-label={`Eliminar comunicado ${item.title}`} className="academic-secretary__row-icon-button is-danger" disabled={busy} onClick={() => onDeleteCommunication(item)} title="Eliminar publicación" type="button"><CloseIcon /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+      ) : null}
+
+      {activeSection === 'family_emails' && !isBillingPortal ? (
+        <section className="academic-secretary__grid academic-secretary__grid--content">
+          <article className="academic-secretary__panel">
+            <div className="academic-secretary__panel-head">
+              <div>
+                <h2>Correo electrónico a familias</h2>
+                <p>Envía un correo a acudientes matriculados. Misma segmentación: todo el colegio, grados o cursos. No se publica en el feed.</p>
+              </div>
+            </div>
+            <form className="academic-secretary__form" onSubmit={onSubmitFamilyEmail}>
+              <label>
+                Asunto del correo
+                <input
+                  required
+                  value={familyEmailForm.title}
+                  onChange={(event) => setFamilyEmailForm((previous) => ({ ...previous, title: event.target.value }))}
+                  placeholder="Ej. Reunión de padres — grado 5"
+                />
+              </label>
+              <label>
+                Mensaje
+                <textarea
+                  required
+                  value={familyEmailForm.body}
+                  onChange={(event) => setFamilyEmailForm((previous) => ({ ...previous, body: event.target.value }))}
+                  placeholder="Escribe el contenido que recibirán los acudientes por correo."
+                />
+              </label>
+              <label>
+                Remitente visible
+                <select
+                  value={selectedFamilyEmailAuthorId}
+                  onChange={(event) => setFamilyEmailForm((previous) => ({ ...previous, authorId: event.target.value }))}
+                >
+                  {communicationAuthors.map((author) => (
+                    <option key={author._id} value={author._id}>{author.name}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="academic-secretary__subform">
+                <h4>¿A quién se envía el correo?</h4>
+                <p>Filtra por colegio completo, grados o cursos. Usa Ctrl/Cmd para selección múltiple.</p>
+                <div className="academic-secretary__form-grid">
+                  <label>
+                    Segmentación
+                    <select
+                      value={familyEmailForm.audienceType}
+                      onChange={(event) => setFamilyEmailForm((previous) => ({
+                        ...previous,
+                        audienceType: event.target.value,
+                        gradeTargets: [],
+                        courseTargets: [],
+                        parentTargets: [],
+                        studentTargets: [],
+                      }))}
+                    >
+                      <option value="general">Todo el colegio</option>
+                      <option value="grade">Grados específicos</option>
+                      <option value="course">Cursos específicos</option>
+                      <option value="individual">Acudientes o alumnos puntuales</option>
+                    </select>
+                  </label>
+                  {familyEmailForm.audienceType === 'grade' ? (
+                    <label>
+                      Grados
+                      <select className="academic-secretary__multi-select" multiple value={familyEmailForm.gradeTargets} onChange={(event) => onMultiSelectChange(event, 'gradeTargets', setFamilyEmailForm)}>
+                        {gradeCatalog.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}
+                      </select>
+                    </label>
+                  ) : null}
+                  {familyEmailForm.audienceType === 'course' ? (
+                    <label>
+                      Cursos
+                      <select className="academic-secretary__multi-select" multiple value={familyEmailForm.courseTargets} onChange={(event) => onMultiSelectChange(event, 'courseTargets', setFamilyEmailForm)}>
+                        {courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}
+                      </select>
+                    </label>
+                  ) : null}
+                  {familyEmailForm.audienceType === 'individual' ? (
+                    <>
+                      <label>
+                        Acudientes
+                        <select className="academic-secretary__multi-select" multiple value={familyEmailForm.parentTargets} onChange={(event) => onMultiSelectChange(event, 'parentTargets', setFamilyEmailForm)}>
+                          {parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        Alumnos
+                        <select className="academic-secretary__multi-select" multiple value={familyEmailForm.studentTargets} onChange={(event) => onMultiSelectChange(event, 'studentTargets', setFamilyEmailForm)}>
+                          {studentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select>
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <div className="academic-secretary__actions">
+                <button className="btn btn-primary" disabled={busy} type="submit">Enviar correo</button>
+                <button className="btn" disabled={busy} onClick={resetFamilyEmailForm} type="button">Limpiar</button>
+              </div>
+            </form>
+          </article>
+          <article className="academic-secretary__panel">
+            <h2>Historial de correos a familias</h2>
+            <p>Solo aparecen envíos hechos desde este apartado (no incluyen publicaciones del feed).</p>
+            <div className="academic-secretary__table-wrap">
+              <table className="academic-secretary__table">
+                <thead>
+                  <tr>
+                    <th>Asunto</th>
+                    <th>Remitente</th>
+                    <th>Audiencia</th>
+                    <th>Entrega</th>
+                    <th>Fecha</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {familyEmailCommunications.length === 0 ? (
+                    <tr><td colSpan="5">Aún no hay correos enviados desde este apartado.</td></tr>
+                  ) : familyEmailCommunications.map((item) => (
+                    <tr key={item._id}>
+                      <td><strong>{item.emailSubject || item.title}</strong><div>{item.body}</div></td>
+                      <td>{item.authorName || 'Secretaría académica'}</td>
+                      <td>{formatCommunicationAudienceSummary(item, { gradeLabelByValue, courseLabelByValue })}</td>
+                      <td>
+                        {item.deliverySummary?.emailed != null
+                          ? `${item.deliverySummary.emailed} correo(s)`
+                          : (item.deliverySummary?.status === 'queued' ? 'En cola' : 'Enviado')}
+                      </td>
+                      <td>{formatDateTime(item.sentAt || item.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </article>
         </section>
       ) : null}
@@ -5107,70 +5565,268 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       ) : null}
 
       {activeSection === 'routes' ? (
-        <section className="academic-secretary__grid academic-secretary__grid--content">
-          <article className="academic-secretary__panel">
-            <div className="academic-secretary__panel-head">
+        <section className="route-manager">
+          <header className="route-manager__header">
+            <div className="route-manager__title">
+              <span className="route-manager__title-icon" aria-hidden="true">🚌</span>
               <div>
-                <h2>Asignación de ruta escolar</h2>
-                <p>Selecciona un usuario de ruta y agrega los alumnos que ese conductor recogerá.</p>
+                <h2>Gestión de rutas escolares</h2>
+                <p>Administra la asignación de estudiantes y organiza los recorridos por conductor.</p>
               </div>
-              <button className="academic-secretary__refresh" disabled={routeAssignmentsLoading} onClick={loadSchoolRouteAssignments} type="button">Actualizar rutas</button>
             </div>
+            <button className="route-manager__sync" disabled={routeAssignmentsLoading} onClick={loadSchoolRouteAssignments} type="button">
+              <span>{routeAssignmentsLoading ? 'Sincronizando…' : 'Sincronizar rutas'}</span>
+              <span className={routeAssignmentsLoading ? 'is-spinning' : ''} aria-hidden="true">↻</span>
+            </button>
+          </header>
 
-            {routeDrivers.length === 0 ? (
-              <p>No hay usuarios con rol de ruta escolar para este colegio.</p>
-            ) : (
-              <form className="academic-secretary__form" onSubmit={onSubmitRouteAssignment}>
-                <div className="academic-secretary__form-grid">
-                  <label>
-                    Conductor
-                    <select value={selectedRouteDriver?.id || ''} onChange={(event) => setRouteAssignmentForm((previous) => ({ ...previous, driverUserId: event.target.value }))}>
-                      {routeDrivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}{driver.username ? ` · ${driver.username}` : ''}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    Alumno
-                    <select value={routeAssignmentForm.studentId} onChange={(event) => {
-                      const student = assignableRouteStudents.find((item) => item.id === event.target.value);
-                      setRouteAssignmentForm((previous) => ({
-                        ...previous,
-                        studentId: event.target.value,
-                        pickupAddress: previous.pickupAddress || student?.address || '',
-                      }));
-                    }}>
-                      <option value="">Selecciona alumno</option>
-                      {assignableRouteStudents.map((student) => <option key={student.id} value={student.id}>{student.name} · {formatGradeLabel(student.grade)}{student.course ? ` · ${student.course}` : ''}</option>)}
-                    </select>
-                  </label>
-                  <label>Dirección de recogida<input value={routeAssignmentForm.pickupAddress} onChange={(event) => setRouteAssignmentForm((previous) => ({ ...previous, pickupAddress: event.target.value }))} placeholder="Dirección registrada o punto de recogida" /></label>
-                  <label>Nota para ruta<input value={routeAssignmentForm.notes} onChange={(event) => setRouteAssignmentForm((previous) => ({ ...previous, notes: event.target.value }))} placeholder="Torre, portería, referencia" /></label>
+          <div className="route-manager__overview">
+            <article className="route-manager__card route-manager__assignment">
+              <div className="route-manager__card-heading">
+                <span className="route-manager__heading-icon tone-blue" aria-hidden="true">♙</span>
+                <div>
+                  <h3>Asignar estudiante a la ruta</h3>
+                  <p>Selecciona el conductor y completa los datos de recogida.</p>
                 </div>
-                <div className="academic-secretary__actions"><button className="btn btn-primary" disabled={busy || routeAssignmentsLoading || !selectedRouteDriver?.id || !routeAssignmentForm.studentId} type="submit">Agregar alumno a ruta</button></div>
-              </form>
-            )}
-          </article>
+              </div>
 
-          <article className="academic-secretary__panel">
-            <div className="academic-secretary__panel-head"><div><h2>Ruta del conductor</h2><p>{selectedRouteDriver ? `${selectedRouteDriver.name} tiene ${selectedRouteStops.length} alumno(s) asignados.` : 'Selecciona un conductor para ver sus alumnos asignados.'}</p></div></div>
-            <div className="academic-secretary__summary-grid academic-secretary__summary-grid--compact">
-              <div className="academic-secretary__mini-card"><span>Conductores</span><strong>{routeDrivers.length}</strong></div>
-              <div className="academic-secretary__mini-card is-accent"><span>Asignados</span><strong>{selectedRouteStops.length}</strong></div>
-              <div className="academic-secretary__mini-card is-neutral"><span>Disponibles</span><strong>{assignableRouteStudents.length}</strong></div>
+              {routeDrivers.length === 0 ? (
+                <div className="route-manager__empty">No hay usuarios con rol de ruta escolar para este colegio.</div>
+              ) : (
+                <form className="route-manager__form" onSubmit={onSubmitRouteAssignment}>
+                  <label>
+                    <span>Conductor</span>
+                    <select
+                      value={selectedRouteDriver?.id || ''}
+                      onChange={(event) => setRouteAssignmentForm((previous) => ({
+                        ...previous,
+                        driverUserId: event.target.value,
+                      }))}
+                    >
+                      {routeDrivers.map((driver) => (
+                        <option key={driver.id} value={driver.id}>
+                          {driver.name}{driver.username ? ` · ${driver.username}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Alumno</span>
+                    <Select
+                      className="route-manager__student-select"
+                      classNamePrefix="route-student-select"
+                      isClearable
+                      isSearchable
+                      menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+                      noOptionsMessage={({ inputValue }) => inputValue ? 'No hay estudiantes con ese nombre' : 'No hay estudiantes disponibles'}
+                      onChange={(option) => {
+                        const student = option?.student;
+                        setRouteAssignmentForm((previous) => ({
+                          ...previous,
+                          studentId: option?.value || '',
+                          pickupAddress: option ? (student?.address || previous.pickupAddress || '') : '',
+                          latitude: null,
+                          longitude: null,
+                          placeId: '',
+                        }));
+                      }}
+                      options={assignableRouteStudentOptions}
+                      placeholder="Escribe el nombre del estudiante…"
+                      styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+                      value={assignableRouteStudentOptions.find((option) => option.value === routeAssignmentForm.studentId) || null}
+                    />
+                  </label>
+                  <label>
+                    <span>Dirección de recogida</span>
+                    <GooglePlacesAddressInput
+                      ariaLabel="Dirección de recogida"
+                      onPlaceSelected={(place) => setRouteAssignmentForm((previous) => ({
+                        ...previous,
+                        pickupAddress: place.pickupAddress || '',
+                        latitude: place.latitude,
+                        longitude: place.longitude,
+                        placeId: place.placeId || '',
+                      }))}
+                      placeholder="Busca y elige la dirección en Google Maps…"
+                      value={routeAssignmentForm.pickupAddress}
+                    />
+                  </label>
+                  <label>
+                    <span>Nota para el conductor</span>
+                    <input
+                      value={routeAssignmentForm.notes}
+                      onChange={(event) => setRouteAssignmentForm((previous) => ({ ...previous, notes: event.target.value }))}
+                      placeholder="Torre, portería, referencia…"
+                    />
+                  </label>
+                  <label>
+                    <span>Precio de la ruta por alumno</span>
+                    <input
+                      inputMode="numeric"
+                      min="0"
+                      onChange={(event) => setRouteAssignmentForm((previous) => ({ ...previous, routeCost: event.target.value }))}
+                      placeholder="0"
+                      step="1000"
+                      type="number"
+                      value={routeAssignmentForm.routeCost}
+                    />
+                  </label>
+                  <label className="route-manager__checkbox">
+                    <input
+                      checked={Boolean(routeAssignmentForm.linkToCartera)}
+                      onChange={(event) => setRouteAssignmentForm((previous) => ({ ...previous, linkToCartera: event.target.checked }))}
+                      type="checkbox"
+                    />
+                    <span>Vincular precio con Cartera</span>
+                  </label>
+                  <button
+                    className="route-manager__add"
+                    disabled={busy || routeAssignmentsLoading || !selectedRouteDriver?.id || !routeAssignmentForm.studentId}
+                    type="submit"
+                  >
+                    <span aria-hidden="true">＋</span>
+                    Agregar estudiante
+                  </button>
+                </form>
+              )}
+            </article>
+
+            <article className="route-manager__card route-manager__summary">
+              <div className="route-manager__card-heading">
+                <span className="route-manager__heading-icon tone-violet" aria-hidden="true">⌁</span>
+                <div>
+                  <h3>Resumen de la ruta</h3>
+                  <p>{selectedRoute?.routeName || 'Ruta escolar seleccionada'}</p>
+                </div>
+              </div>
+              <div className="route-manager__stats">
+                <div className="route-manager__stat tone-blue"><span>Conductores</span><strong>{routeDrivers.length}</strong></div>
+                <div className="route-manager__stat tone-green"><span>Asignados</span><strong>{selectedRouteStops.length}</strong></div>
+                <div className="route-manager__stat tone-orange"><span>Disponibles</span><strong>{assignableRouteStudents.length}</strong></div>
+                <div className="route-manager__stat tone-violet"><span>Distancia total</span><strong>{routeDistanceKm ? `${routeDistanceKm} km` : '—'}</strong></div>
+                <div className="route-manager__stat route-manager__stat--wide tone-sky"><span>Tiempo estimado</span><strong>{estimatedRouteMinutes ? `${estimatedRouteMinutes} min` : '—'}</strong></div>
+              </div>
+            </article>
+
+            <article className="route-manager__card route-manager__map-card">
+              <div className="route-manager__map-heading">
+                <div>
+                  <h3>Vista del recorrido</h3>
+                  <p>{selectedRoute?.routeName || selectedRouteDriver?.name || 'Sin conductor seleccionado'}</p>
+                </div>
+                <span className="route-manager__status">{selectedRoute?.status === 'active' ? 'Activa' : 'Planificación'}</span>
+              </div>
+              <GoogleSchoolRouteMap
+                onMetricsChange={setRouteMapMetrics}
+                routeName={selectedRoute?.routeName || 'Ruta escolar'}
+                stops={selectedRouteStops}
+              />
+            </article>
+          </div>
+
+          <article className="route-manager__card route-manager__students">
+            <div className="route-manager__students-head">
+              <div className="route-manager__students-title">
+                <span className="route-manager__heading-icon tone-blue" aria-hidden="true">♙</span>
+                <div>
+                  <h3>Estudiantes asignados a la ruta</h3>
+                  <p>{selectedRouteDriver ? `${selectedRouteDriver.name} · ${selectedRouteStops.length} estudiantes` : 'Selecciona un conductor'}</p>
+                </div>
+              </div>
+              <div className="route-manager__students-tools">
+                <label className="route-manager__search">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    aria-label="Buscar estudiante en la ruta"
+                    onChange={(event) => setRouteStudentSearch(event.target.value)}
+                    placeholder="Buscar en la lista…"
+                    value={routeStudentSearch}
+                  />
+                </label>
+                <button disabled={!selectedRouteStops.length} onClick={onExportSelectedRoute} type="button">⇩ Exportar</button>
+              </div>
             </div>
-            <div className="academic-secretary__table-wrap">
-              <table className="academic-secretary__table">
-                <thead><tr><th>Orden</th><th>Alumno</th><th>Dirección</th><th>Nota</th><th>Acciones</th></tr></thead>
+            <div className="route-manager__table-wrap">
+              <table className="route-manager__table">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th>Estudiante</th>
+                    <th>Curso</th>
+                    <th>Dirección de recogida</th>
+                    <th>Nota</th>
+                    <th>Precio por alumno</th>
+                    <th>Cartera</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {selectedRouteStops.length === 0 ? <tr><td colSpan="5">Este conductor aún no tiene alumnos asignados.</td></tr> : selectedRouteStops.map((stop) => (
+                  {filteredSelectedRouteStops.length === 0 ? (
+                    <tr>
+                      <td className="route-manager__table-empty" colSpan="9">
+                        {selectedRouteStops.length ? 'No hay estudiantes que coincidan con la búsqueda.' : 'Este conductor aún no tiene estudiantes asignados.'}
+                      </td>
+                    </tr>
+                  ) : filteredSelectedRouteStops.map((stop) => (
                     <tr key={stop.id}>
-                      <td>{stop.order}</td>
-                      <td><strong>{stop.studentName}</strong><div>{formatGradeLabel(stop.studentGrade)}{stop.studentCourse ? ` · ${stop.studentCourse}` : ''}</div></td>
-                      <td><input value={stop.pickupAddress || ''} onChange={(event) => onChangeRouteStopDraft(stop.id, { pickupAddress: event.target.value })} /></td>
-                      <td><input value={stop.notes || ''} onChange={(event) => onChangeRouteStopDraft(stop.id, { notes: event.target.value })} /></td>
+                      <td><span className="route-manager__order">⋮⋮</span>{stop.order}</td>
                       <td>
-                        <div className="academic-secretary__row-actions">
-                          <button className="academic-secretary__promote-button" disabled={busy} onClick={() => onUpdateRouteStop(stop)} type="button">Guardar</button>
-                          <button className="academic-secretary__row-icon-button" disabled={busy} onClick={() => onRemoveRouteStop(stop.id)} type="button">Quitar</button>
+                        <div className="route-manager__student">
+                          <span className="route-manager__avatar">{String(stop.studentName || 'E').charAt(0).toUpperCase()}</span>
+                          <div><strong>{stop.studentName}</strong><small>ID {String(stop.studentId || '').slice(-6).toUpperCase()}</small></div>
+                        </div>
+                      </td>
+                      <td><span className="route-manager__course">{formatGradeLabel(stop.studentGrade)}{stop.studentCourse ? ` ${stop.studentCourse}` : ''}</span></td>
+                      <td>
+                        <GooglePlacesAddressInput
+                          ariaLabel={`Dirección de ${stop.studentName}`}
+                          onPlaceSelected={(place) => onChangeRouteStopDraft(stop.id, {
+                            pickupAddress: place.pickupAddress || '',
+                            latitude: place.latitude,
+                            longitude: place.longitude,
+                            placeId: place.placeId || '',
+                          })}
+                          placeholder="Busca y elige la dirección en Google Maps…"
+                          value={stop.pickupAddress || ''}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`Nota de ${stop.studentName}`}
+                          onChange={(event) => onChangeRouteStopDraft(stop.id, { notes: event.target.value })}
+                          value={stop.notes || ''}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          aria-label={`Precio de ruta por alumno de ${stop.studentName}`}
+                          className="route-manager__cost-input"
+                          inputMode="numeric"
+                          min="0"
+                          onChange={(event) => onChangeRouteStopDraft(stop.id, { routeCost: event.target.value })}
+                          placeholder="0"
+                          step="1000"
+                          type="number"
+                          value={stop.routeCost ?? ''}
+                        />
+                      </td>
+                      <td>
+                        <label className="route-manager__cartera-check" title={stop.carteraChargeId ? 'Vinculado a un cobro de Cartera' : 'Sin vincular a Cartera'}>
+                          <input
+                            aria-label={`Vincular ruta de ${stop.studentName} con Cartera`}
+                            checked={Boolean(stop.linkToCartera)}
+                            onChange={(event) => onChangeRouteStopDraft(stop.id, { linkToCartera: event.target.checked })}
+                            type="checkbox"
+                          />
+                          <span>{stop.carteraChargeId ? 'Vinculado' : 'Vincular'}</span>
+                        </label>
+                      </td>
+                      <td><span className={`route-manager__student-status is-${stop.status || 'pending'}`}>{stop.status === 'completed' ? 'Completado' : stop.status === 'active' ? 'Activo' : 'Asignado'}</span></td>
+                      <td>
+                        <div className="route-manager__row-actions">
+                          <button className="is-save" disabled={busy} onClick={() => onUpdateRouteStop(stop)} title="Guardar cambios" type="button"><SaveIcon /></button>
+                          <button className="is-remove" disabled={busy} onClick={() => onRemoveRouteStop(stop.id)} title="Quitar de la ruta" type="button"><CloseIcon /></button>
                         </div>
                       </td>
                     </tr>
@@ -5669,6 +6325,31 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
           </div>
         </div>
       ) : null}
+    </section>
+  );
+
+  if (embedded) {
+    return secretaryBody;
+  }
+
+  return (
+    <section className="admissions-portal-page academic-secretary-portal-page">
+      <StaffPortalShell
+        activeKey={activeSection}
+        navItems={portalSections.map((item) => ({
+          key: item.key,
+          label: buildSectionLabel(item.key, pendingApprovalCount, portalSections, staffAnnouncementsUnreadCount),
+        }))}
+        navLabel={portalLabel}
+        onNavigate={setActiveSection}
+        onRefresh={() => window.location.reload()}
+        portalLabel={portalLabel}
+        refreshLabel={backgroundLoading ? 'Completando carga...' : 'Actualizar portal'}
+        schoolName={schoolName}
+        userName={user?.name || user?.username || 'Usuario'}
+      >
+        {secretaryBody}
+      </StaffPortalShell>
     </section>
   );
 }

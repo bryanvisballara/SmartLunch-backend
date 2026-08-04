@@ -1,0 +1,412 @@
+/* Shared staff chrome modeled on the Teacher portal (campus-teacher__*) */
+/* Body zoom is disabled on staff routes (see admissions-route-active). */
+
+.staff-teacher-chrome__frame {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #f5f7fb;
+}
+
+.staff-teacher-chrome__frame > .staff-teacher-chrome__rail {
+  width: 280px;
+  max-width: 280px;
+  justify-self: stretch;
+  align-self: start;
+}
+
+.staff-teacher-chrome__main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #f5f7fb;
+}
+
+/* Keep the rail fixed to the viewport and scroll its complete content internally. */
+.staff-teacher-chrome__rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  padding: 1rem 0.85rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.2) transparent;
+  border-right: 1px solid #e5eaf2;
+  background:
+    linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, rgba(255, 255, 255, 0) 18%),
+    linear-gradient(180deg, #ffffff 0%, #f7fbfa 100%);
+  box-sizing: border-box;
+}
+
+.staff-teacher-chrome__rail::-webkit-scrollbar {
+  width: 7px;
+}
+
+.staff-teacher-chrome__rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.staff-teacher-chrome__rail::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.2);
+}
+
+.staff-teacher-chrome__rail::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.32);
+}
+
+.staff-teacher-chrome__rail > * {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.staff-teacher-chrome__rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0.35rem 0.85rem;
+  border-bottom: 1px solid rgba(15, 118, 110, 0.12);
+  flex: 0 0 auto;
+}
+
+.staff-teacher-chrome__rail-brand-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.staff-teacher-chrome__rail-brand-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.staff-teacher-chrome__rail-brand-copy strong {
+  display: block;
+  color: #0f2744;
+  font-size: 1.12rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.staff-teacher-chrome__rail-brand-copy span {
+  display: block;
+  margin-top: 0.12rem;
+  color: #6b7c93;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.staff-teacher-chrome__rail-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.15rem;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.staff-teacher-chrome__rail-group {
+  display: grid;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.staff-teacher-chrome__rail-group-label {
+  margin: 0 0 0.2rem;
+  padding: 0 0.75rem;
+  color: #0f766e;
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.staff-teacher-chrome__nav-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  width: 100%;
+}
+
+button.staff-teacher-chrome__nav-item,
+.staff-teacher-chrome__nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0.62rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-sizing: border-box;
+  background: transparent;
+  color: #334155;
+  text-align: left;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.25;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.staff-teacher-chrome__nav-item:hover,
+.staff-teacher-chrome__nav-item:focus-visible {
+  background: rgba(15, 118, 110, 0.08);
+  color: #0f766e;
+}
+
+.staff-teacher-chrome__nav-item.is-active {
+  background: rgba(15, 118, 110, 0.14);
+  color: #0f766e;
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.08);
+}
+
+.staff-teacher-chrome__nav-item-label {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.staff-teacher-chrome__rail-school {
+  margin-top: auto;
+  flex: 0 0 auto;
+  padding: 0.85rem;
+  border: 1px solid rgba(15, 118, 110, 0.14);
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.staff-teacher-chrome__rail-school-main {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.staff-teacher-chrome__rail-school-main strong {
+  display: block;
+  color: #0f2744;
+  font-size: 0.88rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.staff-teacher-chrome__rail-school-main span {
+  display: block;
+  margin-top: 0.15rem;
+  color: #6b7c93;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.staff-teacher-chrome__rail-school-icon {
+  display: inline-flex;
+  width: 2.2rem;
+  height: 2.2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #fff;
+}
+
+.staff-teacher-chrome__rail-school-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.staff-teacher-chrome__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.85rem;
+  min-height: 72px;
+  padding: 0.7rem 1.25rem;
+  border-bottom: 1px solid #e8edf5;
+  background: #ffffff;
+}
+
+.staff-teacher-chrome__topbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.institutional-portal-header__helper-inline {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.institutional-portal-header__helper-inline strong {
+  color: #0f2744;
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
+.institutional-portal-header__helper-inline span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.staff-teacher-chrome__topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+
+.staff-teacher-chrome__topbar-profile {
+  position: relative;
+}
+
+.staff-teacher-chrome__topbar-profile-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+  padding: 0.35rem 0.7rem 0.35rem 0.4rem;
+  border: 1px solid #e5eaf2;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.staff-teacher-chrome__topbar-avatar {
+  display: inline-flex;
+  width: 2.1rem;
+  height: 2.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  overflow: hidden;
+}
+
+.staff-teacher-chrome__topbar-profile-copy {
+  display: grid;
+  gap: 0.05rem;
+  text-align: left;
+}
+
+.staff-teacher-chrome__topbar-profile-copy strong {
+  color: #0f2744;
+  font-size: 0.84rem;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.staff-teacher-chrome__topbar-profile-copy span {
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.staff-teacher-chrome__topbar-chevron {
+  width: 1rem;
+  height: 1rem;
+  color: #64748b;
+}
+
+.staff-teacher-chrome__topbar-dropdown {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 0.2rem;
+  min-width: 220px;
+  padding: 0.45rem;
+  border: 1px solid #e5eaf2;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+}
+
+.staff-teacher-chrome__topbar-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.staff-teacher-chrome__topbar-dropdown-item:hover,
+.staff-teacher-chrome__topbar-dropdown-item:focus-visible {
+  background: #eff6ff;
+}
+
+.staff-teacher-chrome__topbar-dropdown-item.is-danger {
+  color: #b42318;
+}
+
+.staff-teacher-chrome__workspace {
+  min-width: 0;
+  min-height: 0;
+  padding: 1.1rem 1.25rem 2rem;
+  background: #f5f7fb;
+}
+
+@media (max-width: 900px) {
+  .staff-teacher-chrome__frame {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-teacher-chrome__rail {
+    position: static;
+    height: auto;
+    max-height: none;
+    min-height: auto;
+    overflow: visible;
+  }
+}

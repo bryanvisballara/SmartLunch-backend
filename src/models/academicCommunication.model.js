@@ -67,8 +67,9 @@ const academicCommunicationSchema = new mongoose.Schema(
       default: [],
     },
     channels: {
+      feed: { type: Boolean, default: true },
       push: { type: Boolean, default: true },
-      email: { type: Boolean, default: true },
+      email: { type: Boolean, default: false },
     },
     sentAt: { type: Date, default: null },
     deliverySummary: { type: mongoose.Schema.Types.Mixed, default: null },

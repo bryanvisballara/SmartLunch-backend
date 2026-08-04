@@ -47,6 +47,12 @@ const { createBillingPaymentDeletionRequest } = require('../services/enrollmentM
 const { ensureStudentCohortMembership } = require('../services/communityFeed.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
+  parseLinkToCartera,
+  parseRouteCost,
+  syncSchoolRouteStopCartera,
+  unlinkSchoolRouteStopCartera,
+} = require('../services/schoolRouteCartera.service');
+const {
   normalizeStoredImageUrl,
   validateIncomingImageUrl,
   uploadImageMiddleware,
@@ -73,7 +79,7 @@ const uploadAcademicDatabaseMigrationFile = multer({
 
 const ACADEMIC_SECRETARY_FULL_ACCESS_ROLES = ['academic_secretary', 'admin', 'rectoria', 'direccion'];
 const ACADEMIC_BILLING_ACCESS_ROLES = ['billing', 'admin', 'rectoria', 'direccion'];
-const ACADEMIC_COMMUNICATION_EMAIL_DELIVERY_ENABLED = false;
+const ACADEMIC_COMMUNICATION_EMAIL_DELIVERY_ENABLED = String(process.env.ACADEMIC_COMMUNICATION_EMAIL_DELIVERY_ENABLED || 'true').toLowerCase() !== 'false';
 const ACADEMIC_SECRETARY_FEE_SETTINGS_ROLES = ['academic_secretary', 'billing', 'admin', 'rectoria', 'direccion'];
 const ACADEMIC_ADMISSIONS_READ_ROLES = ['admissions'];
 const ACADEMIC_COORDINATION_READ_ROLES = ['coordination'];
@@ -97,6 +103,10 @@ router.use((req, res, next) => {
     || /^\/communication-requests(\/|$)/.test(req.path);
   const isCalendarAssignmentRoute = /^\/academic-management\/assignments(\/|$)/.test(req.path);
   const isCourseAssignmentRoute = /^\/academic-management\/students\/[^/]+\/course$/.test(req.path) && method === 'PATCH';
+  const isScheduleWorkspaceRoute = (
+    /^\/academic-management\/schedules(\/|$)/.test(req.path)
+    || req.path === '/academic-management/schedule-settings'
+  ) && ['PUT', 'POST'].includes(method);
   const isEnrollmentRoute = req.path === '/enrollments' && method === 'POST';
   const isAcademicDatabaseAccessRoute = (req.path === '/database' && method === 'GET')
     || (/^\/database\/[^/]+$/.test(req.path) && method === 'PATCH');
@@ -133,6 +143,10 @@ router.use((req, res, next) => {
 
   if (isCourseAssignmentRoute) {
     return roleMiddleware(ACADEMIC_COURSE_ASSIGNMENT_ROLES)(req, res, next);
+  }
+
+  if (isScheduleWorkspaceRoute) {
+    return roleMiddleware([...ACADEMIC_SECRETARY_FULL_ACCESS_ROLES, ...ACADEMIC_COORDINATION_READ_ROLES])(req, res, next);
   }
 
   if (isBillingAccessRoute) {
@@ -1075,6 +1089,81 @@ function resolveCoordinationGradeKeys(serializedAcademicStructure = {}, coordina
   return { levelKeys, gradeKeys };
 }
 
+function assertCoordinationCanEditGradeSchedule(req, serializedAcademicStructure = {}, gradeKey = '') {
+  if (String(req.user?.role || '').trim() !== 'coordination') {
+    return { ok: true };
+  }
+
+  const { gradeKeys } = resolveCoordinationGradeKeys(serializedAcademicStructure, req.user?.coordinationScope);
+  if (!gradeKeys.has(normalizeText(gradeKey))) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Solo puedes editar horarios de grados del nivel académico asignado a tu coordinación.',
+    };
+  }
+
+  return { ok: true };
+}
+
+function serializeAcademicStructureForRequester(req, configuration) {
+  const serialized = serializeAcademicStructureConfiguration(configuration);
+  if (String(req.user?.role || '').trim() !== 'coordination') {
+    return serialized;
+  }
+
+  const { levelKeys, gradeKeys } = resolveCoordinationGradeKeys(serialized, req.user?.coordinationScope);
+  return filterAcademicStructureForCoordination(serialized, levelKeys, gradeKeys);
+}
+
+function mergeCoordinationScheduleSettings(existingSettings = {}, incomingSettings = {}, scopedGradeKeys = new Set()) {
+  const existingGroups = Array.isArray(existingSettings?.groups) ? existingSettings.groups : [];
+  const incomingGroups = Array.isArray(incomingSettings?.groups) ? incomingSettings.groups : [];
+  const incomingKeys = new Set(incomingGroups.map((group) => normalizeText(group?.key)).filter(Boolean));
+
+  const preservedOutsideScope = existingGroups.filter((group) => {
+    const gradeKeys = Array.isArray(group?.gradeKeys) ? group.gradeKeys.map(normalizeText).filter(Boolean) : [];
+    return gradeKeys.length === 0 || !gradeKeys.some((gradeKey) => scopedGradeKeys.has(gradeKey));
+  });
+
+  const mergedIncoming = incomingGroups.map((incoming) => {
+    const existing = existingGroups.find((group) => normalizeText(group?.key) === normalizeText(incoming?.key));
+    const outOfScopeGradeKeys = (Array.isArray(existing?.gradeKeys) ? existing.gradeKeys : [])
+      .map(normalizeText)
+      .filter((gradeKey) => gradeKey && !scopedGradeKeys.has(gradeKey));
+    const scopedIncomingGradeKeys = (Array.isArray(incoming?.gradeKeys) ? incoming.gradeKeys : [])
+      .map(normalizeText)
+      .filter((gradeKey) => gradeKey && scopedGradeKeys.has(gradeKey));
+
+    return {
+      ...incoming,
+      gradeKeys: Array.from(new Set([...outOfScopeGradeKeys, ...scopedIncomingGradeKeys])),
+    };
+  });
+
+  const partiallyRetained = existingGroups
+    .filter((group) => {
+      const key = normalizeText(group?.key);
+      const gradeKeys = Array.isArray(group?.gradeKeys) ? group.gradeKeys.map(normalizeText).filter(Boolean) : [];
+      return key
+        && !incomingKeys.has(key)
+        && gradeKeys.some((gradeKey) => scopedGradeKeys.has(gradeKey))
+        && gradeKeys.some((gradeKey) => !scopedGradeKeys.has(gradeKey));
+    })
+    .map((group) => ({
+      ...group,
+      gradeKeys: (Array.isArray(group?.gradeKeys) ? group.gradeKeys : [])
+        .map(normalizeText)
+        .filter((gradeKey) => gradeKey && !scopedGradeKeys.has(gradeKey)),
+    }))
+    .filter((group) => Array.isArray(group.gradeKeys) && group.gradeKeys.length > 0);
+
+  return {
+    ...incomingSettings,
+    groups: [...preservedOutsideScope, ...mergedIncoming, ...partiallyRetained],
+  };
+}
+
 function filterAcademicStructureForCoordination(serializedAcademicStructure = {}, levelKeys = new Set(), gradeKeys = new Set()) {
   if (levelKeys.size === 0 || gradeKeys.size === 0) {
     return {
@@ -1108,6 +1197,19 @@ function filterAcademicStructureForCoordination(serializedAcademicStructure = {}
       gradeKeys: Array.isArray(item?.gradeKeys) ? item.gradeKeys.filter((gradeKey) => gradeKeys.has(normalizeText(gradeKey))) : [],
     })).filter((item) => Array.isArray(item.gradeKeys) && item.gradeKeys.length > 0),
     gradeSchedules: (serializedAcademicStructure.gradeSchedules || []).filter((schedule) => gradeKeys.has(normalizeText(schedule?.gradeKey))),
+    scheduleBreaks: (serializedAcademicStructure.scheduleBreaks || []).map((item) => ({
+      ...item,
+      gradeKeys: Array.isArray(item?.gradeKeys) ? item.gradeKeys.filter((gradeKey) => gradeKeys.has(normalizeText(gradeKey))) : [],
+    })).filter((item) => Array.isArray(item.gradeKeys) && item.gradeKeys.length > 0),
+    scheduleSettings: {
+      ...(serializedAcademicStructure.scheduleSettings || {}),
+      groups: (Array.isArray(serializedAcademicStructure.scheduleSettings?.groups)
+        ? serializedAcademicStructure.scheduleSettings.groups
+        : []).map((group) => ({
+        ...group,
+        gradeKeys: Array.isArray(group?.gradeKeys) ? group.gradeKeys.filter((gradeKey) => gradeKeys.has(normalizeText(gradeKey))) : [],
+      })).filter((group) => Array.isArray(group.gradeKeys) && group.gradeKeys.length > 0),
+    },
   };
 }
 
@@ -5597,6 +5699,12 @@ async function upsertParentAccount({ schoolId, parentData, relationship, matchBy
   return { user, created: true, temporaryPassword };
 }
 
+function parseAcademicPickupCoordinate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function serializeAcademicSchoolRouteStop(stop) {
   const student = stop?.studentId && typeof stop.studentId === 'object' ? stop.studentId : null;
   const studentId = student?._id || stop?.studentId || null;
@@ -5608,6 +5716,12 @@ function serializeAcademicSchoolRouteStop(stop) {
     studentGrade: normalizeText(student?.grade || stop?.studentGrade),
     studentCourse: normalizeText(student?.course || stop?.studentCourse),
     pickupAddress: normalizeText(stop?.pickupAddress),
+    latitude: parseAcademicPickupCoordinate(stop?.latitude),
+    longitude: parseAcademicPickupCoordinate(stop?.longitude),
+    placeId: normalizeText(stop?.placeId),
+    routeCost: parseRouteCost(stop?.routeCost),
+    linkToCartera: Boolean(stop?.linkToCartera),
+    carteraChargeId: stop?.carteraChargeId ? String(stop.carteraChargeId) : '',
     notes: normalizeText(stop?.notes),
     order: Number(stop?.order || 0),
     status: normalizeText(stop?.status) || 'pending',
@@ -5722,6 +5836,13 @@ router.post('/school-routes/:driverUserId/stops', async (req, res) => {
     const studentObjectId = toObjectId(req.body?.studentId);
     const pickupAddress = normalizeText(req.body?.pickupAddress).slice(0, 220);
     const notes = normalizeText(req.body?.notes).slice(0, 220);
+    const latitude = parseAcademicPickupCoordinate(req.body?.latitude);
+    const longitude = parseAcademicPickupCoordinate(req.body?.longitude);
+    const placeId = normalizeText(req.body?.placeId).slice(0, 220);
+    const hasValidCoordinates = latitude !== null
+      && longitude !== null
+      && Math.abs(latitude) <= 90
+      && Math.abs(longitude) <= 180;
 
     if (!studentObjectId) {
       return res.status(400).json({ message: 'Selecciona un alumno valido.' });
@@ -5738,6 +5859,8 @@ router.post('/school-routes/:driverUserId/stops', async (req, res) => {
     }
 
     const route = await getOrCreateAcademicSchoolRoute({ schoolId, driverUserId: driver._id });
+    const routeCost = parseRouteCost(req.body?.routeCost);
+    const linkToCartera = parseLinkToCartera(req.body?.linkToCartera);
     const nextOrder = Math.max(0, ...(route.stops || []).map((stop) => Number(stop.order || 0))) + 1;
     route.stops.push({
       studentId: student._id,
@@ -5745,10 +5868,24 @@ router.post('/school-routes/:driverUserId/stops', async (req, res) => {
       studentGrade: student.grade,
       studentCourse: student.course,
       pickupAddress: pickupAddress || normalizeText(student.address).slice(0, 220),
+      latitude: hasValidCoordinates ? latitude : null,
+      longitude: hasValidCoordinates ? longitude : null,
+      placeId: hasValidCoordinates ? placeId : '',
+      routeCost,
+      linkToCartera,
+      carteraChargeId: null,
       notes,
       order: nextOrder,
       status: 'pending',
       statusUpdatedAt: null,
+    });
+    const createdStop = route.stops[route.stops.length - 1];
+    await syncSchoolRouteStopCartera({
+      schoolId,
+      stop: createdStop,
+      routeName: route.routeName,
+      createdByUserId: req.user.userId,
+      createdByRole: req.user.role,
     });
     await route.save();
 
@@ -5775,9 +5912,35 @@ router.patch('/school-routes/:driverUserId/stops/:stopId', async (req, res) => {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'pickupAddress')) {
       stop.pickupAddress = normalizeText(req.body.pickupAddress).slice(0, 220);
     }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'latitude') || Object.prototype.hasOwnProperty.call(req.body || {}, 'longitude')) {
+      const latitude = parseAcademicPickupCoordinate(req.body.latitude);
+      const longitude = parseAcademicPickupCoordinate(req.body.longitude);
+      const valid = latitude !== null
+        && longitude !== null
+        && Math.abs(latitude) <= 90
+        && Math.abs(longitude) <= 180;
+      stop.latitude = valid ? latitude : null;
+      stop.longitude = valid ? longitude : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'placeId')) {
+      stop.placeId = normalizeText(req.body.placeId).slice(0, 220);
+    }
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'notes')) {
       stop.notes = normalizeText(req.body.notes).slice(0, 220);
     }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'routeCost')) {
+      stop.routeCost = parseRouteCost(req.body.routeCost);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'linkToCartera')) {
+      stop.linkToCartera = parseLinkToCartera(req.body.linkToCartera);
+    }
+    await syncSchoolRouteStopCartera({
+      schoolId,
+      stop,
+      routeName: route.routeName,
+      createdByUserId: req.user.userId,
+      createdByRole: req.user.role,
+    });
     await route.save();
 
     const populatedRoute = await CampusSchoolRoute.findById(route._id)
@@ -5800,6 +5963,7 @@ router.delete('/school-routes/:driverUserId/stops/:stopId', async (req, res) => 
       return res.status(404).json({ message: 'Parada no encontrada.' });
     }
 
+    await unlinkSchoolRouteStopCartera({ schoolId, stop });
     stop.deleteOne();
     route.stops
       .sort((left, right) => Number(left.order || 0) - Number(right.order || 0))
@@ -6950,18 +7114,45 @@ router.put('/academic-management/schedule-breaks', async (req, res) => {
 router.put('/academic-management/schedule-settings', async (req, res) => {
   try {
     const { schoolId } = req.user;
+    const isCoordinationUser = String(req.user?.role || '').trim() === 'coordination';
     const configuration = await ensureAcademicStructureConfiguration(schoolId);
+    const serialized = serializeAcademicStructureConfiguration(configuration);
     const allowedGradeKeys = new Set((Array.isArray(configuration?.grades) ? configuration.grades : []).map((grade) => normalizeAcademicStructureGradeKey(grade?.key || grade?.label)).filter(Boolean));
     const normalizedSettings = normalizeAcademicScheduleSettings(req.body, { allowedGradeKeys });
     if (!normalizedSettings.ok) {
       return res.status(400).json({ message: normalizedSettings.message });
     }
 
-    configuration.scheduleSettings = normalizedSettings.scheduleSettings;
+    if (isCoordinationUser) {
+      const { gradeKeys: scopedGradeKeys } = resolveCoordinationGradeKeys(serialized, req.user?.coordinationScope);
+      if (scopedGradeKeys.size === 0) {
+        return res.status(403).json({ message: 'No tienes un nivel académico asignado para gestionar jornadas.' });
+      }
+
+      const incomingGroups = Array.isArray(normalizedSettings.scheduleSettings?.groups)
+        ? normalizedSettings.scheduleSettings.groups
+        : [];
+      const hasOutOfScopeGrade = incomingGroups.some((group) => (
+        Array.isArray(group?.gradeKeys)
+        && group.gradeKeys.some((gradeKey) => !scopedGradeKeys.has(normalizeText(gradeKey)))
+      ));
+      if (hasOutOfScopeGrade) {
+        return res.status(403).json({ message: 'Solo puedes asignar grados del nivel académico de tu coordinación.' });
+      }
+
+      configuration.scheduleSettings = mergeCoordinationScheduleSettings(
+        configuration.scheduleSettings,
+        normalizedSettings.scheduleSettings,
+        scopedGradeKeys,
+      );
+    } else {
+      configuration.scheduleSettings = normalizedSettings.scheduleSettings;
+    }
+
     applyAcademicScheduleBreaksToConfiguration(configuration);
     await configuration.save();
 
-    return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+    return res.status(200).json({ academicStructure: serializeAcademicStructureForRequester(req, configuration) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -7050,6 +7241,10 @@ router.put('/academic-management/schedules/:gradeKey/load', async (req, res) => 
     if (!grade) {
       return res.status(404).json({ message: 'No se encontró el grado solicitado.' });
     }
+    const coordinationScopeGuard = assertCoordinationCanEditGradeSchedule(req, serialized, gradeKey);
+    if (!coordinationScopeGuard.ok) {
+      return res.status(coordinationScopeGuard.status).json({ message: coordinationScopeGuard.message });
+    }
     if (courseKey && !grade.courses.some((course) => course.key === courseKey)) {
       return res.status(404).json({ message: 'No se encontró el curso solicitado para este grado.' });
     }
@@ -7112,7 +7307,7 @@ router.put('/academic-management/schedules/:gradeKey/load', async (req, res) => 
     gradeSchedule.updatedAt = new Date();
     await configuration.save();
 
-    return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+    return res.status(200).json({ academicStructure: serializeAcademicStructureForRequester(req, configuration) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -7132,6 +7327,10 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
     const grade = serialized.grades.find((item) => item.key === gradeKey);
     if (!grade) {
       return res.status(404).json({ message: 'No se encontró el grado solicitado.' });
+    }
+    const coordinationScopeGuard = assertCoordinationCanEditGradeSchedule(req, serialized, gradeKey);
+    if (!coordinationScopeGuard.ok) {
+      return res.status(coordinationScopeGuard.status).json({ message: coordinationScopeGuard.message });
     }
     if (courseKey && !grade.courses.some((course) => course.key === courseKey)) {
       return res.status(404).json({ message: 'No se encontró el curso solicitado para este grado.' });
@@ -7198,7 +7397,7 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
     gradeSchedule.updatedAt = new Date();
     await configuration.save();
 
-    return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+    return res.status(200).json({ academicStructure: serializeAcademicStructureForRequester(req, configuration) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -7217,6 +7416,10 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
     const grade = serialized.grades.find((item) => item.key === gradeKey);
     if (!grade) {
       return res.status(404).json({ message: 'No se encontró el grado solicitado.' });
+    }
+    const coordinationScopeGuard = assertCoordinationCanEditGradeSchedule(req, serialized, gradeKey);
+    if (!coordinationScopeGuard.ok) {
+      return res.status(coordinationScopeGuard.status).json({ message: coordinationScopeGuard.message });
     }
 
     const gradeSchedule = ensureAcademicGradeSchedule(configuration, gradeKey);
@@ -7252,7 +7455,7 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
     gradeSchedule.updatedAt = new Date();
     await configuration.save();
 
-    return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+    return res.status(200).json({ academicStructure: serializeAcademicStructureForRequester(req, configuration) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -8190,6 +8393,24 @@ router.post('/communications', async (req, res) => {
       return res.status(400).json({ message: 'title and body are required' });
     }
 
+    const publishToFeed = channels?.feed !== false;
+    const sendPush = channels?.push !== false;
+    const sendEmail = channels?.email === true;
+    if (!publishToFeed && !sendEmail) {
+      return res.status(400).json({ message: 'Debes publicar en el feed o enviar por correo.' });
+    }
+
+    const normalizedAudienceType = normalizeText(audienceType) || 'general';
+    if (normalizedAudienceType === 'grade' && !normalizeArray(gradeTargets).length) {
+      return res.status(400).json({ message: 'Selecciona al menos un grado.' });
+    }
+    if (normalizedAudienceType === 'course' && !normalizeArray(courseTargets).length) {
+      return res.status(400).json({ message: 'Selecciona al menos un curso.' });
+    }
+    if (normalizedAudienceType === 'individual' && !normalizeArray(parentTargets).length && !normalizeArray(studentTargets).length) {
+      return res.status(400).json({ message: 'Selecciona al menos un acudiente o alumno.' });
+    }
+
     const audience = await resolveAudienceMembers({ schoolId, audienceType, gradeTargets, courseTargets, parentTargets, studentTargets });
     if (!audience.parents.length) {
       return res.status(400).json({ message: 'No se encontraron acudientes para el filtro seleccionado.' });
@@ -8208,7 +8429,7 @@ router.post('/communications', async (req, res) => {
       authorThumbUrl: selectedAuthor.authorThumbUrl,
       title: normalizeText(title),
       body: normalizeText(body),
-      audienceType: normalizeText(audienceType) || 'general',
+      audienceType: normalizedAudienceType,
       gradeTargets: normalizeArray(gradeTargets),
       courseTargets: normalizeArray(courseTargets),
       parentTargets: audienceType === 'individual' ? audience.parentIds : [],
@@ -8218,8 +8439,9 @@ router.post('/communications', async (req, res) => {
       emailSubject: normalizeText(emailSubject) || normalizeText(title),
       media: normalizedMedia,
       channels: {
-        push: channels?.push !== false,
-        email: false,
+        feed: publishToFeed,
+        push: publishToFeed ? sendPush : false,
+        email: sendEmail,
       },
       sentAt: new Date(),
     });
@@ -8299,10 +8521,14 @@ router.put('/communications/:id', async (req, res) => {
     communication.recipientStudentIds = audience.studentIds;
     communication.emailSubject = normalizeText(emailSubject) || normalizeText(title);
     communication.media = normalizeCommunicationMedia(media);
-    communication.channels = {
-      push: channels?.push !== false,
-      email: false,
-    };
+    // Edits update the published content only; delivery channels stay as originally sent.
+    if (channels && typeof channels === 'object') {
+      communication.channels = {
+        feed: channels.feed !== false,
+        push: channels.push !== false,
+        email: channels.email === true,
+      };
+    }
 
     await communication.save();
 

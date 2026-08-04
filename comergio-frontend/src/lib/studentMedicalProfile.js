@@ -65,6 +65,9 @@ export function getMedicalProfileSourceLabel(source = '') {
   if (source === 'admin') {
     return 'Administracion';
   }
+  if (source === 'enrollment' || source === 'matricula') {
+    return 'Matricula';
+  }
   return 'Actualizacion';
 }
 

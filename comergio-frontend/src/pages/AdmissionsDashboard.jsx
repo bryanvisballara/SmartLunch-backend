@@ -9,10 +9,15 @@ import AcademicSecretaryDashboard from './AcademicSecretaryDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
-import { COMERGIO_ACADEMY_PARENT } from '../components/comergio-academy/academyNav';
-import { AcademyNotificationBadge } from '../components/comergio-academy/AcademyNotificationBadge';
-import { useComergioAcademyNotificationCounts } from '../components/comergio-academy/useComergioAcademyNotificationCounts';
+import {
+  COMERGIO_ACADEMY_CHILDREN,
+  COMERGIO_ACADEMY_PARENT,
+  isComergioAcademySection,
+} from '../components/comergio-academy/academyNav';
 import '../components/comergio-academy/ComergioAcademyPanel.css';
+import colibriLogo from '../assets/colibrisinfondo.png';
+import StaffComergioAcademyNav from '../components/staff-chrome/StaffComergioAcademyNav';
+import '../components/staff-chrome/StaffTeacherChrome.css';
 import {
   createAdmissionApplicant,
   createAdmissionEvent,
@@ -75,7 +80,12 @@ const ADMISSIONS_VIEW_OPTIONS = [
   { key: 'marketing', label: 'Marketing', status: '', empty: '' },
   { key: 'matricula', label: 'Matrícula', status: '', empty: '' },
   { key: 'matriculas_digitales', label: 'Matrículas digitales', status: '', empty: '' },
-  { key: COMERGIO_ACADEMY_PARENT.key, label: COMERGIO_ACADEMY_PARENT.label, status: '', empty: '' },
+];
+
+const ADMISSIONS_ALL_VIEW_KEYS = [
+  ...ADMISSIONS_VIEW_OPTIONS.map((option) => option.key),
+  COMERGIO_ACADEMY_PARENT.key,
+  ...COMERGIO_ACADEMY_CHILDREN.map((child) => child.key),
 ];
 
 const ADMISSION_RESULT_OPTIONS = [
@@ -335,7 +345,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const { stageKey: routeStageKey = '' } = useParams();
   const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const [internalView, setInternalView] = useState(queryParams.get('view') || 'dashboard');
-  const currentView = ADMISSIONS_VIEW_OPTIONS.some((option) => option.key === (activeView || internalView)) ? (activeView || internalView) : 'dashboard';
+  const requestedView = activeView || internalView;
+  const currentView = ADMISSIONS_ALL_VIEW_KEYS.includes(requestedView) ? requestedView : 'dashboard';
   const currentViewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === currentView) || ADMISSIONS_VIEW_OPTIONS[0];
   const isWorklistView = ['aspirantes', 'desistidos', 'no-admitidos'].includes(currentView);
   const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
@@ -344,7 +355,6 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     ?? staffAnnouncementsUnreadQuery.data?.unreadCount
     ?? 0
   );
-  const academyCounts = useComergioAcademyNotificationCounts(!embedded);
   const schoolDisplayName = getSchoolDisplayName(user, 'Colegio');
   const userDisplayName = user?.name || user?.username || 'Usuario';
   const [loading, setLoading] = useState(true);
@@ -448,14 +458,23 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   useEffect(() => {
     const stageFromUrl = routeStageKey || queryParams.get('stage') || '';
     const viewFromUrl = queryParams.get('view') || currentView;
-    const viewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === viewFromUrl) || currentViewConfig;
-    const nextStatus = stageFromUrl && viewConfig.key === 'dashboard' ? 'active' : viewConfig.status;
+    const resolvedKey = ADMISSIONS_ALL_VIEW_KEYS.includes(viewFromUrl) ? viewFromUrl : 'dashboard';
+    const viewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === resolvedKey) || {
+      key: resolvedKey,
+      status: '',
+    };
+    const nextStatus = stageFromUrl && viewConfig.key === 'dashboard' ? 'active' : (viewConfig.status || '');
     setInternalView(viewConfig.key);
     setFilters((previous) => ({ ...previous, stage: stageFromUrl, status: nextStatus }));
-    loadAdmissions({ ...filters, stage: stageFromUrl, status: nextStatus }, { keepSelection: true });
+    if (!isComergioAcademySection(viewConfig.key)) {
+      loadAdmissions({ ...filters, stage: stageFromUrl, status: nextStatus }, { keepSelection: true });
+    }
   }, []);
 
   useEffect(() => {
+    if (isComergioAcademySection(currentView)) {
+      return;
+    }
     const nextStatus = currentView === 'dashboard' && filters.stage ? 'active' : currentViewConfig.status;
     setFilters((previous) => ({ ...previous, status: nextStatus }));
     loadAdmissions({ ...filters, status: nextStatus }, { keepSelection: false });
@@ -500,8 +519,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   };
 
   const openPortalView = (viewKey) => {
-    const viewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === viewKey) || ADMISSIONS_VIEW_OPTIONS[0];
-    const nextFilters = { ...filters, stage: '', status: viewConfig.status };
+    const resolvedKey = ADMISSIONS_ALL_VIEW_KEYS.includes(viewKey) ? viewKey : 'dashboard';
+    const viewConfig = ADMISSIONS_VIEW_OPTIONS.find((option) => option.key === resolvedKey) || {
+      key: resolvedKey,
+      status: '',
+    };
+    const nextFilters = { ...filters, stage: '', status: viewConfig.status || '' };
     setInternalView(viewConfig.key);
     setFilters(nextFilters);
     setSelectedApplicant(null);
@@ -902,52 +925,96 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     }
   };
 
+  const userInitial = String(userDisplayName || 'A').trim().charAt(0).toUpperCase() || 'A';
+
   return (
     <section className={`admissions-page dashboard-shell${embedded ? '' : ' admissions-portal-page'}`}>
-      {!embedded ? (
-        <header className="admissions-portal-header">
-          <div className="admissions-portal-brand">
-            <strong>Comergio</strong>
-            <span aria-hidden="true" />
-            <p>{schoolDisplayName}</p>
-          </div>
-          <div className="admissions-user-menu">
-            <span className="admissions-portal-context">Admisiones</span>
-            <span>{userDisplayName}</span>
-            <button className="admissions-user-menu-button" type="button" aria-label="Abrir menú de usuario" onClick={() => setShowUserMenu((value) => !value)}>
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 12a4.25 4.25 0 1 0-4.25-4.25A4.25 4.25 0 0 0 12 12Zm0 2c-4 0-7 1.9-7 4.4V20h14v-1.6C19 15.9 16 14 12 14Z" fill="currentColor" /></svg>
-            </button>
-            {showUserMenu ? (
-              <div className="admissions-user-dropdown">
-                <button type="button" onClick={handleLogout}>Cerrar sesión</button>
-              </div>
-            ) : null}
-          </div>
-        </header>
-      ) : null}
-      <div className={embedded ? 'admissions-embedded-shell' : 'admissions-portal-shell'}>
+      <div className={embedded ? 'admissions-embedded-shell' : 'staff-teacher-chrome__frame'}>
         {!embedded ? (
-          <aside className="admissions-sidebar" aria-label="Navegación de admisiones">
-            {ADMISSIONS_VIEW_OPTIONS.map((option) => (
-              <button
-                key={option.key}
-                className={`admissions-sidebar-item${currentView === option.key ? ' is-active' : ''}${option.key === COMERGIO_ACADEMY_PARENT.key ? ' admissions-sidebar-item--academy' : ''}`}
-                type="button"
-                onClick={() => openPortalView(option.key)}
-              >
-                <span>
-                  {option.label}
-                  {option.key === 'staff_announcements' ? (
-                    <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
-                  ) : null}
-                  {option.key === COMERGIO_ACADEMY_PARENT.key ? (
-                    <AcademyNotificationBadge count={academyCounts.total} />
-                  ) : null}
+          <aside className="staff-teacher-chrome__rail" aria-label="Navegación de admisiones">
+            <div className="staff-teacher-chrome__rail-brand">
+              <div className="staff-teacher-chrome__rail-brand-copy">
+                <img alt="Comergio" className="staff-teacher-chrome__rail-brand-logo" src={colibriLogo} />
+                <div>
+                  <strong>Comergio</strong>
+                  <span>Conectamos tu colegio</span>
+                </div>
+              </div>
+            </div>
+            <nav className="staff-teacher-chrome__rail-nav">
+              <div className="staff-teacher-chrome__rail-group">
+                <p className="staff-teacher-chrome__rail-group-label">Admisiones</p>
+                <div className="staff-teacher-chrome__nav-list">
+                  {ADMISSIONS_VIEW_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      className={`staff-teacher-chrome__nav-item${currentView === option.key ? ' is-active' : ''}`}
+                      type="button"
+                      onClick={() => openPortalView(option.key)}
+                    >
+                      <span className="staff-teacher-chrome__nav-item-label">
+                        {option.label}
+                        {option.key === 'staff_announcements' ? (
+                          <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+                        ) : null}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <StaffComergioAcademyNav activeKey={currentView} onSelect={openPortalView} />
+            </nav>
+            <div className="staff-teacher-chrome__rail-school">
+              <div className="staff-teacher-chrome__rail-school-main">
+                <span className="staff-teacher-chrome__rail-school-icon" aria-hidden="true">
+                  <svg fill="none" viewBox="0 0 24 24">
+                    <path d="M12 3 4.5 6.5v4.2c0 4.6 3.1 8.8 7.5 10.3 4.4-1.5 7.5-5.7 7.5-10.3V6.5L12 3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                    <path d="M9.5 12.2 11 13.7l3.5-3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                  </svg>
                 </span>
-              </button>
-            ))}
+                <div>
+                  <strong>{schoolDisplayName}</strong>
+                  <span>Admisiones</span>
+                </div>
+              </div>
+            </div>
           </aside>
         ) : null}
+        <div className={embedded ? undefined : 'staff-teacher-chrome__main'}>
+          {!embedded ? (
+            <header className="staff-teacher-chrome__topbar">
+              <div className="staff-teacher-chrome__topbar-spacer" />
+              <div className="staff-teacher-chrome__topbar-actions">
+                <div className="staff-teacher-chrome__topbar-profile">
+                  <button
+                    aria-expanded={showUserMenu}
+                    aria-haspopup="menu"
+                    aria-label="Abrir menú de usuario"
+                    className="staff-teacher-chrome__topbar-profile-btn"
+                    onClick={() => setShowUserMenu((value) => !value)}
+                    type="button"
+                  >
+                    <span className="staff-teacher-chrome__topbar-avatar">{userInitial}</span>
+                    <span className="staff-teacher-chrome__topbar-profile-copy">
+                      <strong>{userDisplayName}</strong>
+                      <span>Admisiones</span>
+                    </span>
+                    <svg aria-hidden="true" className="staff-teacher-chrome__topbar-chevron" fill="none" viewBox="0 0 24 24">
+                      <path d="m7 10 5 5 5-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+                    </svg>
+                  </button>
+                  {showUserMenu ? (
+                    <div className="staff-teacher-chrome__topbar-dropdown" role="menu">
+                      <button className="staff-teacher-chrome__topbar-dropdown-item is-danger" onClick={handleLogout} role="menuitem" type="button">
+                        Cerrar sesión
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </header>
+          ) : null}
+          <div className={embedded ? undefined : 'staff-teacher-chrome__workspace'}>
       <section className="dashboard-stage admin-dashboard-stage admissions-stage">
         <div className="admin-dashboard-main admissions-main">
           {message ? (
@@ -1227,9 +1294,13 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             </section>
           ) : null}
 
-          {currentView === COMERGIO_ACADEMY_PARENT.key && !showApplicantDetail ? (
+          {isComergioAcademySection(currentView) && !showApplicantDetail ? (
             <section className="dashboard-card">
-              <ComergioAcademyPanel showInternalNav />
+              <ComergioAcademyPanel
+                activeKey={currentView === COMERGIO_ACADEMY_PARENT.key ? 'video_tutoriales' : currentView}
+                onNavigate={openPortalView}
+                showLandingCards={false}
+              />
             </section>
           ) : null}
 
@@ -1445,6 +1516,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
           ) : null}
         </div>
       </section>
+          </div>
+        </div>
       </div>
     </section>
   );

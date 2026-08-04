@@ -209,6 +209,7 @@ function buildStudentCommunityFeedQuery({ schoolId, userId, student }) {
   return {
     schoolId,
     sentAt: { $ne: null },
+    'channels.feed': { $ne: false },
     $or: orFilters,
   };
 }
@@ -228,6 +229,7 @@ function buildParentCommunityFeedQuery({ schoolId, parentUserId, children = [] }
   return {
     schoolId,
     sentAt: { $ne: null },
+    'channels.feed': { $ne: false },
     $or: orFilters,
   };
 }

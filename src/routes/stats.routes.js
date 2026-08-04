@@ -358,6 +358,11 @@ router.get('/admin-home', async (req, res) => {
     last7Start.setUTCDate(last7Start.getUTCDate() - 6);
     const prev7Start = new Date(last7Start);
     prev7Start.setUTCDate(prev7Start.getUTCDate() - 7);
+    const dayStart = startOfDay(now);
+    const yesterdayStart = new Date(dayStart.getTime() - (24 * 60 * 60 * 1000));
+    const weekStart = startOfWeek(now);
+    const previousWeekStart = new Date(weekStart.getTime() - (7 * 24 * 60 * 60 * 1000));
+    const previousMonthStart = startOfMonth(new Date(monthStart.getTime() - 1));
 
     const orderMatch = {
       schoolId,
@@ -399,11 +404,14 @@ router.get('/admin-home', async (req, res) => {
       salesToday,
       salesWeek,
       salesMonth,
+      salesYesterday,
+      salesPreviousWeek,
+      salesPreviousMonth,
       utilityToday,
       utilityWeek,
       utilityMonth,
-      topStudentsRaw,
-      topProductsRaw,
+      topStudentsAgg,
+      topProductsAgg,
       profitabilityRaw,
       lowStockProducts,
       lowBalanceStudents,
@@ -421,26 +429,38 @@ router.get('/admin-home', async (req, res) => {
       academicUsersByRoleRaw,
     ] = await Promise.all([
       orderAggregate([
-        { $match: { ...orderMatch, createdAt: { $gte: startOfDay(now) } } },
+        { $match: { ...orderMatch, createdAt: { $gte: dayStart } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       orderAggregate([
-        { $match: { ...orderMatch, createdAt: { $gte: startOfWeek(now) } } },
+        { $match: { ...orderMatch, createdAt: { $gte: weekStart } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       orderAggregate([
         { $match: { ...orderMatch, createdAt: { $gte: monthStart, $lt: monthEnd } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
-      getUtilityForPeriod(orderMatch, startOfDay(now)),
-      getUtilityForPeriod(orderMatch, startOfWeek(now)),
+      orderAggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: yesterdayStart, $lt: dayStart } } },
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]),
+      orderAggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: previousWeekStart, $lt: weekStart } } },
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]),
+      orderAggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: previousMonthStart, $lt: monthStart } } },
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]),
+      getUtilityForPeriod(orderMatch, dayStart),
+      getUtilityForPeriod(orderMatch, weekStart),
       getUtilityForPeriod(orderMatch, monthStart, monthEnd),
       orderAggregate([
         {
           $match: {
             ...orderMatch,
             studentId: { $ne: null },
-            createdAt: { $gte: thirtyDaysAgo },
+            guestSale: { $ne: true },
           },
         },
         {
@@ -451,6 +471,7 @@ router.get('/admin-home', async (req, res) => {
                 $dateToString: {
                   format: '%Y-%m-%d',
                   date: '$createdAt',
+                  timezone: 'America/Bogota',
                 },
               },
             },
@@ -475,23 +496,12 @@ router.get('/admin-home', async (req, res) => {
             },
           },
         },
-        { $sort: { averageDailySpent: -1, totalSpent: -1 } },
-        { $limit: 8 },
-        {
-          $lookup: {
-            from: 'students',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'student',
-          },
-        },
-        { $unwind: { path: '$student', preserveNullAndEmptyArrays: true } },
+        { $sort: { totalSpent: -1, averageDailySpent: -1 } },
+        { $limit: 10 },
         {
           $project: {
             _id: 0,
             studentId: '$_id',
-            studentName: '$student.name',
-            schoolCode: '$student.schoolCode',
             totalSpent: 1,
             daysWithOrders: 1,
             averageDailySpent: 1,
@@ -499,7 +509,7 @@ router.get('/admin-home', async (req, res) => {
         },
       ]),
       orderAggregate([
-        { $match: { ...orderMatch, createdAt: { $gte: thirtyDaysAgo } } },
+        { $match: orderMatch },
         { $unwind: '$items' },
         {
           $group: {
@@ -508,22 +518,12 @@ router.get('/admin-home', async (req, res) => {
             revenue: { $sum: '$items.subtotal' },
           },
         },
-        { $sort: { quantity: -1 } },
-        { $limit: 10 },
-        {
-          $lookup: {
-            from: 'products',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'product',
-          },
-        },
-        { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } },
+        { $sort: { quantity: -1, revenue: -1 } },
+        { $limit: 20 },
         {
           $project: {
             _id: 0,
             productId: '$_id',
-            productName: '$product.name',
             quantity: 1,
             revenue: 1,
           },
@@ -752,6 +752,55 @@ router.get('/admin-home', async (req, res) => {
       accumulator[String(item._id || '')] = Number(item.count || 0);
       return accumulator;
     }, {});
+
+    const topStudentIds = (Array.isArray(topStudentsAgg) ? topStudentsAgg : [])
+      .map((row) => row?.studentId)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      .map((id) => (id instanceof mongoose.Types.ObjectId ? id : new mongoose.Types.ObjectId(String(id))));
+    const topStudentDocs = topStudentIds.length
+      ? await Student.find({ _id: { $in: topStudentIds }, schoolId: String(schoolId) })
+        .select('_id name firstName lastName schoolCode grade')
+        .lean()
+      : [];
+    const topStudentById = new Map(topStudentDocs.map((student) => [String(student._id), student]));
+    const resolveStudentDisplayName = (student) => {
+      const fullName = String(student?.name || '').trim();
+      if (fullName) return fullName;
+      const composed = `${student?.firstName || ''} ${student?.lastName || ''}`.trim();
+      return composed || 'Alumno';
+    };
+    const topStudentsRaw = (Array.isArray(topStudentsAgg) ? topStudentsAgg : []).map((row) => {
+      const student = topStudentById.get(String(row.studentId || '')) || null;
+      return {
+        studentId: row.studentId,
+        studentName: resolveStudentDisplayName(student),
+        schoolCode: student?.schoolCode || '',
+        grade: student?.grade || '',
+        totalSpent: Number(row.totalSpent || 0),
+        daysWithOrders: Number(row.daysWithOrders || 0),
+        averageDailySpent: Number(row.averageDailySpent || 0),
+      };
+    });
+
+    const topProductIds = (Array.isArray(topProductsAgg) ? topProductsAgg : [])
+      .map((row) => row?.productId)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      .map((id) => (id instanceof mongoose.Types.ObjectId ? id : new mongoose.Types.ObjectId(String(id))));
+    const topProductDocs = topProductIds.length
+      ? await Product.find({ _id: { $in: topProductIds }, schoolId: String(schoolId) })
+        .select('_id name')
+        .lean()
+      : [];
+    const topProductById = new Map(topProductDocs.map((product) => [String(product._id), product]));
+    const topProductsRaw = (Array.isArray(topProductsAgg) ? topProductsAgg : []).map((row) => {
+      const product = topProductById.get(String(row.productId || '')) || null;
+      return {
+        productId: row.productId,
+        productName: product?.name || 'Producto',
+        quantity: Number(row.quantity || 0),
+        revenue: Number(row.revenue || 0),
+      };
+    });
 
     const calculateQrFee = (amount) => (Number(amount || 0) * accountingFeeSettings.qrPercent) / 100;
     const calculateDataphoneFee = (amount) => (
@@ -1147,6 +1196,9 @@ router.get('/admin-home', async (req, res) => {
       salesToday: salesToday[0]?.total || 0,
       salesWeek: salesWeek[0]?.total || 0,
       salesMonth: salesMonth[0]?.total || 0,
+      salesYesterday: salesYesterday[0]?.total || 0,
+      salesPreviousWeek: salesPreviousWeek[0]?.total || 0,
+      salesPreviousMonth: salesPreviousMonth[0]?.total || 0,
       salesMonthNet: salesMonthNetTotal,
       paymentFeesMonthTotal,
       utilityToday,

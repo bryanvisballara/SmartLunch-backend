@@ -799,6 +799,8 @@ export default function RectoriaControlCenterPanel({
   disciplineObservations = [],
   passingScoreLabel = '70',
   onCommunityReportsSummaryChange,
+  scopeLabel = '',
+  scopedStudentIds = null,
 }) {
   const [wellbeingData, setWellbeingData] = useState(null);
   const [nursingData, setNursingData] = useState(null);
@@ -1541,6 +1543,41 @@ export default function RectoriaControlCenterPanel({
       });
   }, [academicGradingScale?.passingScore, campusPerformanceCourses, students, teacherLabelById]);
 
+  const scopedStudentIdSet = useMemo(() => {
+    if (!scopedStudentIds) {
+      return null;
+    }
+    return new Set([...scopedStudentIds].map((id) => String(id || '').trim()).filter(Boolean));
+  }, [scopedStudentIds]);
+
+  const scopedDisciplineObservations = useMemo(() => {
+    if (!scopedStudentIdSet) {
+      return disciplineObservations;
+    }
+    return (disciplineObservations || []).filter((item) => {
+      const studentId = String(item.studentId || item.student?._id || item.student?.id || '').trim();
+      if (studentId) {
+        return scopedStudentIdSet.has(studentId);
+      }
+      const studentName = String(item.studentName || item.student?.name || '').trim().toLowerCase();
+      if (!studentName) {
+        return false;
+      }
+      return (students || []).some((student) => String(student.name || '').trim().toLowerCase() === studentName);
+    });
+  }, [disciplineObservations, scopedStudentIdSet, students]);
+
+  const scopedWellbeingCases = useMemo(() => {
+    const cases = wellbeingData?.recentCases || [];
+    if (!scopedStudentIdSet) {
+      return cases;
+    }
+    return cases.filter((item) => {
+      const studentId = String(item.studentId || item.student?.id || '').trim();
+      return studentId ? scopedStudentIdSet.has(studentId) : false;
+    });
+  }, [scopedStudentIdSet, wellbeingData]);
+
   const viewMeta = {
     control_levels: {
       eyebrow: 'Centro de control',
@@ -1604,7 +1641,10 @@ export default function RectoriaControlCenterPanel({
         <div>
           <span className="rectoria-control-eyebrow">{viewMeta.eyebrow}</span>
           <h2>{view === 'control_community_reports' ? <TeEscuchamosLabel as="span" /> : viewMeta.title}</h2>
-          <p>{viewMeta.description}</p>
+          <p>
+            {viewMeta.description}
+            {scopeLabel ? ` Vista limitada a ${scopeLabel}.` : ''}
+          </p>
         </div>
         {view === 'control_levels' && overviewAcademicPerformance?.weightedAverage != null ? (
           <div className="rectoria-control-hero-metric">
@@ -1673,14 +1713,14 @@ export default function RectoriaControlCenterPanel({
           {!loadingWellbeing ? (
             <>
               <ControlKpiGrid items={[
-                { key: 'active', label: 'Casos activos', value: wellbeingData?.summary?.activeCount || 0, helper: 'Abiertos o en seguimiento' },
-                { key: 'urgent', label: 'Urgentes', value: wellbeingData?.summary?.urgentCount || 0, helper: 'Prioridad alta', tone: (wellbeingData?.summary?.urgentCount || 0) > 0 ? 'danger' : '' },
-                { key: 'week', label: 'Nuevos esta semana', value: wellbeingData?.summary?.newThisWeekCount || 0, helper: 'Casos creados' },
-                { key: 'follow', label: 'Seguimiento pendiente', value: wellbeingData?.summary?.followUpDueCount || 0, helper: 'Requieren acción', tone: (wellbeingData?.summary?.followUpDueCount || 0) > 0 ? 'warn' : '' },
+                { key: 'active', label: 'Casos del nivel', value: scopedWellbeingCases.filter((item) => ['open', 'follow_up', 'escalated'].includes(String(item.status || ''))).length, helper: scopeLabel ? `En ${scopeLabel}` : 'Abiertos o en seguimiento' },
+                { key: 'urgent', label: 'Urgentes', value: scopedWellbeingCases.filter((item) => item.priority === 'urgent').length, helper: 'Prioridad alta', tone: scopedWellbeingCases.some((item) => item.priority === 'urgent') ? 'danger' : '' },
+                { key: 'total', label: 'Casos recientes', value: scopedWellbeingCases.length, helper: 'Visibles en este nivel' },
+                { key: 'follow', label: 'Seguimiento pendiente', value: wellbeingData?.summary?.followUpDueCount || 0, helper: 'Indicador institucional', tone: (wellbeingData?.summary?.followUpDueCount || 0) > 0 ? 'warn' : '' },
               ]} />
               <ControlListPanel
-                emptyLabel="No hay casos de bienestar reportados todavía."
-                items={(wellbeingData?.recentCases || []).map((item) => ({
+                emptyLabel={scopeLabel ? `No hay casos de bienestar en ${scopeLabel}.` : 'No hay casos de bienestar reportados todavía.'}
+                items={scopedWellbeingCases.map((item) => ({
                   key: item.id || item._id,
                   title: item.student?.name || item.studentName || 'Alumno',
                   meta: `${item.caseType || item.title || 'Caso'} · ${item.status || 'abierto'} · ${formatDate(item.updatedAt || item.createdAt)}`,
@@ -1698,18 +1738,24 @@ export default function RectoriaControlCenterPanel({
           {!loadingNursing ? (
             <>
               <ControlKpiGrid items={[
-                { key: 'total', label: 'Atenciones totales', value: nursingData?.summary?.totalVisits || 0, helper: 'Registradas en enfermería' },
+                { key: 'total', label: 'Atenciones totales', value: nursingData?.summary?.totalVisits || 0, helper: scopeLabel ? 'Indicador institucional' : 'Registradas en enfermería' },
                 { key: 'week', label: 'Esta semana', value: nursingData?.summary?.visitsThisWeek || 0, helper: 'Atenciones recientes' },
-                { key: 'students', label: 'Alumnos atendidos', value: nursingData?.summary?.studentsAttended || 0, helper: 'Con historial clínico' },
-                { key: 'discipline', label: 'Observaciones convivencia', value: disciplineObservations.length, helper: 'Reportadas por docentes' },
+                { key: 'students', label: 'Alumnos del nivel', value: students.length, helper: scopeLabel || 'Con alcance de coordinación' },
+                { key: 'discipline', label: 'Observaciones convivencia', value: scopedDisciplineObservations.length, helper: 'Reportadas en el nivel' },
               ]} />
               <ControlListPanel
                 emptyLabel="No hay atenciones de enfermería registradas todavía."
-                items={(nursingData?.recentVisits || []).map((item) => ({
-                  key: item.id,
-                  title: item.studentName || 'Alumno',
-                  meta: `${item.reason || 'Atención'} · ${formatDate(item.attendedAt)}`,
-                }))}
+                items={(nursingData?.recentVisits || [])
+                  .filter((item) => {
+                    if (!scopedStudentIdSet) return true;
+                    const studentId = String(item.studentId || item.student?.id || '').trim();
+                    return studentId ? scopedStudentIdSet.has(studentId) : false;
+                  })
+                  .map((item) => ({
+                    key: item.id,
+                    title: item.studentName || 'Alumno',
+                    meta: `${item.reason || 'Atención'} · ${formatDate(item.attendedAt)}`,
+                  }))}
                 title="Atenciones recientes"
               />
             </>
@@ -1720,14 +1766,14 @@ export default function RectoriaControlCenterPanel({
       {view === 'control_coexistence' ? (
         <>
           <ControlKpiGrid items={[
-            { key: 'total', label: 'Observaciones', value: disciplineObservations.length, helper: 'Reportes de convivencia' },
-            { key: 'week', label: 'Últimos 30 registros', value: Math.min(disciplineObservations.length, 30), helper: 'Cargados en el tablero' },
-            { key: 'students', label: 'Alumnos', value: new Set(disciplineObservations.map((item) => item.studentName || item.studentId).filter(Boolean)).size, helper: 'Con observaciones' },
+            { key: 'total', label: 'Observaciones', value: scopedDisciplineObservations.length, helper: 'Reportes de convivencia' },
+            { key: 'week', label: 'Últimos 30 registros', value: Math.min(scopedDisciplineObservations.length, 30), helper: 'Cargados en el tablero' },
+            { key: 'students', label: 'Alumnos', value: new Set(scopedDisciplineObservations.map((item) => item.studentName || item.studentId).filter(Boolean)).size, helper: 'Con observaciones' },
             { key: 'risk', label: 'En riesgo académico', value: overviewAcademicPerformance?.atRiskStudents?.length || 0, helper: 'Promedio bajo umbral' },
           ]} />
           <ControlListPanel
-            emptyLabel="No hay observaciones de convivencia registradas."
-            items={disciplineObservations.slice(0, 12).map((item) => ({
+            emptyLabel={scopeLabel ? `No hay observaciones de convivencia en ${scopeLabel}.` : 'No hay observaciones de convivencia registradas.'}
+            items={scopedDisciplineObservations.slice(0, 12).map((item) => ({
               key: item.id || `${item.studentId}-${item.submittedAt}`,
               title: item.studentName || 'Alumno',
               meta: `${item.category || item.type || 'Observación'} · ${item.teacherName || item.reportedBy || 'Docente'} · ${formatDate(item.incidentAt || item.submittedAt || item.createdAt)}`,

@@ -19,3 +19,4 @@ export const getNotificationsUnreadCount = () => api.get('/notifications/unread-
 export const dismissNotification = (id) => api.patch(`/notifications/${id}/dismiss`).then((response) => response.data);
 export const markAllNotificationsRead = () => api.post('/notifications/read-all').then((response) => response.data);
 export const getNotificationsAudit = (params = {}) => api.get('/notifications/audit', { params });
+export const sendCafeteriaPromoPush = (data) => api.post('/notifications/admin/promo', data);

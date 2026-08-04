@@ -313,6 +313,12 @@ async function ensureNativePushNotifications() {
 }
 
 async function ensureWebPushNotifications() {
+  // Never register a Service Worker during Vite DEV — Chrome will keep it
+  // controlling localhost and HMR / hard refresh stop reflecting code changes.
+  if (import.meta.env.DEV) {
+    return { enabled: false, reason: 'Push web deshabilitado en desarrollo local' };
+  }
+
   if (!isWebPushSupported()) {
     return { enabled: false, reason: 'Push API no soportada en este navegador/dispositivo' };
   }

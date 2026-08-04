@@ -11,14 +11,14 @@ import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula
 import EnrollmentMatriculaAuthorizationsPanel from '../components/enrollment-matricula/EnrollmentMatriculaAuthorizationsPanel';
 import { PortalBootSplash } from '../components/PortalBootSplash';
 import InstitutionalPortalHeader from '../components/InstitutionalPortalHeader';
-import '../components/InstitutionalPortalHeader.css';
 import RectoriaPortalSidebar from '../components/rectoria/RectoriaPortalSidebar';
+import '../components/staff-chrome/StaffTeacherChrome.css';
 import RectoriaControlCenterPanel from '../components/rectoria/RectoriaControlCenterPanel';
 import CommunityReportsPanel from '../components/community/CommunityReportsPanel';
 import StaffAnnouncementsPanel, { useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
-import { COMERGIO_ACADEMY_CHILDREN, isComergioAcademySection } from '../components/comergio-academy/academyNav';
-import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection } from '../components/rectoria/rectoriaPortalNav';
+import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
+import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection, COORDINATION_PORTAL_NAV, DIRECCION_PORTAL_NAV } from '../components/rectoria/rectoriaPortalNav';
 import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
 import BrandConfirmModal from '../components/BrandConfirmModal';
@@ -80,20 +80,22 @@ import {
 } from '../services/academicSecretary.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import CoordinationLevelDashboard from '../components/CoordinationLevelDashboard';
-import CoordinationSchedulePanel from '../components/CoordinationSchedulePanel';
 import { getCampusCoordinationCourses, getCampusCoordinationDashboard, getCampusCoordinationTeachers, getCampusDisciplineObservations, resyncCampusCoordinationCourses } from '../campus/services/campus.service';
 import {
   approveHrSupplyRequest,
   consolidateHrPlannerRequests,
   createHrPlannerCycle,
+  createHrPurchaseArea,
   deleteHrPlannerCycle,
   getHrCoordinationPlannerRequests,
   getHrDashboard,
   getHrPlannerCycles,
+  getHrPurchaseAreas,
   getHrSupplyItems,
   getHrSupplyRequests,
   rejectHrSupplyRequest,
   updateHrPlannerCycle,
+  updateHrPurchaseArea,
 } from '../services/hr.service';
 import { getStudents } from '../services/students.service';
 
@@ -2223,6 +2225,8 @@ function RectoriaDashboard() {
   const [activeSection, setActiveSection] = useState('overview');
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState('');
   const [activeAcademicManagementSection, setActiveAcademicManagementSection] = useState('grades_courses');
+  const isAcademicScheduleViewActive = (activeSection === 'students' && activeAcademicManagementSection === 'schedule')
+    || (isCoordinationPortal && activeSection === 'schedule');
   const [homeData, setHomeData] = useState(null);
   const [disciplineObservations, setDisciplineObservations] = useState([]);
   const [coordinationDashboard, setCoordinationDashboard] = useState(null);
@@ -2231,6 +2235,9 @@ function RectoriaDashboard() {
   const [resourcePlannerCycles, setResourcePlannerCycles] = useState([]);
   const [resourcePlannerRequests, setResourcePlannerRequests] = useState([]);
   const [resourceRequests, setResourceRequests] = useState([]);
+  const [resourcePurchaseAreas, setResourcePurchaseAreas] = useState([]);
+  const [resourceAreaDraft, setResourceAreaDraft] = useState({ name: '', budgetAmount: '' });
+  const [editingResourceAreaId, setEditingResourceAreaId] = useState('');
   const [resourceStatusFilter, setResourceStatusFilter] = useState('');
   const [resourcePlannerCycleDraft, setResourcePlannerCycleDraft] = useState(createEmptyResourcePlannerCycleDraft);
   const [editingResourcePlannerCycleId, setEditingResourcePlannerCycleId] = useState('');
@@ -2351,19 +2358,14 @@ function RectoriaDashboard() {
   const allowedSectionKeys = useMemo(
     () => {
       if (isCoordinationPortal) {
-        return [
-          'overview',
-          'community_reports',
-          'communications',
-          'staff_announcements',
-          'resources',
-          'schedule',
-          ...COMERGIO_ACADEMY_CHILDREN.map((child) => child.key),
-        ];
+        return flattenRectoriaNavKeys(COORDINATION_PORTAL_NAV);
+      }
+      if (isDireccionPortal) {
+        return flattenRectoriaNavKeys(DIRECCION_PORTAL_NAV);
       }
       return flattenRectoriaNavKeys();
     },
-    [isCoordinationPortal],
+    [isCoordinationPortal, isDireccionPortal],
   );
   const communicationAuthors = useMemo(() => (billingBootstrap.communicationAuthors || []).filter((author) => author && author._id), [billingBootstrap.communicationAuthors]);
   const defaultCommunicationAuthor = communicationAuthors.find((author) => author.isDefault) || null;
@@ -2384,14 +2386,20 @@ function RectoriaDashboard() {
     if (isCoordinationPortal) {
       if (isComergioAcademySection(activeSection)) {
         setExpandedSidebarGroup('comergio_academy_group');
+        return;
+      }
+      const groupKey = findRectoriaNavGroupForSection(activeSection, COORDINATION_PORTAL_NAV);
+      if (groupKey) {
+        setExpandedSidebarGroup(groupKey);
       }
       return;
     }
-    const groupKey = findRectoriaNavGroupForSection(activeSection);
+    const portalNav = isDireccionPortal ? DIRECCION_PORTAL_NAV : undefined;
+    const groupKey = findRectoriaNavGroupForSection(activeSection, portalNav);
     if (groupKey) {
       setExpandedSidebarGroup(groupKey);
     }
-  }, [activeSection, isCoordinationPortal]);
+  }, [activeSection, isCoordinationPortal, isDireccionPortal]);
 
   useEffect(() => {
     if (activeSection !== 'billing' || !billingFocusParentId) {
@@ -2794,9 +2802,15 @@ function RectoriaDashboard() {
       : new Set();
 
     if (isCoordinationPortal) {
-      nextAcademicStructure = filterAcademicStructureByLevelKeys(nextAcademicStructure, coordinationLevelKeys);
-      nextStudents = filterStudentsByGradeKeys(nextStudents, coordinationGradeKeys);
-      nextBillingBootstrap = filterBillingBootstrapByGradeKeys(nextBillingBootstrap, coordinationGradeKeys);
+      if (coordinationLevelKeys.size > 0) {
+        nextAcademicStructure = filterAcademicStructureByLevelKeys(nextAcademicStructure, coordinationLevelKeys);
+        nextStudents = filterStudentsByGradeKeys(nextStudents, coordinationGradeKeys);
+        nextBillingBootstrap = filterBillingBootstrapByGradeKeys(nextBillingBootstrap, coordinationGradeKeys);
+      } else {
+        nextAcademicStructure = filterAcademicStructureByLevelKeys(nextAcademicStructure, new Set(['__no_coordination_scope__']));
+        nextStudents = [];
+        nextBillingBootstrap = filterBillingBootstrapByGradeKeys(nextBillingBootstrap, new Set(['__no_coordination_scope__']));
+      }
     }
 
     if (isCoordinationPortal) {
@@ -2879,6 +2893,7 @@ function RectoriaDashboard() {
         getHrPlannerCycles({ status: 'active' }),
         getHrCoordinationPlannerRequests({ status: 'pending_coordination_review' }),
         getHrSupplyRequests(),
+        isCoordinationPortal ? Promise.resolve({ data: { areas: [] } }) : getHrPurchaseAreas(),
       ]);
 
       const [
@@ -2890,6 +2905,7 @@ function RectoriaDashboard() {
         resourcePlannerCyclesResult,
         resourcePlannerRequestsResult,
         resourceRequestsResult,
+        resourcePurchaseAreasResult,
       ] = requestResults;
 
       const failedSections = [];
@@ -2913,6 +2929,7 @@ function RectoriaDashboard() {
       setResourcePlannerCycles(resourcePlannerCyclesResult.status === 'fulfilled' ? (resourcePlannerCyclesResult.value?.data?.cycles || []) : resourcePlannerCycles);
       setResourcePlannerRequests(resourcePlannerRequestsResult.status === 'fulfilled' ? (resourcePlannerRequestsResult.value?.data?.requests || []) : resourcePlannerRequests);
       setResourceRequests(resourceRequestsResult.status === 'fulfilled' ? (resourceRequestsResult.value?.data?.requests || []) : resourceRequests);
+      setResourcePurchaseAreas(resourcePurchaseAreasResult?.status === 'fulfilled' ? (resourcePurchaseAreasResult.value?.data?.areas || []) : resourcePurchaseAreas);
       setFeeSettingsDraft(nextFeeSettings);
 
       await refreshMatriculaAuthorizationSummary();
@@ -4786,6 +4803,68 @@ function RectoriaDashboard() {
     }
   };
 
+  const resourcePendingPurchaseApprovals = useMemo(
+    () => resourceRequests.filter((request) => request.requestType === 'purchase' && request.status === 'pending_approval'),
+    [resourceRequests]
+  );
+
+  const formatCop = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
+
+  const onSaveResourcePurchaseArea = async (event) => {
+    event.preventDefault();
+    clearMessages();
+    const name = String(resourceAreaDraft.name || '').trim();
+    const budgetAmount = Math.max(0, Number(resourceAreaDraft.budgetAmount || 0));
+    if (!name) {
+      setError('Escribe el nombre del área de compra.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (editingResourceAreaId) {
+        await updateHrPurchaseArea(editingResourceAreaId, { name, budgetAmount });
+        setSuccess('Presupuesto del área actualizado.');
+      } else {
+        await createHrPurchaseArea({ name, budgetAmount });
+        setSuccess('Área de compra creada. Ya está disponible en Recursos.');
+      }
+      setResourceAreaDraft({ name: '', budgetAmount: '' });
+      setEditingResourceAreaId('');
+      await loadPortal({ silent: true });
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo guardar el área de compra.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onEditResourcePurchaseArea = (area) => {
+    setEditingResourceAreaId(area.id);
+    setResourceAreaDraft({
+      name: area.name || '',
+      budgetAmount: String(area.budgetAmount ?? ''),
+    });
+  };
+
+  const onArchiveResourcePurchaseArea = async (area) => {
+    clearMessages();
+    setBusy(true);
+    try {
+      await updateHrPurchaseArea(area.id, { status: 'archived' });
+      setSuccess(`Área ${area.name} archivada.`);
+      if (editingResourceAreaId === area.id) {
+        setEditingResourceAreaId('');
+        setResourceAreaDraft({ name: '', budgetAmount: '' });
+      }
+      await loadPortal({ silent: true });
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo archivar el área.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onApproveResourceRequest = async (request) => {
     clearMessages();
     setBusy(true);
@@ -4797,7 +4876,9 @@ function RectoriaDashboard() {
           approvedQuantity: entry.quantity,
         })),
       });
-      setSuccess('Requerimiento aprobado.');
+      setSuccess(request.requestType === 'purchase'
+        ? `Compra aprobada. Presupuesto usado: $${Number(request.estimatedTotal || 0).toLocaleString('es-CO')}.`
+        : 'Requerimiento aprobado.');
       await loadPortal({ silent: true });
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo aprobar el requerimiento.');
@@ -5194,14 +5275,21 @@ function RectoriaDashboard() {
   };
 
   const syncAcademicStructureState = (structurePayload) => {
-    const nextDraft = normalizeAcademicStructureDraftWithBootstrap(structurePayload || {}, billingBootstrap);
+    let nextDraft = normalizeAcademicStructureDraftWithBootstrap(structurePayload || {}, billingBootstrap);
+    if (isCoordinationPortal) {
+      const levelKeys = resolveCoordinationLevelKeys(nextDraft, coordinationScope);
+      nextDraft = filterAcademicStructureByLevelKeys(
+        nextDraft,
+        levelKeys.size > 0 ? levelKeys : new Set(['__no_coordination_scope__']),
+      );
+    }
     setAcademicStructureDraft(nextDraft);
     setFeeSettingsDraft((prev) => normalizeFeeSettingsDraft(prev, nextDraft.grades));
     setBillingBootstrap((prev) => ({
       ...prev,
       grades: nextDraft.grades.map((grade) => grade.key),
       courses: nextDraft.grades.flatMap((grade) => grade.courses.map((course) => course.key)),
-      academicStructure: structurePayload || prev.academicStructure,
+      academicStructure: nextDraft,
     }));
   };
 
@@ -6165,7 +6253,7 @@ function RectoriaDashboard() {
 
   useEffect(() => {
     const onScheduleKeyDown = (event) => {
-      if (activeAcademicManagementSection !== 'schedule' || !selectedScheduleSlotKey) return;
+      if (!isAcademicScheduleViewActive || !selectedScheduleSlotKey) return;
       const isCopy = (event.metaKey || event.ctrlKey) && String(event.key || '').toLowerCase() === 'c';
       const isPaste = (event.metaKey || event.ctrlKey) && String(event.key || '').toLowerCase() === 'v';
       if (!isCopy && !isPaste) return;
@@ -6212,7 +6300,7 @@ function RectoriaDashboard() {
 
     window.addEventListener('keydown', onScheduleKeyDown);
     return () => window.removeEventListener('keydown', onScheduleKeyDown);
-  }, [activeAcademicManagementSection, scheduleClipboardEntry, selectedScheduleConfiguredBlocks, selectedScheduleConfiguredSlotByKey, selectedScheduleEntryByKey, selectedScheduleGradeKey, selectedScheduleSlotKey]);
+  }, [isAcademicScheduleViewActive, scheduleClipboardEntry, selectedScheduleConfiguredBlocks, selectedScheduleConfiguredSlotByKey, selectedScheduleEntryByKey, selectedScheduleGradeKey, selectedScheduleSlotKey]);
 
   const onSaveAcademicScheduleLoad = async () => {
     if (!selectedScheduleGradeKey) {
@@ -6268,7 +6356,7 @@ function RectoriaDashboard() {
   };
 
   useEffect(() => {
-    if (activeAcademicManagementSection !== 'schedule' || !selectedScheduleGradeKey || !selectedScheduleCourseKey) {
+    if (!isAcademicScheduleViewActive || !selectedScheduleGradeKey || !selectedScheduleCourseKey) {
       return undefined;
     }
 
@@ -6305,7 +6393,7 @@ function RectoriaDashboard() {
         clearTimeout(scheduleAutosaveTimerRef.current);
       }
     };
-  }, [activeAcademicManagementSection, selectedGradeSchedule.weeklySchedule, selectedScheduleCourseKey, selectedScheduleGradeKey]);
+  }, [isAcademicScheduleViewActive, selectedGradeSchedule.weeklySchedule, selectedScheduleCourseKey, selectedScheduleGradeKey]);
 
   const onGenerateAcademicWeeklySchedule = async () => {
     if (!selectedScheduleGradeKey) {
@@ -7628,80 +7716,81 @@ function RectoriaDashboard() {
   }
 
   return (
-    <section className="rectoria-shell">
-      <InstitutionalPortalHeader
-        helperText={institutionalHeaderConfig.helperText}
-        logoAlt={institutionalHeaderConfig.logoAlt}
-        logoSrc={institutionalHeaderConfig.logoSrc}
-        onRefresh={() => loadPortal({ silent: true })}
-        portalKicker={institutionalHeaderConfig.portalKicker}
-        refreshDisabled={refreshing || backgroundLoading || busy}
-        refreshLabel={institutionalRefreshLabel}
-        userName={institutionalUserName}
+    <section className="rectoria-shell staff-teacher-chrome__frame">
+      <RectoriaPortalSidebar
+        activeSection={activeSection}
+        admissionsSubnav={(
+          <div className="rectoria-sidebar-subnav" aria-label="Secciones de admisiones">
+            {ADMISSIONS_SECTION_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                className={`rectoria-sidebar-subitem${activeAdmissionsView === option.key ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => setActiveAdmissionsView(option.key)}
+              >
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        academicManagementSubnav={(
+          <div className="rectoria-sidebar-subnav" aria-label="Bloques de gestión académica">
+            {ACADEMIC_MANAGEMENT_SECTION_OPTIONS.map((option) => (
+              <button
+                key={option.key}
+                className={`rectoria-sidebar-subitem${activeAcademicManagementSection === option.key ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => setActiveAcademicManagementSection(option.key)}
+              >
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        expandedGroup={expandedSidebarGroup}
+        isCoordinationPortal={isCoordinationPortal}
+        isDireccionPortal={isDireccionPortal}
+        matriculaAuthorizationPendingCount={isDireccionPortal ? 0 : matriculaAuthorizationPendingCount}
+        portalLabel={institutionalHeaderConfig.portalKicker}
+        schoolName={schoolName}
+        studentsMissingPlacementCount={studentsMissingPlacementCount}
+        communityReportsPendingCount={communityReportsPendingCount}
+        staffAnnouncementsUnreadCount={staffAnnouncementsUnreadCount}
+        onExpandedGroupChange={setExpandedSidebarGroup}
+        onSectionChange={setActiveSection}
+        teamSubnav={(
+          <div className="rectoria-sidebar-subnav" aria-label="Roles institucionales">
+            {roleSummary.map((group) => (
+              <button
+                key={group.value}
+                className={`rectoria-sidebar-subitem${selectedTeamRole === group.value ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => setSelectedTeamRole(group.value)}
+              >
+                <span>{group.label}</span>
+                <strong>{group.count}</strong>
+              </button>
+            ))}
+          </div>
+        )}
       />
 
-      <div className="rectoria-portal-layout">
-        <RectoriaPortalSidebar
-          activeSection={activeSection}
-          admissionsSubnav={(
-            <div className="rectoria-sidebar-subnav" aria-label="Secciones de admisiones">
-              {ADMISSIONS_SECTION_OPTIONS.map((option) => (
-                <button
-                  key={option.key}
-                  className={`rectoria-sidebar-subitem${activeAdmissionsView === option.key ? ' is-active' : ''}`}
-                  type="button"
-                  onClick={() => setActiveAdmissionsView(option.key)}
-                >
-                  <span>{option.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          academicManagementSubnav={(
-            <div className="rectoria-sidebar-subnav" aria-label="Bloques de gestión académica">
-              {ACADEMIC_MANAGEMENT_SECTION_OPTIONS.map((option) => (
-                <button
-                  key={option.key}
-                  className={`rectoria-sidebar-subitem${activeAcademicManagementSection === option.key ? ' is-active' : ''}`}
-                  type="button"
-                  onClick={() => setActiveAcademicManagementSection(option.key)}
-                >
-                  <span>{option.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          expandedGroup={expandedSidebarGroup}
-          isCoordinationPortal={isCoordinationPortal}
-          matriculaAuthorizationPendingCount={matriculaAuthorizationPendingCount}
-          studentsMissingPlacementCount={studentsMissingPlacementCount}
-          communityReportsPendingCount={communityReportsPendingCount}
-          staffAnnouncementsUnreadCount={staffAnnouncementsUnreadCount}
-          onExpandedGroupChange={setExpandedSidebarGroup}
-          onSectionChange={setActiveSection}
-          teamSubnav={(
-            <div className="rectoria-sidebar-subnav" aria-label="Roles institucionales">
-              {roleSummary.map((group) => (
-                <button
-                  key={group.value}
-                  className={`rectoria-sidebar-subitem${selectedTeamRole === group.value ? ' is-active' : ''}`}
-                  type="button"
-                  onClick={() => setSelectedTeamRole(group.value)}
-                >
-                  <span>{group.label}</span>
-                  <strong>{group.count}</strong>
-                </button>
-              ))}
-            </div>
-          )}
+      <div className="staff-teacher-chrome__main">
+        <InstitutionalPortalHeader
+          helperText={institutionalHeaderConfig.helperText}
+          onRefresh={() => loadPortal({ silent: true })}
+          portalKicker={institutionalHeaderConfig.portalKicker}
+          refreshDisabled={refreshing || backgroundLoading || busy}
+          refreshLabel={institutionalRefreshLabel}
+          userName={institutionalUserName}
         />
 
-        <main className="rectoria-content">
+        <main className="rectoria-content staff-teacher-chrome__workspace">
       {activeSection === 'admissions' ? (
         <AdmissionsDashboard activeView={activeAdmissionsView} embedded />
       ) : null}
 
-      {!isCoordinationPortal && RECTORIA_CONTROL_CENTER_KEYS.includes(activeSection) ? (
+      {RECTORIA_CONTROL_CENTER_KEYS.includes(activeSection) ? (
         <RectoriaControlCenterPanel
           academicGradingScale={academicGradingScale}
           academicStructureDraft={academicStructureDraft}
@@ -7712,28 +7801,12 @@ function RectoriaDashboard() {
           overviewAcademicLevelKpi={overviewAcademicLevelKpi}
           overviewAcademicPerformance={overviewAcademicPerformance}
           passingScoreLabel={passingScoreLabel}
+          scopeLabel={isCoordinationPortal ? (coordinationDashboard?.scope?.label || coordinationScope || '') : ''}
+          scopedStudentIds={isCoordinationPortal ? students.map((student) => String(student._id || student.id || '')) : null}
           students={students}
           teacherLabelById={teacherLabelById}
           view={activeSection}
         />
-      ) : null}
-
-      {activeSection === 'community_reports' && isCoordinationPortal ? (
-        <CommunityReportsPanel
-          className="community-reports-panel--embedded"
-          onSummaryChange={(summary) => setCommunityReportsPendingCount(Number(summary?.pending || 0))}
-        />
-      ) : null}
-
-      {activeSection === 'schedule' && isCoordinationPortal ? (
-        <section className="panel rectoria-panel rectoria-panel--school-schedule">
-          <CoordinationSchedulePanel
-            academicStructure={academicStructureDraft}
-            gradeLabels={configuredGradeLabels}
-            teacherLabels={teacherLabelById}
-            scopeLabel={coordinationDashboard?.scope?.label || coordinationScope || schoolName}
-          />
-        </section>
       ) : null}
 
       {activeSection === 'overview' ? (
@@ -7741,12 +7814,13 @@ function RectoriaDashboard() {
           <CoordinationLevelDashboard
             dashboard={coordinationDashboard}
             loading={shellLoading || (refreshing && !coordinationDashboard)}
+            onNavigate={setActiveSection}
             onRefresh={() => loadPortal({ silent: true })}
           />
         ) : (
         <div className="rectoria-stack rectoria-stack--overview">
           <div className="rectoria-overview-command-grid">
-            {!isCoordinationPortal ? (
+            {!isCoordinationPortal && !isDireccionPortal ? (
               <article
                 className="rectoria-overview-kpi rectoria-overview-kpi--billing is-clickable"
                 role="button"
@@ -8644,14 +8718,158 @@ function RectoriaDashboard() {
               <strong>{resourcePurchasingCount}</strong>
             </article>
             <article className="rectoria-card">
-              <span>Pendientes aprobación</span>
-              <strong>{resourceDashboard?.summary?.pendingApprovalCount ?? resourcePendingApprovalCount}</strong>
+              <span>Compras por aprobar</span>
+              <strong>{resourcePendingPurchaseApprovals.length}</strong>
             </article>
             <article className="rectoria-card">
               <span>Stock bajo</span>
               <strong>{resourceDashboard?.summary?.lowStockCount ?? resourceLowStockItems.length}</strong>
             </article>
           </div>
+
+          {!isCoordinationPortal ? (
+            <>
+              <section className="panel rectoria-panel">
+                <div className="rectoria-section-header">
+                  <div>
+                    <h3>Presupuestos por área</h3>
+                    <p>Define áreas de compra y su presupuesto. Las áreas nuevas aparecen de inmediato en el portal de Recursos.</p>
+                  </div>
+                </div>
+
+                <form className="rectoria-billing-form" onSubmit={onSaveResourcePurchaseArea}>
+                  <div className="rectoria-billing-grid rectoria-billing-grid--headline">
+                    <label>
+                      Nombre del área
+                      <input
+                        value={resourceAreaDraft.name}
+                        onChange={(event) => setResourceAreaDraft((previous) => ({ ...previous, name: event.target.value }))}
+                        placeholder="Ej: Academia, Limpieza, Mantenimiento"
+                      />
+                    </label>
+                    <label>
+                      Presupuesto (COP)
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={resourceAreaDraft.budgetAmount}
+                        onChange={(event) => setResourceAreaDraft((previous) => ({ ...previous, budgetAmount: event.target.value }))}
+                        placeholder="10000000"
+                      />
+                    </label>
+                  </div>
+                  <div className="rectoria-fee-actions">
+                    <button className="btn btn-primary" type="submit" disabled={busy}>
+                      {editingResourceAreaId ? 'Guardar presupuesto' : 'Crear área'}
+                    </button>
+                    {editingResourceAreaId ? (
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => {
+                          setEditingResourceAreaId('');
+                          setResourceAreaDraft({ name: '', budgetAmount: '' });
+                        }}
+                        disabled={busy}
+                      >
+                        Cancelar
+                      </button>
+                    ) : null}
+                  </div>
+                </form>
+
+                <div className="rectoria-student-table-wrap">
+                  <table className="rectoria-table">
+                    <thead>
+                      <tr>
+                        <th>Área</th>
+                        <th>Presupuesto</th>
+                        <th>Usado</th>
+                        <th>Disponible</th>
+                        <th>% usado</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resourcePurchaseAreas.length === 0 ? (
+                        <tr><td colSpan="6">Aún no hay áreas de compra. Crea la primera arriba.</td></tr>
+                      ) : resourcePurchaseAreas.map((area) => {
+                        const budget = Number(area.budgetAmount || 0);
+                        const spent = Number(area.spentAmount || 0);
+                        const available = Math.max(0, budget - spent);
+                        const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+                        return (
+                          <tr key={area.id}>
+                            <td><strong>{area.name}</strong></td>
+                            <td>{formatCop(budget)}</td>
+                            <td>{formatCop(spent)}</td>
+                            <td>{formatCop(available)}</td>
+                            <td>{budget > 0 ? `${pct}%` : '—'}</td>
+                            <td>
+                              <div className="rectoria-row-actions">
+                                <button className="btn" type="button" onClick={() => onEditResourcePurchaseArea(area)} disabled={busy}>Editar</button>
+                                <button className="btn btn-danger" type="button" onClick={() => onArchiveResourcePurchaseArea(area)} disabled={busy}>Archivar</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="panel rectoria-panel">
+                <div className="rectoria-section-header">
+                  <div>
+                    <h3>Solicitudes de compra pendientes</h3>
+                    <p>Compras enviadas desde Recursos. Al aprobar se descuenta el presupuesto del área.</p>
+                  </div>
+                </div>
+                <div className="rectoria-student-table-wrap">
+                  <table className="rectoria-table">
+                    <thead>
+                      <tr>
+                        <th>Área</th>
+                        <th>Solicitante</th>
+                        <th>Detalle</th>
+                        <th>Total estimado</th>
+                        <th>Disponible área</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resourcePendingPurchaseApprovals.length === 0 ? (
+                        <tr><td colSpan="6">No hay compras pendientes de aprobación.</td></tr>
+                      ) : resourcePendingPurchaseApprovals.map((request) => {
+                        const area = resourcePurchaseAreas.find((entry) => entry.id === request.areaId);
+                        const available = area ? Math.max(0, Number(area.budgetAmount || 0) - Number(area.spentAmount || 0)) : 0;
+                        return (
+                          <tr key={request.id}>
+                            <td><strong>{request.area?.name || area?.name || 'Sin área'}</strong></td>
+                            <td>{request.requestedBy?.name || 'Usuario'}</td>
+                            <td>
+                              <div>{getResourceRequestItemsLabel(request)}</div>
+                              {request.purpose ? <div>{request.purpose}</div> : null}
+                            </td>
+                            <td>{formatCop(request.estimatedTotal)}</td>
+                            <td>{formatCop(available)}</td>
+                            <td>
+                              <div className="rectoria-row-actions">
+                                <button className="btn btn-primary" type="button" onClick={() => onApproveResourceRequest(request)} disabled={busy}>Aprobar</button>
+                                <button className="btn btn-danger" type="button" onClick={() => onRejectResourceRequest(request)} disabled={busy}>Rechazar</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          ) : null}
 
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
@@ -8852,8 +9070,9 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
-      {activeSection === 'students' ? (
+      {activeSection === 'students' || (isCoordinationPortal && activeSection === 'schedule') ? (
         <div className="rectoria-stack">
+          {activeSection === 'students' ? (
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
               <div>
@@ -8862,8 +9081,9 @@ function RectoriaDashboard() {
               </div>
             </div>
           </section>
+          ) : null}
 
-          {activeAcademicManagementSection === 'assignments' ? (
+          {activeSection === 'students' && activeAcademicManagementSection === 'assignments' ? (
             <AcademicAssignmentsPanel
               assignments={billingBootstrap.calendarAssignments}
               busy={busy}
@@ -8874,7 +9094,7 @@ function RectoriaDashboard() {
             />
           ) : null}
 
-          {activeAcademicManagementSection === 'content' ? (
+          {activeSection === 'students' && activeAcademicManagementSection === 'content' ? (
             <section className="panel rectoria-panel">
               <div className="rectoria-section-header">
                 <div>
@@ -8913,7 +9133,7 @@ function RectoriaDashboard() {
             </section>
           ) : null}
 
-          {activeAcademicManagementSection === 'grades_courses' ? (
+          {activeSection === 'students' && activeAcademicManagementSection === 'grades_courses' ? (
             <>
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
@@ -9219,7 +9439,7 @@ function RectoriaDashboard() {
             </>
           ) : null}
 
-          {activeAcademicManagementSection === 'subjects' && !isCoordinationPortal ? (
+          {activeSection === 'students' && activeAcademicManagementSection === 'subjects' && !isCoordinationPortal ? (
             <>
               <section className="panel rectoria-panel">
                 <div className="rectoria-section-header">
@@ -9361,7 +9581,7 @@ function RectoriaDashboard() {
             </>
           ) : null}
 
-          {activeAcademicManagementSection === 'periods' && !isCoordinationPortal ? (
+          {activeSection === 'students' && activeAcademicManagementSection === 'periods' && !isCoordinationPortal ? (
               <section className="panel rectoria-panel">
                 <div className="rectoria-section-header">
                   <div>
@@ -9547,16 +9767,26 @@ function RectoriaDashboard() {
               </section>
           ) : null}
 
-          {activeAcademicManagementSection === 'schedule' && !isCoordinationPortal ? (
+          {isAcademicScheduleViewActive ? (
             <>
               <section className="panel rectoria-panel">
                 <div className="rectoria-section-header">
                   <div>
-                    <h3>Horario académico</h3>
-                    <p>Configura primero la jornada, luego los breaks, después la disponibilidad de docencia y la carga académica compartida. Solo al final seleccionas el grado para armar o generar la malla.</p>
+                    <h3>Horario académico{isCoordinationPortal ? ` · ${coordinationDashboard?.scope?.label || coordinationScope || 'Nivel asignado'}` : ''}</h3>
+                    <p>
+                      {isCoordinationPortal
+                        ? 'Arma o ajusta la malla semanal de los cursos de tu nivel. Solo verás grados, cursos y docentes del nivel académico asignado.'
+                        : 'Configura primero la jornada, luego los breaks, después la disponibilidad de docencia y la carga académica compartida. Solo al final seleccionas el grado para armar o generar la malla.'}
+                    </p>
                   </div>
                 </div>
-                {gradeOptionsForSchedule.length === 0 ? <p className="rectoria-role-empty">Aún no hay grados creados, pero ya puedes dejar configuradas la jornada, los breaks, la disponibilidad docente y la carga compartida.</p> : null}
+                {gradeOptionsForSchedule.length === 0 ? (
+                  <p className="rectoria-role-empty">
+                    {isCoordinationPortal
+                      ? 'Aún no hay grados configurados para tu nivel académico.'
+                      : 'Aún no hay grados creados, pero ya puedes dejar configuradas la jornada, los breaks, la disponibilidad docente y la carga compartida.'}
+                  </p>
+                ) : null}
               </section>
 
                   <section className="panel rectoria-panel rectoria-schedule-config-hidden">
@@ -9892,7 +10122,11 @@ function RectoriaDashboard() {
                         <div className="rectoria-section-header rectoria-section-header--compact">
                           <div>
                             <h3>{selectedScheduleGroupKey === NEW_SCHEDULE_GROUP_KEY ? 'Nueva jornada' : 'Editar jornada'}</h3>
-                            <p>Agrega jornadas por días y grados. Cada jornada guardada queda abajo como card desplegable para modificarla cuando necesites.</p>
+                            <p>
+                              {isCoordinationPortal
+                                ? 'Agrega jornadas por días y grados de tu nivel. Cada jornada guardada queda abajo como card desplegable para modificarla cuando necesites.'
+                                : 'Agrega jornadas por días y grados. Cada jornada guardada queda abajo como card desplegable para modificarla cuando necesites.'}
+                            </p>
                           </div>
                           <div className="rectoria-fee-actions">
                             <button className="btn" type="button" onClick={onCreateNewScheduleGroup} disabled={busy}>
@@ -10509,7 +10743,7 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
-      {!isCoordinationPortal && activeSection === 'enrollment_matricula' ? (
+      {!isCoordinationPortal && !isDireccionPortal && activeSection === 'enrollment_matricula' ? (
         <div className="rectoria-stack">
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
@@ -10523,7 +10757,7 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
-      {!isCoordinationPortal && activeSection === 'matricula_authorizations' ? (
+      {!isCoordinationPortal && !isDireccionPortal && activeSection === 'matricula_authorizations' ? (
         <div className="rectoria-stack">
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
@@ -10537,7 +10771,7 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
-      {!isCoordinationPortal && activeSection === 'fees' ? (
+      {!isCoordinationPortal && !isDireccionPortal && activeSection === 'fees' ? (
         <div className="rectoria-stack">
           <section className="panel rectoria-panel">
             <div className="rectoria-section-header">
@@ -10863,7 +11097,7 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
-      {!isCoordinationPortal && activeSection === 'billing' ? (
+      {!isCoordinationPortal && !isDireccionPortal && activeSection === 'billing' ? (
         <div className="rectoria-stack">
           <section className="panel rectoria-panel rectoria-billing-intro">
             <div>

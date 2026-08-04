@@ -6,6 +6,8 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import App from './App.jsx';
 import { queryClient } from './lib/queryClient.js';
+import { cleanupDevServiceWorkers } from './lib/devServiceWorkerCleanup.js';
+
 const platform = Capacitor?.getPlatform?.() || 'web';
 const shouldPreventZoomGestures = platform === 'ios';
 
@@ -13,6 +15,10 @@ let lastTouchEndAt = 0;
 
 document.documentElement.classList.add(`platform-${platform}`);
 document.body.classList.add(`platform-${platform}`);
+
+// Unregister SW/caches before React mounts so Chrome picks up Vite HMR.
+void cleanupDevServiceWorkers();
+
 
 const preventGestureZoom = (event) => {
   event.preventDefault();

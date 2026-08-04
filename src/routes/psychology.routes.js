@@ -9,6 +9,11 @@ const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
+const {
+  buildGoogleCalendarLink,
+  sendPsychologyWellbeingAppointmentEmail,
+} = require('../services/brevo.service');
+const AcademicStructure = require('../models/academicStructure.model');
 
 const router = express.Router();
 
@@ -307,11 +312,11 @@ router.get('/dashboard', roleMiddleware(psychologyStaffRoles), async (req, res) 
       PsychologyCase.countDocuments({ schoolId, status: { $in: openStatuses } }),
       PsychologyCase.countDocuments({ schoolId, createdAt: { $gte: startOfWeek } }),
       PsychologyCase.countDocuments({ schoolId, status: { $in: openStatuses }, nextActionAt: { $lte: now } }),
-      PsychologyCase.find({ schoolId })
+      PsychologyCase.find({ schoolId, status: { $in: openStatuses } })
         .populate('studentId', 'name schoolCode grade course imageUrl thumbUrl')
         .populate('openedByUserId', 'name username role')
         .sort({ updatedAt: -1 })
-        .limit(8)
+        .limit(12)
         .lean(),
       PsychologyCase.aggregate([
         { $match: { schoolId } },
@@ -364,13 +369,22 @@ router.get('/students/:studentId/profile', roleMiddleware(psychologyStaffRoles),
 
     return res.status(200).json({
       student: serializeStudent(student),
-      guardians: parentLinks.map((link) => ({
-        id: String(link.parentId?._id || ''),
-        name: normalizeText(link.parentId?.name),
-        username: normalizeText(link.parentId?.username),
-        relationship: normalizeText(link.relationship) || 'Acudiente',
-        isPrimaryContact: Boolean(link.isPrimaryContact),
-      })),
+      guardians: parentLinks.map((link) => {
+        const parent = link.parentId || {};
+        const email = normalizeText(parent.email).toLowerCase()
+          || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeText(parent.username))
+            ? normalizeText(parent.username).toLowerCase()
+            : '');
+        return {
+          id: String(parent._id || ''),
+          name: normalizeText(parent.name),
+          username: normalizeText(parent.username),
+          phone: normalizeText(parent.phone),
+          email,
+          relationship: normalizeText(link.relationship) || 'Acudiente',
+          isPrimaryContact: Boolean(link.isPrimaryContact),
+        };
+      }).filter((guardian) => guardian.id),
       cases: cases.map((item) => serializeCase(item)),
     });
   } catch (error) {
@@ -378,9 +392,30 @@ router.get('/students/:studentId/profile', roleMiddleware(psychologyStaffRoles),
   }
 });
 
+function formatPsychologyAppointmentDateLabel(value) {
+  if (!value) return '';
+  const [year, month, day] = String(value).split('-').map(Number);
+  if (!year || !month || !day) return value;
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('es-CO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function resolvePsychologyAppointmentModality(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (['virtual', 'online', 'videollamada'].includes(normalized)) return 'Virtual';
+  if (['phone', 'llamada', 'telefono', 'teléfono'].includes(normalized)) return 'Llamada telefónica';
+  return 'Presencial';
+}
+
+async function getPsychologySchoolName(schoolId) {
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('schoolName').lean();
+  return normalizeText(academicStructure?.schoolName) || normalizeText(schoolId) || 'Colegio';
+}
+
 router.post('/cases', roleMiddleware(psychologyStaffRoles), async (req, res) => {
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, name: staffName } = req.user;
     const studentId = normalizeText(req.body.studentId);
     const title = normalizeText(req.body.title);
     const summary = normalizeText(req.body.summary);
@@ -389,6 +424,12 @@ router.post('/cases', roleMiddleware(psychologyStaffRoles), async (req, res) => 
     const notifyAudiences = normalizeAudienceList(req.body.notifyAudiences).length
       ? normalizeAudienceList(req.body.notifyAudiences)
       : defaultAudiencesForVisibility(visibility);
+    const citeParents = req.body.citeParents === true || req.body.citeParents === 'true';
+    const appointmentDate = normalizeText(req.body.appointmentDate);
+    const appointmentTime = normalizeText(req.body.appointmentTime);
+    const appointmentModality = normalizeText(req.body.appointmentModality) || 'presencial';
+    const appointmentLocation = normalizeText(req.body.appointmentLocation);
+    const appointmentDurationMinutes = Math.min(180, Math.max(15, Number(req.body.appointmentDurationMinutes) || 45));
 
     if (!isValidObjectId(studentId)) {
       return res.status(400).json({ message: 'studentId is invalid' });
@@ -396,11 +437,21 @@ router.post('/cases', roleMiddleware(psychologyStaffRoles), async (req, res) => 
     if (!title || !summary) {
       return res.status(400).json({ message: 'title and summary are required' });
     }
+    if (citeParents && (!appointmentDate || !appointmentTime)) {
+      return res.status(400).json({ message: 'Para citar a los padres indica fecha y hora de la cita.' });
+    }
 
     const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null }).select('name schoolCode grade course').lean();
     if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
+
+    const nextActionAt = citeParents && appointmentDate && appointmentTime
+      ? new Date(`${appointmentDate}T${appointmentTime}:00`)
+      : (req.body.nextActionAt ? new Date(req.body.nextActionAt) : null);
+    const nextAction = citeParents
+      ? (normalizeText(req.body.nextAction) || `Citación a padres · ${appointmentDate} ${appointmentTime}`)
+      : normalizeText(req.body.nextAction);
 
     const psychologyCase = await PsychologyCase.create({
       schoolId,
@@ -412,8 +463,8 @@ router.post('/cases', roleMiddleware(psychologyStaffRoles), async (req, res) => 
       caseType: safeEnum(req.body.caseType, caseTypes, 'other'),
       priority: safeEnum(req.body.priority, priorities, 'medium'),
       status: safeEnum(req.body.status, statuses, 'open'),
-      nextAction: normalizeText(req.body.nextAction),
-      nextActionAt: req.body.nextActionAt ? new Date(req.body.nextActionAt) : null,
+      nextAction,
+      nextActionAt: nextActionAt && !Number.isNaN(nextActionAt.getTime()) ? nextActionAt : null,
       notes: initialNote
         ? [{ visibility, content: initialNote, recommendations: normalizeText(req.body.recommendations), notifyAudiences, createdByUserId: userId }]
         : [],
@@ -430,12 +481,132 @@ router.post('/cases', roleMiddleware(psychologyStaffRoles), async (req, res) => 
       });
     }
 
+    let appointmentEmailResult = null;
+    let calendarLink = '';
+    if (citeParents) {
+      const [schoolName, parentLinks, staffUser] = await Promise.all([
+        getPsychologySchoolName(schoolId),
+        ParentStudentLink.find({ schoolId, studentId, status: 'active' }).populate('parentId', 'name username phone email').lean(),
+        User.findById(userId).select('name').lean(),
+      ]);
+      const modalityLabel = resolvePsychologyAppointmentModality(appointmentModality);
+      const location = appointmentLocation
+        || (modalityLabel === 'Virtual'
+          ? 'Cita virtual · Bienestar Escolar'
+          : modalityLabel === 'Llamada telefónica'
+            ? 'Llamada telefónica · Bienestar Escolar'
+            : `${schoolName} · Área de Bienestar`);
+      const recipients = [];
+      for (const link of parentLinks) {
+        const parent = link.parentId || {};
+        const email = normalizeText(parent.email).toLowerCase()
+          || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeText(parent.username))
+            ? normalizeText(parent.username).toLowerCase()
+            : '');
+        if (!email) continue;
+        if (recipients.some((item) => item.email === email)) continue;
+        recipients.push({
+          email,
+          name: normalizeText(parent.name) || 'Acudiente',
+        });
+      }
+
+      calendarLink = buildGoogleCalendarLink({
+        title: `${schoolName} · Citación de Bienestar`,
+        details: [
+          `Citación de Bienestar para ${normalizeText(student.name)}`,
+          `Motivo: ${title}`,
+          `Resumen: ${summary}`,
+          `Modalidad: ${modalityLabel}`,
+        ].join('\n'),
+        location,
+        date: appointmentDate,
+        time: appointmentTime,
+        durationMinutes: appointmentDurationMinutes,
+      });
+
+      const deliveries = [];
+      for (const recipient of recipients) {
+        try {
+          const sent = await sendPsychologyWellbeingAppointmentEmail({
+            toEmail: recipient.email,
+            toName: recipient.name,
+            schoolName,
+            studentName: normalizeText(student.name),
+            grade: normalizeText(student.grade || student.course),
+            caseTitle: title,
+            caseSummary: summary,
+            appointmentDate,
+            appointmentTime,
+            appointmentDateLabel: formatPsychologyAppointmentDateLabel(appointmentDate),
+            modalityLabel,
+            location,
+            durationMinutes: appointmentDurationMinutes,
+            professionalName: normalizeText(staffUser?.name || staffName),
+          });
+          deliveries.push({ email: recipient.email, ok: true, mocked: Boolean(sent?.mocked) });
+          if (sent?.calendarLink) calendarLink = sent.calendarLink;
+        } catch (emailError) {
+          deliveries.push({ email: recipient.email, ok: false, error: emailError.message });
+        }
+      }
+
+      appointmentEmailResult = {
+        requested: recipients.length,
+        sent: deliveries.filter((item) => item.ok).length,
+        failed: deliveries.filter((item) => !item.ok).length,
+        deliveries,
+        calendarLink,
+      };
+    }
+
     await psychologyCase.populate('studentId', 'name schoolCode grade course imageUrl thumbUrl');
     await psychologyCase.populate('openedByUserId', 'name username role');
     await psychologyCase.populate('assignedToUserId', 'name username role');
     await psychologyCase.populate('notes.createdByUserId', 'name username role');
 
-    return res.status(201).json({ case: serializeCase(psychologyCase), notificationResult });
+    return res.status(201).json({
+      case: serializeCase(psychologyCase),
+      notificationResult,
+      appointmentEmailResult,
+      calendarLink: calendarLink || '',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/cases/:caseId/status', roleMiddleware(psychologyStaffRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const { caseId } = req.params;
+    const nextStatus = safeEnum(req.body.status, statuses, '');
+
+    if (!isValidObjectId(caseId)) {
+      return res.status(400).json({ message: 'Invalid case id' });
+    }
+    if (!nextStatus) {
+      return res.status(400).json({ message: 'status is required' });
+    }
+
+    const psychologyCase = await PsychologyCase.findOne({ _id: caseId, schoolId });
+    if (!psychologyCase) {
+      return res.status(404).json({ message: 'Case not found' });
+    }
+
+    psychologyCase.status = nextStatus;
+    psychologyCase.closedAt = nextStatus === 'closed' ? new Date() : null;
+    if (nextStatus === 'closed') {
+      psychologyCase.nextActionAt = null;
+    }
+    await psychologyCase.save();
+
+    await psychologyCase.populate('studentId', 'name schoolCode grade course imageUrl thumbUrl');
+    await psychologyCase.populate('openedByUserId', 'name username role');
+    await psychologyCase.populate('assignedToUserId', 'name username role');
+    await psychologyCase.populate('notes.createdByUserId', 'name username role');
+
+    return res.status(200).json({ case: serializeCase(psychologyCase) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

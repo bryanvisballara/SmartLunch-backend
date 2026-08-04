@@ -16,6 +16,10 @@ const inventoryRequestSchema = new mongoose.Schema(
     rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     rejectedAt: { type: Date, default: null },
     notes: { type: String, trim: true },
+    invoiceAmount: { type: Number, default: null, min: 0 },
+    supplierId: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
+    supplierName: { type: String, default: '', trim: true },
+    invoiceFixedCostId: { type: mongoose.Schema.Types.ObjectId, ref: 'FixedCost', default: null },
   },
   { timestamps: true }
 );
