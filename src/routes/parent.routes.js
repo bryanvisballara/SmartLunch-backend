@@ -46,6 +46,7 @@ const PsychologyCase = require('../models/psychologyCase.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
+const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
 const {
   isEpaycoConfigured,
   createCardToken: createEpaycoCardToken,
@@ -115,6 +116,110 @@ function normalizeParentAppFeatures(rawFeatures = {}) {
     features[key] = rawFeatures[key] === undefined ? DEFAULT_PARENT_APP_FEATURES[key] : Boolean(rawFeatures[key]);
     return features;
   }, {});
+}
+
+const SCHOOL_ROUTE_STOP_STATUS_LABELS = {
+  pending: 'Pendiente de recogida',
+  on_way: 'En camino a tu parada',
+  arrived: 'El bus está en la puerta',
+  picked_up: 'Ya fue recogido',
+  skipped: 'La ruta continuó sin el alumno',
+};
+
+function buildParentTransportEta(stopStatus = 'pending', routeStatus = 'draft') {
+  const status = String(stopStatus || 'pending').trim().toLowerCase();
+  if (SCHOOL_ROUTE_STOP_STATUS_LABELS[status]) return SCHOOL_ROUTE_STOP_STATUS_LABELS[status];
+  if (String(routeStatus || '').trim().toLowerCase() === 'active') return 'Ruta en operación';
+  return 'Por confirmar';
+}
+
+function parseParentTransportCoordinate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function serializeParentTransportMapStop(stop = {}, index = 0) {
+  const student = stop?.studentId && typeof stop.studentId === 'object' ? stop.studentId : null;
+  const studentId = student?._id || stop?.studentId || null;
+  const latitude = parseParentTransportCoordinate(stop?.latitude);
+  const longitude = parseParentTransportCoordinate(stop?.longitude);
+
+  return {
+    id: stop?._id ? String(stop._id) : `stop-${index + 1}`,
+    order: Number(stop?.order) > 0 ? Number(stop.order) : index + 1,
+    studentId: studentId ? String(studentId) : '',
+    studentName: normalizeText(student?.name || stop?.studentNameSnapshot),
+    pickupAddress: normalizeText(stop?.pickupAddress),
+    notes: normalizeText(stop?.notes),
+    status: normalizeText(stop?.status) || 'pending',
+    latitude,
+    longitude,
+    placeId: normalizeText(stop?.placeId),
+  };
+}
+
+async function buildParentTransportByStudentId({ schoolId, studentIds = [] }) {
+  const uniqueIds = [...new Set((studentIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  const objectIds = uniqueIds.map((id) => toObjectId(id)).filter(Boolean);
+  const byStudentId = {};
+  if (!schoolId || !objectIds.length) return byStudentId;
+
+  const routes = await CampusSchoolRoute.find({
+    schoolId,
+    'stops.studentId': { $in: objectIds },
+  })
+    .populate('driverUserId', 'name username phone')
+    .select('routeName status driverUserId startedAt completedAt stops')
+    .lean();
+
+  for (const route of routes || []) {
+    const stops = Array.isArray(route.stops) ? route.stops : [];
+    const orderedStops = [...stops].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+    const mapStops = orderedStops.map((stop, index) => serializeParentTransportMapStop(stop, index));
+    const driver = route.driverUserId && typeof route.driverUserId === 'object' ? route.driverUserId : null;
+    const driverName = normalizeText(driver?.name)
+      || normalizeText(driver?.username)
+      || 'Conductor por asignar';
+    const storedRouteName = normalizeText(route.routeName);
+    const displayRouteName = storedRouteName && storedRouteName.toLowerCase() !== 'ruta escolar'
+      ? storedRouteName
+      : (driverName !== 'Conductor por asignar' ? driverName : 'Ruta escolar');
+
+    for (let index = 0; index < orderedStops.length; index += 1) {
+      const stop = orderedStops[index];
+      const student = stop?.studentId && typeof stop.studentId === 'object' ? stop.studentId : null;
+      const studentId = String(student?._id || stop?.studentId || '').trim();
+      if (!studentId || !uniqueIds.includes(studentId) || byStudentId[studentId]) continue;
+
+      const order = Number(stop.order) > 0 ? Number(stop.order) : index + 1;
+      const stopStatus = normalizeText(stop.status) || 'pending';
+      const pickupAddress = normalizeText(stop.pickupAddress) || 'Dirección por confirmar';
+      const pickupNotes = normalizeText(stop.notes);
+
+      byStudentId[studentId] = {
+        assigned: true,
+        routeId: String(route._id || ''),
+        routeName: displayRouteName,
+        routeStatus: normalizeText(route.status) || 'draft',
+        driverName,
+        driverPhone: normalizeText(driver?.phone),
+        pickupAddress,
+        pickupNotes,
+        stopOrder: order,
+        stopCount: orderedStops.length,
+        stopLabel: `Parada ${order} de ${orderedStops.length}`,
+        stopStatus,
+        stopStatusLabel: SCHOOL_ROUTE_STOP_STATUS_LABELS[stopStatus] || 'Asignado a la ruta',
+        eta: buildParentTransportEta(stopStatus, route.status),
+        latitude: parseParentTransportCoordinate(stop.latitude),
+        longitude: parseParentTransportCoordinate(stop.longitude),
+        stops: mapStops,
+      };
+    }
+  }
+
+  return byStudentId;
 }
 
 function serializeParentPsychologyCase(item = {}) {
@@ -3527,7 +3632,7 @@ router.get('/portal/overview', async (req, res) => {
       return res.status(400).json({ message: 'Invalid student id' });
     }
 
-    const [studentsRaw, wallets, meriendaSubscriptions, psychologyCases, coexistenceObservations] = await Promise.all([
+    const [studentsRaw, wallets, meriendaSubscriptions, psychologyCases, coexistenceObservations, transportByStudentId] = await Promise.all([
       Student.find({
         schoolId,
         _id: { $in: studentIds },
@@ -3561,6 +3666,7 @@ router.get('/portal/overview', async (req, res) => {
         .sort({ submittedAt: -1, createdAt: -1 })
         .limit(100)
         .lean(),
+      buildParentTransportByStudentId({ schoolId, studentIds }),
     ]);
     const students = await ensureStudentsCohortMembership(studentsRaw, schoolId);
 
@@ -3594,6 +3700,7 @@ router.get('/portal/overview', async (req, res) => {
       const wallet = walletByStudentId[String(student._id)] || null;
       const subKey = String(student.name || '').trim().toLowerCase();
       const merienda = meriendaByChildName[subKey] || null;
+      const transport = transportByStudentId[String(student._id)] || null;
 
       return {
         _id: student._id,
@@ -3651,6 +3758,7 @@ router.get('/portal/overview', async (req, res) => {
               parentRecommendations: '',
               childFoodRestrictions: '',
             },
+        transport,
       };
     });
 

@@ -38,6 +38,7 @@ import {
   uploadCommunityPublicationMedia,
 } from '../../services/parent.service';
 import { launchWompiWebCheckout } from '../../components/WompiPaymentButton';
+import GoogleSchoolRouteMap from '../../components/routes/GoogleSchoolRouteMap';
 import StudentAssignmentsPanel from '../components/StudentAssignmentsPanel';
 import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import { getParentNursingRecords } from '../../services/nursing.service';
@@ -1178,13 +1179,46 @@ function buildParentChildFromOverview(child = {}, overview = {}) {
       note: 'No hay atenciones recientes registradas por Enfermería.',
       updates: [],
     },
-    transport: {
-      routeName: 'Sin ruta asignada',
-      operator: '',
-      stop: '',
-      eta: '',
-      note: 'No hay información de ruta registrada para este alumno.',
-    },
+    transport: (() => {
+      const apiTransport = child.transport;
+      if (apiTransport?.assigned || apiTransport?.routeName) {
+        const stopLabel = String(apiTransport.stopLabel || '').trim()
+          || (apiTransport.stopOrder
+            ? `Parada ${apiTransport.stopOrder}${apiTransport.stopCount ? ` de ${apiTransport.stopCount}` : ''}`
+            : '');
+        const pickupAddress = String(apiTransport.pickupAddress || '').trim();
+        const pickupNotes = String(apiTransport.pickupNotes || '').trim();
+        const stopStatusLabel = String(apiTransport.stopStatusLabel || '').trim();
+        return {
+          assigned: true,
+          routeName: String(apiTransport.routeName || 'Ruta escolar').trim(),
+          operator: String(apiTransport.driverName || '').trim(),
+          stop: stopLabel || pickupAddress || 'Parada asignada',
+          stopOrder: Number(apiTransport.stopOrder || 0) || null,
+          stopCount: Number(apiTransport.stopCount || 0) || null,
+          stopLabel,
+          stopStatus: String(apiTransport.stopStatus || 'pending').trim(),
+          stopStatusLabel,
+          eta: String(apiTransport.eta || stopStatusLabel || 'Por confirmar').trim(),
+          pickupAddress,
+          note: [pickupAddress && `Recogida: ${pickupAddress}`, pickupNotes && `Nota: ${pickupNotes}`]
+            .filter(Boolean)
+            .join(' · ')
+            || 'Ruta escolar asignada para este alumno.',
+          stops: Array.isArray(apiTransport.stops) ? apiTransport.stops : [],
+        };
+      }
+
+      return {
+        assigned: false,
+        routeName: 'Sin ruta asignada',
+        operator: '',
+        stop: '',
+        eta: '',
+        note: 'No hay información de ruta registrada para este alumno.',
+        stops: [],
+      };
+    })(),
     study: {
       readiness: 'Sin datos',
       nextFocus: '',
@@ -2679,6 +2713,18 @@ function ParentTransportSceneIllustration() {
 }
 
 function ParentTransportSection({ hasAssignedRoute, transport }) {
+  const [routeMetrics, setRouteMetrics] = useState(null);
+  const mapStops = Array.isArray(transport?.stops) ? transport.stops : [];
+  const durationText = Number(routeMetrics?.durationSeconds) > 0
+    ? `${Math.max(1, Math.round(Number(routeMetrics.durationSeconds) / 60))} min`
+    : '';
+  const distanceText = Number(routeMetrics?.distanceMeters) > 0
+    ? `${(Number(routeMetrics.distanceMeters) / 1000).toFixed(1).replace('.', ',')} km`
+    : '';
+  const estimatedArrival = durationText
+    ? `~${durationText} de recorrido`
+    : (transport?.eta || 'Por confirmar');
+
   if (hasAssignedRoute) {
     return (
       <section className="campus-parent-mobile__transport-page">
@@ -2687,7 +2733,11 @@ function ParentTransportSection({ hasAssignedRoute, transport }) {
           <span className="campus-parent-mobile__transport-kicker">Transporte escolar</span>
           <h2>{transport.routeName}</h2>
           <span aria-hidden="true" className="campus-parent-mobile__transport-accent" />
-          <p>{transport.stop ? `${transport.stop} · llegada estimada ${transport.eta || 'por confirmar'}` : 'Ruta escolar asignada para este alumno.'}</p>
+          <p>
+            {transport.stopLabel || transport.stop
+              ? `${transport.stopLabel || transport.stop} · ${estimatedArrival}`
+              : 'Ruta escolar asignada para este alumno.'}
+          </p>
         </header>
 
         <section aria-label="Detalle de la ruta" className="campus-parent-mobile__transport-status-grid">
@@ -2696,14 +2746,36 @@ function ParentTransportSection({ hasAssignedRoute, transport }) {
             <strong>{transport.operator || 'Por confirmar'}</strong>
           </article>
           <article>
-            <span>Parada</span>
-            <strong>{transport.stop || 'Por confirmar'}</strong>
+            <span>Orden en la ruta</span>
+            <strong>{transport.stopLabel || transport.stop || 'Por confirmar'}</strong>
+          </article>
+          <article>
+            <span>Estado</span>
+            <strong>{transport.stopStatusLabel || transport.eta || 'Asignado'}</strong>
           </article>
           <article>
             <span>Llegada</span>
-            <strong>{transport.eta || 'Por confirmar'}</strong>
+            <strong>{estimatedArrival}</strong>
           </article>
         </section>
+
+        {mapStops.length ? (
+          <article className="campus-parent-mobile__transport-map-card" aria-label="Mapa de la ruta escolar">
+            <div className="campus-parent-mobile__transport-map-head">
+              <strong>Recorrido del conductor</strong>
+              <span>
+                {distanceText && durationText
+                  ? `${distanceText} · ${durationText}`
+                  : `${mapStops.length} punto(s) de recogida`}
+              </span>
+            </div>
+            <GoogleSchoolRouteMap
+              stops={mapStops}
+              routeName={transport.routeName || 'Ruta escolar'}
+              onMetricsChange={setRouteMetrics}
+            />
+          </article>
+        ) : null}
 
         {transport.note ? (
           <article className="campus-parent-mobile__transport-info-card">
@@ -2718,7 +2790,7 @@ function ParentTransportSection({ hasAssignedRoute, transport }) {
           <span className="campus-parent-mobile__transport-notify-icon"><ParentTransportBellIcon /></span>
           <div>
             <strong>Te avisaremos</strong>
-            <p>Recibirás una notificación cuando haya novedades sobre la ruta escolar.</p>
+            <p>Recibirás una notificación cuando el conductor vaya en camino, llegue a tu parada o recoja al alumno.</p>
           </div>
         </article>
       </section>
@@ -2737,7 +2809,7 @@ function ParentTransportSection({ hasAssignedRoute, transport }) {
 
       <article className="campus-parent-mobile__transport-info-card">
         <span className="campus-parent-mobile__transport-info-icon"><ParentTransportInfoIcon /></span>
-        <p>Cuando el colegio asigne una ruta, aparecerán aquí el conductor, la parada y la hora estimada.</p>
+        <p>Cuando el colegio asigne una ruta, aparecerán aquí el conductor, la parada, el orden de recogida y el mapa del recorrido.</p>
       </article>
 
       <ParentTransportSceneIllustration />
@@ -6316,8 +6388,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
   const selectedChildTransport = selectedChild?.transport || {};
   const hasAssignedTransportRoute = Boolean(
-    String(selectedChildTransport.routeName || '').trim()
-    && String(selectedChildTransport.routeName || '').trim().toLowerCase() !== 'sin ruta asignada'
+    selectedChildTransport.assigned
+    || (
+      String(selectedChildTransport.routeName || '').trim()
+      && String(selectedChildTransport.routeName || '').trim().toLowerCase() !== 'sin ruta asignada'
+    )
   );
 
   useEffect(() => {
