@@ -1182,21 +1182,29 @@ router.get('/users', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   try {
-    const { schoolId } = req.user;
-    const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber } = req.body;
+    const { schoolId, role: requesterRole } = req.user;
+    const { name, username, email, phone, password, role, assignedStoreId, documentType, documentNumber, coordinationScope, assignedSubjects } = req.body;
 
     if (!name || !username || !password || !role) {
       return res.status(400).json({ message: 'name, username, password and role are required' });
     }
 
-    if (!CAFETERIA_ADMIN_CREATABLE_USER_ROLES.includes(role)) {
+    const normalizedRole = String(role || '').trim();
+    const isCafeteriaAdminRequester = String(requesterRole || '') === 'admin';
+    const creatableRoles = isCafeteriaAdminRequester
+      ? CAFETERIA_ADMIN_CREATABLE_USER_ROLES
+      : ADMIN_MANAGED_USER_ROLES;
+
+    if (!creatableRoles.includes(normalizedRole)) {
       return res.status(400).json({
-        message: 'Desde cafetería solo puedes crear vendedor, administrador, tutor de alimentación o acudiente externo.',
+        message: isCafeteriaAdminRequester
+          ? 'Desde cafetería solo puedes crear vendedor, administrador, tutor de alimentación o acudiente externo.'
+          : 'Rol no válido para crear usuarios desde este portal.',
       });
     }
 
     let resolvedAssignedStoreId = null;
-    if (String(role) === 'vendor') {
+    if (normalizedRole === 'vendor') {
       if (!assignedStoreId) {
         return res.status(400).json({ message: 'assignedStoreId is required for vendor users' });
       }
@@ -1213,12 +1221,14 @@ router.post('/users', async (req, res) => {
     const normalizedEmail = normalizeEmail(email) || (isValidEmail(normalizedUsername) ? normalizedUsername : '');
     const normalizedDocumentType = normalizeDocumentType(documentType);
     const normalizedDocumentNumber = normalizeDocumentNumber(documentNumber);
+    const normalizedCoordinationScope = normalizeCoordinationScope(coordinationScope);
+    const normalizedAssignedSubjects = normalizeStringArray(assignedSubjects);
 
     if (normalizedEmail && !isValidEmail(normalizedEmail)) {
       return res.status(400).json({ message: 'Invalid email' });
     }
 
-    if (String(role) === 'parent') {
+    if (normalizedRole === 'parent') {
       if (!normalizedEmail) {
         return res.status(400).json({ message: 'email is required for parent users' });
       }
@@ -1226,6 +1236,10 @@ router.post('/users', async (req, res) => {
       if (!normalizedDocumentType || normalizedDocumentNumber.length < 5) {
         return res.status(400).json({ message: 'documentType and documentNumber are required for parent users' });
       }
+    }
+
+    if (normalizedRole === 'coordination' && !normalizedCoordinationScope) {
+      return res.status(400).json({ message: 'coordinationScope is required for coordination users' });
     }
 
     const existing = await releaseDeletedInstitutionalUsername({ schoolId, username: normalizedUsername });
@@ -1243,10 +1257,10 @@ router.post('/users', async (req, res) => {
       documentType: normalizedDocumentType,
       documentNumber: normalizedDocumentNumber,
       assignedStoreId: resolvedAssignedStoreId,
-      coordinationScope: '',
-      assignedSubjects: [],
+      coordinationScope: normalizedRole === 'coordination' ? normalizedCoordinationScope : '',
+      assignedSubjects: normalizedRole === 'teacher' ? normalizedAssignedSubjects : [],
       passwordHash,
-      role,
+      role: normalizedRole,
       status: 'active',
     });
 
