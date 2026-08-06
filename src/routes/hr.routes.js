@@ -102,6 +102,14 @@ function parsePlannerCalendarDate(value) {
   return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 12, 0, 0, 0));
 }
 
+function assertPlannerDateRange(startDate, endDate) {
+  if (startDate && endDate && endDate.getTime() < startDate.getTime()) {
+    const error = new Error('La fecha "Hasta" debe ser igual o posterior a la fecha "Desde".');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 function escapeRegex(value) {
   return normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -783,6 +791,7 @@ router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, re
 
     const startDate = parsePlannerCalendarDate(req.body.startDate);
     const endDate = parsePlannerCalendarDate(req.body.endDate);
+    assertPlannerDateRange(startDate, endDate);
     const cycle = await HrPlannerCycle.create({
       schoolId,
       title,
@@ -816,6 +825,9 @@ router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, re
       staffAnnouncementId: staffAnnouncement ? String(staffAnnouncement._id) : null,
     });
   } catch (error) {
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ message: error.message });
+    }
     return res.status(500).json({ message: error.message });
   }
 });
@@ -837,6 +849,7 @@ router.patch('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), asyn
 
     const startDate = parsePlannerCalendarDate(req.body.startDate);
     const endDate = parsePlannerCalendarDate(req.body.endDate);
+    assertPlannerDateRange(startDate, endDate);
     const cycle = await HrPlannerCycle.findOneAndUpdate(
       { _id: cycleId, schoolId },
       {
@@ -858,6 +871,9 @@ router.patch('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), asyn
 
     return res.status(200).json({ cycle: serializePlannerCycle(cycle) });
   } catch (error) {
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ message: error.message });
+    }
     return res.status(500).json({ message: error.message });
   }
 });

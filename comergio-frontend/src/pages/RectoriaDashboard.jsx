@@ -1634,6 +1634,7 @@ const defaultAcademicGradingScale = {
   minScore: 0,
   maxScore: 100,
   passingScore: 70,
+  qualitativeOnly: false,
   performanceLevels: defaultAcademicPerformanceLevels,
 };
 
@@ -1663,6 +1664,7 @@ function normalizeAcademicGradingScale(raw = {}) {
     minScore: normalizedMin,
     maxScore: normalizedMax,
     passingScore: normalizedPassing,
+    qualitativeOnly: Boolean(sourceScale?.qualitativeOnly),
     performanceLevels,
   };
 }
@@ -4706,6 +4708,13 @@ function RectoriaDashboard() {
 
     if (!String(resourcePlannerCycleDraft.title || '').trim() || !String(resourcePlannerCycleDraft.submissionDeadline || '').trim()) {
       setError('Escribe titulo y fecha limite del planner.');
+      return;
+    }
+
+    const startDate = String(resourcePlannerCycleDraft.startDate || '').trim();
+    const endDate = String(resourcePlannerCycleDraft.endDate || '').trim();
+    if (startDate && endDate && endDate < startDate) {
+      setError('La fecha "Hasta" debe ser igual o posterior a la fecha "Desde".');
       return;
     }
 
@@ -8891,7 +8900,12 @@ function RectoriaDashboard() {
                 </label>
                 <label>
                   Hasta
-                  <input type="date" value={resourcePlannerCycleDraft.endDate} onChange={(event) => onResourcePlannerCycleChange('endDate', event.target.value)} />
+                  <input
+                    min={resourcePlannerCycleDraft.startDate || undefined}
+                    type="date"
+                    value={resourcePlannerCycleDraft.endDate}
+                    onChange={(event) => onResourcePlannerCycleChange('endDate', event.target.value)}
+                  />
                 </label>
                 <label>
                   Fecha límite
@@ -9656,6 +9670,17 @@ function RectoriaDashboard() {
                     <p className="rectoria-role-empty">Primero crea niveles educativos para asignarles una escala de calificaciones.</p>
                   ) : (
                     <>
+                      <label className="rectoria-checkbox-field">
+                        <input
+                          checked={Boolean(selectedAcademicGradingScale.qualitativeOnly)}
+                          disabled={busy || !selectedAcademicGradingLevelKey}
+                          onChange={(event) => onAcademicGradingScaleChange('qualitativeOnly', event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>Solo calificación cualitativa (sin notas numéricas para docentes ni familias)</span>
+                      </label>
+
+                      {!selectedAcademicGradingScale.qualitativeOnly ? (
                       <div className="rectoria-period-row">
                         <label>
                           <span>Calificación mínima</span>
@@ -9691,11 +9716,20 @@ function RectoriaDashboard() {
                           />
                         </label>
                       </div>
+                      ) : (
+                        <p className="rectoria-role-empty">
+                          En este nivel los docentes y las familias verán solo categorías de desempeño (por ejemplo Excelente, Sobresaliente). Los rangos numéricos se usan internamente para el cálculo.
+                        </p>
+                      )}
 
                       <div className="rectoria-grading-levels-head">
                         <div>
                           <strong>Categorías de desempeño</strong>
-                          <span>Define cómo se interpreta cada rango de calificaciones para este nivel.</span>
+                          <span>
+                            {selectedAcademicGradingScale.qualitativeOnly
+                              ? 'Estas categorías serán las únicas opciones de calificación para este nivel.'
+                              : 'Define cómo se interpreta cada rango de calificaciones para este nivel.'}
+                          </span>
                         </div>
                         <div className="rectoria-fee-actions">
                           <button className="btn" type="button" onClick={onAddAcademicPerformanceLevel} disabled={busy || !selectedAcademicGradingLevelKey}>Agregar categoría</button>

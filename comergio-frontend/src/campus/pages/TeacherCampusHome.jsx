@@ -1094,6 +1094,25 @@ function resolveTeacherPerformanceLevel(score, gradingScale = {}) {
   )) || null;
 }
 
+function getTeacherPerformanceLevelMidpoint(level = {}) {
+  const minScore = Number(level?.minScore);
+  const maxScore = Number(level?.maxScore);
+  if (!Number.isFinite(minScore) || !Number.isFinite(maxScore)) {
+    return '';
+  }
+  return Number(((minScore + maxScore) / 2).toFixed(2));
+}
+
+function formatTeacherGradeDisplay(score, gradingScale = {}) {
+  if (score === null || score === undefined || score === '') {
+    return 'Sin nota';
+  }
+  if (gradingScale?.qualitativeOnly) {
+    return resolveTeacherPerformanceLevel(score, gradingScale)?.label || 'Sin categoría';
+  }
+  return `Nota ${score}`;
+}
+
 function buildSessionKey(session) {
   return `${Number(session.weekday)}-${String(session.startTime || '')}-${String(session.endTime || '')}`;
 }
@@ -5953,6 +5972,10 @@ function TeacherCampusHome({ forcePreview = false }) {
       setNotice({ type: 'error', text: 'Completa título, motivo pedagógico y fecha de la actividad.' });
       return;
     }
+    if ((minDate && maxDate && minDate > maxDate)) {
+      setNotice({ type: 'error', text: 'Este planner tiene fechas invertidas. Pide a Rectoría o Coordinación corregir Desde/Hasta.' });
+      return;
+    }
     if ((minDate && date < minDate) || (maxDate && date > maxDate)) {
       setNotice({ type: 'error', text: `La fecha debe estar entre ${formatDateLabel(minDate)} y ${formatDateLabel(maxDate)}.` });
       return;
@@ -8977,7 +9000,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                               </div>
                                                               <div className="campus-teacher__gradebook-toggle-meta">
                                                                 <span className="campus-teacher__mode-pill">
-                                                                  {score.score === null || score.score === undefined ? 'Sin nota' : `Nota ${score.score}`}
+                                                                  {formatTeacherGradeDisplay(score.score, selectedCourseGradingScale)}
                                                                 </span>
                                                                 <span className="campus-teacher__gradebook-toggle-icon" aria-hidden="true">{isComponentOpen ? '−' : '+'}</span>
                                                               </div>
@@ -8987,15 +9010,40 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                                 <div className="campus-teacher__student-score">
                                                                   {!visibleSubcomponents.length ? (
                                                                     <label>
-                                                                      Nota del componente
-                                                                      <input
-                                                                        max={selectedCourseGradingScale.maxScore}
-                                                                        min={selectedCourseGradingScale.minScore}
-                                                                        step="0.1"
-                                                                        type="number"
-                                                                        value={studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, score.componentKey)]?.score ?? ''}
-                                                                        onChange={(event) => onStudentDraftChange(student.studentId, period.key, score.componentKey, 'score', event.target.value)}
-                                                                      />
+                                                                      {selectedCourseGradingScale.qualitativeOnly ? 'Desempeño del componente' : 'Nota del componente'}
+                                                                      {selectedCourseGradingScale.qualitativeOnly ? (
+                                                                        <select
+                                                                          value={resolveTeacherPerformanceLevel(
+                                                                            studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, score.componentKey)]?.score,
+                                                                            selectedCourseGradingScale
+                                                                          )?.key || ''}
+                                                                          onChange={(event) => {
+                                                                            const selectedLevel = (selectedCourseGradingScale.performanceLevels || [])
+                                                                              .find((level) => String(level.key) === String(event.target.value));
+                                                                            onStudentDraftChange(
+                                                                              student.studentId,
+                                                                              period.key,
+                                                                              score.componentKey,
+                                                                              'score',
+                                                                              selectedLevel ? getTeacherPerformanceLevelMidpoint(selectedLevel) : ''
+                                                                            );
+                                                                          }}
+                                                                        >
+                                                                          <option value="">Selecciona categoría</option>
+                                                                          {(selectedCourseGradingScale.performanceLevels || []).map((level) => (
+                                                                            <option key={level.key} value={level.key}>{level.label}</option>
+                                                                          ))}
+                                                                        </select>
+                                                                      ) : (
+                                                                        <input
+                                                                          max={selectedCourseGradingScale.maxScore}
+                                                                          min={selectedCourseGradingScale.minScore}
+                                                                          step="0.1"
+                                                                          type="number"
+                                                                          value={studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, score.componentKey)]?.score ?? ''}
+                                                                          onChange={(event) => onStudentDraftChange(student.studentId, period.key, score.componentKey, 'score', event.target.value)}
+                                                                        />
+                                                                      )}
                                                                     </label>
                                                                   ) : null}
                                                                   {!visibleSubcomponents.length ? (
@@ -9016,8 +9064,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                                   {visibleSubcomponents.length ? (
                                                                     <div className="campus-teacher__student-subcomponents">
                                                                       <div className="campus-teacher__student-score-summary">
-                                                                        <span className="campus-teacher__student-subcomponents-title">Nota del componente</span>
-                                                                        <strong>{score.score === null || score.score === undefined ? 'Sin nota calculada' : score.score}</strong>
+                                                                        <span className="campus-teacher__student-subcomponents-title">
+                                                                          {selectedCourseGradingScale.qualitativeOnly ? 'Desempeño del componente' : 'Nota del componente'}
+                                                                        </span>
+                                                                        <strong>
+                                                                          {score.score === null || score.score === undefined
+                                                                            ? (selectedCourseGradingScale.qualitativeOnly ? 'Sin categoría calculada' : 'Sin nota calculada')
+                                                                            : formatTeacherGradeDisplay(score.score, selectedCourseGradingScale)}
+                                                                        </strong>
                                                                         <p>Se calcula automaticamente con el promedio ponderado de los subcomponentes.</p>
                                                                       </div>
                                                                       <span className="campus-teacher__student-subcomponents-title">Subcomponentes</span>
@@ -9036,15 +9090,41 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                                             </div>
                                                                             <div className="campus-teacher__student-subcomponent-fields">
                                                                               <label>
-                                                                                Nota
-                                                                                <input
-                                                                                  max={selectedCourseGradingScale.maxScore}
-                                                                                  min={selectedCourseGradingScale.minScore}
-                                                                                  step="0.1"
-                                                                                  type="number"
-                                                                                  value={studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, score.componentKey, subcomponent.key)]?.score ?? ''}
-                                                                                  onChange={(event) => onStudentDraftChange(student.studentId, period.key, score.componentKey, 'score', event.target.value, subcomponent.key)}
-                                                                                />
+                                                                                {selectedCourseGradingScale.qualitativeOnly ? 'Desempeño' : 'Nota'}
+                                                                                {selectedCourseGradingScale.qualitativeOnly ? (
+                                                                                  <select
+                                                                                    value={resolveTeacherPerformanceLevel(
+                                                                                      studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, score.componentKey, subcomponent.key)]?.score,
+                                                                                      selectedCourseGradingScale
+                                                                                    )?.key || ''}
+                                                                                    onChange={(event) => {
+                                                                                      const selectedLevel = (selectedCourseGradingScale.performanceLevels || [])
+                                                                                        .find((level) => String(level.key) === String(event.target.value));
+                                                                                      onStudentDraftChange(
+                                                                                        student.studentId,
+                                                                                        period.key,
+                                                                                        score.componentKey,
+                                                                                        'score',
+                                                                                        selectedLevel ? getTeacherPerformanceLevelMidpoint(selectedLevel) : '',
+                                                                                        subcomponent.key
+                                                                                      );
+                                                                                    }}
+                                                                                  >
+                                                                                    <option value="">Selecciona categoría</option>
+                                                                                    {(selectedCourseGradingScale.performanceLevels || []).map((level) => (
+                                                                                      <option key={level.key} value={level.key}>{level.label}</option>
+                                                                                    ))}
+                                                                                  </select>
+                                                                                ) : (
+                                                                                  <input
+                                                                                    max={selectedCourseGradingScale.maxScore}
+                                                                                    min={selectedCourseGradingScale.minScore}
+                                                                                    step="0.1"
+                                                                                    type="number"
+                                                                                    value={studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, score.componentKey, subcomponent.key)]?.score ?? ''}
+                                                                                    onChange={(event) => onStudentDraftChange(student.studentId, period.key, score.componentKey, 'score', event.target.value, subcomponent.key)}
+                                                                                  />
+                                                                                )}
                                                                               </label>
                                                                               <label>
                                                                                 Observación
@@ -9123,7 +9203,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                           <tr>
                                             <th>Alumno</th>
                                             <th>Definitiva</th>
-                                            <th>Nota</th>
+                                            <th>{selectedCourseGradingScale.qualitativeOnly ? 'Desempeño' : 'Nota'}</th>
                                             <th>Observacion</th>
                                           </tr>
                                         </thead>
@@ -9148,23 +9228,53 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                     <strong>{student.name}</strong>
                                                     <span>{student.grade}</span>
                                                   </td>
-                                                  <td>{studentFinalScore === null || studentFinalScore === undefined ? 'Sin definitiva' : studentFinalScore}</td>
                                                   <td>
-                                                    <input
-                                                      max={selectedCourseGradingScale.maxScore}
-                                                      min={selectedCourseGradingScale.minScore}
-                                                      step="0.1"
-                                                      type="number"
-                                                      value={studentDrafts?.[student.studentId]?.[draftKey]?.score ?? ''}
-                                                      onChange={(event) => onStudentDraftChange(
-                                                        student.studentId,
-                                                        selectedGradebookAssignment.periodKey,
-                                                        selectedGradebookAssignment.componentKey,
-                                                        'score',
-                                                        event.target.value,
-                                                        selectedGradebookAssignment.subcomponentKey
-                                                      )}
-                                                    />
+                                                    {studentFinalScore === null || studentFinalScore === undefined
+                                                      ? (selectedCourseGradingScale.qualitativeOnly ? 'Sin definitiva' : 'Sin definitiva')
+                                                      : formatTeacherGradeDisplay(studentFinalScore, selectedCourseGradingScale)}
+                                                  </td>
+                                                  <td>
+                                                    {selectedCourseGradingScale.qualitativeOnly ? (
+                                                      <select
+                                                        value={resolveTeacherPerformanceLevel(
+                                                          studentDrafts?.[student.studentId]?.[draftKey]?.score,
+                                                          selectedCourseGradingScale
+                                                        )?.key || ''}
+                                                        onChange={(event) => {
+                                                          const selectedLevel = (selectedCourseGradingScale.performanceLevels || [])
+                                                            .find((level) => String(level.key) === String(event.target.value));
+                                                          onStudentDraftChange(
+                                                            student.studentId,
+                                                            selectedGradebookAssignment.periodKey,
+                                                            selectedGradebookAssignment.componentKey,
+                                                            'score',
+                                                            selectedLevel ? getTeacherPerformanceLevelMidpoint(selectedLevel) : '',
+                                                            selectedGradebookAssignment.subcomponentKey
+                                                          );
+                                                        }}
+                                                      >
+                                                        <option value="">Categoría</option>
+                                                        {(selectedCourseGradingScale.performanceLevels || []).map((level) => (
+                                                          <option key={level.key} value={level.key}>{level.label}</option>
+                                                        ))}
+                                                      </select>
+                                                    ) : (
+                                                      <input
+                                                        max={selectedCourseGradingScale.maxScore}
+                                                        min={selectedCourseGradingScale.minScore}
+                                                        step="0.1"
+                                                        type="number"
+                                                        value={studentDrafts?.[student.studentId]?.[draftKey]?.score ?? ''}
+                                                        onChange={(event) => onStudentDraftChange(
+                                                          student.studentId,
+                                                          selectedGradebookAssignment.periodKey,
+                                                          selectedGradebookAssignment.componentKey,
+                                                          'score',
+                                                          event.target.value,
+                                                          selectedGradebookAssignment.subcomponentKey
+                                                        )}
+                                                      />
+                                                    )}
                                                   </td>
                                                   <td>
                                                     <textarea
@@ -9187,7 +9297,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       </table>
                                     </div>
                                     <div className="campus-teacher__classroom-footer">
-                                      <span className="campus-panel__meta">Se guardarán las filas que tengan nota digitada.</span>
+                                      <span className="campus-panel__meta">
+                                        {selectedCourseGradingScale.qualitativeOnly
+                                          ? 'Se guardarán las filas que tengan categoría seleccionada.'
+                                          : 'Se guardarán las filas que tengan nota digitada.'}
+                                      </span>
                                       <button className="campus-teacher__action-btn campus-teacher__action-btn--compact" disabled={isBusy || !selectedGradebookAssignment} onClick={onSaveAssignmentGrades} type="button">
                                         {saveGradesMutation.isPending ? 'Guardando...' : 'Guardar asignación'}
                                       </button>
@@ -10529,18 +10643,33 @@ function TeacherCampusHome({ forcePreview = false }) {
                                       <rect height="16" rx="2" stroke="currentColor" strokeWidth="1.7" width="16" x="4" y="5" />
                                       <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
                                     </svg>
-                                    <input
-                                      max={toDateInputValue(selectedTeacherPlannerCycle.endDate) || undefined}
-                                      min={toDateInputValue(selectedTeacherPlannerCycle.startDate) || undefined}
-                                      type="date"
-                                      value={teacherResourceRequestDraft.activityDate}
-                                      onChange={(event) => onTeacherResourceDraftChange('activityDate', event.target.value)}
-                                    />
+                                    {(() => {
+                                      const minDate = toDateInputValue(selectedTeacherPlannerCycle.startDate);
+                                      const maxDate = toDateInputValue(selectedTeacherPlannerCycle.endDate);
+                                      const hasInvalidRange = Boolean(minDate && maxDate && minDate > maxDate);
+                                      return (
+                                        <input
+                                          disabled={hasInvalidRange}
+                                          max={hasInvalidRange ? undefined : (maxDate || undefined)}
+                                          min={hasInvalidRange ? undefined : (minDate || undefined)}
+                                          type="date"
+                                          value={teacherResourceRequestDraft.activityDate}
+                                          onChange={(event) => onTeacherResourceDraftChange('activityDate', event.target.value)}
+                                        />
+                                      );
+                                    })()}
                                   </div>
                                 </label>
                                 <div className="campus-teacher__recursos-range">
                                   <span>Rango permitido</span>
                                   <strong>{formatDateLabel(selectedTeacherPlannerCycle.startDate)} – {formatDateLabel(selectedTeacherPlannerCycle.endDate)}</strong>
+                                  {toDateInputValue(selectedTeacherPlannerCycle.startDate)
+                                    && toDateInputValue(selectedTeacherPlannerCycle.endDate)
+                                    && toDateInputValue(selectedTeacherPlannerCycle.startDate) > toDateInputValue(selectedTeacherPlannerCycle.endDate) ? (
+                                      <small className="campus-teacher__recursos-range-warning">
+                                        Este planner tiene fechas invertidas. Pide a Rectoría o Coordinación corregir Desde/Hasta.
+                                      </small>
+                                    ) : null}
                                 </div>
                               </div>
 

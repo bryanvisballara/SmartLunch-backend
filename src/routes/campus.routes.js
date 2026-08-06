@@ -3245,7 +3245,13 @@ function normalizeCampusGradingScale(rawScale = {}) {
       order: Number(level?.order || 0),
     }))
     .filter((level) => level.key && level.label && Number.isFinite(level.minScore) && Number.isFinite(level.maxScore));
-  return { minScore, maxScore, passingScore, performanceLevels };
+  return {
+    minScore,
+    maxScore,
+    passingScore,
+    qualitativeOnly: Boolean(sourceScale?.qualitativeOnly),
+    performanceLevels,
+  };
 }
 
 const campusAttendanceTypeLabels = {

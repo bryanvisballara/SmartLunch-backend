@@ -75,6 +75,7 @@ const academicStructureGradingScaleSchema = new mongoose.Schema(
     minScore: { type: Number, min: 0, max: 100, default: 0 },
     maxScore: { type: Number, min: 1, max: 100, default: 100 },
     passingScore: { type: Number, min: 0, max: 100, default: 70 },
+    qualitativeOnly: { type: Boolean, default: false },
     performanceLevels: { type: [academicStructurePerformanceLevelSchema], default: [] },
   },
   { _id: false }
@@ -86,6 +87,7 @@ const academicStructureLevelGradingScaleSchema = new mongoose.Schema(
     minScore: { type: Number, min: 0, max: 100, default: 0 },
     maxScore: { type: Number, min: 1, max: 100, default: 100 },
     passingScore: { type: Number, min: 0, max: 100, default: 70 },
+    qualitativeOnly: { type: Boolean, default: false },
     performanceLevels: { type: [academicStructurePerformanceLevelSchema], default: [] },
   },
   { _id: false }

@@ -342,6 +342,13 @@ function CoordinationCampusHome() {
       return;
     }
 
+    const startDate = String(plannerCycleDraft.startDate || '').trim();
+    const endDate = String(plannerCycleDraft.endDate || '').trim();
+    if (startDate && endDate && endDate < startDate) {
+      setNotice({ type: 'error', text: 'La fecha "Hasta" debe ser igual o posterior a la fecha "Desde".' });
+      return;
+    }
+
     await createPlannerCycleMutation.mutateAsync(plannerCycleDraft);
   };
 
@@ -511,7 +518,12 @@ function CoordinationCampusHome() {
             </label>
             <label className="campus-coordination__field">
               <span>Hasta</span>
-              <input type="date" value={plannerCycleDraft.endDate} onChange={(event) => setPlannerCycleDraft((draft) => ({ ...draft, endDate: event.target.value }))} />
+              <input
+                min={plannerCycleDraft.startDate || undefined}
+                type="date"
+                value={plannerCycleDraft.endDate}
+                onChange={(event) => setPlannerCycleDraft((draft) => ({ ...draft, endDate: event.target.value }))}
+              />
             </label>
             <label className="campus-coordination__field">
               <span>Fecha limite</span>

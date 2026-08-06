@@ -319,10 +319,20 @@ const parentCareMenuItems = [
   { id: 'coexistence', title: 'Convivencia', icon: 'coexistence' },
 ];
 
-function formatGrade(value) {
+function formatGrade(value, gradingScale = null, performanceLevel = null) {
   if (value === null || value === undefined || value === '') {
     return 'Sin nota';
   }
+
+  if (gradingScale?.qualitativeOnly) {
+    const label = String(
+      performanceLevel?.label
+      || resolvePerformanceLevelForAverage(value, gradingScale)?.label
+      || ''
+    ).trim();
+    return label || 'Sin nota';
+  }
+
   return `${Math.round(Number(value) || 0)}/100`;
 }
 
@@ -4728,6 +4738,9 @@ function ParentAcademicContent({
   const performanceProgress = academicPerformanceAverage !== null && academicPerformanceAverage !== undefined
     ? Math.max(0, Math.min(100, Math.round(Number(academicPerformanceAverage) || 0)))
     : 0;
+  const parentGradingScale = selectedChild?.academicGradingScale || null;
+  const isQualitativeOnlyGrading = Boolean(parentGradingScale?.qualitativeOnly);
+  const formatParentGrade = (value, performanceLevel = null) => formatGrade(value, parentGradingScale, performanceLevel);
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const upcomingAssignments = selectedChild?.isRealParentChild
@@ -4800,16 +4813,22 @@ function ParentAcademicContent({
           <div className="campus-parent-mobile__performance-hero-body">
             <div className="campus-parent-mobile__performance-hero-main">
               <div className="campus-parent-mobile__performance-hero-copy">
-                <span className="campus-parent-mobile__performance-hero-eyebrow">Promedio general</span>
+                <span className="campus-parent-mobile__performance-hero-eyebrow">
+                  {isQualitativeOnlyGrading ? 'Desempeño general' : 'Promedio general'}
+                </span>
                 <h2>
                   {isPerformanceLoading
                     ? '—'
-                    : (academicPerformanceAverage !== null && academicPerformanceAverage !== undefined ? formatGrade(academicPerformanceAverage) : 'Sin nota')}
+                    : (academicPerformanceAverage !== null && academicPerformanceAverage !== undefined
+                      ? formatParentGrade(academicPerformanceAverage, resolvedPerformanceLevel)
+                      : 'Sin nota')}
                 </h2>
                 <p>
                   {isPerformanceLoading
                     ? 'Consultando calificaciones'
-                    : getGradeTextLabel(academicPerformanceAverage, resolvedPerformanceLevel)}
+                    : (isQualitativeOnlyGrading
+                      ? 'Calificación cualitativa · sin notas numéricas'
+                      : getGradeTextLabel(academicPerformanceAverage, resolvedPerformanceLevel))}
                 </p>
               </div>
             </div>
@@ -4981,7 +5000,7 @@ function ParentAcademicContent({
                     </small>
                   </div>
                   <div className="campus-parent-mobile__grade-card-score">
-                    <strong className={`is-${scoreTone}`}>{formatGrade(gradeEntry.score)}</strong>
+                    <strong className={`is-${scoreTone}`}>{formatParentGrade(gradeEntry.score)}</strong>
                     <span className={`is-${scoreTone}`}>{getGradeDisplayLabel(gradeEntry.score)}</span>
                   </div>
                   <span className="campus-parent-mobile__grade-card-chevron" aria-hidden="true">
@@ -5031,7 +5050,7 @@ function ParentAcademicContent({
                     <span className="campus-parent-mobile__reinforce-card-badge">Bajo desempeño</span>
                   </div>
                   <div className="campus-parent-mobile__reinforce-card-score">
-                    <strong className={`is-${scoreTone}`}>{formatGrade(subject.finalAverage)}</strong>
+                    <strong className={`is-${scoreTone}`}>{formatParentGrade(subject.finalAverage, subject.performanceLevel)}</strong>
                     <small>Requiere seguimiento</small>
                   </div>
                   <span className="campus-parent-mobile__reinforce-card-chevron" aria-hidden="true">
@@ -5159,7 +5178,7 @@ function ParentAcademicContent({
                     <strong>{entry.name}</strong>
                     {entry.isSelf ? <small>{studentPortalMode ? 'Tú' : 'Tu hijo(a)'}</small> : null}
                   </div>
-                  <strong className="campus-parent-mobile__ranking-score">{formatGrade(entry.average)}</strong>
+                  <strong className="campus-parent-mobile__ranking-score">{formatParentGrade(entry.average)}</strong>
                 </article>
               ))}
             </div>
@@ -5684,9 +5703,17 @@ function ParentAcademicContent({
         <section className="campus-parent-mobile__academic-section">
           <h3>Calificaciones</h3>
           <div className="campus-parent-mobile__grade-overall-summary" aria-label="Promedio general del estudiante">
-            <span>PROMEDIO GENERAL</span>
-            <strong>{overallGradeAverage}</strong>
-            <small>{getGradeTextLabel(overallGradeAverage)}</small>
+            <span>{isQualitativeOnlyGrading ? 'DESEMPEÑO GENERAL' : 'PROMEDIO GENERAL'}</span>
+            <strong>
+              {overallGradeAverage === null || overallGradeAverage === undefined
+                ? 'Sin nota'
+                : formatParentGrade(overallGradeAverage, resolvePerformanceLevelForAverage(overallGradeAverage, parentGradingScale))}
+            </strong>
+            <small>
+              {isQualitativeOnlyGrading
+                ? 'Calificación cualitativa · sin notas numéricas'
+                : getGradeTextLabel(overallGradeAverage, resolvePerformanceLevelForAverage(overallGradeAverage, parentGradingScale))}
+            </small>
             <div className="campus-parent-mobile__grade-ranking-pill">
               <span>Ranking del curso</span>
               <strong>{formatAcademicRankingLabel(academicWorkspace.ranking, academicWorkspace.gradebook)}</strong>
@@ -5714,7 +5741,7 @@ function ParentAcademicContent({
                       <strong>{subject.name}</strong>
                     </div>
                     <div className={`campus-parent-mobile__subject-card-score${hasSubjectGrade ? '' : ' is-empty'}`}>
-                      <strong>{hasSubjectGrade ? formatGrade(subject.finalAverage) : 'Sin calificaciones'}</strong>
+                      <strong>{hasSubjectGrade ? formatParentGrade(subject.finalAverage, subject.performanceLevel) : 'Sin calificaciones'}</strong>
                       <small>{isSubjectOpen ? 'Ocultar' : 'Ver detalle'}</small>
                     </div>
                   </button>
@@ -5728,7 +5755,7 @@ function ParentAcademicContent({
                       <span>{period.weight}%</span>
                     </div>
                     <div className="campus-parent-mobile__grade-period-score">
-                      <strong>{formatGrade(period.average)}</strong>
+                      <strong>{formatParentGrade(period.average)}</strong>
                     </div>
                   </div>
                   <div className="campus-parent-mobile__grade-component-list">
@@ -5747,7 +5774,7 @@ function ParentAcademicContent({
                               <span>{component.weight}%</span>
                             </div>
                             <div className="campus-parent-mobile__grade-component-score">
-                              <strong>{formatGrade(component.average)}</strong>
+                              <strong>{formatParentGrade(component.average)}</strong>
                               <small>{isOpen ? 'Ocultar detalle' : 'Ver detalle'}</small>
                             </div>
                           </button>
@@ -5761,7 +5788,7 @@ function ParentAcademicContent({
                                   </div>
                                   <div className="campus-parent-mobile__grade-component-detail-bottom">
                                     <span>Tema: {evaluation.topic}</span>
-                                    <strong>{formatGrade(evaluation.score)}</strong>
+                                    <strong>{formatParentGrade(evaluation.score)}</strong>
                                   </div>
                                   {evaluation.feedback ? <p>{evaluation.feedback}</p> : null}
                                 </article>

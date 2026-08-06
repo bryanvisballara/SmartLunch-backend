@@ -2479,6 +2479,7 @@ const DEFAULT_ACADEMIC_GRADING_SCALE = {
   minScore: 0,
   maxScore: 100,
   passingScore: 70,
+  qualitativeOnly: false,
   performanceLevels: DEFAULT_ACADEMIC_PERFORMANCE_LEVELS,
 };
 
@@ -2550,6 +2551,7 @@ function normalizeAcademicGradingScale(rawScale = {}) {
       minScore: Number(minScore.toFixed(2)),
       maxScore: Number(maxScore.toFixed(2)),
       passingScore: Number(passingScore.toFixed(2)),
+      qualitativeOnly: Boolean(sourceScale?.qualitativeOnly),
       performanceLevels: sortedPerformanceLevels,
     },
   };

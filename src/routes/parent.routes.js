@@ -672,6 +672,7 @@ function normalizeParentGradingScale(rawScale = {}) {
     minScore: Number(rawScale?.minScore ?? 0),
     maxScore: Number(rawScale?.maxScore ?? 100),
     passingScore: Number(rawScale?.passingScore ?? 70),
+    qualitativeOnly: Boolean(rawScale?.qualitativeOnly),
     performanceLevels: sourceLevels
       .map((level, index) => ({
         key: normalizeText(level?.key) || `performance_level_${index + 1}`,
@@ -714,6 +715,7 @@ function serializeParentGradingScale(gradingScale = {}) {
     minScore: normalizedScale.minScore,
     maxScore: normalizedScale.maxScore,
     passingScore: normalizedScale.passingScore,
+    qualitativeOnly: Boolean(normalizedScale.qualitativeOnly),
     performanceLevels: (Array.isArray(normalizedScale.performanceLevels) ? normalizedScale.performanceLevels : []).map((level) => ({
       key: level.key,
       label: level.label,

@@ -734,7 +734,8 @@
 }
 
 .rectoria-form {
-  overflow-x: auto;
+  overflow: visible;
+  min-width: 0;
 }
 
 .rectoria-form-title {
@@ -743,10 +744,11 @@
 
 .rectoria-form-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 14px;
-  flex-wrap: nowrap;
-  min-width: max-content;
+  min-width: 0;
+  width: 100%;
 }
 
 .rectoria-form label,
@@ -758,7 +760,9 @@
 }
 
 .rectoria-form-field {
-  flex: 0 0 auto;
+  flex: 1 1 150px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .rectoria-form-grid {
@@ -775,6 +779,8 @@
 .rectoria-form-field textarea,
 .rectoria-form-field select {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid #d6deea;
   border-radius: 14px;
   padding: 11px 12px;
@@ -830,37 +836,37 @@
 }
 
 .rectoria-form-field--title {
-  width: 110px;
+  flex: 0 1 110px;
 }
 
 .rectoria-form-field--name {
-  width: 180px;
+  flex: 1 1 180px;
 }
 
 .rectoria-form-field--email {
-  width: 220px;
+  flex: 1 1 220px;
 }
 
-.rectoria-form-field--phone {
-  width: 150px;
-}
-
+.rectoria-form-field--phone,
 .rectoria-form-field--password {
-  width: 150px;
+  flex: 1 1 150px;
 }
 
 .rectoria-form-field--role,
 .rectoria-form-field--scope {
-  width: 170px;
+  flex: 1 1 180px;
 }
 
 .rectoria-form-field--subjects {
-  width: 240px;
+  flex: 1 1 240px;
 }
 
 .rectoria-form-submit {
+  flex: 0 0 auto;
   align-self: end;
   white-space: nowrap;
+  width: auto;
+  min-width: max-content;
 }
 
 .rectoria-form input,
@@ -3849,9 +3855,14 @@ button.rectoria-team-assignment-card.is-active {
   .rectoria-form-field--role,
   .rectoria-form-field--scope,
   .rectoria-form-field--subjects {
+    flex: 1 1 100%;
     width: 100%;
     max-width: none;
     min-width: 0;
+  }
+
+  .rectoria-form-submit {
+    width: 100%;
   }
 
   .rectoria-role-accordion-summary,
