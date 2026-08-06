@@ -200,6 +200,13 @@ const academicStructureGradeScheduleSchema = new mongoose.Schema(
     courseKey: { type: String, trim: true, default: '' },
     subjectLoads: { type: [academicStructureGradeSubjectLoadSchema], default: [] },
     weeklySchedule: { type: [academicStructureGradeScheduleEntrySchema], default: [] },
+    // When true, parents and students do not see this course schedule (draft / rehearsal).
+    hiddenFromFamilies: { type: Boolean, default: false },
+    gioAiInstructions: { type: String, trim: true, default: '' },
+    gioAiConstraints: { type: mongoose.Schema.Types.Mixed, default: null },
+    gioAiSummary: { type: String, trim: true, default: '' },
+    gioAiGeneratedAt: { type: Date, default: null },
+    gioAiModel: { type: String, trim: true, default: '' },
     updatedAt: { type: Date, default: null },
   },
   { _id: false }

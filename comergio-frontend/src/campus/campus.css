@@ -17390,9 +17390,23 @@ button.campus-teacher__home-kpi-card:focus-visible {
   }
 
   .campus-teacher__topbar {
+    --campus-teacher-top-safe-area: env(safe-area-inset-top, 0px);
+
+    position: sticky;
+    top: 0;
+    z-index: 60;
     justify-content: flex-start;
-    min-height: 64px;
-    padding: 0.55rem 0.85rem;
+    min-height: calc(64px + var(--campus-teacher-top-safe-area));
+    padding:
+      calc(0.55rem + var(--campus-teacher-top-safe-area))
+      max(0.85rem, env(safe-area-inset-right, 0px))
+      0.55rem
+      max(0.85rem, env(safe-area-inset-left, 0px));
+  }
+
+  .platform-android .campus-teacher__topbar {
+    /* Some Android WebViews report 0px while drawing below the status bar. */
+    --campus-teacher-top-safe-area: max(env(safe-area-inset-top, 0px), 24px);
   }
 
   .campus-teacher__topbar-search {

@@ -2552,6 +2552,9 @@ function findParentAcademicStructureSchedule(academicStructure, { gradeValues = 
 
 async function buildParentAcademicScheduleFromStructure({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [] }) {
   const gradeSchedule = findParentAcademicStructureSchedule(academicStructure, { gradeValues, courseValues, courseTitleValues });
+  if (gradeSchedule?.hiddenFromFamilies === true) {
+    return { courses: [], slots: [], hiddenFromFamilies: true };
+  }
   const entries = Array.isArray(gradeSchedule?.weeklySchedule) ? gradeSchedule.weeklySchedule : [];
   const blockSlots = buildAcademicScheduleBlockSlots(academicStructure, { gradeValues, entries });
 
@@ -3903,6 +3906,23 @@ router.get('/portal/overview', async (req, res) => {
     });
     const academicStructureScheduleCourses = Array.isArray(academicStructureSchedule?.courses) ? academicStructureSchedule.courses : [];
     const academicStructureScheduleSlots = Array.isArray(academicStructureSchedule?.slots) ? academicStructureSchedule.slots : [];
+    const scheduleHiddenFromFamilies = Boolean(academicStructureSchedule?.hiddenFromFamilies);
+    const fallbackScheduleCourses = academicContentCourses.map((course) => ({
+      courseId: String(course._id),
+      title: String(course.title || '').trim(),
+      subject: String(course.subject || '').trim(),
+      gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
+      section: String(course.section || '').trim(),
+      classSessions: Array.isArray(course.classSessions) ? course.classSessions.map((session) => ({
+        weekday: Number(session.weekday || 0),
+        startTime: String(session.startTime || '').trim(),
+        endTime: String(session.endTime || '').trim(),
+        label: String(session.label || '').trim(),
+      })).filter((session) => session.weekday >= 1 && session.weekday <= 5 && session.startTime && session.endTime) : [],
+    })).filter((course) => course.classSessions.length > 0);
+    const publishedScheduleCourses = scheduleHiddenFromFamilies
+      ? []
+      : (academicStructureScheduleCourses.length ? academicStructureScheduleCourses : fallbackScheduleCourses);
 
     return res.status(200).json({
       parent: {
@@ -3993,20 +4013,9 @@ router.get('/portal/overview', async (req, res) => {
       academicSchedule: {
         gradeKey: selectedStudentGrade,
         section: selectedStudentCourse,
-        slots: academicStructureScheduleSlots,
-        courses: (academicStructureScheduleCourses.length ? academicStructureScheduleCourses : academicContentCourses.map((course) => ({
-          courseId: String(course._id),
-          title: String(course.title || '').trim(),
-          subject: String(course.subject || '').trim(),
-          gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
-          section: String(course.section || '').trim(),
-          classSessions: Array.isArray(course.classSessions) ? course.classSessions.map((session) => ({
-            weekday: Number(session.weekday || 0),
-            startTime: String(session.startTime || '').trim(),
-            endTime: String(session.endTime || '').trim(),
-            label: String(session.label || '').trim(),
-          })).filter((session) => session.weekday >= 1 && session.weekday <= 5 && session.startTime && session.endTime) : [],
-        })).filter((course) => course.classSessions.length > 0)),
+        slots: scheduleHiddenFromFamilies ? [] : academicStructureScheduleSlots,
+        courses: publishedScheduleCourses,
+        hiddenFromFamilies: scheduleHiddenFromFamilies,
       },
       parentAppFeatures,
     });

@@ -1639,6 +1639,36 @@ function buildTeacherConflictIndex(gradeSchedules, { skipGradeKey = '' } = {}) {
   return conflicts;
 }
 
+function buildTeacherBusyIntervals(gradeSchedules, { skipScheduleKey = '' } = {}) {
+  const busyByTeacherId = new Map();
+  (Array.isArray(gradeSchedules) ? gradeSchedules : []).forEach((gradeSchedule) => {
+    const scheduleKey = `${normalizeAcademicStructureGradeKey(gradeSchedule?.gradeKey)}::${normalizeText(gradeSchedule?.courseKey)}`;
+    if (scheduleKey === skipScheduleKey) return;
+    (Array.isArray(gradeSchedule?.weeklySchedule) ? gradeSchedule.weeklySchedule : []).forEach((entry) => {
+      const teacherUserId = normalizeText(entry?.teacherUserId);
+      const weekday = Number(entry?.weekday || 0);
+      const startMinutes = academicScheduleTimeToMinutes(entry?.startTime);
+      const endMinutes = academicScheduleTimeToMinutes(entry?.endTime);
+      if (!teacherUserId || !weekday || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) return;
+      if (!busyByTeacherId.has(teacherUserId)) busyByTeacherId.set(teacherUserId, []);
+      busyByTeacherId.get(teacherUserId).push({ weekday, startMinutes, endMinutes });
+    });
+  });
+  return busyByTeacherId;
+}
+
+function teacherHasAcademicScheduleOverlap(teacherBusyIntervals, teacherUserId, slot) {
+  if (!teacherUserId) return false;
+  const slotStart = academicScheduleTimeToMinutes(slot?.startTime);
+  const slotEnd = academicScheduleTimeToMinutes(slot?.endTime);
+  if (slotStart === null || slotEnd === null) return true;
+  return (teacherBusyIntervals.get(String(teacherUserId)) || []).some((busy) => (
+    Number(busy.weekday) === Number(slot?.weekday)
+    && slotStart < Number(busy.endMinutes)
+    && slotEnd > Number(busy.startMinutes)
+  ));
+}
+
 function isAcademicTimeRangeWithinSlot({ startTime, endTime, slot }) {
   const rangeStartMinutes = academicScheduleTimeToMinutes(startTime);
   const rangeEndMinutes = academicScheduleTimeToMinutes(endTime);
@@ -1916,6 +1946,12 @@ function ensureAcademicGradeSchedule(configuration, gradeKey, { courseKey = '' }
       courseKey: normalizedCourseKey,
       subjectLoads: [],
       weeklySchedule: createDefaultAcademicScheduleTemplate(configuration?.scheduleSettings, { gradeKey: normalizedGradeKey, allowedGradeKeys }),
+      hiddenFromFamilies: false,
+      gioAiInstructions: '',
+      gioAiConstraints: null,
+      gioAiSummary: '',
+      gioAiGeneratedAt: null,
+      gioAiModel: '',
       updatedAt: null,
     };
     configuration.gradeSchedules.push(schedule);
@@ -2393,6 +2429,395 @@ function generateAcademicWeeklySchedule({ slotTemplates = [], subjectLoads = [],
   return { ok: false, message: 'No fue posible generar el horario sin cruces de profesor y respetando la disponibilidad docente. Ajusta la carga o amplía horarios disponibles.' };
 }
 
+const GIO_AI_SCHEDULE_CONSTRAINT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'teacherRules', 'subjectRules', 'globalRules', 'warnings'],
+  properties: {
+    summary: { type: 'string' },
+    teacherRules: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['teacherUserId', 'unavailableWeekdays', 'earliestStartTime', 'latestEndTime'],
+        properties: {
+          teacherUserId: { type: 'string' },
+          unavailableWeekdays: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 6 } },
+          earliestStartTime: { type: 'string' },
+          latestEndTime: { type: 'string' },
+        },
+      },
+    },
+    subjectRules: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'subjectKey',
+          'forbiddenWeekdays',
+          'preferredWeekdays',
+          'forbiddenBlocks',
+          'preferredBlocks',
+          'avoidFirstBlock',
+          'avoidLastBlock',
+          'afterBreak',
+          'maxPerDay',
+          'consecutiveBlocks',
+        ],
+        properties: {
+          subjectKey: { type: 'string' },
+          forbiddenWeekdays: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 6 } },
+          preferredWeekdays: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 6 } },
+          forbiddenBlocks: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 48 } },
+          preferredBlocks: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 48 } },
+          avoidFirstBlock: { type: 'boolean' },
+          avoidLastBlock: { type: 'boolean' },
+          afterBreak: { type: 'boolean' },
+          maxPerDay: { type: 'integer', minimum: 0, maximum: 12 },
+          consecutiveBlocks: { type: 'integer', minimum: 1, maximum: 3 },
+        },
+      },
+    },
+    globalRules: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['avoidSubjectRepeatSameDay', 'balanceAcrossWeek'],
+      properties: {
+        avoidSubjectRepeatSameDay: { type: 'boolean' },
+        balanceAcrossWeek: { type: 'boolean' },
+      },
+    },
+    warnings: { type: 'array', items: { type: 'string' } },
+  },
+};
+
+function uniqueScheduleNumbers(values, minimum, maximum) {
+  return Array.from(new Set((Array.isArray(values) ? values : [])
+    .map(Number)
+    .filter((value) => Number.isInteger(value) && value >= minimum && value <= maximum)));
+}
+
+function normalizeGioAiScheduleConstraints(rawConstraints, { subjectKeys = new Set(), teacherIds = new Set() } = {}) {
+  const source = rawConstraints && typeof rawConstraints === 'object' ? rawConstraints : {};
+  const teacherRules = (Array.isArray(source.teacherRules) ? source.teacherRules : [])
+    .map((rule) => ({
+      teacherUserId: normalizeText(rule?.teacherUserId),
+      unavailableWeekdays: uniqueScheduleNumbers(rule?.unavailableWeekdays, 1, 6),
+      earliestStartTime: normalizeAcademicScheduleTime(rule?.earliestStartTime),
+      latestEndTime: normalizeAcademicScheduleTime(rule?.latestEndTime),
+    }))
+    .filter((rule) => teacherIds.has(rule.teacherUserId));
+  const subjectRules = (Array.isArray(source.subjectRules) ? source.subjectRules : [])
+    .map((rule) => ({
+      subjectKey: slugifyAcademicStructureKey(rule?.subjectKey),
+      forbiddenWeekdays: uniqueScheduleNumbers(rule?.forbiddenWeekdays, 1, 6),
+      preferredWeekdays: uniqueScheduleNumbers(rule?.preferredWeekdays, 1, 6),
+      forbiddenBlocks: uniqueScheduleNumbers(rule?.forbiddenBlocks, 1, 48),
+      preferredBlocks: uniqueScheduleNumbers(rule?.preferredBlocks, 1, 48),
+      avoidFirstBlock: Boolean(rule?.avoidFirstBlock),
+      avoidLastBlock: Boolean(rule?.avoidLastBlock),
+      afterBreak: Boolean(rule?.afterBreak),
+      maxPerDay: Math.max(0, Math.min(12, Number(rule?.maxPerDay || 0))),
+      consecutiveBlocks: Math.max(1, Math.min(3, Number(rule?.consecutiveBlocks || 1))),
+    }))
+    .filter((rule) => subjectKeys.has(rule.subjectKey));
+
+  return {
+    summary: normalizeText(source.summary) || 'GIO IA interpretó las indicaciones y generó una propuesta válida.',
+    teacherRules,
+    subjectRules,
+    globalRules: {
+      avoidSubjectRepeatSameDay: Boolean(source?.globalRules?.avoidSubjectRepeatSameDay),
+      balanceAcrossWeek: source?.globalRules?.balanceAcrossWeek !== false,
+    },
+    warnings: (Array.isArray(source.warnings) ? source.warnings : []).map(normalizeText).filter(Boolean).slice(0, 8),
+  };
+}
+
+async function interpretGioAiScheduleInstructions({
+  instructions,
+  grade,
+  course,
+  subjects,
+  teachers,
+  slotTemplates,
+}) {
+  if (!openAiClient) {
+    const error = new Error('GIO IA no está configurado. Agrega OPENAI_API_KEY en el backend.');
+    error.status = 503;
+    throw error;
+  }
+
+  const model = String(process.env.OPENAI_MODEL || 'gpt-5-mini').trim();
+  const catalog = {
+    grade: { key: grade?.key || '', label: grade?.label || '' },
+    course: { key: course?.key || '', label: course?.label || course?.key || '' },
+    subjects: subjects.map((subject) => ({ key: subject.key, label: subject.label })),
+    teachers: teachers.map((teacher) => ({ id: String(teacher._id), name: teacher.name })),
+    availableSlots: slotTemplates.map((slot) => ({
+      weekday: Number(slot.weekday),
+      block: Number(slot.block),
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+      type: slot.entryType === 'break' ? 'break' : 'class',
+    })),
+  };
+  const response = await openAiClient.responses.create({
+    model,
+    input: [
+      {
+        role: 'system',
+        content: [
+          'Eres GIO IA, asistente de configuración de horarios escolares de Comergio.',
+          'Convierte las instrucciones del usuario únicamente a las restricciones soportadas por el esquema.',
+          'Usa exclusivamente IDs y claves del catálogo; nunca inventes docentes, asignaturas, bloques o días.',
+          'Una preferencia no debe convertirse en prohibición. Si algo no se puede representar, agrégalo a warnings.',
+          'maxPerDay=0 significa sin límite. consecutiveBlocks=1 significa sin obligación de continuidad.',
+          'Los días son 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado.',
+        ].join(' '),
+      },
+      {
+        role: 'user',
+        content: `CATÁLOGO DEL COLEGIO:\n${JSON.stringify(catalog)}\n\nINDICACIONES:\n${instructions}`,
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'gio_schedule_constraints',
+        strict: true,
+        schema: GIO_AI_SCHEDULE_CONSTRAINT_SCHEMA,
+      },
+    },
+  });
+  const parsed = JSON.parse(normalizeText(response?.output_text || '{}'));
+  return { parsed, model };
+}
+
+function generateGioAiAcademicWeeklySchedule({
+  slotTemplates = [],
+  subjectLoads = [],
+  conflictIndex = new Map(),
+  teacherBusyIntervals = new Map(),
+  teachingAvailability = [],
+  gradeKey = '',
+  constraints = {},
+}) {
+  const classSlots = slotTemplates.filter((slot) => normalizeText(slot?.entryType || 'class') !== 'break');
+  const subjectRuleByKey = new Map((constraints.subjectRules || []).map((rule) => [rule.subjectKey, rule]));
+  const teacherRuleById = new Map((constraints.teacherRules || []).map((rule) => [rule.teacherUserId, rule]));
+  const slotsByWeekday = new Map();
+  const firstBlockByWeekday = new Map();
+  const lastBlockByWeekday = new Map();
+  const firstBreakEndByWeekday = new Map();
+
+  classSlots.forEach((slot) => {
+    const weekday = Number(slot.weekday);
+    if (!slotsByWeekday.has(weekday)) slotsByWeekday.set(weekday, []);
+    slotsByWeekday.get(weekday).push(slot);
+  });
+  slotsByWeekday.forEach((slots, weekday) => {
+    slots.sort((left, right) => Number(left.block) - Number(right.block));
+    firstBlockByWeekday.set(weekday, Number(slots[0]?.block || 0));
+    lastBlockByWeekday.set(weekday, Number(slots[slots.length - 1]?.block || 0));
+  });
+  slotTemplates.filter((slot) => normalizeText(slot?.entryType) === 'break').forEach((slot) => {
+    const weekday = Number(slot.weekday);
+    const current = firstBreakEndByWeekday.get(weekday);
+    if (!current || academicScheduleTimeToMinutes(slot.endTime) < academicScheduleTimeToMinutes(current)) {
+      firstBreakEndByWeekday.set(weekday, slot.endTime);
+    }
+  });
+
+  const isStaticallyAllowed = (load, slot) => {
+    const slotKey = buildAcademicScheduleSlotKey(slot.weekday, slot.block);
+    if (load.teacherUserId && conflictIndex.has(`${load.teacherUserId}::${slotKey}`)) return false;
+    if (teacherHasAcademicScheduleOverlap(teacherBusyIntervals, load.teacherUserId, slot)) return false;
+    if (!isAcademicScheduleSlotAllowedByTeachingAvailability({
+      teachingAvailability,
+      teacherUserId: load.teacherUserId,
+      subjectKey: load.subjectKey,
+      gradeKey,
+      slot,
+    })) return false;
+
+    const teacherRule = teacherRuleById.get(load.teacherUserId);
+    if (teacherRule) {
+      if (teacherRule.unavailableWeekdays.includes(Number(slot.weekday))) return false;
+      const startMinutes = academicScheduleTimeToMinutes(slot.startTime);
+      const endMinutes = academicScheduleTimeToMinutes(slot.endTime);
+      const earliestMinutes = academicScheduleTimeToMinutes(teacherRule.earliestStartTime);
+      const latestMinutes = academicScheduleTimeToMinutes(teacherRule.latestEndTime);
+      if (earliestMinutes !== null && startMinutes < earliestMinutes) return false;
+      if (latestMinutes !== null && endMinutes > latestMinutes) return false;
+    }
+
+    const rule = subjectRuleByKey.get(load.subjectKey);
+    if (!rule) return true;
+    if (rule.forbiddenWeekdays.includes(Number(slot.weekday))) return false;
+    if (rule.forbiddenBlocks.includes(Number(slot.block))) return false;
+    if (rule.avoidFirstBlock && Number(slot.block) === firstBlockByWeekday.get(Number(slot.weekday))) return false;
+    if (rule.avoidLastBlock && Number(slot.block) === lastBlockByWeekday.get(Number(slot.weekday))) return false;
+    if (rule.afterBreak) {
+      const breakEnd = firstBreakEndByWeekday.get(Number(slot.weekday));
+      if (!breakEnd || academicScheduleTimeToMinutes(slot.startTime) < academicScheduleTimeToMinutes(breakEnd)) return false;
+    }
+    return true;
+  };
+
+  const units = [];
+  for (const load of subjectLoads) {
+    const count = Number(load.weeklyHours || 0);
+    const rule = subjectRuleByKey.get(load.subjectKey);
+    const unitSize = Number(rule?.consecutiveBlocks || 1);
+    if (unitSize > 1 && count % unitSize !== 0) {
+      return { ok: false, message: `${load.subjectLabel || load.subjectKey} tiene ${count} bloques semanales, que no se pueden agrupar siempre de ${unitSize} en ${unitSize}.` };
+    }
+    for (let index = 0; index < count; index += unitSize) {
+      units.push({ ...load, size: unitSize });
+    }
+  }
+  if (!units.length) {
+    return { ok: false, message: 'Primero configura horas semanales para al menos una asignatura.' };
+  }
+  if (units.reduce((sum, unit) => sum + unit.size, 0) > classSlots.length) {
+    return { ok: false, message: 'La carga semanal configurada supera la cantidad de bloques disponibles.' };
+  }
+
+  const staticPlacementsByUnit = new Map();
+  units.forEach((unit, unitIndex) => {
+    const placements = [];
+    slotsByWeekday.forEach((daySlots) => {
+      for (let startIndex = 0; startIndex <= daySlots.length - unit.size; startIndex += 1) {
+        const placement = daySlots.slice(startIndex, startIndex + unit.size);
+        const isContinuous = placement.every((slot, index) => (
+          index === 0
+          || (
+            Number(slot.block) === Number(placement[index - 1].block) + 1
+            && normalizeAcademicScheduleTime(placement[index - 1].endTime) === normalizeAcademicScheduleTime(slot.startTime)
+          )
+        ));
+        if (isContinuous && placement.every((slot) => isStaticallyAllowed(unit, slot))) placements.push(placement);
+      }
+    });
+    staticPlacementsByUnit.set(unitIndex, placements);
+  });
+
+  const impossibleUnitIndex = units.findIndex((unit, index) => staticPlacementsByUnit.get(index).length === 0);
+  if (impossibleUnitIndex >= 0) {
+    const unit = units[impossibleUnitIndex];
+    return {
+      ok: false,
+      message: `No hay bloques disponibles para ${unit.subjectLabel || unit.subjectKey} que cumplan la disponibilidad docente y las restricciones indicadas.`,
+    };
+  }
+
+  for (const load of subjectLoads) {
+    const availableSlotKeys = new Set(classSlots
+      .filter((slot) => isStaticallyAllowed(load, slot))
+      .map((slot) => buildAcademicScheduleSlotKey(slot.weekday, slot.block)));
+    if (Number(load.weeklyHours || 0) > availableSlotKeys.size) {
+      return {
+        ok: false,
+        message: `${load.subjectLabel || load.subjectKey} necesita ${load.weeklyHours} bloques, pero solo tiene ${availableSlotKeys.size} disponibles con las reglas actuales.`,
+      };
+    }
+  }
+  const loadsByTeacher = new Map();
+  subjectLoads.filter((load) => load.teacherUserId).forEach((load) => {
+    if (!loadsByTeacher.has(load.teacherUserId)) loadsByTeacher.set(load.teacherUserId, []);
+    loadsByTeacher.get(load.teacherUserId).push(load);
+  });
+  for (const teacherLoads of loadsByTeacher.values()) {
+    const requiredBlocks = teacherLoads.reduce((sum, load) => sum + Number(load.weeklyHours || 0), 0);
+    const availableSlotKeys = new Set();
+    teacherLoads.forEach((load) => classSlots
+      .filter((slot) => isStaticallyAllowed(load, slot))
+      .forEach((slot) => availableSlotKeys.add(buildAcademicScheduleSlotKey(slot.weekday, slot.block))));
+    if (requiredBlocks > availableSlotKeys.size) {
+      return {
+        ok: false,
+        message: `${teacherLoads[0].teacherName || 'El docente asignado'} debe impartir ${requiredBlocks} bloques para este curso, pero solo tiene ${availableSlotKeys.size} disponibles con las reglas actuales.`,
+      };
+    }
+  }
+
+  for (let attempt = 0; attempt < 800; attempt += 1) {
+    const usedSlots = new Set();
+    const subjectDayBlockCounts = new Map();
+    const subjectDaySessionCounts = new Map();
+    const selectedPlacements = [];
+    const orderedUnits = units
+      .map((unit, index) => ({ unit, index, options: staticPlacementsByUnit.get(index).length, random: Math.random() }))
+      .sort((left, right) => left.options - right.options || right.unit.size - left.unit.size || left.random - right.random);
+    let failed = false;
+
+    for (const { unit, index } of orderedUnits) {
+      const rule = subjectRuleByKey.get(unit.subjectKey);
+      const maxPerDay = Number(rule?.maxPerDay || 0);
+      const candidates = shuffleArray(staticPlacementsByUnit.get(index))
+        .filter((placement) => {
+          if (placement.some((slot) => usedSlots.has(buildAcademicScheduleSlotKey(slot.weekday, slot.block)))) return false;
+          const weekday = Number(placement[0].weekday);
+          const countKey = `${unit.subjectKey}::${weekday}`;
+          const currentBlockCount = Number(subjectDayBlockCounts.get(countKey) || 0);
+          const currentSessionCount = Number(subjectDaySessionCounts.get(countKey) || 0);
+          if (constraints?.globalRules?.avoidSubjectRepeatSameDay && currentSessionCount >= 1) return false;
+          return !maxPerDay || currentBlockCount + placement.length <= maxPerDay;
+        })
+        .map((placement) => {
+          const weekday = Number(placement[0].weekday);
+          const currentDayCount = Number(subjectDayBlockCounts.get(`${unit.subjectKey}::${weekday}`) || 0);
+          let score = Math.random();
+          if (rule?.preferredWeekdays?.includes(weekday)) score += 10;
+          score += placement.reduce((sum, slot) => sum + (rule?.preferredBlocks?.includes(Number(slot.block)) ? 5 : 0), 0);
+          if (constraints?.globalRules?.balanceAcrossWeek) score -= currentDayCount * 4;
+          return { placement, score };
+        })
+        .sort((left, right) => right.score - left.score);
+      if (!candidates.length) {
+        failed = true;
+        break;
+      }
+      const placement = candidates[0].placement;
+      placement.forEach((slot) => usedSlots.add(buildAcademicScheduleSlotKey(slot.weekday, slot.block)));
+      const countKey = `${unit.subjectKey}::${Number(placement[0].weekday)}`;
+      subjectDayBlockCounts.set(countKey, Number(subjectDayBlockCounts.get(countKey) || 0) + placement.length);
+      subjectDaySessionCounts.set(countKey, Number(subjectDaySessionCounts.get(countKey) || 0) + 1);
+      selectedPlacements.push({ unit, placement });
+    }
+
+    if (!failed) {
+      const assignments = new Map();
+      selectedPlacements.forEach(({ unit, placement }) => placement.forEach((slot) => {
+        assignments.set(buildAcademicScheduleSlotKey(slot.weekday, slot.block), unit);
+      }));
+      const weeklySchedule = slotTemplates.map((slot) => {
+        if (normalizeText(slot?.entryType) === 'break') {
+          return { ...slot, subjectKey: '', teacherUserId: null };
+        }
+        const assignment = assignments.get(buildAcademicScheduleSlotKey(slot.weekday, slot.block));
+        return {
+          ...slot,
+          entryType: 'class',
+          subjectKey: assignment?.subjectKey || '',
+          breakKey: '',
+          breakLabel: '',
+          teacherUserId: assignment?.teacherUserId || null,
+        };
+      }).sort((left, right) => Number(left.weekday) - Number(right.weekday) || Number(left.block) - Number(right.block));
+      return { ok: true, weeklySchedule };
+    }
+  }
+
+  return {
+    ok: false,
+    message: 'GIO IA entendió las reglas, pero el motor no encontró una combinación válida. Reduce restricciones, amplía la disponibilidad o revisa la intensidad horaria.',
+  };
+}
+
 function normalizeAcademicStructureDate(value) {
   if (value === null || value === undefined || String(value).trim() === '') {
     return null;
@@ -2700,6 +3125,12 @@ function serializeAcademicStructureConfiguration(configuration) {
         }))
         .filter((entry) => ACADEMIC_SCHEDULE_WEEKDAYS.includes(entry.weekday) && Number(entry.block) > 0 && entry.startTime && entry.endTime)
         .sort((left, right) => Number(left.weekday || 0) - Number(right.weekday || 0) || Number(left.block || 0) - Number(right.block || 0)),
+      hiddenFromFamilies: Boolean(gradeSchedule?.hiddenFromFamilies),
+      gioAiInstructions: normalizeText(gradeSchedule?.gioAiInstructions),
+      gioAiConstraints: gradeSchedule?.gioAiConstraints || null,
+      gioAiSummary: normalizeText(gradeSchedule?.gioAiSummary),
+      gioAiGeneratedAt: gradeSchedule?.gioAiGeneratedAt || null,
+      gioAiModel: normalizeText(gradeSchedule?.gioAiModel),
       updatedAt: gradeSchedule?.updatedAt || null,
     }))
     .filter((gradeSchedule) => gradeSchedule.gradeKey && gradeKeySet.has(gradeSchedule.gradeKey));
@@ -7394,6 +7825,9 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
     }
 
     gradeSchedule.weeklySchedule = normalizedWeeklySchedule.weeklySchedule;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'hiddenFromFamilies')) {
+      gradeSchedule.hiddenFromFamilies = Boolean(req.body.hiddenFromFamilies);
+    }
     applyAcademicScheduleBreaksToConfiguration(configuration);
     pruneEmptyDuplicateGradeSchedules(configuration);
     gradeSchedule.updatedAt = new Date();
@@ -7452,7 +7886,9 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
       return res.status(400).json({ message: generationResult.message });
     }
 
-    gradeSchedule.weeklySchedule = generationResult.weeklySchedule;
+    gradeSchedule.weeklySchedule = generationResult.weeklySchedule.filter((entry) => (
+      normalizeText(entry?.entryType) === 'break' || slugifyAcademicStructureKey(entry?.subjectKey)
+    ));
     applyAcademicScheduleBreaksToConfiguration(configuration);
     gradeSchedule.updatedAt = new Date();
     await configuration.save();
@@ -7460,6 +7896,163 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
     return res.status(200).json({ academicStructure: serializeAcademicStructureForRequester(req, configuration) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/academic-management/schedules/:gradeKey/gio-ai/generate', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const gradeKey = normalizeAcademicStructureGradeKey(req.params.gradeKey);
+    const courseKey = normalizeText(req.body?.courseKey);
+    const instructions = normalizeText(req.body?.instructions).slice(0, 4000);
+    if (!gradeKey || !courseKey) {
+      return res.status(400).json({ message: 'Selecciona un curso antes de generar el horario con GIO IA.' });
+    }
+    if (!instructions) {
+      return res.status(400).json({ message: 'Escribe al menos una indicación para GIO IA.' });
+    }
+
+    const configuration = await ensureAcademicStructureConfiguration(schoolId);
+    const serialized = serializeAcademicStructureConfiguration(configuration);
+    const grade = serialized.grades.find((item) => item.key === gradeKey);
+    if (!grade) {
+      return res.status(404).json({ message: 'No se encontró el grado solicitado.' });
+    }
+    const coordinationScopeGuard = assertCoordinationCanEditGradeSchedule(req, serialized, gradeKey);
+    if (!coordinationScopeGuard.ok) {
+      return res.status(coordinationScopeGuard.status).json({ message: coordinationScopeGuard.message });
+    }
+    const course = (Array.isArray(grade.courses) ? grade.courses : []).find((item) => item.key === courseKey);
+    if (!course) {
+      return res.status(404).json({ message: 'No se encontró el curso solicitado para este grado.' });
+    }
+
+    const gradeSchedule = ensureAcademicGradeSchedule(configuration, gradeKey, { courseKey });
+    const gradeLevelSchedule = ensureAcademicGradeSchedule(configuration, gradeKey);
+    const scheduleSubjectLoads = Array.isArray(gradeSchedule.subjectLoads) && gradeSchedule.subjectLoads.length > 0
+      ? gradeSchedule.subjectLoads
+      : (Array.isArray(gradeLevelSchedule?.subjectLoads) && gradeLevelSchedule.subjectLoads.length > 0
+        ? gradeLevelSchedule.subjectLoads
+        : buildAcademicSubjectLoadsFromTemplates(configuration.subjectLoadTemplates, gradeKey));
+    const subjectLabelByKey = new Map(serialized.subjects.map((subject) => [subject.key, subject.label || subject.key]));
+    const subjectLoads = (Array.isArray(scheduleSubjectLoads) ? scheduleSubjectLoads : [])
+      .map((load) => ({
+        subjectKey: slugifyAcademicStructureKey(load.subjectKey),
+        subjectLabel: subjectLabelByKey.get(slugifyAcademicStructureKey(load.subjectKey)) || load.subjectKey,
+        weeklyHours: Number(load.weeklyHours || 0),
+        teacherUserId: load.teacherUserId ? String(load.teacherUserId) : '',
+      }))
+      .filter((load) => load.subjectKey && load.weeklyHours > 0);
+    if (!subjectLoads.length) {
+      return res.status(400).json({ message: 'Configura la intensidad horaria y los docentes antes de usar GIO IA.' });
+    }
+
+    const allowedGradeKeys = new Set(serialized.grades.map((item) => item.key));
+    const breakSlotMap = buildAcademicBreakSlotIndex(configuration.scheduleBreaks, gradeKey, {
+      scheduleSettings: configuration.scheduleSettings,
+      allowedGradeKeys,
+    });
+    // Always start from the complete configured school day. The visual draft only
+    // contains occupied slots, which would incorrectly hide valid options from the solver.
+    const slotTemplatesSource = createDefaultAcademicScheduleTemplate(configuration.scheduleSettings, {
+      gradeKey,
+      allowedGradeKeys,
+    });
+    const emptySlotTemplates = slotTemplatesSource.map((entry) => ({
+      ...entry,
+      subjectKey: '',
+      teacherUserId: null,
+      entryType: breakSlotMap.has(buildAcademicScheduleSlotKey(entry?.weekday, entry?.block)) ? 'break' : 'class',
+    }));
+    const normalizedTemplates = normalizeAcademicWeeklyScheduleEntries(emptySlotTemplates, {
+      subjectLoadMap: new Map(),
+      breakSlotMap,
+      scheduleSettings: configuration.scheduleSettings,
+      gradeKey,
+      allowedGradeKeys,
+    });
+    if (!normalizedTemplates.ok) {
+      return res.status(400).json({ message: normalizedTemplates.message });
+    }
+
+    const teacherIds = Array.from(new Set(subjectLoads.map((load) => load.teacherUserId).filter((id) => mongoose.Types.ObjectId.isValid(id))));
+    const teachers = teacherIds.length
+      ? await User.find({ schoolId, _id: { $in: teacherIds }, role: 'teacher', status: 'active', deletedAt: null }).select('_id name').lean()
+      : [];
+    const teacherNameById = new Map(teachers.map((teacher) => [String(teacher._id), normalizeText(teacher.name) || 'Docente']));
+    subjectLoads.forEach((load) => {
+      load.teacherName = teacherNameById.get(load.teacherUserId) || '';
+    });
+    const relevantSubjectKeys = new Set(subjectLoads.map((load) => load.subjectKey));
+    const relevantSubjects = serialized.subjects.filter((subject) => relevantSubjectKeys.has(subject.key));
+    const aiResult = await interpretGioAiScheduleInstructions({
+      instructions,
+      grade,
+      course,
+      subjects: relevantSubjects,
+      teachers,
+      slotTemplates: normalizedTemplates.weeklySchedule,
+    });
+    const constraints = normalizeGioAiScheduleConstraints(aiResult.parsed, {
+      subjectKeys: relevantSubjectKeys,
+      teacherIds: new Set(teachers.map((teacher) => String(teacher._id))),
+    });
+    const generationResult = generateGioAiAcademicWeeklySchedule({
+      slotTemplates: normalizedTemplates.weeklySchedule,
+      subjectLoads,
+      conflictIndex: buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
+      teacherBusyIntervals: buildTeacherBusyIntervals(serialized.gradeSchedules, { skipScheduleKey: `${gradeKey}::${courseKey}` }),
+      teachingAvailability: configuration.teachingAvailability,
+      gradeKey,
+      constraints,
+    });
+    if (!generationResult.ok) {
+      return res.status(422).json({
+        message: generationResult.message,
+        gioAi: {
+          summary: constraints.summary,
+          warnings: constraints.warnings,
+          constraints,
+        },
+      });
+    }
+
+    gradeSchedule.subjectLoads = scheduleSubjectLoads;
+    gradeSchedule.weeklySchedule = generationResult.weeklySchedule.filter((entry) => (
+      normalizeText(entry?.entryType) === 'break' || slugifyAcademicStructureKey(entry?.subjectKey)
+    ));
+    gradeSchedule.hiddenFromFamilies = true;
+    gradeSchedule.gioAiInstructions = instructions;
+    gradeSchedule.gioAiConstraints = constraints;
+    gradeSchedule.gioAiSummary = constraints.summary;
+    gradeSchedule.gioAiGeneratedAt = new Date();
+    gradeSchedule.gioAiModel = aiResult.model;
+    gradeSchedule.updatedAt = new Date();
+    applyAcademicScheduleBreaksToConfiguration(configuration);
+    pruneEmptyDuplicateGradeSchedules(configuration);
+    await configuration.save();
+
+    return res.status(200).json({
+      academicStructure: serializeAcademicStructureForRequester(req, configuration),
+      gioAi: {
+        summary: constraints.summary,
+        warnings: constraints.warnings,
+        constraints,
+        hiddenFromFamilies: true,
+      },
+    });
+  } catch (error) {
+    const openAiStatus = Number(error?.status || error?.statusCode || 0);
+    if (openAiStatus === 401) {
+      return res.status(503).json({ message: 'La clave de OpenAI configurada para GIO IA no es válida.' });
+    }
+    if (openAiStatus === 429) {
+      return res.status(429).json({ message: 'GIO IA alcanzó temporalmente su límite de uso. Intenta nuevamente en unos minutos.' });
+    }
+    if (error instanceof SyntaxError) {
+      return res.status(502).json({ message: 'GIO IA no devolvió una configuración válida. Intenta reformular las indicaciones.' });
+    }
+    return res.status(error?.status || 500).json({ message: error.message || 'No se pudo generar el horario con GIO IA.' });
   }
 });
 

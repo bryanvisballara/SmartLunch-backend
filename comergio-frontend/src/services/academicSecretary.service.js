@@ -107,4 +107,5 @@ export const saveAcademicManagementSubjectLoadTemplates = (data) => api.put('/ac
 export const saveAcademicManagementScheduleLoad = (gradeKey, data) => api.put(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/load`, data);
 export const saveAcademicManagementWeeklySchedule = (gradeKey, data) => api.put(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/weekly`, data);
 export const generateAcademicManagementWeeklySchedule = (gradeKey, data) => api.post(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/generate`, data);
+export const generateAcademicManagementGioAiSchedule = (gradeKey, data) => api.post(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/gio-ai/generate`, data);
 export const assignAcademicManagementStudentCourse = (studentId, data) => api.patch(`/academic-secretary/academic-management/students/${studentId}/course`, data);

@@ -2966,6 +2966,14 @@ button.rectoria-team-assignment-card.is-active {
   grid-template-columns: minmax(220px, 1.2fr) repeat(2, minmax(110px, 0.5fr)) minmax(190px, 0.75fr) auto;
 }
 
+.rectoria-grading-level-row input:disabled {
+  background: #e2e8f0;
+  color: #64748b;
+  border-color: #cbd5e1;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 .rectoria-grading-color-cell {
   align-items: end;
   display: grid;
@@ -3275,7 +3283,387 @@ button.rectoria-team-assignment-card.is-active {
 }
 
 .rectoria-panel--school-schedule .school-creation-calendar-toolbar {
-  grid-template-columns: minmax(280px, 420px) 1fr;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1rem;
+}
+
+.rectoria-panel--school-schedule .school-creation-calendar-toolbar > label:first-child {
+  flex: 0 1 320px;
+  min-width: min(100%, 220px);
+}
+
+.rectoria-schedule-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.45rem;
+  margin-bottom: 0.05rem;
+}
+
+.rectoria-schedule-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.28rem 0.55rem 0.28rem 0.35rem;
+  border: 1px solid #d8e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.rectoria-schedule-visibility-toggle:hover:not(:disabled) {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.rectoria-schedule-visibility-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rectoria-schedule-visibility-switch {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 1rem;
+  border-radius: 999px;
+  background: #cbd5e1;
+  transition: background-color 0.15s ease;
+}
+
+.rectoria-schedule-visibility-knob {
+  position: absolute;
+  top: 0.12rem;
+  left: 0.12rem;
+  width: 0.76rem;
+  height: 0.76rem;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.rectoria-schedule-visibility-copy {
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.rectoria-schedule-visibility-toggle.is-on {
+  border-color: #f0c56d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.rectoria-schedule-visibility-toggle.is-on .rectoria-schedule-visibility-switch {
+  background: #d97706;
+}
+
+.rectoria-schedule-visibility-toggle.is-on .rectoria-schedule-visibility-knob {
+  transform: translateX(0.68rem);
+}
+
+.rectoria-gio-schedule-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2rem;
+  padding: 0.32rem 0.6rem;
+  border: 1px solid #b8a5ff;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f6f3ff 0%, #eef8ff 100%);
+  color: #46318d;
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(91, 69, 160, 0.1);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rectoria-gio-schedule-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #8067dc;
+  box-shadow: 0 5px 14px rgba(91, 69, 160, 0.18);
+}
+
+.rectoria-gio-schedule-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rectoria-gio-schedule-button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.rectoria-gio-schedule-button small,
+.rectoria-gio-schedule-kicker small {
+  padding: 0.16rem 0.3rem;
+  border-radius: 999px;
+  background: #6d54c7;
+  color: #ffffff;
+  font-size: 0.55rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+}
+
+.rectoria-gio-schedule-overlay {
+  z-index: 1100;
+}
+
+.rectoria-gio-schedule-modal {
+  width: min(620px, calc(100vw - 2rem));
+  max-height: min(760px, calc(100vh - 2rem));
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #ddd6fe;
+  border-radius: 20px;
+}
+
+.rectoria-gio-schedule-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.85rem;
+  padding: 1.25rem 1.25rem 1.1rem;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(139, 92, 246, 0.14), transparent 34%),
+    linear-gradient(135deg, #faf8ff 0%, #f3f9ff 100%);
+  border-bottom: 1px solid #e9e2ff;
+}
+
+.rectoria-gio-schedule-mark {
+  display: grid;
+  place-items: center;
+  width: 2.65rem;
+  height: 2.65rem;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #7659d5, #4f86d9);
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(91, 69, 160, 0.22);
+}
+
+.rectoria-gio-schedule-mark svg {
+  width: 1.4rem;
+  height: 1.4rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.rectoria-gio-schedule-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #5b459f;
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.rectoria-gio-schedule-hero h3 {
+  margin: 0.2rem 0 0.25rem;
+  color: #182033;
+  font-size: 1.2rem;
+}
+
+.rectoria-gio-schedule-hero p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.rectoria-gio-schedule-modal > :not(.rectoria-gio-schedule-hero) {
+  margin-right: 1.25rem;
+  margin-left: 1.25rem;
+}
+
+.rectoria-gio-schedule-course {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.rectoria-gio-schedule-course span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.rectoria-gio-schedule-course strong {
+  color: #172033;
+  font-size: 0.92rem;
+}
+
+.rectoria-gio-schedule-course small {
+  color: #64748b;
+  font-size: 0.74rem;
+}
+
+.rectoria-gio-schedule-prompt {
+  margin-top: 0.9rem;
+  color: #253047;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.rectoria-gio-schedule-prompt textarea {
+  min-height: 130px;
+  resize: vertical;
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #172033;
+  line-height: 1.5;
+}
+
+.rectoria-gio-schedule-prompt textarea:focus {
+  border-color: #8067dc;
+  box-shadow: 0 0 0 3px rgba(128, 103, 220, 0.12);
+  outline: none;
+}
+
+.rectoria-gio-schedule-prompt > small {
+  justify-self: end;
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.rectoria-gio-schedule-examples {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.rectoria-gio-schedule-examples > span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rectoria-gio-schedule-examples > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.rectoria-gio-schedule-examples button {
+  padding: 0.3rem 0.55rem;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  background: #faf8ff;
+  color: #5b459f;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rectoria-gio-schedule-result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #a7f3d0;
+  border-radius: 14px;
+  background: #ecfdf5;
+}
+
+.rectoria-gio-schedule-result-icon {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 50%;
+  background: #059669;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.rectoria-gio-schedule-result strong {
+  color: #065f46;
+}
+
+.rectoria-gio-schedule-result p {
+  margin: 0.25rem 0 0;
+  color: #38665a;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.rectoria-gio-schedule-error,
+.rectoria-gio-schedule-warnings {
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+}
+
+.rectoria-gio-schedule-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.rectoria-gio-schedule-warnings {
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.rectoria-gio-schedule-warnings ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.rectoria-gio-schedule-actions {
+  margin-top: 0.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.rectoria-gio-schedule-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-color: #6650b6;
+  background: linear-gradient(135deg, #7056cb, #4e82d2);
+  color: #ffffff;
+}
+
+.rectoria-gio-schedule-spinner {
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: rectoria-gio-spin 0.75s linear infinite;
+}
+
+@keyframes rectoria-gio-spin {
+  to { transform: rotate(360deg); }
 }
 
 .rectoria-panel--school-schedule .school-creation-calendar-board-wrap {

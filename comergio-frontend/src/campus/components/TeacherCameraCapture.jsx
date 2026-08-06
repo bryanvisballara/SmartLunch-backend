@@ -132,11 +132,14 @@ export default function TeacherCameraCapture({
           width: { ideal: 1920 },
           height: { ideal: 1080 },
         },
-        audio: true,
+        // Android WebView can reject the complete stream when microphone access
+        // is requested unnecessarily. Photos only need the camera.
+        audio: captureMode === 'video',
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
         await videoRef.current.play();
       }
       setCameraState('ready');
@@ -146,11 +149,13 @@ export default function TeacherCameraCapture({
         setError('Permite el acceso a la cámara y al micrófono en los ajustes del teléfono para continuar.');
       } else if (requestError?.name === 'NotFoundError') {
         setError('No se encontró una cámara disponible en este dispositivo.');
+      } else if (requestError?.name === 'NotReadableError' || requestError?.name === 'AbortError') {
+        setError('La cámara está siendo usada por otra aplicación. Ciérrala e intenta nuevamente.');
       } else {
         setError(requestError?.message || 'No se pudo abrir la cámara.');
       }
     }
-  }, [facingMode, stopCamera]);
+  }, [captureMode, facingMode, stopCamera]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -324,6 +329,7 @@ export default function TeacherCameraCapture({
   return (
     <div aria-label="Cámara para publicaciones" aria-modal="true" className="teacher-camera" role="dialog">
       <video
+        autoPlay
         className={`teacher-camera__preview${facingMode === 'user' ? ' is-mirrored' : ''}`}
         muted
         playsInline

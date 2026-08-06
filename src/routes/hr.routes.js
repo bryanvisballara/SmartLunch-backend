@@ -110,6 +110,25 @@ function assertPlannerDateRange(startDate, endDate) {
   }
 }
 
+function parsePlannerDateRange(body = {}) {
+  const rawStartDate = normalizeText(body.startDate);
+  const rawEndDate = normalizeText(body.endDate);
+  const startDate = parsePlannerCalendarDate(rawStartDate);
+  const endDate = parsePlannerCalendarDate(rawEndDate);
+  if (rawStartDate && !startDate) {
+    const error = new Error('La fecha "Desde" no es válida.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (rawEndDate && !endDate) {
+    const error = new Error('La fecha "Hasta" no es válida.');
+    error.statusCode = 400;
+    throw error;
+  }
+  assertPlannerDateRange(startDate, endDate);
+  return { startDate, endDate };
+}
+
 function escapeRegex(value) {
   return normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -786,12 +805,10 @@ router.post('/planner-cycles', roleMiddleware(coordinationRoles), async (req, re
     const parsedDeadline = parsePlannerCalendarDate(req.body.submissionDeadline);
 
     if (!title || !parsedDeadline) {
-      return res.status(400).json({ message: 'title and submissionDeadline are required' });
+      return res.status(400).json({ message: 'El título y la fecha límite son requeridos.' });
     }
 
-    const startDate = parsePlannerCalendarDate(req.body.startDate);
-    const endDate = parsePlannerCalendarDate(req.body.endDate);
-    assertPlannerDateRange(startDate, endDate);
+    const { startDate, endDate } = parsePlannerDateRange(req.body);
     const cycle = await HrPlannerCycle.create({
       schoolId,
       title,
@@ -847,9 +864,7 @@ router.patch('/planner-cycles/:cycleId', roleMiddleware(coordinationRoles), asyn
       return res.status(400).json({ message: 'Título y fecha límite son requeridos.' });
     }
 
-    const startDate = parsePlannerCalendarDate(req.body.startDate);
-    const endDate = parsePlannerCalendarDate(req.body.endDate);
-    assertPlannerDateRange(startDate, endDate);
+    const { startDate, endDate } = parsePlannerDateRange(req.body);
     const cycle = await HrPlannerCycle.findOneAndUpdate(
       { _id: cycleId, schoolId },
       {

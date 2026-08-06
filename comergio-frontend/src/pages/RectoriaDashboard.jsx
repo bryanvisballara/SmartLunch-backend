@@ -53,6 +53,7 @@ import {
   deleteAcademicManagementSubject,
   deleteAcademicManagementCourse,
   deleteAcademicManagementGrade,
+  generateAcademicManagementGioAiSchedule,
   generateAcademicManagementWeeklySchedule,
   getAcademicSecretaryBootstrap,
   getAcademicSecretaryFeeSettings,
@@ -763,6 +764,22 @@ function formatResourceDate(value) {
     : new Date(value);
   if (Number.isNaN(parsed.getTime())) return 'Sin fecha';
   return parsed.toLocaleDateString('es-CO', { dateStyle: 'medium', timeZone: 'UTC' });
+}
+
+function getRequestErrorDetail(requestError, fallbackMessage) {
+  const responseMessage = requestError?.response?.data?.message
+    || requestError?.response?.data?.error
+    || requestError?.response?.data?.detail;
+  if (responseMessage) {
+    return String(responseMessage);
+  }
+  if (!requestError?.response && (requestError?.code === 'ERR_NETWORK' || requestError?.message === 'Network Error')) {
+    return 'No fue posible conectar con el servidor. Verifica que el backend esté activo e inténtalo nuevamente.';
+  }
+  if (requestError?.response?.status) {
+    return `${fallbackMessage} (HTTP ${requestError.response.status}).`;
+  }
+  return requestError?.message || fallbackMessage;
 }
 
 function getResourceRequestItemsLabel(request) {
@@ -1836,6 +1853,12 @@ function normalizeAcademicStructureDraft(raw) {
             order: Number(entry?.order || (entryIndex + 1) * 10),
           }))
           .filter((entry) => entry.weekday && entry.block && entry.startTime && entry.endTime),
+        hiddenFromFamilies: Boolean(gradeSchedule?.hiddenFromFamilies),
+        gioAiInstructions: String(gradeSchedule?.gioAiInstructions || '').trim(),
+        gioAiConstraints: gradeSchedule?.gioAiConstraints || null,
+        gioAiSummary: String(gradeSchedule?.gioAiSummary || '').trim(),
+        gioAiGeneratedAt: gradeSchedule?.gioAiGeneratedAt || null,
+        gioAiModel: String(gradeSchedule?.gioAiModel || '').trim(),
         updatedAt: gradeSchedule?.updatedAt || null,
       }))
       .filter((gradeSchedule) => gradeSchedule.gradeKey),
@@ -2338,6 +2361,15 @@ function RectoriaDashboard() {
   const [selectedScheduleSlotKey, setSelectedScheduleSlotKey] = useState('');
   const [scheduleClipboardEntry, setScheduleClipboardEntry] = useState(null);
   const [scheduleSlotModal, setScheduleSlotModal] = useState({ open: false, mode: 'create', slotKey: '', weekday: 0, block: 0, startTime: '', endTime: '', entryType: 'class', subjectKey: '', teacherUserId: '', breakKey: 'break' });
+  const [gioAiScheduleModal, setGioAiScheduleModal] = useState({
+    open: false,
+    instructions: '',
+    error: '',
+    summary: '',
+    warnings: [],
+    generated: false,
+  });
+  const [gioAiScheduleGenerating, setGioAiScheduleGenerating] = useState(false);
   const [showCustomScheduleBlockForm, setShowCustomScheduleBlockForm] = useState(false);
   const [customScheduleBlockName, setCustomScheduleBlockName] = useState('');
   const [customScheduleBlocks, setCustomScheduleBlocks] = useState([]);
@@ -3963,6 +3995,12 @@ function RectoriaDashboard() {
       courseKey: selectedScheduleCourseKey,
       subjectLoads,
       weeklySchedule,
+      hiddenFromFamilies: Boolean(existingSchedule?.hiddenFromFamilies),
+      gioAiInstructions: String(existingSchedule?.gioAiInstructions || '').trim(),
+      gioAiConstraints: existingSchedule?.gioAiConstraints || null,
+      gioAiSummary: String(existingSchedule?.gioAiSummary || '').trim(),
+      gioAiGeneratedAt: existingSchedule?.gioAiGeneratedAt || null,
+      gioAiModel: String(existingSchedule?.gioAiModel || '').trim(),
       updatedAt: existingSchedule?.updatedAt || null,
     };
   }, [academicStructureDraft.gradeSchedules, selectedScheduleCourseKey, selectedScheduleGradeKey, selectedScheduleSubjects, selectedScheduleTeacherBySubjectKey]);
@@ -4736,7 +4774,7 @@ function RectoriaDashboard() {
       );
       await loadPortal({ silent: true });
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'No se pudo guardar el planner docente.');
+      setError(getRequestErrorDetail(requestError, 'No se pudo guardar el planner docente'));
     } finally {
       setBusy(false);
     }
@@ -4966,6 +5004,10 @@ function RectoriaDashboard() {
       return;
     }
     setEditUserModal(createEmptyEditUserModal());
+  };
+
+  const closeCreatedUserModal = () => {
+    setCreatedUserModal({ open: false, name: '', role: '', username: '' });
   };
 
   const onSaveEditedUser = async (event) => {
@@ -5314,6 +5356,12 @@ function RectoriaDashboard() {
           courseKey: normalizedCourseKey,
           subjectLoads: [],
           weeklySchedule: [],
+          hiddenFromFamilies: false,
+          gioAiInstructions: '',
+          gioAiConstraints: null,
+          gioAiSummary: '',
+          gioAiGeneratedAt: null,
+          gioAiModel: '',
           updatedAt: null,
         };
       const nextSchedule = { ...updater(baseSchedule), gradeKey, courseKey: normalizedCourseKey };
@@ -6346,15 +6394,18 @@ function RectoriaDashboard() {
     setBusy(true);
     try {
       const weeklySchedule = selectedGradeSchedule.weeklySchedule.filter((entry) => entry.entryType === 'break' || entry.subjectKey);
+      const hiddenFromFamilies = Boolean(selectedGradeSchedule.hiddenFromFamilies);
       const response = await saveAcademicManagementWeeklySchedule(selectedScheduleGradeKey, {
         courseKey: selectedScheduleCourseKey,
         weeklySchedule,
+        hiddenFromFamilies,
       });
       syncAcademicStructureState(response?.data?.academicStructure || {});
       scheduleAutosaveSignatureRef.current = JSON.stringify({
         gradeKey: selectedScheduleGradeKey,
         courseKey: selectedScheduleCourseKey,
         weeklySchedule,
+        hiddenFromFamilies,
       });
       setSuccess(`Horario semanal guardado para ${getGradeLabel(selectedScheduleGradeKey)} ${selectedScheduleCourseKey ? `· ${getCourseLabel(selectedScheduleCourseKey)}` : ''}.`);
     } catch (requestError) {
@@ -6364,16 +6415,36 @@ function RectoriaDashboard() {
     }
   };
 
+  const onToggleScheduleHiddenFromFamilies = (checked) => {
+    if (!selectedScheduleGradeKey || !selectedScheduleCourseKey) {
+      setError('Selecciona un curso para cambiar la visibilidad del horario.');
+      return;
+    }
+
+    upsertGradeScheduleDraft(selectedScheduleGradeKey, (currentSchedule) => {
+      const hasWeekly = Array.isArray(currentSchedule.weeklySchedule) && currentSchedule.weeklySchedule.length > 0;
+      const hasLoads = Array.isArray(currentSchedule.subjectLoads) && currentSchedule.subjectLoads.length > 0;
+      return {
+        ...currentSchedule,
+        weeklySchedule: hasWeekly ? currentSchedule.weeklySchedule : selectedGradeSchedule.weeklySchedule,
+        subjectLoads: hasLoads ? currentSchedule.subjectLoads : selectedGradeSchedule.subjectLoads,
+        hiddenFromFamilies: Boolean(checked),
+      };
+    }, { courseKey: selectedScheduleCourseKey });
+  };
+
   useEffect(() => {
     if (!isAcademicScheduleViewActive || !selectedScheduleGradeKey || !selectedScheduleCourseKey) {
       return undefined;
     }
 
     const weeklySchedule = selectedGradeSchedule.weeklySchedule.filter((entry) => entry.entryType === 'break' || entry.subjectKey);
+    const hiddenFromFamilies = Boolean(selectedGradeSchedule.hiddenFromFamilies);
     const signature = JSON.stringify({
       gradeKey: selectedScheduleGradeKey,
       courseKey: selectedScheduleCourseKey,
       weeklySchedule,
+      hiddenFromFamilies,
     });
 
     if (scheduleAutosaveSignatureRef.current === signature) {
@@ -6390,6 +6461,7 @@ function RectoriaDashboard() {
         await saveAcademicManagementWeeklySchedule(selectedScheduleGradeKey, {
           courseKey: selectedScheduleCourseKey,
           weeklySchedule,
+          hiddenFromFamilies,
         });
       } catch (requestError) {
         scheduleAutosaveSignatureRef.current = '';
@@ -6402,7 +6474,7 @@ function RectoriaDashboard() {
         clearTimeout(scheduleAutosaveTimerRef.current);
       }
     };
-  }, [isAcademicScheduleViewActive, selectedGradeSchedule.weeklySchedule, selectedScheduleCourseKey, selectedScheduleGradeKey]);
+  }, [isAcademicScheduleViewActive, selectedGradeSchedule.hiddenFromFamilies, selectedGradeSchedule.weeklySchedule, selectedScheduleCourseKey, selectedScheduleGradeKey]);
 
   const onGenerateAcademicWeeklySchedule = async () => {
     if (!selectedScheduleGradeKey) {
@@ -6422,6 +6494,65 @@ function RectoriaDashboard() {
       setError(requestError?.response?.data?.message || 'No se pudo generar el horario automático.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onOpenGioAiScheduleModal = () => {
+    if (!selectedScheduleGradeKey || !selectedScheduleCourseKey) {
+      setError('Selecciona un curso antes de generar el horario con GIO IA.');
+      return;
+    }
+    clearMessages();
+    setGioAiScheduleModal({
+      open: true,
+      instructions: selectedGradeSchedule.gioAiInstructions || '',
+      error: '',
+      summary: '',
+      warnings: [],
+      generated: false,
+    });
+  };
+
+  const onCloseGioAiScheduleModal = () => {
+    if (gioAiScheduleGenerating) return;
+    setGioAiScheduleModal((previous) => ({ ...previous, open: false }));
+  };
+
+  const onGenerateGioAiSchedule = async (event) => {
+    event.preventDefault();
+    const instructions = String(gioAiScheduleModal.instructions || '').trim();
+    if (!instructions) {
+      setGioAiScheduleModal((previous) => ({ ...previous, error: 'Describe cómo quieres organizar el horario.' }));
+      return;
+    }
+
+    setGioAiScheduleGenerating(true);
+    setGioAiScheduleModal((previous) => ({ ...previous, error: '', summary: '', warnings: [], generated: false }));
+    try {
+      const response = await generateAcademicManagementGioAiSchedule(selectedScheduleGradeKey, {
+        courseKey: selectedScheduleCourseKey,
+        instructions,
+        slotTemplates: selectedGradeSchedule.weeklySchedule,
+      });
+      syncAcademicStructureState(response?.data?.academicStructure || {});
+      const gioAi = response?.data?.gioAi || {};
+      setGioAiScheduleModal((previous) => ({
+        ...previous,
+        summary: String(gioAi.summary || 'Horario generado correctamente.').trim(),
+        warnings: Array.isArray(gioAi.warnings) ? gioAi.warnings : [],
+        generated: true,
+      }));
+      setSuccess(`GIO IA generó una propuesta para ${getGradeLabel(selectedScheduleGradeKey)} · ${getCourseLabel(selectedScheduleCourseKey)}. Quedó oculta a las familias para que puedas revisarla.`);
+    } catch (requestError) {
+      const gioAi = requestError?.response?.data?.gioAi || {};
+      setGioAiScheduleModal((previous) => ({
+        ...previous,
+        error: requestError?.response?.data?.message || 'No se pudo generar el horario con GIO IA.',
+        summary: String(gioAi.summary || '').trim(),
+        warnings: Array.isArray(gioAi.warnings) ? gioAi.warnings : [],
+      }));
+    } finally {
+      setGioAiScheduleGenerating(false);
     }
   };
 
@@ -9758,6 +9889,7 @@ function RectoriaDashboard() {
                               max={selectedAcademicGradingScale.maxScore ?? 100}
                               step="0.1"
                               value={level.minScore ?? ''}
+                              disabled={Boolean(selectedAcademicGradingScale.qualitativeOnly)}
                               onChange={(event) => onAcademicPerformanceLevelChange(index, 'minScore', event.target.value)}
                             />
                           </label>
@@ -9769,6 +9901,7 @@ function RectoriaDashboard() {
                               max={selectedAcademicGradingScale.maxScore ?? 100}
                               step="0.1"
                               value={level.maxScore ?? ''}
+                              disabled={Boolean(selectedAcademicGradingScale.qualitativeOnly)}
                               onChange={(event) => onAcademicPerformanceLevelChange(index, 'maxScore', event.target.value)}
                             />
                           </label>
@@ -10285,6 +10418,35 @@ function RectoriaDashboard() {
                               ))}
                             </select>
                           </label>
+                          <div className="rectoria-schedule-toolbar-actions">
+                            <button
+                              aria-pressed={Boolean(selectedGradeSchedule.hiddenFromFamilies)}
+                              className={`rectoria-schedule-visibility-toggle${selectedGradeSchedule.hiddenFromFamilies ? ' is-on' : ''}`}
+                              disabled={!selectedScheduleCourseKey || busy}
+                              onClick={() => onToggleScheduleHiddenFromFamilies(!selectedGradeSchedule.hiddenFromFamilies)}
+                              title="Úsalo mientras ensayas el horario. Actívalo para ocultarlo a alumnos y padres."
+                              type="button"
+                            >
+                              <span aria-hidden="true" className="rectoria-schedule-visibility-switch">
+                                <span className="rectoria-schedule-visibility-knob" />
+                              </span>
+                              <span className="rectoria-schedule-visibility-copy">
+                                {selectedGradeSchedule.hiddenFromFamilies ? 'Oculto a familias' : 'Visible a familias'}
+                              </span>
+                            </button>
+                            <button
+                              className="rectoria-gio-schedule-button"
+                              disabled={!selectedScheduleCourseKey || busy}
+                              onClick={onOpenGioAiScheduleModal}
+                              type="button"
+                            >
+                              <svg aria-hidden="true" viewBox="0 0 24 24">
+                                <path d="M12 2.75l1.35 4.1a5.8 5.8 0 0 0 3.8 3.8l4.1 1.35-4.1 1.35a5.8 5.8 0 0 0-3.8 3.8L12 21.25l-1.35-4.1a5.8 5.8 0 0 0-3.8-3.8L2.75 12l4.1-1.35a5.8 5.8 0 0 0 3.8-3.8L12 2.75z" />
+                              </svg>
+                              <span>Genera tu horario con GIO IA</span>
+                              <small>BETA</small>
+                            </button>
+                          </div>
                         </div>
 
                         <div className="school-creation-calendar-subjects">
@@ -10512,6 +10674,93 @@ function RectoriaDashboard() {
                       </div>
                     </div>
                   </section>
+                  {gioAiScheduleModal.open ? (
+                    <div className="rectoria-modal-overlay rectoria-gio-schedule-overlay" role="dialog" aria-modal="true" aria-label="Generar horario con GIO IA">
+                      <form className="rectoria-modal-card rectoria-modal-form rectoria-gio-schedule-modal" onSubmit={onGenerateGioAiSchedule}>
+                        <div className="rectoria-gio-schedule-hero">
+                          <div className="rectoria-gio-schedule-mark" aria-hidden="true">
+                            <svg viewBox="0 0 24 24">
+                              <path d="M12 2.75l1.35 4.1a5.8 5.8 0 0 0 3.8 3.8l4.1 1.35-4.1 1.35a5.8 5.8 0 0 0-3.8 3.8L12 21.25l-1.35-4.1a5.8 5.8 0 0 0-3.8-3.8L2.75 12l4.1-1.35a5.8 5.8 0 0 0 3.8-3.8L12 2.75z" />
+                            </svg>
+                          </div>
+                          <div>
+                            <span className="rectoria-gio-schedule-kicker">GIO IA <small>BETA</small></span>
+                            <h3>Genera una propuesta inteligente</h3>
+                            <p>GIO interpreta tus indicaciones y el motor valida disponibilidad, intensidad horaria y cruces docentes.</p>
+                          </div>
+                          <button aria-label="Cerrar" className="rectoria-modal-close" disabled={gioAiScheduleGenerating} onClick={onCloseGioAiScheduleModal} type="button">×</button>
+                        </div>
+
+                        <div className="rectoria-gio-schedule-course">
+                          <span>Horario seleccionado</span>
+                          <strong>{getGradeLabel(selectedScheduleGradeKey)} · {getCourseLabel(selectedScheduleCourseKey)}</strong>
+                          <small>La propuesta quedará oculta a las familias hasta que decidas publicarla.</small>
+                        </div>
+
+                        {!gioAiScheduleModal.generated ? (
+                          <>
+                            <label className="rectoria-gio-schedule-prompt">
+                              ¿Cómo quieres organizarlo?
+                              <textarea
+                                autoFocus
+                                disabled={gioAiScheduleGenerating}
+                                maxLength={4000}
+                                onChange={(event) => setGioAiScheduleModal((previous) => ({ ...previous, instructions: event.target.value, error: '' }))}
+                                placeholder={'Ejemplo: Matemáticas preferiblemente en los dos primeros bloques. Educación Física después del descanso y en dos bloques consecutivos. No repetir la misma materia más de dos veces al día.'}
+                                rows={6}
+                                value={gioAiScheduleModal.instructions}
+                              />
+                              <small>{gioAiScheduleModal.instructions.length}/4000 caracteres</small>
+                            </label>
+                            <div className="rectoria-gio-schedule-examples">
+                              <span>Ideas que puedes pedir:</span>
+                              <div>
+                                <button type="button" onClick={() => setGioAiScheduleModal((previous) => ({ ...previous, instructions: 'Prioriza Matemáticas e Inglés en los primeros bloques. Distribuye las materias de forma equilibrada durante la semana.', error: '' }))}>Materias clave temprano</button>
+                                <button type="button" onClick={() => setGioAiScheduleModal((previous) => ({ ...previous, instructions: 'No repitas una asignatura más de una vez por día. Distribuye toda la carga de manera equilibrada durante la semana.', error: '' }))}>Evitar repeticiones</button>
+                                <button type="button" onClick={() => setGioAiScheduleModal((previous) => ({ ...previous, instructions: 'Programa Educación Física después del primer descanso y en bloques consecutivos.', error: '' }))}>Bloques consecutivos</button>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="rectoria-gio-schedule-result">
+                            <span className="rectoria-gio-schedule-result-icon" aria-hidden="true">✓</span>
+                            <div>
+                              <strong>Propuesta generada</strong>
+                              <p>{gioAiScheduleModal.summary}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {gioAiScheduleModal.error ? <p className="rectoria-gio-schedule-error">{gioAiScheduleModal.error}</p> : null}
+                        {gioAiScheduleModal.warnings.length ? (
+                          <div className="rectoria-gio-schedule-warnings">
+                            <strong>Observaciones de GIO</strong>
+                            <ul>{gioAiScheduleModal.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul>
+                          </div>
+                        ) : null}
+
+                        <div className="rectoria-modal-actions rectoria-gio-schedule-actions">
+                          <button className="btn" disabled={gioAiScheduleGenerating} onClick={onCloseGioAiScheduleModal} type="button">
+                            {gioAiScheduleModal.generated ? 'Ver horario' : 'Cancelar'}
+                          </button>
+                          {!gioAiScheduleModal.generated ? (
+                            <button className="btn rectoria-gio-schedule-submit" disabled={gioAiScheduleGenerating || !String(gioAiScheduleModal.instructions || '').trim()} type="submit">
+                              {gioAiScheduleGenerating ? (
+                                <>
+                                  <span className="rectoria-gio-schedule-spinner" aria-hidden="true" />
+                                  Analizando restricciones…
+                                </>
+                              ) : 'Generar propuesta'}
+                            </button>
+                          ) : (
+                            <button className="btn rectoria-gio-schedule-submit" onClick={() => setGioAiScheduleModal((previous) => ({ ...previous, generated: false, summary: '', warnings: [] }))} type="button">
+                              Generar otra propuesta
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+                  ) : null}
                   {scheduleSlotModal.open ? (
                     <div className="rectoria-modal-overlay" role="presentation">
                       <form className="rectoria-modal-card rectoria-modal-form" onSubmit={onSaveScheduleSlotModal}>
