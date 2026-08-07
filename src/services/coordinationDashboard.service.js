@@ -353,7 +353,10 @@ async function buildCoordinationDashboard({
     Student.find({ schoolId, deletedAt: null, status: 'active' }).select('name schoolCode grade course').lean(),
     CampusCourse.find({ schoolId, status: { $ne: 'archived' } }).lean(),
     CampusPost.find({ schoolId }).select('courseId type status title').lean(),
-    CampusDisciplineObservation.find({ schoolId }).sort({ submittedAt: -1 }).limit(40).lean(),
+    CampusDisciplineObservation.find({
+      schoolId,
+      $or: [{ destination: 'coexistence' }, { destination: { $exists: false } }, { destination: null }],
+    }).sort({ submittedAt: -1 }).limit(40).lean(),
     NursingVisit.find({ schoolId }).sort({ attendedAt: -1 }).limit(40).lean(),
     PsychologyCase.find({ schoolId }).sort({ updatedAt: -1 }).limit(40).lean(),
     User.find({ schoolId, status: 'active', deletedAt: null }).select('name username role assignedSubjects').lean(),

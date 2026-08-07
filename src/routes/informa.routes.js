@@ -16,6 +16,7 @@ const {
 const {
   generateInformaDraft,
   listDrafts,
+  clearPendingDrafts,
   publishDraft,
   discardDraft,
 } = require('../services/informaAuto.service');
@@ -144,13 +145,25 @@ router.get('/drafts', requirePublisher, async (req, res) => {
 
 router.post('/drafts/generate', requirePublisher, async (req, res) => {
   try {
+    const clearExisting = req.body?.clearExisting === true || req.query.clearExisting === '1';
     const result = await generateInformaDraft({
       slotKey: `manual-${Date.now()}`,
       force: true,
+      clearExisting,
     });
     return res.status(201).json(result);
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo generar el borrador.' });
+  }
+});
+
+router.post('/drafts/clear', requirePublisher, async (req, res) => {
+  try {
+    const actor = getActor(req);
+    const result = await clearPendingDrafts({ role: actor.role });
+    return res.json(result);
+  } catch (error) {
+    return res.status(400).json({ message: error.message || 'No se pudieron limpiar los borradores.' });
   }
 });
 

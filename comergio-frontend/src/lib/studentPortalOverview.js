@@ -13,6 +13,12 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
     cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
     isRealParentChild: true,
     walletBalance: Number(data?.walletBalance || 0),
+    coexistenceScore: data?.coexistenceScore || {
+      startingScore: 100,
+      totalDeducted: 0,
+      score: 100,
+      observationCount: 0,
+    },
   } : null;
 
   return {
@@ -30,9 +36,16 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
     academicPerformanceLevel: academic.performanceLevel || null,
     academicGradingScale: academic.gradingScale || null,
     academicUpcomingAssignments: Array.isArray(academic.upcomingAssignments) ? academic.upcomingAssignments : [],
-    academicContent: [],
+    academicContent: Array.isArray(academic.content) ? academic.content : [],
+    includeClassAttendance: academic.includeClassAttendance !== false,
     psychologyCases: Array.isArray(data?.psychologyCases) ? data.psychologyCases : [],
     coexistenceObservations: Array.isArray(data?.coexistenceObservations) ? data.coexistenceObservations : [],
+    coexistenceScore: data?.coexistenceScore || {
+      startingScore: 100,
+      totalDeducted: 0,
+      score: 100,
+      observationCount: 0,
+    },
     parentAppFeatures: {
       home: true,
       finance: false,
@@ -44,6 +57,14 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
       coexistence: true,
       transport: true,
       ...(data?.parentAppFeatures || {}),
+    },
+    flyLock: data?.flyLock || {
+      flyLocked: false,
+      reason: '',
+      unlocksAt: null,
+      unlocksAtLabel: '',
+      subject: '',
+      teacherName: '',
     },
   };
 }

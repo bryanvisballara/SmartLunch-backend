@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   adjustHrSupplyItemStock,
   createHrSupplyItem,
@@ -13,7 +13,6 @@ const categoryOptions = [
   { value: 'nursing', label: 'Enfermería' },
   { value: 'other', label: 'Otros' },
   { value: 'stationery', label: 'Papelería' },
-  { value: 'cleaning', label: 'Aseo y limpieza' },
 ];
 
 const unitOptions = ['unidad', 'caja', 'paquete', 'rollo', 'galón', 'litro', 'kg', 'metro', 'par', 'juego', 'bolsa'];
@@ -57,9 +56,8 @@ const emptyItemForm = {
   itemType: 'consumable',
   unit: 'unidad',
   sku: '',
-  stock: 0,
-  minStock: 0,
-  unitCost: 0,
+  stock: '',
+  minStock: '',
   location: '',
   notes: '',
 };
@@ -73,7 +71,6 @@ const emptyRequestForm = {
   customName: '',
   quantity: 1,
   unit: 'unidad',
-  unitCost: 0,
   itemNotes: '',
 };
 
@@ -186,8 +183,10 @@ export default function NursingResourcesPanel({ className = '' }) {
   const [historyFilter, setHistoryFilter] = useState('all');
   const [activeModal, setActiveModal] = useState(null);
   const [message, setMessage] = useState('');
+  const [modalError, setModalError] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const purposeInputRef = useRef(null);
 
   const areaId = nursingArea?.id || '';
   const lowStockItems = useMemo(
@@ -207,18 +206,15 @@ export default function NursingResourcesPanel({ className = '' }) {
     [items, requestForm.itemId]
   );
 
-  const requestEstimatedTotal = useMemo(
-    () => requestItems.reduce((sum, entry) => sum + (Number(entry.quantity || 0) * Number(entry.unitCost || 0)), 0),
-    [requestItems]
-  );
-
   const closeModal = () => {
     setActiveModal(null);
+    setModalError('');
     setStockForm(emptyStockForm);
   };
 
   const openModal = (modalKey) => {
     setMessage('');
+    setModalError('');
     if (modalKey === 'create-request') {
       setRequestForm(emptyRequestForm);
       setRequestItems([]);
@@ -264,30 +260,37 @@ export default function NursingResourcesPanel({ className = '' }) {
 
   const onCreateItem = async (event) => {
     event.preventDefault();
+    setModalError('');
     if (!itemForm.name.trim()) {
-      setMessage('Escribe el nombre del insumo.');
+      setModalError('Escribe el nombre del insumo.');
       return;
     }
     if (!areaId) {
-      setMessage('El área de Enfermería no está disponible.');
+      setModalError('El área de Enfermería no está disponible.');
       return;
     }
 
     setSubmitting(true);
     try {
       await createHrSupplyItem({
-        ...itemForm,
+        name: itemForm.name.trim(),
+        category: itemForm.category || 'nursing',
+        itemType: 'consumable',
+        unit: itemForm.unit || 'unidad',
+        sku: itemForm.sku || '',
         areaId,
-        stock: Number(itemForm.stock || 0),
-        minStock: Number(itemForm.minStock || 0),
-        unitCost: Math.max(0, Number(itemForm.unitCost || 0)),
+        stock: itemForm.stock === '' || itemForm.stock == null ? 0 : Number(itemForm.stock),
+        minStock: itemForm.minStock === '' || itemForm.minStock == null ? 0 : Number(itemForm.minStock),
+        unitCost: 0,
+        location: String(itemForm.location || '').trim(),
+        notes: String(itemForm.notes || '').trim(),
       });
       setItemForm(emptyItemForm);
       setMessage('Insumo guardado en el inventario de Enfermería.');
       closeModal();
       await loadData();
     } catch (error) {
-      setMessage(error?.response?.data?.message || 'No se pudo guardar el insumo.');
+      setModalError(error?.response?.data?.message || 'No se pudo guardar el insumo.');
     } finally {
       setSubmitting(false);
     }
@@ -295,8 +298,9 @@ export default function NursingResourcesPanel({ className = '' }) {
 
   const onAdjustStockIn = async (event) => {
     event.preventDefault();
+    setModalError('');
     if (!stockForm.itemId) {
-      setMessage('Selecciona un material del inventario.');
+      setModalError('Selecciona un material del inventario.');
       return;
     }
     const quantity = Math.max(1, Number(stockForm.quantity || 0));
@@ -312,7 +316,7 @@ export default function NursingResourcesPanel({ className = '' }) {
       closeModal();
       await loadData();
     } catch (error) {
-      setMessage(error?.response?.data?.message || 'No se pudo agregar inventario.');
+      setModalError(error?.response?.data?.message || 'No se pudo agregar inventario.');
     } finally {
       setSubmitting(false);
     }
@@ -322,12 +326,10 @@ export default function NursingResourcesPanel({ className = '' }) {
     const quantity = Math.max(1, Number(requestForm.quantity || 0));
     const selectedItem = items.find((item) => item.id === requestForm.itemId);
     const customName = String(requestForm.customName || materialSearch || '').trim();
-    const unitCost = selectedItem
-      ? Math.max(0, Number(selectedItem.unitCost || 0))
-      : Math.max(0, Number(requestForm.unitCost || 0));
+    setModalError('');
 
     if (!selectedItem && !customName) {
-      setMessage('Selecciona un material del catálogo o escribe el producto a comprar.');
+      setModalError('Selecciona un material del catálogo o escribe el producto a comprar.');
       return;
     }
 
@@ -338,7 +340,7 @@ export default function NursingResourcesPanel({ className = '' }) {
         customName: '',
         name: selectedItem.name,
         unit: selectedItem.unit || requestForm.unit || 'unidad',
-        unitCost,
+        unitCost: 0,
         notes: String(requestForm.itemNotes || '').trim(),
         quantity,
       }
@@ -348,7 +350,7 @@ export default function NursingResourcesPanel({ className = '' }) {
         customName,
         name: customName,
         unit: requestForm.unit || 'unidad',
-        unitCost,
+        unitCost: 0,
         notes: String(requestForm.itemNotes || '').trim(),
         quantity,
       };
@@ -362,7 +364,6 @@ export default function NursingResourcesPanel({ className = '' }) {
               ...entry,
               quantity: entry.quantity + quantity,
               notes: nextEntry.notes || entry.notes,
-              unitCost: nextEntry.unitCost || entry.unitCost,
             }
             : entry
         );
@@ -375,7 +376,6 @@ export default function NursingResourcesPanel({ className = '' }) {
       customName: '',
       quantity: 1,
       unit: selectedItem?.unit || current.unit || 'unidad',
-      unitCost: 0,
       itemNotes: '',
     }));
     setMaterialSearch('');
@@ -383,16 +383,22 @@ export default function NursingResourcesPanel({ className = '' }) {
 
   const onCreateRequest = async (event) => {
     event.preventDefault();
+    setModalError('');
+
     if (!requestItems.length) {
-      setMessage('Agrega al menos un producto a la solicitud.');
+      setModalError('Agrega al menos un producto a la solicitud.');
       return;
     }
     if (!String(requestForm.purpose || '').trim()) {
-      setMessage('Describe el motivo o justificación de la solicitud.');
+      setModalError('Describe el motivo o justificación de la solicitud.');
+      window.requestAnimationFrame(() => {
+        purposeInputRef.current?.focus?.();
+        purposeInputRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      });
       return;
     }
     if (!areaId) {
-      setMessage('El área de Enfermería no está disponible.');
+      setModalError('El área de Enfermería no está disponible. Actualiza la página e inténtalo de nuevo.');
       return;
     }
 
@@ -413,7 +419,7 @@ export default function NursingResourcesPanel({ className = '' }) {
           customName: entry.customName || undefined,
           quantity: entry.quantity,
           unit: entry.unit,
-          unitCost: Math.max(0, Number(entry.unitCost || 0)),
+          unitCost: 0,
           notes: entry.notes,
         })),
       });
@@ -424,7 +430,13 @@ export default function NursingResourcesPanel({ className = '' }) {
       closeModal();
       await loadData();
     } catch (error) {
-      setMessage(error?.response?.data?.message || 'No se pudo enviar la solicitud.');
+      const status = Number(error?.response?.status || 0);
+      const offline = !error?.response && (error?.code === 'ERR_NETWORK' || /Network Error|ECONNREFUSED/i.test(String(error?.message || '')));
+      setModalError(
+        offline || status === 0
+          ? 'No hay conexión con el servidor. Verifica que el backend esté activo e inténtalo de nuevo.'
+          : (error?.response?.data?.message || 'No se pudo enviar la solicitud.')
+      );
     } finally {
       setSubmitting(false);
     }
@@ -442,13 +454,24 @@ export default function NursingResourcesPanel({ className = '' }) {
     return (
       <div className="hr-portal__modal" role="dialog" aria-modal="true" aria-label={titles[activeModal]}>
         <button className="hr-portal__modal-backdrop" type="button" aria-label="Cerrar" onClick={closeModal} />
-        <div className="hr-portal__modal-panel">
+        <div className={`hr-portal__modal-panel${activeModal === 'create-request' ? ' nursing-resource-request-panel' : ''}`}>
           <div className="hr-portal__modal-header">
-            <h2>{titles[activeModal]}</h2>
+            <div>
+              <h2>{titles[activeModal]}</h2>
+              {activeModal === 'create-request' ? (
+                <p className="nursing-resource-request__header-sub">Solicitud de compra para el área de enfermería</p>
+              ) : null}
+            </div>
             <button className="hr-portal__modal-close" type="button" aria-label="Cerrar" onClick={closeModal}>
               <IconClose />
             </button>
           </div>
+
+          {modalError ? (
+            <div className="hr-portal__modal-error" role="alert">
+              {modalError}
+            </div>
+          ) : null}
 
           {activeModal === 'create-item' ? (
             <form className="hr-portal__form" onSubmit={onCreateItem}>
@@ -467,13 +490,6 @@ export default function NursingResourcesPanel({ className = '' }) {
                 </select>
               </label>
               <label>
-                Tipo
-                <select value={itemForm.itemType} onChange={(event) => setItemForm((current) => ({ ...current, itemType: event.target.value }))}>
-                  <option value="consumable">Consumible</option>
-                  <option value="asset">Activo</option>
-                </select>
-              </label>
-              <label>
                 Unidad
                 <select value={itemForm.unit} onChange={(event) => setItemForm((current) => ({ ...current, unit: event.target.value }))}>
                   {unitOptions.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
@@ -481,21 +497,22 @@ export default function NursingResourcesPanel({ className = '' }) {
               </label>
               <label>
                 Stock inicial
-                <input type="number" min="0" value={itemForm.stock} onChange={(event) => setItemForm((current) => ({ ...current, stock: event.target.value }))} />
-              </label>
-              <label>
-                Mínimo
-                <input type="number" min="0" value={itemForm.minStock} onChange={(event) => setItemForm((current) => ({ ...current, minStock: event.target.value }))} />
-              </label>
-              <label>
-                Costo unitario
                 <input
                   type="number"
                   min="0"
-                  step="100"
-                  value={itemForm.unitCost}
-                  onChange={(event) => setItemForm((current) => ({ ...current, unitCost: event.target.value }))}
-                  placeholder="0"
+                  placeholder="Opcional"
+                  value={itemForm.stock}
+                  onChange={(event) => setItemForm((current) => ({ ...current, stock: event.target.value }))}
+                />
+              </label>
+              <label>
+                Mínimo
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="Opcional"
+                  value={itemForm.minStock}
+                  onChange={(event) => setItemForm((current) => ({ ...current, minStock: event.target.value }))}
                 />
               </label>
               <label>
@@ -503,7 +520,7 @@ export default function NursingResourcesPanel({ className = '' }) {
                 <input
                   value={itemForm.location}
                   onChange={(event) => setItemForm((current) => ({ ...current, location: event.target.value }))}
-                  placeholder="Botiquín, armario..."
+                  placeholder="Opcional · Botiquín, armario..."
                 />
               </label>
               <div className="hr-portal__form-actions">
@@ -548,133 +565,162 @@ export default function NursingResourcesPanel({ className = '' }) {
           ) : null}
 
           {activeModal === 'create-request' ? (
-            <form className="hr-portal__form" onSubmit={onCreateRequest}>
-              <p className="hr-portal__empty" style={{ marginTop: 0 }}>
-                Esta solicitud llega directamente a Recursos en la pestaña Enfermería.
-              </p>
-              <label>
-                Motivo / justificación
-                <textarea
-                  value={requestForm.purpose}
-                  onChange={(event) => setRequestForm((current) => ({ ...current, purpose: event.target.value }))}
-                  placeholder="Por qué se necesita la compra..."
-                  rows={3}
-                />
-              </label>
-              <label>
-                Prioridad
-                <select value={requestForm.priority} onChange={(event) => setRequestForm((current) => ({ ...current, priority: event.target.value }))}>
-                  {priorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
-              </label>
-              <label>
-                Fecha necesaria
-                <input type="date" value={requestForm.neededByDate} onChange={(event) => setRequestForm((current) => ({ ...current, neededByDate: event.target.value }))} />
-              </label>
-              <label>
-                Solicitado por / para
-                <input
-                  value={requestForm.requestedForPerson}
-                  onChange={(event) => setRequestForm((current) => ({ ...current, requestedForPerson: event.target.value }))}
-                  placeholder="Opcional"
-                />
-              </label>
+            <form className="hr-portal__form nursing-resource-request" onSubmit={onCreateRequest}>
+              <div className="nursing-resource-request__intro hr-portal__field-wide">
+                <span className="nursing-resource-request__kicker">Compra de insumos</span>
+                <p>
+                  Completa el motivo, agrega los insumos que necesitas y envía la solicitud.
+                  Llega a Recursos en la pestaña Enfermería.
+                </p>
+              </div>
 
-              <div className="hr-portal__picker">
-                <label className="hr-portal__picker-search">
-                  <span>Producto</span>
-                  <input
-                    list="nursing-resource-items"
-                    value={selectedRequestItem ? selectedRequestItem.name : materialSearch}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      const match = items.find((item) => item.name === value);
-                      if (match) {
-                        setRequestForm((current) => ({
-                          ...current,
-                          itemId: match.id,
-                          customName: '',
-                          unit: match.unit || 'unidad',
-                          unitCost: match.unitCost || 0,
-                        }));
-                        setMaterialSearch(match.name);
-                      } else {
-                        setRequestForm((current) => ({
-                          ...current,
-                          itemId: '',
-                          customName: value,
-                          unitCost: current.itemId ? 0 : current.unitCost,
-                        }));
-                        setMaterialSearch(value);
-                      }
-                    }}
-                    placeholder="Busca en catálogo o escribe uno nuevo"
-                  />
-                  <datalist id="nursing-resource-items">
-                    {items.map((item) => (
-                      <option key={item.id} value={item.name}>
-                        {item.stock} {item.unit} · {formatCop(item.unitCost)}
-                      </option>
-                    ))}
-                  </datalist>
-                </label>
-                <label className="hr-portal__picker-qty">
-                  <span>Cantidad</span>
-                  <input type="number" min="1" value={requestForm.quantity} onChange={(event) => setRequestForm((current) => ({ ...current, quantity: event.target.value }))} />
-                </label>
-                <label className="hr-portal__picker-unit">
-                  <span>Unidad</span>
+              <div className="nursing-resource-request__meta hr-portal__field-wide">
+                <label>
+                  Prioridad
                   <select
-                    value={selectedRequestItem?.unit || requestForm.unit || 'unidad'}
-                    onChange={(event) => setRequestForm((current) => ({ ...current, unit: event.target.value }))}
-                    disabled={Boolean(selectedRequestItem)}
+                    value={requestForm.priority}
+                    onChange={(event) => setRequestForm((current) => ({ ...current, priority: event.target.value }))}
                   >
-                    {[selectedRequestItem?.unit, ...unitOptions].filter(Boolean).filter((value, index, list) => list.indexOf(value) === index).map((unit) => (
-                      <option key={unit} value={unit}>{unit}</option>
+                    {priorityOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
                 </label>
-                {!selectedRequestItem ? (
-                  <label className="hr-portal__picker-cost">
-                    <span>Costo unitario</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={requestForm.unitCost}
-                      onChange={(event) => setRequestForm((current) => ({ ...current, unitCost: event.target.value }))}
-                      placeholder="0"
-                    />
-                  </label>
-                ) : null}
-                <button className="hr-portal__add-item" type="button" onClick={onAddRequestItem}>
-                  <IconPlus />
-                  Agregar
-                </button>
+                <label>
+                  Fecha necesaria
+                  <input
+                    type="date"
+                    value={requestForm.neededByDate}
+                    onChange={(event) => setRequestForm((current) => ({ ...current, neededByDate: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Solicitado por / para
+                  <input
+                    value={requestForm.requestedForPerson}
+                    onChange={(event) => setRequestForm((current) => ({ ...current, requestedForPerson: event.target.value }))}
+                    placeholder="Opcional · Ej. Enfermería principal"
+                  />
+                </label>
               </div>
 
-              {requestItems.length > 0 ? (
-                <>
-                  <div className="hr-portal__chips">
+              <label className={`hr-portal__field-wide${modalError && !String(requestForm.purpose || '').trim() ? ' is-invalid' : ''}`}>
+                Motivo / justificación
+                <textarea
+                  ref={purposeInputRef}
+                  required
+                  value={requestForm.purpose}
+                  onChange={(event) => {
+                    setModalError('');
+                    setRequestForm((current) => ({ ...current, purpose: event.target.value }));
+                  }}
+                  placeholder="Describe por qué se necesita la compra (stock bajo, atención frecuente, reposición del botiquín...)"
+                  rows={3}
+                />
+              </label>
+
+              <div className="hr-portal__details hr-portal__field-wide nursing-resource-request__products">
+                <div className="nursing-resource-request__products-head">
+                  <p className="hr-portal__details-title">Insumos a solicitar</p>
+                  <span>{requestItems.length} agregado{requestItems.length === 1 ? '' : 's'}</span>
+                </div>
+
+                <div className="hr-portal__request-picker">
+                  <label className="hr-portal__picker-product">
+                    <span>Producto</span>
+                    <input
+                      list="nursing-resource-items"
+                      value={selectedRequestItem ? selectedRequestItem.name : materialSearch}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        const match = items.find((item) => item.name === value);
+                        if (match) {
+                          setRequestForm((current) => ({
+                            ...current,
+                            itemId: match.id,
+                            customName: '',
+                            unit: match.unit || 'unidad',
+                          }));
+                          setMaterialSearch(match.name);
+                        } else {
+                          setRequestForm((current) => ({
+                            ...current,
+                            itemId: '',
+                            customName: value,
+                          }));
+                          setMaterialSearch(value);
+                        }
+                      }}
+                      placeholder="Busca en catálogo o escribe uno nuevo"
+                    />
+                    <datalist id="nursing-resource-items">
+                      {items.map((item) => (
+                        <option key={item.id} value={item.name}>
+                          {item.stock} {item.unit}
+                        </option>
+                      ))}
+                    </datalist>
+                  </label>
+                  <label className="hr-portal__picker-qty">
+                    <span>Cantidad</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={requestForm.quantity}
+                      onChange={(event) => setRequestForm((current) => ({ ...current, quantity: event.target.value }))}
+                    />
+                  </label>
+                  <label className="hr-portal__picker-unit">
+                    <span>Unidad</span>
+                    <select
+                      value={selectedRequestItem?.unit || requestForm.unit || 'unidad'}
+                      onChange={(event) => setRequestForm((current) => ({ ...current, unit: event.target.value }))}
+                      disabled={Boolean(selectedRequestItem)}
+                    >
+                      {[selectedRequestItem?.unit, ...unitOptions].filter(Boolean).filter((value, index, list) => list.indexOf(value) === index).map((unit) => (
+                        <option key={unit} value={unit}>{unit}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="nursing-resource-request__add" type="button" onClick={onAddRequestItem}>
+                    <IconPlus />
+                    <span>Agregar</span>
+                  </button>
+                </div>
+
+                {requestItems.length > 0 ? (
+                  <ul className="nursing-resource-request__list">
                     {requestItems.map((entry) => (
-                      <button key={entry.key} type="button" onClick={() => setRequestItems((current) => current.filter((item) => item.key !== entry.key))}>
-                        {entry.name} x{entry.quantity} {entry.unit}
-                        {Number(entry.unitCost) > 0 ? ` · ${formatCop(entry.unitCost)}` : ''}
-                        {entry.itemId ? '' : ' · compra'}
-                      </button>
+                      <li key={entry.key}>
+                        <div>
+                          <strong>{entry.name}</strong>
+                          <span>
+                            {entry.quantity} {entry.unit}
+                            {entry.itemId ? '' : ' · compra nueva'}
+                          </span>
+                        </div>
+                        <button
+                          aria-label={`Quitar ${entry.name}`}
+                          type="button"
+                          onClick={() => setRequestItems((current) => current.filter((item) => item.key !== entry.key))}
+                        >
+                          Quitar
+                        </button>
+                      </li>
                     ))}
-                  </div>
-                  <p className="hr-portal__request-total">
-                    Total estimado: <strong>{formatCop(requestEstimatedTotal)}</strong>
+                  </ul>
+                ) : (
+                  <p className="nursing-resource-request__hint">
+                    Agrega gasas, alcohol, jeringas u otros insumos médicos.
                   </p>
-                </>
-              ) : (
-                <p className="hr-portal__empty">Agrega gasas, alcohol, jeringas u otros insumos médicos.</p>
-              )}
+                )}
+              </div>
 
               <div className="hr-portal__form-actions">
-                <button className="hr-portal__btn hr-portal__btn--ghost" type="button" onClick={closeModal} disabled={submitting}>Cancelar</button>
-                <button className="hr-portal__btn hr-portal__btn--green" type="submit" disabled={submitting || !areaId}>
+                <button className="hr-portal__btn hr-portal__btn--ghost" type="button" onClick={closeModal} disabled={submitting}>
+                  Cancelar
+                </button>
+                <button className="hr-portal__btn hr-portal__btn--green" type="submit" disabled={submitting || !areaId || requestItems.length === 0}>
                   <IconSend />
                   {submitting ? 'Enviando...' : 'Enviar a Recursos'}
                 </button>
@@ -821,30 +867,47 @@ export default function NursingResourcesPanel({ className = '' }) {
         {historyEntries.length === 0 ? (
           <p className="hr-portal__empty">No hay movimientos registrados en esta área.</p>
         ) : (
-          historyEntries.map(({ request, kind, kindLabel }) => (
-            <article key={request.id} className="hr-portal__history-card">
-              <div className="hr-portal__history-main">
-                <div>
-                  <div className="hr-portal__history-badges">
-                    <span className={`hr-portal__kind-badge is-${kind === 'request' ? 'request' : kind === 'stock_in' ? 'stock' : 'delivery'}`}>
-                      {kindLabel}
-                    </span>
-                    <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
-                  </div>
-                  <h3>{requestTypeLabels[request.requestType] || 'Solicitud'}</h3>
-                  <p>{getRequestItemsLabel(request)}</p>
-                  {request.purpose ? <p className="hr-portal__request-purpose">{request.purpose}</p> : null}
-                  <p className="hr-portal__request-context">
-                    {[request.requestedForPerson, request.requestedBy?.name].filter(Boolean).join(' · ')}
-                  </p>
-                </div>
-                <div className="hr-portal__request-meta">
-                  <span>{formatDate(request.createdAt)}</span>
-                  {Number(request.estimatedTotal) > 0 ? <strong>{formatCop(request.estimatedTotal)}</strong> : null}
-                </div>
-              </div>
-            </article>
-          ))
+          <div className="hr-portal__inventory-table-wrap nursing-history-table-wrap">
+            <table className="hr-portal__inventory-table nursing-history-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Tipo</th>
+                  <th>Estado</th>
+                  <th>Movimiento</th>
+                  <th>Insumos</th>
+                  <th>Motivo / observación</th>
+                  <th>Solicitante</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyEntries.map(({ request, kind, kindLabel, sortAt }) => (
+                  <tr key={request.id}>
+                    <td className="is-muted nursing-history-table__date">{formatDate(sortAt || request.createdAt)}</td>
+                    <td>
+                      <span className={`hr-portal__kind-badge is-${kind === 'request' ? 'request' : kind === 'stock_in' ? 'stock' : 'delivery'}`}>
+                        {kindLabel}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
+                    </td>
+                    <td>
+                      <strong>{requestTypeLabels[request.requestType] || 'Solicitud'}</strong>
+                      {request.requestedForArea ? (
+                        <div className="nursing-history-table__area">{request.requestedForArea}</div>
+                      ) : null}
+                    </td>
+                    <td>{getRequestItemsLabel(request) || '—'}</td>
+                    <td className="nursing-history-table__purpose">{request.purpose || '—'}</td>
+                    <td className="is-muted">
+                      {[request.requestedForPerson, request.requestedBy?.name].filter(Boolean).join(' · ') || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
 

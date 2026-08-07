@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { getPsychologyDashboard } from '../../services/psychology.service';
 import { getNursingSummary } from '../../services/nursing.service';
+import { getCampusCoexistenceScores } from '../../campus/services/campus.service';
 import CommunityReportsPanel from '../community/CommunityReportsPanel';
 import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
 import './RectoriaControlCenter.css';
@@ -14,6 +15,12 @@ function formatScore(value) {
 function formatDate(value) {
   if (!value) return 'Sin fecha';
   return new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+}
+
+function formatPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '—';
+  return `${Number(numeric.toFixed(Number.isInteger(numeric) ? 0 : 1))}%`;
 }
 
 function ControlKpiGrid({ items = [] }) {
@@ -31,19 +38,164 @@ function ControlKpiGrid({ items = [] }) {
 }
 
 function ControlListPanel({ title, emptyLabel, items = [] }) {
+  const [expandedKey, setExpandedKey] = useState('');
+
   return (
     <section className="rectoria-control-list-panel">
       <h3>{title}</h3>
       {items.length === 0 ? <p className="rectoria-control-empty">{emptyLabel}</p> : (
         <div className="rectoria-control-list">
-          {items.map((item) => (
-            <article className="rectoria-control-list-item" key={item.key}>
-              <strong>{item.title}</strong>
-              {item.meta ? <span>{item.meta}</span> : null}
-            </article>
-          ))}
+          {items.map((item) => {
+            const isExpanded = expandedKey === item.key;
+            const hasDetails = Array.isArray(item.details) && item.details.length > 0;
+            return (
+              <article className={`rectoria-control-list-item${isExpanded ? ' is-expanded' : ''}${hasDetails ? ' is-clickable' : ''}`} key={item.key}>
+                <button
+                  aria-expanded={hasDetails ? isExpanded : undefined}
+                  className="rectoria-control-list-item__toggle"
+                  disabled={!hasDetails}
+                  onClick={() => {
+                    if (!hasDetails) return;
+                    setExpandedKey((current) => (current === item.key ? '' : item.key));
+                  }}
+                  type="button"
+                >
+                  <span className="rectoria-control-list-item__copy">
+                    <strong>{item.title}</strong>
+                    {item.meta ? <span>{item.meta}</span> : null}
+                  </span>
+                  {hasDetails ? (
+                    <span className="rectoria-control-list-item__chevron" aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                  ) : null}
+                </button>
+                {isExpanded && hasDetails ? (
+                  <div className="rectoria-control-list-item__details">
+                    {item.details.map((detail) => (
+                      <div key={`${item.key}-${detail.label}`}>
+                        <span>{detail.label}</span>
+                        <p>{detail.value || '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       )}
+    </section>
+  );
+}
+
+function CoexistenceScoresPanel({
+  emptyLabel,
+  loading = false,
+  rows = [],
+}) {
+  const [nameFilter, setNameFilter] = useState('');
+  const [expandedStudentId, setExpandedStudentId] = useState('');
+
+  const filteredRows = useMemo(() => {
+    const needle = String(nameFilter || '').trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter((row) => {
+      const haystack = `${row.studentName || ''} ${row.studentSchoolCode || ''} ${row.studentGrade || ''} ${row.studentCourse || ''}`.toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [nameFilter, rows]);
+
+  return (
+    <section className="rectoria-control-list-panel">
+      <div className="rectoria-control-students-head">
+        <div>
+          <h3>Puntaje de convivencia por alumno</h3>
+          <p>Consulta el % actual de disciplina y abre cada fila para ver los descuentos aplicados.</p>
+        </div>
+      </div>
+
+      <div className="rectoria-control-students-filters">
+        <label>
+          Buscar alumno
+          <input
+            onChange={(event) => setNameFilter(event.target.value)}
+            placeholder="Nombre, código o curso"
+            type="search"
+            value={nameFilter}
+          />
+        </label>
+      </div>
+
+      {loading ? <p className="rectoria-control-empty">Cargando puntajes de convivencia...</p> : null}
+
+      {!loading ? (
+        <div className="rectoria-control-students-table-wrap">
+          <table className="rectoria-control-students-table rectoria-control-coexistence-table">
+            <thead>
+              <tr>
+                <th>Alumno</th>
+                <th>Grado / curso</th>
+                <th>Puntaje</th>
+                <th>Descontado</th>
+                <th>Observaciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>{emptyLabel}</td>
+                </tr>
+              ) : filteredRows.map((row) => {
+                const isExpanded = expandedStudentId === row.studentId;
+                const scoreTone = Number(row.score) < 70 ? 'danger' : (Number(row.totalDeducted) > 0 ? 'warn' : '');
+                return (
+                  <Fragment key={row.studentId}>
+                    <tr
+                      className={`rectoria-control-students-row${isExpanded ? ' is-expanded' : ''}${scoreTone ? ` is-tone-${scoreTone}` : ''}`}
+                      onClick={() => setExpandedStudentId((current) => (current === row.studentId ? '' : row.studentId))}
+                    >
+                      <td>
+                        <strong>{row.studentName || 'Alumno'}</strong>
+                        {row.studentSchoolCode ? <small>{row.studentSchoolCode}</small> : null}
+                      </td>
+                      <td>{[row.studentGrade, row.studentCourse].filter(Boolean).join(' · ') || '—'}</td>
+                      <td><strong>{formatPercent(row.score)}</strong></td>
+                      <td>{formatPercent(row.totalDeducted)}</td>
+                      <td>{row.observationCount || 0}</td>
+                    </tr>
+                    {isExpanded ? (
+                      <tr className="rectoria-control-coexistence-detail-row">
+                        <td colSpan={5}>
+                          {(row.observations || []).length === 0 ? (
+                            <p className="rectoria-control-empty">Sin descuentos registrados. El alumno conserva el puntaje inicial.</p>
+                          ) : (
+                            <div className="rectoria-control-coexistence-deductions">
+                              {row.observations.map((item) => (
+                                <article key={item.id}>
+                                  <div>
+                                    <strong>
+                                      {item.infractionLabel || 'Observación de convivencia'}
+                                      {item.deductionPercent ? ` (−${item.deductionPercent}%)` : ''}
+                                    </strong>
+                                    <p>{item.observation || 'Sin detalle'}</p>
+                                  </div>
+                                  <div>
+                                    <span>{item.teacherName || 'Docente'}</span>
+                                    <span>{formatDate(item.incidentAt || item.submittedAt || item.createdAt)}</span>
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -804,8 +956,21 @@ export default function RectoriaControlCenterPanel({
 }) {
   const [wellbeingData, setWellbeingData] = useState(null);
   const [nursingData, setNursingData] = useState(null);
+  const [coexistenceScoresData, setCoexistenceScoresData] = useState(null);
   const [loadingWellbeing, setLoadingWellbeing] = useState(false);
   const [loadingNursing, setLoadingNursing] = useState(false);
+  const [loadingCoexistenceScores, setLoadingCoexistenceScores] = useState(false);
+
+  const studentNameById = useMemo(() => {
+    const map = new Map();
+    (students || []).forEach((student) => {
+      const id = String(student._id || student.id || '').trim();
+      if (id) {
+        map.set(id, String(student.name || '').trim());
+      }
+    });
+    return map;
+  }, [students]);
 
   useEffect(() => {
     if (view !== 'control_wellbeing') return undefined;
@@ -837,6 +1002,23 @@ export default function RectoriaControlCenterPanel({
       })
       .finally(() => {
         if (!cancelled) setLoadingNursing(false);
+      });
+    return () => { cancelled = true; };
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'control_coexistence') return undefined;
+    let cancelled = false;
+    setLoadingCoexistenceScores(true);
+    getCampusCoexistenceScores()
+      .then((response) => {
+        if (!cancelled) setCoexistenceScoresData(response || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCoexistenceScoresData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCoexistenceScores(false);
       });
     return () => { cancelled = true; };
   }, [view]);
@@ -1578,6 +1760,35 @@ export default function RectoriaControlCenterPanel({
     });
   }, [scopedStudentIdSet, wellbeingData]);
 
+  const scopedNursingVisits = useMemo(() => {
+    const visits = nursingData?.recentVisits || [];
+    if (!scopedStudentIdSet) {
+      return visits;
+    }
+    return visits.filter((item) => {
+      const studentId = String(item.studentId || item.student?.id || '').trim();
+      return studentId ? scopedStudentIdSet.has(studentId) : false;
+    });
+  }, [nursingData, scopedStudentIdSet]);
+
+  const scopedCoexistenceScoreRows = useMemo(() => {
+    const rows = Array.isArray(coexistenceScoresData?.students) ? coexistenceScoresData.students : [];
+    if (!scopedStudentIdSet) {
+      return rows;
+    }
+    return rows.filter((row) => scopedStudentIdSet.has(String(row.studentId || '')));
+  }, [coexistenceScoresData, scopedStudentIdSet]);
+
+  const resolveStudentDisplayName = (item = {}) => {
+    const studentId = String(item.studentId || item.student?.id || item.student?._id || '').trim();
+    return String(
+      item.student?.name
+      || item.studentName
+      || (studentId ? studentNameById.get(studentId) : '')
+      || 'Alumno'
+    ).trim();
+  };
+
   const viewMeta = {
     control_levels: {
       eyebrow: 'Centro de control',
@@ -1612,7 +1823,7 @@ export default function RectoriaControlCenterPanel({
     control_coexistence: {
       eyebrow: 'Centro de control',
       title: 'Convivencia',
-      description: 'Observaciones de comportamiento reportadas por docentes y equipo institucional.',
+      description: 'Puntaje de disciplina de cada alumno y detalle de descuentos reportados por docentes.',
     },
     control_community_reports: {
       eyebrow: 'Centro de control',
@@ -1722,8 +1933,18 @@ export default function RectoriaControlCenterPanel({
                 emptyLabel={scopeLabel ? `No hay casos de bienestar en ${scopeLabel}.` : 'No hay casos de bienestar reportados todavía.'}
                 items={scopedWellbeingCases.map((item) => ({
                   key: item.id || item._id,
-                  title: item.student?.name || item.studentName || 'Alumno',
+                  title: resolveStudentDisplayName(item),
                   meta: `${item.caseType || item.title || 'Caso'} · ${item.status || 'abierto'} · ${formatDate(item.updatedAt || item.createdAt)}`,
+                  details: [
+                    { label: 'Alumno', value: resolveStudentDisplayName(item) },
+                    { label: 'Tipo de caso', value: item.caseType || item.title || 'Caso' },
+                    { label: 'Prioridad', value: item.priority || '—' },
+                    { label: 'Estado', value: item.status || 'abierto' },
+                    { label: 'Resumen', value: item.summary || item.title || 'Sin resumen registrado' },
+                    { label: 'Próxima acción', value: item.nextAction || 'Sin acción pendiente' },
+                    { label: 'Abierto por', value: item.openedBy?.name || 'Equipo de bienestar' },
+                    { label: 'Actualizado', value: formatDate(item.updatedAt || item.createdAt) },
+                  ],
                 }))}
                 title="Casos recientes"
               />
@@ -1745,17 +1966,21 @@ export default function RectoriaControlCenterPanel({
               ]} />
               <ControlListPanel
                 emptyLabel="No hay atenciones de enfermería registradas todavía."
-                items={(nursingData?.recentVisits || [])
-                  .filter((item) => {
-                    if (!scopedStudentIdSet) return true;
-                    const studentId = String(item.studentId || item.student?.id || '').trim();
-                    return studentId ? scopedStudentIdSet.has(studentId) : false;
-                  })
-                  .map((item) => ({
-                    key: item.id,
-                    title: item.studentName || 'Alumno',
-                    meta: `${item.reason || 'Atención'} · ${formatDate(item.attendedAt)}`,
-                  }))}
+                items={scopedNursingVisits.map((item) => ({
+                  key: item.id,
+                  title: resolveStudentDisplayName(item),
+                  meta: `${item.reason || item.symptoms || 'Atención'} · ${formatDate(item.attendedAt || item.createdAt)}`,
+                  details: [
+                    { label: 'Alumno', value: resolveStudentDisplayName(item) },
+                    { label: 'Grado / curso', value: [item.student?.grade, item.student?.course].filter(Boolean).join(' · ') || '—' },
+                    { label: 'Síntomas', value: item.symptoms || item.reason || '—' },
+                    { label: 'Manejo / tratamiento', value: item.treatment || '—' },
+                    { label: 'Notas', value: item.notes || 'Sin notas adicionales' },
+                    { label: 'Disposición', value: item.disposition || '—' },
+                    { label: 'Atendido por', value: item.attendedBy?.name || 'Enfermería' },
+                    { label: 'Fecha', value: formatDate(item.attendedAt || item.createdAt) },
+                  ],
+                }))}
                 title="Atenciones recientes"
               />
             </>
@@ -1766,19 +1991,17 @@ export default function RectoriaControlCenterPanel({
       {view === 'control_coexistence' ? (
         <>
           <ControlKpiGrid items={[
-            { key: 'total', label: 'Observaciones', value: scopedDisciplineObservations.length, helper: 'Reportes de convivencia' },
-            { key: 'week', label: 'Últimos 30 registros', value: Math.min(scopedDisciplineObservations.length, 30), helper: 'Cargados en el tablero' },
-            { key: 'students', label: 'Alumnos', value: new Set(scopedDisciplineObservations.map((item) => item.studentName || item.studentId).filter(Boolean)).size, helper: 'Con observaciones' },
-            { key: 'risk', label: 'En riesgo académico', value: overviewAcademicPerformance?.atRiskStudents?.length || 0, helper: 'Promedio bajo umbral' },
+            { key: 'students', label: 'Alumnos', value: scopedCoexistenceScoreRows.length, helper: 'Con puntaje de disciplina' },
+            { key: 'deductions', label: 'Con descuentos', value: scopedCoexistenceScoreRows.filter((row) => Number(row.totalDeducted) > 0).length, helper: 'Al menos una observación' },
+            { key: 'average', label: 'Promedio de disciplina', value: scopedCoexistenceScoreRows.length
+              ? formatPercent(scopedCoexistenceScoreRows.reduce((sum, row) => sum + Number(row.score || 0), 0) / scopedCoexistenceScoreRows.length)
+              : '—', helper: 'Sobre el puntaje actual' },
+            { key: 'observations', label: 'Observaciones', value: scopedDisciplineObservations.length, helper: 'Reportes cargados en el tablero' },
           ]} />
-          <ControlListPanel
-            emptyLabel={scopeLabel ? `No hay observaciones de convivencia en ${scopeLabel}.` : 'No hay observaciones de convivencia registradas.'}
-            items={scopedDisciplineObservations.slice(0, 12).map((item) => ({
-              key: item.id || `${item.studentId}-${item.submittedAt}`,
-              title: item.studentName || 'Alumno',
-              meta: `${item.category || item.type || 'Observación'} · ${item.teacherName || item.reportedBy || 'Docente'} · ${formatDate(item.incidentAt || item.submittedAt || item.createdAt)}`,
-            }))}
-            title="Observaciones recientes"
+          <CoexistenceScoresPanel
+            emptyLabel={scopeLabel ? `No hay alumnos con convivencia en ${scopeLabel}.` : 'No hay alumnos para mostrar el puntaje de convivencia.'}
+            loading={loadingCoexistenceScores}
+            rows={scopedCoexistenceScoreRows}
           />
         </>
       ) : null}

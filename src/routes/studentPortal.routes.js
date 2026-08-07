@@ -17,6 +17,8 @@ const {
   loadGlobalColibriLeaderboard,
   submitColibriGameScoreForUser,
 } = require('../services/colibriGame.service');
+const { resolveStudentFlyLockStatus } = require('../services/campusFlyLock.service');
+const { buildStudentCoexistenceScore } = require('../services/campusCoexistencePolicy.service');
 const {
   buildStudentCommunityFeedQuery,
   ensureStudentCohortMembership,
@@ -88,11 +90,20 @@ function serializeStudentPsychologyCase(item = {}) {
 
 function serializeStudentCoexistenceObservation(item = {}) {
   return {
+    id: String(item._id || ''),
     _id: item._id,
     studentId: item.studentId,
-    category: H.normalizeText(item.category),
+    teacherName: H.normalizeText(item.teacherName),
+    courseTitle: H.normalizeText(item.courseTitle),
+    subject: H.normalizeText(item.subject),
+    observation: H.normalizeText(item.observation),
+    infractionKey: H.normalizeText(item.infractionKey),
+    infractionLabel: H.normalizeText(item.infractionLabel),
+    deductionPercent: Number(item.deductionPercent || 0),
+    category: H.normalizeText(item.infractionLabel || item.category),
     status: item.status || '',
-    summary: H.normalizeText(item.summary || item.description),
+    summary: H.normalizeText(item.observation || item.summary || item.description),
+    incidentAt: item.incidentAt || null,
     submittedAt: item.submittedAt || item.createdAt || null,
   };
 }
@@ -169,7 +180,7 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleValues,
     } = H.buildParentStudentAcademicMatchValues(student);
 
-    const [academicGradeCourses, academicGradeEntryRefs, academicStructure, psychologyCases, coexistenceObservations, wallet] = await Promise.all([
+    const [academicGradeCourses, academicGradeEntryRefs, academicStructure, psychologyCases, coexistenceObservations, wallet, academicContentCourses] = await Promise.all([
       gradeValues.length
         ? CampusCourse.find({
           schoolId,
@@ -196,11 +207,23 @@ router.get('/portal/overview', async (req, res) => {
         schoolId,
         studentId: student._id,
         status: { $in: ['submitted', 'reviewed'] },
+        $or: [{ destination: 'coexistence' }, { destination: { $exists: false } }, { destination: null }],
       })
         .sort({ submittedAt: -1, createdAt: -1 })
         .limit(100)
         .lean(),
       Wallet.findOne({ schoolId, studentId: student._id }).lean(),
+      gradeValues.length
+        ? CampusCourse.find({
+          schoolId,
+          status: 'active',
+          studentGradeKey: { $in: gradeValues },
+          'academicContent.topics.0': { $exists: true },
+        })
+          .select('title subject gradeLevel section studentGradeKey academicContent')
+          .sort({ title: 1, subject: 1 })
+          .lean()
+        : Promise.resolve([]),
     ]);
 
     const academicGradeCourseIds = new Set((academicGradeCourses || []).map((course) => String(course._id)));
@@ -235,6 +258,9 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleValues,
     });
     const gradingScale = H.resolveParentGradingScaleForGrade(academicStructure, gradeValues);
+    const includeClassAttendance = typeof H.resolveIncludeClassAttendanceForGrade === 'function'
+      ? H.resolveIncludeClassAttendanceForGrade(academicStructure, gradeValues)
+      : true;
     const gradebook = await H.buildParentAcademicGradebook({
       schoolId,
       studentId: studentObjectId,
@@ -265,6 +291,42 @@ router.get('/portal/overview', async (req, res) => {
       })
       : [];
 
+    const academicContent = (academicContentCourses || []).map((course) => ({
+      courseId: String(course._id),
+      title: String(course.title || '').trim(),
+      subject: String(course.subject || '').trim(),
+      gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
+      section: String(course.section || '').trim(),
+      periods: Array.isArray(course.academicContent) ? course.academicContent.map((period) => ({
+        periodKey: String(period.periodKey || '').trim(),
+        periodName: String(period.periodName || '').trim(),
+        startDate: String(period.startDate || '').trim(),
+        endDate: String(period.endDate || '').trim(),
+        topics: Array.isArray(period.topics) ? period.topics.map((topic) => ({
+          key: String(topic.key || '').trim(),
+          title: String(topic.title || '').trim(),
+          description: String(topic.description || '').trim(),
+          completed: Boolean(topic.completed),
+          completedAt: topic.completedAt || null,
+          materials: Array.isArray(topic.materials) ? topic.materials.map((material) => ({
+            sourceType: String(material.sourceType || 'file').trim(),
+            kind: String(material.kind || 'file').trim(),
+            title: String(material.title || material.fileName || '').trim(),
+            url: String(material.url || '').trim(),
+            fileName: String(material.fileName || '').trim(),
+            mimeType: String(material.mimeType || '').trim(),
+          })).filter((material) => material.url) : [],
+        })).filter((topic) => topic.title) : [],
+      })) : [],
+    })).filter((course) => course.periods.some((period) => period.topics.length > 0));
+
+    const flyLockStatus = await resolveStudentFlyLockStatus({ schoolId, student });
+    const coexistenceScore = await buildStudentCoexistenceScore({ schoolId, studentId: student._id });
+    const parentAppFeatures = {
+      ...STUDENT_PORTAL_FEATURES,
+      games: Boolean(STUDENT_PORTAL_FEATURES.games) && !flyLockStatus.flyLocked,
+    };
+
     return res.status(200).json({
       student: {
         _id: student._id,
@@ -275,9 +337,11 @@ router.get('/portal/overview', async (req, res) => {
         schoolCode: student.schoolCode || '',
         cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
       },
-      parentAppFeatures: STUDENT_PORTAL_FEATURES,
+      parentAppFeatures,
+      flyLock: flyLockStatus,
       psychologyCases: psychologyCases.map(serializeStudentPsychologyCase),
       coexistenceObservations: coexistenceObservations.map(serializeStudentCoexistenceObservation),
+      coexistenceScore,
       walletBalance: Number(wallet?.balance || 0),
       academic: {
         gradebook,
@@ -286,10 +350,28 @@ router.get('/portal/overview', async (req, res) => {
         overallAverage,
         gradingScale,
         upcomingAssignments,
+        content: academicContent,
+        includeClassAttendance,
       },
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/fly-lock', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const student = await resolveStudentDocumentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    const flyLock = await resolveStudentFlyLockStatus({ schoolId, student });
+    return res.status(200).json({ flyLock });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo consultar el estado de FLY.' });
   }
 });
 
@@ -527,6 +609,17 @@ router.get('/portal/colibri-game/leaderboard', async (_req, res) => {
 router.post('/portal/colibri-game/scores', async (req, res) => {
   try {
     const { schoolId, userId, name: userName } = req.user;
+    const student = await resolveStudentDocumentForPortal(req);
+    if (student) {
+      const flyLock = await resolveStudentFlyLockStatus({ schoolId, student });
+      if (flyLock.flyLocked) {
+        return res.status(403).json({
+          message: flyLock.reason || 'FLY está pausado durante la clase. No se pueden guardar puntajes.',
+          flyLock,
+        });
+      }
+    }
+
     const result = await submitColibriGameScoreForUser({
       schoolId,
       userId,

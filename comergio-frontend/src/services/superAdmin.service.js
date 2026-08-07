@@ -12,6 +12,14 @@ export const deleteSuperAdminSchool = (schoolId) => (
   api.delete(`/super-admin/schools/${encodeURIComponent(schoolId)}`)
 );
 
+export const requestSuperAdminSchoolDelete = (schoolId) => (
+  api.post(`/super-admin/schools/${encodeURIComponent(schoolId)}/delete-request`)
+);
+
+export const confirmSuperAdminSchoolDelete = (token) => (
+  api.post('/super-admin/schools/confirm-delete', { token })
+);
+
 export const getSuperAdminRectoriaUser = (schoolId) => (
   api.get(`/super-admin/schools/${encodeURIComponent(schoolId)}/rectoria`)
 );

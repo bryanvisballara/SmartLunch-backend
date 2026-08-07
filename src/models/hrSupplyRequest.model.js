@@ -15,6 +15,14 @@ const hrSupplyRequestItemSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const hrPlannerActivityMaterialSchema = new mongoose.Schema(
+  {
+    materialName: { type: String, trim: true, default: '' },
+    quantity: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false }
+);
+
 const hrPlannerActivitySchema = new mongoose.Schema(
   {
     date: { type: Date, default: null },
@@ -25,6 +33,7 @@ const hrPlannerActivitySchema = new mongoose.Schema(
     courseLabel: { type: String, trim: true, default: '' },
     materialName: { type: String, trim: true, default: '' },
     quantity: { type: Number, default: 0, min: 0 },
+    materials: { type: [hrPlannerActivityMaterialSchema], default: [] },
     purpose: { type: String, trim: true, default: '' },
   },
   { _id: true }
@@ -65,7 +74,7 @@ const hrSupplyRequestSchema = new mongoose.Schema(
     budgetChargedAt: { type: Date, default: null },
     status: {
       type: String,
-      enum: ['pending_coordination_review', 'consolidated', 'pending_hr_review', 'pending_purchasing_review', 'pending_approval', 'approved', 'rejected', 'delivered', 'partially_delivered', 'cancelled'],
+      enum: ['pending_coordination_review', 'returned_for_correction', 'consolidated', 'pending_hr_review', 'pending_purchasing_review', 'pending_approval', 'approved', 'rejected', 'delivered', 'partially_delivered', 'cancelled'],
       default: 'pending_approval',
       index: true,
     },
@@ -76,6 +85,10 @@ const hrSupplyRequestSchema = new mongoose.Schema(
     rejectedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     rejectedAt: { type: Date, default: null },
     rejectionReason: { type: String, trim: true, default: '' },
+    coordinationObservation: { type: String, trim: true, default: '' },
+    returnedByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    returnedAt: { type: Date, default: null },
+    resubmittedAt: { type: Date, default: null },
     deliveredByUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     deliveredAt: { type: Date, default: null },
     deliveryNotes: { type: String, trim: true, default: '' },

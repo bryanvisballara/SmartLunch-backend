@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useAuthStore from '../store/auth.store';
-import { createNursingVisit, getNursingStudentHistory, getNursingStudentMedicalProfileHistory, searchNursingStudents } from '../services/nursing.service';
+import {
+  createNursingVisit,
+  getNursingStudentHistory,
+  getNursingStudentMedicalProfileHistory,
+  searchNursingStudents,
+  uploadNursingVisitImage,
+} from '../services/nursing.service';
 import StudentMedicalProfileHistory from '../components/StudentMedicalProfileHistory';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
 import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
 import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
 import NursingResourcesPanel from '../components/nursing/NursingResourcesPanel';
+import NursingMedicalSignaturesPanel from '../components/nursing/NursingMedicalSignaturesPanel';
+import GuidanceAttendanceReportPanel from '../components/attendance/GuidanceAttendanceReportPanel';
 import { getSchoolDisplayName } from '../lib/schools';
 
 const dispositionOptions = [
@@ -17,11 +25,14 @@ const dispositionOptions = [
   { value: 'other', label: 'Otro manejo' },
 ];
 
+const MAX_VISIT_PHOTOS = 6;
+
 const emptyForm = {
   symptoms: '',
   treatment: '',
   notes: '',
   disposition: 'observation',
+  photos: [],
 };
 
 function formatDateTime(value) {
@@ -60,6 +71,18 @@ function hasMedicalValue(value) {
 function toTelHref(value) {
   const digits = String(value || '').replace(/[^\d+]/g, '');
   return digits ? `tel:${digits}` : '';
+}
+
+function toWhatsAppHref(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  const withCountry = digits.length === 10 ? `57${digits}` : digits;
+  return `https://wa.me/${withCountry}`;
+}
+
+function toMailHref(email) {
+  const value = String(email || '').trim();
+  return value ? `mailto:${value}` : '';
 }
 
 function getMedicationAuthorizationLabel(value) {
@@ -220,6 +243,30 @@ function NursingIcon({ name }) {
       </svg>
     );
   }
+  if (name === 'whatsapp') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M12 3.8a7.7 7.7 0 0 0-6.6 11.6L4.5 20l4.8-.9A7.7 7.7 0 1 0 12 3.8z" />
+        <path {...common} d="M9.4 9.6c.2-.4.4-.4.7-.4h.5c.2 0 .4 0 .5.4l.7 1.7c.1.2 0 .4-.1.6l-.4.5c-.1.2 0 .4.2.7.4.5 1 .9 1.6 1.2.3.1.5 0 .7-.1l.6-.4c.2-.1.4-.1.6 0l1.5.8c.2.1.3.3.3.5 0 .7-.6 1.6-1.3 1.7-.9.2-2.3 0-4-1.3-1.5-1.2-2.4-2.8-2.6-3.6-.1-.6.2-1.4.6-1.9z" />
+      </svg>
+    );
+  }
+  if (name === 'mail') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect {...common} x="3.5" y="5.5" width="17" height="13" rx="2" />
+        <path {...common} d="m5 7.5 7 5.5 7-5.5" />
+      </svg>
+    );
+  }
+  if (name === 'camera') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4.5 8.5h3l1.4-2h6.2l1.4 2H19.5A1.5 1.5 0 0 1 21 10v8.5A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5V10a1.5 1.5 0 0 1 1.5-1.5z" />
+        <circle {...common} cx="12" cy="14" r="3.2" />
+      </svg>
+    );
+  }
 
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -246,10 +293,13 @@ function NursingPortal() {
   const [query, setQuery] = useState('');
   const [students, setStudents] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [guardians, setGuardians] = useState([]);
   const [history, setHistory] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const photoInputRef = useRef(null);
   const [medicalProfileRevisions, setMedicalProfileRevisions] = useState([]);
   const [loadingMedicalProfileHistory, setLoadingMedicalProfileHistory] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -264,7 +314,7 @@ function NursingPortal() {
   );
 
   const latestVisit = history[0] || null;
-  const canSave = Boolean(selectedStudent?.id && form.symptoms.trim() && form.treatment.trim() && !saving);
+  const canSave = Boolean(selectedStudent?.id && form.symptoms.trim() && form.treatment.trim() && !saving && !uploadingPhotos);
   const todayBadge = useMemo(() => formatTodayBadge(), []);
 
   const filteredStudentsTitle = useMemo(() => {
@@ -304,6 +354,7 @@ function NursingPortal() {
   useEffect(() => {
     if (!selectedStudent?.id) {
       setHistory([]);
+      setGuardians([]);
       return;
     }
 
@@ -316,12 +367,14 @@ function NursingPortal() {
           if (response.data?.student) {
             setSelectedStudent(response.data.student);
           }
+          setGuardians(response.data?.guardians || []);
           setHistory(response.data?.visits || []);
         }
       })
       .catch((error) => {
         if (!cancelled) {
           setHistory([]);
+          setGuardians([]);
           setNotice({ type: 'error', text: error?.response?.data?.message || 'No se pudo cargar el historial.' });
         }
       })
@@ -369,6 +422,7 @@ function NursingPortal() {
 
   const onSelectStudent = (student) => {
     setSelectedStudent(student);
+    setGuardians([]);
     setNotice({ type: '', text: '' });
     setForm(emptyForm);
   };
@@ -376,6 +430,67 @@ function NursingPortal() {
   const onClearForm = () => {
     setForm(emptyForm);
     setNotice({ type: '', text: '' });
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+    }
+  };
+
+  const onRemoveVisitPhoto = (index) => {
+    setForm((currentForm) => ({
+      ...currentForm,
+      photos: (currentForm.photos || []).filter((_, photoIndex) => photoIndex !== index),
+    }));
+  };
+
+  const onSelectVisitPhotos = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length || !selectedStudent?.id) {
+      return;
+    }
+
+    const remainingSlots = Math.max(0, MAX_VISIT_PHOTOS - (form.photos || []).length);
+    if (remainingSlots <= 0) {
+      setNotice({ type: 'error', text: `Puedes adjuntar hasta ${MAX_VISIT_PHOTOS} fotos por atención.` });
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remainingSlots);
+    setUploadingPhotos(true);
+    setNotice({ type: '', text: '' });
+
+    try {
+      const uploaded = [];
+      for (const file of selectedFiles) {
+        const response = await uploadNursingVisitImage(file, file.name);
+        const photo = response.data?.photo || response.data?.data?.photo;
+        if (photo?.url) {
+          uploaded.push({
+            url: photo.url,
+            thumbUrl: photo.thumbUrl || photo.url,
+            alt: photo.alt || '',
+          });
+        }
+      }
+
+      if (!uploaded.length) {
+        setNotice({ type: 'error', text: 'No se pudieron subir las fotos seleccionadas.' });
+        return;
+      }
+
+      setForm((currentForm) => ({
+        ...currentForm,
+        photos: [...(currentForm.photos || []), ...uploaded].slice(0, MAX_VISIT_PHOTOS),
+      }));
+      setNotice({
+        type: 'success',
+        text: uploaded.length === 1 ? 'Foto agregada a la atención.' : `${uploaded.length} fotos agregadas a la atención.`,
+      });
+    } catch (error) {
+      setNotice({ type: 'error', text: error?.response?.data?.message || 'No se pudieron subir las fotos.' });
+    } finally {
+      setUploadingPhotos(false);
+    }
   };
 
   const onShowAllStudents = () => {
@@ -385,10 +500,14 @@ function NursingPortal() {
 
   const onClearSelection = () => {
     setSelectedStudent(null);
+    setGuardians([]);
     setHistory([]);
     setMedicalProfileRevisions([]);
     setForm(emptyForm);
     setNotice({ type: '', text: '' });
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+    }
   };
 
   const onScrollToHistory = () => {
@@ -413,10 +532,14 @@ function NursingPortal() {
         treatment: form.treatment,
         notes: form.notes,
         disposition: form.disposition,
+        photos: form.photos || [],
       });
       const savedVisit = response.data?.visit;
       setHistory((currentHistory) => (savedVisit ? [savedVisit, ...currentHistory] : currentHistory));
       setForm(emptyForm);
+      if (photoInputRef.current) {
+        photoInputRef.current.value = '';
+      }
       setNotice({ type: 'success', text: 'Atención guardada y acudiente notificado.' });
     } catch (error) {
       setNotice({ type: 'error', text: error?.response?.data?.message || 'No se pudo guardar la atención.' });
@@ -440,7 +563,9 @@ function NursingPortal() {
       activeKey={activePortalView}
       navItems={[
         { key: 'attention', label: 'Atención' },
+        { key: 'asistencia', label: 'Asistencia del día' },
         { key: 'resources', label: 'Recursos' },
+        { key: 'medical_signatures', label: 'Firmas de fichas médicas' },
         {
           key: 'staff_announcements',
           label: (
@@ -473,14 +598,22 @@ function NursingPortal() {
         {activePortalView === 'staff_announcements' ? (
           <StaffAnnouncementsPanel
             className="nursing-panel"
-            description="Mensajes internos de rectoría y coordinación. Confirma cuando los hayas leído."
-            mode="inbox"
+            description="Envía y recibe mensajes internos del colegio. Selecciona a quién va dirigido cada comunicado."
+            mode="manage"
             title="Comunicados internos"
           />
         ) : null}
 
         {activePortalView === 'resources' ? (
           <NursingResourcesPanel className="nursing-panel" />
+        ) : null}
+
+        {activePortalView === 'medical_signatures' ? (
+          <NursingMedicalSignaturesPanel />
+        ) : null}
+
+        {activePortalView === 'asistencia' ? (
+          <GuidanceAttendanceReportPanel className="nursing-panel" />
         ) : null}
 
         {activePortalView === 'attention' ? (
@@ -500,6 +633,7 @@ function NursingPortal() {
             </section>
 
             {selectedStudent ? (
+              <>
               <section className="nursing-panel nursing-medical-sheet">
                 <header className="nursing-medical-sheet__head">
                   <div>
@@ -593,8 +727,91 @@ function NursingPortal() {
                       <strong>{selectedMedicationAuthorization.notes}</strong>
                     </div>
                   ) : null}
+                  {selectedMedicalProfile.signatureImage ? (
+                    <div className="nursing-medical-signature-card">
+                      <span>Firma del acudiente</span>
+                      <img
+                        alt="Firma del acudiente"
+                        src={selectedMedicalProfile.signatureImage}
+                      />
+                      <small>
+                        {selectedMedicalProfile.signedByParentName || 'Acudiente'}
+                        {selectedMedicalProfile.signedAt
+                          ? ` · ${formatDateTime(selectedMedicalProfile.signedAt)}`
+                          : ''}
+                      </small>
+                    </div>
+                  ) : (
+                    <div>
+                      <span>Firma del acudiente</span>
+                      <strong>Sin firma registrada</strong>
+                    </div>
+                  )}
                 </div>
               </section>
+
+              <section className="nursing-panel nursing-guardians-panel">
+                <header className="nursing-panel-head">
+                  <span className="nursing-kicker">Familia</span>
+                  <h2>Acudientes del alumno</h2>
+                  <p>Contacta a los papás vinculados para informar o coordinar el seguimiento.</p>
+                </header>
+                <div className="nursing-guardians__head">
+                  <strong>Contactos</strong>
+                  <em>{loadingHistory ? '…' : guardians.length}</em>
+                </div>
+                {loadingHistory ? <p className="nursing-empty">Cargando acudientes...</p> : null}
+                {!loadingHistory && guardians.length === 0 ? (
+                  <p className="nursing-empty">Sin acudientes vinculados a este alumno.</p>
+                ) : null}
+                {!loadingHistory && guardians.length > 0 ? (
+                  <div className="nursing-guardians__list">
+                    {guardians.map((guardian) => {
+                      const whatsappHref = toWhatsAppHref(guardian.phone);
+                      const mailHref = toMailHref(guardian.email);
+                      return (
+                        <article className="nursing-guardian-card" key={guardian.id}>
+                          <div>
+                            <strong>{guardian.name || 'Acudiente'}</strong>
+                            <small>
+                              {guardian.relationship || 'Acudiente'}
+                              {guardian.isPrimaryContact ? ' · Contacto principal' : ''}
+                            </small>
+                          </div>
+                          <p>
+                            <span>Correo</span>
+                            {mailHref ? (
+                              <a href={mailHref}>
+                                <NursingIcon name="mail" />
+                                {guardian.email}
+                              </a>
+                            ) : (
+                              <b>No registrado</b>
+                            )}
+                          </p>
+                          <p>
+                            <span>Teléfono</span>
+                            <b>{guardian.phone || 'No registrado'}</b>
+                            {whatsappHref ? (
+                              <a
+                                className="nursing-whatsapp-btn"
+                                href={whatsappHref}
+                                rel="noreferrer"
+                                target="_blank"
+                                title="Abrir WhatsApp"
+                              >
+                                <NursingIcon name="whatsapp" />
+                                WhatsApp
+                              </a>
+                            ) : null}
+                          </p>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </section>
+              </>
             ) : (
               <section className="nursing-panel nursing-medical-sheet is-placeholder">
                 <header className="nursing-medical-sheet__head">
@@ -602,7 +819,7 @@ function NursingPortal() {
                     <span className="nursing-kicker">Ficha médica de matrícula</span>
                     <h2>Selecciona un alumno para ver su ficha</h2>
                     <p>
-                      Aquí aparecerán alergias, medicamentos, autorización y contacto de emergencia
+                      Aquí aparecerán alergias, medicamentos, autorización, acudientes y contacto de emergencia
                       registrados en matrícula o actualizados por el acudiente.
                     </p>
                   </div>
@@ -750,6 +967,52 @@ function NursingPortal() {
                   />
                 </label>
 
+                <div className={`nursing-field nursing-photos-field${!selectedStudent ? ' is-disabled' : ''}`}>
+                  <span className="nursing-field__label">
+                    <i className="tone-blue" aria-hidden="true"><NursingIcon name="camera" /></i>
+                    Fotos para acudientes
+                    <small>Los padres verán estas imágenes en la app</small>
+                  </span>
+                  <input
+                    accept="image/*"
+                    disabled={!selectedStudent || uploadingPhotos || (form.photos || []).length >= MAX_VISIT_PHOTOS}
+                    multiple
+                    onChange={onSelectVisitPhotos}
+                    ref={photoInputRef}
+                    type="file"
+                  />
+                  <div className="nursing-photos-actions">
+                    <button
+                      className="nursing-secondary-btn"
+                      disabled={!selectedStudent || uploadingPhotos || (form.photos || []).length >= MAX_VISIT_PHOTOS}
+                      onClick={() => photoInputRef.current?.click()}
+                      type="button"
+                    >
+                      <NursingIcon name="camera" />
+                      {uploadingPhotos ? 'Subiendo...' : 'Subir fotos'}
+                    </button>
+                    <small>{(form.photos || []).length} / {MAX_VISIT_PHOTOS}</small>
+                  </div>
+                  {(form.photos || []).length > 0 ? (
+                    <div className="nursing-photos-grid">
+                      {form.photos.map((photo, index) => (
+                        <figure className="nursing-photo-thumb" key={`${photo.url}-${index}`}>
+                          <img alt={photo.alt || `Foto ${index + 1}`} src={photo.thumbUrl || photo.url} />
+                          <button
+                            aria-label="Quitar foto"
+                            onClick={() => onRemoveVisitPhoto(index)}
+                            type="button"
+                          >
+                            ×
+                          </button>
+                        </figure>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="nursing-photos-hint">Adjunta fotos de la lesión, curación u observación para que la familia las vea.</p>
+                  )}
+                </div>
+
                 <div className="nursing-form-actions">
                   <button className="nursing-primary-btn" disabled={!canSave} type="submit">
                     <NursingIcon name="plus" />
@@ -803,6 +1066,20 @@ function NursingPortal() {
                       <p><b>Síntomas:</b> {visit.symptoms}</p>
                       <p><b>Manejo:</b> {visit.treatment}</p>
                       {visit.notes ? <p><b>Notas:</b> {visit.notes}</p> : null}
+                      {Array.isArray(visit.photos) && visit.photos.length > 0 ? (
+                        <div className="nursing-history-photos">
+                          {visit.photos.map((photo, index) => (
+                            <a
+                              href={photo.url}
+                              key={`${visit.id}-photo-${index}`}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <img alt={photo.alt || `Foto ${index + 1}`} src={photo.thumbUrl || photo.url} />
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
                       <small>Registró: {visit.attendedBy?.name || 'Enfermería'}</small>
                     </article>
                   ))}

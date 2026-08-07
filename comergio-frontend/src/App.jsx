@@ -9,6 +9,7 @@ import { resolveComergioAppUrl } from './lib/deepLinks';
 import { savePostLoginRedirect } from './lib/postLoginRedirect';
 import { ensurePortalPushNotifications, registerPushNotificationNavigation } from './lib/pushNotifications';
 import { getDefaultRouteByRole, INSTITUTIONAL_PLACEHOLDER_ROLES } from './lib/defaultRouteByRole';
+import StaffSupportWhatsAppFab from './components/staff-chrome/StaffSupportWhatsAppFab';
 import { LOGIN_PATH } from './lib/authNavigation';
 import { useAndroidNavInset } from './hooks/useAndroidNavInset';
 import Login from './pages/Login';
@@ -208,6 +209,8 @@ function App() {
     || isInstitutionalPortalRoute
     || normalizedPathname === '/admin'
     || normalizedPathname.startsWith('/admin/');
+  const isCampusTeacherRoute = normalizedPathname === '/campus/teacher' || normalizedPathname.startsWith('/campus/teacher/');
+  const showStaffSupportWhatsAppFab = isAuthenticated && (isStaffPortalChromeRoute || isCampusTeacherRoute);
   const showNavbar =
     !isLandingRoute &&
     !isPrimerContactoRoute &&
@@ -757,6 +760,7 @@ function App() {
           <Route element={<Navigate replace to={campusPreviewEnabled ? "/campus-preview/parent" : LOGIN_PATH} />} path="*" />
         </Routes>
       </main>
+      {showStaffSupportWhatsAppFab ? <StaffSupportWhatsAppFab /> : null}
       {!hideFooter ? <AppFooter /> : null}
     </div>
     </AppErrorBoundary>

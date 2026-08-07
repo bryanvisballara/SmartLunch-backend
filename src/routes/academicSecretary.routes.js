@@ -34,6 +34,7 @@ const { upsertStudentAccount } = require('../utils/studentAccount');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
+const { runWithSchoolContext } = require('../config/db');
 const {
   applyMonthlyTuitionAdditionalDiscount,
   hasMonthlyTuitionAdditionalDiscount,
@@ -44,7 +45,11 @@ const {
   unlinkCarteraPaymentFromEnrollmentMatricula,
 } = require('../services/enrollmentMatricula.service');
 const { createBillingPaymentDeletionRequest } = require('../services/enrollmentMatriculaPurgeRequest.service');
-const { ensureStudentCohortMembership } = require('../services/communityFeed.service');
+const {
+  buildCohortKey,
+  ensureStudentCohortMembership,
+  resolveCommunityAudienceMembers,
+} = require('../services/communityFeed.service');
 const { sendAcademicBillingEmail, sendAcademicCommunicationEmail } = require('../services/brevo.service');
 const {
   parseLinkToCartera,
@@ -1036,6 +1041,28 @@ function normalizeAcademicStructureGradeKey(value) {
 
 function normalizeAcademicStructureLevelKey(value) {
   return slugifyAcademicStructureKey(value);
+}
+
+function resolveDefaultIncludeClassAttendanceForLevel({ key = '', label = '', explicitValue }) {
+  if (explicitValue === true || explicitValue === false) {
+    return explicitValue;
+  }
+  if (typeof explicitValue === 'string') {
+    const normalized = normalizeText(explicitValue).toLowerCase();
+    if (['false', '0', 'no', 'off'].includes(normalized)) {
+      return false;
+    }
+    if (['true', '1', 'yes', 'on', 'si', 'sí'].includes(normalized)) {
+      return true;
+    }
+  }
+
+  const haystack = `${normalizeAcademicStructureLevelKey(key)} ${normalizeAcademicScheduleMatch(label)}`;
+  if (/(preescolar|preschool|inicial|jardin|jardín|kinder|maternal)/i.test(haystack)) {
+    return false;
+  }
+
+  return true;
 }
 
 function normalizeAcademicScheduleMatch(value) {
@@ -3025,6 +3052,7 @@ function serializeAcademicStructureConfiguration(configuration) {
       key: normalizeAcademicStructureLevelKey(level?.key || level?.label),
       label: normalizeText(level?.label || level?.key),
       order: Number(level?.order || (levelIndex + 1) * 10),
+      includeClassAttendance: level?.includeClassAttendance !== false,
     }))
     .filter((level) => level.key)
     .sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || compareAcademicLabels(left.label, right.label));
@@ -3214,13 +3242,22 @@ function buildAcademicStructureFromSchoolCreationPayload(payload = {}) {
   const selectedIds = new Set((Array.isArray(payload.selectedLevelIds) ? payload.selectedLevelIds : []).map(normalizeText).filter(Boolean));
   const levels = availableLevels
     .filter((level) => selectedIds.has(normalizeText(level?.id)))
-    .map((level, index) => ({
-      key: normalizeAcademicStructureLevelKey(level?.id || level?.name) || `nivel_${index + 1}`,
-      sourceId: normalizeText(level?.id),
-      label: normalizeText(level?.name || level?.id) || `Nivel ${index + 1}`,
-      order: (index + 1) * 10,
-      status: 'active',
-    }));
+    .map((level, index) => {
+      const key = normalizeAcademicStructureLevelKey(level?.id || level?.name) || `nivel_${index + 1}`;
+      const label = normalizeText(level?.name || level?.id) || `Nivel ${index + 1}`;
+      return {
+        key,
+        sourceId: normalizeText(level?.id),
+        label,
+        order: (index + 1) * 10,
+        status: 'active',
+        includeClassAttendance: resolveDefaultIncludeClassAttendanceForLevel({
+          key,
+          label,
+          explicitValue: level?.includeClassAttendance,
+        }),
+      };
+    });
   const gradesByLevel = payload.gradesByLevel || {};
   const coursesByGrade = payload.coursesByGrade || {};
   const singleCourseGrades = payload.singleCourseGrades || {};
@@ -5209,25 +5246,38 @@ async function dispatchCommunication({ schoolId, schoolName, communication, pare
 }
 
 function dispatchCommunicationInBackground({ schoolId, schoolName, communicationId, parents }) {
-  setImmediate(async () => {
-    try {
-      const communication = await AcademicCommunication.findOne({ _id: communicationId, schoolId });
-      if (!communication) {
-        return;
+  setImmediate(() => {
+    // setImmediate loses request ALS school context; tenant DBs need explicit scope
+    // or AcademicCommunication.findOne hits the control DB and silently skips push.
+    runWithSchoolContext(schoolId, async () => {
+      try {
+        const communication = await AcademicCommunication.findOne({ _id: communicationId, schoolId });
+        if (!communication) {
+          console.warn(`[ACADEMIC_COMMUNICATION_BACKGROUND_DELIVERY_FAILED] communicationId=${communicationId} schoolId=${schoolId} reason=not_found`);
+          return;
+        }
+
+        const deliverySummary = await dispatchCommunication({
+          schoolId,
+          schoolName,
+          communication,
+          parents,
+        });
+
+        communication.deliverySummary = deliverySummary;
+        await communication.save();
+        console.info(
+          `[ACADEMIC_COMMUNICATION_DELIVERED] communicationId=${communicationId} schoolId=${schoolId} `
+          + `notifications=${deliverySummary?.push?.notificationsCreated || 0} `
+          + `tokens=${deliverySummary?.push?.tokensFound || 0} `
+          + `emailed=${deliverySummary?.emailed || 0}`
+        );
+      } catch (error) {
+        console.warn(`[ACADEMIC_COMMUNICATION_BACKGROUND_DELIVERY_FAILED] communicationId=${communicationId} schoolId=${schoolId} error=${error.message}`);
       }
-
-      const deliverySummary = await dispatchCommunication({
-        schoolId,
-        schoolName,
-        communication,
-        parents,
-      });
-
-      communication.deliverySummary = deliverySummary;
-      await communication.save();
-    } catch (error) {
-      console.warn(`[ACADEMIC_COMMUNICATION_BACKGROUND_DELIVERY_FAILED] communicationId=${communicationId} error=${error.message}`);
-    }
+    }).catch((error) => {
+      console.warn(`[ACADEMIC_COMMUNICATION_BACKGROUND_DELIVERY_FAILED] communicationId=${communicationId} schoolId=${schoolId} error=${error.message}`);
+    });
   });
 }
 
@@ -6778,6 +6828,11 @@ router.post('/academic-management/levels', async (req, res) => {
     const { schoolId } = req.user;
     const levelLabel = normalizeText(req.body?.level || req.body?.label || req.body?.name);
     const levelKey = normalizeAcademicStructureLevelKey(req.body?.key || levelLabel);
+    const includeClassAttendance = resolveDefaultIncludeClassAttendanceForLevel({
+      key: levelKey,
+      label: levelLabel,
+      explicitValue: req.body?.includeClassAttendance,
+    });
 
     if (!levelKey || !levelLabel) {
       return res.status(400).json({ message: 'Debes indicar un nivel educativo valido.' });
@@ -6798,6 +6853,7 @@ router.post('/academic-management/levels', async (req, res) => {
         label: levelLabel,
         order: ((Array.isArray(configuration.levels) ? configuration.levels.length : 0) + 1) * 10,
         status: 'active',
+        includeClassAttendance,
       },
     ];
     await configuration.save();
@@ -6813,6 +6869,14 @@ router.patch('/academic-management/levels/:levelKey', async (req, res) => {
     const { schoolId } = req.user;
     const levelKey = normalizeAcademicStructureLevelKey(req.params?.levelKey);
     const levelLabel = normalizeText(req.body?.label || req.body?.level || req.body?.name);
+    const hasIncludeClassAttendance = Object.prototype.hasOwnProperty.call(req.body || {}, 'includeClassAttendance');
+    const includeClassAttendance = hasIncludeClassAttendance
+      ? resolveDefaultIncludeClassAttendanceForLevel({
+        key: levelKey,
+        label: levelLabel,
+        explicitValue: req.body?.includeClassAttendance,
+      })
+      : undefined;
 
     if (!levelKey) {
       return res.status(400).json({ message: 'Debes indicar un nivel educativo valido.' });
@@ -6833,6 +6897,9 @@ router.patch('/academic-management/levels/:levelKey', async (req, res) => {
     configuration.levels = serialized.levels.map((item) => ({
       ...item,
       label: item.key === levelKey ? levelLabel : item.label,
+      includeClassAttendance: item.key === levelKey && hasIncludeClassAttendance
+        ? includeClassAttendance
+        : item.includeClassAttendance !== false,
       status: 'active',
     }));
     await configuration.save();
@@ -9222,20 +9289,37 @@ router.post('/communication-requests/:id/approve', async (req, res) => {
       return res.status(400).json({ message: 'Tipo de audiencia invalido para publicar la solicitud.' });
     }
 
-    const audience = await resolveAudienceMembers({
-      schoolId,
-      audienceType: nextAudienceType,
-      gradeTargets: nextGradeTargets,
-      courseTargets: nextCourseTargets,
-      parentTargets: nextParentTargets,
-      studentTargets: nextStudentTargets,
-    });
+    const publisherRole = normalizeText(pendingRequest.publisherRole) || 'teacher';
+    const requestGrade = nextGradeTargets[0] || '';
+    const requestCourse = nextCourseTargets[0] || requestGrade;
+    let audience;
 
-    if (!audience.parents.length) {
-      return res.status(400).json({ message: 'No se encontraron acudientes para publicar esta solicitud.' });
+    if (
+      nextAudienceType === 'course'
+      && (publisherRole === 'student' || normalizeText(pendingRequest.cohortKey))
+      && (requestGrade || requestCourse)
+    ) {
+      audience = await resolveCommunityAudienceMembers({
+        schoolId,
+        audienceType: 'course',
+        grade: requestGrade,
+        course: requestCourse,
+      });
+    } else {
+      audience = await resolveAudienceMembers({
+        schoolId,
+        audienceType: nextAudienceType,
+        gradeTargets: nextGradeTargets,
+        courseTargets: nextCourseTargets,
+        parentTargets: nextParentTargets,
+        studentTargets: nextStudentTargets,
+      });
     }
 
-    const publisherRole = normalizeText(pendingRequest.publisherRole) || 'teacher';
+    if (!audience.parents.length && !(audience.students || []).length && !(audience.studentIds || []).length) {
+      return res.status(400).json({ message: 'No se encontraron destinatarios para publicar esta solicitud.' });
+    }
+
     const authorName = buildTeacherCommunicationAuthorName(pendingRequest);
     const authorPhotoUrl = publisherRole === 'teacher'
       ? normalizeText(pendingRequest.teacherUserId?.campusPhotoUrl)
@@ -9260,9 +9344,16 @@ router.post('/communication-requests/:id/approve', async (req, res) => {
       courseTargets: nextCourseTargets,
       parentTargets: nextAudienceType === 'individual' ? audience.parentIds : [],
       studentTargets: audience.studentIds,
-      recipientParentIds: audience.parentIds,
-      recipientStudentIds: audience.studentIds,
-      cohortKey: normalizeText(pendingRequest.cohortKey),
+      recipientParentIds: audience.parentIds || [],
+      recipientStudentIds: audience.studentIds || [],
+      cohortKey: normalizeText(pendingRequest.cohortKey)
+        || (nextAudienceType === 'course'
+          ? buildCohortKey({
+            academicYear: normalizeText(pendingRequest.academicYear),
+            grade: requestGrade,
+            course: requestCourse,
+          })
+          : ''),
       academicYear: normalizeText(pendingRequest.academicYear),
       emailSubject: nextEmailSubject,
       media: normalizedMedia,

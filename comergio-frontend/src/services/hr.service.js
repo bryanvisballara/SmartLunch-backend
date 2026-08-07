@@ -17,6 +17,7 @@ export const getHrCoordinationPlannerRequests = (params = {}) => api.get('/hr/co
 export const createHrSupplyRequest = (data) => api.post('/hr/requests', data);
 export const updateHrSupplyRequest = (requestId, data) => api.patch(`/hr/requests/${requestId}`, data);
 export const consolidateHrPlannerRequests = (data) => api.post('/hr/coordination/consolidate', data);
+export const returnHrPlannerRequest = (requestId, data) => api.post(`/hr/coordination/planner-requests/${requestId}/return`, data);
 export const submitHrSupplyRequestForApproval = (requestId, data = {}) => api.post(`/hr/requests/${requestId}/submit-approval`, data);
 export const acceptHrPurchasingRequest = (requestId, data = {}) => api.post(`/hr/requests/${requestId}/purchasing-accept`, data);
 export const approveHrSupplyRequest = (requestId, data = {}) => api.post(`/hr/requests/${requestId}/approve`, data);

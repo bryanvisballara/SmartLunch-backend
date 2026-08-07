@@ -8,6 +8,10 @@ const STAFF_ANNOUNCEMENT_TARGET_ROLES = [
   'admissions',
   'coordination',
   'billing',
+  'human_resources',
+  'rectoria',
+  'direccion',
+  'admin',
 ];
 
 const staffAnnouncementSchema = new mongoose.Schema(

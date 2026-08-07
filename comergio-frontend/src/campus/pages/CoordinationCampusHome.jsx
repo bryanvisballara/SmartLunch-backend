@@ -6,6 +6,7 @@ import {
   createHrPlannerCycle,
   getHrCoordinationPlannerRequests,
   getHrPlannerCycles,
+  returnHrPlannerRequest,
 } from '../../services/hr.service';
 import {
   getCampusCoordinationCourses,
@@ -13,6 +14,12 @@ import {
   getCampusDisciplineObservations,
   updateCampusCoordinationCourse,
 } from '../services/campus.service';
+import {
+  buildPlannerReturnObservation,
+  createPlannerReturnDraft,
+  getPlannerRequestReviewRows,
+  getPlannerReturnObservationLength,
+} from '../../lib/hrPlannerReview';
 import { mockCoordinationWorkspace } from '../mockCampusContext';
 
 const campusPreviewEnabled = import.meta.env.DEV && String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
@@ -92,12 +99,6 @@ function formatPlannerDate(value) {
   return parsed.toLocaleDateString('es-CO', { dateStyle: 'medium', timeZone: 'UTC' });
 }
 
-function getPlannerRequestItemsLabel(request) {
-  return (request.items || [])
-    .map((entry) => `${entry.item?.name || entry.customName || 'Material'} x${entry.quantity}`)
-    .join(' · ');
-}
-
 function CoordinationCampusHome() {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState({ type: 'info', text: '' });
@@ -114,6 +115,7 @@ function CoordinationCampusHome() {
   const [plannerCycleDraft, setPlannerCycleDraft] = useState(createPlannerCycleDraft);
   const [selectedPlannerRequestIds, setSelectedPlannerRequestIds] = useState([]);
   const [plannerConsolidationNote, setPlannerConsolidationNote] = useState('');
+  const [plannerReturnDraft, setPlannerReturnDraft] = useState(() => createPlannerReturnDraft());
 
   const teachersQuery = useQuery({
     queryKey: ['campus', 'coordination', 'teachers'],
@@ -133,7 +135,7 @@ function CoordinationCampusHome() {
 
   const disciplineObservationsQuery = useQuery({
     queryKey: ['campus', 'discipline-observations', 'coordination'],
-    queryFn: () => getCampusDisciplineObservations({ limit: 30 }),
+    queryFn: () => getCampusDisciplineObservations({ limit: 30, destination: 'coexistence' }),
     retry: false,
     staleTime: 20_000,
     enabled: !campusPreviewEnabled,
@@ -149,7 +151,7 @@ function CoordinationCampusHome() {
 
   const plannerRequestsQuery = useQuery({
     queryKey: ['hr', 'coordination', 'planner-requests'],
-    queryFn: () => getHrCoordinationPlannerRequests({ status: 'pending_coordination_review' }),
+    queryFn: () => getHrCoordinationPlannerRequests({ status: 'pending_coordination_review,returned_for_correction' }),
     retry: false,
     staleTime: 20_000,
     enabled: !campusPreviewEnabled,
@@ -192,6 +194,19 @@ function CoordinationCampusHome() {
     },
     onError: (error) => {
       setNotice({ type: 'error', text: error?.response?.data?.message || 'No fue posible consolidar los planners.' });
+    },
+  });
+
+  const returnPlannerMutation = useMutation({
+    mutationFn: ({ requestId, observation }) => returnHrPlannerRequest(requestId, { observation }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['hr', 'coordination', 'planner-requests'] });
+      setSelectedPlannerRequestIds((current) => current.filter((id) => id !== variables.requestId));
+      setPlannerReturnDraft(createPlannerReturnDraft());
+      setNotice({ type: 'success', text: 'Planner devuelto al docente con observaciones.' });
+    },
+    onError: (error) => {
+      setNotice({ type: 'error', text: error?.response?.data?.message || 'No fue posible devolver el planner.' });
     },
   });
 
@@ -371,6 +386,26 @@ function CoordinationCampusHome() {
       reviewNotes: plannerConsolidationNote,
       priority: 'medium',
     });
+  };
+
+  const onReturnPlannerRequest = async (requestId) => {
+    if (!requestId) {
+      return;
+    }
+
+    const request = plannerRequests.find((entry) => entry.id === requestId);
+    const rows = getPlannerRequestReviewRows(request);
+    const draft = plannerReturnDraft.requestId === requestId
+      ? plannerReturnDraft
+      : createPlannerReturnDraft(requestId);
+    const observation = buildPlannerReturnObservation(draft, rows);
+
+    if (observation.length < 8) {
+      setNotice({ type: 'error', text: 'Escribe una observacion general o al menos una anotacion por material (minimo 8 caracteres).' });
+      return;
+    }
+
+    await returnPlannerMutation.mutateAsync({ requestId, observation });
   };
 
   const teacherLoadError = teachersQuery.error?.message;
@@ -571,7 +606,7 @@ function CoordinationCampusHome() {
         <article className="campus-coordination__filters campus-teacher__panel-surface">
           <div className="campus-teacher__panel-head">
             <div>
-              <span className="campus-panel__kicker">Consolidacion</span>
+              <span className="campus-panel__kicker">Revision</span>
               <h2>Planners recibidos</h2>
             </div>
             <button className="campus-teacher__ghost-btn" disabled={plannerRequestsQuery.isFetching} onClick={() => plannerRequestsQuery.refetch()} type="button">Actualizar</button>
@@ -579,16 +614,145 @@ function CoordinationCampusHome() {
 
           {plannerRequestsQuery.isLoading ? <p className="campus-panel__meta">Cargando planners docentes...</p> : null}
           {plannerRequests.length === 0 && !plannerRequestsQuery.isLoading ? <p className="campus-panel__meta">No hay planners pendientes de consolidar.</p> : null}
-          <div className="campus-coordination__selected-list">
-            {plannerRequests.map((request) => (
-              <button className={`campus-coordination__selected-item${selectedPlannerRequestIds.includes(request.id) ? ' is-selected' : ''}`} key={request.id} onClick={() => onTogglePlannerRequest(request.id)} type="button">
-                <div>
-                  <strong>{request.requestedBy?.name || 'Docente'}</strong>
-                  <span>{request.plannerCycle?.title || 'Planner'} · {request.requestedForArea || 'Sin area'}</span>
-                  <small>{getPlannerRequestItemsLabel(request)}</small>
+          <div className="campus-coordination__planner-request-list">
+            {plannerRequests.map((request) => {
+              const isReturned = request.status === 'returned_for_correction';
+              const isSelected = selectedPlannerRequestIds.includes(request.id);
+              const isReturning = plannerReturnDraft.requestId === request.id;
+              const reviewRows = getPlannerRequestReviewRows(request);
+              const returnObservationLength = isReturning
+                ? getPlannerReturnObservationLength(plannerReturnDraft, reviewRows)
+                : 0;
+
+              return (
+                <div className={`campus-coordination__planner-request-card${isSelected ? ' is-selected' : ''}${isReturned ? ' is-returned' : ''}`} key={request.id}>
+                  <header className="campus-coordination__planner-request-head">
+                    <div>
+                      <strong>{request.requestedBy?.name || 'Docente'}</strong>
+                      <span>{request.plannerCycle?.title || 'Planner'} · {request.requestedForArea || 'Sin area'}</span>
+                    </div>
+                    <div className="campus-coordination__planner-request-actions">
+                      <button
+                        className="campus-teacher__ghost-btn"
+                        disabled={isReturned || consolidatePlannerMutation.isPending || returnPlannerMutation.isPending}
+                        onClick={() => {
+                          if (isReturned) return;
+                          onTogglePlannerRequest(request.id);
+                        }}
+                        type="button"
+                      >
+                        {isReturned ? 'Devuelto' : (isSelected ? 'Seleccionado' : 'Seleccionar')}
+                      </button>
+                      {!isReturned && !isReturning ? (
+                        <button
+                          className="campus-teacher__ghost-btn"
+                          disabled={returnPlannerMutation.isPending}
+                          onClick={() => setPlannerReturnDraft(createPlannerReturnDraft(request.id))}
+                          type="button"
+                        >
+                          Devolver a correccion
+                        </button>
+                      ) : null}
+                    </div>
+                  </header>
+
+                  <div className="campus-coordination__planner-table-wrap">
+                    <table className="campus-coordination__planner-table">
+                      <thead>
+                        <tr>
+                          <th>Actividad</th>
+                          <th>Materiales</th>
+                          <th>Para que lo necesitan</th>
+                          <th>Curso / materia</th>
+                          {isReturning ? <th>Anotacion</th> : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviewRows.map((row) => (
+                          <tr key={row.key}>
+                            <td>
+                              <strong>{row.activityTitle || 'Actividad sin titulo'}</strong>
+                            </td>
+                            <td>
+                              <ul className="campus-coordination__planner-materials">
+                                {(row.materials || []).map((material) => (
+                                  <li key={material.key}>
+                                    <strong>{material.needed}</strong>
+                                    <span>{material.quantity ? `x${material.quantity}` : ''}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </td>
+                            <td>{row.purpose || 'Sin detalle'}</td>
+                            <td>{row.context || '—'}</td>
+                            {isReturning ? (
+                              <td>
+                                <input
+                                  onChange={(event) => setPlannerReturnDraft((current) => ({
+                                    ...current,
+                                    requestId: request.id,
+                                    rowNotes: {
+                                      ...(current.rowNotes || {}),
+                                      [row.key]: event.target.value,
+                                    },
+                                  }))}
+                                  placeholder="Anotacion de esta actividad"
+                                  value={plannerReturnDraft.rowNotes?.[row.key] || ''}
+                                />
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {isReturned && request.coordinationObservation ? (
+                    <small className="campus-coordination__observation">Observacion enviada: {request.coordinationObservation}</small>
+                  ) : null}
+                  {!isReturned && request.coordinationObservation && request.resubmittedAt ? (
+                    <small className="campus-coordination__observation">Reenviado tras observacion: {request.coordinationObservation}</small>
+                  ) : null}
+
+                  {isReturning ? (
+                    <div className="campus-coordination__return-box">
+                      <label className="campus-coordination__field">
+                        <span>Observacion general</span>
+                        <textarea
+                          onChange={(event) => setPlannerReturnDraft((current) => ({
+                            ...current,
+                            requestId: request.id,
+                            generalObservation: event.target.value,
+                          }))}
+                          placeholder="Comentario general para el docente (opcional si ya anotaste filas)"
+                          rows={3}
+                          value={plannerReturnDraft.generalObservation}
+                        />
+                      </label>
+                      <p className="campus-panel__meta">Puedes anotar por actividad, dejar una observacion general, o ambas.</p>
+                      <div className="campus-coordination__return-actions">
+                        <button
+                          className="campus-teacher__ghost-btn"
+                          disabled={returnPlannerMutation.isPending}
+                          onClick={() => setPlannerReturnDraft(createPlannerReturnDraft())}
+                          type="button"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          className="campus-coordination__save-button"
+                          disabled={returnPlannerMutation.isPending || returnObservationLength < 8}
+                          onClick={() => onReturnPlannerRequest(request.id)}
+                          type="button"
+                        >
+                          {returnPlannerMutation.isPending ? 'Devolviendo...' : 'Devolver con observacion'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
 
           <label className="campus-coordination__field">

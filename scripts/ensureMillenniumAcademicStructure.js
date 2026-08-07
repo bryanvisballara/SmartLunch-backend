@@ -13,9 +13,9 @@ const TEMPLATE_SCHOOL_ID = String(process.env.TEMPLATE_SCHOOL_ID || 'comergio_de
 const DRY_RUN = process.argv.includes('--dry-run');
 
 const DEFAULT_LEVELS = [
-  { key: 'preescolar', label: 'Preescolar', order: 10, status: 'active' },
-  { key: 'primaria', label: 'Primaria', order: 20, status: 'active' },
-  { key: 'secundaria', label: 'Secundaria', order: 30, status: 'active' },
+  { key: 'preescolar', label: 'Preescolar', order: 10, status: 'active', includeClassAttendance: false },
+  { key: 'primaria', label: 'Primaria', order: 20, status: 'active', includeClassAttendance: true },
+  { key: 'secundaria', label: 'Secundaria', order: 30, status: 'active', includeClassAttendance: true },
 ];
 
 const DEFAULT_GRADE_LEVELS = {

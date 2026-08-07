@@ -9,7 +9,10 @@ export const commentInformaPost = (postId, data) => api.post(`/informa/posts/${p
 export const likeInformaComment = (postId, commentId) => api.post(`/informa/posts/${postId}/comments/${commentId}/like`);
 export const archiveInformaPost = (postId) => api.patch(`/informa/posts/${postId}/archive`);
 export const getInformaDrafts = (params = {}) => api.get('/informa/drafts', { params });
-export const generateInformaDraft = () => api.post('/informa/drafts/generate');
+export const generateInformaDraft = (payload = {}) => api.post('/informa/drafts/generate', payload, {
+  timeout: 180_000,
+});
+export const clearInformaDrafts = () => api.post('/informa/drafts/clear');
 export const publishInformaDraft = (postId) => api.post(`/informa/drafts/${postId}/publish`);
 export const discardInformaDraft = (postId) => api.patch(`/informa/drafts/${postId}/discard`);
 

@@ -47,12 +47,30 @@ const campusClassSessionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const campusMaterialAttachmentSchema = new mongoose.Schema(
+  {
+    sourceType: { type: String, enum: ['file', 'link'], default: 'file' },
+    kind: { type: String, trim: true, default: 'file' },
+    title: { type: String, trim: true, default: '' },
+    url: { type: String, trim: true, default: '' },
+    fileName: { type: String, trim: true, default: '' },
+    mimeType: { type: String, trim: true, default: '' },
+    sizeBytes: { type: Number, default: 0 },
+    extension: { type: String, trim: true, default: '' },
+    storage: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 const campusAcademicContentTopicSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, trim: true },
     title: { type: String, required: true, trim: true },
     description: { type: String, trim: true, default: '' },
     order: { type: Number, default: 0 },
+    completed: { type: Boolean, default: false },
+    completedAt: { type: Date, default: null },
+    materials: { type: [campusMaterialAttachmentSchema], default: [] },
   },
   { _id: false }
 );

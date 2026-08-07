@@ -6,14 +6,25 @@ import {
 } from '../services/parent.service';
 import {
   createEmptyStudentMedicalProfileDraft,
+  formatMedicalProfileDateTime,
   mapMedicalProfileToDraft,
 } from '../lib/studentMedicalProfile';
+import { evaluateSignatureImage } from './enrollment-matricula/signatureValidation';
+import SignaturePad, { compressSignatureDataUrl } from './signature/SignaturePad';
 import StudentMedicalProfileForm from './StudentMedicalProfileForm';
 import StudentMedicalProfileHistory from './StudentMedicalProfileHistory';
 
-function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) {
+function ParentStudentMedicalProfilePanel({
+  studentId = '',
+  studentName = '',
+  onSignedStatusChange,
+}) {
   const [bloodType, setBloodType] = useState('');
   const [medicalProfile, setMedicalProfile] = useState(createEmptyStudentMedicalProfileDraft());
+  const [savedSignatureImage, setSavedSignatureImage] = useState('');
+  const [savedSignedAt, setSavedSignedAt] = useState(null);
+  const [savedSignedByParentName, setSavedSignedByParentName] = useState('');
+  const [draftSignatureImage, setDraftSignatureImage] = useState('');
   const [revisions, setRevisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -22,6 +33,16 @@ function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+
+  const isSigned = Boolean(savedSignedAt && savedSignatureImage);
+
+  useEffect(() => {
+    onSignedStatusChange?.({
+      studentId: String(studentId || ''),
+      signed: isSigned,
+      loading,
+    });
+  }, [isSigned, loading, onSignedStatusChange, studentId]);
 
   const loadMedicalProfile = useCallback(async () => {
     if (!studentId) {
@@ -35,8 +56,13 @@ function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) 
     try {
       const response = await getParentStudentMedicalProfile(studentId);
       const payload = response.data || {};
+      const profile = payload.medicalProfile || {};
       setBloodType(payload.student?.bloodType || '');
-      setMedicalProfile(mapMedicalProfileToDraft(payload.medicalProfile));
+      setMedicalProfile(mapMedicalProfileToDraft(profile));
+      setSavedSignatureImage(profile.signatureImage || '');
+      setSavedSignedAt(profile.signedAt || null);
+      setSavedSignedByParentName(profile.signedByParentName || '');
+      setDraftSignatureImage('');
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo cargar la ficha medica.');
     } finally {
@@ -80,8 +106,16 @@ function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) 
     }));
   };
 
+  const onStartEdit = () => {
+    setEditing(true);
+    setDraftSignatureImage('');
+    setSuccess('');
+    setError('');
+  };
+
   const onCancelEdit = () => {
     setEditing(false);
+    setDraftSignatureImage('');
     setSuccess('');
     setError('');
     loadMedicalProfile();
@@ -97,15 +131,34 @@ function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) 
     setSuccess('');
 
     try {
+      const signatureCheck = await evaluateSignatureImage(draftSignatureImage);
+      if (!signatureCheck.valid) {
+        setError(signatureCheck.message || 'Dibuja tu firma antes de guardar la ficha.');
+        setSaving(false);
+        return;
+      }
+
+      const compressedSignature = await compressSignatureDataUrl(draftSignatureImage, {
+        maxWidth: 1000,
+        quality: 0.7,
+        mimeType: 'image/jpeg',
+      });
+
       const response = await updateParentStudentMedicalProfile(studentId, {
         bloodType,
         medicalProfile,
+        signatureImage: compressedSignature,
       });
       const payload = response.data || {};
+      const profile = payload.medicalProfile || {};
       setBloodType(payload.student?.bloodType || bloodType);
-      setMedicalProfile(mapMedicalProfileToDraft(payload.medicalProfile));
+      setMedicalProfile(mapMedicalProfileToDraft(profile));
+      setSavedSignatureImage(profile.signatureImage || compressedSignature);
+      setSavedSignedAt(profile.signedAt || new Date().toISOString());
+      setSavedSignedByParentName(profile.signedByParentName || '');
+      setDraftSignatureImage('');
       setEditing(false);
-      setSuccess(payload.message || 'Ficha medica actualizada correctamente.');
+      setSuccess(payload.message || 'Ficha medica actualizada y firmada correctamente.');
       await loadHistory();
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo guardar la ficha medica.');
@@ -123,7 +176,7 @@ function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) 
           <p>La misma ficha de matricula. Enfermeria consulta estos datos para la atencion diaria.</p>
         </div>
         {!editing ? (
-          <button className="parent-student-medical-profile__edit-btn" disabled={loading || !studentId} onClick={() => setEditing(true)} type="button">
+          <button className="parent-student-medical-profile__edit-btn" disabled={loading || !studentId} onClick={onStartEdit} type="button">
             Editar ficha
           </button>
         ) : null}
@@ -145,9 +198,38 @@ function ParentStudentMedicalProfilePanel({ studentId = '', studentName = '' }) 
           />
 
           {editing ? (
+            <section className="parent-student-medical-profile__signature">
+              <div className="parent-student-medical-profile__signature-head">
+                <strong>Firma del acudiente</strong>
+                <p>Firma en el recuadro para confirmar que la informacion clinica es correcta. Enfermeria vera esta firma.</p>
+              </div>
+              <SignaturePad disabled={saving} onChange={setDraftSignatureImage} />
+            </section>
+          ) : null}
+
+          {!editing && savedSignatureImage ? (
+            <section className="parent-student-medical-profile__signature is-saved">
+              <div className="parent-student-medical-profile__signature-head">
+                <strong>Firma registrada</strong>
+                <p>
+                  {savedSignedByParentName ? `Firmada por ${savedSignedByParentName}` : 'Firmada por el acudiente'}
+                  {savedSignedAt ? ` · ${formatMedicalProfileDateTime(savedSignedAt)}` : ''}
+                </p>
+              </div>
+              <img alt="Firma del acudiente" className="parent-student-medical-profile__signature-image" src={savedSignatureImage} />
+            </section>
+          ) : null}
+
+          {!editing && !savedSignatureImage ? (
+            <p className="parent-student-medical-profile__signature-empty">
+              Esta ficha aun no tiene firma. Editala y firma para autorizar la informacion ante Enfermeria.
+            </p>
+          ) : null}
+
+          {editing ? (
             <div className="parent-student-medical-profile__actions">
               <button className="parent-student-medical-profile__save-btn" disabled={saving} onClick={onSave} type="button">
-                {saving ? 'Guardando...' : 'Guardar ficha medica'}
+                {saving ? 'Guardando...' : 'Guardar y firmar ficha'}
               </button>
               <button className="parent-student-medical-profile__cancel-btn" disabled={saving} onClick={onCancelEdit} type="button">
                 Cancelar

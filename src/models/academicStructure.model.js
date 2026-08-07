@@ -30,6 +30,8 @@ const academicStructureLevelSchema = new mongoose.Schema(
     label: { type: String, required: true, trim: true },
     order: { type: Number, default: 0 },
     status: { type: String, enum: ['active', 'archived'], default: 'active' },
+    // When false, subject-class attendance is disabled (typical for preschool: children do not rotate classes).
+    includeClassAttendance: { type: Boolean, default: true },
   },
   { _id: false }
 );

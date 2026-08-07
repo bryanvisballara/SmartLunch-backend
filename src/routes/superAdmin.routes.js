@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
@@ -11,11 +12,15 @@ const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const DeviceToken = require('../models/deviceToken.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
+const SuperAdminSchoolDeleteRequest = require('../models/superAdminSchoolDeleteRequest.model');
 const { getSchoolDisplayName, updateSchoolDisplayName } = require('../utils/schoolDisplayName');
 const dianInvoicingService = require('../services/dianInvoicing.service');
+const { sendBrevoEmail } = require('../services/brevo.service');
 const multer = require('multer');
 
 const NATIVE_APP_PLATFORMS = ['ios', 'android'];
+const SCHOOL_DELETE_CONFIRM_EMAIL = 'mercancias.visbal@gmail.com';
+const SCHOOL_DELETE_TOKEN_TTL_MS = 1000 * 60 * 60 * 12;
 const uploadDianCertificate = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -193,15 +198,40 @@ async function countNativeAppInstalls(schoolId) {
 
 async function getSchoolSummary(tenantContext) {
   return runWithSchoolContext(tenantContext.schoolId, async () => {
-    const [schoolName, activeStudents, inactiveStudents, parentUsers, settings, appInstalls] = await Promise.all([
+    const [
+      schoolName,
+      activeStudents,
+      inactiveStudents,
+      parentUsers,
+      staffUsers,
+      settings,
+      appInstalls,
+      academicStructure,
+      recentUsers,
+    ] = await Promise.all([
       getSchoolDisplayName(tenantContext.schoolId),
       Student.countDocuments({ schoolId: tenantContext.schoolId, status: 'active', deletedAt: null }),
       Student.countDocuments({ schoolId: tenantContext.schoolId, status: 'inactive', deletedAt: null }),
       User.countDocuments({ schoolId: tenantContext.schoolId, role: 'parent', status: 'active', deletedAt: null }),
+      User.countDocuments({
+        schoolId: tenantContext.schoolId,
+        status: 'active',
+        deletedAt: null,
+        role: { $nin: ['parent', 'student'] },
+      }),
       SuperAdminSchoolSettings.findOne({ schoolId: tenantContext.schoolId }).lean(),
       countNativeAppInstalls(tenantContext.schoolId),
+      AcademicStructure.findOne({ schoolId: tenantContext.schoolId }).select('subjects grades').lean(),
+      User.find({ schoolId: tenantContext.schoolId, deletedAt: null })
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .select('name username role createdAt')
+        .lean(),
     ]);
     const serializedSettings = serializeSettings(settings || { schoolId: tenantContext.schoolId });
+    const grades = Array.isArray(academicStructure?.grades) ? academicStructure.grades : [];
+    const subjects = Array.isArray(academicStructure?.subjects) ? academicStructure.subjects : [];
+    const coursesCount = grades.reduce((sum, grade) => sum + (Array.isArray(grade?.courses) ? grade.courses.length : 0), 0);
 
     return {
       schoolId: tenantContext.schoolId,
@@ -210,6 +240,17 @@ async function getSchoolSummary(tenantContext) {
       activeStudents,
       inactiveStudents,
       parentUsers,
+      staffUsers,
+      subjectsCount: subjects.length,
+      gradesCount: grades.length,
+      coursesCount,
+      recentUsers: (recentUsers || []).map((user) => ({
+        _id: String(user._id),
+        name: user.name || '',
+        username: user.username || '',
+        role: user.role || '',
+        createdAt: user.createdAt || null,
+      })),
       ...appInstalls,
       settings: serializedSettings,
       monthlyCharge: activeStudents * serializedSettings.pricePerStudent,
@@ -458,18 +499,111 @@ router.post('/schools/:schoolId/rectoria', async (req, res) => {
   }
 });
 
-router.delete('/schools/:schoolId', async (req, res) => {
+router.post('/schools/:schoolId/delete-request', async (req, res) => {
   try {
     const targetSchoolId = normalizeText(req.params.schoolId);
-    const deletionResult = await deleteSchoolTenant(targetSchoolId);
+    const tenantContext = await findTenantContext(targetSchoolId);
+    if (!tenantContext) {
+      return res.status(404).json({ message: 'Colegio no encontrado' });
+    }
+
+    const schoolName = await runWithSchoolContext(targetSchoolId, async () => getSchoolDisplayName(targetSchoolId));
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + SCHOOL_DELETE_TOKEN_TTL_MS);
+    const requestedBy = normalizeText(req.user?.username || req.user?.name || req.user?.email);
+
+    await SuperAdminSchoolDeleteRequest.updateMany(
+      { schoolId: targetSchoolId, status: 'pending' },
+      { $set: { status: 'cancelled' } }
+    );
+
+    await SuperAdminSchoolDeleteRequest.create({
+      schoolId: targetSchoolId,
+      schoolName,
+      tokenHash,
+      requestedBy,
+      status: 'pending',
+      expiresAt,
+    });
+
+    const frontendBase = String(process.env.FRONTEND_URL || process.env.APP_URL || 'http://127.0.0.1:5175').replace(/\/$/, '');
+    const confirmUrl = `${frontendBase}/super-admin?confirmDeleteToken=${encodeURIComponent(rawToken)}`;
+
+    await sendBrevoEmail({
+      toEmail: SCHOOL_DELETE_CONFIRM_EMAIL,
+      toName: 'Gerencia Comergio',
+      subject: `Confirmar eliminación de colegio: ${schoolName}`,
+      htmlContent: `
+        <div style="font-family:Segoe UI,Roboto,Arial,sans-serif;line-height:1.6;color:#0f172a;">
+          <h2 style="margin:0 0 12px;">Confirmación de eliminación</h2>
+          <p>Se solicitó eliminar permanentemente el colegio <strong>${schoolName}</strong> (<code>${targetSchoolId}</code>).</p>
+          <p>Solicitado por: <strong>${requestedBy || 'super_admin'}</strong></p>
+          <p>Esta acción borra usuarios, alumnos, configuración y todos los datos asociados. No se puede deshacer.</p>
+          <p style="margin:24px 0;">
+            <a href="${confirmUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#b42318;color:#fff;text-decoration:none;font-weight:700;">
+              Confirmar eliminación
+            </a>
+          </p>
+          <p style="color:#64748b;font-size:13px;">El enlace vence en 12 horas. Si no fuiste tú, ignora este correo.</p>
+        </div>
+      `,
+      textContent: [
+        `Confirmar eliminación del colegio ${schoolName} (${targetSchoolId}).`,
+        `Solicitado por: ${requestedBy || 'super_admin'}`,
+        `Abre este enlace para confirmar: ${confirmUrl}`,
+        'El enlace vence en 12 horas.',
+      ].join('\n'),
+    });
+
     return res.status(200).json({
-      message: 'Colegio eliminado permanentemente.',
+      message: `Se envió un correo de confirmación a ${SCHOOL_DELETE_CONFIRM_EMAIL}. El colegio no se eliminará hasta que confirmes desde ese correo.`,
+      email: SCHOOL_DELETE_CONFIRM_EMAIL,
+      expiresAt,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.post('/schools/confirm-delete', async (req, res) => {
+  try {
+    const rawToken = normalizeText(req.body?.token);
+    if (!rawToken) {
+      return res.status(400).json({ message: 'Falta el token de confirmación.' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const deleteRequest = await SuperAdminSchoolDeleteRequest.findOne({ tokenHash, status: 'pending' });
+    if (!deleteRequest) {
+      return res.status(404).json({ message: 'La solicitud de eliminación no existe o ya fue usada.' });
+    }
+
+    if (deleteRequest.expiresAt && new Date(deleteRequest.expiresAt).getTime() < Date.now()) {
+      deleteRequest.status = 'expired';
+      await deleteRequest.save();
+      return res.status(410).json({ message: 'La solicitud de eliminación expiró. Genera una nueva desde el portal.' });
+    }
+
+    const deletionResult = await deleteSchoolTenant(deleteRequest.schoolId);
+    deleteRequest.status = 'confirmed';
+    deleteRequest.confirmedAt = new Date();
+    await deleteRequest.save();
+
+    return res.status(200).json({
+      message: `Colegio "${deleteRequest.schoolName}" eliminado permanentemente.`,
+      schoolId: deleteRequest.schoolId,
       ...deletionResult,
     });
   } catch (error) {
-    const statusCode = error.statusCode || 500;
-    return res.status(statusCode).json({ message: error.message });
+    return res.status(error.statusCode || 500).json({ message: error.message });
   }
+});
+
+router.delete('/schools/:schoolId', async (req, res) => {
+  return res.status(405).json({
+    message: 'La eliminación directa está deshabilitada. Solicita confirmación por correo desde el portal.',
+  });
 });
 
 router.get('/dian/config', async (_req, res) => {

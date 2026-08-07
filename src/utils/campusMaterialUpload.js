@@ -214,6 +214,7 @@ function shouldPersistAcademicCommunicationAssetsToDatabase({ folder, useDatabas
   const persistableFolders = new Set([
     'academic-communications',
     'campus-materials',
+    'campus-academic-content',
     'campus-student-submissions',
   ]);
 

@@ -15,6 +15,8 @@ import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnounc
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
 import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
 import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
+import GuidanceAttendanceReportPanel from '../components/attendance/GuidanceAttendanceReportPanel';
+import PsychologyResourcePlannerPanel from '../components/psychology/PsychologyResourcePlannerPanel';
 import { getSchoolDisplayName } from '../lib/schools';
 
 const caseTypeOptions = [
@@ -46,6 +48,12 @@ const statusOptions = [
 ];
 
 const openCaseStatuses = new Set(['open', 'follow_up', 'escalated']);
+
+const disciplineObservationStatusLabels = {
+  submitted: 'Enviada',
+  reviewed: 'Revisada',
+  archived: 'Archivada',
+};
 
 const visibilityOptions = [
   { value: 'private', label: 'Nota privada', hint: 'Solo Psicología' },
@@ -385,7 +393,7 @@ function PsychologyPortal() {
 
   const refreshDashboard = () => {
     setLoadingDashboard(true);
-    Promise.allSettled([getPsychologyDashboard(), getCampusDisciplineObservations({ limit: 20 })])
+    Promise.allSettled([getPsychologyDashboard(), getCampusDisciplineObservations({ limit: 50, destination: 'wellbeing' })])
       .then(([dashboardResult, observationsResult]) => {
         setDashboard(
           dashboardResult.status === 'fulfilled'
@@ -597,6 +605,10 @@ function PsychologyPortal() {
       activeKey={activePortalView}
       navItems={[
         { key: 'cases', label: 'Casos clínicos' },
+        { key: 'anecdotario', label: 'Anecdotario' },
+        { key: 'observaciones_clase', label: 'Observaciones en clase' },
+        { key: 'asistencia', label: 'Asistencia / llegada' },
+        { key: 'resource_requests', label: 'Planner de recursos' },
         { key: 'community_reports', label: <TeEscuchamosLabel className="te-escuchamos-label--nav" /> },
         {
           key: 'staff_announcements',
@@ -630,14 +642,85 @@ function PsychologyPortal() {
         {activePortalView === 'staff_announcements' ? (
           <StaffAnnouncementsPanel
             className="psychology-panel"
-            description="Mensajes internos de rectoría y coordinación. Confirma la lectura para que quede registrado."
-            mode="inbox"
+            description="Envía y recibe mensajes internos del colegio. Selecciona coordinación, rectoría, enfermería u otras áreas."
+            mode="manage"
             title="Comunicados internos"
           />
         ) : null}
 
         {activePortalView === 'community_reports' ? (
           <CommunityReportsPanel className="community-reports-panel--embedded" />
+        ) : null}
+
+        {activePortalView === 'anecdotario' ? (
+          <section className="psychology-panel psychology-section-panel">
+            <header className="psychology-panel-head">
+              <span className="psychology-kicker">Registro cualitativo</span>
+              <h2>Anecdotario</h2>
+              <p>Registra hechos significativos del estudiante para seguimiento de bienestar, sin abrir un caso clínico.</p>
+            </header>
+            <div className="psychology-section-empty">
+              <span className="psychology-section-empty__icon" aria-hidden="true">
+                <PsychologyIcon name="users" />
+              </span>
+              <strong>Sin registros todavía</strong>
+              <p>Pronto podrás documentar anécdotas, contexto y acuerdos de acompañamiento desde aquí.</p>
+            </div>
+          </section>
+        ) : null}
+
+        {activePortalView === 'observaciones_clase' ? (
+          <section className="psychology-panel psychology-section-panel">
+            <header className="psychology-panel-head">
+              <span className="psychology-kicker">Bienestar</span>
+              <h2>Observaciones en clase</h2>
+              <p>Reportes de docentes dirigidos a Bienestar para acompañamiento psicológico.</p>
+            </header>
+
+            {loadingDashboard ? <p className="psychology-empty">Cargando observaciones...</p> : null}
+
+            {!loadingDashboard && disciplineObservations.length === 0 ? (
+              <div className="psychology-section-empty">
+                <span className="psychology-section-empty__icon" aria-hidden="true">
+                  <PsychologyIcon name="users" />
+                </span>
+                <strong>No hay observaciones registradas</strong>
+                <p>Cuando un docente envíe una observación dirigida a Bienestar, aparecerá aquí para seguimiento de Psicología.</p>
+              </div>
+            ) : null}
+
+            {!loadingDashboard && disciplineObservations.length > 0 ? (
+              <div className="psychology-observations-feed">
+                {disciplineObservations.map((item) => (
+                  <article className="psychology-observations-feed__item" key={item.id}>
+                    <div className="psychology-observations-feed__main">
+                      <span className={`psychology-status-pill status-${item.status || 'submitted'}`}>
+                        {disciplineObservationStatusLabels[item.status] || item.status || 'Enviada'}
+                      </span>
+                      <strong>{item.studentName || 'Estudiante'}</strong>
+                      <p>{item.observation}</p>
+                    </div>
+                    <div className="psychology-observations-feed__meta">
+                      <span>{formatDateTime(item.incidentAt || item.submittedAt)}</span>
+                      {[item.courseTitle, item.subject].filter(Boolean).length > 0 ? (
+                        <span>{[item.courseTitle, item.subject].filter(Boolean).join(' · ')}</span>
+                      ) : null}
+                      {item.teacherName ? <span>{item.teacherName}</span> : null}
+                      {item.studentGrade ? <span>{item.studentGrade}</span> : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {activePortalView === 'asistencia' ? (
+          <GuidanceAttendanceReportPanel className="psychology-panel" />
+        ) : null}
+
+        {activePortalView === 'resource_requests' ? (
+          <PsychologyResourcePlannerPanel className="psychology-panel" />
         ) : null}
 
         {activePortalView === 'cases' ? (
@@ -733,7 +816,7 @@ function PsychologyPortal() {
               <div className="psychology-observations-banner__copy">
                 <span className="psychology-kicker">
                   <PsychologyIcon name="users" />
-                  Convivencia escolar
+                  Bienestar
                 </span>
                 <h2>Observaciones docentes recientes</h2>
                 {loadingDashboard ? <p>Cargando observaciones...</p> : null}
@@ -751,6 +834,13 @@ function PsychologyPortal() {
                     ))}
                   </div>
                 ) : null}
+                <button
+                  className="psychology-observations-banner__link"
+                  onClick={() => setActivePortalView('observaciones_clase')}
+                  type="button"
+                >
+                  Ver todas en Observaciones en clase
+                </button>
               </div>
               <div className="psychology-observations-banner__art" aria-hidden="true">
                 <PsychologyIcon name="users" />

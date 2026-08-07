@@ -4602,8 +4602,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         <section className="academic-secretary__grid academic-secretary__grid--content academic-secretary__grid--full">
           <article className="academic-secretary__panel">
             <StaffAnnouncementsPanel
-              description="Mensajes internos de rectoría y coordinación. Confirma la lectura para registrar el acuse."
-              mode="inbox"
+              description="Envía y recibe mensajes internos del colegio. Selecciona a quién va dirigido cada comunicado."
+              mode="manage"
               title="Comunicados internos"
             />
           </article>

@@ -11,6 +11,10 @@ const STAFF_ANNOUNCEMENT_TARGET_ROLES = [
   'admissions',
   'coordination',
   'billing',
+  'human_resources',
+  'rectoria',
+  'direccion',
+  'admin',
 ];
 
 function normalizeText(value) {
@@ -34,7 +38,10 @@ function normalizeTargetRoles(targetRoles, fallback = STAFF_ANNOUNCEMENT_TARGET_
   const selected = (Array.isArray(targetRoles) ? targetRoles : [])
     .map((role) => normalizeText(role))
     .filter((role) => allowed.has(role));
-  return selected.length ? Array.from(new Set(selected)) : [...fallback];
+  if (selected.length) {
+    return Array.from(new Set(selected));
+  }
+  return Array.isArray(fallback) ? [...fallback] : [];
 }
 
 function serializeAnnouncement(announcement, extras = {}) {
@@ -61,7 +68,10 @@ function serializeAnnouncement(announcement, extras = {}) {
 }
 
 async function resolveRecipientsForRoles({ schoolId, targetRoles, excludeUserId = null }) {
-  const roles = normalizeTargetRoles(targetRoles);
+  const roles = normalizeTargetRoles(targetRoles, []);
+  if (!roles.length) {
+    return [];
+  }
   const users = await User.find({
     schoolId,
     role: { $in: roles },
@@ -93,7 +103,10 @@ async function publishStaffAnnouncement({
     throw new Error('Título y mensaje son requeridos.');
   }
 
-  const roles = normalizeTargetRoles(targetRoles);
+  const roles = normalizeTargetRoles(targetRoles, []);
+  if (!roles.length) {
+    throw new Error('Selecciona al menos un destinatario.');
+  }
   const recipients = await resolveRecipientsForRoles({
     schoolId,
     targetRoles: roles,

@@ -64,7 +64,7 @@ import {
   getWompiMatriculaPaymentStatus,
 } from '../../services/enrollmentMatricula.service';
 import { isMillenniumSchool, shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
-import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance } from '../../services/studentPortal.service';
+import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance, getStudentFlyLockStatus } from '../../services/studentPortal.service';
 import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
 import ColibriFlappyGame from '../../components/games/ColibriFlappyGame';
 import colibriGameCover from '../../assets/colibrisinfondo.png';
@@ -285,6 +285,13 @@ const academicMenuItems = [
     navShortTitle: 'Asignaciones',
     description: 'Tareas y actividades publicadas por tus docentes, con materiales y entregas.',
     icon: 'tasks',
+  },
+  {
+    id: 'academic-content',
+    title: 'Contenido académico',
+    navShortTitle: 'Contenido',
+    description: 'Temas del periodo y material de apoyo subido por los docentes para estudiar o reforzar la clase.',
+    icon: 'content',
   },
   {
     id: 'academic-attendance',
@@ -1242,6 +1249,9 @@ function buildParentChildFromOverview(child = {}, overview = {}) {
     academicUpcomingAssignments: selectedOverviewChildId === childId && Array.isArray(overview.academicUpcomingAssignments)
       ? overview.academicUpcomingAssignments
       : [],
+    includeClassAttendance: selectedOverviewChildId === childId
+      ? overview.includeClassAttendance !== false
+      : true,
     isRealParentChild: true,
   };
 }
@@ -1302,7 +1312,7 @@ function academicFeedItemMatchesChild(item, child) {
 function getCommunityAudienceLabel(audienceType = '') {
   const normalized = normalizeLookupKey(audienceType);
   if (normalized === 'course_students') return 'Curso · solo alumnos';
-  if (normalized === 'course') return 'Curso · familias';
+  if (normalized === 'course') return 'Curso · docentes, alumnos y padres';
   if (normalized === 'grade') return 'Grado';
   if (normalized === 'individual') return 'Individual';
   return 'Colegio';
@@ -3262,6 +3272,14 @@ function AcademicMenuIcon({ icon }) {
       </svg>
     );
   }
+  if (icon === 'content') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H12v16H5.5A1.5 1.5 0 0 1 4 18.5v-13ZM12 4h6.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H12V4Z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+        <path d="M15 8h2.5M15 12h2.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.9" />
+      </svg>
+    );
+  }
   if (icon === 'schedule') {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -3966,48 +3984,11 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
   );
 }
 
-const studentFeedFilterOptions = [
-  { id: 'general', label: 'Feed colegio', description: 'Publicaciones para todo el colegio', avatar: 'CO' },
-  { id: 'course', label: 'Feed curso · alumnos & docentes', description: 'Publicaciones de tu curso', avatar: 'CU' },
-  { id: 'course_students', label: 'Feed curso privado (alumnos)', description: 'Solo entre alumnos del curso', avatar: 'AL' },
-  { id: 'all', label: 'Feed combinado', description: 'Todo el contenido en un solo lugar', avatar: 'FC' },
-];
+const STUDENT_MAIN_FEED_AUDIENCE_TYPES = new Set(['general', 'course', 'course_students']);
 
-function StudentFeedSelector({ isOpen, onSelect, onToggle, selectedFilterId }) {
-  const feedSwitcherRef = useRef(null);
-  const selectedOption = studentFeedFilterOptions.find((option) => option.id === selectedFilterId)
-    || studentFeedFilterOptions[studentFeedFilterOptions.length - 1];
-
-  return (
-    <section aria-label="Selector de feed" className={`parent-student-switcher${isOpen ? ' is-open' : ''}`} ref={feedSwitcherRef}>
-      <div className="parent-student-toggle-card">
-        <button aria-expanded={isOpen} className="parent-student-toggle" onClick={onToggle} type="button">
-          <div className="parent-student-toggle-copy">
-            <p className="meta">Feed seleccionado</p>
-            <h3>{selectedOption.label}</h3>
-            <p>{selectedOption.description}</p>
-          </div>
-          <span className={`chevron ${isOpen ? 'open' : ''}`}>⌄</span>
-        </button>
-
-        <button aria-label="Cambiar tipo de feed" className="parent-student-photo-btn" onClick={onToggle} type="button">
-          <span className="parent-student-avatar">{selectedOption.avatar}</span>
-        </button>
-      </div>
-
-      <ParentStudentOptionsPortal anchorRef={feedSwitcherRef} isOpen={isOpen}>
-        {studentFeedFilterOptions.map((option) => (
-          <button key={option.id} onClick={() => onSelect(option.id)} type="button">
-            <span className="parent-student-avatar is-small">{option.avatar}</span>
-            <span className="parent-student-option-copy">
-              <strong>{option.label}</strong>
-              <span>{option.description}</span>
-            </span>
-          </button>
-        ))}
-      </ParentStudentOptionsPortal>
-    </section>
-  );
+function isStudentMainFeedItem(item) {
+  const audienceType = normalizeLookupKey(item?.audienceType) || 'general';
+  return STUDENT_MAIN_FEED_AUDIENCE_TYPES.has(audienceType);
 }
 
 function ParentMobilePortalHeader({
@@ -4430,7 +4411,7 @@ function ParentAcademicContent({
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
       : buildAcademicWorkspace(selectedChild)
   ), [selectedChild]);
-  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance', 'academic-assignments', 'academic-ranking'].includes(activeView)
+  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance', 'academic-assignments', 'academic-content', 'academic-ranking'].includes(activeView)
     ? 'academic-performance'
     : activeView;
   const weeklyClassSchedule = useMemo(() => {
@@ -5379,6 +5360,72 @@ function ParentAcademicContent({
     );
   }
 
+  if (effectiveActiveView === 'academic-content') {
+    const academicContentCourses = Array.isArray(selectedChild?.academicContent) ? selectedChild.academicContent : [];
+    return (
+      <section className="campus-parent-mobile__academic-page">
+        <section className="campus-parent-mobile__academic-section">
+          <h3>Contenido académico</h3>
+          <p className="campus-parent-mobile__section-lead">
+            Temas del periodo y material de apoyo de tus docentes. Úsalo para estudiar o recuperar una clase.
+          </p>
+          {academicContentCourses.length === 0 ? (
+            <p className="campus-parent-mobile__empty-copy">Aún no hay contenido académico publicado en tus materias.</p>
+          ) : (
+            <div className="campus-parent-mobile__content-course-stack">
+              {academicContentCourses.map((course) => (
+                <article className="campus-parent-mobile__content-course" key={course.courseId || course.title}>
+                  <header className="campus-parent-mobile__content-course-head">
+                    <strong>{course.subject || course.title || 'Materia'}</strong>
+                    {course.title && course.subject && course.title !== course.subject ? (
+                      <span>{course.title}</span>
+                    ) : null}
+                  </header>
+                  <div className="campus-parent-mobile__content-period-stack">
+                    {(course.periods || []).map((period, periodIndex) => (
+                      <div className="campus-parent-mobile__content-period" key={period.periodKey || `period-${periodIndex}`}>
+                        <h4>{period.periodName || `Periodo ${periodIndex + 1}`}</h4>
+                        <div className="campus-parent-mobile__card-stack">
+                          {(period.topics || []).map((topic, topicIndex) => (
+                            <article
+                              className={`campus-parent-mobile__content-topic${topic.completed ? ' is-completed' : ''}`}
+                              key={topic.key || `${course.courseId}-topic-${topicIndex}`}
+                            >
+                              <div className="campus-parent-mobile__content-topic-top">
+                                <strong>{topic.title}</strong>
+                                {topic.completed ? <span className="campus-parent-mobile__content-topic-badge">Impartido</span> : null}
+                              </div>
+                              {topic.description ? <p>{topic.description}</p> : null}
+                              {(topic.materials || []).length > 0 ? (
+                                <ul className="campus-parent-mobile__content-materials">
+                                  {(topic.materials || []).map((material, materialIndex) => {
+                                    const href = resolveApiAssetUrl(material.url);
+                                    const label = String(material.title || material.fileName || material.url || 'Material').trim() || 'Material';
+                                    return (
+                                      <li key={`${href}-${materialIndex}`}>
+                                        <a href={href} rel="noreferrer" target="_blank">{label}</a>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              ) : (
+                                <p className="campus-parent-mobile__empty-copy">Sin material de apoyo todavía.</p>
+                              )}
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </section>
+    );
+  }
+
   if (effectiveActiveView === 'academic-tasks') {
     return (
       <section className="campus-parent-mobile__academic-page">
@@ -5878,12 +5925,18 @@ function ParentAcademicContent({
         return String(left.subject || left.courseTitle || '').localeCompare(String(right.subject || right.courseTitle || ''), 'es', { sensitivity: 'base' });
       });
 
+      const includeClassAttendance = selectedChild?.includeClassAttendance !== false;
+
       return (
         <section className="campus-parent-mobile__academic-page campus-parent-mobile__academic-page--attendance">
           <header className="campus-parent-mobile__attendance-heading">
             <span>Académico</span>
             <h2>Puntualidad y asistencia</h2>
-            <p>Separamos la llegada al colegio de la asistencia en cada asignatura para que puedas revisar ambas por aparte.</p>
+            <p>
+              {includeClassAttendance
+                ? 'Separamos la llegada al colegio de la asistencia en cada asignatura para que puedas revisar ambas por aparte.'
+                : 'En este nivel educativo revisamos la llegada al colegio. La asistencia por asignatura no aplica porque los niños no rotan de clase.'}
+            </p>
           </header>
 
           {parentAcademicAttendance.isLoading ? <p className="campus-parent-mobile__academic-calendar-status">Cargando puntualidad y asistencia...</p> : null}
@@ -5936,6 +5989,7 @@ function ParentAcademicContent({
             </div>
           </section>
 
+          {includeClassAttendance ? (
           <section className="campus-parent-mobile__academic-section">
             <div className="campus-parent-mobile__attendance-section-head">
               <div>
@@ -6035,6 +6089,7 @@ function ParentAcademicContent({
               ) : null}
             </div>
           </section>
+          ) : null}
 
           {guidanceRoutineLog.isOpen ? (
             <ParentFeedBottomSheet
@@ -6181,6 +6236,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const baseWorkspace = useMemo(() => buildParentPreviewWorkspace(user), [user]);
   const [parentOverview, setParentOverview] = useState(null);
   const [parentAppFeatures, setParentAppFeatures] = useState(defaultParentAppFeatures);
+  const [studentFlyLock, setStudentFlyLock] = useState({
+    flyLocked: false,
+    reason: '',
+    unlocksAt: null,
+    unlocksAtLabel: '',
+    subject: '',
+    teacherName: '',
+  });
   const [parentOverviewLoading, setParentOverviewLoading] = useState(true);
   const [studentPortalLoadError, setStudentPortalLoadError] = useState('');
   const [studentPortalRetryCount, setStudentPortalRetryCount] = useState(0);
@@ -6207,6 +6270,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [psychologyCases, setPsychologyCases] = useState([]);
   const [expandedNursingRecordId, setExpandedNursingRecordId] = useState('');
   const [nursingLoading, setNursingLoading] = useState(false);
+  const [medicalProfileSigned, setMedicalProfileSigned] = useState(false);
   const [psychologyLoading, setPsychologyLoading] = useState(false);
   const [academicLoading, setAcademicLoading] = useState(false);
   const [academicPaymentMessage, setAcademicPaymentMessage] = useState('');
@@ -6233,7 +6297,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [pendingFeedCommentLikeKeys, setPendingFeedCommentLikeKeys] = useState([]);
   const [feedRefreshCount, setFeedRefreshCount] = useState(0);
   const [academicRefreshCount, setAcademicRefreshCount] = useState(0);
-  const [studentFeedFilter, setStudentFeedFilter] = useState('all');
   const [showCommunityCamera, setShowCommunityCamera] = useState(false);
   const [showCommunityComposer, setShowCommunityComposer] = useState(false);
   const [communityMediaUploading, setCommunityMediaUploading] = useState(false);
@@ -6241,7 +6304,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [communityDraft, setCommunityDraft] = useState({
     title: '',
     body: '',
-    audienceType: 'general',
+    audienceType: 'course',
     media: [],
   });
   const pendingFeedLikeIdsRef = useRef(new Set());
@@ -6252,6 +6315,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const usesRoutedSections = Boolean(normalizedRouteBase);
   const useQuerySectionRouting = shouldUseParentQuerySectionRouting();
   const studentGamesAvailable = useStudentGamesAvailable();
+  const studentFlyLocked = Boolean(studentPortalMode && studentFlyLock.flyLocked);
   const portalAppFeatures = useMemo(() => {
     if (!studentPortalMode) {
       return parentAppFeatures;
@@ -6259,9 +6323,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
     return {
       ...parentAppFeatures,
-      games: studentGamesAvailable,
+      games: studentGamesAvailable && !studentFlyLocked,
     };
-  }, [parentAppFeatures, studentPortalMode, studentGamesAvailable]);
+  }, [parentAppFeatures, studentPortalMode, studentGamesAvailable, studentFlyLocked]);
   const activeSection = useMemo(() => {
     if (!usesRoutedSections) {
       return localActiveSection;
@@ -6436,6 +6500,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
           setParentOverview(mappedOverview);
           setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
+          if (mappedOverview.flyLock) {
+            setStudentFlyLock(mappedOverview.flyLock);
+          }
           setStudentPortalLoadError('');
         })
         .catch((error) => {
@@ -6933,6 +7000,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             const mappedOverview = mapStudentPortalOverviewToParentOverview(response.data || {}, user);
             setParentOverview(mappedOverview);
             setParentAppFeatures(normalizeParentAppFeatures(mappedOverview.parentAppFeatures || {}));
+            if (mappedOverview.flyLock) {
+              setStudentFlyLock(mappedOverview.flyLock);
+            }
           })
           .catch(() => {
             setParentOverview({ children: [] });
@@ -7455,9 +7525,26 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [parentOverview?.coexistenceObservations, selectedChild]);
 
   const latestCoexistenceObservation = selectedChildCoexistenceObservations[0] || null;
+  const selectedChildCoexistenceScore = selectedChild?.coexistenceScore
+    || parentOverview?.coexistenceScore
+    || null;
 
   useEffect(() => {
     setExpandedNursingRecordId('');
+    setMedicalProfileSigned(false);
+  }, [selectedChild?.id]);
+
+  const handleMedicalProfileSignedStatusChange = useCallback(({ studentId = '', signed = false, loading = false } = {}) => {
+    if (loading) {
+      return;
+    }
+
+    const currentId = String(selectedChild?.id || '');
+    if (currentId && String(studentId || '') !== currentId) {
+      return;
+    }
+
+    setMedicalProfileSigned(Boolean(signed));
   }, [selectedChild?.id]);
 
   const feedAnnouncements = useMemo(() => {
@@ -7466,12 +7553,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     }
 
     const matchedItems = studentPortalMode
-      ? academicFeed.filter((item) => {
-        if (studentFeedFilter === 'all') {
-          return true;
-        }
-        return (normalizeLookupKey(item.audienceType) || 'general') === studentFeedFilter;
-      })
+      ? academicFeed.filter((item) => (
+        isStudentMainFeedItem(item)
+        && academicFeedItemMatchesChild(item, selectedChild)
+      ))
       : academicFeed.filter((item) => {
         if (isAllChildrenFeedSelected) {
           return workspace.children.some((child) => academicFeedItemMatchesChild(item, child));
@@ -7506,7 +7591,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       commentsCount: Number(item.commentsCount || 0),
       comments: Array.isArray(item.comments) ? item.comments : [],
     }));
-  }, [academicFeed, isAllChildrenFeedSelected, selectedChild, studentFeedFilter, studentPortalMode, workspace.announcements, workspace.children]);
+  }, [academicFeed, isAllChildrenFeedSelected, selectedChild, studentPortalMode, workspace.announcements, workspace.children]);
 
   const selectedLikesAnnouncement = feedAnnouncements.find((announcement) => announcement.id === feedLikesSheetId) || null;
   const selectedCommentsAnnouncement = feedAnnouncements.find((announcement) => announcement.id === feedCommentsSheetId) || null;
@@ -7595,7 +7680,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     setCommunityDraft({
       title: '',
       body: '',
-      audienceType: 'general',
+      audienceType: studentPortalMode ? 'course' : 'general',
       media: [],
     });
   };
@@ -7731,9 +7816,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         title,
         body,
         media: communityDraft.media || [],
-        audienceType: studentPortalMode
-          ? (communityDraft.audienceType || 'general')
-          : 'general',
+        audienceType: studentPortalMode ? 'course' : 'general',
         studentId: selectedChild?.id || selectedChild?._id || undefined,
       };
       const created = await createCommunityPublication(payload);
@@ -7742,7 +7825,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         setShowCommunityComposer(false);
         setFeedActionMessage(
           created?.message
-          || 'Tu publicación quedó en revisión. Rectoría, coordinación, dirección o secretaría académica la autorizarán.'
+          || (studentPortalMode
+            ? 'Tu publicación del curso quedó en revisión. Coordinación la autorizará y luego la verán docentes, alumnos y padres de tu curso.'
+            : 'Tu publicación quedó en revisión. Rectoría, coordinación, dirección o secretaría académica la autorizarán.')
         );
         return;
       }
@@ -7865,6 +7950,54 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     showFinanceChildOptions,
     showUserMenu,
   ]);
+
+  useEffect(() => {
+    if (!studentPortalMode) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const syncFlyLock = async () => {
+      try {
+        const data = await getStudentFlyLockStatus();
+        if (!cancelled && data?.flyLock) {
+          setStudentFlyLock(data.flyLock);
+        }
+      } catch (_error) {
+        // Keep last known status if the lightweight poll fails.
+      }
+    };
+
+    syncFlyLock();
+    const intervalId = window.setInterval(syncFlyLock, 10_000);
+
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncFlyLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
+    window.addEventListener('focus', onVisibilityOrFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+      window.removeEventListener('focus', onVisibilityOrFocus);
+    };
+  }, [studentPortalMode]);
+
+  useEffect(() => {
+    if (!studentPortalMode || !studentFlyLocked) {
+      return;
+    }
+
+    if (activeSection === 'games') {
+      setFeedActionMessage(studentFlyLock.reason || 'FLY está pausado durante la clase.');
+    }
+  }, [activeSection, studentFlyLocked, studentFlyLock.reason, studentPortalMode]);
 
   useEffect(() => {
     if (!usesRoutedSections) {
@@ -8084,74 +8217,111 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
           {nursingLoading ? <p className="campus-parent-mobile__nursing-loading">Actualizando historial de enfermería...</p> : null}
 
-          {!studentPortalMode && selectedChild?.id ? (
-            <ParentStudentMedicalProfilePanel
-              key={selectedChild.id}
-              studentId={selectedChild.id}
-              studentName={selectedChild.name}
-            />
-          ) : null}
+          {(() => {
+            const medicalProfilePanel = !studentPortalMode && selectedChild?.id ? (
+              <ParentStudentMedicalProfilePanel
+                key={selectedChild.id}
+                studentId={selectedChild.id}
+                studentName={selectedChild.name}
+                onSignedStatusChange={handleMedicalProfileSignedStatusChange}
+              />
+            ) : null;
 
-          <section className="campus-parent-mobile__nursing-record-list">
-            {selectedChildNursingRecords.length > 0 ? selectedChildNursingRecords.map((record) => {
-              const recordId = String(record.id || record._id || record.attendedAt || 'nursing-record');
-              const isExpanded = expandedNursingRecordId === recordId;
+            const nursingCasesSection = (
+              <section className="campus-parent-mobile__nursing-record-list">
+                {selectedChildNursingRecords.length > 0 ? selectedChildNursingRecords.map((record) => {
+                  const recordId = String(record.id || record._id || record.attendedAt || 'nursing-record');
+                  const isExpanded = expandedNursingRecordId === recordId;
 
-              return (
-                <article className={`campus-parent-mobile__nursing-record-card${isExpanded ? ' is-open' : ''}`} key={recordId}>
-                  <button
-                    aria-expanded={isExpanded}
-                    className="campus-parent-mobile__nursing-record-toggle"
-                    onClick={() => setExpandedNursingRecordId(isExpanded ? '' : recordId)}
-                    type="button"
-                  >
-                    <div className="campus-parent-mobile__nursing-record-toggle-copy">
-                      <span>Atención registrada</span>
-                      <strong>{record.symptoms || 'Registro de enfermería'}</strong>
-                    </div>
-                    <div className="campus-parent-mobile__nursing-record-toggle-meta">
-                      <strong>{formatParentNursingDate(record.attendedAt)}</strong>
-                      <span>{getParentNursingDispositionLabel(record.disposition)}</span>
-                    </div>
-                    <span className="campus-parent-mobile__nursing-record-chevron" aria-hidden="true">⌄</span>
-                  </button>
-                  {isExpanded ? (
-                    <>
-                      <div className="campus-parent-mobile__nursing-record-body">
-                        <article>
-                          <span>Síntomas</span>
-                          <p>{record.symptoms}</p>
-                        </article>
-                        <article>
-                          <span>Manejo</span>
-                          <p>{record.treatment}</p>
-                        </article>
-                        <article>
-                          <span>Resultado</span>
-                          <p>{getParentNursingDispositionLabel(record.disposition)}</p>
-                        </article>
-                        {record.notes ? (
-                          <article className="is-wide">
-                            <span>Observaciones</span>
-                            <p>{record.notes}</p>
-                          </article>
-                        ) : null}
-                      </div>
-                      <footer className="campus-parent-mobile__nursing-record-footer">
-                        <span>{record.attendedBy?.name ? `Registró ${record.attendedBy.name}` : 'Registro de enfermería'}</span>
-                      </footer>
-                    </>
-                  ) : null}
-                </article>
-              );
-            }) : (
-              <article className="campus-parent-mobile__care-empty-card">
-                <span className="campus-parent-mobile__care-empty-mark"><ParentAppIcon icon="nursing" /></span>
-                <strong>Sin atenciones registradas</strong>
-                <p>{selectedChild.name} aún no tiene registros de enfermería visibles para acudientes.</p>
-              </article>
-            )}
-          </section>
+                  return (
+                    <article className={`campus-parent-mobile__nursing-record-card${isExpanded ? ' is-open' : ''}`} key={recordId}>
+                      <button
+                        aria-expanded={isExpanded}
+                        className="campus-parent-mobile__nursing-record-toggle"
+                        onClick={() => setExpandedNursingRecordId(isExpanded ? '' : recordId)}
+                        type="button"
+                      >
+                        <div className="campus-parent-mobile__nursing-record-toggle-copy">
+                          <span>Atención registrada</span>
+                          <strong>{record.symptoms || 'Registro de enfermería'}</strong>
+                        </div>
+                        <div className="campus-parent-mobile__nursing-record-toggle-meta">
+                          <strong>{formatParentNursingDate(record.attendedAt)}</strong>
+                          <span>{getParentNursingDispositionLabel(record.disposition)}</span>
+                        </div>
+                        <span className="campus-parent-mobile__nursing-record-chevron" aria-hidden="true">⌄</span>
+                      </button>
+                      {isExpanded ? (
+                        <>
+                          <div className="campus-parent-mobile__nursing-record-body">
+                            <article>
+                              <span>Síntomas</span>
+                              <p>{record.symptoms}</p>
+                            </article>
+                            <article>
+                              <span>Manejo</span>
+                              <p>{record.treatment}</p>
+                            </article>
+                            <article>
+                              <span>Resultado</span>
+                              <p>{getParentNursingDispositionLabel(record.disposition)}</p>
+                            </article>
+                            {record.notes ? (
+                              <article className="is-wide">
+                                <span>Observaciones</span>
+                                <p>{record.notes}</p>
+                              </article>
+                            ) : null}
+                            {Array.isArray(record.photos) && record.photos.length > 0 ? (
+                              <article className="is-wide campus-parent-mobile__nursing-photos">
+                                <span>Fotos</span>
+                                <div className="campus-parent-mobile__nursing-photos-grid">
+                                  {record.photos.map((photo, index) => (
+                                    <a
+                                      href={photo.url || photo.src}
+                                      key={`${recordId}-photo-${index}`}
+                                      rel="noreferrer"
+                                      target="_blank"
+                                    >
+                                      <img
+                                        alt={photo.alt || `Foto de la atención ${index + 1}`}
+                                        src={photo.thumbUrl || photo.url || photo.src}
+                                      />
+                                    </a>
+                                  ))}
+                                </div>
+                              </article>
+                            ) : null}
+                          </div>
+                          <footer className="campus-parent-mobile__nursing-record-footer">
+                            <span>{record.attendedBy?.name ? `Registró ${record.attendedBy.name}` : 'Registro de enfermería'}</span>
+                          </footer>
+                        </>
+                      ) : null}
+                    </article>
+                  );
+                }) : (
+                  <article className="campus-parent-mobile__care-empty-card">
+                    <span className="campus-parent-mobile__care-empty-mark"><ParentAppIcon icon="nursing" /></span>
+                    <strong>Sin atenciones registradas</strong>
+                    <p>{selectedChild.name} aún no tiene registros de enfermería visibles para acudientes.</p>
+                  </article>
+                )}
+              </section>
+            );
+
+            return medicalProfileSigned ? (
+              <>
+                {nursingCasesSection}
+                {medicalProfilePanel}
+              </>
+            ) : (
+              <>
+                {medicalProfilePanel}
+                {nursingCasesSection}
+              </>
+            );
+          })()}
         </section>
       ) : null}
 
@@ -8221,11 +8391,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           <header className="campus-parent-mobile__nursing-overview campus-parent-mobile__coexistence-overview">
             <div className="campus-parent-mobile__nursing-overview-copy">
               <span className="campus-parent-mobile__nursing-kicker">Convivencia escolar</span>
-              <h2>{latestCoexistenceObservation ? 'Observaciones registradas' : 'Convivencia sin novedades'}</h2>
+              <h2>
+                {typeof selectedChildCoexistenceScore?.score === 'number'
+                  ? `Disciplina: ${selectedChildCoexistenceScore.score}%`
+                  : (latestCoexistenceObservation ? 'Observaciones registradas' : 'Convivencia sin novedades')}
+              </h2>
               <p>
-                {latestCoexistenceObservation
-                  ? `${selectedChild.name} tiene ${selectedChildCoexistenceObservations.length} observación${selectedChildCoexistenceObservations.length === 1 ? '' : 'es'} de convivencia registrada${selectedChildCoexistenceObservations.length === 1 ? '' : 's'}.`
-                  : `Los reportes, acuerdos o reconocimientos de convivencia para ${selectedChild.name} aparecerán aquí.`}
+                {typeof selectedChildCoexistenceScore?.score === 'number'
+                  ? `${selectedChild.name} parte de ${selectedChildCoexistenceScore.startingScore}% y acumula −${selectedChildCoexistenceScore.totalDeducted}% por observaciones de convivencia.`
+                  : (latestCoexistenceObservation
+                    ? `${selectedChild.name} tiene ${selectedChildCoexistenceObservations.length} observación${selectedChildCoexistenceObservations.length === 1 ? '' : 'es'} de convivencia registrada${selectedChildCoexistenceObservations.length === 1 ? '' : 's'}.`
+                    : `Los reportes, acuerdos o reconocimientos de convivencia para ${selectedChild.name} aparecerán aquí.`)}
               </p>
             </div>
             <span className="campus-parent-mobile__nursing-overview-icon"><ParentCareOptionIcon icon="coexistence" /></span>
@@ -8239,8 +8415,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 <article className="campus-parent-mobile__nursing-record-card campus-parent-mobile__wellbeing-record-card" key={item.id}>
                   <div className="campus-parent-mobile__nursing-record-toggle">
                     <div className="campus-parent-mobile__nursing-record-toggle-copy">
-                      <span>{item.subject || item.courseTitle || 'Convivencia escolar'}</span>
-                      <strong>{item.observation || 'Observación registrada'}</strong>
+                      <span>
+                        {item.infractionLabel
+                          ? `${item.infractionLabel}${item.deductionPercent ? ` (−${item.deductionPercent}%)` : ''}`
+                          : (item.subject || item.courseTitle || 'Convivencia escolar')}
+                      </span>
+                      <strong>{item.observation || item.summary || 'Observación registrada'}</strong>
                     </div>
                     <div className="campus-parent-mobile__nursing-record-toggle-meta">
                       <strong>{formatParentNursingDate(item.incidentAt || item.submittedAt || item.createdAt)}</strong>
@@ -8290,30 +8470,18 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             userMenuRef={userMenuRef}
           />
           {activeSection !== 'games' ? (
-            studentPortalMode && activeSection === 'home' ? (
-              <StudentFeedSelector
-                isOpen={showFinanceChildOptions}
-                onSelect={(filterId) => {
-                  setStudentFeedFilter(filterId);
-                  setShowFinanceChildOptions(false);
-                }}
-                onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
-                selectedFilterId={studentFeedFilter}
-              />
-            ) : (
-              <ParentFinanceStudentSelector
-                children={workspace.children}
-                includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
-                isOpen={showFinanceChildOptions}
-                onSelectChild={(childId) => {
-                  setSelectedChildId(childId);
-                  setShowFinanceChildOptions(false);
-                }}
-                onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
-                readOnly={studentPortalMode}
-                selectedChild={selectedChildForSwitcher}
-              />
-            )
+            <ParentFinanceStudentSelector
+              children={workspace.children}
+              includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
+              isOpen={showFinanceChildOptions}
+              onSelectChild={(childId) => {
+                setSelectedChildId(childId);
+                setShowFinanceChildOptions(false);
+              }}
+              onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
+              readOnly={studentPortalMode}
+              selectedChild={selectedChildForSwitcher}
+            />
           ) : null}
           {parentCareSectionContent}
           {parentTransportSectionContent}
@@ -8354,9 +8522,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 <span>{studentPortalMode ? 'Nueva publicación' : 'Publicar en el colegio'}</span>
                 <strong>
                   {studentPortalMode
-                    ? (communityDraft.audienceType === 'general'
-                      ? 'Colegio · requiere autorización'
-                      : 'Se publica al instante')
+                    ? 'Mi curso · requiere autorización de coordinación'
                     : 'Requiere autorización institucional'}
                 </strong>
               </div>
@@ -8370,48 +8536,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
             </header>
 
             {studentPortalMode ? (
-              <fieldset className="campus-parent-community-composer__audience">
-                <legend>¿Quién puede verlo?</legend>
-                <label className={communityDraft.audienceType === 'general' ? 'is-active' : ''}>
-                  <input
-                    checked={communityDraft.audienceType === 'general'}
-                    name="community-audience"
-                    onChange={() => setCommunityDraft((current) => ({ ...current, audienceType: 'general' }))}
-                    type="radio"
-                    value="general"
-                  />
-                  <span>
-                    <strong>Colegio</strong>
-                    <small>Todo el colegio · pasa por autorización</small>
-                  </span>
-                </label>
-                <label className={communityDraft.audienceType === 'course' ? 'is-active' : ''}>
-                  <input
-                    checked={communityDraft.audienceType === 'course'}
-                    name="community-audience"
-                    onChange={() => setCommunityDraft((current) => ({ ...current, audienceType: 'course' }))}
-                    type="radio"
-                    value="course"
-                  />
-                  <span>
-                    <strong>Mi curso</strong>
-                    <small>Alumnos y acudientes · se publica al instante</small>
-                  </span>
-                </label>
-                <label className={communityDraft.audienceType === 'course_students' ? 'is-active' : ''}>
-                  <input
-                    checked={communityDraft.audienceType === 'course_students'}
-                    name="community-audience"
-                    onChange={() => setCommunityDraft((current) => ({ ...current, audienceType: 'course_students' }))}
-                    type="radio"
-                    value="course_students"
-                  />
-                  <span>
-                    <strong>Curso privado</strong>
-                    <small>Solo estudiantes · se publica al instante</small>
-                  </span>
-                </label>
-              </fieldset>
+              <p className="campus-parent-community-composer__audience-note">
+                Se publicará para tu curso: docentes, compañeros y padres. Primero pasa por aprobación de coordinación.
+              </p>
             ) : null}
 
             <label className="campus-parent-community-composer__field">
@@ -8480,11 +8607,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 Descartar
               </button>
               <button disabled={communityPublishing || communityMediaUploading} type="submit">
-                {communityPublishing
-                  ? 'Enviando…'
-                  : (!studentPortalMode || communityDraft.audienceType === 'general'
-                    ? 'Enviar a revisión'
-                    : 'Publicar')}
+                {communityPublishing ? 'Enviando…' : 'Enviar a revisión'}
               </button>
             </div>
           </form>
@@ -8535,7 +8658,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       >
         {activeSection === 'home' ? (
           <>
-            {studentPortalMode && studentGamesAvailable ? (
+            {studentPortalMode && studentFlyLocked ? (
+              <div className="campus-parent-mobile__fly-lock-banner" role="status">
+                <strong>FLY pausado</strong>
+                <span>
+                  {studentFlyLock.reason || 'Tu docente pausó el juego durante la clase.'}
+                  {studentFlyLock.unlocksAtLabel ? ` (${studentFlyLock.unlocksAtLabel})` : ''}
+                </span>
+              </div>
+            ) : null}
+            {studentPortalMode && studentGamesAvailable && !studentFlyLocked ? (
               <button
                 className="campus-parent-mobile__game-promo"
                 onClick={() => onSelectSection('games')}
@@ -8602,11 +8734,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 );
               }              ) : (
                 <ParentFeedEmptyState
-                  description={studentPortalMode && studentFeedFilter !== 'all'
-                    ? `Aún no hay publicaciones en «${(studentFeedFilterOptions.find((option) => option.id === studentFeedFilter) || {}).label || 'este feed'}». Cambia de feed arriba o vuelve más tarde.`
-                    : ''}
+                  description=""
                   studentName={selectedChild.name}
-                  title={studentPortalMode && studentFeedFilter !== 'all' ? 'Sin publicaciones en este feed' : ''}
+                  title=""
                 />
               )}
             </section>
@@ -8696,7 +8826,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           )
         ) : null}
 
-        {activeSection === 'games' && studentGamesAvailable ? (
+        {activeSection === 'games' && studentGamesAvailable && !studentFlyLocked ? (
           <ColibriFlappyGame playerName={selectedChild?.name || user?.name || ''} />
         ) : null}
       </div>

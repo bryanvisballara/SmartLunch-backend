@@ -25,6 +25,10 @@ const studentMedicalProfileSchema = new mongoose.Schema(
     physicianPhone: { type: String, trim: true, default: '' },
     medicationAuthorization: { type: medicationAuthorizationSchema, default: () => ({}) },
     completedAt: { type: Date, default: null },
+    signatureImage: { type: String, default: '' },
+    signedAt: { type: Date, default: null },
+    signedByParentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    signedByParentName: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );

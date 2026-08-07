@@ -18,14 +18,15 @@ router.use(authMiddleware);
 const hrManagerRoles = ['human_resources', 'admin', 'rectoria', 'direccion'];
 const coordinationRoles = ['coordination', 'admin', 'rectoria', 'direccion'];
 const nursingSupplyRoles = ['nursing'];
-const requesterRoles = ['teacher', 'human_resources', 'coordination', 'admin', 'rectoria', 'direccion', ...nursingSupplyRoles];
+const plannerSubmitterRoles = ['teacher', 'psychology'];
+const requesterRoles = ['teacher', 'psychology', 'human_resources', 'coordination', 'admin', 'rectoria', 'direccion', ...nursingSupplyRoles];
 const itemWriteRoles = [...hrManagerRoles, ...nursingSupplyRoles];
 const approvalRoles = ['rectoria', 'direccion', 'admin'];
 const deliveryRoles = ['human_resources', 'admin'];
 const categories = ['stationery', 'classroom', 'sports', 'technology', 'laboratory', 'music', 'maintenance', 'cleaning', 'construction', 'furniture', 'cafeteria', 'nursing', 'security', 'admin', 'other'];
 const itemTypes = ['consumable', 'asset'];
 const priorities = ['low', 'medium', 'high', 'urgent'];
-const statuses = ['pending_coordination_review', 'consolidated', 'pending_hr_review', 'pending_purchasing_review', 'pending_approval', 'approved', 'rejected', 'delivered', 'partially_delivered', 'cancelled'];
+const statuses = ['pending_coordination_review', 'returned_for_correction', 'consolidated', 'pending_hr_review', 'pending_purchasing_review', 'pending_approval', 'approved', 'rejected', 'delivered', 'partially_delivered', 'cancelled'];
 const requestTypes = ['material', 'purchase', 'replenishment'];
 const serviceAreas = ['teaching', 'cleaning', 'maintenance', 'administration', 'cafeteria', 'nursing', 'sports', 'technology', 'security', 'general'];
 const areaManagerRoles = ['rectoria', 'direccion', 'admin'];
@@ -63,6 +64,10 @@ function isCollectionLimitError(error) {
 
 function isNursingSupplyRole(role) {
   return nursingSupplyRoles.includes(normalizeText(role));
+}
+
+function isPlannerSubmitterRole(role) {
+  return plannerSubmitterRoles.includes(normalizeText(role));
 }
 
 async function resolveAreaByKey(schoolId, key, { createdByUserId = null } = {}) {
@@ -348,12 +353,37 @@ function serializePlannerCycle(cycle) {
   };
 }
 
+function normalizePlannerActivityMaterials(entry = {}) {
+  const fromArray = (Array.isArray(entry?.materials) ? entry.materials : [])
+    .map((item) => {
+      const materialName = normalizeText(item?.materialName || item?.name || item?.customName || item?.material);
+      const quantity = Math.max(0, Number(item?.quantity || 0));
+      return {
+        materialName,
+        quantity: Number.isFinite(quantity) ? quantity : 0,
+      };
+    })
+    .filter((item) => item.materialName && item.quantity > 0);
+
+  if (fromArray.length) {
+    return fromArray;
+  }
+
+  const legacyName = normalizeText(entry?.materialName || entry?.material);
+  const legacyQuantity = Math.max(0, Number(entry?.quantity || 0));
+  if (legacyName && legacyQuantity > 0) {
+    return [{ materialName: legacyName, quantity: legacyQuantity }];
+  }
+
+  return [];
+}
+
 function normalizePlannerActivities(value) {
   return (Array.isArray(value) ? value : [])
     .map((entry) => {
       const dateValue = normalizeText(entry?.date);
       const parsedDate = dateValue ? new Date(dateValue) : null;
-      const quantity = Math.max(0, Number(entry?.quantity || 0));
+      const materials = normalizePlannerActivityMaterials(entry);
       return {
         date: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
         title: normalizeText(entry?.title),
@@ -361,8 +391,9 @@ function normalizePlannerActivities(value) {
         subject: normalizeText(entry?.subject),
         grade: normalizeText(entry?.grade),
         courseLabel: normalizeText(entry?.courseLabel || entry?.course),
-        materialName: normalizeText(entry?.materialName || entry?.material),
-        quantity: Number.isFinite(quantity) ? quantity : 0,
+        materials,
+        materialName: materials[0]?.materialName || '',
+        quantity: materials[0]?.quantity || 0,
         purpose: normalizeText(entry?.purpose),
       };
     })
@@ -416,16 +447,26 @@ function buildRequestItemsFromPayload(rawItems = [], plannerActivities = [], noM
 
   const aggregated = new Map();
   plannerActivities.forEach((activity) => {
-    const materialName = normalizeText(activity.materialName);
-    const quantity = Math.max(1, Number(activity.quantity || 0));
-    if (!materialName || quantity <= 0) {
-      return;
-    }
-    const key = materialName.toLowerCase();
-    const current = aggregated.get(key) || { itemId: null, customName: materialName, unit: '', notes: '', unitCost: 0, lineTotal: 0, quantity: 0 };
-    current.quantity += quantity;
-    current.lineTotal = current.quantity * current.unitCost;
-    aggregated.set(key, current);
+    normalizePlannerActivityMaterials(activity).forEach((material) => {
+      const materialName = normalizeText(material.materialName);
+      const quantity = Math.max(1, Number(material.quantity || 0));
+      if (!materialName || quantity <= 0) {
+        return;
+      }
+      const key = materialName.toLowerCase();
+      const current = aggregated.get(key) || {
+        itemId: null,
+        customName: materialName,
+        unit: '',
+        notes: '',
+        unitCost: 0,
+        lineTotal: 0,
+        quantity: 0,
+      };
+      current.quantity += quantity;
+      current.lineTotal = current.quantity * current.unitCost;
+      aggregated.set(key, current);
+    });
   });
 
   return Array.from(aggregated.values());
@@ -445,18 +486,22 @@ function serializeRequest(request) {
     plannerCycle: request.plannerCycleId?._id ? serializePlannerCycle(request.plannerCycleId) : null,
     plannerCycleId: String(request.plannerCycleId?._id || request.plannerCycleId || ''),
     plannerActivities: Array.isArray(request.plannerActivities)
-      ? request.plannerActivities.map((activity) => ({
-        id: String(activity._id || ''),
-        date: activity.date || null,
-        title: normalizeText(activity.title),
-        description: normalizeText(activity.description),
-        subject: normalizeText(activity.subject),
-        grade: normalizeText(activity.grade),
-        courseLabel: normalizeText(activity.courseLabel),
-        materialName: normalizeText(activity.materialName),
-        quantity: Number(activity.quantity || 0),
-        purpose: normalizeText(activity.purpose),
-      }))
+      ? request.plannerActivities.map((activity) => {
+        const materials = normalizePlannerActivityMaterials(activity);
+        return {
+          id: String(activity._id || ''),
+          date: activity.date || null,
+          title: normalizeText(activity.title),
+          description: normalizeText(activity.description),
+          subject: normalizeText(activity.subject),
+          grade: normalizeText(activity.grade),
+          courseLabel: normalizeText(activity.courseLabel),
+          materials,
+          materialName: materials[0]?.materialName || normalizeText(activity.materialName),
+          quantity: materials[0]?.quantity || Number(activity.quantity || 0),
+          purpose: normalizeText(activity.purpose),
+        };
+      })
       : [],
     noMaterialsNeeded: Boolean(request.noMaterialsNeeded),
     consolidatedFromRequestIds: Array.isArray(request.consolidatedFromRequestIds) ? request.consolidatedFromRequestIds.map((id) => String(id)) : [],
@@ -493,6 +538,10 @@ function serializeRequest(request) {
     rejectedBy: request.rejectedByUserId?._id ? serializeUser(request.rejectedByUserId) : null,
     rejectedAt: request.rejectedAt || null,
     rejectionReason: normalizeText(request.rejectionReason),
+    coordinationObservation: normalizeText(request.coordinationObservation),
+    returnedBy: request.returnedByUserId?._id ? serializeUser(request.returnedByUserId) : null,
+    returnedAt: request.returnedAt || null,
+    resubmittedAt: request.resubmittedAt || null,
     deliveredBy: request.deliveredByUserId?._id ? serializeUser(request.deliveredByUserId) : null,
     deliveredAt: request.deliveredAt || null,
     deliveryNotes: normalizeText(request.deliveryNotes),
@@ -510,6 +559,7 @@ async function populateRequest(query) {
     .populate('plannerCycleId', 'title startDate endDate submissionDeadline instructions status')
     .populate('approvedByUserId', 'name username role')
     .populate('rejectedByUserId', 'name username role')
+    .populate('returnedByUserId', 'name username role')
     .populate('deliveredByUserId', 'name username role')
     .populate('items.itemId', 'name category itemType unit unitCost sku stock minStock location status notes areaId');
 }
@@ -521,6 +571,7 @@ async function populateRequestDocument(request) {
     { path: 'plannerCycleId', select: 'title startDate endDate submissionDeadline instructions status' },
     { path: 'approvedByUserId', select: 'name username role' },
     { path: 'rejectedByUserId', select: 'name username role' },
+    { path: 'returnedByUserId', select: 'name username role' },
     { path: 'deliveredByUserId', select: 'name username role' },
     { path: 'items.itemId', select: 'name category itemType unit unitCost sku stock minStock location status notes areaId' },
   ]);
@@ -583,20 +634,76 @@ async function notifyUser({ schoolId, userId, title, body, payload }) {
   return queueNotificationsForParents({ schoolId, parentIds: [userId], title, body, payload });
 }
 
+async function resolveCatalogItemForDelivery({ schoolId, areaId, itemId, customName }) {
+  const resolvedItemId = String(itemId || '').trim();
+  if (resolvedItemId && mongoose.Types.ObjectId.isValid(resolvedItemId)) {
+    const byId = await HrSupplyItem.findOne(supplyItemQuery({
+      _id: resolvedItemId,
+      schoolId,
+      status: 'active',
+    }));
+    if (byId) return byId;
+  }
+
+  const name = normalizeText(customName);
+  if (!name) return null;
+
+  const nameRegex = new RegExp(`^${escapeRegex(name)}$`, 'i');
+  const baseFilter = supplyItemQuery({ schoolId, status: 'active', name: nameRegex });
+
+  if (areaId && mongoose.Types.ObjectId.isValid(String(areaId))) {
+    const inArea = await HrSupplyItem.findOne({ ...baseFilter, areaId });
+    if (inArea) return inArea;
+  }
+
+  const areas = await HrPurchaseArea.find({ schoolId }).select('_id key').lean();
+  const generalArea = areas.find((area) => normalizeText(area.key) === 'general');
+  if (generalArea && String(generalArea._id) !== String(areaId || '')) {
+    const inGeneral = await HrSupplyItem.findOne({ ...baseFilter, areaId: generalArea._id });
+    if (inGeneral) return inGeneral;
+  }
+
+  return HrSupplyItem.findOne(baseFilter);
+}
+
 async function applyDeliveredStock({ request, deliveredItems }) {
   const deliveredByItemId = new Map(deliveredItems.map((entry) => [String(entry.requestItemId || entry.id || entry.itemId || ''), Number(entry.deliveredQuantity || 0)]));
+  const requestAreaId = String(request.areaId?._id || request.areaId || '');
 
   for (const requestItem of request.items) {
-    const itemId = String(requestItem.itemId?._id || requestItem.itemId || '');
+    let itemId = String(requestItem.itemId?._id || requestItem.itemId || '');
     const requestItemKey = itemId || String(requestItem._id || '');
-    const deliveredQuantity = Math.min(Number(requestItem.approvedQuantity || requestItem.quantity || 0), Math.max(0, Number(deliveredByItemId.get(requestItemKey) || 0)));
+    const deliveredQuantity = Math.min(
+      Number(requestItem.approvedQuantity || requestItem.quantity || 0),
+      Math.max(0, Number(deliveredByItemId.get(requestItemKey) || deliveredByItemId.get(String(requestItem._id || '')) || 0))
+    );
     requestItem.deliveredQuantity = deliveredQuantity;
 
-    if (!itemId) {
+    if (deliveredQuantity <= 0) {
       continue;
     }
 
-    if (deliveredQuantity > 0 && request.requestType === 'material') {
+    if (request.requestType === 'material') {
+      const catalogItem = await resolveCatalogItemForDelivery({
+        schoolId: request.schoolId,
+        areaId: requestAreaId,
+        itemId,
+        customName: requestItem.customName || requestItem.itemId?.name,
+      });
+
+      if (!catalogItem) {
+        const label = normalizeText(requestItem.customName)
+          || normalizeText(requestItem.itemId?.name)
+          || 'material solicitado';
+        throw new Error(`"${label}" no está en el inventario. Créalo o agrégalo al stock antes de confirmar el despacho.`);
+      }
+
+      itemId = String(catalogItem._id);
+      requestItem.itemId = catalogItem._id;
+      if (!normalizeText(requestItem.unit)) {
+        requestItem.unit = normalizeText(catalogItem.unit) || 'unidad';
+      }
+
       const updatedItem = await HrSupplyItem.findOneAndUpdate(
         supplyItemQuery({ _id: itemId, schoolId: request.schoolId, stock: { $gte: deliveredQuantity } }),
         { $inc: { stock: -deliveredQuantity } },
@@ -604,11 +711,16 @@ async function applyDeliveredStock({ request, deliveredItems }) {
       );
 
       if (!updatedItem) {
-        throw new Error(`Stock insuficiente para ${requestItem.itemId?.name || 'material solicitado'}`);
+        throw new Error(`Stock insuficiente para ${catalogItem.name || 'material solicitado'} (se necesitan ${deliveredQuantity}).`);
       }
+      continue;
     }
 
-    if (deliveredQuantity > 0 && (request.requestType === 'replenishment' || request.requestType === 'purchase')) {
+    if (!itemId) {
+      continue;
+    }
+
+    if (request.requestType === 'replenishment' || request.requestType === 'purchase') {
       await HrSupplyItem.updateOne(
         supplyItemQuery({ _id: itemId, schoolId: request.schoolId }),
         { $inc: { stock: deliveredQuantity } }
@@ -664,7 +776,7 @@ router.get('/dashboard', roleMiddleware(hrManagerRoles), async (req, res) => {
   }
 });
 
-router.get('/purchase-areas', roleMiddleware([...hrManagerRoles, 'coordination', 'teacher', ...nursingSupplyRoles]), async (req, res) => {
+router.get('/purchase-areas', roleMiddleware([...hrManagerRoles, 'coordination', 'teacher', 'psychology', ...nursingSupplyRoles]), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.user;
     const areas = await ensurePurchaseAreas(schoolId, { createdByUserId: userId });
@@ -948,8 +1060,10 @@ router.post('/items', roleMiddleware(itemWriteRoles), async (req, res) => {
       return res.status(404).json({ message: 'Área de compra no encontrada.' });
     }
 
+    // Do not use supplyItemQuery() here: hrEntity is a legacy raw-collection flag and
+    // Mongoose rejects it on upsert because it is not in the HrSupplyItem schema.
     const item = await HrSupplyItem.findOneAndUpdate(
-      supplyItemQuery({ schoolId, areaId, name }),
+      { schoolId, areaId, name },
       {
         schoolId,
         areaId,
@@ -1137,7 +1251,7 @@ router.get('/requests', roleMiddleware(requesterRoles), async (req, res) => {
     if (req.query.requestType) filter.requestType = safeEnum(req.query.requestType, requestTypes, 'material');
     if (req.query.plannerCycleId && isValidObjectId(req.query.plannerCycleId)) filter.plannerCycleId = req.query.plannerCycleId;
     if (req.query.areaId && isValidObjectId(req.query.areaId)) filter.areaId = req.query.areaId;
-    if (role === 'teacher') filter.requestedByUserId = userId;
+    if (isPlannerSubmitterRole(role)) filter.requestedByUserId = userId;
 
     if (isNursingSupplyRole(role)) {
       const nursingArea = await resolveNursingPurchaseArea(schoolId, { createdByUserId: userId });
@@ -1158,7 +1272,17 @@ router.get('/coordination/planner-requests', roleMiddleware(coordinationRoles), 
   try {
     const { schoolId } = req.user;
     const filter = { schoolId, requestType: 'material' };
-    if (req.query.status) filter.status = safeEnum(req.query.status, statuses, 'pending_coordination_review');
+    if (req.query.status) {
+      const statusParts = String(req.query.status || '')
+        .split(',')
+        .map((value) => normalizeText(value))
+        .filter((value) => statuses.includes(value));
+      if (statusParts.length === 1) {
+        filter.status = statusParts[0];
+      } else if (statusParts.length > 1) {
+        filter.status = { $in: statusParts };
+      }
+    }
     if (req.query.plannerCycleId && isValidObjectId(req.query.plannerCycleId)) filter.plannerCycleId = req.query.plannerCycleId;
     const requests = await populateRequest(HrSupplyRequest.find(filter).sort({ updatedAt: -1 }).limit(200).lean());
     return res.status(200).json({ requests: requests.map(serializeRequest) });
@@ -1189,7 +1313,9 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
     const plannerActivities = normalizePlannerActivities(req.body.plannerActivities);
     let plannerCycle = null;
 
-    if (role === 'teacher' && requestType === 'material') {
+    const isPlannerMaterialRequest = isPlannerSubmitterRole(role) && requestType === 'material';
+
+    if (isPlannerMaterialRequest) {
       if (!isValidObjectId(plannerCycleId)) {
         return res.status(400).json({ message: 'Selecciona el planner definido por coordinacion.' });
       }
@@ -1203,17 +1329,22 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
       if (!noMaterialsNeeded && !plannerActivities.length) {
         return res.status(400).json({ message: 'Registra al menos una actividad del planner.' });
       }
+      if (!noMaterialsNeeded && plannerActivities.some((activity) => !normalizePlannerActivityMaterials(activity).length)) {
+        return res.status(400).json({ message: 'Cada actividad del planner debe incluir al menos un material.' });
+      }
 
       const existingPending = await HrSupplyRequest.findOne({
         schoolId,
         requestType: 'material',
         plannerCycleId: plannerCycle._id,
         requestedByUserId: userId,
-        status: 'pending_coordination_review',
+        status: { $in: ['pending_coordination_review', 'returned_for_correction'] },
       }).lean();
       if (existingPending) {
         return res.status(409).json({
-          message: 'Ya enviaste este planner. Usa la edicion del card verde para modificarlo antes de la fecha limite.',
+          message: existingPending.status === 'returned_for_correction'
+            ? 'Este planner fue devuelto con observaciones. Edítalo y vuelve a enviarlo a coordinación.'
+            : 'Ya enviaste este planner. Usa la edicion del card verde para modificarlo antes de la fecha limite.',
           requestId: String(existingPending._id),
         });
       }
@@ -1231,13 +1362,13 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
         return res.status(404).json({ message: 'Área de Enfermería no configurada.' });
       }
       areaId = String(nursingArea._id);
-    } else if (role === 'teacher' && requestType === 'material' && academiaArea) {
+    } else if (isPlannerMaterialRequest && academiaArea) {
       areaId = String(academiaArea._id);
     } else if (!areaId && generalArea) {
       areaId = String(generalArea._id);
     }
 
-    if (role !== 'teacher' || requestType !== 'material') {
+    if (!isPlannerMaterialRequest) {
       if (!isValidObjectId(areaId)) {
         return res.status(400).json({ message: 'Debes seleccionar un área de compra.' });
       }
@@ -1255,7 +1386,8 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
       return res.status(400).json({ message: 'Agrega productos válidos a la solicitud.' });
     }
 
-    if (requestType === 'material' && items.some((entry) => !entry.itemId)) {
+    // Planner cycles allow free-text materials (customName); inventory deliveries require catalog itemId.
+    if (requestType === 'material' && !plannerCycle && items.some((entry) => !entry.itemId)) {
       return res.status(400).json({ message: 'Las entregas desde inventario deben usar materiales del catálogo.' });
     }
 
@@ -1290,16 +1422,19 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
 
     const neededByDate = normalizeText(req.body.neededByDate);
     const parsedNeededByDate = neededByDate ? new Date(neededByDate) : null;
-    const initialStatus = role === 'teacher' && requestType === 'material' ? 'pending_coordination_review' : 'pending_purchasing_review';
+    const initialStatus = isPlannerMaterialRequest ? 'pending_coordination_review' : 'pending_purchasing_review';
     const purpose = noMaterialsNeeded
       ? (normalizeText(req.body.purpose) || 'No necesito material para este periodo.')
       : normalizeText(req.body.purpose);
-    const resolvedServiceArea = role === 'teacher'
+    const resolvedServiceArea = isPlannerMaterialRequest
       ? 'teaching'
       : (isNursingSupplyRole(role) ? 'nursing' : serviceArea);
-    const resolvedNeedCategory = role === 'teacher'
+    const resolvedNeedCategory = isPlannerMaterialRequest
       ? 'classroom'
       : (isNursingSupplyRole(role) ? safeEnum(needCategory, categories, 'nursing') : needCategory);
+    const defaultRequestedForArea = isNursingSupplyRole(role)
+      ? 'Enfermería'
+      : (normalizeText(role) === 'psychology' ? 'Psicología - bienestar' : '');
 
     const request = await HrSupplyRequest.create({
       schoolId,
@@ -1311,7 +1446,7 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
       noMaterialsNeeded,
       serviceArea: resolvedServiceArea,
       needCategory: resolvedNeedCategory,
-      requestedForArea: normalizeText(req.body.requestedForArea) || (isNursingSupplyRole(role) ? 'Enfermería' : ''),
+      requestedForArea: normalizeText(req.body.requestedForArea) || defaultRequestedForArea,
       requestedForPerson: normalizeText(req.body.requestedForPerson),
       purpose,
       neededByDate: parsedNeededByDate && !Number.isNaN(parsedNeededByDate.getTime()) ? parsedNeededByDate : null,
@@ -1326,13 +1461,21 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
     await populateRequestDocument(request);
 
     if (initialStatus === 'pending_coordination_review') {
+      const actorName = request.requestedByUserId?.name
+        || (normalizeText(role) === 'psychology' ? 'Bienestar' : 'Un docente');
       await notifyCoordination({
         schoolId,
-        title: 'Planner docente para revisar',
+        title: normalizeText(role) === 'psychology' ? 'Planner de Bienestar para revisar' : 'Planner docente para revisar',
         body: noMaterialsNeeded
-          ? `${request.requestedByUserId?.name || 'Un docente'} marco que no necesita material en este periodo.`
-          : `${request.requestedByUserId?.name || 'Un docente'} envio planner y ${items.length} requerimiento(s).`,
-        payload: { type: 'hr.planner.coordination_review', requestId: String(request._id), requestType, url: '/campus/coordination' },
+          ? `${actorName} marco que no necesita material en este periodo.`
+          : `${actorName} envio planner y ${items.length} requerimiento(s).`,
+        payload: {
+          type: 'hr.planner.coordination_review',
+          requestId: String(request._id),
+          requestType,
+          sectionKey: 'resources',
+          url: '/coordinacion',
+        },
       }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] request=${request._id} error=${error.message}`));
     } else {
       const requestTypeLabel = requestType === 'purchase'
@@ -1353,7 +1496,7 @@ router.post('/requests', roleMiddleware(requesterRoles), async (req, res) => {
   }
 });
 
-router.patch('/requests/:id', roleMiddleware(['teacher']), async (req, res) => {
+router.patch('/requests/:id', roleMiddleware(plannerSubmitterRoles), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
     const { id } = req.params;
@@ -1372,9 +1515,11 @@ router.patch('/requests/:id', roleMiddleware(['teacher']), async (req, res) => {
       return res.status(404).json({ message: 'Solicitud no encontrada.' });
     }
 
-    if (request.status !== 'pending_coordination_review') {
-      return res.status(409).json({ message: 'Solo puedes editar el planner mientras esta en revision de coordinacion.' });
+    if (!['pending_coordination_review', 'returned_for_correction'].includes(request.status)) {
+      return res.status(409).json({ message: 'Solo puedes editar el planner mientras esta en revision de coordinacion o fue devuelto para correccion.' });
     }
+
+    const wasReturnedForCorrection = request.status === 'returned_for_correction';
 
     const plannerCycle = request.plannerCycleId
       ? await HrPlannerCycle.findOne({ _id: request.plannerCycleId, schoolId }).lean()
@@ -1387,6 +1532,9 @@ router.patch('/requests/:id', roleMiddleware(['teacher']), async (req, res) => {
     const plannerActivities = normalizePlannerActivities(req.body.plannerActivities);
     if (!noMaterialsNeeded && !plannerActivities.length) {
       return res.status(400).json({ message: 'Registra al menos una actividad del planner.' });
+    }
+    if (!noMaterialsNeeded && plannerActivities.some((activity) => !normalizePlannerActivityMaterials(activity).length)) {
+      return res.status(400).json({ message: 'Cada actividad del planner debe incluir al menos un material.' });
     }
 
     const items = buildRequestItemsFromPayload(req.body.items, plannerActivities, noMaterialsNeeded);
@@ -1409,11 +1557,84 @@ router.patch('/requests/:id', roleMiddleware(['teacher']), async (req, res) => {
     request.purpose = noMaterialsNeeded
       ? (normalizeText(req.body.purpose) || 'No necesito material para este periodo.')
       : normalizeText(req.body.purpose);
+    request.status = 'pending_coordination_review';
+    if (wasReturnedForCorrection) {
+      request.resubmittedAt = new Date();
+    }
     await request.save();
 
     await request.populate('requestedByUserId', 'name username role');
     await request.populate('items.itemId', 'name category itemType unit sku stock minStock location status notes');
     await request.populate('plannerCycleId', 'title startDate endDate submissionDeadline instructions status');
+    await request.populate('returnedByUserId', 'name username role');
+
+    if (wasReturnedForCorrection) {
+      const actorName = request.requestedByUserId?.name || 'Un docente';
+      await notifyCoordination({
+        schoolId,
+        title: 'Planner reenviado tras correccion',
+        body: `${actorName} corrigio y volvio a enviar su planner.`,
+        payload: {
+          type: 'hr.planner.resubmitted',
+          requestId: String(request._id),
+          sectionKey: 'resources',
+          url: '/coordinacion',
+        },
+      }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] resubmit=${request._id} error=${error.message}`));
+    }
+
+    return res.status(200).json({ request: serializeRequest(request) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/coordination/planner-requests/:id/return', roleMiddleware(coordinationRoles), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+    const observation = normalizeText(req.body?.observation || req.body?.coordinationObservation || req.body?.notes);
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Solicitud invalida.' });
+    }
+    if (observation.length < 8) {
+      return res.status(400).json({ message: 'Escribe una observacion clara para que el docente pueda corregir el planner.' });
+    }
+
+    const request = await HrSupplyRequest.findOne({
+      _id: id,
+      schoolId,
+      requestType: 'material',
+      status: 'pending_coordination_review',
+    });
+
+    if (!request) {
+      return res.status(404).json({ message: 'Planner no encontrado o ya no esta pendiente de revision.' });
+    }
+
+    if (!request.plannerCycleId) {
+      return res.status(400).json({ message: 'Solo se pueden devolver planners docentes.' });
+    }
+
+    request.status = 'returned_for_correction';
+    request.coordinationObservation = observation.slice(0, 2000);
+    request.returnedByUserId = userId;
+    request.returnedAt = new Date();
+    await request.save();
+    await populateRequestDocument(request);
+
+    await notifyUser({
+      schoolId,
+      userId: request.requestedByUserId?._id || request.requestedByUserId,
+      title: 'Planner devuelto para correccion',
+      body: `Coordinacion dejo una observacion: ${observation.slice(0, 180)}`,
+      payload: {
+        type: 'hr.planner.returned_for_correction',
+        requestId: String(request._id),
+        url: '/campus/teacher',
+      },
+    }).catch((error) => console.warn(`[HR_NOTIFY_WARNING] return=${request._id} error=${error.message}`));
 
     return res.status(200).json({ request: serializeRequest(request) });
   } catch (error) {
@@ -1560,7 +1781,10 @@ router.post('/requests/:id/purchasing-accept', roleMiddleware(deliveryRoles), as
 
     return res.status(200).json({ request: serializeRequest(request) });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    const statusCode = /stock insuficiente|no está en el inventario/i.test(String(error.message || ''))
+      ? 400
+      : 500;
+    return res.status(statusCode).json({ message: error.message || 'No se pudo aceptar la solicitud.' });
   }
 });
 

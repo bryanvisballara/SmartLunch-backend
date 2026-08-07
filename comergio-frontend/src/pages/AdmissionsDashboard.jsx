@@ -1287,8 +1287,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
           {currentView === 'staff_announcements' && !showApplicantDetail ? (
             <section className="dashboard-card">
               <StaffAnnouncementsPanel
-                description="Mensajes internos de rectoría y coordinación. Confirma la lectura para registrar el acuse de recibo."
-                mode="inbox"
+                description="Envía y recibe mensajes internos del colegio. Selecciona a quién va dirigido cada comunicado."
+                mode="manage"
                 title="Comunicados internos"
               />
             </section>

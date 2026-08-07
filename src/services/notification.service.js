@@ -746,9 +746,50 @@ async function queueCafeteriaPromoNotifications({
   });
 }
 
+async function notifySchoolStaffRoles({
+  schoolId,
+  roles = ['rectoria', 'direccion', 'coordination'],
+  title,
+  body,
+  payload = {},
+  studentId = null,
+}) {
+  const normalizedRoles = Array.from(new Set(
+    (Array.isArray(roles) ? roles : [])
+      .map((role) => String(role || '').trim())
+      .filter(Boolean)
+  ));
+
+  if (!schoolId || !normalizedRoles.length) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  const users = await User.find({
+    schoolId,
+    role: { $in: normalizedRoles },
+    status: 'active',
+    deletedAt: null,
+  }).select('_id').lean();
+
+  const userIds = users.map((user) => user._id).filter(Boolean);
+  if (!userIds.length) {
+    return { notificationsCreated: 0, tokensFound: 0 };
+  }
+
+  return queueNotificationsForParents({
+    schoolId,
+    parentIds: userIds,
+    studentId,
+    title,
+    body,
+    payload,
+  });
+}
+
 module.exports = {
   queueOrderCreatedNotifications,
   queueNotificationsForParents,
+  notifySchoolStaffRoles,
   queueStudentUserNotification,
   queueStudentUserNotifications,
   queueStudentParentNotification,

@@ -179,6 +179,7 @@ const COMERGIO_SUPPORT_WHATSAPP = '573016214806';
 const COMERGIO_SUPPORT_WHATSAPP_BASE = `https://wa.me/${COMERGIO_SUPPORT_WHATSAPP}`;
 const TUTORIAL_REQUEST_WHATSAPP = `${COMERGIO_SUPPORT_WHATSAPP_BASE}?text=${encodeURIComponent('Hola, quiero solicitar un tutorial de Comergio Academy.')}`;
 export const COMERGIO_TEACHER_SUPPORT_WHATSAPP_URL = `${COMERGIO_SUPPORT_WHATSAPP_BASE}?text=${encodeURIComponent('Hola, necesito ayuda con el portal docente de Comergio / quiero reportar una inconsistencia.')}`;
+// Kept for compatibility; staff portals use StaffSupportWhatsAppFab.
 
 function formatDuration(seconds) {
   const total = Math.round(Number(seconds) || 0);

@@ -12,6 +12,22 @@ const CampusDisciplineObservation = require('../models/campusDisciplineObservati
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const CampusPost = require('../models/campusPost.model');
 const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
+const CampusSubjectReportCard = require('../models/campusSubjectReportCard.model');
+const CampusGeneralReportCard = require('../models/campusGeneralReportCard.model');
+const {
+  getFlyLockForCourse,
+  setFlyLockForCourse,
+  serializeFlyLock,
+  resolveClassSessionForLock,
+} = require('../services/campusFlyLock.service');
+const {
+  getOrCreateCoexistencePolicy,
+  saveCoexistencePolicy,
+  serializeCoexistencePolicy,
+  findActiveInfraction,
+  buildStudentCoexistenceScore,
+  computeDisciplineScore,
+} = require('../services/campusCoexistencePolicy.service');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
@@ -38,6 +54,10 @@ const {
   unlinkSchoolRouteStopCartera,
 } = require('../services/schoolRouteCartera.service');
 const {
+  buildCohortKey,
+  resolveSchoolAcademicYear,
+} = require('../services/communityFeed.service');
+const {
   buildParentPushUrl,
   getCampusPostCategoryLabel,
 } = require('../utils/parentPushTargets');
@@ -57,7 +77,14 @@ function isValidPublicMediaUrl(url) {
 const router = express.Router();
 const uploadTeacherProfilePhoto = uploadImageMiddleware.single('image');
 const disciplineObservationRecipients = ['coordination', 'direccion', 'psychology', 'rectoria'];
+const disciplineObservationDestinations = ['wellbeing', 'coexistence'];
+const disciplineObservationRecipientsByDestination = {
+  wellbeing: ['psychology', 'direccion', 'rectoria'],
+  coexistence: ['coordination', 'direccion', 'rectoria'],
+};
 const disciplineObservationViewerRoles = ['admin', 'rectoria', 'direccion', 'coordination', 'psychology'];
+const coexistencePolicyManagerRoles = ['admin', 'rectoria', 'direccion', 'coordination'];
+const attendanceReportViewerRoles = ['admin', 'rectoria', 'direccion', 'coordination', 'psychology', 'nursing'];
 const schoolRouteOperatorRoles = ['admin', 'rectoria', 'direccion', 'academic_secretary', 'school_route'];
 const schoolRouteConfiguratorRoles = ['admin', 'rectoria', 'direccion', 'academic_secretary'];
 
@@ -213,13 +240,40 @@ async function resolveTeacherOwnPublishedCommunicationIds(schoolId, teacherUserI
 
 async function buildTeacherFamilyFeedAccessQuery(schoolId, teacherUserId) {
   const ownPublishedCommunicationIds = await resolveTeacherOwnPublishedCommunicationIds(schoolId, teacherUserId);
+  const [teacherCourses, academicYear] = await Promise.all([
+    CampusCourse.find({ schoolId, teacherUserId, status: 'active' })
+      .select('studentGradeKey gradeLevel section sourceCourseKey')
+      .lean(),
+    resolveSchoolAcademicYear(schoolId),
+  ]);
+
+  const cohortKeys = new Set();
+  teacherCourses.forEach((course) => {
+    const grade = normalizeText(course.studentGradeKey || course.gradeLevel);
+    const section = normalizeText(course.section || course.sourceCourseKey);
+    if (!grade) return;
+    [
+      buildCohortKey({ academicYear, grade, course: section || grade }),
+      buildCohortKey({ academicYear, grade, course: grade }),
+      section ? buildCohortKey({ academicYear, grade, course: `${grade}${section}` }) : '',
+    ].filter(Boolean).forEach((key) => cohortKeys.add(key));
+  });
+
+  const orFilters = [
+    { audienceType: 'general' },
+    { _id: { $in: ownPublishedCommunicationIds } },
+  ];
+  if (cohortKeys.size) {
+    orFilters.push({
+      audienceType: 'course',
+      cohortKey: { $in: Array.from(cohortKeys) },
+    });
+  }
+
   return {
     schoolId,
     sentAt: { $ne: null },
-    $or: [
-      { audienceType: 'general' },
-      { _id: { $in: ownPublishedCommunicationIds } },
-    ],
+    $or: orFilters,
   };
 }
 
@@ -1813,6 +1867,31 @@ function getCourseAcademicPeriods(course) {
   return fallbackPeriods.ok ? fallbackPeriods.periods : buildDefaultAcademicPeriods();
 }
 
+function normalizeAcademicContentMaterials(materials = []) {
+  return (Array.isArray(materials) ? materials : [])
+    .map((item) => {
+      const url = normalizeText(item?.url);
+      if (!url) {
+        return null;
+      }
+
+      const sourceType = normalizeText(item?.sourceType) === 'link' ? 'link' : 'file';
+      return {
+        sourceType,
+        kind: normalizeText(item?.kind) || (sourceType === 'link' ? 'link' : 'file'),
+        title: normalizeText(item?.title || item?.fileName || url).slice(0, 160),
+        url,
+        fileName: normalizeText(item?.fileName),
+        mimeType: normalizeText(item?.mimeType),
+        sizeBytes: Math.max(0, Number(item?.sizeBytes || 0)),
+        extension: normalizeText(item?.extension),
+        storage: normalizeText(item?.storage),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 function normalizeAcademicContentTopics(topics = []) {
   const usedKeys = new Set();
   return (Array.isArray(topics) ? topics : [])
@@ -1829,11 +1908,20 @@ function normalizeAcademicContentTopics(topics = []) {
 
       usedKeys.add(key);
 
+      const completed = Boolean(topic?.completed);
+      const completedAtRaw = topic?.completedAt ? new Date(topic.completedAt) : null;
+      const completedAt = completed && completedAtRaw && !Number.isNaN(completedAtRaw.getTime())
+        ? completedAtRaw
+        : (completed ? new Date() : null);
+
       return {
         key,
         title,
         description: normalizeText(topic?.description).slice(0, 1000),
         order: Number.isFinite(Number(topic?.order)) ? Number(topic.order) : (index + 1) * 10,
+        completed,
+        completedAt,
+        materials: normalizeAcademicContentMaterials(topic?.materials),
       };
     })
     .filter((topic) => Boolean(topic.title))
@@ -1907,6 +1995,7 @@ function serializeCourse(course, options = {}) {
     gradeLevel: normalizeText(course.gradeLevel),
     section: normalizeText(course.section),
     studentGradeKey: normalizeText(course.studentGradeKey),
+    includeClassAttendance: course.includeClassAttendance !== false,
     description: normalizeText(course.description),
     colorToken: normalizeText(course.colorToken) || '#2a6f97',
     classSessions: Array.isArray(course.classSessions)
@@ -2018,8 +2107,51 @@ function buildAcademicLookupMaps(academicStructure) {
     .map((subject) => [normalizeText(subject?.key), normalizeText(subject?.label || subject?.key)]));
   const gradesByKey = new Map((Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
     .map((grade) => [normalizeText(grade?.key), grade]));
+  const levelsByKey = new Map((Array.isArray(academicStructure?.levels) ? academicStructure.levels : [])
+    .map((level) => [normalizeText(level?.key), level]));
 
-  return { subjectsByKey, gradesByKey };
+  return { subjectsByKey, gradesByKey, levelsByKey };
+}
+
+function resolveIncludeClassAttendanceForCourse(academicStructure, course) {
+  if (!academicStructure || !course) {
+    return true;
+  }
+
+  const { gradesByKey, levelsByKey } = buildAcademicLookupMaps(academicStructure);
+  const gradeCandidates = [
+    normalizeText(course?.studentGradeKey),
+    normalizeText(course?.gradeLevel),
+    normalizeText(course?.sourceCourseKey),
+  ].filter(Boolean);
+
+  let matchedGrade = null;
+  for (const candidate of gradeCandidates) {
+    matchedGrade = gradesByKey.get(candidate)
+      || Array.from(gradesByKey.values()).find((grade) => {
+        const gradeKey = normalizeText(grade?.key);
+        const gradeLabel = normalizeText(grade?.label);
+        return gradeKey === candidate
+          || gradeLabel === candidate
+          || candidate.startsWith(`${gradeKey}:`)
+          || candidate.toLowerCase() === gradeKey.toLowerCase()
+          || candidate.toLowerCase() === gradeLabel.toLowerCase();
+      });
+    if (matchedGrade) {
+      break;
+    }
+  }
+
+  if (!matchedGrade) {
+    return true;
+  }
+
+  const level = levelsByKey.get(normalizeText(matchedGrade.levelKey));
+  if (!level) {
+    return true;
+  }
+
+  return level.includeClassAttendance !== false;
 }
 
 function buildAcademicCourseSectionFromKey(courseKey = '') {
@@ -2648,6 +2780,7 @@ function serializePost(post) {
 }
 
 function serializeDisciplineObservation(observation) {
+  const destination = normalizeText(observation.destination) === 'wellbeing' ? 'wellbeing' : 'coexistence';
   return {
     id: String(observation._id),
     teacherUserId: String(observation.teacherUserId?._id || observation.teacherUserId || ''),
@@ -2662,6 +2795,10 @@ function serializeDisciplineObservation(observation) {
     studentGrade: normalizeText(observation.studentGrade || observation.studentId?.grade),
     studentCourse: normalizeText(observation.studentCourse || observation.studentId?.course),
     observation: normalizeText(observation.observation),
+    destination,
+    infractionKey: normalizeText(observation.infractionKey),
+    infractionLabel: normalizeText(observation.infractionLabel),
+    deductionPercent: Number(observation.deductionPercent || 0),
     incidentAt: observation.incidentAt || null,
     status: normalizeText(observation.status) || 'submitted',
     recipients: Array.isArray(observation.recipients) ? observation.recipients.map(normalizeText).filter(Boolean) : [],
@@ -2843,9 +2980,17 @@ async function queueCampusPostPublishedNotifications({ schoolId, teacherUserId, 
 }
 
 async function notifyDisciplineObservation({ schoolId, observation }) {
+  const destination = normalizeText(observation.destination) === 'wellbeing' ? 'wellbeing' : 'coexistence';
+  const recipientRoles = Array.isArray(observation.recipients) && observation.recipients.length > 0
+    ? observation.recipients.map(normalizeText).filter(Boolean)
+    : (disciplineObservationRecipientsByDestination[destination] || disciplineObservationRecipients);
+  const staffRoles = Array.from(new Set([...recipientRoles, 'admin']));
+  const titlePrefix = destination === 'wellbeing' ? 'Bienestar' : 'Convivencia escolar';
+  const bodyKind = destination === 'wellbeing' ? 'una observación de bienestar' : 'una observación de comportamiento';
+
   const users = await User.find({
     schoolId,
-    role: { $in: ['coordination', 'direccion', 'psychology', 'rectoria', 'admin'] },
+    role: { $in: staffRoles },
     status: 'active',
     deletedAt: null,
   }).select('_id role').lean();
@@ -2867,31 +3012,35 @@ async function notifyDisciplineObservation({ schoolId, observation }) {
     schoolId,
     parentIds: target.userIds,
     studentId: observation.studentId,
-    title: `Convivencia escolar: ${observation.studentName || 'Estudiante'}`,
-    body: `${observation.teacherName || 'Un docente'} registro una observacion de comportamiento en ${observation.courseTitle || 'clase'}${observation.incidentAt ? ` (${new Date(observation.incidentAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})` : ''}.`,
+    title: `${titlePrefix}: ${observation.studentName || 'Estudiante'}`,
+    body: `${observation.teacherName || 'Un docente'} registro ${bodyKind} en ${observation.courseTitle || 'clase'}${observation.incidentAt ? ` (${new Date(observation.incidentAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})` : ''}.`,
     payload: {
       type: 'campus.discipline_observation',
       observationId: String(observation._id),
       studentId: String(observation.studentId || ''),
       courseId: String(observation.courseId || ''),
+      destination,
       incidentAt: observation.incidentAt || null,
       url: target.url,
     },
   })));
 
-  results.push(await queueStudentParentNotification({
-    schoolId,
-    studentId: observation.studentId,
-    title: `Convivencia escolar: ${observation.studentName || 'Estudiante'}`,
-    body: `${observation.teacherName || 'Un docente'} registro una observacion de comportamiento en ${observation.courseTitle || 'clase'}${observation.incidentAt ? ` (${new Date(observation.incidentAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})` : ''}.`,
-    payload: {
-      type: 'campus.discipline_observation_parent',
-      observationId: String(observation._id),
-      studentId: String(observation.studentId || ''),
-      courseId: String(observation.courseId || ''),
-      url: buildParentPushUrl('campus.discipline_observation_parent', { studentId: observation.studentId }),
-    },
-  }));
+  if (destination === 'coexistence') {
+    results.push(await queueStudentParentNotification({
+      schoolId,
+      studentId: observation.studentId,
+      title: `${titlePrefix}: ${observation.studentName || 'Estudiante'}`,
+      body: `${observation.teacherName || 'Un docente'} registro ${bodyKind} en ${observation.courseTitle || 'clase'}${observation.incidentAt ? ` (${new Date(observation.incidentAt).toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})` : ''}.`,
+      payload: {
+        type: 'campus.discipline_observation_parent',
+        observationId: String(observation._id),
+        studentId: String(observation.studentId || ''),
+        courseId: String(observation.courseId || ''),
+        destination,
+        url: buildParentPushUrl('campus.discipline_observation_parent', { studentId: observation.studentId }),
+      },
+    }));
+  }
 
   return results.reduce((summary, result) => ({
     notificationsCreated: summary.notificationsCreated + Number(result?.notificationsCreated || 0),
@@ -2919,6 +3068,21 @@ async function canViewDisciplineObservations(req) {
 
   const campusContext = await loadCampusContext(req);
   return hasMembership(campusContext, 'campus_coordination');
+}
+
+async function canManageCoexistencePolicy(req) {
+  const role = normalizeText(req.user?.role);
+  if (coexistencePolicyManagerRoles.includes(role)) {
+    return true;
+  }
+
+  const campusContext = await loadCampusContext(req);
+  return hasMembership(campusContext, 'campus_coordination');
+}
+
+async function canViewAttendanceReport(req) {
+  const role = normalizeText(req.user?.role);
+  return attendanceReportViewerRoles.includes(role);
 }
 
 async function hasAssignedTeacherCourses(user) {
@@ -3385,6 +3549,7 @@ function buildTeacherOverviewCourseCards({
 
     return {
       ...normalizedCourse,
+      includeClassAttendance: resolveIncludeClassAttendanceForCourse(academicStructure, course),
       stats: buildCourseCardStats({
         courseDetail: { students: studentRows },
         posts: postsByCourseId.get(courseId) || [],
@@ -3620,7 +3785,7 @@ function enrichTeacherOverviewCourses(academicStructure, teacherUserId, courses)
 async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
   await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId: userId });
 
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels').lean();
   const [teacherUser, courses, recentPosts, gradingContext] = await Promise.all([
     User.findOne({ _id: userId, schoolId })
       .select('_id name username campusPhotoUrl campusPhotoThumbUrl')
@@ -3642,6 +3807,7 @@ async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
     const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
     return {
       ...serializeCourse(course, { gradingScale: courseGradingScale }),
+      includeClassAttendance: resolveIncludeClassAttendanceForCourse(academicStructure, course),
       stats: buildEmptyCourseStats(),
     };
   });
@@ -3663,7 +3829,7 @@ async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
 }
 
 async function buildTeacherOverviewMetrics({ schoolId, userId }) {
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels').lean();
   const gradingContext = await loadCampusGradingContext(schoolId);
   const courses = await CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
     .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
@@ -3995,7 +4161,7 @@ router.get('/teacher/courses/:id', requireCampusTeacherAccess, async (req, res) 
 
     const gradingContext = await loadCampusGradingContext(schoolId);
     const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
-    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels').lean();
     const [detail, posts] = await Promise.all([
       buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course, gradingScale: courseGradingScale, academicStructure }),
       CampusPost.find({ schoolId, teacherUserId: userId, courseId: course._id })
@@ -4234,6 +4400,45 @@ router.patch('/teacher/courses/:id/academic-content', requireCampusTeacherAccess
     return res.status(200).json(detail);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/teacher/courses/:id/academic-content/media', requireCampusTeacherAccess, uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+
+    const course = await CampusCourse.findOne({ _id: id, schoolId, teacherUserId: userId }).select('_id').lean();
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const incomingFiles = Array.isArray(req.files) ? req.files : [];
+    if (!incomingFiles.length) {
+      return res.status(400).json({ message: 'No se recibió ningún archivo.' });
+    }
+
+    incomingFiles.forEach((file) => {
+      const resolvedMimeType = resolveUploadMimeType(file);
+      if (resolvedMimeType) {
+        file.mimetype = resolvedMimeType;
+      }
+    });
+
+    const materials = await processStoredCampusMaterialFiles(incomingFiles, {
+      folder: 'campus-academic-content',
+      schoolId,
+      createdByUserId: userId,
+      requireCloudinary: isCloudinaryEnabled(),
+    });
+
+    return res.status(201).json({ materials });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo subir el material de apoyo.' });
   }
 });
 
@@ -5297,6 +5502,12 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
     const incidentDate = normalizeText(req.body.incidentDate);
     const incidentTime = normalizeText(req.body.incidentTime);
     const incidentAtRaw = normalizeText(req.body.incidentAt);
+    const destinationRaw = normalizeText(req.body.destination).toLowerCase();
+    const destination = disciplineObservationDestinations.includes(destinationRaw)
+      ? destinationRaw
+      : 'coexistence';
+    const recipients = disciplineObservationRecipientsByDestination[destination] || disciplineObservationRecipients;
+    const infractionKeyRaw = normalizeText(req.body.infractionKey);
 
     if (!isValidObjectId(courseId)) {
       return res.status(400).json({ message: 'courseId is invalid' });
@@ -5306,6 +5517,25 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
     }
     if (!observationText || observationText.length < 8) {
       return res.status(400).json({ message: 'La observacion debe tener al menos 8 caracteres.' });
+    }
+
+    let infractionKey = '';
+    let infractionLabel = '';
+    let deductionPercent = 0;
+    if (destination === 'coexistence') {
+      const policy = await getOrCreateCoexistencePolicy(schoolId);
+      const activeInfractions = (policy.infractions || []).filter((item) => item.active !== false);
+      if (activeInfractions.length > 0) {
+        const matched = findActiveInfraction(policy, infractionKeyRaw);
+        if (!matched) {
+          return res.status(400).json({
+            message: 'Selecciona el tipo de falta definido por Rectoría para calificar la convivencia.',
+          });
+        }
+        infractionKey = normalizeText(matched.key);
+        infractionLabel = normalizeText(matched.label);
+        deductionPercent = Number(matched.deductionPercent || 0);
+      }
     }
 
     let incidentAt = null;
@@ -5361,9 +5591,13 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
       studentGrade: normalizeText(student.grade),
       studentCourse: normalizeText(student.course),
       observation: observationText,
+      destination,
+      infractionKey,
+      infractionLabel,
+      deductionPercent,
       incidentAt,
       status: 'submitted',
-      recipients: disciplineObservationRecipients,
+      recipients,
       submittedAt: new Date(),
     });
 
@@ -5384,12 +5618,176 @@ router.get('/discipline-observations', async (req, res) => {
     }
 
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
-    const observations = await CampusDisciplineObservation.find({ schoolId })
+    const destinationRaw = normalizeText(req.query.destination).toLowerCase();
+    const filter = { schoolId };
+    if (disciplineObservationDestinations.includes(destinationRaw)) {
+      if (destinationRaw === 'coexistence') {
+        // Legacy rows without destination behave as convivencia/disciplina.
+        filter.$or = [{ destination: 'coexistence' }, { destination: { $exists: false } }, { destination: null }];
+      } else {
+        filter.destination = destinationRaw;
+      }
+    }
+
+    const observations = await CampusDisciplineObservation.find(filter)
       .sort({ submittedAt: -1, createdAt: -1 })
       .limit(limit)
       .lean();
 
     return res.status(200).json({ observations: observations.map(serializeDisciplineObservation) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/attendance-report', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    if (!(await canViewAttendanceReport(req))) {
+      return res.status(403).json({ message: 'No tienes permisos para ver el reporte de asistencia.' });
+    }
+
+    // Solo asistencia de headroom / llegada al colegio (primera del día).
+    const attendanceType = 'guidance_routine';
+    const date = normalizeDateString(req.query?.date || new Date().toISOString());
+    if (!date) {
+      return res.status(400).json({ message: 'Selecciona una fecha válida.' });
+    }
+
+    const [sessions, guidanceCourses, teacherUsers] = await Promise.all([
+      CampusAttendanceSession.find({
+        schoolId,
+        attendanceType,
+        date,
+      })
+        .sort({ gradeSnapshot: 1, courseTitleSnapshot: 1, submittedAt: -1 })
+        .lean(),
+      CampusCourse.find({
+        schoolId,
+        courseType: 'guidance_routine',
+        status: { $ne: 'archived' },
+      })
+        .select('title subject gradeLevel section studentGradeKey teacherUserId teacherName sourceCourseKey status')
+        .lean(),
+      User.find({
+        schoolId,
+        status: 'active',
+        deletedAt: null,
+      })
+        .select('_id name username')
+        .lean(),
+    ]);
+
+    const teacherNameById = new Map(
+      teacherUsers.map((user) => [
+        String(user._id),
+        normalizeText(user.name) || normalizeText(user.username),
+      ])
+    );
+
+    const sessionByCourseId = new Map();
+    sessions.forEach((session) => {
+      const courseId = String(session.courseId || '');
+      if (!courseId) return;
+      const existing = sessionByCourseId.get(courseId);
+      if (!existing || new Date(session.submittedAt || 0) > new Date(existing.submittedAt || 0)) {
+        sessionByCourseId.set(courseId, session);
+      }
+    });
+
+    const buildSessionSummary = (records = []) => records.reduce((accumulator, record) => {
+      const status = normalizeCampusAttendanceStatus(record.status);
+      accumulator[status] = Number(accumulator[status] || 0) + 1;
+      accumulator.total += 1;
+      return accumulator;
+    }, { total: 0, present: 0, late: 0, absent: 0, excused: 0 });
+
+    const serializeReportSession = (session, course = null) => {
+      const records = (Array.isArray(session?.records) ? session.records : []).map((record) => {
+        const status = normalizeCampusAttendanceStatus(record.status);
+        return {
+          studentId: String(record.studentId || ''),
+          studentName: normalizeText(record.studentNameSnapshot || record.studentName),
+          schoolCode: normalizeText(record.studentCodeSnapshot || record.schoolCode),
+          status,
+          statusLabel: campusAttendanceStatusLabels[status],
+          notes: normalizeText(record.notes),
+          recordedAt: record.recordedAt || null,
+        };
+      });
+      const summary = buildSessionSummary(records);
+      const teacherUserId = normalizeText(session?.teacherUserId || course?.teacherUserId);
+      return {
+        id: session?._id ? String(session._id) : '',
+        submitted: Boolean(session?._id),
+        courseId: String(session?.courseId || course?._id || ''),
+        courseTitle: normalizeText(session?.courseTitleSnapshot || course?.title),
+        subject: normalizeText(session?.subjectSnapshot || course?.subject || 'Guidance Routine'),
+        grade: normalizeText(session?.gradeSnapshot || course?.gradeLevel || course?.studentGradeKey),
+        section: normalizeText(course?.section),
+        teacherUserId,
+        teacherName: teacherNameById.get(teacherUserId) || normalizeText(course?.teacherName) || 'Docente',
+        submittedAt: session?.submittedAt || null,
+        summary,
+        records,
+      };
+    };
+
+    const reportedCourseIds = new Set();
+    const reportedSessions = sessions.map((session) => {
+      const courseId = String(session.courseId || '');
+      reportedCourseIds.add(courseId);
+      const course = guidanceCourses.find((item) => String(item._id) === courseId) || null;
+      return serializeReportSession(session, course);
+    });
+
+    const pendingCourses = guidanceCourses
+      .filter((course) => !reportedCourseIds.has(String(course._id)))
+      .map((course) => ({
+        id: '',
+        submitted: false,
+        courseId: String(course._id),
+        courseTitle: normalizeText(course.title),
+        subject: normalizeText(course.subject) || 'Guidance Routine',
+        grade: normalizeText(course.gradeLevel || course.studentGradeKey),
+        section: normalizeText(course.section),
+        teacherUserId: normalizeText(course.teacherUserId),
+        teacherName: teacherNameById.get(String(course.teacherUserId || '')) || normalizeText(course.teacherName) || 'Docente',
+        submittedAt: null,
+        summary: { total: 0, present: 0, late: 0, absent: 0, excused: 0 },
+        records: [],
+      }));
+
+    const allSessions = [...reportedSessions, ...pendingCourses]
+      .sort((left, right) => String(left.grade || '').localeCompare(String(right.grade || ''), 'es')
+        || String(left.courseTitle || '').localeCompare(String(right.courseTitle || ''), 'es'));
+
+    const summary = allSessions.reduce((accumulator, session) => {
+      accumulator.present += Number(session.summary?.present || 0);
+      accumulator.late += Number(session.summary?.late || 0);
+      accumulator.absent += Number(session.summary?.absent || 0);
+      accumulator.excused += Number(session.summary?.excused || 0);
+      accumulator.studentsMarked += Number(session.summary?.total || 0);
+      if (session.submitted) accumulator.sessionsSubmitted += 1;
+      else accumulator.coursesMissing += 1;
+      return accumulator;
+    }, {
+      sessionsSubmitted: 0,
+      coursesMissing: 0,
+      studentsMarked: 0,
+      present: 0,
+      late: 0,
+      absent: 0,
+      excused: 0,
+    });
+
+    return res.status(200).json({
+      date,
+      attendanceType,
+      attendanceTypeLabel: campusAttendanceTypeLabels[attendanceType],
+      summary,
+      sessions: allSessions,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -5977,6 +6375,697 @@ router.patch('/coordination/courses/:id', requireCampusCoordinationAccess, async
     return res.status(200).json(serializeCourse(course));
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+function serializeSubjectReportCard(report) {
+  if (!report) return null;
+  return {
+    id: String(report._id),
+    campusCourseId: String(report.campusCourseId?._id || report.campusCourseId || ''),
+    sourceCourseKey: normalizeText(report.sourceCourseKey),
+    studentGradeKey: normalizeText(report.studentGradeKey),
+    sectionLabel: normalizeText(report.sectionLabel),
+    subject: normalizeText(report.subject),
+    courseTitle: normalizeText(report.courseTitle),
+    academicPeriodKey: normalizeText(report.academicPeriodKey),
+    academicPeriodName: normalizeText(report.academicPeriodName),
+    teacherUserId: String(report.teacherUserId?._id || report.teacherUserId || ''),
+    teacherName: normalizeText(report.teacherName),
+    headroomTeacherUserId: String(report.headroomTeacherUserId?._id || report.headroomTeacherUserId || ''),
+    status: normalizeText(report.status) || 'draft',
+    students: (Array.isArray(report.students) ? report.students : []).map((student) => ({
+      studentId: String(student.studentId?._id || student.studentId || ''),
+      studentName: normalizeText(student.studentName),
+      studentSchoolCode: normalizeText(student.studentSchoolCode),
+      periodAverage: student.periodAverage === null || student.periodAverage === undefined
+        ? null
+        : Number(student.periodAverage),
+      observation: normalizeText(student.observation),
+    })),
+    submittedAt: report.submittedAt || null,
+    createdAt: report.createdAt || null,
+    updatedAt: report.updatedAt || null,
+  };
+}
+
+function serializeGeneralReportCard(report) {
+  if (!report) return null;
+  return {
+    id: String(report._id),
+    sourceCourseKey: normalizeText(report.sourceCourseKey),
+    studentGradeKey: normalizeText(report.studentGradeKey),
+    sectionLabel: normalizeText(report.sectionLabel),
+    academicPeriodKey: normalizeText(report.academicPeriodKey),
+    academicPeriodName: normalizeText(report.academicPeriodName),
+    headroomTeacherUserId: String(report.headroomTeacherUserId?._id || report.headroomTeacherUserId || ''),
+    headroomTeacherName: normalizeText(report.headroomTeacherName),
+    status: normalizeText(report.status) || 'draft',
+    subjectReportIds: (Array.isArray(report.subjectReportIds) ? report.subjectReportIds : []).map((id) => String(id)),
+    students: (Array.isArray(report.students) ? report.students : []).map((student) => ({
+      studentId: String(student.studentId?._id || student.studentId || ''),
+      studentName: normalizeText(student.studentName),
+      studentSchoolCode: normalizeText(student.studentSchoolCode),
+      subjectLines: (Array.isArray(student.subjectLines) ? student.subjectLines : []).map((line) => ({
+        campusCourseId: String(line.campusCourseId?._id || line.campusCourseId || ''),
+        subjectReportId: String(line.subjectReportId?._id || line.subjectReportId || ''),
+        subject: normalizeText(line.subject),
+        teacherUserId: String(line.teacherUserId?._id || line.teacherUserId || ''),
+        teacherName: normalizeText(line.teacherName),
+        periodAverage: line.periodAverage === null || line.periodAverage === undefined
+          ? null
+          : Number(line.periodAverage),
+        teacherObservation: normalizeText(line.teacherObservation),
+      })),
+      overallAverage: student.overallAverage === null || student.overallAverage === undefined
+        ? null
+        : Number(student.overallAverage),
+      headroomObservation: normalizeText(student.headroomObservation),
+    })),
+    publishedAt: report.publishedAt || null,
+    createdAt: report.createdAt || null,
+    updatedAt: report.updatedAt || null,
+  };
+}
+
+async function resolveHeadroomAssignmentForCourse(schoolId, course) {
+  const sourceCourseKey = normalizeText(course?.sourceCourseKey).toUpperCase();
+  const studentGradeKey = normalizeText(course?.studentGradeKey || course?.gradeLevel);
+  if (!schoolId || !sourceCourseKey) {
+    return null;
+  }
+
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('grades').lean();
+  const grades = Array.isArray(academicStructure?.grades) ? academicStructure.grades : [];
+  for (const grade of grades) {
+    const gradeKey = normalizeText(grade?.key || grade?.label);
+    const courses = Array.isArray(grade?.courses) ? grade.courses : [];
+    for (const structureCourse of courses) {
+      const courseKey = normalizeText(structureCourse?.key).toUpperCase();
+      if (courseKey !== sourceCourseKey) {
+        continue;
+      }
+      if (studentGradeKey && gradeKey && gradeKey !== studentGradeKey) {
+        // Prefer exact grade match but still allow sourceCourseKey-only match.
+      }
+      const headroomTeacherUserId = normalizeText(structureCourse?.headroomTeacherUserId);
+      if (!headroomTeacherUserId || !mongoose.Types.ObjectId.isValid(headroomTeacherUserId)) {
+        return {
+          sourceCourseKey,
+          studentGradeKey: gradeKey || studentGradeKey,
+          sectionLabel: normalizeText(structureCourse?.label || structureCourse?.section || courseKey),
+          headroomTeacherUserId: null,
+        };
+      }
+      return {
+        sourceCourseKey,
+        studentGradeKey: gradeKey || studentGradeKey,
+        sectionLabel: normalizeText(structureCourse?.label || structureCourse?.section || courseKey),
+        headroomTeacherUserId,
+      };
+    }
+  }
+
+  return {
+    sourceCourseKey,
+    studentGradeKey,
+    sectionLabel: normalizeText(course?.section || sourceCourseKey),
+    headroomTeacherUserId: null,
+  };
+}
+
+async function loadSubjectCourseRosterWithPeriodAverages({ schoolId, course, academicPeriodKey }) {
+  const academicPeriods = getCourseAcademicPeriods(course);
+  const period = academicPeriods.find((item) => normalizeText(item.key) === normalizeText(academicPeriodKey))
+    || academicPeriods[0]
+    || null;
+  if (!period) {
+    return { period: null, students: [] };
+  }
+
+  const rosterStudents = await loadStudentsForTeacherCourses(schoolId, [course]);
+  const gradeEntries = await CampusGradeEntry.find({
+    schoolId,
+    courseId: course._id,
+    academicPeriodKey: period.key,
+  }).lean();
+  const studentRows = buildCourseStudentRows(rosterStudents, academicPeriods, gradeEntries);
+
+  return {
+    period: {
+      key: normalizeText(period.key),
+      name: normalizeText(period.name),
+    },
+    students: studentRows.map((row) => {
+      const matchingPeriod = (row.periods || []).find((item) => normalizeText(item.key) === normalizeText(period.key));
+      return {
+        studentId: String(row.studentId),
+        studentName: normalizeText(row.name),
+        studentSchoolCode: normalizeText(row.schoolCode),
+        periodAverage: matchingPeriod?.periodScore === null || matchingPeriod?.periodScore === undefined
+          ? null
+          : Number(matchingPeriod.periodScore),
+      };
+    }),
+  };
+}
+
+router.get('/teacher/courses/:id/report-cards', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+    const academicPeriodKey = normalizeText(req.query.academicPeriodKey);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+
+    const course = await CampusCourse.findOne({ _id: id, schoolId, teacherUserId: userId, status: 'active' }).lean();
+    if (!course || normalizeText(course.courseType) === 'guidance_routine') {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const query = { schoolId, campusCourseId: course._id, teacherUserId: userId };
+    if (academicPeriodKey) {
+      query.academicPeriodKey = academicPeriodKey;
+    }
+
+    const reports = await CampusSubjectReportCard.find(query).sort({ updatedAt: -1 }).lean();
+    const headroom = await resolveHeadroomAssignmentForCourse(schoolId, course);
+    const periods = getCourseAcademicPeriods(course).map((period) => ({
+      key: normalizeText(period.key),
+      name: normalizeText(period.name),
+    }));
+
+    return res.status(200).json({
+      courseId: String(course._id),
+      subject: normalizeText(course.subject),
+      periods,
+      headroomTeacherUserId: headroom?.headroomTeacherUserId || '',
+      sectionLabel: headroom?.sectionLabel || normalizeText(course.section),
+      reports: reports.map(serializeSubjectReportCard),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar el boletín.' });
+  }
+});
+
+router.post('/teacher/courses/:id/report-cards', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const { id } = req.params;
+    const academicPeriodKey = normalizeText(req.body?.academicPeriodKey);
+    const status = normalizeText(req.body?.status) === 'submitted' ? 'submitted' : 'draft';
+    const incomingStudents = Array.isArray(req.body?.students) ? req.body.students : [];
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+    if (!academicPeriodKey) {
+      return res.status(400).json({ message: 'Debes indicar el periodo académico del boletín.' });
+    }
+
+    const course = await CampusCourse.findOne({ _id: id, schoolId, teacherUserId: userId, status: 'active' });
+    if (!course || normalizeText(course.courseType) === 'guidance_routine') {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const headroom = await resolveHeadroomAssignmentForCourse(schoolId, course);
+    if (status === 'submitted' && !headroom?.headroomTeacherUserId) {
+      return res.status(400).json({ message: 'Este curso aún no tiene director de grupo (headroom teacher) asignado.' });
+    }
+
+    const { period, students: rosterAverages } = await loadSubjectCourseRosterWithPeriodAverages({
+      schoolId,
+      course,
+      academicPeriodKey,
+    });
+    if (!period) {
+      return res.status(400).json({ message: 'El periodo académico indicado no existe en este curso.' });
+    }
+
+    const observationByStudentId = new Map(
+      incomingStudents
+        .map((entry) => [String(entry?.studentId || '').trim(), normalizeText(entry?.observation).slice(0, 1000)])
+        .filter(([studentId]) => studentId)
+    );
+
+    const students = rosterAverages.map((student) => ({
+      studentId: student.studentId,
+      studentName: student.studentName,
+      studentSchoolCode: student.studentSchoolCode,
+      periodAverage: student.periodAverage,
+      observation: observationByStudentId.get(String(student.studentId)) || '',
+    }));
+
+    if (status === 'submitted' && students.some((student) => student.periodAverage === null || student.periodAverage === undefined)) {
+      return res.status(400).json({
+        message: 'Todos los alumnos deben tener promedio del periodo antes de enviar el boletín al director de grupo.',
+      });
+    }
+
+    const report = await CampusSubjectReportCard.findOneAndUpdate(
+      {
+        schoolId,
+        campusCourseId: course._id,
+        academicPeriodKey: period.key,
+      },
+      {
+        $set: {
+          schoolId,
+          campusCourseId: course._id,
+          sourceCourseKey: normalizeText(course.sourceCourseKey).toUpperCase(),
+          studentGradeKey: normalizeText(course.studentGradeKey || course.gradeLevel),
+          sectionLabel: headroom?.sectionLabel || normalizeText(course.section),
+          subject: normalizeText(course.subject),
+          courseTitle: normalizeText(course.title),
+          academicPeriodKey: period.key,
+          academicPeriodName: period.name,
+          teacherUserId: userId,
+          teacherName: normalizeText(name),
+          headroomTeacherUserId: headroom?.headroomTeacherUserId || null,
+          status,
+          students,
+          submittedAt: status === 'submitted' ? new Date() : null,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    if (status === 'submitted' && headroom?.headroomTeacherUserId) {
+      await queueNotificationsForParents({
+        schoolId,
+        parentIds: [headroom.headroomTeacherUserId],
+        title: `Boletín de ${normalizeText(course.subject) || 'materia'} recibido`,
+        body: `${normalizeText(name) || 'Un docente'} envió el boletín de ${normalizeText(course.subject) || 'su materia'} (${period.name}) para ${headroom.sectionLabel || 'el curso'}.`,
+        payload: {
+          type: 'campus.subject_report_submitted',
+          courseId: String(course._id),
+          reportId: String(report._id),
+          academicPeriodKey: period.key,
+          url: '/campus/teacher',
+        },
+      }).catch((error) => console.warn(`[CAMPUS_REPORT_NOTIFY] ${error.message}`));
+    }
+
+    return res.status(status === 'submitted' ? 201 : 200).json({ report: serializeSubjectReportCard(report) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo guardar el boletín.' });
+  }
+});
+
+router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const sourceCourseKey = normalizeText(req.query.sourceCourseKey).toUpperCase();
+    const academicPeriodKey = normalizeText(req.query.academicPeriodKey);
+
+    const guidanceCourses = await CampusCourse.find({
+      schoolId,
+      teacherUserId: userId,
+      status: 'active',
+      courseType: 'guidance_routine',
+      ...(sourceCourseKey ? { sourceCourseKey } : {}),
+    }).sort({ section: 1, title: 1 }).lean();
+
+    if (!guidanceCourses.length) {
+      return res.status(200).json({ sections: [] });
+    }
+
+    const sections = [];
+    for (const guidanceCourse of guidanceCourses) {
+      const sectionKey = normalizeText(guidanceCourse.sourceCourseKey).toUpperCase();
+      const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
+      const subjectCourses = await CampusCourse.find({
+        schoolId,
+        status: 'active',
+        courseType: { $ne: 'guidance_routine' },
+        sourceCourseKey: sectionKey,
+        ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
+      }).select('_id title subject teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+
+      const periodOptions = new Map();
+      subjectCourses.forEach((course) => {
+        getCourseAcademicPeriods(course).forEach((period) => {
+          const key = normalizeText(period.key);
+          if (!key || periodOptions.has(key)) return;
+          periodOptions.set(key, { key, name: normalizeText(period.name) });
+        });
+      });
+
+      const selectedPeriodKey = academicPeriodKey || Array.from(periodOptions.keys())[0] || '';
+      const subjectReports = selectedPeriodKey
+        ? await CampusSubjectReportCard.find({
+          schoolId,
+          sourceCourseKey: sectionKey,
+          academicPeriodKey: selectedPeriodKey,
+        }).lean()
+        : [];
+      const reportsByCourseId = new Map(subjectReports.map((report) => [String(report.campusCourseId), report]));
+
+      const subjectChecklist = subjectCourses.map((course) => {
+        const report = reportsByCourseId.get(String(course._id));
+        return {
+          campusCourseId: String(course._id),
+          subject: normalizeText(course.subject) || normalizeText(course.title),
+          teacherUserId: String(course.teacherUserId || ''),
+          report: report ? serializeSubjectReportCard(report) : null,
+          submitted: report?.status === 'submitted',
+        };
+      });
+
+      const allSubmitted = subjectChecklist.length > 0 && subjectChecklist.every((item) => item.submitted);
+      const generalReport = selectedPeriodKey
+        ? await CampusGeneralReportCard.findOne({
+          schoolId,
+          sourceCourseKey: sectionKey,
+          academicPeriodKey: selectedPeriodKey,
+          headroomTeacherUserId: userId,
+        }).lean()
+        : null;
+
+      sections.push({
+        sourceCourseKey: sectionKey,
+        studentGradeKey: gradeKey,
+        sectionLabel: normalizeText(guidanceCourse.section) || sectionKey,
+        guidanceCourseId: String(guidanceCourse._id),
+        periods: Array.from(periodOptions.values()),
+        academicPeriodKey: selectedPeriodKey,
+        subjects: subjectChecklist,
+        allSubjectsSubmitted: allSubmitted,
+        generalReport: serializeGeneralReportCard(generalReport),
+      });
+    }
+
+    return res.status(200).json({ sections });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar el boletín general.' });
+  }
+});
+
+router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const sourceCourseKey = normalizeText(req.body?.sourceCourseKey).toUpperCase();
+    const academicPeriodKey = normalizeText(req.body?.academicPeriodKey);
+    const status = normalizeText(req.body?.status) === 'published' ? 'published' : 'draft';
+    const incomingStudents = Array.isArray(req.body?.students) ? req.body.students : [];
+
+    if (!sourceCourseKey || !academicPeriodKey) {
+      return res.status(400).json({ message: 'Debes indicar el curso y el periodo del boletín general.' });
+    }
+
+    const guidanceCourse = await CampusCourse.findOne({
+      schoolId,
+      teacherUserId: userId,
+      status: 'active',
+      courseType: 'guidance_routine',
+      sourceCourseKey,
+    }).lean();
+    if (!guidanceCourse) {
+      return res.status(403).json({ message: 'No eres director de grupo de este curso.' });
+    }
+
+    const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
+    const subjectCourses = await CampusCourse.find({
+      schoolId,
+      status: 'active',
+      courseType: { $ne: 'guidance_routine' },
+      sourceCourseKey,
+      ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
+    }).lean();
+
+    if (!subjectCourses.length) {
+      return res.status(400).json({ message: 'No hay materias activas para este curso.' });
+    }
+
+    const subjectReports = await CampusSubjectReportCard.find({
+      schoolId,
+      sourceCourseKey,
+      academicPeriodKey,
+      status: 'submitted',
+      campusCourseId: { $in: subjectCourses.map((course) => course._id) },
+    }).lean();
+
+    if (subjectReports.length !== subjectCourses.length) {
+      return res.status(400).json({
+        message: 'Aún faltan boletines de materias por enviar. El boletín general se puede generar cuando todas las materias estén listas.',
+      });
+    }
+
+    const observationByStudentId = new Map(
+      incomingStudents
+        .map((entry) => [String(entry?.studentId || '').trim(), normalizeText(entry?.headroomObservation).slice(0, 1000)])
+        .filter(([studentId]) => studentId)
+    );
+
+    const studentsById = new Map();
+    subjectReports.forEach((report) => {
+      (report.students || []).forEach((student) => {
+        const studentId = String(student.studentId || '');
+        if (!studentId) return;
+        const current = studentsById.get(studentId) || {
+          studentId,
+          studentName: normalizeText(student.studentName),
+          studentSchoolCode: normalizeText(student.studentSchoolCode),
+          subjectLines: [],
+        };
+        current.subjectLines.push({
+          campusCourseId: report.campusCourseId,
+          subjectReportId: report._id,
+          subject: normalizeText(report.subject),
+          teacherUserId: report.teacherUserId,
+          teacherName: normalizeText(report.teacherName),
+          periodAverage: student.periodAverage === null || student.periodAverage === undefined
+            ? null
+            : Number(student.periodAverage),
+          teacherObservation: normalizeText(student.observation),
+        });
+        studentsById.set(studentId, current);
+      });
+    });
+
+    const students = Array.from(studentsById.values())
+      .map((student) => {
+        const averages = student.subjectLines
+          .map((line) => Number(line.periodAverage))
+          .filter((value) => Number.isFinite(value));
+        const overallAverage = averages.length
+          ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
+          : null;
+        return {
+          ...student,
+          subjectLines: student.subjectLines.sort((left, right) => left.subject.localeCompare(right.subject, 'es')),
+          overallAverage,
+          headroomObservation: observationByStudentId.get(String(student.studentId)) || '',
+        };
+      })
+      .sort((left, right) => left.studentName.localeCompare(right.studentName, 'es'));
+
+    const periodName = normalizeText(subjectReports[0]?.academicPeriodName) || academicPeriodKey;
+    const report = await CampusGeneralReportCard.findOneAndUpdate(
+      {
+        schoolId,
+        sourceCourseKey,
+        academicPeriodKey,
+      },
+      {
+        $set: {
+          schoolId,
+          sourceCourseKey,
+          studentGradeKey: gradeKey,
+          sectionLabel: normalizeText(guidanceCourse.section) || sourceCourseKey,
+          academicPeriodKey,
+          academicPeriodName: periodName,
+          headroomTeacherUserId: userId,
+          headroomTeacherName: normalizeText(name),
+          status,
+          subjectReportIds: subjectReports.map((item) => item._id),
+          students,
+          publishedAt: status === 'published' ? new Date() : null,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return res.status(status === 'published' ? 201 : 200).json({ report: serializeGeneralReportCard(report) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo guardar el boletín general.' });
+  }
+});
+
+router.get('/teacher/courses/:id/fly-lock', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+
+    const course = await CampusCourse.findOne({ _id: id, schoolId, teacherUserId: userId, status: 'active' }).lean();
+    if (!course || normalizeText(course.courseType) === 'guidance_routine') {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const lock = await getFlyLockForCourse({ schoolId, campusCourseId: course._id });
+    const sessionPreview = resolveClassSessionForLock(course);
+
+    return res.status(200).json({
+      courseId: String(course._id),
+      lock: serializeFlyLock(lock, { warning: lock?.active ? '' : sessionPreview.warning }),
+      sessionPreview: {
+        classSessionKey: sessionPreview.classSessionKey,
+        endTime: sessionPreview.endTime,
+        expiresAt: sessionPreview.expiresAt,
+        inProgress: Boolean(sessionPreview.inProgress),
+        canLock: Boolean(sessionPreview.canLock),
+        warning: sessionPreview.warning,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar el bloqueo de FLY.' });
+  }
+});
+
+router.put('/teacher/courses/:id/fly-lock', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const { id } = req.params;
+    const active = Boolean(req.body?.active);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+
+    const course = await CampusCourse.findOne({ _id: id, schoolId, teacherUserId: userId, status: 'active' }).lean();
+    if (!course || normalizeText(course.courseType) === 'guidance_routine') {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const { lock, warning } = await setFlyLockForCourse({
+      schoolId,
+      course,
+      teacherUserId: userId,
+      teacherName: name,
+      active,
+    });
+
+    return res.status(200).json({
+      courseId: String(course._id),
+      lock: serializeFlyLock(lock, { warning }),
+      message: active
+        ? (warning || 'FLY bloqueado para los alumnos de este curso.')
+        : 'FLY desbloqueado para los alumnos de este curso.',
+    });
+  } catch (error) {
+    const status = Number(error?.status) || 500;
+    return res.status(status).json({ message: error.message || 'No se pudo actualizar el bloqueo de FLY.' });
+  }
+});
+
+router.get('/coexistence-policy', async (req, res) => {
+  try {
+    const { schoolId, role } = req.user;
+    const normalizedRole = normalizeText(role);
+    const isManager = await canManageCoexistencePolicy(req);
+    const isTeacher = normalizedRole === 'teacher' || await hasAssignedTeacherCourses(req.user);
+    if (!isManager && !isTeacher && normalizedRole !== 'psychology') {
+      return res.status(403).json({ message: 'No tienes permisos para ver la política de convivencia.' });
+    }
+
+    const policy = await getOrCreateCoexistencePolicy(schoolId);
+    return res.status(200).json({ policy: serializeCoexistencePolicy(policy) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar la política de convivencia.' });
+  }
+});
+
+router.get('/coexistence-scores', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    if (!(await canViewDisciplineObservations(req))) {
+      return res.status(403).json({ message: 'No tienes permisos para ver el puntaje de convivencia.' });
+    }
+
+    const [policy, students, observations] = await Promise.all([
+      getOrCreateCoexistencePolicy(schoolId),
+      Student.find({ schoolId, deletedAt: null, status: 'active' })
+        .select('_id name schoolCode grade course')
+        .sort({ name: 1 })
+        .lean(),
+      CampusDisciplineObservation.find({
+        schoolId,
+        status: { $in: ['submitted', 'reviewed'] },
+        $or: [{ destination: 'coexistence' }, { destination: { $exists: false } }, { destination: null }],
+      })
+        .sort({ incidentAt: -1, submittedAt: -1, createdAt: -1 })
+        .lean(),
+    ]);
+
+    const serializedPolicy = serializeCoexistencePolicy(policy);
+    const observationsByStudentId = new Map();
+    observations.forEach((item) => {
+      const studentId = String(item.studentId || '');
+      if (!studentId) return;
+      if (!observationsByStudentId.has(studentId)) {
+        observationsByStudentId.set(studentId, []);
+      }
+      observationsByStudentId.get(studentId).push(serializeDisciplineObservation(item));
+    });
+
+    const rows = students.map((student) => {
+      const studentId = String(student._id);
+      const studentObservations = observationsByStudentId.get(studentId) || [];
+      const scoreSummary = computeDisciplineScore({
+        startingScore: serializedPolicy.startingScore,
+        observations: studentObservations,
+      });
+
+      return {
+        studentId,
+        studentName: normalizeText(student.name),
+        studentSchoolCode: normalizeText(student.schoolCode),
+        studentGrade: normalizeText(student.grade),
+        studentCourse: normalizeText(student.course),
+        startingScore: scoreSummary.startingScore,
+        totalDeducted: scoreSummary.totalDeducted,
+        score: scoreSummary.score,
+        observationCount: studentObservations.length,
+        observations: studentObservations,
+      };
+    });
+
+    return res.status(200).json({
+      policy: serializedPolicy,
+      students: rows,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar el puntaje de convivencia.' });
+  }
+});
+
+router.put('/coexistence-policy', async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    if (!(await canManageCoexistencePolicy(req))) {
+      return res.status(403).json({ message: 'No tienes permisos para editar la política de convivencia.' });
+    }
+
+    const policy = await saveCoexistencePolicy({
+      schoolId,
+      startingScore: req.body?.startingScore,
+      infractions: req.body?.infractions,
+      updatedByUserId: userId,
+      updatedByName: name,
+    });
+
+    return res.status(200).json({
+      policy: serializeCoexistencePolicy(policy),
+      message: 'Política de convivencia actualizada.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo guardar la política de convivencia.' });
   }
 });
 

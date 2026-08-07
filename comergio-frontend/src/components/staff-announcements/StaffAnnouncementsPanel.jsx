@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createStaffAnnouncement,
@@ -12,15 +12,23 @@ import {
 } from '../../services/staffAnnouncements.service';
 import './StaffAnnouncementsPanel.css';
 
-const DEFAULT_TARGET_ROLES = [
-  'teacher',
-  'psychology',
-  'nursing',
-  'academic_secretary',
-  'admissions',
-  'coordination',
-  'billing',
+const DEFAULT_TARGET_ROLE_OPTIONS = [
+  { value: 'teacher', label: 'Docentes' },
+  { value: 'psychology', label: 'Bienestar / Psicología' },
+  { value: 'nursing', label: 'Enfermería' },
+  { value: 'academic_secretary', label: 'Secretaría académica' },
+  { value: 'admissions', label: 'Admisiones' },
+  { value: 'coordination', label: 'Coordinación' },
+  { value: 'billing', label: 'Cartera' },
+  { value: 'human_resources', label: 'Recursos humanos' },
+  { value: 'rectoria', label: 'Rectoría' },
+  { value: 'direccion', label: 'Dirección' },
+  { value: 'admin', label: 'Administración' },
 ];
+
+const ROLE_LABEL_BY_VALUE = Object.fromEntries(
+  DEFAULT_TARGET_ROLE_OPTIONS.map((option) => [option.value, option.label])
+);
 
 const INBOX_TABS = [
   { key: 'inbox', label: 'Bandeja recibida' },
@@ -39,11 +47,16 @@ function formatAnnouncementDate(value) {
   });
 }
 
-function createEmptyDraft(targetRoles = DEFAULT_TARGET_ROLES) {
+function formatSenderRole(role) {
+  const key = String(role || '').trim();
+  return ROLE_LABEL_BY_VALUE[key] || key;
+}
+
+function createEmptyDraft() {
   return {
     title: '',
     body: '',
-    targetRoles: [...targetRoles],
+    targetRoles: [],
   };
 }
 
@@ -86,9 +99,9 @@ function EmptyInboxIllustration() {
 }
 
 export default function StaffAnnouncementsPanel({
-  mode = 'inbox',
+  mode = 'manage',
   title = 'Comunicados internos',
-  description = 'Recibe y confirma mensajes internos de rectoría y coordinación.',
+  description = 'Envía y recibe mensajes internos entre el equipo del colegio. Selecciona a quién va dirigido cada comunicado.',
   className = '',
 }) {
   const queryClient = useQueryClient();
@@ -128,15 +141,6 @@ export default function StaffAnnouncementsPanel({
     enabled: canManage && Boolean(selectedSentId),
   });
 
-  useEffect(() => {
-    const roles = metaQuery.data?.data?.targetRoles || metaQuery.data?.targetRoles;
-    if (!Array.isArray(roles) || !roles.length) return;
-    setComposeDraft((current) => {
-      if ((current.targetRoles || []).length) return current;
-      return { ...current, targetRoles: roles.map((entry) => entry.value || entry) };
-    });
-  }, [metaQuery.data]);
-
   const markReadMutation = useMutation({
     mutationFn: markStaffAnnouncementRead,
     onSuccess: () => {
@@ -166,11 +170,8 @@ export default function StaffAnnouncementsPanel({
     mutationFn: createStaffAnnouncement,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-announcements'] });
-      setComposeDraft(createEmptyDraft(
-        (metaQuery.data?.data?.targetRoles || metaQuery.data?.targetRoles || [])
-          .map((entry) => entry.value || entry)
-      ));
-      setNotice({ type: 'success', text: 'Comunicado publicado al equipo.' });
+      setComposeDraft(createEmptyDraft());
+      setNotice({ type: 'success', text: 'Comunicado enviado al equipo seleccionado.' });
     },
     onError: (error) => {
       setNotice({ type: 'error', text: error?.response?.data?.message || 'No se pudo publicar el comunicado.' });
@@ -179,10 +180,7 @@ export default function StaffAnnouncementsPanel({
 
   const inboxItems = inboxQuery.data?.data?.announcements || inboxQuery.data?.announcements || [];
   const sentItems = sentQuery.data?.data?.announcements || sentQuery.data?.announcements || [];
-  const targetRoleOptions = metaQuery.data?.data?.targetRoles || metaQuery.data?.targetRoles || DEFAULT_TARGET_ROLES.map((value) => ({
-    value,
-    label: value,
-  }));
+  const targetRoleOptions = metaQuery.data?.data?.targetRoles || metaQuery.data?.targetRoles || DEFAULT_TARGET_ROLE_OPTIONS;
   const recipients = recipientsQuery.data?.data?.recipients || recipientsQuery.data?.recipients || [];
   const recipientSummary = recipientsQuery.data?.data?.summary || recipientsQuery.data?.summary || null;
   const selectedRoleCount = (composeDraft.targetRoles || []).length;
@@ -192,7 +190,7 @@ export default function StaffAnnouncementsPanel({
     inboxItems.forEach((item) => {
       const key = String(item.senderRole || item.senderName || '').trim().toLowerCase();
       if (!key) return;
-      const label = item.senderRole || item.senderName || 'Equipo';
+      const label = formatSenderRole(item.senderRole) || item.senderName || 'Equipo';
       if (!labels.has(key)) labels.set(key, label);
     });
     return Array.from(labels.entries()).map(([value, label]) => ({ value, label }));
@@ -297,8 +295,8 @@ export default function StaffAnnouncementsPanel({
           <div className="staff-announcements-compose__head">
             <div>
               <span className="staff-announcements-compose__step">Nuevo mensaje</span>
-              <h3>Crear comunicado interno</h3>
-              <p>La publicación llegará a los portales de los equipos seleccionados.</p>
+              <h3>Redactar comunicado</h3>
+              <p>Elige a quién va dirigido: coordinación, rectoría, bienestar, enfermería u otras áreas.</p>
             </div>
           </div>
           <div className="staff-announcements-compose__fields">
@@ -352,7 +350,7 @@ export default function StaffAnnouncementsPanel({
             <span>Los destinatarios deberán confirmar la lectura.</span>
             <button className="staff-announcements-btn" disabled={createMutation.isPending} type="submit">
               <AnnouncementIcon />
-              {createMutation.isPending ? 'Publicando...' : 'Publicar comunicado interno'}
+              {createMutation.isPending ? 'Enviando...' : 'Enviar comunicado'}
             </button>
           </footer>
         </form>
@@ -460,8 +458,8 @@ export default function StaffAnnouncementsPanel({
                       <div>
                         <strong>{item.title}</strong>
                         <small>
-                          {item.senderName || 'Equipo directivo'}
-                          {item.senderRole ? ` · ${item.senderRole}` : ''}
+                          {item.senderName || 'Equipo'}
+                          {item.senderRole ? ` · ${formatSenderRole(item.senderRole)}` : ''}
                           {' · '}
                           {formatAnnouncementDate(item.publishedAt)}
                         </small>

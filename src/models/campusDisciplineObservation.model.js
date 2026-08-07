@@ -15,6 +15,15 @@ const campusDisciplineObservationSchema = new mongoose.Schema(
     studentGrade: { type: String, trim: true, default: '' },
     studentCourse: { type: String, trim: true, default: '' },
     observation: { type: String, required: true, trim: true },
+    destination: {
+      type: String,
+      enum: ['wellbeing', 'coexistence'],
+      default: 'coexistence',
+      index: true,
+    },
+    infractionKey: { type: String, trim: true, default: '', index: true },
+    infractionLabel: { type: String, trim: true, default: '' },
+    deductionPercent: { type: Number, default: 0, min: 0, max: 100 },
     incidentAt: { type: Date, default: null, index: true },
     status: { type: String, enum: ['submitted', 'reviewed', 'archived'], default: 'submitted', index: true },
     recipients: { type: [String], default: ['coordination', 'direccion', 'psychology', 'rectoria'] },
@@ -24,6 +33,7 @@ const campusDisciplineObservationSchema = new mongoose.Schema(
 );
 
 campusDisciplineObservationSchema.index({ schoolId: 1, submittedAt: -1 });
+campusDisciplineObservationSchema.index({ schoolId: 1, destination: 1, submittedAt: -1 });
 campusDisciplineObservationSchema.index({ schoolId: 1, studentId: 1, submittedAt: -1 });
 campusDisciplineObservationSchema.index({ schoolId: 1, teacherUserId: 1, submittedAt: -1 });
 campusDisciplineObservationSchema.index({ schoolId: 1, incidentAt: -1 });

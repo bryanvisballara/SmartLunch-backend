@@ -320,7 +320,8 @@ function communityPublicationRequiresApproval(publisherRole, audienceType) {
   const audience = normalizeText(audienceType) || 'general';
 
   if (role === 'student') {
-    return audience === 'general';
+    // Student course publications always go through institutional approval (coordination / leadership).
+    return audience === 'general' || audience === 'course' || audience === 'course_students';
   }
 
   if (role === 'parent' || role === 'teacher') {
@@ -359,11 +360,19 @@ async function createCommunityPublicationRequest({
     throw new Error('Los acudientes solo pueden solicitar publicaciones para todo el colegio.');
   }
 
-  if (publisherRole === 'student' && normalizedAudienceType !== 'general') {
-    throw new Error('Esta audiencia no requiere autorización; publícala directamente.');
+  if (publisherRole === 'student' && !['course', 'general'].includes(normalizedAudienceType)) {
+    throw new Error('Los alumnos solo pueden publicar para su curso (con autorización).');
   }
 
   const year = normalizeText(academicYear) || await resolveSchoolAcademicYear(schoolId);
+  const cohortKey = (normalizedAudienceType === 'course' || normalizedAudienceType === 'course_students')
+    ? buildCohortKey({ academicYear: year, grade, course })
+    : '';
+
+  if ((normalizedAudienceType === 'course' || normalizedAudienceType === 'course_students') && !cohortKey) {
+    throw new Error('No se pudo determinar el curso o grado para la publicación.');
+  }
+
   const request = await AcademicCommunicationRequest.create({
     schoolId,
     publisherRole,
@@ -379,7 +388,7 @@ async function createCommunityPublicationRequest({
     audienceType: normalizedAudienceType,
     gradeTargets: grade ? [normalizeText(grade)] : [],
     courseTargets: course ? [normalizeText(course)] : [],
-    cohortKey: '',
+    cohortKey,
     academicYear: year,
     media: Array.isArray(media) ? media : [],
     channels: { push: true, email: false },
@@ -394,8 +403,13 @@ async function createCommunityPublicationRequest({
 }
 
 async function submitCommunityPublication(params = {}) {
-  const audienceType = normalizeText(params.audienceType) || 'general';
+  let audienceType = normalizeText(params.audienceType) || 'general';
   const publisherRole = normalizeText(params.publisherRole);
+
+  // Students always publish to their course; institutional roles approve before it appears.
+  if (publisherRole === 'student') {
+    audienceType = 'course';
+  }
 
   if (communityPublicationRequiresApproval(publisherRole, audienceType)) {
     const request = await createCommunityPublicationRequest({

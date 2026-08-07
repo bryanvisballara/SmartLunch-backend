@@ -284,10 +284,44 @@
 }
 
 .rectoria-control-list-item {
-  padding: 12px 14px;
+  padding: 0;
   border: 1px solid #e8eaed;
   border-radius: 12px;
   background: #f8f9fa;
+  overflow: hidden;
+}
+
+.rectoria-control-list-item.is-expanded {
+  background: #fff;
+  border-color: #c5d4e8;
+}
+
+.rectoria-control-list-item__toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: default;
+  font: inherit;
+}
+
+.rectoria-control-list-item.is-clickable .rectoria-control-list-item__toggle {
+  cursor: pointer;
+}
+
+.rectoria-control-list-item.is-clickable .rectoria-control-list-item__toggle:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.rectoria-control-list-item__copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
 }
 
 .rectoria-control-list-item strong {
@@ -298,9 +332,95 @@
 
 .rectoria-control-list-item span {
   display: block;
-  margin-top: 3px;
+  margin-top: 0;
   color: #5f6368;
   font-size: 0.8rem;
+}
+
+.rectoria-control-list-item__chevron {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.rectoria-control-list-item__details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  padding: 0 14px 14px;
+  border-top: 1px solid #eef1f5;
+}
+
+.rectoria-control-list-item__details > div {
+  display: grid;
+  gap: 0.2rem;
+  padding-top: 0.75rem;
+}
+
+.rectoria-control-list-item__details span {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rectoria-control-list-item__details p {
+  margin: 0;
+  color: #334155;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.rectoria-control-coexistence-table tr.is-tone-warn td:nth-child(3) strong {
+  color: #b45309;
+}
+
+.rectoria-control-coexistence-table tr.is-tone-danger td:nth-child(3) strong {
+  color: #b91c1c;
+}
+
+.rectoria-control-coexistence-detail-row td {
+  background: #fbfcfe;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.rectoria-control-coexistence-deductions {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.rectoria-control-coexistence-deductions article {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.rectoria-control-coexistence-deductions strong {
+  display: block;
+  color: #202124;
+  margin-bottom: 0.25rem;
+}
+
+.rectoria-control-coexistence-deductions p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.rectoria-control-coexistence-deductions > article > div:last-child {
+  display: grid;
+  gap: 0.2rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  text-align: right;
 }
 
 .rectoria-control-subject-card {

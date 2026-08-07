@@ -272,6 +272,8 @@ app.use(['/assets/academic-communications/:fileName', '/uploads/academic-communi
 app.use([
   '/assets/campus-materials/:fileName',
   '/uploads/campus-materials/:fileName',
+  '/assets/campus-academic-content/:fileName',
+  '/uploads/campus-academic-content/:fileName',
   '/assets/campus-student-submissions/:fileName',
   '/uploads/campus-student-submissions/:fileName',
 ], async (req, res, next) => {

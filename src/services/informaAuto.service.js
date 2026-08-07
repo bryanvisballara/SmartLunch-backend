@@ -9,7 +9,6 @@ const {
 } = require('../config/db');
 const {
   processAndStoreUploadedImage,
-  isCloudinaryEnabled,
   normalizeStoredImageUrl,
 } = require('../utils/imageUpload');
 const {
@@ -242,6 +241,8 @@ function escapeXml(value) {
 
 function wrapTitleLines(title, maxChars = 28, maxLines = 3) {
   const words = normalizeText(title).split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+
   const lines = [];
   let current = '';
   for (const word of words) {
@@ -249,7 +250,10 @@ function wrapTitleLines(title, maxChars = 28, maxLines = 3) {
     if (next.length > maxChars && current) {
       lines.push(current);
       current = word;
-      if (lines.length >= maxLines - 1) break;
+      if (lines.length >= maxLines) {
+        current = '';
+        break;
+      }
     } else {
       current = next;
     }
@@ -257,9 +261,11 @@ function wrapTitleLines(title, maxChars = 28, maxLines = 3) {
   if (current && lines.length < maxLines) {
     lines.push(current);
   }
-  const leftover = words.join(' ').slice(lines.join(' ').length).trim();
-  if (leftover && lines.length) {
-    lines[lines.length - 1] = `${lines[lines.length - 1]}…`.slice(0, maxChars + 1);
+
+  const usedWords = lines.join(' ').split(/\s+/).filter(Boolean).length;
+  if (usedWords < words.length && lines.length) {
+    const last = lines[lines.length - 1].replace(/\s+\S*$/, '').trim() || lines[lines.length - 1];
+    lines[lines.length - 1] = `${last}…`.slice(0, maxChars + 1);
   }
   return lines.slice(0, maxLines);
 }
@@ -287,7 +293,7 @@ async function downloadImageBuffer(url) {
     });
     if (!response.ok) return null;
     const contentType = String(response.headers.get('content-type') || '');
-    if (!contentType.startsWith('image/')) return null;
+    if (!contentType.startsWith('image/') && !contentType.includes('octet-stream')) return null;
     const arrayBuffer = await response.arrayBuffer();
     return Buffer.from(arrayBuffer);
   } catch (_error) {
@@ -295,58 +301,159 @@ async function downloadImageBuffer(url) {
   }
 }
 
-async function buildBrandedImageBuffer({ title, topic, storyImageUrl = '' }) {
-  const width = 1200;
-  const height = 675;
-  const lines = wrapTitleLines(title, 30, 3);
-  const titleSvg = lines.map((line, index) => (
-    `<text x="72" y="${250 + (index * 58)}" font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="800" fill="#102A43">${escapeXml(line)}</text>`
-  )).join('');
+const COVER_WIDTH = 1080;
+const COVER_HEIGHT = 1350;
 
-  const storyBuffer = await downloadImageBuffer(storyImageUrl);
-  const svg = `
-    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#D8F5EC"/>
-          <stop offset="55%" stop-color="#E7F4FF"/>
-          <stop offset="100%" stop-color="#EEF6FF"/>
-        </linearGradient>
-      </defs>
-      <rect width="${width}" height="${height}" rx="36" fill="url(#bg)"/>
-      <rect x="48" y="48" width="210" height="42" rx="21" fill="#E8EEFC"/>
-      <text x="72" y="76" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#2F6FED">COMERGIO INFORMA</text>
-      <text x="72" y="150" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" fill="#64748B">${escapeXml(topic || 'Novedad')}</text>
-      ${titleSvg}
-      <rect x="72" y="470" width="72" height="8" rx="4" fill="#3B82F6"/>
-      <text x="72" y="530" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="600" fill="#475569">Para el equipo Comergio</text>
-    </svg>
-  `;
+function buildPhotoScenePrompt({ title, body, topic }) {
+  return [
+    'Photorealistic editorial news photograph for Instagram, vertical 4:5 frame.',
+    'Must look like a real camera photo: natural lighting, real locations, real people or real campuses/products.',
+    'STRICTLY FORBIDDEN: illustration, cartoon, vector art, flat design, 3D render, clipart, icons floating in air, anime, watercolor, collage of drawings.',
+    'Absolutely no text, letters, logos, watermarks, captions, UI chrome, or overlays in the photo.',
+    'Compose with clear space in the lower third for a later text overlay (slightly darker or empty foreground is fine).',
+    `News category: ${topic || 'technology'}`,
+    `Headline: ${title}`,
+    `Context: ${String(body || '').slice(0, 280)}`,
+    'If the headline names a university, city, company or landmark, show that real place or a believable documentary scene of it.',
+    'Cinematic documentary style, high resolution, sharp focus.',
+  ].join('\n');
+}
 
-  const base = sharp(Buffer.from(svg)).png();
-  const composites = [];
-
-  if (storyBuffer) {
-    composites.push({
-      input: await sharp(storyBuffer).resize(360, 360, { fit: 'cover' }).png().toBuffer(),
-      top: 150,
-      left: 760,
-    });
+async function generateImageWithOpenAi({ title, body, topic }) {
+  if (!openAiClient) {
+    return null;
   }
 
+  const prompt = buildPhotoScenePrompt({ title, body, topic });
+  const model = String(process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1').trim();
+  const isDalle3 = /dall-e-3/i.test(model);
+  const isLegacyDalle = /^dall-e-/i.test(model);
+  // Prefer portrait for Instagram-style covers when the model allows it.
+  const size = isDalle3
+    ? '1024x1792'
+    : (isLegacyDalle ? '1024x1024' : '1024x1536');
+  const response = await openAiClient.images.generate({
+    model,
+    prompt,
+    n: 1,
+    size,
+    ...(isDalle3 ? { quality: 'standard' } : {}),
+  });
+
+  const item = response?.data?.[0] || null;
+  if (item?.b64_json) {
+    return Buffer.from(item.b64_json, 'base64');
+  }
+  if (item?.url) {
+    return downloadImageBuffer(item.url);
+  }
+  return null;
+}
+
+function buildInstagramOverlaySvg({ title, topic, body = '' }) {
+  const width = COVER_WIDTH;
+  const height = COVER_HEIGHT;
+  const titleLines = wrapTitleLines(String(title || '').toUpperCase(), 26, 5);
+  const subtitle = wrapTitleLines(body, 42, 2).join(' ');
+  const brand = 'COMERGIO INFORMA';
+  const topicLabel = String(topic || 'NOVEDAD').toUpperCase();
+  const titleStartY = titleLines.length > 4 ? 900 : 960;
+  const titleBlock = titleLines.map((line, index) => (
+    `<text x="54" y="${titleStartY + (index * 54)}" font-family="Arial Black, Arial Narrow, Helvetica, sans-serif" font-size="48" font-weight="900" letter-spacing="-0.5" fill="#5AD2FF">${escapeXml(line)}</text>`
+  )).join('');
+  const subtitleY = titleStartY + (titleLines.length * 54) + 26;
+
+  return `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bottomFade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+          <stop offset="35%" stop-color="#000000" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.92"/>
+        </linearGradient>
+      </defs>
+      <rect x="0" y="${height * 0.42}" width="${width}" height="${height * 0.58}" fill="url(#bottomFade)"/>
+      <text x="54" y="88" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" letter-spacing="3" fill="#FFFFFF">${escapeXml(brand)}</text>
+      <line x1="54" y1="102" x2="280" y2="102" stroke="#FFFFFF" stroke-width="2" stroke-opacity="0.85"/>
+      <text x="${width - 54}" y="88" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" letter-spacing="2" fill="#FFFFFF">${escapeXml(topicLabel)}</text>
+      ${titleBlock}
+      ${subtitle ? `<text x="54" y="${subtitleY}" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="600" fill="#FFFFFF">${escapeXml(subtitle)}</text>` : ''}
+    </svg>
+  `;
+}
+
+async function composeInstagramCover({ photoBuffer, title, topic, body = '' }) {
+  if (!photoBuffer) return null;
+
+  const base = await sharp(photoBuffer)
+    .rotate()
+    .resize(COVER_WIDTH, COVER_HEIGHT, { fit: 'cover', position: 'attention' })
+    .png()
+    .toBuffer();
+
+  const overlay = await sharp(Buffer.from(buildInstagramOverlaySvg({ title, topic, body })))
+    .png()
+    .toBuffer();
+
+  const composites = [{ input: overlay, top: 0, left: 0 }];
   const colibri = await loadColibriBuffer();
   if (colibri) {
     composites.push({
-      input: await sharp(colibri).resize(88, 88, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer(),
-      top: 540,
-      left: 1050,
+      input: await sharp(colibri)
+        .resize(64, 64, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toBuffer(),
+      top: COVER_HEIGHT - 92,
+      left: COVER_WIDTH - 92,
     });
   }
 
-  if (composites.length) {
-    return base.composite(composites).png().toBuffer();
+  return sharp(base).composite(composites).png().toBuffer();
+}
+
+async function resolveCoverPhotoBuffer({ title, body, topic, storyImageUrl = '' }) {
+  // Prefer a real news photo when the source provides one.
+  const sourced = await downloadImageBuffer(storyImageUrl);
+  if (sourced) {
+    return { buffer: sourced, imageModel: 'source-photo' };
   }
-  return base.png().toBuffer();
+
+  const generated = await generateImageWithOpenAi({ title, body, topic });
+  if (generated) {
+    return {
+      buffer: generated,
+      imageModel: String(process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1').trim(),
+    };
+  }
+
+  return { buffer: null, imageModel: '' };
+}
+
+async function buildBrandedImageBuffer({ title, topic, storyImageUrl = '', body = '' }) {
+  const sourced = await downloadImageBuffer(storyImageUrl);
+  if (sourced) {
+    return composeInstagramCover({
+      photoBuffer: sourced,
+      title,
+      topic,
+      body,
+    });
+  }
+
+  // Last-resort solid photographic-looking gradient if no photo is available.
+  const fallbackSvg = `
+    <svg width="${COVER_WIDTH}" height="${COVER_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#0B1C2C"/>
+          <stop offset="100%" stop-color="#102A43"/>
+        </linearGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#bg)"/>
+    </svg>
+  `;
+  const photoBuffer = await sharp(Buffer.from(fallbackSvg)).png().toBuffer();
+  return composeInstagramCover({ photoBuffer, title, topic, body });
 }
 
 async function storeBrandedImage(buffer, preferredName = 'informa-auto') {
@@ -361,7 +468,8 @@ async function storeBrandedImage(buffer, preferredName = 'informa-auto') {
     file,
     folder: 'informa',
     preferredName,
-    requireCloudinary: isCloudinaryEnabled(),
+    requireCloudinary: false,
+    maxWidth: COVER_WIDTH,
   });
 
   return {
@@ -434,8 +542,15 @@ async function createDraftFromStory({ story, copy, media, slotKey }) {
   }));
 }
 
-async function generateInformaDraft({ slotKey = '', force = false } = {}) {
+async function generateInformaDraft({ slotKey = '', force = false, clearExisting = false } = {}) {
   const resolvedSlot = slotKey || resolveSlotKey(new Date()) || `manual-${Date.now()}`;
+
+  if (clearExisting) {
+    await runInControlDb(() => InformaPost.updateMany(
+      { informaEntity: 'post', status: 'draft' },
+      { $set: { status: 'archived', informaEntity: 'post' } }
+    ));
+  }
 
   if (!force) {
     const existing = await runInControlDb(() => InformaPost.findOne({
@@ -458,15 +573,47 @@ async function generateInformaDraft({ slotKey = '', force = false } = {}) {
   }
 
   const copy = await generateCopyWithOpenAi(story);
-  const imageBuffer = await buildBrandedImageBuffer({
-    title: copy.title,
-    topic: story.topic,
-    storyImageUrl: story.imageUrl,
-  });
+  let imageBuffer = null;
+  let imageModel = '';
+
+  try {
+    const resolved = await resolveCoverPhotoBuffer({
+      title: copy.title,
+      body: copy.body,
+      topic: story.topic,
+      storyImageUrl: story.imageUrl,
+    });
+    if (resolved.buffer) {
+      imageBuffer = await composeInstagramCover({
+        photoBuffer: resolved.buffer,
+        title: copy.title,
+        topic: story.topic,
+        body: copy.body,
+      });
+      imageModel = resolved.imageModel
+        ? `${resolved.imageModel}+overlay`
+        : 'photo+overlay';
+    }
+  } catch (imageError) {
+    console.warn(`[INFORMA_IMAGE] Cover compose failed: ${imageError.message || imageError}`);
+  }
+
+  if (!imageBuffer) {
+    imageBuffer = await buildBrandedImageBuffer({
+      title: copy.title,
+      topic: story.topic,
+      storyImageUrl: story.imageUrl,
+      body: copy.body,
+    });
+  }
+
   const media = await storeBrandedImage(imageBuffer, `informa-${resolvedSlot}`);
   const draftDoc = await createDraftFromStory({
     story,
-    copy,
+    copy: {
+      ...copy,
+      model: [copy.model, imageModel].filter(Boolean).join('+') || copy.model,
+    },
     media,
     slotKey: resolvedSlot,
   });
@@ -474,7 +621,22 @@ async function generateInformaDraft({ slotKey = '', force = false } = {}) {
   return {
     skipped: false,
     draft: serializeAdminDraft(draftDoc),
+    imageModel: imageModel || 'branded-fallback',
   };
+}
+
+async function clearPendingDrafts({ role } = {}) {
+  if (!canPublishInforma(role)) {
+    throw new Error('Solo Gerencia Comergio puede limpiar borradores de Comergio Informa.');
+  }
+
+  return runInControlDb(async () => {
+    const result = await InformaPost.updateMany(
+      { informaEntity: 'post', status: 'draft' },
+      { $set: { status: 'archived', informaEntity: 'post' } }
+    );
+    return { cleared: Number(result.modifiedCount || 0) };
+  });
 }
 
 async function listDrafts({ limit = 30 } = {}) {
@@ -571,6 +733,7 @@ module.exports = {
   generateInformaDraft,
   runScheduledInformaDraftJob,
   listDrafts,
+  clearPendingDrafts,
   publishDraft,
   discardDraft,
   serializeAdminDraft,

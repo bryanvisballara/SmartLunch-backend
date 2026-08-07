@@ -8,18 +8,26 @@ const NursingVisit = require('../models/nursingVisit.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
-const { queueNotificationsForParents } = require('../services/notification.service');
+const { queueNotificationsForParents, notifySchoolStaffRoles } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const {
   serializeStudentMedicalProfile,
   listStudentMedicalProfileRevisions,
 } = require('../services/studentMedicalProfile.service');
+const {
+  uploadImageMiddleware,
+  processAndStoreUploadedImage,
+  isCloudinaryEnabled,
+  normalizeStoredImageUrl,
+} = require('../utils/imageUpload');
 
 const router = express.Router();
 
 router.use(authMiddleware);
 
 const nursingStaffRoles = ['nursing', 'admin', 'rectoria', 'direccion'];
+const nursingSummaryViewerRoles = ['nursing', 'admin', 'rectoria', 'direccion', 'coordination'];
+const MAX_NURSING_VISIT_PHOTOS = 6;
 
 function isValidObjectId(value) {
   return mongoose.Types.ObjectId.isValid(String(value || ''));
@@ -39,6 +47,54 @@ function escapeRegExp(value) {
 
 function firstName(name) {
   return normalizeText(name).split(/\s+/)[0] || 'El alumno';
+}
+
+function serializeGuardian(link) {
+  const parent = link?.parentId || {};
+  const email = normalizeText(parent.email).toLowerCase()
+    || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeText(parent.username))
+      ? normalizeText(parent.username).toLowerCase()
+      : '');
+
+  return {
+    id: String(parent._id || ''),
+    name: normalizeText(parent.name),
+    username: normalizeText(parent.username),
+    phone: normalizeText(parent.phone),
+    email,
+    relationship: normalizeText(link?.relationship) || 'Acudiente',
+    isPrimaryContact: Boolean(link?.isPrimaryContact),
+  };
+}
+
+function normalizeVisitPhotos(value) {
+  let raw = value;
+  if (typeof value === 'string') {
+    try {
+      raw = JSON.parse(value);
+    } catch {
+      raw = [];
+    }
+  }
+
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .slice(0, MAX_NURSING_VISIT_PHOTOS)
+    .map((item) => {
+      const url = normalizeStoredImageUrl(item?.url || item?.src || item);
+      if (!url) {
+        return null;
+      }
+      return {
+        url,
+        thumbUrl: normalizeStoredImageUrl(item?.thumbUrl || url),
+        alt: normalizeText(item?.alt),
+      };
+    })
+    .filter(Boolean);
 }
 
 function getAcademicCourseSectionFromKey(courseKey = '') {
@@ -322,6 +378,7 @@ function serializeVisit(visit, { academicStructure = null } = {}) {
     symptoms: normalizeText(rawVisit.symptoms),
     treatment: normalizeText(rawVisit.treatment),
     notes: normalizeText(rawVisit.notes),
+    photos: normalizeVisitPhotos(rawVisit.photos),
     disposition: normalizeText(rawVisit.disposition) || 'observation',
     attendedAt: rawVisit.attendedAt,
     createdAt: rawVisit.createdAt,
@@ -400,7 +457,7 @@ router.get('/students/:studentId/history', roleMiddleware(nursingStaffRoles), as
       return res.status(400).json({ message: 'Invalid student id' });
     }
 
-    const [student, visits, academicStructure] = await Promise.all([
+    const [student, visits, parentLinks, academicStructure] = await Promise.all([
       Student.findOne({ _id: studentId, schoolId, deletedAt: null })
         .select('name schoolCode grade course documentNumber bloodType medicalProfile imageUrl thumbUrl')
         .lean(),
@@ -408,6 +465,9 @@ router.get('/students/:studentId/history', roleMiddleware(nursingStaffRoles), as
         .populate('attendedByUserId', 'name username')
         .sort({ attendedAt: -1, createdAt: -1 })
         .limit(50)
+        .lean(),
+      ParentStudentLink.find({ schoolId, studentId, status: 'active' })
+        .populate('parentId', 'name username phone email')
         .lean(),
       AcademicStructure.findOne({ schoolId }).lean(),
     ]);
@@ -418,11 +478,49 @@ router.get('/students/:studentId/history', roleMiddleware(nursingStaffRoles), as
 
     return res.status(200).json({
       student: serializeStudent(student, { academicStructure }),
+      guardians: parentLinks.map(serializeGuardian).filter((guardian) => guardian.id),
       visits: visits.map((visit) => serializeVisit(visit, { academicStructure })),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
+});
+
+router.post('/uploads/image', roleMiddleware(nursingStaffRoles), (req, res) => {
+  uploadImageMiddleware.single('image')(req, res, async (error) => {
+    if (error) {
+      const statusCode = error?.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(statusCode).json({
+        message: error.message || 'No se pudo procesar la imagen.',
+      });
+    }
+
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'Selecciona una imagen.' });
+      }
+
+      const cloudinaryEnabled = isCloudinaryEnabled();
+      const saved = await processAndStoreUploadedImage({
+        file: req.file,
+        folder: 'nursing-visits',
+        preferredName: req.body?.preferredName || req.file?.originalname || 'nursing-visit',
+        requireCloudinary: cloudinaryEnabled,
+      });
+
+      return res.status(201).json({
+        photo: {
+          url: normalizeStoredImageUrl(saved.url),
+          thumbUrl: normalizeStoredImageUrl(saved.thumbUrl || saved.url),
+          alt: normalizeText(req.body?.alt),
+        },
+      });
+    } catch (processingError) {
+      return res.status(400).json({
+        message: processingError.message || 'No se pudo guardar la imagen.',
+      });
+    }
+  });
 });
 
 router.get('/students/:studentId/medical-profile/history', roleMiddleware(nursingStaffRoles), async (req, res) => {
@@ -462,6 +560,51 @@ router.get('/students/:studentId/medical-profile/history', roleMiddleware(nursin
   }
 });
 
+router.get('/medical-profile-signatures', roleMiddleware(nursingStaffRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const [students, academicStructure] = await Promise.all([
+      Student.find({
+        schoolId,
+        deletedAt: null,
+        status: 'active',
+        'medicalProfile.signatureImage': { $exists: true, $nin: [null, ''] },
+      })
+        .select('name schoolCode grade course bloodType medicalProfile imageUrl thumbUrl')
+        .sort({ 'medicalProfile.signedAt': -1, updatedAt: -1 })
+        .limit(limit)
+        .lean(),
+      AcademicStructure.findOne({ schoolId }).lean(),
+    ]);
+
+    return res.status(200).json({
+      signatures: students.map((student) => {
+        const serialized = serializeStudent(student, { academicStructure });
+        const medicalProfile = serialized?.medicalProfile || {};
+        return {
+          studentId: serialized.id,
+          studentName: serialized.name,
+          schoolCode: serialized.schoolCode,
+          displayGrade: serialized.displayGrade,
+          grade: serialized.grade,
+          course: serialized.course,
+          bloodType: serialized.bloodType,
+          imageUrl: serialized.imageUrl,
+          thumbUrl: serialized.thumbUrl,
+          signatureImage: medicalProfile.signatureImage || '',
+          signedAt: medicalProfile.signedAt || null,
+          signedByParentName: medicalProfile.signedByParentName || '',
+          signedByParentId: medicalProfile.signedByParentId || '',
+          hasMedicalProfile: serialized.hasMedicalProfile,
+        };
+      }),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
@@ -469,6 +612,7 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
     const symptoms = normalizeText(req.body.symptoms);
     const treatment = normalizeText(req.body.treatment);
     const notes = normalizeText(req.body.notes);
+    const photos = normalizeVisitPhotos(req.body.photos);
     const disposition = ['return_class', 'observation', 'sent_home', 'referred', 'other'].includes(normalizeText(req.body.disposition))
       ? normalizeText(req.body.disposition)
       : 'observation';
@@ -495,6 +639,7 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
       symptoms,
       treatment,
       notes,
+      photos,
       disposition,
     });
 
@@ -512,7 +657,7 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
           parentIds,
           studentId,
           title: `Atencion de enfermeria para ${childName}`,
-          body: `${childName} fue atendido en enfermeria. Sintomas: ${symptoms}. Manejo: ${treatment}.`,
+          body: `${childName} fue atendido en enfermeria. Sintomas: ${symptoms}. Manejo: ${treatment}.${photos.length ? ` Incluye ${photos.length} foto${photos.length === 1 ? '' : 's'}.` : ''}`,
           payload: {
             type: 'nursing.visit',
             nursingVisitId: String(visit._id),
@@ -541,6 +686,22 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
     await visit.populate('attendedByUserId', 'name username');
     await visit.populate('studentId', 'name schoolCode grade course documentNumber bloodType imageUrl thumbUrl');
 
+    const childName = firstName(student.name);
+    notifySchoolStaffRoles({
+      schoolId,
+      roles: ['rectoria', 'direccion', 'coordination', 'admin'],
+      studentId,
+      title: `Nuevo caso de enfermería: ${childName}`,
+      body: `${childName} fue atendido en enfermería. Síntomas: ${symptoms}. Manejo: ${treatment}.`,
+      payload: {
+        type: 'nursing.visit.staff',
+        nursingVisitId: String(visit._id),
+        studentId: String(studentId),
+        sectionKey: 'control_nursing',
+        url: '/rectoria',
+      },
+    }).catch((error) => console.warn(`[NURSING_STAFF_NOTIFY_WARNING] visit=${visit._id} error=${error.message}`));
+
     return res.status(201).json({
       visit: serializeVisit(visit, { academicStructure }),
       parentIdsNotified: parentIds.map(String),
@@ -550,7 +711,7 @@ router.post('/visits', roleMiddleware(nursingStaffRoles), async (req, res) => {
   }
 });
 
-router.get('/summary', roleMiddleware(nursingStaffRoles), async (req, res) => {
+router.get('/summary', roleMiddleware(nursingSummaryViewerRoles), async (req, res) => {
   try {
     const { schoolId } = req.user;
     const now = new Date();
@@ -561,10 +722,14 @@ router.get('/summary', roleMiddleware(nursingStaffRoles), async (req, res) => {
       NursingVisit.countDocuments({ schoolId, attendedAt: { $gte: startOfWeek } }),
       NursingVisit.distinct('studentId', { schoolId }),
       NursingVisit.find({ schoolId })
+        .populate('studentId', 'name schoolCode grade course imageUrl thumbUrl')
+        .populate('attendedByUserId', 'name username')
         .sort({ attendedAt: -1, createdAt: -1 })
-        .limit(8)
+        .limit(20)
         .lean(),
     ]);
+
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('grades levels').lean();
 
     return res.status(200).json({
       summary: {
@@ -572,14 +737,14 @@ router.get('/summary', roleMiddleware(nursingStaffRoles), async (req, res) => {
         visitsThisWeek,
         studentsAttended: studentsWithVisits.length,
       },
-      recentVisits: recentVisits.map((visit) => ({
-        id: String(visit._id),
-        studentId: String(visit.studentId || ''),
-        studentName: normalizeText(visit.studentName) || 'Alumno',
-        reason: normalizeText(visit.reason) || 'Atención',
-        attendedAt: visit.attendedAt || visit.createdAt,
-        status: normalizeText(visit.status) || 'registered',
-      })),
+      recentVisits: recentVisits.map((visit) => {
+        const serialized = serializeVisit(visit, { academicStructure });
+        return {
+          ...serialized,
+          studentName: normalizeText(serialized?.student?.name) || 'Alumno',
+          reason: normalizeText(serialized?.symptoms) || 'Atención',
+        };
+      }),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

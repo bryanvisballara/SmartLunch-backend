@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import './SchoolCreationWizard.css';
 import './RectoriaDashboard.css';
@@ -6,6 +6,12 @@ import { buildAcademicEnrollmentProrationTable } from '../lib/academicEnrollment
 import { findMatchingFeeSetting, getFeeGradeAliases, resolveStructureGradeKeyForStudent, studentMatchesAnyGradeKey, buildAcademicStructureGradeMetadataIndex, gradesMatchForFilter } from '../lib/feeGradeMatching';
 import { resolveGradeCourses, resolveStudentCourseKey, studentHasAssignedCourseInGrade } from '../lib/academicGradeCourses';
 import { formatEducationalGradeLabel } from '../lib/educationalGradeLabels';
+import {
+  buildPlannerReturnObservation,
+  createPlannerReturnDraft,
+  getPlannerRequestReviewRows,
+  getPlannerReturnObservationLength,
+} from '../lib/hrPlannerReview';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import EnrollmentMatriculaAuthorizationsPanel from '../components/enrollment-matricula/EnrollmentMatriculaAuthorizationsPanel';
@@ -81,7 +87,8 @@ import {
 } from '../services/academicSecretary.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import CoordinationLevelDashboard from '../components/CoordinationLevelDashboard';
-import { getCampusCoordinationCourses, getCampusCoordinationDashboard, getCampusCoordinationTeachers, getCampusDisciplineObservations, resyncCampusCoordinationCourses } from '../campus/services/campus.service';
+import { getCampusCoordinationCourses, getCampusCoordinationDashboard, getCampusCoordinationTeachers, getCampusDisciplineObservations, getCampusCoexistencePolicy, updateCampusCoexistencePolicy, resyncCampusCoordinationCourses } from '../campus/services/campus.service';
+import RectoriaCoexistencePolicyPanel from '../components/rectoria/RectoriaCoexistencePolicyPanel';
 import {
   approveHrSupplyRequest,
   consolidateHrPlannerRequests,
@@ -95,6 +102,7 @@ import {
   getHrSupplyItems,
   getHrSupplyRequests,
   rejectHrSupplyRequest,
+  returnHrPlannerRequest,
   updateHrPlannerCycle,
   updateHrPurchaseArea,
 } from '../services/hr.service';
@@ -123,6 +131,10 @@ const ACADEMIC_MANAGEMENT_SECTION_OPTIONS = [
   { key: 'schedule', label: 'Horario académico' },
   { key: 'content', label: 'Contenido académico' },
   { key: 'assignments', label: 'Asignaciones' },
+  { key: 'coexistence', label: 'Convivencia' },
+];
+const COORDINATION_ACADEMIC_MANAGEMENT_SECTION_OPTIONS = [
+  { key: 'coexistence', label: 'Convivencia' },
 ];
 const ADMISSIONS_SECTION_OPTIONS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -733,6 +745,7 @@ const emptyChargeForm = {
 
 const HR_REQUEST_STATUS_LABELS = {
   pending_coordination_review: 'Revisión coordinación',
+  returned_for_correction: 'Devuelto a corrección',
   consolidated: 'Consolidada',
   pending_hr_review: 'Revisión RRHH',
   pending_purchasing_review: 'Gestión de compras',
@@ -766,6 +779,789 @@ function formatResourceDate(value) {
   return parsed.toLocaleDateString('es-CO', { dateStyle: 'medium', timeZone: 'UTC' });
 }
 
+function getPlannerCycleStatusLabel(status = 'active') {
+  const normalized = String(status || 'active').trim().toLowerCase();
+  if (normalized === 'active') return 'Activo';
+  if (normalized === 'closed' || normalized === 'archived') return 'Cerrado';
+  return normalized || 'Activo';
+}
+
+function PlannerCycleCalendarIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <rect height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" width="16" x="4" y="5" />
+      <path d="M8 3.5v3M16 3.5v3M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M8.5 14h2M13.5 14h2M8.5 17h2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function PlannerCyclePeriodIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <rect height="14" rx="2" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="6" />
+      <path d="M8 4v3M16 4v3M5 11h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerCycleDeadlineIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M6 4h9l3 3v13H6V4Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M14 4v4h4M9 13h6M9 16h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerCycleQuoteIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M6 16.5c1.8 0 3-1.2 3-3.1S8 10 6.2 10C6 7.8 7.7 6 10.2 6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <path d="M14 16.5c1.8 0 3-1.2 3-3.1S16 10 14.2 10C14 7.8 15.7 6 18.2 6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerCycleEditIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m5 16.5 9.8-9.8a1.8 1.8 0 0 1 2.5 0l1 1a1.8 1.8 0 0 1 0 2.5L8.5 20H5v-3.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerCycleDeleteIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5 8h14M10 8V6h4v2M9 11v6M12 11v6M15 11v6M7 8l1 12h8l1-12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerCycleArt() {
+  return (
+    <svg aria-hidden="true" className="rectoria-planner-cycle-card__art" fill="none" viewBox="0 0 160 140">
+      <ellipse cx="84" cy="118" fill="currentColor" opacity="0.12" rx="46" ry="10" />
+      <rect fill="currentColor" height="78" opacity="0.18" rx="14" width="78" x="42" y="28" />
+      <rect fill="#fff" height="70" rx="12" stroke="currentColor" strokeWidth="3" width="70" x="46" y="24" />
+      <rect fill="currentColor" height="16" rx="8" width="70" x="46" y="24" />
+      <circle cx="62" cy="32" fill="#fff" r="3" />
+      <circle cx="100" cy="32" fill="#fff" r="3" />
+      <rect fill="currentColor" height="8" opacity="0.35" rx="2" width="10" x="58" y="52" />
+      <rect fill="currentColor" height="8" opacity="0.35" rx="2" width="10" x="76" y="52" />
+      <rect fill="currentColor" height="8" opacity="0.55" rx="2" width="10" x="94" y="52" />
+      <rect fill="currentColor" height="8" opacity="0.35" rx="2" width="10" x="58" y="68" />
+      <rect fill="currentColor" height="8" opacity="0.55" rx="2" width="10" x="76" y="68" />
+      <rect fill="currentColor" height="8" opacity="0.35" rx="2" width="10" x="94" y="68" />
+      <path d="M118 34c8 2 14 10 12 18-3 10-16 10-20 2 8 2 14-4 8-12Z" fill="currentColor" opacity="0.55" />
+      <path d="M30 78c7-8 18-6 20 2 2 8-8 14-16 10 4-2 6-8 0-12Z" fill="currentColor" opacity="0.4" />
+    </svg>
+  );
+}
+
+function getPlannerTeacherInitials(name = '') {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'DO';
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase() || 'DO';
+}
+
+function getPlannerTeacherAccent(seed = '') {
+  const accents = ['sky', 'teal', 'amber', 'rose', 'indigo'];
+  const text = String(seed || '');
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+  return accents[Math.abs(hash) % accents.length];
+}
+
+function PlannerInboxHeaderIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M7 3.5h7.5L18 7v13.5H7V3.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+      <path d="M14 3.5V7h4" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+      <circle cx="12" cy="12" r="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8.8 17.2c.7-1.5 2-2.2 3.2-2.2s2.5.7 3.2 2.2" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function PlannerRefreshIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M20 12a8 8 0 1 1-2.2-5.4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M20 5v5h-5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function PlannerSelectIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <rect height="14" rx="3" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="5" />
+      <path d="m8.5 12 2.2 2.2L15.5 9.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerReturnIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M6 7.5h12a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H11l-3.5 2.5V16.5H6a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M8.5 11h7M8.5 13.5h4.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerMetaCalendarIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <rect height="14" rx="2" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="6" />
+      <path d="M8 4v3M16 4v3M5 11h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerMetaBookIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5 6.5A2.5 2.5 0 0 1 7.5 4H19v14H7.5A2.5 2.5 0 0 0 5 20.5V6.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M5 17.5h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerColActivityIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <rect height="16" rx="3" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="4" />
+    </svg>
+  );
+}
+
+function PlannerColMaterialsIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 9.5 12 5l8 4.5v5L12 19l-8-4.5v-5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M12 19v-9.5M4 9.5l8 4.5 8-4.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerColPurposeIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerColCourseIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M3 10.5 12 6l9 4.5-9 4.5-9-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M7 13v4.2c0 .6 2.2 2.3 5 2.3s5-1.7 5-2.3V13" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PlannerActivityGlyph() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m7 16.5 8.5-8.5a1.5 1.5 0 0 1 2.1 0l.9.9a1.5 1.5 0 0 1 0 2.1L10 19.5H7v-3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceHeaderIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M8 4.5h6.5L18 8v11.5H8V4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M14 4.5V8h4M10 12h5M10 15h3.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="m15.2 14.2 2.3 2.3 3.5-3.8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceFilterIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function TraceColStatusIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <rect height="16" rx="3" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="4" />
+    </svg>
+  );
+}
+
+function TraceColPersonIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="9" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M6.5 18.5c1.2-2.4 3-3.5 5.5-3.5s4.3 1.1 5.5 3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceColFolderIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6H10l1.5 2H17.5A2.5 2.5 0 0 1 20 10.5v6A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceColBoxIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 9.5 12 5l8 4.5v5L12 19l-8-4.5v-5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M12 19v-9.5M4 9.5l8 4.5 8-4.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceColCalendarIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <rect height="14" rx="2" stroke="currentColor" strokeWidth="1.7" width="14" x="5" y="6" />
+      <path d="M8 4v3M16 4v3M5 11h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceColActionsIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M13 3 5.5 13.5H12l-1 7.5L18.5 10.5H12L13 3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceClockIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 8.5V12l2.5 2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceMenuIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="6.5" cy="12" fill="currentColor" r="1.6" />
+      <circle cx="12" cy="12" fill="currentColor" r="1.6" />
+      <circle cx="17.5" cy="12" fill="currentColor" r="1.6" />
+    </svg>
+  );
+}
+
+function TraceStatusCartIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 5h2.2l1.3 10.2a1.5 1.5 0 0 0 1.5 1.3h8.3a1.5 1.5 0 0 0 1.5-1.2L20 8H7.1" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+      <circle cx="10" cy="19" r="1.2" fill="currentColor" />
+      <circle cx="17" cy="19" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TraceStatusCheckIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m8.8 12.2 2.1 2.1 4.3-4.4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TraceStatusPeopleIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="9" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="16" cy="9.5" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4.8 17.5c.9-2 2.4-3 4.2-3s3.3 1 4.2 3M13.2 17.2c.5-1.2 1.5-1.9 2.8-1.9 1.2 0 2.1.6 2.7 1.7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TraceStatusDefaultIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 8.2v4.2M12 15.8h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewWalletIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4.5 8.5h15v10a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-10Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M4.5 8.5 7.2 4.8A2 2 0 0 1 8.8 4h6.4a2 2 0 0 1 1.6.8L19.5 8.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <circle cx="16.2" cy="13.8" fill="currentColor" r="1.2" />
+    </svg>
+  );
+}
+
+function OverviewGradIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M3 10.5 12 6l9 4.5-9 4.5-9-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M7 13v4.2c0 .6 2.2 2.3 5 2.3s5-1.7 5-2.3V13" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function OverviewSchoolIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 19.5V9.8L12 5l8 4.8v9.7" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M9 19.5v-5h6v5M12 9.2v.01" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function OverviewTrendIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 16.5 9.2 11l3.3 3.2L20 7.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M15.5 7.5H20V12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewPeopleIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="9" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="16" cy="9.5" r="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4.8 17.5c.9-2 2.4-3 4.2-3s3.3 1 4.2 3M13.2 17.2c.5-1.2 1.5-1.9 2.8-1.9 1.2 0 2.1.6 2.7 1.7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function OverviewWarnIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M12 4.8 20.2 18.5H3.8L12 4.8Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M12 10v4M12 16.5h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewDownIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M4 7.5 9.2 13l3.3-3.2L20 16.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      <path d="M15.5 16.5H20V12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewClipboardIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M9 5.5h6M9 4h6a1 1 0 0 1 1 1v1.5H8V5a1 1 0 0 1 1-1Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+      <rect height="14" rx="2" stroke="currentColor" strokeWidth="1.7" width="12" x="6" y="5.5" />
+      <path d="M9.5 11h5M9.5 14.5h3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TeamCreateHeaderIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="10" cy="8.5" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M4.5 18c1-2.4 2.8-3.6 5.5-3.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <path d="M16.5 10v6M13.5 13h6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function TeamBodyHeaderIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="9" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="16" cy="9.5" r="2.1" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4.8 17.5c.9-2 2.4-3 4.2-3s3.3 1 4.2 3M13.2 17.2c.5-1.2 1.5-1.9 2.8-1.9 1.2 0 2.1.6 2.7 1.7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TeamShieldIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M12 4.5 18.5 7v5.2c0 3.7-2.5 6.3-6.5 7.8-4-1.5-6.5-4.1-6.5-7.8V7L12 4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="m9.5 12 1.7 1.7 3.5-3.6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamStatMembersIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="9" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4.8 17.5c.9-2 2.4-3 4.2-3s3.3 1 4.2 3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" />
+      <circle cx="16.2" cy="9.5" r="2" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TeamStatActiveIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m8.8 12.2 2.1 2.1 4.3-4.4" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamStatInactiveIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 8.2V12l2.4 1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamEditIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m7 16.5 8.5-8.5a1.5 1.5 0 0 1 2.1 0l.9.9a1.5 1.5 0 0 1 0 2.1L10 19.5H7v-3Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamPowerIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M12 4.5v7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+      <path d="M8.2 7.6a6.5 6.5 0 1 0 7.6 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function TeamExternalIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M10 6H6.5A2.5 2.5 0 0 0 4 8.5v9A2.5 2.5 0 0 0 6.5 20h9a2.5 2.5 0 0 0 2.5-2.5V14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <path d="M13 4h7v7M20.5 4.5 12 13" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamEyeIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M2.8 12S6.2 6.5 12 6.5 21.2 12 21.2 12 17.8 17.5 12 17.5 2.8 12 2.8 12Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <circle cx="12" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamEyeOffIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m4 4 16 16M9.5 9.7A3 3 0 0 0 12 15a3 3 0 0 0 2.7-1.7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <path d="M6.4 6.8C4.2 8.2 2.8 12 2.8 12S6.2 17.5 12 17.5c1.5 0 2.8-.3 4-.8M10.2 6.7c.6-.1 1.2-.2 1.8-.2 5.8 0 9.2 5.5 9.2 5.5a16 16 0 0 1-2.3 2.7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamPlusIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M12 6v12M6 12h12" stroke="currentColor" strokeLinecap="round" strokeWidth="1.9" />
+    </svg>
+  );
+}
+
+function TeamGridIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5 5h5.5v5.5H5V5ZM13.5 5H19v5.5h-5.5V5ZM5 13.5h5.5V19H5v-5.5ZM13.5 13.5H19V19h-5.5v-5.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TeamPendingUserIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="9" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M6.5 18.5c1.2-2.4 3-3.5 5.5-3.5s4.3 1.1 5.5 3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamMoreIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="5" fill="currentColor" r="1.6" />
+      <circle cx="12" cy="12" fill="currentColor" r="1.6" />
+      <circle cx="12" cy="19" fill="currentColor" r="1.6" />
+    </svg>
+  );
+}
+
+function TeamFocusAssignIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M8 4.5H5.5V8M16 4.5h2.5V8M8 19.5H5.5V16M16 19.5h2.5V16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+      <circle cx="12" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8.2 17c.9-1.8 2.3-2.7 3.8-2.7s2.9.9 3.8 2.7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamLinkIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M9.5 14.5 14.5 9.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      <path d="M11 8.2 12.8 6.4a3.2 3.2 0 0 1 4.5 4.5L15.5 12.7M13 15.8 11.2 17.6a3.2 3.2 0 1 1-4.5-4.5L8.5 11.3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamPersonSelectIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="9" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M6.5 18.5c1.2-2.4 3-3.5 5.5-3.5s4.3 1.1 5.5 3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamCheckIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8" fill="currentColor" />
+      <path d="m8.8 12.2 2.1 2.1 4.3-4.4" stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function TeamTrashIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5 8h14M10 11v5M14 11v5M8.5 8l.7-2h5.6l.7 2M7 8l.8 11h8.4L17 8" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamGradeListIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M7 5.5h10v13H7V5.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M9.5 9h5M9.5 12.5h5M9.5 16h3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamCourseListIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5 7h14v11H5V7Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M8 7V5.8A1.8 1.8 0 0 1 9.8 4h4.4A1.8 1.8 0 0 1 16 5.8V7" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function getSubjectChipTone(label = '') {
+  const tones = ['sky', 'violet', 'teal', 'amber', 'rose', 'indigo', 'lime'];
+  const text = String(label || '');
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+    hash |= 0;
+  }
+  return tones[Math.abs(hash) % tones.length];
+}
+
+function normalizeTeacherLinkGradeText(value = '') {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function getTeacherLinkGradeKind(grade = {}, levelLabel = '') {
+  const text = normalizeTeacherLinkGradeText(`${grade.label || ''} ${grade.key || ''} ${levelLabel || ''}`);
+  if (/\b(prep|preparatoria)\b/.test(text) && !/(maternal|kinder|jardin|preescolar|preschool)/.test(text)) {
+    return 'prep';
+  }
+  if (/(maternal|kinder|jardin|preescolar|preschool|inicial|parvulo)/.test(text)) {
+    return 'early';
+  }
+  if (/(^|\D)(\d{1,2})(\D|$)/.test(String(grade.label || grade.key || '').trim())) {
+    return 'number';
+  }
+  return 'other';
+}
+
+function getTeacherLinkGradeDisplay(grade = {}, kind = 'other') {
+  const label = String(grade.label || grade.key || '').trim();
+  if (kind === 'prep') return 'Prep.';
+  if (kind === 'number') {
+    const match = label.match(/(\d{1,2})/);
+    return match ? match[1] : label;
+  }
+  return label;
+}
+
+function getTeacherLinkEarlyGradeIcon(label = '') {
+  const text = normalizeTeacherLinkGradeText(label);
+  if (text.includes('maternal')) return 'maternal';
+  if (/kinder\s*[12]|kinder\s*i\b|prekinder/.test(text)) return 'blocks';
+  return 'pencil';
+}
+
+function TeamGradCapIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m3.5 10 8.5-4.5L20.5 10 12 14.5 3.5 10Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M7 12v4.2c0 .8 2.2 2.3 5 2.3s5-1.5 5-2.3V12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M20.5 10v5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamEarlyMaternalIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="9.5" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7.5 18.5c1-2.4 2.8-3.5 4.5-3.5s3.5 1.1 4.5 3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function TeamEarlyBlocksIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5.5 13.5h6v6h-6v-6ZM12.5 4.5h6v6h-6v-6ZM9 4.5h5v5H9v-5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TeamEarlyPencilIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m14.2 5.2 4.6 4.6M5 19l1.2-4.5L16.3 4.4a1.6 1.6 0 0 1 2.3 0l1 1a1.6 1.6 0 0 1 0 2.3L8.5 18.8 5 19Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function TeamEarlyGradeIcon({ variant = 'pencil' }) {
+  if (variant === 'maternal') return <TeamEarlyMaternalIcon />;
+  if (variant === 'blocks') return <TeamEarlyBlocksIcon />;
+  return <TeamEarlyPencilIcon />;
+}
+
+function getTeamStatIcon(key) {
+  if (key === 'active') return <TeamStatActiveIcon />;
+  if (key === 'inactive') return <TeamStatInactiveIcon />;
+  return <TeamStatMembersIcon />;
+}
+
+function OverviewChevronIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="m9 6 6 6-6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+    </svg>
+  );
+}
+
+function OverviewBookIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M5 6.5A2.5 2.5 0 0 1 7.5 4H19v14H7.5A2.5 2.5 0 0 0 5 20.5V6.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M5 17.5h14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function OverviewInfoIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 10.5V16M12 8h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewMinusIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8.5 12h7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewRiskIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M12 4.8 20.2 18.5H3.8L12 4.8Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M12 10v4M12 16.5h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function OverviewLevelPreschoolIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.25" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 8v4l2.5 1.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function OverviewLevelPrimaryIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path d="M7 10.5V19h10v-8.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M5.5 10.5h13l-1.4-4.2A2 2 0 0 0 15.2 5H8.8a2 2 0 0 0-1.9 1.3L5.5 10.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+      <path d="M10 13.5h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function getOverviewLevelTheme(level = {}) {
+  const text = `${level.key || ''} ${level.label || ''}`.toLowerCase();
+  if (text.includes('preescolar') || text.includes('preschool') || text.includes('inicial')) return 'preschool';
+  if (text.includes('secund') || text.includes('media') || text.includes('bachiller')) return 'secondary';
+  if (text.includes('primar') || text.includes('basic')) return 'primary';
+  const accents = ['preschool', 'primary', 'secondary'];
+  const seed = String(level.key || level.label || '');
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = ((hash << 5) - hash) + seed.charCodeAt(index);
+    hash |= 0;
+  }
+  return accents[Math.abs(hash) % accents.length];
+}
+
+function OverviewLevelGlyph({ theme }) {
+  if (theme === 'preschool') return <OverviewLevelPreschoolIcon />;
+  if (theme === 'secondary') return <OverviewGradIcon />;
+  return <OverviewLevelPrimaryIcon />;
+}
+
 function getRequestErrorDetail(requestError, fallbackMessage) {
   const responseMessage = requestError?.response?.data?.message
     || requestError?.response?.data?.error
@@ -783,11 +1579,68 @@ function getRequestErrorDetail(requestError, fallbackMessage) {
 }
 
 function getResourceRequestItemsLabel(request) {
-  const items = Array.isArray(request?.items) ? request.items : [];
+  const items = getResourceRequestItems(request);
   if (!items.length) return 'Sin materiales registrados';
-  return items
-    .map((entry) => `${entry.item?.name || entry.customName || 'Material'} x${entry.quantity}`)
-    .join(' · ');
+  return items.map((entry) => entry.label).join(' · ');
+}
+
+function getResourceRequestItems(request) {
+  const items = Array.isArray(request?.items) ? request.items : [];
+  return items.map((entry, index) => ({
+    key: entry.id || entry.item?.id || `${entry.customName || 'material'}-${index}`,
+    label: `${entry.item?.name || entry.customName || 'Material'}${entry.quantity ? ` x${entry.quantity}` : ''}`,
+  }));
+}
+
+function getResourceRequestAreaTitle(request) {
+  if (request?.requestedForArea) return request.requestedForArea;
+  const consolidatedCount = Array.isArray(request?.consolidatedFromRequestIds)
+    ? request.consolidatedFromRequestIds.length
+    : 0;
+  if (consolidatedCount > 0) {
+    return `Consolidado de ${consolidatedCount} planner${consolidatedCount === 1 ? '' : '(s)'}`;
+  }
+  return 'Sin área';
+}
+
+function getResourceRequestStatusTone(status = '') {
+  switch (String(status || '')) {
+    case 'pending_purchasing_review':
+      return 'sky';
+    case 'consolidated':
+    case 'approved':
+    case 'delivered':
+      return 'teal';
+    case 'pending_coordination_review':
+    case 'pending_hr_review':
+      return 'violet';
+    case 'pending_approval':
+      return 'amber';
+    case 'rejected':
+    case 'cancelled':
+      return 'rose';
+    case 'returned_for_correction':
+    case 'partially_delivered':
+      return 'orange';
+    default:
+      return 'slate';
+  }
+}
+
+function ResourceRequestStatusIcon({ status }) {
+  switch (String(status || '')) {
+    case 'pending_purchasing_review':
+      return <TraceStatusCartIcon />;
+    case 'consolidated':
+    case 'approved':
+    case 'delivered':
+      return <TraceStatusCheckIcon />;
+    case 'pending_coordination_review':
+    case 'pending_hr_review':
+      return <TraceStatusPeopleIcon />;
+    default:
+      return <TraceStatusDefaultIcon />;
+  }
 }
 
 function formatCurrency(value) {
@@ -1776,6 +2629,7 @@ function normalizeAcademicStructureDraft(raw) {
         key: String(level?.key || level?.label || '').trim(),
         label: String(level?.label || level?.key || '').trim(),
         order: Number(level?.order || (levelIndex + 1) * 10),
+        includeClassAttendance: level?.includeClassAttendance !== false,
       }))
       .filter((level) => level.key),
     subjects: subjects
@@ -2254,6 +3108,12 @@ function RectoriaDashboard() {
     || (isCoordinationPortal && activeSection === 'schedule');
   const [homeData, setHomeData] = useState(null);
   const [disciplineObservations, setDisciplineObservations] = useState([]);
+  const [coexistencePolicy, setCoexistencePolicy] = useState(null);
+  const [coexistencePolicyLoading, setCoexistencePolicyLoading] = useState(false);
+  const [coexistencePolicySaving, setCoexistencePolicySaving] = useState(false);
+  const academicManagementSectionOptions = isCoordinationPortal
+    ? COORDINATION_ACADEMIC_MANAGEMENT_SECTION_OPTIONS
+    : ACADEMIC_MANAGEMENT_SECTION_OPTIONS;
   const [coordinationDashboard, setCoordinationDashboard] = useState(null);
   const [resourceDashboard, setResourceDashboard] = useState(null);
   const [resourceItems, setResourceItems] = useState([]);
@@ -2264,6 +3124,7 @@ function RectoriaDashboard() {
   const [resourceAreaDraft, setResourceAreaDraft] = useState({ name: '', budgetAmount: '' });
   const [editingResourceAreaId, setEditingResourceAreaId] = useState('');
   const [resourceStatusFilter, setResourceStatusFilter] = useState('');
+  const [resourceTraceMenuId, setResourceTraceMenuId] = useState('');
   const [resourcePlannerCycleDraft, setResourcePlannerCycleDraft] = useState(createEmptyResourcePlannerCycleDraft);
   const [editingResourcePlannerCycleId, setEditingResourcePlannerCycleId] = useState('');
   const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
@@ -2274,6 +3135,12 @@ function RectoriaDashboard() {
   );
   const [selectedResourcePlannerRequestIds, setSelectedResourcePlannerRequestIds] = useState([]);
   const [resourcePlannerConsolidationNote, setResourcePlannerConsolidationNote] = useState('');
+  const [resourcePlannerReturnDraft, setResourcePlannerReturnDraft] = useState(() => createPlannerReturnDraft());
+  const [plannerConsolidateModal, setPlannerConsolidateModal] = useState({
+    open: false,
+    phase: 'loading',
+    message: '',
+  });
   const [users, setUsers] = useState([]);
   const [students, setStudents] = useState([]);
   const [billingBootstrap, setBillingBootstrap] = useState({
@@ -2296,10 +3163,15 @@ function RectoriaDashboard() {
   const [selectedSchoolYearLevelKey, setSelectedSchoolYearLevelKey] = useState('');
   const [selectedFeeGradeKey, setSelectedFeeGradeKey] = useState('');
   const [userForm, setUserForm] = useState(createEmptyUserForm());
+  const [showTeamPassword, setShowTeamPassword] = useState(false);
+  const [expandedTeamMemberId, setExpandedTeamMemberId] = useState('');
   const [editUserModal, setEditUserModal] = useState(createEmptyEditUserModal());
   const [selectedTeamRole, setSelectedTeamRole] = useState(ROLE_OPTIONS[0]?.value || 'rectoria');
   const [teamCoordinatorSelections, setTeamCoordinatorSelections] = useState({});
+  const [expandedCoordinationLevelKey, setExpandedCoordinationLevelKey] = useState('');
   const [teamTeacherAssignment, setTeamTeacherAssignment] = useState(createEmptyTeamTeacherAssignment());
+  const [teamTeacherGradesHelpOpen, setTeamTeacherGradesHelpOpen] = useState(false);
+  const [teamTeacherCoursesPreviewOpen, setTeamTeacherCoursesPreviewOpen] = useState(false);
   const [headroomTeacherAssignment, setHeadroomTeacherAssignment] = useState(createEmptyHeadroomTeacherAssignment());
   const [chargeForm, setChargeForm] = useState(emptyChargeForm);
   const [institutionalCommunicationForm, setInstitutionalCommunicationForm] = useState(emptyInstitutionalCommunicationForm);
@@ -2322,7 +3194,7 @@ function RectoriaDashboard() {
   const [communicationEngagementModal, setCommunicationEngagementModal] = useState({ open: false, type: 'comments', item: null });
   const [deleteAuthorModal, setDeleteAuthorModal] = useState({ open: false, author: null });
   const [deleteCommentModal, setDeleteCommentModal] = useState({ open: false, communication: null, comment: null });
-  const [editLevelModal, setEditLevelModal] = useState({ open: false, levelKey: '', levelLabel: '', error: '' });
+  const [editLevelModal, setEditLevelModal] = useState({ open: false, levelKey: '', levelLabel: '', includeClassAttendance: true, error: '' });
   const [selectedAcademicGradingLevelKey, setSelectedAcademicGradingLevelKey] = useState('');
   const [deleteLevelModal, setDeleteLevelModal] = useState({ open: false, levelKey: '', levelLabel: '', password: '', error: '' });
   const [editSubjectModal, setEditSubjectModal] = useState({ open: false, subjectKey: '', subjectLabel: '', subjectKind: 'principal', error: '' });
@@ -2345,6 +3217,7 @@ function RectoriaDashboard() {
   const [studentSearch, setStudentSearch] = useState('');
   const [studentDrafts, setStudentDrafts] = useState({});
   const [newEducationalLevelName, setNewEducationalLevelName] = useState('');
+  const [newEducationalLevelIncludeClassAttendance, setNewEducationalLevelIncludeClassAttendance] = useState(true);
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectKind, setNewSubjectKind] = useState('principal');
   const [subjectGradeDrafts, setSubjectGradeDrafts] = useState({});
@@ -2417,6 +3290,56 @@ function RectoriaDashboard() {
   }, [activeSection, allowedSectionKeys]);
 
   useEffect(() => {
+    if (activeSection !== 'students') {
+      return;
+    }
+    const allowedKeys = academicManagementSectionOptions.map((option) => option.key);
+    if (!allowedKeys.includes(activeAcademicManagementSection)) {
+      setActiveAcademicManagementSection(allowedKeys[0] || 'coexistence');
+    }
+  }, [activeSection, activeAcademicManagementSection, academicManagementSectionOptions]);
+
+  useEffect(() => {
+    if (activeSection !== 'students' || activeAcademicManagementSection !== 'coexistence') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setCoexistencePolicyLoading(true);
+    getCampusCoexistencePolicy()
+      .then((response) => {
+        if (!cancelled) {
+          setCoexistencePolicy(response?.policy || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCoexistencePolicy(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCoexistencePolicyLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, activeAcademicManagementSection]);
+
+  const onSaveCoexistencePolicy = async (payload) => {
+    setCoexistencePolicySaving(true);
+    try {
+      const response = await updateCampusCoexistencePolicy(payload);
+      setCoexistencePolicy(response?.policy || null);
+      return response;
+    } finally {
+      setCoexistencePolicySaving(false);
+    }
+  };
+
+  useEffect(() => {
     if (isCoordinationPortal) {
       if (isComergioAcademySection(activeSection)) {
         setExpandedSidebarGroup('comergio_academy_group');
@@ -2446,6 +3369,18 @@ function RectoriaDashboard() {
 
     return () => window.clearTimeout(timer);
   }, [activeSection, billingFocusParentId]);
+
+  useEffect(() => {
+    if (!resourceTraceMenuId) return undefined;
+
+    const onPointerDown = (event) => {
+      if (event.target?.closest?.('.rectoria-trace-actions')) return;
+      setResourceTraceMenuId('');
+    };
+
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [resourceTraceMenuId]);
 
   const clearMessages = () => {
     setError('');
@@ -2921,11 +3856,11 @@ function RectoriaDashboard() {
       const requestResults = await Promise.allSettled([
         isCoordinationPortal ? Promise.resolve({ data: null }) : getAdminHomepage(),
         isCoordinationPortal ? Promise.resolve({ data: {} }) : getAcademicSecretaryFeeSettings(),
-        getCampusDisciplineObservations({ limit: 30 }),
+        getCampusDisciplineObservations({ limit: 30, destination: 'coexistence' }),
         isCoordinationPortal ? Promise.resolve({ data: null }) : getHrDashboard(),
         getHrSupplyItems({ status: 'active' }),
         getHrPlannerCycles({ status: 'active' }),
-        getHrCoordinationPlannerRequests({ status: 'pending_coordination_review' }),
+        getHrCoordinationPlannerRequests({ status: 'pending_coordination_review,returned_for_correction' }),
         getHrSupplyRequests(),
         isCoordinationPortal ? Promise.resolve({ data: { areas: [] } }) : getHrPurchaseAreas(),
       ]);
@@ -3582,6 +4517,19 @@ function RectoriaDashboard() {
   }, [selectedTeamRole, visibleRoleOptions]);
 
   useEffect(() => {
+    if (!selectedTeamRole) return;
+    setExpandedTeamMemberId('');
+    setUserForm((previous) => {
+      if (previous.role === selectedTeamRole) return previous;
+      return {
+        ...previous,
+        role: selectedTeamRole,
+        coordinationScope: selectedTeamRole === 'coordination' ? previous.coordinationScope : '',
+      };
+    });
+  }, [selectedTeamRole]);
+
+  useEffect(() => {
     if (academicGradingLevelOptions.length === 0) {
       if (selectedAcademicGradingLevelKey) {
         setSelectedAcademicGradingLevelKey('');
@@ -3598,6 +4546,48 @@ function RectoriaDashboard() {
     () => academicStructureDraft.grades.map((grade) => ({ value: grade.key, label: grade.label || grade.key })),
     [academicStructureDraft.grades]
   );
+
+  const teamTeacherGradePickerGroups = useMemo(() => {
+    const levelLabelByKey = (academicStructureDraft.levels || []).reduce((accumulator, level) => {
+      accumulator[String(level.key || '').trim()] = level.label || level.key;
+      return accumulator;
+    }, {});
+
+    const earlyYears = [];
+    const courseGrades = [];
+
+    gradeOptionsForSubjects.forEach((grade) => {
+      const structureGrade = academicStructureDraft.grades.find((item) => item.key === grade.value) || {};
+      const levelLabel = levelLabelByKey[String(structureGrade.levelKey || '').trim()] || '';
+      const kind = getTeacherLinkGradeKind(grade, levelLabel);
+      const item = {
+        ...grade,
+        kind,
+        displayLabel: getTeacherLinkGradeDisplay(grade, kind),
+        earlyIcon: getTeacherLinkEarlyGradeIcon(grade.label || grade.key),
+      };
+
+      if (kind === 'early') {
+        earlyYears.push(item);
+      } else {
+        courseGrades.push(item);
+      }
+    });
+
+    const sortByLabel = (left, right) => String(left.label || '').localeCompare(String(right.label || ''), 'es', { numeric: true, sensitivity: 'base' });
+    earlyYears.sort(sortByLabel);
+    courseGrades.sort((left, right) => {
+      const rank = { prep: 0, number: 1, other: 2 };
+      const rankDiff = (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3);
+      if (rankDiff !== 0) return rankDiff;
+      if (left.kind === 'number' && right.kind === 'number') {
+        return Number(left.displayLabel) - Number(right.displayLabel);
+      }
+      return sortByLabel(left, right);
+    });
+
+    return { earlyYears, courseGrades };
+  }, [academicStructureDraft.grades, academicStructureDraft.levels, gradeOptionsForSubjects]);
 
   const gradeOptionsForSchedule = useMemo(
     () => gradeOptions,
@@ -4384,14 +5374,6 @@ function RectoriaDashboard() {
     }));
   }, [assignedStudentCountsByGrade, coordinationUsersByLevelKey, groupedEducationalLevels, pendingStudentCountsByGrade, teamLevelOptions]);
 
-  const educationalLevelSummaryByKey = useMemo(
-    () => educationalLevelSummaries.reduce((accumulator, level) => {
-      accumulator[level.key] = level;
-      return accumulator;
-    }, {}),
-    [educationalLevelSummaries]
-  );
-
   const campusPerformanceCourses = useMemo(
     () => {
       const mapped = (billingBootstrap.campusCourses || [])
@@ -4512,9 +5494,9 @@ function RectoriaDashboard() {
     const activeCount = selectedTeamGroup.users.filter((item) => item.status === 'active').length;
     const inactiveCount = selectedTeamGroup.users.length - activeCount;
     const cards = [
-      { key: 'members', label: 'Integrantes', value: selectedTeamGroup.users.length, helper: 'Total registrados en este rol.' },
-      { key: 'active', label: 'Activos', value: activeCount, helper: 'Disponibles hoy en operación.' },
-      { key: 'inactive', label: 'Inactivos', value: inactiveCount, helper: 'Pendientes de reactivar o retirar.' },
+      { key: 'members', label: 'Integrantes', value: selectedTeamGroup.users.length, helper: 'Total registrados en este rol.', tone: 'info' },
+      { key: 'active', label: 'Activos', value: activeCount, helper: 'Disponibles hoy en operación.', tone: 'good' },
+      { key: 'inactive', label: 'Inactivos', value: inactiveCount, helper: 'Pendientes de reactivar o retirar.', tone: 'warn' },
     ];
 
     if (selectedTeamRole === 'coordination') {
@@ -4523,6 +5505,7 @@ function RectoriaDashboard() {
         label: 'Con alcance definido',
         value: selectedTeamGroup.users.filter((item) => normalizeText(item.coordinationScope)).length,
         helper: 'Coordinadores ya asignados a un nivel.',
+        tone: 'info',
       });
     }
 
@@ -4537,6 +5520,7 @@ function RectoriaDashboard() {
           return hasBaseSubjects || hasLinkedSubjects;
         }).length,
         helper: 'Docentes con materias registradas o vinculadas.',
+        tone: 'info',
       });
     }
 
@@ -4546,6 +5530,7 @@ function RectoriaDashboard() {
         label: 'Niveles educativos',
         value: educationalLevelSummaries.length,
         helper: 'Niveles disponibles para asignar coordinacion.',
+        tone: 'good',
       });
     }
 
@@ -4553,25 +5538,57 @@ function RectoriaDashboard() {
   }, [academicSubjectLoadTemplates, educationalLevelSummaries.length, selectedTeamGroup, selectedTeamRole]);
 
   const teamTeacherAssignmentCoursePreview = useMemo(() => {
-    const subjectKeys = getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment);
-    const selectedGradeKeys = teamTeacherAssignment.gradeKeys || [];
-    if (!subjectKeys.length || !selectedGradeKeys.length) {
+    const selectedGradeKeys = Array.from(new Set(
+      (teamTeacherAssignment.gradeKeys || []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean),
+    ));
+    if (!selectedGradeKeys.length) {
       return [];
     }
 
-    return Array.from(new Map(
-      subjectKeys.flatMap((subjectKey) => {
-        const subject = academicStructureDraft.subjects.find((item) => item.key === subjectKey);
-        const gradeKeysForSubject = resolveSubjectAssignmentGradeKeys(subject, selectedGradeKeys);
-        return gradeKeysForSubject.flatMap((gradeKey) => (
-          (courseOptionsByGrade[gradeKey] || []).map((course) => [
-            `${subjectKey}::${gradeKey}::${course.value}`,
-            `${subject?.label || subjectKey} · ${getGradeLabel(gradeKey)} · ${course.label}`,
-          ])
-        ));
-      }),
-    ).entries()).map(([value, label]) => ({ value, label }));
-  }, [academicStructureDraft.subjects, courseOptionsByGrade, getGradeLabel, teamTeacherAssignment]);
+    const studentCountByGradeKey = (billingBootstrap.academicDatabase || []).reduce((accumulator, item) => {
+      const rowMeta = academicDatabaseRowMetaById[String(item?._id || '')] || {};
+      const gradeKey = String(rowMeta.resolvedGradeKey || item?.grade || '').trim();
+      if (!gradeKey) {
+        return accumulator;
+      }
+      accumulator[gradeKey] = (accumulator[gradeKey] || 0) + 1;
+      return accumulator;
+    }, {});
+
+    return selectedGradeKeys.map((gradeKey) => {
+      const grade = academicStructureDraft.grades.find((item) => String(item.key || '').trim() === gradeKey) || {};
+      const gradeLabel = getGradeLabel(gradeKey) || grade.label || gradeKey;
+      const levelLabel = String(getLevelLabel(grade.levelKey) || '').trim();
+      const courses = courseOptionsByGrade[gradeKey] || [];
+      const courseLabels = (courses.length > 0
+        ? courses.map((course) => (course.isImplicit ? gradeLabel : (course.label || course.value)))
+        : [gradeLabel]
+      ).filter(Boolean);
+
+      return {
+        value: gradeKey,
+        gradeLabel,
+        levelLabel,
+        courseLabels,
+        courseSummary: courseLabels.join(', '),
+        studentCount: Number(studentCountByGradeKey[gradeKey] || 0),
+        isImplicit: courses.length === 0 || courses.every((course) => course.isImplicit),
+      };
+    });
+  }, [
+    academicDatabaseRowMetaById,
+    academicStructureDraft.grades,
+    billingBootstrap.academicDatabase,
+    courseOptionsByGrade,
+    getGradeLabel,
+    getLevelLabel,
+    teamTeacherAssignment.gradeKeys,
+  ]);
+
+  const teamTeacherAssignmentIncludedCourseCount = useMemo(
+    () => teamTeacherAssignmentCoursePreview.reduce((total, grade) => total + (grade.courseLabels?.length || 0), 0),
+    [teamTeacherAssignmentCoursePreview]
+  );
 
   const teamTeacherAssignmentRows = useMemo(
     () => academicSubjectLoadTemplates
@@ -4594,22 +5611,23 @@ function RectoriaDashboard() {
     [academicSubjectLoadTemplates, courseOptionsByGrade, getGradeLabel, subjectOptionsForSchedule, teacherLabelById]
   );
 
-  const selectedTeamTeacherAssignmentRows = useMemo(() => {
-    const teacherUserId = String(teamTeacherAssignment.teacherUserId || '').trim();
-    if (!teacherUserId) {
-      return teamTeacherAssignmentRows;
-    }
-
-    return teamTeacherAssignmentRows.filter((assignment) => String(assignment.teacherUserId || '').trim() === teacherUserId);
-  }, [teamTeacherAssignment.teacherUserId, teamTeacherAssignmentRows]);
+  const linkedTeacherAssignmentCount = useMemo(
+    () => Array.from(new Set(teamTeacherAssignmentRows.map((row) => String(row.teacherUserId || '').trim()).filter(Boolean))).length,
+    [teamTeacherAssignmentRows]
+  );
 
   const headroomCourseOptions = useMemo(() => (
-    academicStructureDraft.grades.flatMap((grade) => resolveGradeCourses(grade).map((course) => ({
-      value: course.key,
-      label: `${grade.label || grade.key} · ${course.label || course.section || course.key}`,
-      gradeKey: grade.key,
-      teacherUserId: String(course.headroomTeacherUserId || '').trim(),
-    })))
+    academicStructureDraft.grades.flatMap((grade) => {
+      const courses = resolveGradeCourses(grade);
+      return courses.map((course) => ({
+        value: course.key,
+        label: `${grade.label || grade.key} · ${buildRectoriaCourseOptionLabel(grade, course, courses)}`,
+        gradeKey: grade.key,
+        gradeLabel: grade.label || grade.key,
+        courseLabel: buildRectoriaCourseOptionLabel(grade, course, courses),
+        teacherUserId: String(course.headroomTeacherUserId || '').trim(),
+      }));
+    })
   ), [academicStructureDraft.grades]);
 
   const selectedHeadroomCourseOptions = useMemo(() => {
@@ -4826,6 +5844,11 @@ function RectoriaDashboard() {
     ));
   };
 
+  const closePlannerConsolidateModal = () => {
+    if (plannerConsolidateModal.phase === 'loading') return;
+    setPlannerConsolidateModal({ open: false, phase: 'loading', message: '' });
+  };
+
   const onConsolidateResourcePlannerRequests = async () => {
     clearMessages();
     if (!selectedResourcePlannerRequestIds.length) {
@@ -4834,6 +5857,11 @@ function RectoriaDashboard() {
     }
 
     setBusy(true);
+    setPlannerConsolidateModal({
+      open: true,
+      phase: 'loading',
+      message: 'Enviando el consolidado a gestión de compras...',
+    });
     try {
       await consolidateHrPlannerRequests({
         requestIds: selectedResourcePlannerRequestIds,
@@ -4841,10 +5869,47 @@ function RectoriaDashboard() {
       });
       setSelectedResourcePlannerRequestIds([]);
       setResourcePlannerConsolidationNote('');
-      setSuccess('Requerimientos consolidados y enviados a gestión de compras.');
+      await loadPortal({ silent: true });
+      setPlannerConsolidateModal({
+        open: true,
+        phase: 'success',
+        message: 'Requerimientos consolidados y enviados a gestión de compras.',
+      });
+    } catch (requestError) {
+      setPlannerConsolidateModal({ open: false, phase: 'loading', message: '' });
+      setError(requestError?.response?.data?.message || 'No se pudieron consolidar los planners docentes.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onReturnResourcePlannerRequest = async (requestId) => {
+    clearMessages();
+    if (!requestId) {
+      return;
+    }
+
+    const request = resourcePlannerRequests.find((entry) => entry.id === requestId);
+    const rows = getPlannerRequestReviewRows(request);
+    const draft = resourcePlannerReturnDraft.requestId === requestId
+      ? resourcePlannerReturnDraft
+      : createPlannerReturnDraft(requestId);
+    const observation = buildPlannerReturnObservation(draft, rows);
+
+    if (observation.length < 8) {
+      setError('Escribe una observación general o al menos una anotación por material (mínimo 8 caracteres).');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await returnHrPlannerRequest(requestId, { observation });
+      setSelectedResourcePlannerRequestIds((current) => current.filter((id) => id !== requestId));
+      setResourcePlannerReturnDraft(createPlannerReturnDraft());
+      setSuccess('Planner devuelto al docente con observaciones.');
       await loadPortal({ silent: true });
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'No se pudieron consolidar los planners docentes.');
+      setError(requestError?.response?.data?.message || 'No se pudo devolver el planner.');
     } finally {
       setBusy(false);
     }
@@ -4955,13 +6020,19 @@ function RectoriaDashboard() {
     event.preventDefault();
     clearMessages();
 
+    const roleToCreate = selectedTeamRole || String(userForm.role || '').trim();
     const createdUserPreview = {
       name: String(userForm.name || '').trim(),
-      role: String(userForm.role || '').trim(),
+      role: roleToCreate,
       username: String(userForm.username || '').trim(),
     };
 
-    if (userForm.role === 'coordination' && !userForm.coordinationScope) {
+    if (!roleToCreate) {
+      setError('Selecciona un rol en el cuerpo académico antes de crear el integrante.');
+      return;
+    }
+
+    if (roleToCreate === 'coordination' && !userForm.coordinationScope) {
       setError('Debes definir el alcance de la coordinación.');
       return;
     }
@@ -4974,11 +6045,15 @@ function RectoriaDashboard() {
         username: userForm.username,
         phone: userForm.phone,
         password: userForm.password,
-        role: userForm.role,
-        coordinationScope: userForm.role === 'coordination' ? userForm.coordinationScope : undefined,
+        role: roleToCreate,
+        coordinationScope: roleToCreate === 'coordination' ? userForm.coordinationScope : undefined,
       });
       setCreatedUserModal({ open: true, ...createdUserPreview });
-      setUserForm(createEmptyUserForm());
+      setShowTeamPassword(false);
+      setUserForm({
+        ...createEmptyUserForm(),
+        role: roleToCreate,
+      });
       await loadPortal({ silent: true });
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo crear el usuario.');
@@ -5121,6 +6196,15 @@ function RectoriaDashboard() {
         ? prev.gradeKeys.filter((item) => item !== gradeKey)
         : [...prev.gradeKeys, gradeKey],
     }));
+  };
+
+  const onCancelTeamTeacherAssignment = () => {
+    setTeamTeacherAssignment((prev) => ({
+      ...createEmptyTeamTeacherAssignment(),
+      teacherUserId: prev.teacherUserId,
+    }));
+    setTeamTeacherCoursesPreviewOpen(false);
+    setTeamTeacherGradesHelpOpen(false);
   };
 
   const onToggleTeamTeacherAssignmentSubject = (subjectKey) => {
@@ -6617,10 +7701,14 @@ function RectoriaDashboard() {
     clearMessages();
     setBusy(true);
     try {
-      const response = await createAcademicManagementLevel({ level: newEducationalLevelName });
+      const response = await createAcademicManagementLevel({
+        level: newEducationalLevelName,
+        includeClassAttendance: newEducationalLevelIncludeClassAttendance,
+      });
       syncAcademicStructureState(response?.data?.academicStructure || {});
       setSelectedLevelKeyForGrade(normalizeEducationalLevelKey(newEducationalLevelName));
       setNewEducationalLevelName('');
+      setNewEducationalLevelIncludeClassAttendance(true);
       setSuccess('Nivel educativo creado correctamente.');
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo crear el nivel educativo.');
@@ -6874,9 +7962,15 @@ function RectoriaDashboard() {
     setDeleteLevelModal({ open: true, levelKey, levelLabel, password: '', error: '' });
   };
 
-  const openEditLevelModal = (levelKey, levelLabel) => {
+  const openEditLevelModal = (levelKey, levelLabel, includeClassAttendance = true) => {
     clearMessages();
-    setEditLevelModal({ open: true, levelKey, levelLabel, error: '' });
+    setEditLevelModal({
+      open: true,
+      levelKey,
+      levelLabel,
+      includeClassAttendance: includeClassAttendance !== false,
+      error: '',
+    });
   };
 
   const openDeleteCourseModal = (gradeKey, courseKey) => {
@@ -6922,7 +8016,7 @@ function RectoriaDashboard() {
     if (busy) {
       return;
     }
-    setEditLevelModal({ open: false, levelKey: '', levelLabel: '', error: '' });
+    setEditLevelModal({ open: false, levelKey: '', levelLabel: '', includeClassAttendance: true, error: '' });
   };
 
   const closeDeleteSubjectModal = () => {
@@ -7101,9 +8195,12 @@ function RectoriaDashboard() {
     setEditLevelModal((previous) => ({ ...previous, error: '' }));
     setBusy(true);
     try {
-      const response = await updateAcademicManagementLevelName(levelKey, { label: levelLabel });
+      const response = await updateAcademicManagementLevelName(levelKey, {
+        label: levelLabel,
+        includeClassAttendance: editLevelModal.includeClassAttendance !== false,
+      });
       syncAcademicStructureState(response?.data?.academicStructure || {});
-      setEditLevelModal({ open: false, levelKey: '', levelLabel: '', error: '' });
+      setEditLevelModal({ open: false, levelKey: '', levelLabel: '', includeClassAttendance: true, error: '' });
       setSuccess(`Nivel educativo ${levelLabel} actualizado correctamente.`);
     } catch (requestError) {
       setEditLevelModal((previous) => ({
@@ -7875,7 +8972,7 @@ function RectoriaDashboard() {
         )}
         academicManagementSubnav={(
           <div className="rectoria-sidebar-subnav" aria-label="Bloques de gestión académica">
-            {ACADEMIC_MANAGEMENT_SECTION_OPTIONS.map((option) => (
+            {academicManagementSectionOptions.map((option) => (
               <button
                 key={option.key}
                 className={`rectoria-sidebar-subitem${activeAcademicManagementSection === option.key ? ' is-active' : ''}`}
@@ -7917,7 +9014,13 @@ function RectoriaDashboard() {
 
       <div className="staff-teacher-chrome__main">
         <InstitutionalPortalHeader
+          enableNotifications
           helperText={institutionalHeaderConfig.helperText}
+          onNotificationNavigate={(sectionKey) => {
+            if (sectionKey) {
+              setActiveSection(sectionKey);
+            }
+          }}
           onRefresh={() => loadPortal({ silent: true })}
           portalKicker={institutionalHeaderConfig.portalKicker}
           refreshDisabled={refreshing || backgroundLoading || busy}
@@ -7973,47 +9076,55 @@ function RectoriaDashboard() {
                   }
                 }}
               >
-                <div className="rectoria-overview-kpi-head">
-                  <span>Cartera por cobrar</span>
-                  <small className="rectoria-overview-kpi-link">Ver detalle</small>
-                </div>
-                <strong>{formatCurrency(overviewBillingKpis.pendingAmount)}</strong>
-                <p>{overviewBillingKpis.totalPendingCharges} cargos pendientes · {overviewBillingKpis.overdueFamilies} familia{overviewBillingKpis.overdueFamilies === 1 ? '' : 's'} en mora</p>
-                {overviewBillingKpis.familiesInMora?.length > 0 ? (
-                  <div className="rectoria-overview-billing-families">
-                    {(overviewBillingKpis.familiesInMora || []).slice(0, 3).map((family) => (
-                      <button
-                        className="rectoria-overview-billing-family"
-                        key={family.parentId}
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          navigateFromOverview({ section: 'billing', billingParentId: family.parentId });
-                        }}
-                      >
-                        <strong>{family.parentName}</strong>
-                        <span>{formatCurrency(family.amount)} · {family.overdueDays} días</span>
-                      </button>
-                    ))}
+                <div className="rectoria-overview-billing">
+                  <div className="rectoria-overview-billing__main">
+                    <div className="rectoria-overview-kpi-head">
+                      <span className="rectoria-overview-kpi-label">Cartera por cobrar</span>
+                      <small className="rectoria-overview-kpi-link">Ver detalle</small>
+                    </div>
+                    <strong className="rectoria-overview-kpi-value">{formatCurrency(overviewBillingKpis.pendingAmount)}</strong>
+                    <p className="rectoria-overview-kpi-meta">
+                      {overviewBillingKpis.totalPendingCharges} cargos pendientes · {overviewBillingKpis.overdueFamilies} familia{overviewBillingKpis.overdueFamilies === 1 ? '' : 's'} en mora
+                    </p>
+                    <div className="rectoria-overview-kpi-pills">
+                      <span className="is-paid">
+                        Pagado este mes
+                        <strong>{formatCurrency(overviewBillingKpis.paidThisMonth)}</strong>
+                      </span>
+                      <span className="is-critical">
+                        Mora crítica
+                        <strong>{overviewBillingKpis.overdueCriticalFamilies}</strong>
+                      </span>
+                    </div>
                   </div>
-                ) : (
-                  <p className="rectoria-overview-empty-note rectoria-overview-empty-note--inline">Sin familias en mora por ahora.</p>
-                )}
-                <div className="rectoria-overview-kpi-strip">
-                  <div>
-                    <span>Pagado este mes</span>
-                    <strong>{formatCurrency(overviewBillingKpis.paidThisMonth)}</strong>
-                  </div>
-                  <div>
-                    <span>Mora crítica</span>
-                    <strong>{overviewBillingKpis.overdueCriticalFamilies}</strong>
+                  <div className="rectoria-overview-billing__side">
+                    {overviewBillingKpis.familiesInMora?.length > 0 ? (
+                      <div className="rectoria-overview-billing-families">
+                        {(overviewBillingKpis.familiesInMora || []).slice(0, 3).map((family) => (
+                          <button
+                            className="rectoria-overview-billing-family"
+                            key={family.parentId}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              navigateFromOverview({ section: 'billing', billingParentId: family.parentId });
+                            }}
+                          >
+                            <strong>{family.parentName}</strong>
+                            <span>{formatCurrency(family.amount)} · {family.overdueDays}d</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="rectoria-overview-empty-note rectoria-overview-empty-note--inline">Sin familias en mora.</p>
+                    )}
                   </div>
                 </div>
               </article>
             ) : null}
 
             <article
-              className="rectoria-overview-kpi is-clickable"
+              className="rectoria-overview-kpi rectoria-overview-kpi--students is-clickable"
               role="button"
               tabIndex={0}
               onClick={() => navigateFromOverview({ section: 'database' })}
@@ -8025,13 +9136,25 @@ function RectoriaDashboard() {
               }}
             >
               <div className="rectoria-overview-kpi-head">
-                <span>{isCoordinationPortal ? 'Estudiantes del nivel asignado' : 'Total estudiantes matriculados'}</span>
-                <small className="rectoria-overview-kpi-link">Ver alumnos</small>
+                <span className="rectoria-overview-kpi-label">
+                  {isCoordinationPortal ? 'Estudiantes del nivel' : 'Total estudiantes matriculados'}
+                </span>
+                <small className="rectoria-overview-kpi-link is-students">Ver alumnos ›</small>
               </div>
-              <strong>{students.length}</strong>
-              <p>{overviewAcademicLevelKpi.assignedStudents} con curso asignado · {overviewAcademicLevelKpi.pendingStudents} pendientes por curso</p>
+              <div className="rectoria-overview-students-body">
+                <strong className="rectoria-overview-kpi-value">{students.length}</strong>
+                <div className="rectoria-overview-students-stats">
+                  <div>
+                    <span className="rectoria-overview-students-stats__icon" aria-hidden="true"><OverviewGradIcon /></span>
+                    <span><strong>{overviewAcademicLevelKpi.assignedStudents}</strong> con curso asignado</span>
+                  </div>
+                  <div>
+                    <span className="rectoria-overview-students-stats__icon" aria-hidden="true"><OverviewPeopleIcon /></span>
+                    <span><strong>{overviewAcademicLevelKpi.pendingStudents}</strong> pendientes por curso</span>
+                  </div>
+                </div>
+              </div>
             </article>
-
           </div>
 
           <article className="panel rectoria-panel rectoria-overview-levels-panel">
@@ -8042,9 +9165,14 @@ function RectoriaDashboard() {
                 <p>{isCoordinationPortal ? 'Lectura ejecutiva del nivel académico asignado para seguimiento y planes de refuerzo.' : 'Promedio consolidado por estudiante único, usando solo cursos con calificaciones registradas.'}</p>
               </div>
               <div className={`rectoria-overview-levels-total is-tone-${overviewAcademicPerformance.performanceMeta?.tone || 'neutral'}`}>
-                <span>Promedio general</span>
-                <strong>{overviewAcademicPerformance.weightedAverage === null ? '—' : formatAcademicScore(overviewAcademicPerformance.weightedAverage)}</strong>
-                <small>{overviewAcademicPerformance.performanceMeta?.label || 'Sin calificaciones'}</small>
+                <span className="rectoria-overview-levels-total__glyph" aria-hidden="true">
+                  <OverviewTrendIcon />
+                </span>
+                <div>
+                  <span>Promedio general</span>
+                  <strong>{overviewAcademicPerformance.weightedAverage === null ? '—' : formatAcademicScore(overviewAcademicPerformance.weightedAverage)}</strong>
+                  <small>{overviewAcademicPerformance.performanceMeta?.label || 'Sin calificaciones'}</small>
+                </div>
               </div>
             </div>
             <div className="rectoria-overview-level-summary">
@@ -8069,7 +9197,12 @@ function RectoriaDashboard() {
                     : { section: 'students', academicSection: 'periods' },
                 })}
               >
-                <span>Estudiantes evaluados</span>
+                <span className="rectoria-overview-metric-card__top">
+                  <span className="rectoria-overview-metric-card__icon" aria-hidden="true">
+                    <OverviewPeopleIcon />
+                  </span>
+                  <span>Estudiantes evaluados</span>
+                </span>
                 <strong>{overviewAcademicPerformance.evaluatedStudentCount}</strong>
                 <small>Con notas publicadas en al menos un curso</small>
               </button>
@@ -8090,7 +9223,12 @@ function RectoriaDashboard() {
                   footerTarget: { section: 'students', academicSection: 'grades_courses' },
                 })}
               >
-                <span>Cursos en atención</span>
+                <span className="rectoria-overview-metric-card__top">
+                  <span className="rectoria-overview-metric-card__icon" aria-hidden="true">
+                    <OverviewWarnIcon />
+                  </span>
+                  <span>Cursos en atención</span>
+                </span>
                 <strong>{overviewAcademicPerformance.coursesNeedingAttention.length}</strong>
                 <small>Promedio bajo o alumnos en riesgo</small>
               </button>
@@ -8111,12 +9249,17 @@ function RectoriaDashboard() {
                   footerTarget: { section: 'database' },
                 })}
               >
-                <span>Estudiantes bajo {passingScoreLabel}</span>
+                <span className="rectoria-overview-metric-card__top">
+                  <span className="rectoria-overview-metric-card__icon" aria-hidden="true">
+                    <OverviewDownIcon />
+                  </span>
+                  <span>Estudiantes bajo {passingScoreLabel}</span>
+                </span>
                 <strong>{overviewAcademicPerformance.atRiskStudents.length}</strong>
                 <small>Promedio consolidado por alumno</small>
               </button>
               <button
-                className="rectoria-overview-metric-card is-clickable is-tone-neutral"
+                className="rectoria-overview-metric-card is-clickable is-tone-good"
                 type="button"
                 onClick={() => openOverviewInsightModal({
                   tone: 'neutral',
@@ -8134,113 +9277,265 @@ function RectoriaDashboard() {
                   footerTarget: { section: 'students', academicSection: 'assignments' },
                 })}
               >
-                <span>Pendientes por calificar</span>
+                <span className="rectoria-overview-metric-card__top">
+                  <span className="rectoria-overview-metric-card__icon" aria-hidden="true">
+                    <OverviewClipboardIcon />
+                  </span>
+                  <span>Pendientes por calificar</span>
+                </span>
                 <strong>{overviewAcademicPerformance.pendingGradingCount}</strong>
-                <small>Actividades evaluativas activas</small>
+                <small>Actividades evaluativas adeudadas</small>
               </button>
             </div>
             {overviewAcademicPerformance.levelRows.length === 0 ? <p className="rectoria-overview-empty-note">No hay niveles académicos configurados todavía.</p> : null}
             <div className="rectoria-overview-level-grid">
-              {overviewAcademicPerformance.levelRows.map((level) => (
-                <div className="rectoria-overview-level-card" key={level.key}>
-                  <div className="rectoria-overview-level-card-head">
-                    <div>
-                      <span>{level.label}</span>
-                      <small>{level.evaluatedStudentCount} estudiantes evaluados</small>
+              {overviewAcademicPerformance.levelRows.map((level) => {
+                const theme = getOverviewLevelTheme(level);
+                const hasScore = level.averageScore !== null && level.averageScore !== undefined;
+                const emptyNote = level.evaluatedStudentCount > 0
+                  ? 'Sin cursos críticos en este nivel por ahora.'
+                  : 'Aún no hay notas registradas en este nivel.';
+
+                return (
+                  <div className={`rectoria-overview-level-card theme-${theme}`} key={level.key}>
+                    <div className="rectoria-overview-level-card-head">
+                      <div className="rectoria-overview-level-card-identity">
+                        <span className="rectoria-overview-level-card-icon" aria-hidden="true">
+                          <OverviewLevelGlyph theme={theme} />
+                        </span>
+                        <div>
+                          <span>{level.label}</span>
+                          <small>{level.evaluatedStudentCount} estudiantes evaluados</small>
+                        </div>
+                      </div>
+                      {hasScore ? (
+                        <div className={`rectoria-overview-level-score is-tone-${level.performanceMeta?.tone || 'neutral'}`}>
+                          <strong>{formatAcademicScore(level.averageScore)}</strong>
+                          <small>{level.performanceMeta?.label || 'Sin calificaciones'}</small>
+                        </div>
+                      ) : (
+                        <div className="rectoria-overview-level-score is-tone-info is-empty">
+                          <span className="rectoria-overview-level-score__empty-icon" aria-hidden="true">
+                            <OverviewMinusIcon />
+                          </span>
+                          <small>Aún no hay notas registradas</small>
+                        </div>
+                      )}
                     </div>
-                    <div className={`rectoria-overview-level-score is-tone-${level.performanceMeta?.tone || 'neutral'}`}>
-                      <strong>{level.averageScore === null ? '—' : formatAcademicScore(level.averageScore)}</strong>
-                      <small>{level.performanceMeta?.label || 'Sin calificaciones'}</small>
+
+                    <div className="rectoria-overview-mini-grid">
+                      <button className="rectoria-overview-mini-card is-tone-danger" type="button" onClick={() => openLevelOverviewInsight(level, 'at_risk')}>
+                        <span className="rectoria-overview-mini-card__icon" aria-hidden="true"><OverviewRiskIcon /></span>
+                        <span>En riesgo</span>
+                        <strong>{level.atRiskCount}</strong>
+                      </button>
+                      <button className="rectoria-overview-mini-card is-tone-warn" type="button" onClick={() => openLevelOverviewInsight(level, 'low_courses')}>
+                        <span className="rectoria-overview-mini-card__icon" aria-hidden="true"><OverviewTrendIcon /></span>
+                        <span>Cursos bajos</span>
+                        <strong>{level.lowCoursesCount}</strong>
+                      </button>
+                      <button className="rectoria-overview-mini-card is-tone-info" type="button" onClick={() => openLevelOverviewInsight(level, 'coordinators')}>
+                        <span className="rectoria-overview-mini-card__icon" aria-hidden="true"><OverviewPeopleIcon /></span>
+                        <span>Coordinadores</span>
+                        <strong>{level.coordinatorCount}</strong>
+                      </button>
+                      <button className="rectoria-overview-mini-card is-tone-good" type="button" onClick={() => openLevelOverviewInsight(level, 'grades')}>
+                        <span className="rectoria-overview-mini-card__icon" aria-hidden="true"><OverviewGradIcon /></span>
+                        <span>Grados</span>
+                        <strong>{level.gradesCount || 0}</strong>
+                      </button>
                     </div>
+
+                    {level.lowestCourses.length > 0 ? (
+                      <div className="rectoria-overview-attention-list">
+                        {level.lowestCourses.map((course) => (
+                          <button
+                            className="rectoria-overview-attention-item"
+                            key={`${level.key}-${course.key || course.id || course.label}`}
+                            type="button"
+                            onClick={() => navigateFromOverview({ section: 'students', academicSection: 'grades_courses' })}
+                          >
+                            <span className="rectoria-overview-attention-item__icon is-course" aria-hidden="true">
+                              <OverviewBookIcon />
+                            </span>
+                            <span className="rectoria-overview-attention-item__copy">
+                              <strong>{course.displayLabel || formatRectoriaInstitutionalCourseLabel(course, institutionalCourseLabelContext)}</strong>
+                              <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} estudiantes bajo {passingScoreLabel}</span>
+                            </span>
+                            <span className="rectoria-overview-attention-item__chevron" aria-hidden="true">
+                              <OverviewChevronIcon />
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rectoria-overview-level-empty">
+                        <span aria-hidden="true"><OverviewInfoIcon /></span>
+                        <p>{emptyNote}</p>
+                      </div>
+                    )}
                   </div>
-                  <div className="rectoria-overview-mini-grid">
-                    <button className="rectoria-overview-mini-card is-tone-danger" type="button" onClick={() => openLevelOverviewInsight(level, 'at_risk')}>
-                      <span>En riesgo</span>
-                      <strong>{level.atRiskCount}</strong>
-                    </button>
-                    <button className="rectoria-overview-mini-card is-tone-warn" type="button" onClick={() => openLevelOverviewInsight(level, 'low_courses')}>
-                      <span>Cursos bajos</span>
-                      <strong>{level.lowCoursesCount}</strong>
-                    </button>
-                    <button className="rectoria-overview-mini-card is-tone-info" type="button" onClick={() => openLevelOverviewInsight(level, 'coordinators')}>
-                      <span>Coordinadores</span>
-                      <strong>{level.coordinatorCount}</strong>
-                    </button>
-                    <button className="rectoria-overview-mini-card is-tone-good" type="button" onClick={() => openLevelOverviewInsight(level, 'grades')}>
-                      <span>Grados</span>
-                      <strong>{level.gradesCount || 0}</strong>
-                    </button>
-                  </div>
-                  {level.lowestCourses.length > 0 ? (
-                    <div className="rectoria-overview-attention-list">
-                      {level.lowestCourses.map((course) => (
-                        <button
-                          className="rectoria-overview-attention-item"
-                          key={`${level.key}-${course.key || course.id || course.label}`}
-                          type="button"
-                          onClick={() => navigateFromOverview({ section: 'students', academicSection: 'grades_courses' })}
-                        >
-                          <strong>{course.displayLabel || formatRectoriaInstitutionalCourseLabel(course, institutionalCourseLabelContext)}</strong>
-                          <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} estudiantes bajo {passingScoreLabel}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="rectoria-overview-empty-note">
-                      {level.evaluatedStudentCount > 0
-                        ? 'Sin cursos críticos en este nivel por ahora.'
-                        : 'Aún no hay notas registradas en este nivel.'}
-                    </p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="rectoria-overview-academic-alerts">
-              <article>
-                <h4>Estudiantes con promedios bajos</h4>
-                {overviewAcademicPerformance.atRiskStudents.length === 0 ? <p className="rectoria-overview-empty-note">No hay estudiantes bajo {passingScoreLabel} con calificaciones registradas.</p> : null}
-                {overviewAcademicPerformance.atRiskStudents.slice(0, 6).map((student) => (
+              <article className="rectoria-overview-alert-card">
+                <header className="rectoria-overview-alert-card__head">
+                  <div>
+                    <span className="rectoria-overview-alert-card__icon is-students" aria-hidden="true">
+                      <OverviewPeopleIcon />
+                    </span>
+                    <h4>Estudiantes con promedios bajos</h4>
+                  </div>
                   <button
-                    className="rectoria-overview-attention-item"
-                    key={`${student.studentId || student.schoolCode || student.name}`}
+                    className="rectoria-overview-alert-card__link"
                     type="button"
-                    onClick={() => navigateFromOverview({ section: 'database' })}
+                    onClick={() => openOverviewInsightModal({
+                      tone: 'danger',
+                      title: `Estudiantes bajo ${passingScoreLabel}`,
+                      subtitle: 'Promedio consolidado por alumno en todos sus cursos.',
+                      items: overviewAcademicPerformance.atRiskStudents.map((student) => ({
+                        key: student.studentId || student.schoolCode || student.name,
+                        title: student.name || 'Alumno',
+                        meta: `${formatAcademicScore(student.finalScore)} · ${student.courseLabel} · ${student.teacherLabel}`,
+                        target: { section: 'database' },
+                      })),
+                      footerLabel: 'Ver base de datos académica',
+                      footerTarget: { section: 'database' },
+                    })}
                   >
-                    <strong>{student.name || 'Alumno'}</strong>
-                    <span>{formatAcademicScore(student.finalScore)} · {student.courseLabel} · {student.teacherLabel}</span>
+                    Ver todos ›
                   </button>
-                ))}
+                </header>
+                {overviewAcademicPerformance.atRiskStudents.length === 0 ? (
+                  <p className="rectoria-overview-empty-note">No hay estudiantes bajo {passingScoreLabel} con calificaciones registradas.</p>
+                ) : null}
+                <div className="rectoria-overview-alert-list">
+                  {overviewAcademicPerformance.atRiskStudents.slice(0, 6).map((student) => (
+                    <button
+                      className="rectoria-overview-alert-row"
+                      key={`${student.studentId || student.schoolCode || student.name}`}
+                      type="button"
+                      onClick={() => navigateFromOverview({ section: 'database' })}
+                    >
+                      <span className="rectoria-overview-alert-avatar is-student" aria-hidden="true">
+                        {getPlannerTeacherInitials(student.name || 'Alumno')}
+                      </span>
+                      <span className="rectoria-overview-alert-row__copy">
+                        <strong>{student.name || 'Alumno'}</strong>
+                        <span>{formatAcademicScore(student.finalScore)} · {student.courseLabel} · {student.teacherLabel}</span>
+                      </span>
+                      <span className="rectoria-overview-alert-badge">Bajo {passingScoreLabel}</span>
+                    </button>
+                  ))}
+                </div>
               </article>
-              <article>
-                <h4>Cursos con promedios bajos</h4>
-                {overviewAcademicPerformance.coursesNeedingAttention.length === 0 ? <p className="rectoria-overview-empty-note">No hay cursos por debajo del umbral de atención.</p> : null}
-                {overviewAcademicPerformance.coursesNeedingAttention.slice(0, 6).map((course) => (
+
+              <article className="rectoria-overview-alert-card">
+                <header className="rectoria-overview-alert-card__head">
+                  <div>
+                    <span className="rectoria-overview-alert-card__icon is-courses" aria-hidden="true">
+                      <OverviewBookIcon />
+                    </span>
+                    <h4>Cursos con promedios bajos</h4>
+                  </div>
                   <button
-                    className="rectoria-overview-attention-item"
-                    key={course.key}
+                    className="rectoria-overview-alert-card__link"
                     type="button"
-                    onClick={() => navigateFromOverview({ section: 'students', academicSection: 'grades_courses' })}
+                    onClick={() => openOverviewInsightModal({
+                      tone: 'warn',
+                      title: 'Cursos con promedios bajos',
+                      subtitle: 'Cursos con promedio bajo o alumnos en riesgo.',
+                      items: overviewAcademicPerformance.coursesNeedingAttention.map((course) => ({
+                        key: course.key,
+                        title: course.displayLabel || course.label || course.subject || 'Curso',
+                        meta: `Promedio ${formatAcademicScore(course.averageScore)} · ${course.atRiskCount} bajo ${passingScoreLabel} · ${teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}`,
+                        target: { section: 'students', academicSection: 'grades_courses' },
+                      })),
+                      footerLabel: 'Ir a grados y cursos',
+                      footerTarget: { section: 'students', academicSection: 'grades_courses' },
+                    })}
                   >
-                    <strong>{course.displayLabel || course.label || course.subject || 'Curso'}</strong>
-                    <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} bajo {passingScoreLabel} · {teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}</span>
+                    Ver todos ›
                   </button>
-                ))}
+                </header>
+                {overviewAcademicPerformance.coursesNeedingAttention.length === 0 ? (
+                  <p className="rectoria-overview-empty-note">No hay cursos por debajo del umbral de atención.</p>
+                ) : null}
+                <div className="rectoria-overview-alert-list">
+                  {overviewAcademicPerformance.coursesNeedingAttention.slice(0, 6).map((course) => (
+                    <button
+                      className="rectoria-overview-alert-row"
+                      key={course.key}
+                      type="button"
+                      onClick={() => navigateFromOverview({ section: 'students', academicSection: 'grades_courses' })}
+                    >
+                      <span className="rectoria-overview-alert-avatar is-course" aria-hidden="true">
+                        <OverviewBookIcon />
+                      </span>
+                      <span className="rectoria-overview-alert-row__copy">
+                        <strong>{course.displayLabel || course.label || course.subject || 'Curso'}</strong>
+                        <span>Promedio {formatAcademicScore(course.averageScore)} · {course.atRiskCount} bajo {passingScoreLabel} · {teacherLabelById[course.teacherUserId] || 'Docente sin asignar'}</span>
+                      </span>
+                      <span className="rectoria-overview-alert-badge">Bajo {passingScoreLabel}</span>
+                    </button>
+                  ))}
+                </div>
               </article>
-              <article>
-                <h4>Docentes a revisar</h4>
-                {overviewAcademicPerformance.teacherAttentionRows.length === 0 ? <p className="rectoria-overview-empty-note">No hay suficientes calificaciones para priorizar docentes.</p> : null}
-                {overviewAcademicPerformance.teacherAttentionRows.slice(0, 6).map((teacher) => (
+
+              <article className="rectoria-overview-alert-card">
+                <header className="rectoria-overview-alert-card__head">
+                  <div>
+                    <span className="rectoria-overview-alert-card__icon is-teachers" aria-hidden="true">
+                      <OverviewPeopleIcon />
+                    </span>
+                    <h4>Docentes a revisar</h4>
+                  </div>
                   <button
-                    className="rectoria-overview-attention-item"
-                    key={teacher.key}
+                    className="rectoria-overview-alert-card__link"
                     type="button"
-                    onClick={() => navigateFromOverview({ section: 'team', teamRole: 'teacher' })}
+                    onClick={() => openOverviewInsightModal({
+                      tone: 'info',
+                      title: 'Docentes a revisar',
+                      subtitle: 'Docentes con promedios bajos o estudiantes en riesgo.',
+                      items: overviewAcademicPerformance.teacherAttentionRows.map((teacher) => ({
+                        key: teacher.key,
+                        title: teacher.label,
+                        meta: `Promedio ${formatAcademicScore(teacher.averageScore)} · ${teacher.atRiskCount} estudiantes en riesgo · ${teacher.coursesCount} cursos`,
+                        target: { section: 'team', teamRole: 'teacher' },
+                      })),
+                      footerLabel: 'Ver cuerpo académico',
+                      footerTarget: { section: 'team', teamRole: 'teacher' },
+                    })}
                   >
-                    <strong>{teacher.label}</strong>
-                    <span>Promedio {formatAcademicScore(teacher.averageScore)} · {teacher.atRiskCount} estudiantes en riesgo · {teacher.coursesCount} cursos</span>
+                    Ver todos ›
                   </button>
-                ))}
+                </header>
+                {overviewAcademicPerformance.teacherAttentionRows.length === 0 ? (
+                  <p className="rectoria-overview-empty-note">No hay suficientes calificaciones para priorizar docentes.</p>
+                ) : null}
+                <div className="rectoria-overview-alert-list">
+                  {overviewAcademicPerformance.teacherAttentionRows.slice(0, 6).map((teacher) => (
+                    <button
+                      className="rectoria-overview-alert-row"
+                      key={teacher.key}
+                      type="button"
+                      onClick={() => navigateFromOverview({ section: 'team', teamRole: 'teacher' })}
+                    >
+                      <span className="rectoria-overview-alert-avatar is-teacher" aria-hidden="true">
+                        {getPlannerTeacherInitials(teacher.label || 'Docente')}
+                      </span>
+                      <span className="rectoria-overview-alert-row__copy">
+                        <strong>{teacher.label}</strong>
+                        <span>Promedio {formatAcademicScore(teacher.averageScore)} · {teacher.atRiskCount} estudiantes en riesgo · {teacher.coursesCount} cursos</span>
+                      </span>
+                      <span className="rectoria-overview-attention-item__chevron" aria-hidden="true">
+                        <OverviewChevronIcon />
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </article>
             </div>
           </article>
@@ -8270,8 +9565,8 @@ function RectoriaDashboard() {
             <StaffAnnouncementsPanel
               className="staff-announcements-panel--rectoria"
               description={isCoordinationPortal
-                ? 'Publica mensajes internos para el equipo, recibe los de rectoría y consulta las confirmaciones de lectura.'
-                : 'Centraliza la comunicación interna con el equipo institucional y consulta las confirmaciones de lectura.'}
+                ? 'Envía y recibe mensajes internos entre áreas del colegio y consulta las confirmaciones de lectura.'
+                : 'Envía y recibe mensajes internos entre el equipo institucional y consulta las confirmaciones de lectura.'}
               mode="manage"
               title="Comunicados internos"
             />
@@ -8386,11 +9681,19 @@ function RectoriaDashboard() {
 
       {activeSection === 'team' ? (
         <div className="rectoria-stack rectoria-stack--team">
-          <form className="panel rectoria-panel rectoria-form" onSubmit={onCreateUser}>
-            <h3 className="rectoria-form-title">Crear nuevo integrante</h3>
+          <form className="panel rectoria-panel rectoria-form rectoria-team-create-panel" onSubmit={onCreateUser}>
+            <div className="rectoria-team-panel-header">
+              <span className="rectoria-team-panel-header__icon" aria-hidden="true">
+                <TeamCreateHeaderIcon />
+              </span>
+              <div>
+                <h3>Crear nuevo integrante</h3>
+                <p>Completa la información para crear un nuevo usuario en el sistema.</p>
+              </div>
+            </div>
             <div className="rectoria-form-row">
               <label className="rectoria-form-field rectoria-form-field--title">
-                Titulo
+                Título
                 <select value={userForm.title} onChange={(event) => onUserFormChange('title', event.target.value)}>
                   <option value="Mr">Mr</option>
                   <option value="Ms">Ms</option>
@@ -8400,13 +9703,19 @@ function RectoriaDashboard() {
               </label>
               <label className="rectoria-form-field rectoria-form-field--name">
                 Nombre
-                <input value={userForm.name} onChange={(event) => onUserFormChange('name', event.target.value)} required />
+                <input
+                  placeholder="Ej. Juan Pérez"
+                  value={userForm.name}
+                  onChange={(event) => onUserFormChange('name', event.target.value)}
+                  required
+                />
               </label>
               <label className="rectoria-form-field rectoria-form-field--email">
                 Correo
                 <input
                   type="email"
                   autoComplete="email"
+                  placeholder="correo@ejemplo.com"
                   value={userForm.username}
                   onChange={(event) => onUserFormChange('username', event.target.value)}
                   required
@@ -8414,21 +9723,50 @@ function RectoriaDashboard() {
               </label>
               <label className="rectoria-form-field rectoria-form-field--phone">
                 Teléfono
-                <input value={userForm.phone} onChange={(event) => onUserFormChange('phone', event.target.value)} />
+                <input
+                  placeholder="Ej. 300 123 4567"
+                  value={userForm.phone}
+                  onChange={(event) => onUserFormChange('phone', event.target.value)}
+                />
               </label>
               <label className="rectoria-form-field rectoria-form-field--password">
                 Password
-                <input value={userForm.password} onChange={(event) => onUserFormChange('password', event.target.value)} required />
+                <span className="rectoria-team-password-field">
+                  <input
+                    type={showTeamPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={userForm.password}
+                    onChange={(event) => onUserFormChange('password', event.target.value)}
+                    required
+                  />
+                  <button
+                    aria-label={showTeamPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="rectoria-team-password-toggle"
+                    onClick={() => setShowTeamPassword((current) => !current)}
+                    type="button"
+                  >
+                    {showTeamPassword ? <TeamEyeOffIcon /> : <TeamEyeIcon />}
+                  </button>
+                </span>
               </label>
               <label className="rectoria-form-field rectoria-form-field--role">
                 Rol
-                <select value={userForm.role} onChange={(event) => onUserFormChange('role', event.target.value)}>
-                  {visibleRoleOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
+                <select
+                  value={selectedTeamRole}
+                  onChange={(event) => {
+                    const nextRole = event.target.value;
+                    setSelectedTeamRole(nextRole);
+                    onUserFormChange('role', nextRole);
+                  }}
+                >
+                  {visibleRoleOptions
+                    .filter((option) => option.value === selectedTeamRole)
+                    .map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                 </select>
               </label>
-              {userForm.role === 'coordination' ? (
+              {selectedTeamRole === 'coordination' ? (
                 <label className="rectoria-form-field rectoria-form-field--scope">
                   Alcance
                   {teamLevelOptions.length > 0 ? (
@@ -8443,12 +9781,20 @@ function RectoriaDashboard() {
                   )}
                 </label>
               ) : null}
-              <button className="btn btn-primary rectoria-form-submit" type="submit" disabled={busy}>Crear usuario</button>
+            </div>
+            <div className="rectoria-team-create-actions">
+              <button className="btn btn-primary rectoria-form-submit" type="submit" disabled={busy}>
+                <TeamPlusIcon />
+                Crear usuario
+              </button>
             </div>
           </form>
 
-          <section className="panel rectoria-panel">
-            <div className="rectoria-section-header">
+          <section className="panel rectoria-panel rectoria-team-body-panel">
+            <div className="rectoria-team-panel-header">
+              <span className="rectoria-team-panel-header__icon" aria-hidden="true">
+                <TeamBodyHeaderIcon />
+              </span>
               <div>
                 <h3>Cuerpo académico actual</h3>
                 <p>Selecciona un rol para ver su equipo, métricas operativas y los flujos de asignación que lo sostienen.</p>
@@ -8458,19 +9804,32 @@ function RectoriaDashboard() {
             {selectedTeamGroup ? (
               <div className="rectoria-team-role-surface">
                 <div className="rectoria-team-role-header">
-                  <div>
-                    <h4>{selectedTeamGroup.label}</h4>
-                    <p>{TEAM_ROLE_PANEL_COPY[selectedTeamGroup.value] || 'Consulta el detalle operativo de este rol institucional.'}</p>
+                  <div className="rectoria-team-role-header__copy">
+                    <span className="rectoria-team-role-header__icon" aria-hidden="true">
+                      <TeamShieldIcon />
+                    </span>
+                    <div>
+                      <h4>{selectedTeamGroup.label}</h4>
+                      <p>{TEAM_ROLE_PANEL_COPY[selectedTeamGroup.value] || 'Consulta el detalle operativo de este rol institucional.'}</p>
+                    </div>
                   </div>
-                  <span className="rectoria-team-role-count">{selectedTeamGroup.users.length} integrantes</span>
+                  <span className="rectoria-team-role-count">
+                    <TeamBodyHeaderIcon />
+                    {selectedTeamGroup.users.length} integrante{selectedTeamGroup.users.length === 1 ? '' : 's'}
+                  </span>
                 </div>
 
                 <div className="rectoria-team-stat-grid">
                   {selectedTeamStatCards.map((card) => (
-                    <article className="rectoria-team-stat-card" key={card.key}>
-                      <span>{card.label}</span>
-                      <strong>{card.value}</strong>
-                      <p>{card.helper}</p>
+                    <article className={`rectoria-team-stat-card is-tone-${card.tone || 'info'}`} key={card.key}>
+                      <span className="rectoria-team-stat-card__icon" aria-hidden="true">
+                        {getTeamStatIcon(card.key)}
+                      </span>
+                      <div>
+                        <span>{card.label}</span>
+                        <strong>{card.value}</strong>
+                        <p>{card.helper}</p>
+                      </div>
                     </article>
                   ))}
                 </div>
@@ -8478,7 +9837,8 @@ function RectoriaDashboard() {
                 <div className="rectoria-user-list">
                   {selectedTeamGroup.users.length === 0 ? <p className="rectoria-role-empty">Todavía no hay integrantes asignados a este rol.</p> : null}
                   {selectedTeamGroup.users.map((item) => {
-                    const teacherSummary = item.role === 'teacher' ? teacherTeachingSummaryById[String(item._id)] : null;
+                    const memberId = String(item._id || '');
+                    const teacherSummary = item.role === 'teacher' ? teacherTeachingSummaryById[memberId] : null;
                     const teacherSubjectLabels = teacherSummary ? Array.from(teacherSummary.subjects.values()) : [];
                     const teacherCourseLabels = teacherSummary ? Array.from(teacherSummary.courses.values()) : [];
                     const teacherBaseSubjectLabels = Array.isArray(item.assignedSubjects) ? item.assignedSubjects.filter(Boolean) : [];
@@ -8488,25 +9848,66 @@ function RectoriaDashboard() {
                         .filter(Boolean)
                         .map((subjectLabel) => [subjectLabel.toLowerCase(), subjectLabel])
                     ).values());
-                    const teacherHeadroomCourseLabels = item.role === 'teacher' ? (headroomCourseLabelsByTeacherId[String(item._id)] || []) : [];
+                    const teacherHeadroomCourseLabels = item.role === 'teacher' ? (headroomCourseLabelsByTeacherId[memberId] || []) : [];
+                    const displayName = item.name || item.username || 'Usuario';
+                    const hasExpandableDetails = item.role === 'teacher'
+                      || (item.role === 'coordination' && Boolean(item.coordinationScope));
+                    const isExpanded = hasExpandableDetails && expandedTeamMemberId === memberId;
 
                     return (
-                      <article className="rectoria-user-card" key={item._id}>
-                        <div className="rectoria-user-card__body">
-                          <header className="rectoria-user-card__header">
-                            <div>
-                              <strong>{item.name || item.username}</strong>
-                              <span>{roleLabel(item.role)}</span>
+                      <article
+                        className={`rectoria-user-card${item.status === 'active' ? '' : ' is-inactive'}${hasExpandableDetails ? ' is-expandable' : ''}${isExpanded ? ' is-expanded' : ''}`}
+                        key={item._id}
+                      >
+                        <div
+                          className="rectoria-user-card__main"
+                          onClick={() => {
+                            if (!hasExpandableDetails) return;
+                            setExpandedTeamMemberId((current) => (current === memberId ? '' : memberId));
+                          }}
+                        >
+                          <span className="rectoria-user-card__avatar" aria-hidden="true">
+                            {getPlannerTeacherInitials(displayName)}
+                          </span>
+                          <div className="rectoria-user-card__identity">
+                            <div className="rectoria-user-card__name-row">
+                              <strong>{displayName}</strong>
+                              <span className="rectoria-user-card__role-badge">{roleLabel(item.role)}</span>
+                              {hasExpandableDetails ? (
+                                <span className="rectoria-user-card__expand-hint">
+                                  {isExpanded ? 'Ocultar detalle' : 'Ver detalle'}
+                                </span>
+                              ) : null}
                             </div>
                             <span className="rectoria-user-card__email">{item.username}</span>
-                          </header>
-                          {item.role === 'coordination' && item.coordinationScope ? (
+                          </div>
+                          <div
+                            className="rectoria-user-actions"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button className="rectoria-user-action-btn is-edit" type="button" onClick={() => openEditUserModal(item)} disabled={busy}>
+                              <TeamEditIcon />
+                              Editar
+                            </button>
+                            <button className="rectoria-user-action-btn is-toggle" type="button" onClick={() => onToggleUserStatus(item)} disabled={busy}>
+                              <TeamPowerIcon />
+                              {item.status === 'active' ? 'Inactivar' : 'Activar'}
+                            </button>
+                            <button className="rectoria-user-action-btn is-remove" type="button" onClick={() => onDeleteUser(item)} disabled={busy}>
+                              Retirar
+                            </button>
+                          </div>
+                        </div>
+                        {isExpanded && item.role === 'coordination' && item.coordinationScope ? (
+                          <div className="rectoria-user-card__details">
                             <div className="rectoria-user-card__section">
                               <span>Alcance</span>
                               <p>{getLevelLabel(item.coordinationScope)}</p>
                             </div>
-                          ) : null}
-                          {item.role === 'teacher' ? (
+                          </div>
+                        ) : null}
+                        {isExpanded && item.role === 'teacher' ? (
+                          <div className="rectoria-user-card__details">
                             <div className="rectoria-user-card__teaching-grid">
                               <div className="rectoria-user-card__section">
                                 <span>Asignaturas</span>
@@ -8529,134 +9930,247 @@ function RectoriaDashboard() {
                                 </div>
                               </div>
                             </div>
-                          ) : null}
-                        </div>
-                        <div className="rectoria-user-actions">
-                          <button className="btn btn-primary" type="button" onClick={() => openEditUserModal(item)} disabled={busy}>
-                            Editar
-                          </button>
-                          <button className="btn" type="button" onClick={() => onToggleUserStatus(item)} disabled={busy}>
-                            {item.status === 'active' ? 'Inactivar' : 'Activar'}
-                          </button>
-                          <button className="btn btn-danger" type="button" onClick={() => onDeleteUser(item)} disabled={busy}>
-                            Retirar
-                          </button>
-                        </div>
+                          </div>
+                        ) : null}
                       </article>
                     );
                   })}
                 </div>
 
+                <div className="rectoria-team-role-footer">
+                  <button
+                    className="rectoria-team-role-footer__link"
+                    type="button"
+                    onClick={() => openOverviewInsightModal({
+                      tone: 'info',
+                      title: `Integrantes · ${selectedTeamGroup.label}`,
+                      subtitle: `Equipo registrado actualmente en ${selectedTeamGroup.label}.`,
+                      items: selectedTeamGroup.users.map((item) => ({
+                        key: item._id,
+                        title: item.name || item.username || 'Usuario',
+                        meta: `${item.username || 'Sin correo'} · ${item.status === 'active' ? 'Activo' : 'Inactivo'}`,
+                        target: { section: 'team', teamRole: selectedTeamGroup.value },
+                      })),
+                      footerLabel: 'Seguir en cuerpo académico',
+                      footerTarget: { section: 'team', teamRole: selectedTeamGroup.value },
+                    })}
+                  >
+                    Ver todos los integrantes de {selectedTeamGroup.label}
+                    <TeamExternalIcon />
+                  </button>
+                </div>
+
                 {selectedTeamRole === 'coordination' ? (
-                  <div className="rectoria-team-detail-grid">
-                    <article className="rectoria-team-detail-card">
-                      <div className="rectoria-section-header rectoria-section-header--compact">
-                        <div>
-                          <h4>Vinculacion de coordinadores por nivel educativo</h4>
-                          <p>Revisa como queda distribuida la coordinacion institucional en cada nivel educativo.</p>
-                        </div>
+                  <article className="rectoria-team-coord-table-panel">
+                    <div className="rectoria-team-coord-table-panel__head">
+                      <div>
+                        <h4>Coordinación por nivel educativo</h4>
+                        <p>Consulta coordinadores, grados, cursos y alumnos de cada nivel en una sola vista.</p>
                       </div>
+                    </div>
 
-                      <div className="rectoria-team-level-grid">
-                        {teamLevelOptions.map((level) => {
-                          const levelSummary = educationalLevelSummaryByKey[level.key] || null;
-                          const assignedCoordinators = coordinationUsersByLevelKey[level.key] || [];
+                    {educationalLevelSummaries.length === 0 ? (
+                      <p className="rectoria-role-empty">Todavía no hay niveles educativos configurados.</p>
+                    ) : (
+                      <div className="rectoria-team-coord-table-wrap">
+                        <table className="rectoria-team-coord-table">
+                          <thead>
+                            <tr>
+                              <th>Nivel educativo</th>
+                              <th>Coordinadores</th>
+                              <th>Grados</th>
+                              <th>Cursos</th>
+                              <th>Alumnos asignados</th>
+                              <th>Pendientes por ubicar</th>
+                              <th>Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {educationalLevelSummaries.map((level) => {
+                              const theme = getOverviewLevelTheme(level);
+                              const assignedCoordinators = coordinationUsersByLevelKey[level.key] || [];
+                              const isExpanded = expandedCoordinationLevelKey === level.key;
+                              const assignableCoordinators = coordinationUsers.filter((user) => {
+                                const scope = String(user.coordinationScope || '').trim();
+                                return !scope || scope === level.key;
+                              });
+                              const subtitle = assignedCoordinators.length > 0
+                                ? assignedCoordinators.map((item) => item.name || item.username).join(', ')
+                                : 'Sin coordinadores asignados';
 
-                          return (
-                            <article className="rectoria-team-level-card rectoria-team-level-card--coordination" key={level.key}>
-                              <div className="rectoria-team-level-top">
-                                <div className="rectoria-team-level-title-block">
-                                  <span className="rectoria-team-level-eyebrow">Nivel educativo</span>
-                                  <strong>{level.label}</strong>
-                                </div>
-                                <span className="rectoria-team-level-count-badge">{assignedCoordinators.length} coordinadores</span>
-                              </div>
-
-                              <p className="rectoria-team-level-summary">
-                                {Number(levelSummary?.gradesCount || 0)} grados y {Number(levelSummary?.coursesCount || 0)} cursos listos para coordinacion.
-                              </p>
-
-                              <div className="rectoria-team-level-current">
-                                <span className="rectoria-team-level-current-label">Asignados actualmente</span>
-                                {assignedCoordinators.length > 0 ? (
-                                  <div className="rectoria-team-badge-list">
-                                    {assignedCoordinators.map((item) => (
-                                      <span className="rectoria-team-badge" key={`${level.key}-${item._id}`}>{item.name || item.username}</span>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="rectoria-team-level-empty">Aun no hay coordinadores vinculados a este nivel.</p>
-                                )}
-                              </div>
-                            </article>
-                          );
-                        })}
+                              return (
+                                <Fragment key={level.key}>
+                                  <tr className={`rectoria-team-coord-table__row theme-${theme}${isExpanded ? ' is-expanded' : ''}`}>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__level">
+                                        <span className="rectoria-team-coord-table__level-icon" aria-hidden="true">
+                                          <OverviewLevelGlyph theme={theme} />
+                                        </span>
+                                        <div>
+                                          <div className="rectoria-team-coord-table__level-title">
+                                            <strong>{level.label}</strong>
+                                            <span className="rectoria-team-coord-table__status">Activo</span>
+                                          </div>
+                                          <small>{subtitle}</small>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__metric">
+                                        <span className="rectoria-team-coord-table__metric-icon" aria-hidden="true">
+                                          <OverviewPeopleIcon />
+                                        </span>
+                                        <div>
+                                          <strong>{level.coordinatorCount}</strong>
+                                          <span>Coordinadores</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__metric">
+                                        <span className="rectoria-team-coord-table__metric-icon" aria-hidden="true">
+                                          <TeamGridIcon />
+                                        </span>
+                                        <div>
+                                          <strong>{level.gradesCount}</strong>
+                                          <span>Grados</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__metric">
+                                        <span className="rectoria-team-coord-table__metric-icon" aria-hidden="true">
+                                          <OverviewBookIcon />
+                                        </span>
+                                        <div>
+                                          <strong>{level.coursesCount}</strong>
+                                          <span>Cursos</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__metric">
+                                        <span className="rectoria-team-coord-table__metric-icon" aria-hidden="true">
+                                          <TeamBodyHeaderIcon />
+                                        </span>
+                                        <div>
+                                          <strong>{level.assignedStudents}</strong>
+                                          <span>Alumnos</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__metric is-pending">
+                                        <span className="rectoria-team-coord-table__metric-icon" aria-hidden="true">
+                                          <TeamPendingUserIcon />
+                                        </span>
+                                        <div>
+                                          <strong>{level.pendingStudents}</strong>
+                                          <span>Alumnos</span>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <div className="rectoria-team-coord-table__actions">
+                                        <button
+                                          className="rectoria-team-coord-table__detail-btn"
+                                          type="button"
+                                          onClick={() => setExpandedCoordinationLevelKey((previous) => (previous === level.key ? '' : level.key))}
+                                        >
+                                          {isExpanded ? 'Ocultar detalle' : 'Ver detalle'}
+                                        </button>
+                                        <button
+                                          className="rectoria-team-coord-table__more"
+                                          type="button"
+                                          aria-label={`Opciones de ${level.label}`}
+                                          onClick={() => setExpandedCoordinationLevelKey((previous) => (previous === level.key ? '' : level.key))}
+                                        >
+                                          <TeamMoreIcon />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {isExpanded ? (
+                                    <tr className={`rectoria-team-coord-table__detail theme-${theme}`}>
+                                      <td colSpan={7}>
+                                        <div className="rectoria-team-coord-table__detail-panel">
+                                          <div className="rectoria-team-coord-table__detail-block">
+                                            <span>Asignados actualmente</span>
+                                            {assignedCoordinators.length > 0 ? (
+                                              <div className="rectoria-team-badge-list">
+                                                {assignedCoordinators.map((item) => (
+                                                  <span className="rectoria-team-badge" key={`${level.key}-${item._id}`}>
+                                                    {item.name || item.username}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <p className="rectoria-role-empty">Aún no hay coordinadores vinculados a este nivel.</p>
+                                            )}
+                                          </div>
+                                          <div className="rectoria-team-coord-table__detail-assign">
+                                            <label>
+                                              Vincular coordinador
+                                              <select
+                                                value={teamCoordinatorSelections[level.key] || ''}
+                                                onChange={(event) => onTeamCoordinatorSelectionChange(level.key, event.target.value)}
+                                              >
+                                                <option value="">Selecciona coordinador</option>
+                                                {assignableCoordinators.map((user) => (
+                                                  <option key={user._id} value={user._id}>
+                                                    {user.name || user.username}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                            <button
+                                              className="btn btn-primary"
+                                              type="button"
+                                              disabled={busy || !(teamCoordinatorSelections[level.key] || '').trim()}
+                                              onClick={() => onAssignCoordinatorLevel(level.key)}
+                                            >
+                                              Asignar al nivel
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ) : null}
+                                </Fragment>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
-                    </article>
-
-                    <article className="rectoria-team-detail-card">
-                      <div className="rectoria-section-header rectoria-section-header--compact">
-                        <div>
-                          <h4>KPI por nivel educativo</h4>
-                          <p>Consulta cuántos grados, cursos y alumnos concentra cada nivel antes de asignar coordinacion.</p>
-                        </div>
-                      </div>
-
-                      <div className="rectoria-team-level-kpi-grid">
-                        {educationalLevelSummaries.map((level) => (
-                          <article className="rectoria-team-level-kpi-card" key={level.key}>
-                            <div className="rectoria-team-level-kpi-top">
-                              <div className="rectoria-team-level-kpi-title-block">
-                                <span className="rectoria-team-level-kpi-eyebrow">Nivel educativo</span>
-                                <strong>{level.label}</strong>
-                              </div>
-                              <span className="rectoria-team-level-kpi-badge">
-                                {level.coordinatorCount} coordinadores
-                              </span>
-                            </div>
-                            <p className="rectoria-team-level-kpi-summary">
-                              {level.gradesCount} grados y {level.coursesCount} cursos en este frente academico.
-                            </p>
-                            <div className="rectoria-team-level-kpi-list">
-                              <div className="rectoria-team-level-kpi-metric">
-                                <span>Grados</span>
-                                <strong>{level.gradesCount}</strong>
-                              </div>
-                              <div className="rectoria-team-level-kpi-metric">
-                                <span>Cursos</span>
-                                <strong>{level.coursesCount}</strong>
-                              </div>
-                              <div className="rectoria-team-level-kpi-metric">
-                                <span>Alumnos asignados</span>
-                                <strong>{level.assignedStudents}</strong>
-                              </div>
-                              <div className="rectoria-team-level-kpi-metric">
-                                <span>Pendientes por ubicar</span>
-                                <strong>{level.pendingStudents}</strong>
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    </article>
-                  </div>
+                    )}
+                  </article>
                 ) : null}
 
                 {selectedTeamRole === 'teacher' ? (
-                  <div className="rectoria-team-detail-grid">
-                    <article className="rectoria-team-detail-card">
-                      <div className="rectoria-section-header rectoria-section-header--compact">
+                  <div className="rectoria-team-link-layout">
+                    <article className="rectoria-team-link-panel">
+                      <div className="rectoria-team-link-panel__head">
+                        <span className="rectoria-team-link-panel__icon is-link" aria-hidden="true">
+                          <TeamLinkIcon />
+                        </span>
                         <div>
                           <h4>Vinculación docente a asignaturas</h4>
                           <p>Selecciona el docente, una o más asignaturas y los grados que dictará en cada una.</p>
                         </div>
                       </div>
 
-                      <div className="rectoria-team-link-form">
-                        <label>
-                          Docente
-                          <select value={teamTeacherAssignment.teacherUserId} onChange={(event) => onTeamTeacherAssignmentChange('teacherUserId', event.target.value)}>
-                            <option value="">Selecciona docente</option>
+                      <div className="rectoria-team-link-step">
+                        <span className="rectoria-team-link-step__label">1. Selecciona el docente</span>
+                        <label className="rectoria-team-link-select">
+                          <span className="rectoria-team-link-select__icon" aria-hidden="true">
+                            <TeamPersonSelectIcon />
+                          </span>
+                          <select
+                            aria-label="Seleccionar docente"
+                            value={teamTeacherAssignment.teacherUserId}
+                            onChange={(event) => onTeamTeacherAssignmentChange('teacherUserId', event.target.value)}
+                          >
+                            <option value="">Buscar o seleccionar docente</option>
                             {teacherUsers.map((teacher) => (
                               <option key={teacher.value} value={teacher.value}>{teacher.label}</option>
                             ))}
@@ -8664,103 +10178,245 @@ function RectoriaDashboard() {
                         </label>
                       </div>
 
-                      <div className="rectoria-inline-help">Asignaturas</div>
-                      <div className="rectoria-break-grade-picker">
-                        {subjectOptionsForSchedule.length === 0 ? (
-                          <p className="rectoria-role-empty">Primero crea asignaturas en Gestión académica.</p>
-                        ) : subjectOptionsForSchedule.map((subject) => (
-                          <button
-                            key={`team-teacher-subject-${subject.value}`}
-                            className={`rectoria-break-grade-chip${getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment).includes(subject.value) ? ' is-selected' : ''}`}
-                            disabled={busy}
-                            onClick={() => onToggleTeamTeacherAssignmentSubject(subject.value)}
-                            type="button"
-                          >
-                            {subject.label}
-                          </button>
-                        ))}
+                      <div className="rectoria-team-link-step">
+                        <span className="rectoria-team-link-step__label">2. Selecciona las asignaturas</span>
+                        <p className="rectoria-team-link-step__help">Puedes seleccionar una o más asignaturas.</p>
+                        <div className="rectoria-team-subject-grid">
+                          {subjectOptionsForSchedule.length === 0 ? (
+                            <p className="rectoria-role-empty">Primero crea asignaturas en Gestión académica.</p>
+                          ) : subjectOptionsForSchedule.map((subject) => {
+                            const selected = getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment).includes(subject.value);
+                            return (
+                              <button
+                                key={`team-teacher-subject-${subject.value}`}
+                                className={`rectoria-team-subject-chip tone-${getSubjectChipTone(subject.label)}${selected ? ' is-selected' : ''}`}
+                                disabled={busy}
+                                onClick={() => onToggleTeamTeacherAssignmentSubject(subject.value)}
+                                type="button"
+                              >
+                                <span className="rectoria-team-subject-chip__icon" aria-hidden="true">
+                                  <OverviewBookIcon />
+                                </span>
+                                <span className="rectoria-team-subject-chip__label">{subject.label}</span>
+                                {selected ? (
+                                  <span className="rectoria-team-subject-chip__check" aria-hidden="true">
+                                    <TeamCheckIcon />
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
 
-                      <ClickableOptionPicker
-                        label="Grados a cubrir"
-                        options={gradeOptionsForSubjects}
-                        selectedValues={teamTeacherAssignment.gradeKeys}
-                        emptyLabel="Selecciona uno o más grados para esta vinculación."
-                        onAdd={onToggleTeamTeacherAssignmentGrade}
-                        onRemove={onToggleTeamTeacherAssignmentGrade}
-                      />
-
-                      <div className="rectoria-team-course-preview">
-                        <strong>Cursos incluidos</strong>
-                        {teamTeacherAssignmentCoursePreview.length > 0 ? (
-                          <div className="rectoria-team-badge-list">
-                            {teamTeacherAssignmentCoursePreview.map((course) => (
-                              <span className="rectoria-team-badge" key={course.value}>{course.label}</span>
-                            ))}
+                      <section className="rectoria-team-grades-cover">
+                        <header className="rectoria-team-grades-cover__head">
+                          <div className="rectoria-team-grades-cover__title">
+                            <span className="rectoria-team-grades-cover__step" aria-hidden="true">3</span>
+                            <div>
+                              <h5>Grados a cubrir</h5>
+                              <p>Selecciona uno o más grados para esta vinculación</p>
+                            </div>
                           </div>
-                        ) : (
-                          <p className="rectoria-option-list-empty">Al elegir grados, aquí aparecerán los cursos que el docente cubrirá dentro de cada uno.</p>
-                        )}
-                      </div>
+                          <button
+                            className="rectoria-team-grades-cover__help"
+                            type="button"
+                            onClick={() => setTeamTeacherGradesHelpOpen((previous) => !previous)}
+                          >
+                            <OverviewInfoIcon />
+                            ¿Cómo funciona?
+                          </button>
+                        </header>
 
-                      {teamTeacherAssignment.teacherUserId ? (
-                        <div className="rectoria-team-course-preview rectoria-team-teacher-current-load">
-                          <strong>Materias actuales del docente</strong>
-                          {selectedTeamTeacherSummary && Array.from(selectedTeamTeacherSummary.subjects.values()).length > 0 ? (
-                            <>
-                              <div className="rectoria-team-badge-list">
-                                {Array.from(selectedTeamTeacherSummary.subjects.values()).map((subjectLabel) => (
-                                  <span className="rectoria-team-badge" key={subjectLabel}>{subjectLabel}</span>
-                                ))}
-                              </div>
-                              <p className="rectoria-option-list-empty">
-                                Cursos: {Array.from(selectedTeamTeacherSummary.courses.values()).join(', ') || 'Sin cursos configurados'}
-                              </p>
-                            </>
+                        {teamTeacherGradesHelpOpen ? (
+                          <p className="rectoria-team-grades-cover__tip">
+                            Elige los grados en los que el docente dictará las asignaturas seleccionadas. Los cursos de cada grado se incluyen automáticamente al guardar la vinculación.
+                          </p>
+                        ) : null}
+
+                        <div className="rectoria-team-grades-cover__body">
+                          <div className="rectoria-team-grades-cover__prompt">
+                            <span className="rectoria-team-grades-cover__prompt-icon" aria-hidden="true">
+                              <TeamGradCapIcon />
+                            </span>
+                            <span>Selecciona los grados.</span>
+                          </div>
+
+                          {gradeOptionsForSubjects.length === 0 ? (
+                            <p className="rectoria-role-empty">Primero configura grados en Gestión académica.</p>
                           ) : (
-                            <p className="rectoria-option-list-empty">Este docente todavia no tiene asignaturas vinculadas.</p>
+                            <>
+                              {teamTeacherGradePickerGroups.earlyYears.length > 0 ? (
+                                <div className="rectoria-team-grades-cover__group">
+                                  <span className="rectoria-team-grades-cover__group-label">Primeros años</span>
+                                  <div className="rectoria-team-grades-cover__pills">
+                                    {teamTeacherGradePickerGroups.earlyYears.map((grade) => {
+                                      const selected = (teamTeacherAssignment.gradeKeys || []).includes(grade.value);
+                                      return (
+                                        <button
+                                          key={`team-teacher-early-${grade.value}`}
+                                          className={`rectoria-team-grade-pill${selected ? ' is-selected' : ''}`}
+                                          disabled={busy}
+                                          onClick={() => onToggleTeamTeacherAssignmentGrade(grade.value)}
+                                          type="button"
+                                          title={grade.label}
+                                        >
+                                          <span className="rectoria-team-grade-pill__icon" aria-hidden="true">
+                                            <TeamEarlyGradeIcon variant={grade.earlyIcon} />
+                                          </span>
+                                          <span>{grade.displayLabel}</span>
+                                          {selected ? (
+                                            <span className="rectoria-team-grade-pill__check" aria-hidden="true">
+                                              <TeamCheckIcon />
+                                            </span>
+                                          ) : null}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {teamTeacherGradePickerGroups.courseGrades.length > 0 ? (
+                                <div className="rectoria-team-grades-cover__group">
+                                  <span className="rectoria-team-grades-cover__group-label">Cursos</span>
+                                  <div className="rectoria-team-grades-cover__courses">
+                                    {teamTeacherGradePickerGroups.courseGrades.map((grade) => {
+                                      const selected = (teamTeacherAssignment.gradeKeys || []).includes(grade.value);
+                                      const isCircle = grade.kind === 'number';
+                                      return (
+                                        <button
+                                          key={`team-teacher-course-${grade.value}`}
+                                          className={`${isCircle ? 'rectoria-team-grade-circle' : 'rectoria-team-grade-pill'}${selected ? ' is-selected' : ''}`}
+                                          disabled={busy}
+                                          onClick={() => onToggleTeamTeacherAssignmentGrade(grade.value)}
+                                          type="button"
+                                          title={grade.label}
+                                        >
+                                          <span>{grade.displayLabel}</span>
+                                          {selected ? (
+                                            <span className={`${isCircle ? 'rectoria-team-grade-circle__check' : 'rectoria-team-grade-pill__check'}`} aria-hidden="true">
+                                              <TeamCheckIcon />
+                                            </span>
+                                          ) : null}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
                           )}
                         </div>
-                      ) : null}
 
-                      <div className="rectoria-team-detail-actions">
+                        <div className="rectoria-team-grades-cover__included">
+                          <div className="rectoria-team-grades-cover__included-copy">
+                            <span className="rectoria-team-grades-cover__included-icon" aria-hidden="true">
+                              <TeamCourseListIcon />
+                            </span>
+                            <div>
+                              <strong>Cursos incluidos</strong>
+                              <p>
+                                {teamTeacherAssignmentCoursePreview.length > 0
+                                  ? `${teamTeacherAssignmentIncludedCourseCount} curso${teamTeacherAssignmentIncludedCourseCount === 1 ? '' : 's'} dentro del${teamTeacherAssignmentCoursePreview.length === 1 ? '' : 'os'} grado${teamTeacherAssignmentCoursePreview.length === 1 ? '' : 's'} seleccionado${teamTeacherAssignmentCoursePreview.length === 1 ? '' : 's'}.`
+                                  : 'Al elegir grados, aquí aparecerán los cursos que el docente cubrirá dentro de cada uno.'}
+                              </p>
+                              {teamTeacherCoursesPreviewOpen && teamTeacherAssignmentCoursePreview.length > 0 ? (
+                                <div className="rectoria-team-included-course-grid">
+                                  {teamTeacherAssignmentCoursePreview.map((gradePreview) => (
+                                    <article className="rectoria-team-included-course-card" key={gradePreview.value}>
+                                      <strong className="rectoria-team-included-course-card__grade">{gradePreview.gradeLabel}</strong>
+                                      {gradePreview.levelLabel ? (
+                                        <span className="rectoria-team-included-course-card__level">{gradePreview.levelLabel}</span>
+                                      ) : null}
+                                      <span className="rectoria-team-included-course-card__courses">{gradePreview.courseSummary}</span>
+                                      <span className="rectoria-team-included-course-card__students">
+                                        {gradePreview.studentCount} alumno(s) asignados a cursos
+                                      </span>
+                                    </article>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                          <button
+                            className="rectoria-team-grades-cover__included-btn"
+                            type="button"
+                            disabled={teamTeacherAssignmentCoursePreview.length === 0}
+                            onClick={() => setTeamTeacherCoursesPreviewOpen((previous) => !previous)}
+                          >
+                            {teamTeacherCoursesPreviewOpen ? <TeamEyeOffIcon /> : <TeamEyeIcon />}
+                            {teamTeacherCoursesPreviewOpen ? 'Ocultar cursos' : 'Ver cursos incluidos'}
+                          </button>
+                        </div>
+                      </section>
+
+                      <div className="rectoria-team-link-actions">
                         <button className="btn btn-primary" type="button" onClick={onSaveTeamTeacherAssignment} disabled={busy}>
+                          <SaveIcon />
                           Guardar vinculación
+                        </button>
+                        <button className="rectoria-team-link-cancel" type="button" onClick={onCancelTeamTeacherAssignment} disabled={busy}>
+                          Cancelar
                         </button>
                       </div>
                     </article>
 
-                    <article className="rectoria-team-detail-card">
-                      <div className="rectoria-section-header rectoria-section-header--compact">
+                    <article className="rectoria-team-link-panel rectoria-team-link-panel--active">
+                      <div className="rectoria-team-link-panel__head">
+                        <span className="rectoria-team-link-panel__icon is-active" aria-hidden="true">
+                          <TeamBodyHeaderIcon />
+                        </span>
                         <div>
                           <h4>Vinculaciones activas</h4>
                           <p>Revisa qué docente quedó asociado a cada asignatura y en qué grados ya tiene cobertura.</p>
                         </div>
                       </div>
 
+                      <div className="rectoria-team-link-count">
+                        <OverviewBookIcon />
+                        {linkedTeacherAssignmentCount} docente{linkedTeacherAssignmentCount === 1 ? '' : 's'} vinculado{linkedTeacherAssignmentCount === 1 ? '' : 's'}
+                      </div>
+
                       <div className="rectoria-team-assignment-list">
-                        {teamTeacherAssignment.teacherUserId ? (
-                          <div className="rectoria-team-selected-teacher-summary">
-                            <strong>{teacherLabelById[teamTeacherAssignment.teacherUserId] || 'Docente seleccionado'}</strong>
-                            <span>
-                              {selectedTeamTeacherSummary && Array.from(selectedTeamTeacherSummary.subjects.values()).length > 0
-                                ? `Dicta: ${Array.from(selectedTeamTeacherSummary.subjects.values()).join(', ')}`
-                                : 'Sin materias vinculadas todavia'}
-                            </span>
-                          </div>
-                        ) : null}
-                        {selectedTeamTeacherAssignmentRows.length === 0 ? (
-                          <p className="rectoria-role-empty">Todavía no hay vinculaciones docentes registradas{teamTeacherAssignment.teacherUserId ? ' para este docente' : ''}.</p>
-                        ) : selectedTeamTeacherAssignmentRows.map((assignment) => (
-                          <article className="rectoria-team-assignment-card" key={assignment.key}>
-                            <div>
-                              <strong>{assignment.teacherLabel}</strong>
-                              <p>{assignment.subjectLabel}</p>
-                              <p>Grados: {assignment.gradeLabels.length ? assignment.gradeLabels.join(', ') : 'Sin grados'}</p>
-                              <p>Cursos: {assignment.courseLabels.length ? assignment.courseLabels.join(', ') : 'Sin cursos configurados'}</p>
+                        {teamTeacherAssignmentRows.length === 0 ? (
+                          <p className="rectoria-role-empty">Todavía no hay vinculaciones docentes registradas.</p>
+                        ) : teamTeacherAssignmentRows.map((assignment) => (
+                          <article className="rectoria-team-assignment-card rectoria-team-assignment-card--link" key={assignment.key}>
+                            <header className="rectoria-team-assignment-card__head">
+                              <span className="rectoria-team-assignment-card__avatar" aria-hidden="true">
+                                {getPlannerTeacherInitials(assignment.teacherLabel || 'Docente')}
+                              </span>
+                              <div>
+                                <strong>{assignment.teacherLabel}</strong>
+                                <span className="rectoria-team-assignment-card__subject">{assignment.subjectLabel}</span>
+                              </div>
+                              <span className="rectoria-team-assignment-card__status">Activo</span>
+                            </header>
+                            <div className="rectoria-team-assignment-card__meta">
+                              <div>
+                                <span className="rectoria-team-assignment-card__meta-label">
+                                  <TeamGradeListIcon />
+                                  Grados asignados
+                                </span>
+                                <p>{assignment.gradeLabels.length ? assignment.gradeLabels.join(', ') : 'Sin grados'}</p>
+                              </div>
+                              <div>
+                                <span className="rectoria-team-assignment-card__meta-label">
+                                  <TeamCourseListIcon />
+                                  Cursos asignados
+                                </span>
+                                <p>{assignment.courseLabels.length ? assignment.courseLabels.join(', ') : 'Sin cursos configurados'}</p>
+                              </div>
                             </div>
-                            <div className="rectoria-user-actions">
-                              <button className="btn btn-danger" type="button" onClick={() => onDeleteSubjectLoadTemplate(assignment.key)} disabled={busy}>
+                            <div className="rectoria-team-assignment-card__footer">
+                              <button
+                                className="rectoria-team-assignment-card__remove"
+                                type="button"
+                                onClick={() => onDeleteSubjectLoadTemplate(assignment.key)}
+                                disabled={busy}
+                              >
+                                <TeamTrashIcon />
                                 Retirar vínculo
                               </button>
                             </div>
@@ -8769,70 +10425,158 @@ function RectoriaDashboard() {
                       </div>
                     </article>
 
-                    <article className="rectoria-team-detail-card rectoria-team-detail-card--wide">
-                      <div className="rectoria-section-header rectoria-section-header--compact">
+                    <article className="rectoria-team-headroom">
+                      <div className="rectoria-team-headroom__head">
+                        <span className="rectoria-team-headroom__icon" aria-hidden="true">
+                          <TeamPersonSelectIcon />
+                        </span>
                         <div>
                           <h4>Headroom teacher</h4>
                           <p>Define el docente encargado del guidance routine de cada curso y su planilla de asistencia de la mañana.</p>
                         </div>
                       </div>
 
-                      <div className="rectoria-team-link-form rectoria-team-link-form--three">
-                        <label>
-                          Docente
-                          <select value={headroomTeacherAssignment.teacherUserId} onChange={(event) => onHeadroomTeacherAssignmentChange('teacherUserId', event.target.value)}>
-                            <option value="">Selecciona docente</option>
-                            {teacherUsers.map((teacher) => (
-                              <option key={teacher.value} value={teacher.value}>{teacher.label}</option>
-                            ))}
-                          </select>
-                        </label>
+                      <div className="rectoria-team-headroom__assign">
+                        <div className="rectoria-team-headroom__assign-title">
+                          <span className="rectoria-team-headroom__assign-icon" aria-hidden="true">
+                            <TeamFocusAssignIcon />
+                          </span>
+                          <strong>Asignar nuevo headroom teacher</strong>
+                        </div>
 
-                        <label>
-                          Grado
-                          <select value={headroomTeacherAssignment.gradeKey} onChange={(event) => onHeadroomTeacherAssignmentChange('gradeKey', event.target.value)}>
-                            <option value="">Selecciona grado</option>
-                            {gradeOptionsForSubjects.map((grade) => (
-                              <option key={grade.value} value={grade.value}>{grade.label}</option>
-                            ))}
-                          </select>
-                        </label>
+                        <div className="rectoria-team-headroom__fields">
+                          <label className="rectoria-team-link-select">
+                            <span className="rectoria-team-headroom__field-label">Docente</span>
+                            <span className="rectoria-team-link-select__wrap">
+                              <span className="rectoria-team-link-select__icon" aria-hidden="true">
+                                <TeamPersonSelectIcon />
+                              </span>
+                              <select
+                                aria-label="Seleccionar docente headroom"
+                                value={headroomTeacherAssignment.teacherUserId}
+                                onChange={(event) => onHeadroomTeacherAssignmentChange('teacherUserId', event.target.value)}
+                              >
+                                <option value="">Selecciona docente</option>
+                                {teacherUsers.map((teacher) => (
+                                  <option key={teacher.value} value={teacher.value}>{teacher.label}</option>
+                                ))}
+                              </select>
+                            </span>
+                          </label>
 
-                        <label>
-                          Curso
-                          <select value={headroomTeacherAssignment.courseKey} onChange={(event) => onHeadroomTeacherAssignmentChange('courseKey', event.target.value)} disabled={!headroomTeacherAssignment.gradeKey}>
-                            <option value="">Selecciona curso</option>
-                            {selectedHeadroomCourseOptions.map((course) => (
-                              <option key={course.value} value={course.value}>{course.label}</option>
-                            ))}
-                          </select>
-                        </label>
+                          <label className="rectoria-team-link-select">
+                            <span className="rectoria-team-headroom__field-label">Grado</span>
+                            <span className="rectoria-team-link-select__wrap">
+                              <span className="rectoria-team-link-select__icon" aria-hidden="true">
+                                <TeamGradCapIcon />
+                              </span>
+                              <select
+                                aria-label="Seleccionar grado headroom"
+                                value={headroomTeacherAssignment.gradeKey}
+                                onChange={(event) => onHeadroomTeacherAssignmentChange('gradeKey', event.target.value)}
+                              >
+                                <option value="">Selecciona grado</option>
+                                {gradeOptionsForSubjects.map((grade) => (
+                                  <option key={grade.value} value={grade.value}>{grade.label}</option>
+                                ))}
+                              </select>
+                            </span>
+                          </label>
+
+                          <label className="rectoria-team-link-select">
+                            <span className="rectoria-team-headroom__field-label">Curso</span>
+                            <span className="rectoria-team-link-select__wrap">
+                              <span className="rectoria-team-link-select__icon" aria-hidden="true">
+                                <OverviewBookIcon />
+                              </span>
+                              <select
+                                aria-label="Seleccionar curso headroom"
+                                value={headroomTeacherAssignment.courseKey}
+                                onChange={(event) => onHeadroomTeacherAssignmentChange('courseKey', event.target.value)}
+                                disabled={!headroomTeacherAssignment.gradeKey}
+                              >
+                                <option value="">Selecciona curso</option>
+                                {selectedHeadroomCourseOptions.map((course) => (
+                                  <option key={course.value} value={course.value}>{course.label}</option>
+                                ))}
+                              </select>
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="rectoria-team-headroom__assign-actions">
+                          <button className="btn btn-primary" type="button" onClick={onSaveHeadroomTeacherAssignment} disabled={busy}>
+                            <TeamPlusIcon />
+                            Guardar headroom teacher
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="rectoria-team-detail-actions">
-                        <button className="btn btn-primary" type="button" onClick={onSaveHeadroomTeacherAssignment} disabled={busy}>
-                          Guardar headroom teacher
-                        </button>
+                      <div className="rectoria-team-headroom__list-head">
+                        <h5>Headroom teachers asignados</h5>
+                        <span className="rectoria-team-headroom__count">{headroomAssignmentRows.length}</span>
                       </div>
 
-                      <div className="rectoria-team-assignment-list">
+                      <div className="rectoria-team-headroom__list">
                         {headroomAssignmentRows.length === 0 ? (
                           <p className="rectoria-role-empty">Todavía no hay headroom teachers configurados.</p>
                         ) : headroomAssignmentRows.map((assignment) => (
-                          <article className="rectoria-team-assignment-card" key={assignment.value}>
-                            <div>
-                              <strong>{assignment.teacherLabel}</strong>
-                              <p>{assignment.label}</p>
-                              <p>Guidance routine y planilla de asistencia de la mañana.</p>
-                            </div>
-                            <div className="rectoria-user-actions">
-                              <button className="btn btn-danger" type="button" onClick={() => onClearHeadroomTeacherAssignment(assignment.value)} disabled={busy}>
-                                Retirar
-                              </button>
+                          <article className="rectoria-team-headroom-card" key={assignment.value}>
+                            <div className="rectoria-team-headroom-card__body">
+                              <span className={`rectoria-team-headroom-card__avatar accent-${getPlannerTeacherAccent(assignment.teacherUserId || assignment.teacherLabel)}`} aria-hidden="true">
+                                {getPlannerTeacherInitials(assignment.teacherLabel || 'Docente')}
+                              </span>
+
+                              <div className="rectoria-team-headroom-card__content">
+                                <div className="rectoria-team-headroom-card__top">
+                                  <strong>{assignment.teacherLabel}</strong>
+                                  <div className="rectoria-team-headroom-card__top-actions">
+                                    <span className="rectoria-team-headroom-card__status">Activo</span>
+                                    <button
+                                      className="rectoria-team-headroom-card__remove"
+                                      type="button"
+                                      onClick={() => onClearHeadroomTeacherAssignment(assignment.value)}
+                                      disabled={busy}
+                                    >
+                                      <TeamTrashIcon />
+                                      Retirar
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="rectoria-team-headroom-card__meta">
+                                  <div className="rectoria-team-headroom-card__meta-item">
+                                    <span className="rectoria-team-headroom-card__meta-label">
+                                      <TeamGradCapIcon />
+                                      Grado
+                                    </span>
+                                    <p>{assignment.gradeLabel || 'Sin grado'}</p>
+                                  </div>
+                                  <div className="rectoria-team-headroom-card__meta-item">
+                                    <span className="rectoria-team-headroom-card__meta-label">
+                                      <OverviewBookIcon />
+                                      Curso
+                                    </span>
+                                    <p>{assignment.courseLabel || 'Sin curso'}</p>
+                                  </div>
+                                  <div className="rectoria-team-headroom-card__meta-item rectoria-team-headroom-card__meta-item--role">
+                                    <span className="rectoria-team-headroom-card__meta-label">
+                                      <OverviewClipboardIcon />
+                                      Función
+                                    </span>
+                                    <p>Guidance routine y planilla de asistencia de la mañana.</p>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </article>
                         ))}
                       </div>
+
+                      <p className="rectoria-team-headroom__note">
+                        <OverviewInfoIcon />
+                        Puedes editar o retirar un headroom teacher en cualquier momento.
+                      </p>
                     </article>
                   </div>
                 ) : null}
@@ -9067,46 +10811,248 @@ function RectoriaDashboard() {
               </div>
             </form>
 
-            <div className="rectoria-team-assignment-list">
-              {resourcePlannerCycles.length === 0 ? <p className="rectoria-role-empty">No hay planners activos.</p> : resourcePlannerCycles.map((cycle) => (
-                <article className="rectoria-team-assignment-card" key={cycle.id}>
-                  <div>
-                    <strong>{cycle.title}</strong>
-                    <p>{formatResourceDate(cycle.startDate)} - {formatResourceDate(cycle.endDate)}</p>
-                    <p>Límite: {formatResourceDate(cycle.submissionDeadline)}</p>
-                    {cycle.instructions ? <p>{cycle.instructions}</p> : null}
-                  </div>
-                  <div className="rectoria-fee-actions">
-                    <span className="rectoria-pill">{cycle.status || 'active'}</span>
-                    <button className="btn" type="button" onClick={() => onEditResourcePlannerCycle(cycle)} disabled={busy}>Editar</button>
-                    <button className="btn btn-danger" type="button" onClick={() => onDeleteResourcePlannerCycle(cycle)} disabled={busy}>Eliminar</button>
-                  </div>
-                </article>
-              ))}
+            <div className="rectoria-planner-cycle-list">
+              {resourcePlannerCycles.length === 0 ? <p className="rectoria-role-empty">No hay planners activos.</p> : resourcePlannerCycles.map((cycle, index) => {
+                const themeClass = index % 2 === 0 ? 'is-sky' : 'is-teal';
+                const statusLabel = getPlannerCycleStatusLabel(cycle.status);
+                const isActive = String(cycle.status || 'active').toLowerCase() === 'active';
+
+                return (
+                  <article className={`rectoria-planner-cycle-card ${themeClass}`} key={cycle.id}>
+                    <div className="rectoria-planner-cycle-card__body">
+                      <div className="rectoria-planner-cycle-card__icon" aria-hidden="true">
+                        <PlannerCycleCalendarIcon />
+                      </div>
+
+                      <div className="rectoria-planner-cycle-card__content">
+                        <h4>{cycle.title || 'Planner docente'}</h4>
+
+                        <div className="rectoria-planner-cycle-card__meta">
+                          <div>
+                            <span><PlannerCyclePeriodIcon /> Período</span>
+                            <strong>{formatResourceDate(cycle.startDate)} - {formatResourceDate(cycle.endDate)}</strong>
+                          </div>
+                          <div>
+                            <span><PlannerCycleDeadlineIcon /> Límite</span>
+                            <strong>{formatResourceDate(cycle.submissionDeadline)}</strong>
+                          </div>
+                        </div>
+
+                        {cycle.instructions ? (
+                          <div className="rectoria-planner-cycle-card__quote">
+                            <span className="rectoria-planner-cycle-card__quote-icon" aria-hidden="true">
+                              <PlannerCycleQuoteIcon />
+                            </span>
+                            <p>{cycle.instructions}</p>
+                          </div>
+                        ) : null}
+
+                        <div className="rectoria-planner-cycle-card__footer">
+                          <span className={`rectoria-planner-cycle-card__status${isActive ? ' is-active' : ''}`}>
+                            <i aria-hidden="true" />
+                            {statusLabel}
+                          </span>
+
+                          <div className="rectoria-planner-cycle-card__actions">
+                            <button className="rectoria-planner-cycle-card__edit" type="button" onClick={() => onEditResourcePlannerCycle(cycle)} disabled={busy}>
+                              <PlannerCycleEditIcon />
+                              Editar
+                            </button>
+                            <button className="rectoria-planner-cycle-card__delete" type="button" onClick={() => onDeleteResourcePlannerCycle(cycle)} disabled={busy}>
+                              <PlannerCycleDeleteIcon />
+                              Eliminar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rectoria-planner-cycle-card__visual" aria-hidden="true">
+                        <PlannerCycleArt />
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </section>
 
-          <section className="panel rectoria-panel">
-            <div className="rectoria-section-header">
-              <div>
-                <h3>Planners recibidos de docentes</h3>
-                <p>Revisa los planners pendientes y consolida sus materiales para enviarlos a gestión de compras.</p>
+          <section className="panel rectoria-panel rectoria-planner-inbox-panel">
+            <div className="rectoria-planner-inbox-header">
+              <div className="rectoria-planner-inbox-header__copy">
+                <span className="rectoria-planner-inbox-header__icon" aria-hidden="true">
+                  <PlannerInboxHeaderIcon />
+                </span>
+                <div>
+                  <h3>Planners recibidos de docentes</h3>
+                  <p>Revisa en tabla qué material pide cada docente y para qué. Devuélvelo con anotaciones por fila o una observación general.</p>
+                </div>
               </div>
-              <button className="btn" type="button" onClick={() => loadPortal({ silent: true })} disabled={refreshing || busy}>Actualizar</button>
+              <button className="rectoria-planner-inbox-refresh" type="button" onClick={() => loadPortal({ silent: true })} disabled={refreshing || busy}>
+                <PlannerRefreshIcon />
+                Actualizar
+              </button>
             </div>
 
-            <div className="rectoria-team-assignment-list">
-              {resourcePlannerRequests.length === 0 ? <p className="rectoria-role-empty">No hay planners docentes pendientes de consolidar.</p> : resourcePlannerRequests.map((request) => (
-                <button className={`rectoria-team-assignment-card${selectedResourcePlannerRequestIds.includes(request.id) ? ' is-active' : ''}`} key={request.id} type="button" onClick={() => onToggleResourcePlannerRequest(request.id)}>
-                  <div>
-                    <strong>{request.requestedBy?.name || 'Docente'}</strong>
-                    <p>{request.plannerCycle?.title || 'Planner'} · {request.requestedForArea || 'Sin área'}</p>
-                    <p>{getResourceRequestItemsLabel(request)}</p>
-                    {request.plannerActivities?.length ? <p>{request.plannerActivities.length} actividad(es) registradas</p> : null}
-                  </div>
-                  <span className="rectoria-pill">{selectedResourcePlannerRequestIds.includes(request.id) ? 'Seleccionado' : 'Seleccionar'}</span>
-                </button>
-              ))}
+            <div className="rectoria-planner-request-list">
+              {resourcePlannerRequests.length === 0 ? <p className="rectoria-role-empty">No hay planners docentes pendientes de consolidar.</p> : resourcePlannerRequests.map((request) => {
+                const isReturned = request.status === 'returned_for_correction';
+                const isSelected = selectedResourcePlannerRequestIds.includes(request.id);
+                const isReturning = resourcePlannerReturnDraft.requestId === request.id;
+                const reviewRows = getPlannerRequestReviewRows(request);
+                const returnObservationLength = isReturning
+                  ? getPlannerReturnObservationLength(resourcePlannerReturnDraft, reviewRows)
+                  : 0;
+                const teacherName = request.requestedBy?.name || 'Docente';
+                const accent = getPlannerTeacherAccent(`${teacherName}-${request.id}`);
+                const plannerTitle = request.plannerCycle?.title || 'Planner';
+                const areaLabel = request.requestedForArea || 'Sin área';
+
+                return (
+                  <article className={`rectoria-planner-request-card accent-${accent}${isSelected ? ' is-selected' : ''}${isReturned ? ' is-returned' : ''}`} key={request.id}>
+                    <header className="rectoria-planner-request-card__head">
+                      <div className="rectoria-planner-request-card__identity">
+                        <span className="rectoria-planner-request-card__avatar" aria-hidden="true">
+                          {getPlannerTeacherInitials(teacherName)}
+                        </span>
+                        <div>
+                          <strong>{teacherName}</strong>
+                          <div className="rectoria-planner-request-card__meta">
+                            <span><PlannerMetaCalendarIcon /> {plannerTitle}</span>
+                            <span><PlannerMetaBookIcon /> {areaLabel}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rectoria-planner-request-card__actions">
+                        <button
+                          className={`rectoria-planner-request-card__select${isSelected ? ' is-active' : ''}`}
+                          disabled={isReturned || busy}
+                          onClick={() => {
+                            if (isReturned) return;
+                            onToggleResourcePlannerRequest(request.id);
+                          }}
+                          type="button"
+                        >
+                          <PlannerSelectIcon />
+                          {isReturned ? 'Devuelto' : (isSelected ? 'Seleccionado' : 'Seleccionar')}
+                        </button>
+                        {!isReturned && !isReturning ? (
+                          <button
+                            className="rectoria-planner-request-card__return"
+                            disabled={busy}
+                            onClick={() => setResourcePlannerReturnDraft(createPlannerReturnDraft(request.id))}
+                            type="button"
+                          >
+                            <PlannerReturnIcon />
+                            Devolver a corrección
+                          </button>
+                        ) : null}
+                      </div>
+                    </header>
+
+                    <div className="rectoria-planner-request-table-wrap">
+                      <table className="rectoria-planner-request-table">
+                        <thead>
+                          <tr>
+                            <th><PlannerColActivityIcon /> Actividad</th>
+                            <th><PlannerColMaterialsIcon /> Materiales</th>
+                            <th><PlannerColPurposeIcon /> Para qué lo necesitan</th>
+                            <th><PlannerColCourseIcon /> Curso / materia</th>
+                            {isReturning ? <th>Anotación</th> : null}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reviewRows.map((row) => (
+                            <tr key={row.key}>
+                              <td>
+                                <div className="rectoria-planner-request-activity-cell">
+                                  <span className="rectoria-planner-request-activity-glyph" aria-hidden="true">
+                                    <PlannerActivityGlyph />
+                                  </span>
+                                  <strong>{row.activityTitle || 'Actividad sin título'}</strong>
+                                </div>
+                              </td>
+                              <td>
+                                {(row.materials || []).length === 0 ? (
+                                  <p className="rectoria-planner-materials-empty">Sin materiales</p>
+                                ) : (
+                                  <ul className="rectoria-planner-materials-list">
+                                    {(row.materials || []).map((material) => (
+                                      <li key={material.key}>
+                                        <span className="rectoria-planner-material-name">{material.needed}</span>
+                                        {material.quantity ? (
+                                          <span className="rectoria-planner-material-qty">x{material.quantity}</span>
+                                        ) : null}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </td>
+                              <td className="rectoria-planner-request-purpose">{row.purpose || 'Sin detalle'}</td>
+                              <td>
+                                <span className="rectoria-planner-course-chip">
+                                  <PlannerMetaBookIcon />
+                                  {row.context || areaLabel || '—'}
+                                </span>
+                              </td>
+                              {isReturning ? (
+                                <td>
+                                  <input
+                                    className="rectoria-planner-row-note"
+                                    onChange={(event) => setResourcePlannerReturnDraft((current) => ({
+                                      ...current,
+                                      requestId: request.id,
+                                      rowNotes: {
+                                        ...(current.rowNotes || {}),
+                                        [row.key]: event.target.value,
+                                      },
+                                    }))}
+                                    placeholder="Anotación de esta actividad"
+                                    value={resourcePlannerReturnDraft.rowNotes?.[row.key] || ''}
+                                  />
+                                </td>
+                              ) : null}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {isReturned && request.coordinationObservation ? (
+                      <p className="rectoria-planner-observation">Observación enviada: {request.coordinationObservation}</p>
+                    ) : null}
+                    {!isReturned && request.coordinationObservation && request.resubmittedAt ? (
+                      <p className="rectoria-planner-observation">Reenviado tras observación: {request.coordinationObservation}</p>
+                    ) : null}
+
+                    {isReturning ? (
+                      <div className="rectoria-planner-return">
+                        <label className="rectoria-form-field">
+                          Observación general
+                          <textarea
+                            onChange={(event) => setResourcePlannerReturnDraft((current) => ({
+                              ...current,
+                              requestId: request.id,
+                              generalObservation: event.target.value,
+                            }))}
+                            placeholder="Comentario general para el docente (opcional si ya anotaste filas)"
+                            rows={3}
+                            value={resourcePlannerReturnDraft.generalObservation}
+                          />
+                        </label>
+                        <p className="rectoria-inline-help">Puedes anotar por actividad, dejar una observación general, o ambas.</p>
+                        <div className="rectoria-fee-actions">
+                          <button className="btn" disabled={busy} onClick={() => setResourcePlannerReturnDraft(createPlannerReturnDraft())} type="button">
+                            Cancelar
+                          </button>
+                          <button className="btn btn-danger" disabled={busy || returnObservationLength < 8} onClick={() => onReturnResourcePlannerRequest(request.id)} type="button">
+                            {busy ? 'Devolviendo...' : 'Devolver con observación'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
 
             <label className="rectoria-form-field">
@@ -9120,56 +11066,143 @@ function RectoriaDashboard() {
             </div>
           </section>
 
-          <section className="panel rectoria-panel">
-            <div className="rectoria-section-header">
+          <section className="panel rectoria-panel rectoria-trace-panel">
+            <div className="rectoria-trace-header">
+              <span className="rectoria-trace-header__icon" aria-hidden="true">
+                <TraceHeaderIcon />
+              </span>
               <div>
                 <h3>Requerimientos y trazabilidad</h3>
                 <p>Consulta solicitudes de materiales, estado de compras, aprobaciones y entregas registradas.</p>
               </div>
-              <select value={resourceStatusFilter} onChange={(event) => setResourceStatusFilter(event.target.value)}>
-                <option value="">Todos los estados</option>
-                {Object.entries(HR_REQUEST_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
             </div>
 
-            <div className="rectoria-student-table-wrap">
-              <table className="rectoria-table">
+            <label className="rectoria-trace-filter">
+              <span className="rectoria-trace-filter__icon" aria-hidden="true">
+                <TraceFilterIcon />
+              </span>
+              <select
+                aria-label="Filtrar por estado"
+                value={resourceStatusFilter}
+                onChange={(event) => {
+                  setResourceStatusFilter(event.target.value);
+                  setResourceTraceMenuId('');
+                }}
+              >
+                <option value="">Todos los estados</option>
+                {Object.entries(HR_REQUEST_STATUS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="rectoria-trace-table-wrap">
+              <table className="rectoria-trace-table">
                 <thead>
                   <tr>
-                    <th>Estado</th>
-                    <th>Solicitante</th>
-                    <th>Área / planner</th>
-                    <th>Requerimientos</th>
-                    <th>Fecha</th>
-                    <th>Acciones</th>
+                    <th><TraceColStatusIcon /> Estado</th>
+                    <th><TraceColPersonIcon /> Solicitante</th>
+                    <th><TraceColFolderIcon /> Área / planner</th>
+                    <th><TraceColBoxIcon /> Requerimientos</th>
+                    <th><TraceColCalendarIcon /> Fecha</th>
+                    <th><TraceColActionsIcon /> Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredResourceRequests.length === 0 ? (
                     <tr>
-                      <td colSpan="6">No hay requerimientos registrados con este filtro.</td>
+                      <td className="rectoria-trace-empty" colSpan="6">No hay requerimientos registrados con este filtro.</td>
                     </tr>
-                  ) : filteredResourceRequests.map((request) => (
-                    <tr key={request.id}>
-                      <td><span className="rectoria-pill">{HR_REQUEST_STATUS_LABELS[request.status] || request.status}</span></td>
-                      <td>{request.requestedBy?.name || 'Usuario'}</td>
-                      <td>
-                        <strong>{request.requestedForArea || (request.consolidatedFromRequestIds?.length ? 'Consolidado de planners' : 'Sin área')}</strong>
-                        {request.plannerCycle ? <div>{request.plannerCycle.title}</div> : null}
-                        {request.purpose ? <div>{request.purpose}</div> : null}
-                      </td>
-                      <td>{getResourceRequestItemsLabel(request)}</td>
-                      <td>{formatDateTime(request.updatedAt || request.createdAt)}</td>
-                      <td>
-                        {request.status === 'pending_approval' && !isCoordinationPortal ? (
-                          <div className="rectoria-row-actions">
-                            <button className="btn btn-primary" type="button" onClick={() => onApproveResourceRequest(request)} disabled={busy}>Aprobar</button>
-                            <button className="btn btn-danger" type="button" onClick={() => onRejectResourceRequest(request)} disabled={busy}>Rechazar</button>
+                  ) : filteredResourceRequests.map((request) => {
+                    const tone = getResourceRequestStatusTone(request.status);
+                    const items = getResourceRequestItems(request);
+                    const canApprove = request.status === 'pending_approval' && !isCoordinationPortal;
+                    const menuOpen = resourceTraceMenuId === request.id;
+
+                    return (
+                      <tr className={`tone-${tone}`} key={request.id}>
+                        <td>
+                          <span className={`rectoria-trace-status tone-${tone}`}>
+                            <ResourceRequestStatusIcon status={request.status} />
+                            {HR_REQUEST_STATUS_LABELS[request.status] || request.status}
+                          </span>
+                        </td>
+                        <td className="rectoria-trace-requester">{request.requestedBy?.name || 'Usuario'}</td>
+                        <td>
+                          <div className="rectoria-trace-area">
+                            <strong>{getResourceRequestAreaTitle(request)}</strong>
+                            {request.plannerCycle?.title ? <span>{request.plannerCycle.title}</span> : null}
+                            {request.purpose ? <span className="rectoria-trace-area__note">{request.purpose}</span> : null}
                           </div>
-                        ) : <span className="rectoria-role-empty">Sin acción</span>}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>
+                          {items.length === 0 ? (
+                            <p className="rectoria-trace-items-empty">Sin materiales registrados</p>
+                          ) : (
+                            <ul className="rectoria-trace-items">
+                              {items.map((item) => (
+                                <li key={item.key}>{item.label}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+                        <td>
+                          <span className="rectoria-trace-date">
+                            <TraceClockIcon />
+                            {formatDateTime(request.updatedAt || request.createdAt)}
+                          </span>
+                        </td>
+                        <td>
+                          <div className={`rectoria-trace-actions${menuOpen ? ' is-open' : ''}`}>
+                            <button
+                              aria-expanded={menuOpen}
+                              aria-haspopup="menu"
+                              aria-label="Acciones del requerimiento"
+                              className="rectoria-trace-actions__trigger"
+                              disabled={busy}
+                              onClick={() => setResourceTraceMenuId((current) => (current === request.id ? '' : request.id))}
+                              type="button"
+                            >
+                              <TraceMenuIcon />
+                            </button>
+                            {menuOpen ? (
+                              <div className="rectoria-trace-actions__menu" role="menu">
+                                {canApprove ? (
+                                  <>
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => {
+                                        setResourceTraceMenuId('');
+                                        onApproveResourceRequest(request);
+                                      }}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      Aprobar
+                                    </button>
+                                    <button
+                                      className="is-danger"
+                                      disabled={busy}
+                                      onClick={() => {
+                                        setResourceTraceMenuId('');
+                                        onRejectResourceRequest(request);
+                                      }}
+                                      role="menuitem"
+                                      type="button"
+                                    >
+                                      Rechazar
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="rectoria-trace-actions__empty">Sin acción</span>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -9226,6 +11259,17 @@ function RectoriaDashboard() {
               </div>
             </div>
           </section>
+          ) : null}
+
+          {activeSection === 'students' && activeAcademicManagementSection === 'coexistence' ? (
+            <section className="panel rectoria-panel">
+              <RectoriaCoexistencePolicyPanel
+                loading={coexistencePolicyLoading}
+                onSave={onSaveCoexistencePolicy}
+                policy={coexistencePolicy}
+                saving={coexistencePolicySaving}
+              />
+            </section>
           ) : null}
 
           {activeSection === 'students' && activeAcademicManagementSection === 'assignments' ? (
@@ -9354,15 +11398,42 @@ function RectoriaDashboard() {
                 </div>
               </div>
 
-              <form className="rectoria-inline-form" onSubmit={onCreateEducationalLevel}>
-                <input
-                  value={newEducationalLevelName}
-                  onChange={(event) => setNewEducationalLevelName(event.target.value)}
-                  placeholder="Nuevo nivel educativo, por ejemplo Primaria"
-                />
-                <button className="btn btn-primary" type="submit" disabled={busy || !newEducationalLevelName.trim()}>
-                  Crear nivel
-                </button>
+              <form className="rectoria-inline-form rectoria-inline-form--level-create" onSubmit={onCreateEducationalLevel}>
+                <div className="rectoria-level-create-row">
+                  <label className="rectoria-level-create-name">
+                    Nombre del nivel
+                    <input
+                      value={newEducationalLevelName}
+                      onChange={(event) => {
+                        const nextName = event.target.value;
+                        setNewEducationalLevelName(nextName);
+                        const normalized = String(nextName || '')
+                          .normalize('NFD')
+                          .replace(/[\u0300-\u036f]/g, '')
+                          .toLowerCase();
+                        if (/(preescolar|preschool|inicial|jardin|kinder|maternal)/.test(normalized)) {
+                          setNewEducationalLevelIncludeClassAttendance(false);
+                        }
+                      }}
+                      placeholder="Ej. Primaria"
+                      maxLength={40}
+                    />
+                  </label>
+                  <button className="btn btn-primary" type="submit" disabled={busy || !newEducationalLevelName.trim()}>
+                    Crear nivel
+                  </button>
+                </div>
+                <label className="rectoria-checkbox-field">
+                  <input
+                    checked={newEducationalLevelIncludeClassAttendance}
+                    onChange={(event) => setNewEducationalLevelIncludeClassAttendance(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>
+                    Incluir asistencia a clases
+                    <small>Desactívalo en niveles como preescolar, donde los niños no rotan de clase.</small>
+                  </span>
+                </label>
               </form>
 
               <div className="rectoria-grade-accordion-list">
@@ -9375,7 +11446,14 @@ function RectoriaDashboard() {
                         <div>
                           <strong>{level.label}</strong>
                           <span>{level.grades.length === 0 ? 'Sin grados creados' : level.grades.map((grade) => grade.label || grade.key).join(', ')}</span>
-                          <p>{level.grades.length} grado(s) · {levelCoursesCount} curso(s)</p>
+                          <p>
+                            {level.grades.length} grado(s) · {levelCoursesCount} curso(s)
+                            {level.key !== '__without_level__' ? (
+                              level.includeClassAttendance === false
+                                ? ' · Sin asistencia a clases'
+                                : ' · Con asistencia a clases'
+                            ) : ''}
+                          </p>
                         </div>
                         {level.key !== '__without_level__' ? (
                           <div className="rectoria-grade-accordion-actions">
@@ -9385,7 +11463,7 @@ function RectoriaDashboard() {
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
-                                openEditLevelModal(level.key, level.label);
+                                openEditLevelModal(level.key, level.label, level.includeClassAttendance !== false);
                               }}
                               disabled={busy}
                             >
@@ -9459,18 +11537,25 @@ function RectoriaDashboard() {
                 </div>
               </div>
 
-              <form className="rectoria-inline-form" onSubmit={onCreateAcademicGrade}>
-                <select value={selectedLevelKeyForGrade} onChange={(event) => setSelectedLevelKeyForGrade(event.target.value)}>
-                  <option value="">Selecciona un nivel educativo</option>
-                  {educationalLevelOptions.map((level) => (
-                    <option key={level.value} value={level.value}>{level.label}</option>
-                  ))}
-                </select>
-                <input
-                  value={newGradeName}
-                  onChange={(event) => setNewGradeName(event.target.value)}
-                  placeholder="Nuevo grado, por ejemplo 6"
-                />
+              <form className="rectoria-inline-form rectoria-inline-form--grade-create" onSubmit={onCreateAcademicGrade}>
+                <label className="rectoria-grade-create-level">
+                  Nivel educativo
+                  <select value={selectedLevelKeyForGrade} onChange={(event) => setSelectedLevelKeyForGrade(event.target.value)}>
+                    <option value="">Selecciona un nivel</option>
+                    {educationalLevelOptions.map((level) => (
+                      <option key={level.value} value={level.value}>{level.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="rectoria-grade-create-name">
+                  Grado
+                  <input
+                    value={newGradeName}
+                    onChange={(event) => setNewGradeName(event.target.value)}
+                    placeholder="Ej. 6"
+                    maxLength={24}
+                  />
+                </label>
                 <button className="btn btn-primary" type="submit" disabled={busy || !newGradeName.trim() || !selectedLevelKeyForGrade}>
                   Crear grado
                 </button>
@@ -11864,6 +13949,37 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
+      {plannerConsolidateModal.open ? (
+        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Consolidar planners a compras">
+          <div className={`rectoria-modal-card rectoria-planner-consolidate-modal is-${plannerConsolidateModal.phase}`}>
+            {plannerConsolidateModal.phase === 'loading' ? (
+              <div className="rectoria-planner-consolidate-modal__body">
+                <span className="rectoria-planner-consolidate-spinner" aria-hidden="true" />
+                <h3>Enviando a compras</h3>
+                <p>{plannerConsolidateModal.message || 'Procesando el consolidado...'}</p>
+              </div>
+            ) : (
+              <>
+                <div className="rectoria-modal-head">
+                  <div>
+                    <span className="rectoria-modal-eyebrow">Compras</span>
+                    <h3>Consolidado enviado</h3>
+                    <p>Los planners seleccionados ya quedaron listos en gestión de compras.</p>
+                  </div>
+                  <button className="rectoria-modal-close" type="button" onClick={closePlannerConsolidateModal}>Cerrar</button>
+                </div>
+                <div className="rectoria-modal-form">
+                  <p className="rectoria-planner-consolidate-success">{plannerConsolidateModal.message}</p>
+                  <div className="rectoria-modal-actions">
+                    <button className="btn btn-primary" type="button" onClick={closePlannerConsolidateModal}>Entendido</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {success ? (
         <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Respuesta del portal de rectoría">
           <div className="rectoria-modal-card">
@@ -12009,13 +14125,13 @@ function RectoriaDashboard() {
       ) : null}
 
       {editLevelModal.open ? (
-        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Modificar nombre de nivel educativo">
+        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Modificar nivel educativo">
           <div className="rectoria-modal-card">
             <div className="rectoria-modal-head">
               <div>
                 <span className="rectoria-modal-eyebrow">Modificar nivel educativo</span>
-                <h3>Actualiza el nombre de {getLevelLabel(editLevelModal.levelKey)}</h3>
-                <p>La clave interna del nivel no cambia. Solo se actualiza el nombre visible en el sistema.</p>
+                <h3>Actualiza {getLevelLabel(editLevelModal.levelKey)}</h3>
+                <p>Puedes cambiar el nombre visible y si este nivel usa asistencia a clases.</p>
               </div>
               <button className="rectoria-modal-close" type="button" onClick={closeEditLevelModal} disabled={busy}>Cerrar</button>
             </div>
@@ -12030,10 +14146,25 @@ function RectoriaDashboard() {
                   required
                 />
               </label>
+              <label className="rectoria-checkbox-field">
+                <input
+                  checked={editLevelModal.includeClassAttendance !== false}
+                  onChange={(event) => setEditLevelModal((previous) => ({
+                    ...previous,
+                    includeClassAttendance: event.target.checked,
+                    error: '',
+                  }))}
+                  type="checkbox"
+                />
+                <span>
+                  Incluir asistencia a clases
+                  <small>Desactívalo si en este nivel los niños no rotan de clase (por ejemplo preescolar).</small>
+                </span>
+              </label>
               <div className="rectoria-modal-actions">
                 <button className="btn" type="button" onClick={closeEditLevelModal} disabled={busy}>Cancelar</button>
                 <button className="btn btn-primary" type="submit" disabled={busy || !String(editLevelModal.levelLabel || '').trim()}>
-                  {busy ? 'Guardando...' : 'Guardar nombre'}
+                  {busy ? 'Guardando...' : 'Guardar cambios'}
                 </button>
               </div>
             </form>

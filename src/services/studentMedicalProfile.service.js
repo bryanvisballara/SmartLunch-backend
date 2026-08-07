@@ -4,6 +4,35 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeSignatureImage(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+  if (!raw.startsWith('data:image/')) {
+    const error = new Error('La firma enviada no es válida.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (raw.length > 1_800_000) {
+    const error = new Error('La firma es demasiado grande. Limpia el recuadro y vuelve a firmar.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return raw;
+}
+
+function serializeSignatureFields(profile = {}) {
+  const signatureImage = String(profile?.signatureImage || '').trim();
+  return {
+    signatureImage,
+    signedAt: profile?.signedAt || null,
+    signedByParentId: profile?.signedByParentId ? String(profile.signedByParentId) : '',
+    signedByParentName: normalizeText(profile?.signedByParentName),
+    hasSignature: Boolean(signatureImage),
+  };
+}
+
 function normalizeStudentMedicalProfile(value = {}) {
   const rawProfile = value && typeof value === 'object' ? value : {};
   const rawAuthorization = rawProfile.medicationAuthorization && typeof rawProfile.medicationAuthorization === 'object'
@@ -57,6 +86,7 @@ function getStudentMedicalProfileErrors(profile, studentLabel = '') {
 
 function serializeStudentMedicalProfile(profile = {}) {
   const medicationAuthorization = profile?.medicationAuthorization || {};
+  const signatureFields = serializeSignatureFields(profile);
 
   return {
     allergies: normalizeText(profile?.allergies),
@@ -77,6 +107,7 @@ function serializeStudentMedicalProfile(profile = {}) {
       authorizationDate: medicationAuthorization.authorizationDate || null,
     },
     completedAt: profile?.completedAt || null,
+    ...signatureFields,
   };
 }
 
@@ -184,6 +215,8 @@ async function applyStudentMedicalProfileUpdate({
   medicalProfile,
   actor = {},
   source = 'parent',
+  requireSignature = false,
+  signatureImage,
 }) {
   const previousBloodType = normalizeText(student?.bloodType);
   const previousMedicalProfile = serializeStudentMedicalProfile(student?.medicalProfile);
@@ -197,6 +230,43 @@ async function applyStudentMedicalProfileUpdate({
     throw error;
   }
 
+  const incomingSignature = signatureImage !== undefined
+    ? signatureImage
+    : medicalProfile?.signatureImage;
+  let nextSignatureImage = '';
+
+  if (incomingSignature !== undefined && incomingSignature !== null && String(incomingSignature).trim() !== '') {
+    nextSignatureImage = normalizeSignatureImage(incomingSignature);
+  } else if (!requireSignature && previousMedicalProfile.signatureImage) {
+    nextSignatureImage = previousMedicalProfile.signatureImage;
+  }
+
+  if (requireSignature && !nextSignatureImage) {
+    const error = new Error('Debes firmar la ficha medica antes de guardarla.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const signatureChanged = nextSignatureImage !== previousMedicalProfile.signatureImage;
+
+  if (nextSignatureImage) {
+    nextMedicalProfile.signatureImage = nextSignatureImage;
+    nextMedicalProfile.signedAt = signatureChanged || !previousMedicalProfile.signedAt
+      ? new Date()
+      : (student?.medicalProfile?.signedAt || new Date());
+    nextMedicalProfile.signedByParentId = signatureChanged || !previousMedicalProfile.signedByParentId
+      ? (actor.userId || null)
+      : (student?.medicalProfile?.signedByParentId || actor.userId || null);
+    nextMedicalProfile.signedByParentName = signatureChanged || !previousMedicalProfile.signedByParentName
+      ? normalizeText(actor.name)
+      : previousMedicalProfile.signedByParentName;
+  } else {
+    nextMedicalProfile.signatureImage = '';
+    nextMedicalProfile.signedAt = null;
+    nextMedicalProfile.signedByParentId = null;
+    nextMedicalProfile.signedByParentName = '';
+  }
+
   const changedFields = buildMedicalProfileChangeSet({
     previousBloodType,
     nextBloodType,
@@ -204,14 +274,31 @@ async function applyStudentMedicalProfileUpdate({
     nextMedicalProfile,
   });
 
+  if (signatureChanged) {
+    changedFields.push({
+      key: 'signatureImage',
+      label: 'Firma del acudiente',
+      previousValue: previousMedicalProfile.hasSignature ? 'Firmada' : 'Sin firma',
+      nextValue: nextSignatureImage ? 'Firmada' : 'Sin firma',
+    });
+  }
+
   if (!changedFields.length) {
     return {
       changed: false,
       bloodType: nextBloodType,
-      medicalProfile: nextMedicalProfile,
+      medicalProfile: serializeStudentMedicalProfile({
+        ...nextMedicalProfile,
+        signatureImage: nextSignatureImage,
+        signedAt: student?.medicalProfile?.signedAt || null,
+        signedByParentId: student?.medicalProfile?.signedByParentId || null,
+        signedByParentName: student?.medicalProfile?.signedByParentName || '',
+      }),
       revision: null,
     };
   }
+
+  const serializedNextProfile = serializeStudentMedicalProfile(nextMedicalProfile);
 
   const revision = await StudentMedicalProfileRevision.create({
     schoolId,
@@ -223,7 +310,7 @@ async function applyStudentMedicalProfileUpdate({
     previousBloodType,
     nextBloodType,
     previousMedicalProfile,
-    nextMedicalProfile,
+    nextMedicalProfile: serializedNextProfile,
     changedFields,
   });
 
@@ -234,7 +321,7 @@ async function applyStudentMedicalProfileUpdate({
   return {
     changed: true,
     bloodType: nextBloodType,
-    medicalProfile: nextMedicalProfile,
+    medicalProfile: serializedNextProfile,
     revision: serializeMedicalProfileRevision(revision),
   };
 }

@@ -50,13 +50,25 @@ export default function InformaDraftsPanel() {
     setError('');
     setNotice('');
     try {
-      const response = await generateInformaDraft();
+      const response = await generateInformaDraft({ clearExisting: true });
       if (response.data?.draft) {
-        setDrafts((current) => [response.data.draft, ...current.filter((item) => item.id !== response.data.draft.id)]);
-        setNotice('Borrador generado. Revísalo y publícalo cuando quieras.');
+        setDrafts([response.data.draft]);
+        const imageNote = response.data?.imageModel && response.data.imageModel !== 'branded-fallback'
+          ? ' Imagen generada con OpenAI.'
+          : ' Imagen de respaldo (revisa OPENAI_API_KEY / OPENAI_IMAGE_MODEL).';
+        setNotice(`Borrador listo para previsualizar.${imageNote}`);
+      } else {
+        setNotice(response.data?.reason || 'No se generó un borrador nuevo.');
+        await refresh();
       }
     } catch (generateError) {
-      setError(generateError?.response?.data?.message || generateError.message || 'No se pudo generar el borrador.');
+      const timedOut = /timeout|tardó demasiado|ECONNABORTED/i.test(String(generateError?.message || ''));
+      setError(
+        generateError?.response?.data?.message
+        || (timedOut
+          ? 'La generación con OpenAI tardó demasiado. Vuelve a intentar; suele tomar cerca de 1 minuto.'
+          : (generateError.message || 'No se pudo generar el borrador.'))
+      );
     } finally {
       setGenerating(false);
     }
@@ -96,47 +108,68 @@ export default function InformaDraftsPanel() {
     <section className="informa-drafts">
       <div className="informa-drafts__head">
         <div>
-          <span className="informa-drafts__kicker">Borradores automáticos</span>
-          <h4>Cola de revisión</h4>
-          <p>Cada día a las 7:00 y 12:00 (Colombia) se genera 1 noticia. Tú decides cuándo publicar.</p>
+          <span className="informa-drafts__kicker">Cola de revisión</span>
+          <h4>Previsualización de publicaciones</h4>
+          <p>
+            Genera una noticia con foto realista y título encima (estilo Instagram), lista para previsualizar.
+            Al generar, se archivan los borradores anteriores.
+          </p>
         </div>
-        <button className="informa-drafts__generate" disabled={generating} onClick={onGenerate} type="button">
-          {generating ? 'Generando...' : 'Generar ahora'}
-        </button>
+        <div className="informa-drafts__head-actions">
+          <button className="informa-drafts__refresh" disabled={loading || generating} onClick={refresh} type="button">
+            Actualizar
+          </button>
+          <button className="informa-drafts__generate" disabled={generating} onClick={onGenerate} type="button">
+            {generating ? 'Generando con OpenAI…' : 'Limpiar y generar'}
+          </button>
+        </div>
       </div>
+
+      {generating ? (
+        <div className="informa-drafts__progress" role="status">
+          <span className="informa-drafts__spinner" aria-hidden="true" />
+          <div>
+            <strong>Creando publicación…</strong>
+            <p>Buscando noticia, redactando título/texto y generando la imagen. Puede tomar hasta 1–2 minutos.</p>
+          </div>
+        </div>
+      ) : null}
 
       {notice ? <div className="informa-drafts__banner is-success">{notice}</div> : null}
       {error ? <div className="informa-drafts__banner is-error">{error}</div> : null}
 
       {loading ? <p className="informa-drafts__muted">Cargando borradores...</p> : null}
 
-      {!loading && drafts.length === 0 ? (
+      {!loading && !generating && drafts.length === 0 ? (
         <div className="informa-drafts__empty">
           <p>No hay borradores pendientes.</p>
-          <span>Puedes generar uno manualmente o esperar al próximo horario automático.</span>
+          <span>Pulsa “Limpiar y generar” para crear una previsualización con imagen OpenAI.</span>
         </div>
       ) : null}
 
       <div className="informa-drafts__list">
         {drafts.map((draft) => {
-          const cover = draft.media?.[0]?.src || '';
+          const cover = draft.media?.[0]?.src || draft.media?.[0]?.thumbUrl || '';
           const busy = pendingId === draft.id;
           return (
             <article className="informa-drafts__card" key={draft.id}>
               <div className="informa-drafts__media">
                 {cover ? (
-                  <img alt="" src={resolveApiAssetUrl(cover)} />
+                  <img alt={draft.title || 'Portada Comergio Informa'} src={resolveApiAssetUrl(cover)} />
                 ) : (
                   <span>Sin imagen</span>
                 )}
               </div>
               <div className="informa-drafts__copy">
                 <div className="informa-drafts__meta">
-                  <strong>{draft.source?.topic || 'Novedad'}</strong>
+                  <strong>Previsualización</strong>
                   <span>{formatDate(draft.auto?.generatedAt || draft.createdAt)}</span>
                 </div>
                 <h5>{draft.title}</h5>
                 <p>{draft.body}</p>
+                {draft.auto?.model ? (
+                  <small className="informa-drafts__model">Modelo: {draft.auto.model}</small>
+                ) : null}
                 {draft.source?.url ? (
                   <a href={draft.source.url} rel="noreferrer" target="_blank">
                     Ver fuente original

@@ -185,7 +185,13 @@ function validateIncomingImageUrl(value) {
   return imageUrl;
 }
 
-async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, preferredName = '', requireCloudinary = false }) {
+async function processAndStoreUploadedImage({
+  file,
+  folder = DEFAULT_FOLDER,
+  preferredName = '',
+  requireCloudinary = false,
+  maxWidth = MAX_WIDTH,
+}) {
   if (!file?.buffer) {
     throw new Error('No se recibio ningun archivo de imagen.');
   }
@@ -206,13 +212,14 @@ async function processAndStoreUploadedImage({ file, folder = DEFAULT_FOLDER, pre
   const thumbFilename = `${filenameBase}_thumb.webp`;
   const outputPath = path.join(targetFolderPath, filename);
   const thumbOutputPath = path.join(targetFolderPath, thumbFilename);
+  const targetMaxWidth = Math.max(Number(maxWidth) || MAX_WIDTH, THUMB_MAX_WIDTH);
 
   const metadata = await sharp(file.buffer).rotate().metadata();
 
   const fullBuffer = await sharp(file.buffer)
     .rotate()
     .resize({
-      width: MAX_WIDTH,
+      width: targetMaxWidth,
       withoutEnlargement: true,
       fit: 'inside',
     })

@@ -2,10 +2,10 @@
   display: grid;
   gap: 1rem;
   margin-bottom: 1.25rem;
-  padding: 1.2rem;
-  border: 1px solid rgba(47, 111, 237, 0.14);
-  border-radius: 22px;
-  background: linear-gradient(180deg, #f7faff 0%, #ffffff 48%);
+  padding: 1.15rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  background: #fff;
 }
 
 .informa-drafts__head {
@@ -17,8 +17,8 @@
 
 .informa-drafts__kicker {
   display: inline-block;
-  margin-bottom: 0.35rem;
-  color: #2f6fed;
+  margin-bottom: 0.3rem;
+  color: #0f766e;
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -27,32 +27,79 @@
 
 .informa-drafts__head h4 {
   margin: 0;
-  color: #102a43;
-  font-size: 1.15rem;
+  color: #0f172a;
+  font-size: 1.12rem;
 }
 
 .informa-drafts__head p,
 .informa-drafts__muted,
-.informa-drafts__empty span {
+.informa-drafts__empty span,
+.informa-drafts__progress p {
   margin: 0.35rem 0 0;
-  color: #6b7c93;
-  font-size: 0.9rem;
+  color: #64748b;
+  font-size: 0.88rem;
   line-height: 1.45;
 }
 
+.informa-drafts__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 .informa-drafts__generate,
-.informa-drafts__publish {
+.informa-drafts__publish,
+.informa-drafts__refresh {
   border: 0;
-  border-radius: 999px;
-  background: #2f6fed;
-  color: #fff;
+  border-radius: 10px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .informa-drafts__generate {
-  padding: 0.7rem 1.1rem;
+  min-height: 2.45rem;
+  padding: 0.65rem 1rem;
+  background: #0f766e;
+  color: #fff;
   white-space: nowrap;
+}
+
+.informa-drafts__refresh {
+  min-height: 2.45rem;
+  padding: 0.65rem 0.9rem;
+  background: #e8eef5;
+  color: #0f172a;
+}
+
+.informa-drafts__progress {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.informa-drafts__progress strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.informa-drafts__spinner {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+  border: 2px solid #bfdbfe;
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: informa-spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes informa-spin {
+  to { transform: rotate(360deg); }
 }
 
 .informa-drafts__banner {
@@ -74,42 +121,46 @@
 
 .informa-drafts__empty {
   padding: 1.25rem;
-  border: 1px dashed rgba(47, 111, 237, 0.22);
-  border-radius: 16px;
-  background: #fff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background: #f8fafc;
 }
 
 .informa-drafts__empty p {
   margin: 0;
-  color: #102a43;
+  color: #0f172a;
   font-weight: 700;
 }
 
 .informa-drafts__list {
   display: grid;
-  gap: 0.9rem;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  max-width: 420px;
 }
 
 .informa-drafts__card {
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-rows: auto 1fr;
   overflow: hidden;
-  border: 1px solid rgba(15, 39, 68, 0.08);
-  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
   background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .informa-drafts__media {
-  min-height: 160px;
-  background: #eef2f7;
+  position: relative;
+  min-height: 320px;
+  aspect-ratio: 4 / 5;
+  background: #0b1220;
 }
 
 .informa-drafts__media img {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .informa-drafts__media span {
@@ -120,10 +171,23 @@
   font-size: 0.85rem;
 }
 
+.informa-drafts__media-badge {
+  position: absolute;
+  top: 0.7rem;
+  left: 0.7rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .informa-drafts__copy {
   display: grid;
   gap: 0.45rem;
-  padding: 1rem 1rem 1rem 0;
+  padding: 0.95rem 1rem 1.05rem;
+  align-content: start;
 }
 
 .informa-drafts__meta {
@@ -131,13 +195,13 @@
   justify-content: space-between;
   gap: 0.75rem;
   color: #64748b;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
 }
 
 .informa-drafts__copy h5 {
   margin: 0;
-  color: #102a43;
+  color: #0f172a;
   font-size: 1.05rem;
   line-height: 1.3;
 }
@@ -150,8 +214,13 @@
   white-space: pre-wrap;
 }
 
+.informa-drafts__model {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
 .informa-drafts__copy a {
-  color: #2f6fed;
+  color: #0f766e;
   font-size: 0.84rem;
   font-weight: 700;
   text-decoration: none;
@@ -160,27 +229,34 @@
 .informa-drafts__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
-  margin-top: 0.25rem;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
 }
 
 .informa-drafts__publish,
 .informa-drafts__discard {
-  padding: 0.55rem 0.95rem;
+  min-height: 2.2rem;
+  padding: 0.45rem 0.9rem;
+}
+
+.informa-drafts__publish {
+  background: #0f766e;
+  color: #fff;
 }
 
 .informa-drafts__discard {
-  border: 1px solid rgba(15, 39, 68, 0.12);
-  border-radius: 999px;
+  border: 1px solid #fda4af;
+  border-radius: 10px;
   background: #fff;
-  color: #64748b;
+  color: #e11d48;
   font-weight: 700;
   cursor: pointer;
 }
 
 .informa-drafts__generate:disabled,
 .informa-drafts__publish:disabled,
-.informa-drafts__discard:disabled {
+.informa-drafts__discard:disabled,
+.informa-drafts__refresh:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -190,19 +266,9 @@
     flex-direction: column;
   }
 
-  .informa-drafts__generate {
+  .informa-drafts__head-actions,
+  .informa-drafts__generate,
+  .informa-drafts__refresh {
     width: 100%;
-  }
-
-  .informa-drafts__card {
-    grid-template-columns: 1fr;
-  }
-
-  .informa-drafts__copy {
-    padding: 0 1rem 1rem;
-  }
-
-  .informa-drafts__media {
-    min-height: 180px;
   }
 }

@@ -30,6 +30,14 @@ export const RECTORIA_CONTROL_CENTER_NAV_GROUP = {
 export const COORDINATION_PORTAL_NAV = [
   { type: 'item', key: 'overview', label: 'Tablero de nivel' },
   RECTORIA_CONTROL_CENTER_NAV_GROUP,
+  {
+    type: 'group',
+    key: 'institutional_config',
+    label: 'Configuración institucional',
+    items: [
+      { key: 'students', label: 'Gestión académica' },
+    ],
+  },
   { type: 'item', key: 'communications', label: 'Comunicados a familias' },
   { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
   { type: 'item', key: 'resources', label: 'Recursos y compras' },

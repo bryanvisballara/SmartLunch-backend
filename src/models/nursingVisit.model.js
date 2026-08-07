@@ -1,5 +1,14 @@
 const { mongoose, registerSchoolScopedModel } = require('./_schoolModelRegistry');
 
+const nursingVisitPhotoSchema = new mongoose.Schema(
+  {
+    url: { type: String, required: true, trim: true },
+    thumbUrl: { type: String, trim: true, default: '' },
+    alt: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 const nursingVisitSchema = new mongoose.Schema(
   {
     schoolId: { type: String, required: true, index: true, trim: true },
@@ -8,6 +17,7 @@ const nursingVisitSchema = new mongoose.Schema(
     symptoms: { type: String, required: true, trim: true },
     treatment: { type: String, required: true, trim: true },
     notes: { type: String, trim: true, default: '' },
+    photos: { type: [nursingVisitPhotoSchema], default: [] },
     disposition: {
       type: String,
       enum: ['return_class', 'observation', 'sent_home', 'referred', 'other'],

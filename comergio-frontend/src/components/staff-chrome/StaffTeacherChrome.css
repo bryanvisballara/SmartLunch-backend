@@ -390,6 +390,112 @@ button.staff-teacher-chrome__nav-item,
   color: #b42318;
 }
 
+.staff-teacher-chrome__topbar-icon-wrap {
+  position: relative;
+}
+
+.staff-teacher-chrome__topbar-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid #e8edf5;
+  border-radius: 12px;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+}
+
+.staff-teacher-chrome__topbar-icon-btn:hover {
+  background: #f8fafc;
+  color: #0f766e;
+}
+
+.staff-teacher-chrome__topbar-icon-btn svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.staff-teacher-chrome__topbar-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.staff-teacher-chrome__topbar-dropdown--notifications {
+  width: min(360px, calc(100vw - 2rem));
+  min-width: 280px;
+  padding: 0.55rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown--notifications header {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem 0.45rem 0.55rem;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.staff-teacher-chrome__topbar-dropdown--notifications header strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown--notifications header span {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown-list {
+  display: grid;
+  gap: 0.25rem;
+  max-height: min(420px, 60vh);
+  overflow: auto;
+  padding-top: 0.35rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown-list > p {
+  margin: 0;
+  padding: 0.75rem 0.55rem;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown-item--notification {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown-item--notification strong {
+  font-size: 0.88rem;
+}
+
+.staff-teacher-chrome__topbar-dropdown-item--notification span {
+  color: #475569;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.staff-teacher-chrome__topbar-dropdown-item--notification em {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
 .staff-teacher-chrome__workspace {
   min-width: 0;
   min-height: 0;

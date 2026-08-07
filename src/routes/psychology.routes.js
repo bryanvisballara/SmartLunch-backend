@@ -7,7 +7,7 @@ const ParentStudentLink = require('../models/parentStudentLink.model');
 const PsychologyCase = require('../models/psychologyCase.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
-const { queueNotificationsForParents } = require('../services/notification.service');
+const { queueNotificationsForParents, notifySchoolStaffRoles } = require('../services/notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const {
   buildGoogleCalendarLink,
@@ -20,6 +20,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 const psychologyStaffRoles = ['psychology', 'admin', 'rectoria', 'direccion'];
+const psychologyDashboardViewerRoles = ['psychology', 'admin', 'rectoria', 'direccion', 'coordination'];
 const institutionalViewerRoles = ['teacher', 'coordination', 'admin', 'rectoria', 'direccion', 'psychology'];
 const caseTypes = ['bullying', 'anxiety', 'grief', 'low_performance', 'aggression', 'coexistence', 'abuse_concern', 'family', 'substance_use', 'vocational', 'other'];
 const priorities = ['low', 'medium', 'high', 'urgent'];
@@ -300,7 +301,7 @@ router.get('/students', roleMiddleware(psychologyStaffRoles), async (req, res) =
   }
 });
 
-router.get('/dashboard', roleMiddleware(psychologyStaffRoles), async (req, res) => {
+router.get('/dashboard', roleMiddleware(psychologyDashboardViewerRoles), async (req, res) => {
   try {
     const { schoolId } = req.user;
     const openStatuses = ['open', 'follow_up', 'escalated'];
@@ -480,6 +481,23 @@ router.post('/cases', roleMiddleware(psychologyStaffRoles), async (req, res) => 
         audiences: notifyAudiences,
       });
     }
+
+    const childName = firstName(student.name);
+    const casePriority = normalizeText(psychologyCase.priority) || 'medium';
+    notifySchoolStaffRoles({
+      schoolId,
+      roles: ['rectoria', 'direccion', 'coordination', 'admin'],
+      studentId,
+      title: `Nuevo caso de bienestar: ${childName}`,
+      body: `${title}${casePriority !== 'medium' ? ` · Prioridad ${casePriority}` : ''}. ${summary}`.slice(0, 280),
+      payload: {
+        type: 'psychology.case.staff',
+        psychologyCaseId: String(psychologyCase._id),
+        studentId: String(studentId),
+        sectionKey: 'control_wellbeing',
+        url: '/rectoria',
+      },
+    }).catch((error) => console.warn(`[PSYCHOLOGY_STAFF_NOTIFY_WARNING] case=${psychologyCase._id} error=${error.message}`));
 
     let appointmentEmailResult = null;
     let calendarLink = '';

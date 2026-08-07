@@ -45,6 +45,7 @@ const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const PsychologyCase = require('../models/psychologyCase.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
+const { buildStudentCoexistenceScore } = require('../services/campusCoexistencePolicy.service');
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
 const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
 const {
@@ -268,6 +269,9 @@ function serializeParentCoexistenceObservation(item = {}) {
     studentGrade: normalizeText(rawObservation.studentGrade),
     studentCourse: normalizeText(rawObservation.studentCourse),
     observation: normalizeText(rawObservation.observation),
+    infractionKey: normalizeText(rawObservation.infractionKey),
+    infractionLabel: normalizeText(rawObservation.infractionLabel),
+    deductionPercent: Number(rawObservation.deductionPercent || 0),
     incidentAt: rawObservation.incidentAt || null,
     status: normalizeText(rawObservation.status) || 'submitted',
     submittedAt: rawObservation.submittedAt || rawObservation.createdAt || null,
@@ -707,6 +711,43 @@ function resolveParentGradingScaleForGrade(academicStructure, gradeValues = []) 
     .find((scale) => normalizeText(scale?.levelKey) === levelKey);
 
   return levelScale ? normalizeParentGradingScale(levelScale) : defaultScale;
+}
+
+function resolveIncludeClassAttendanceForGrade(academicStructure, gradeValues = []) {
+  const normalizedGradeValues = new Set((Array.isArray(gradeValues) ? gradeValues : [])
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean));
+
+  if (normalizedGradeValues.size === 0) {
+    return true;
+  }
+
+  const matchesGradeValues = (candidateValues = []) => candidateValues
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter(Boolean)
+    .some((candidate) => normalizedGradeValues.has(candidate));
+
+  const matchedGrade = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+    .find((grade) => matchesGradeValues([
+      grade?.key,
+      grade?.label,
+      ...getFeeGradeAliases(grade?.key),
+      ...getFeeGradeAliases(grade?.label),
+    ]));
+
+  if (!matchedGrade) {
+    return true;
+  }
+
+  const levelKey = normalizeText(matchedGrade?.levelKey);
+  const matchedLevel = (Array.isArray(academicStructure?.levels) ? academicStructure.levels : [])
+    .find((level) => normalizeText(level?.key) === levelKey);
+
+  if (!matchedLevel) {
+    return true;
+  }
+
+  return matchedLevel.includeClassAttendance !== false;
 }
 
 function serializeParentGradingScale(gradingScale = {}) {
@@ -3667,6 +3708,7 @@ router.get('/portal/overview', async (req, res) => {
         schoolId,
         studentId: { $in: studentIds },
         status: { $in: ['submitted', 'reviewed'] },
+        $or: [{ destination: 'coexistence' }, { destination: { $exists: false } }, { destination: null }],
       })
         .sort({ submittedAt: -1, createdAt: -1 })
         .limit(100)
@@ -3674,6 +3716,14 @@ router.get('/portal/overview', async (req, res) => {
       buildParentTransportByStudentId({ schoolId, studentIds }),
     ]);
     const students = await ensureStudentsCohortMembership(studentsRaw, schoolId);
+
+    const coexistenceScoreByStudentId = {};
+    await Promise.all(studentIds.map(async (studentId) => {
+      coexistenceScoreByStudentId[String(studentId)] = await buildStudentCoexistenceScore({
+        schoolId,
+        studentId,
+      });
+    }));
 
     const blockedProductIds = Array.from(new Set(students.flatMap((student) => (
       Array.isArray(student.blockedProducts) ? student.blockedProducts.map((id) => String(id)).filter(Boolean) : []
@@ -3871,9 +3921,16 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleValues: selectedStudentCourseTitleValues,
     });
     const parentGradingScale = resolveParentGradingScaleForGrade(academicStructure, selectedStudentGradeValues);
+    const includeClassAttendance = resolveIncludeClassAttendanceForGrade(academicStructure, selectedStudentGradeValues);
     const childrenWithDisplayGrade = children.map((child) => ({
       ...child,
       displayGrade: resolveStudentDisplayGrade(child, academicStructure),
+      coexistenceScore: coexistenceScoreByStudentId[String(child._id)] || {
+        startingScore: 100,
+        totalDeducted: 0,
+        score: 100,
+        observationCount: 0,
+      },
     }));
     const selectedStudentWithDisplayGrade = childrenWithDisplayGrade.find((child) => String(child._id) === selectedStudentId) || null;
     const academicGrades = await buildParentAcademicGradebook({
@@ -3933,6 +3990,12 @@ router.get('/portal/overview', async (req, res) => {
       children: childrenWithDisplayGrade,
       psychologyCases: psychologyCases.map(serializeParentPsychologyCase),
       coexistenceObservations: coexistenceObservations.map(serializeParentCoexistenceObservation),
+      coexistenceScore: selectedStudentWithDisplayGrade?.coexistenceScore || {
+        startingScore: 100,
+        totalDeducted: 0,
+        score: 100,
+        observationCount: 0,
+      },
       selectedStudentId,
       selectedStudent: selectedStudentWithDisplayGrade,
       spending: {
@@ -3996,6 +4059,16 @@ router.get('/portal/overview', async (req, res) => {
             key: String(topic.key || '').trim(),
             title: String(topic.title || '').trim(),
             description: String(topic.description || '').trim(),
+            completed: Boolean(topic.completed),
+            completedAt: topic.completedAt || null,
+            materials: Array.isArray(topic.materials) ? topic.materials.map((material) => ({
+              sourceType: String(material.sourceType || 'file').trim(),
+              kind: String(material.kind || 'file').trim(),
+              title: String(material.title || material.fileName || '').trim(),
+              url: String(material.url || '').trim(),
+              fileName: String(material.fileName || '').trim(),
+              mimeType: String(material.mimeType || '').trim(),
+            })).filter((material) => material.url) : [],
           })).filter((topic) => topic.title) : [],
         })) : [],
       })).filter((course) => course.periods.some((period) => period.topics.length > 0)),
@@ -4017,6 +4090,7 @@ router.get('/portal/overview', async (req, res) => {
         courses: publishedScheduleCourses,
         hiddenFromFamilies: scheduleHiddenFromFamilies,
       },
+      includeClassAttendance,
       parentAppFeatures,
     });
   } catch (error) {
@@ -4143,7 +4217,7 @@ router.post('/portal/community-publications', async (req, res) => {
         return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
       }
 
-      const audienceType = normalizeText(req.body?.audienceType) || 'general';
+      const audienceType = 'course';
       const student = studentActor.student;
       const result = await submitCommunityPublication({
         schoolId,
@@ -4166,7 +4240,7 @@ router.post('/portal/community-publications', async (req, res) => {
           status: 'pending',
           kind: 'request',
           requestId: result.request?._id,
-          message: 'Tu publicación del colegio quedó en revisión. Rectoría, coordinación, dirección o secretaría académica la autorizarán.',
+          message: 'Tu publicación del curso quedó en revisión. Coordinación, rectoría, dirección o secretaría académica la autorizarán. Al aprobarse la verán docentes, alumnos y padres de tu curso.',
         });
       }
 
@@ -7079,6 +7153,8 @@ router.patch('/portal/children/:studentId/medical-profile', roleMiddleware('pare
       student,
       bloodType: req.body?.bloodType,
       medicalProfile: req.body?.medicalProfile,
+      signatureImage: req.body?.signatureImage ?? req.body?.medicalProfile?.signatureImage,
+      requireSignature: role !== 'admin',
       actor: {
         userId,
         name: name || username || 'Acudiente',
@@ -7133,6 +7209,7 @@ router.academicPortalHelpers = {
   buildParentAcademicGradebook,
   buildParentAcademicRanking,
   resolveParentGradingScaleForGrade,
+  resolveIncludeClassAttendanceForGrade,
   getMonthRange,
   serializeParentAcademicCalendarPost,
   serializeParentAcademicCalendarAssignment,

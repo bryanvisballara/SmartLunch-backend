@@ -3,19 +3,22 @@ import teEscuchamosIcon from '../../assets/te-escuchamos-icon.png';
 import { createCommunityReport } from '../../services/communityReport.service';
 import TeEscuchamosLabel from './TeEscuchamosLabel';
 
-const reportTypeOptions = [
-  { value: 'bullying', label: 'Reportar bullying', hint: 'Situaciones de acoso o intimidación.' },
-  { value: 'depression', label: 'Reportar depresión', hint: 'Tristeza persistente, desánimo o preocupación por el bienestar emocional.' },
-  { value: 'teacher_complaint', label: 'Reportar docente', hint: 'Conducta inapropiada o preocupación con un docente.' },
-  { value: 'school_recommendation', label: 'Recomendación', hint: 'Sugerencia para mejorar la experiencia escolar.' },
+const parentReportTypeOptions = [
+  {
+    value: 'school_recommendation',
+    label: 'Recomendaciones y cuidado',
+    hint: 'Un espacio seguro para aportar ideas o compartir lo que te preocupe del bienestar escolar.',
+  },
 ];
 
 const emptyForm = {
-  reportType: 'bullying',
+  reportType: 'school_recommendation',
   message: '',
   teacherName: '',
   isAnonymous: false,
 };
+
+const PARENT_MESSAGE_PLACEHOLDER = 'Puedes compartirnos con confianza lo que quieras cuidar: ideas para mejorar el colegio, una situación de convivencia que te preocupe, el ánimo o bienestar de tu hijo(a), o una experiencia con algún docente. Estamos para escucharte con respeto y acompañarte.';
 
 function ParentFeedBottomSheet({ children, onClose, title }) {
   return (
@@ -43,13 +46,11 @@ export default function CommunityReportFab({
   const [notice, setNotice] = useState({ type: '', text: '' });
 
   const selectedType = useMemo(
-    () => reportTypeOptions.find((option) => option.value === form.reportType) || reportTypeOptions[0],
+    () => parentReportTypeOptions.find((option) => option.value === form.reportType) || parentReportTypeOptions[0],
     [form.reportType],
   );
 
-  const canSubmit = form.message.trim().length >= 10
-    && (form.reportType !== 'teacher_complaint' || form.teacherName.trim())
-    && !submitting;
+  const canSubmit = form.message.trim().length >= 10 && !submitting;
 
   const resetAndClose = () => {
     setOpen(false);
@@ -68,14 +69,14 @@ export default function CommunityReportFab({
 
     try {
       const response = await createCommunityReport({
-        reportType: form.reportType,
+        reportType: 'school_recommendation',
         message: form.message.trim(),
-        teacherName: form.reportType === 'teacher_complaint' ? form.teacherName.trim() : '',
+        teacherName: '',
         isAnonymous: form.isAnonymous,
         studentId: studentId || undefined,
       });
 
-      setNotice({ type: 'success', text: response.data?.message || 'Reporte enviado correctamente.' });
+      setNotice({ type: 'success', text: response.data?.message || 'Mensaje enviado correctamente. Gracias por confiar en nosotros.' });
       setForm(emptyForm);
       window.setTimeout(() => {
         resetAndClose();
@@ -83,21 +84,21 @@ export default function CommunityReportFab({
     } catch (error) {
       setNotice({
         type: 'error',
-        text: error?.response?.data?.message || 'No se pudo enviar el reporte.',
+        text: error?.response?.data?.message || 'No se pudo enviar el mensaje.',
       });
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (disabled) {
+  if (disabled || studentPortalMode) {
     return null;
   }
 
   return (
     <>
       <button
-        aria-label="Te escuchamos: enviar reporte"
+        aria-label="Te escuchamos: enviar mensaje"
         className="campus-parent-mobile__community-report-fab"
         onClick={() => {
           setOpen(true);
@@ -112,11 +113,11 @@ export default function CommunityReportFab({
         <ParentFeedBottomSheet onClose={resetAndClose} title={<TeEscuchamosLabel className="te-escuchamos-label--sheet" as="span" />}>
           <form className="campus-parent-mobile__community-report-form" onSubmit={onSubmit}>
             <p className="campus-parent-mobile__community-report-intro">
-              Tu voz cuenta. Comparte una preocupación o recomendación para el colegio. Puedes enviarla con tu nombre o de forma anónima.
+              Este es un canal de confianza para las familias. Tu mensaje nos ayuda a cuidar juntos el bienestar de la comunidad escolar.
             </p>
 
-            <div className="campus-parent-mobile__community-report-types" role="radiogroup" aria-label="Tipo de reporte">
-              {reportTypeOptions.map((option) => (
+            <div className="campus-parent-mobile__community-report-types" role="radiogroup" aria-label="Tipo de mensaje">
+              {parentReportTypeOptions.map((option) => (
                 <label className={`campus-parent-mobile__community-report-type${form.reportType === option.value ? ' is-active' : ''}`} key={option.value}>
                   <input
                     checked={form.reportType === option.value}
@@ -131,23 +132,12 @@ export default function CommunityReportFab({
               ))}
             </div>
 
-            {form.reportType === 'teacher_complaint' ? (
-              <label className="campus-parent-mobile__community-report-field">
-                Nombre del docente
-                <input
-                  onChange={(event) => setForm((current) => ({ ...current, teacherName: event.target.value }))}
-                  placeholder="Ej. Prof. García"
-                  value={form.teacherName}
-                />
-              </label>
-            ) : null}
-
             <label className="campus-parent-mobile__community-report-field">
               {selectedType.label}
               <textarea
                 onChange={(event) => setForm((current) => ({ ...current, message: event.target.value }))}
-                placeholder="Describe lo ocurrido o tu recomendación con el mayor detalle posible."
-                rows="5"
+                placeholder={PARENT_MESSAGE_PLACEHOLDER}
+                rows="6"
                 value={form.message}
               />
             </label>
@@ -161,11 +151,9 @@ export default function CommunityReportFab({
               <span>
                 <strong>Enviar de forma anónima</strong>
                 <small>
-                  {form.isAnonymous && form.reportType === 'depression'
-                    ? 'Para proteger tu bienestar, el equipo institucional verá tu identidad aunque marques esta opción como anónima.'
-                    : form.isAnonymous
-                      ? 'Tu nombre no se mostrará al equipo institucional.'
-                      : 'Tu nombre aparecerá en el reporte para facilitar el seguimiento.'}
+                  {form.isAnonymous
+                    ? 'Tu nombre no se mostrará al equipo institucional.'
+                    : 'Tu nombre aparecerá en el mensaje para facilitar el acompañamiento.'}
                 </small>
               </span>
             </label>
@@ -175,7 +163,7 @@ export default function CommunityReportFab({
             ) : null}
 
             <button className="campus-parent-mobile__community-report-submit" disabled={!canSubmit} type="submit">
-              {submitting ? 'Enviando...' : 'Enviar reporte'}
+              {submitting ? 'Enviando...' : 'Enviar mensaje'}
             </button>
           </form>
         </ParentFeedBottomSheet>

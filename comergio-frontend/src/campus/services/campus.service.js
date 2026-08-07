@@ -78,12 +78,45 @@ export function updateCampusTeacherAcademicContent(courseId, payload) {
   return api.patch(`/campus/teacher/courses/${courseId}/academic-content`, payload).then((response) => response.data);
 }
 
+export function uploadCampusTeacherAcademicContentMedia(courseId, files) {
+  const formData = new FormData();
+  Array.from(files || []).forEach((file, index) => {
+    const fileName = String(file?.name || `material-${Date.now()}-${index}.bin`);
+    formData.append('files', file, fileName);
+  });
+  return api.post(`/campus/teacher/courses/${courseId}/academic-content/media`, formData, { timeout: 120000 }).then((response) => response.data);
+}
+
 export function updateCampusTeacherClassSchedule(courseId, payload) {
   return api.patch(`/campus/teacher/courses/${courseId}/class-schedule`, payload).then((response) => response.data);
 }
 
 export function saveCampusTeacherStudentGrades(courseId, studentId, payload) {
   return api.post(`/campus/teacher/courses/${courseId}/students/${studentId}/grades`, payload).then((response) => response.data);
+}
+
+export function getCampusTeacherCourseReportCards(courseId, params = {}) {
+  return api.get(`/campus/teacher/courses/${courseId}/report-cards`, { params }).then((response) => response.data);
+}
+
+export function saveCampusTeacherCourseReportCard(courseId, payload) {
+  return api.post(`/campus/teacher/courses/${courseId}/report-cards`, payload).then((response) => response.data);
+}
+
+export function getCampusTeacherHeadroomReportCards(params = {}) {
+  return api.get('/campus/teacher/headroom/report-cards', { params }).then((response) => response.data);
+}
+
+export function saveCampusTeacherHeadroomReportCard(payload) {
+  return api.post('/campus/teacher/headroom/report-cards', payload).then((response) => response.data);
+}
+
+export function getCampusTeacherCourseFlyLock(courseId) {
+  return api.get(`/campus/teacher/courses/${courseId}/fly-lock`).then((response) => response.data);
+}
+
+export function updateCampusTeacherCourseFlyLock(courseId, payload) {
+  return api.put(`/campus/teacher/courses/${courseId}/fly-lock`, payload).then((response) => response.data);
 }
 
 export function createCampusTeacherPost(payload) {
@@ -157,6 +190,43 @@ export function getCampusDisciplineObservations(params = {}) {
     .catch((error) => {
       if (error?.response?.status === 404 || error?.response?.status === 405) {
         return { observations: [] };
+      }
+      return Promise.reject(error);
+    });
+}
+
+export function getCampusCoexistencePolicy() {
+  return api.get('/campus/coexistence-policy').then((response) => response.data);
+}
+
+export function getCampusCoexistenceScores() {
+  return api.get('/campus/coexistence-scores').then((response) => response.data);
+}
+
+export function updateCampusCoexistencePolicy(payload) {
+  return api.put('/campus/coexistence-policy', payload).then((response) => response.data);
+}
+
+export function getCampusAttendanceReport(params = {}) {
+  return api.get('/campus/attendance-report', { params })
+    .then((response) => response.data)
+    .catch((error) => {
+      if (error?.response?.status === 404 || error?.response?.status === 405) {
+        return {
+          date: params.date || '',
+          attendanceType: 'guidance_routine',
+          attendanceTypeLabel: 'Rutina de orientacion',
+          summary: {
+            sessionsSubmitted: 0,
+            coursesMissing: 0,
+            studentsMarked: 0,
+            present: 0,
+            late: 0,
+            absent: 0,
+            excused: 0,
+          },
+          sessions: [],
+        };
       }
       return Promise.reject(error);
     });

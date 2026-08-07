@@ -10,7 +10,7 @@ import DismissibleNotice from '../../components/DismissibleNotice';
 import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests, updateHrSupplyRequest } from '../../services/hr.service';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../../components/staff-announcements/StaffAnnouncementsPanel';
-import ComergioAcademyPanel, { COMERGIO_TEACHER_SUPPORT_WHATSAPP_URL } from '../../components/comergio-academy/ComergioAcademyPanel';
+import ComergioAcademyPanel from '../../components/comergio-academy/ComergioAcademyPanel';
 import {
   COMERGIO_ACADEMY_CHILDREN,
   COMERGIO_ACADEMY_PARENT,
@@ -32,6 +32,7 @@ import {
   getCampusTeacherAttendance,
   getCampusTeacherCourseDetail,
   getCampusTeacherDisciplineObservations,
+  getCampusCoexistencePolicy,
   getCampusTeacherFamilyFeed,
   toggleCampusTeacherFamilyFeedLike,
   createCampusTeacherFamilyFeedComment,
@@ -43,9 +44,16 @@ import {
   getCampusTeacherOverviewMetrics,
   saveCampusTeacherAttendance,
   saveCampusTeacherStudentGrades,
+  getCampusTeacherCourseReportCards,
+  saveCampusTeacherCourseReportCard,
+  getCampusTeacherHeadroomReportCards,
+  saveCampusTeacherHeadroomReportCard,
+  getCampusTeacherCourseFlyLock,
+  updateCampusTeacherCourseFlyLock,
   uploadCampusTeacherParentFeedMedia,
   uploadCampusTeacherProfilePhoto,
   updateCampusTeacherAcademicContent,
+  uploadCampusTeacherAcademicContentMedia,
   updateCampusTeacherGradingScheme,
   updateCampusTeacherPost,
 } from '../services/campus.service';
@@ -125,6 +133,14 @@ function TeacherSectionIcon({ icon }) {
           <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
           <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
           <path d="M9 12h6M9 16h6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+        </svg>
+      );
+    case 'report':
+      return (
+        <svg {...common}>
+          <path d="M8 7h8M8 11h8M8 15h5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+          <path d="M15 3v5h5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
         </svg>
       );
     case 'attendance':
@@ -225,6 +241,7 @@ const teacherSectionOptions = [
   { key: 'schedule', label: 'Horario', icon: 'calendar', description: 'Consultar el horario asignado desde Rectoría.' },
   { key: 'courses', label: 'Cursos', icon: 'courses', description: 'Ver todos los cursos donde dictas clase.' },
   { key: 'guidance_routine', label: 'Guidance Routine', icon: 'guidance', description: 'Tomar asistencia de la rutina de orientacion del curso asignado.' },
+  { key: 'general_report_card', label: 'Boletín general', icon: 'report', description: 'Genera el boletín consolidado del curso cuando todas las materias hayan enviado su boletín.' },
   { key: 'attendance', label: 'Asistencia a clase', icon: 'attendance', description: 'Registrar si el alumno entró a tiempo, llegó tarde o no asistió a tu clase.' },
   { key: 'academic_management', label: 'Gestión académica', icon: 'academic', description: 'Definir evaluación y crear contenido académico por materia.' },
   { key: 'academic_content', label: 'Contenido académico', icon: 'content', description: 'Planear los temas de estudio por grado y asignatura.' },
@@ -232,7 +249,7 @@ const teacherSectionOptions = [
   { key: 'family_feed', label: 'Feed de familias', icon: 'family', description: 'Consulta las publicaciones y comunicados visibles para las familias.' },
   { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
   { key: 'resource_requests', label: 'Solicitud de recursos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
-  { key: 'staff_announcements', label: 'Comunicados internos', icon: 'announcements', description: 'Recibe y confirma mensajes internos de rectoría y coordinación.' },
+  { key: 'staff_announcements', label: 'Comunicados internos', icon: 'announcements', description: 'Envía y recibe mensajes internos entre el equipo del colegio.' },
   {
     key: COMERGIO_ACADEMY_PARENT.key,
     label: COMERGIO_ACADEMY_PARENT.label,
@@ -247,6 +264,7 @@ const teacherSectionOptions = [
 
 const teacherResourceStatusLabels = {
   pending_coordination_review: 'En revisión de coordinación',
+  returned_for_correction: 'Devuelto para corrección',
   consolidated: 'Consolidada por coordinación',
   pending_purchasing_review: 'En gestión de compras',
   pending_hr_review: 'En revisión por RRHH',
@@ -285,11 +303,31 @@ function createTeacherResourceRequestDraft() {
     materialKey: '',
     customMaterialName: '',
     quantity: '1',
+    pendingMaterials: [],
     activityTitle: '',
     purpose: '',
     activityDate: '',
     noMaterialsNeeded: false,
   };
+}
+
+function resolveTeacherDraftMaterialName(draft = {}) {
+  if (draft.materialKey === '__other__') {
+    return String(draft.customMaterialName || '').trim();
+  }
+  return String(draft.materialKey || '').trim();
+}
+
+function formatTeacherPlannerMaterialsLabel(activity = {}) {
+  const materials = Array.isArray(activity.materials) && activity.materials.length
+    ? activity.materials
+    : (activity.materialName
+      ? [{ materialName: activity.materialName, quantity: activity.quantity || 1 }]
+      : []);
+  if (!materials.length) return '—';
+  return materials
+    .map((item) => `${item.materialName || 'Material'} ×${Math.max(1, Number(item.quantity || 1))}`)
+    .join(' · ');
 }
 
 function isPlannerSubmissionOpen(cycle) {
@@ -323,9 +361,11 @@ function getNowTimeInputValue() {
 
 function createTeacherDisciplineObservationDraft() {
   return {
+    destination: 'coexistence',
     courseId: '',
     studentId: '',
     observation: '',
+    infractionKey: '',
     incidentDate: getTodayDateInputValue(),
     incidentTime: getNowTimeInputValue(),
   };
@@ -431,10 +471,29 @@ const teacherDisciplineStatusLabels = {
   archived: 'Archivada',
 };
 
+const teacherDisciplineDestinationOptions = [
+  {
+    value: 'wellbeing',
+    label: 'Bienestar',
+    description: 'Caso psicológico: llega a Psicología para acompañamiento.',
+  },
+  {
+    value: 'coexistence',
+    label: 'Convivencia',
+    description: 'Disciplina: seguimiento cuantitativo de convivencia escolar.',
+  },
+];
+
+const teacherDisciplineDestinationLabels = {
+  wellbeing: 'Bienestar',
+  coexistence: 'Convivencia',
+};
+
 const teacherCourseWorkspaceTabs = [
   { key: 'grading', label: 'Estructura de notas' },
   { key: 'posts', label: 'Asignación' },
   { key: 'gradebook', label: 'Libro de notas' },
+  { key: 'report_card', label: 'Generar boletín' },
 ];
 
 const classworkAttachOptions = [
@@ -559,7 +618,18 @@ function createAcademicContentTopicDraft(index = 0) {
     title: '',
     description: '',
     order: (index + 1) * 10,
+    completed: false,
+    completedAt: null,
+    materials: [],
   };
+}
+
+function createAcademicContentMaterialLinkDraft() {
+  return { title: '', url: '' };
+}
+
+function formatAcademicContentMaterialLabel(material = {}) {
+  return String(material.title || material.fileName || material.url || 'Material').trim() || 'Material';
 }
 
 function pickActiveAcademicPeriod(periods = []) {
@@ -2227,6 +2297,11 @@ function buildAcademicContentDrafts(course) {
         title: topic.title || '',
         description: topic.description || '',
         order: topic.order ?? (topicIndex + 1) * 10,
+        completed: Boolean(topic.completed),
+        completedAt: topic.completedAt || null,
+        materials: Array.isArray(topic.materials)
+          ? topic.materials.map((material) => ({ ...material }))
+          : [],
       })),
     };
   });
@@ -3064,6 +3139,11 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [activeIntegralModal, setActiveIntegralModal] = useState('');
   const [showPostSuccessModal, setShowPostSuccessModal] = useState(false);
   const [gradebookSaveModal, setGradebookSaveModal] = useState(null);
+  const [reportCardPeriodKey, setReportCardPeriodKey] = useState('');
+  const [reportCardObservations, setReportCardObservations] = useState({});
+  const [headroomReportSectionKey, setHeadroomReportSectionKey] = useState('');
+  const [headroomReportPeriodKey, setHeadroomReportPeriodKey] = useState('');
+  const [headroomObservations, setHeadroomObservations] = useState({});
   const [editingPostId, setEditingPostId] = useState('');
   const [showAssignmentComposer, setShowAssignmentComposer] = useState(false);
   const [showClassworkCreateMenu, setShowClassworkCreateMenu] = useState(false);
@@ -3077,6 +3157,9 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [academicPeriodDrafts, setAcademicPeriodDrafts] = useState([]);
   const [academicContentDrafts, setAcademicContentDrafts] = useState([]);
   const [academicContentTopicInputs, setAcademicContentTopicInputs] = useState({});
+  const [topicLinkDrafts, setTopicLinkDrafts] = useState({});
+  const [expandedAcademicContentTopicKey, setExpandedAcademicContentTopicKey] = useState('');
+  const [academicContentUploadingKey, setAcademicContentUploadingKey] = useState('');
   const [teacherResourceRequestDraft, setTeacherResourceRequestDraft] = useState(createTeacherResourceRequestDraft);
   const [teacherResourcePlannerActivities, setTeacherResourcePlannerActivities] = useState([]);
   const [selectedTeacherPlannerCycleId, setSelectedTeacherPlannerCycleId] = useState('');
@@ -3101,7 +3184,6 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [teacherNotifications, setTeacherNotifications] = useState([]);
   const [loadingTeacherNotifications, setLoadingTeacherNotifications] = useState(false);
   const [showTeacherCamera, setShowTeacherCamera] = useState(false);
-  const [showTeacherSupportHelp, setShowTeacherSupportHelp] = useState(false);
   const [teacherPhotoPreview, setTeacherPhotoPreview] = useState('');
   const [teacherAttendanceLocked, setTeacherAttendanceLocked] = useState(false);
   const [teacherAttendanceSaveModal, setTeacherAttendanceSaveModal] = useState(null);
@@ -3159,6 +3241,40 @@ function TeacherCampusHome({ forcePreview = false }) {
     enabled: !previewEnabled && Boolean(selectedCourseId),
     retry: false,
     staleTime: 30_000,
+  });
+
+  const subjectReportCardsQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'report-cards', teacherQueryScope, selectedCourseId],
+    queryFn: () => getCampusTeacherCourseReportCards(selectedCourseId),
+    enabled: !previewEnabled
+      && Boolean(selectedCourseId)
+      && activeTeacherSection === 'academic_management'
+      && activeCourseWorkspaceTab === 'report_card',
+    retry: false,
+    staleTime: 20_000,
+  });
+
+  const headroomReportCardsQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'headroom-report-cards', teacherQueryScope, headroomReportSectionKey, headroomReportPeriodKey],
+    queryFn: () => getCampusTeacherHeadroomReportCards({
+      sourceCourseKey: headroomReportSectionKey || undefined,
+      academicPeriodKey: headroomReportPeriodKey || undefined,
+    }),
+    enabled: !previewEnabled && activeTeacherSection === 'general_report_card',
+    retry: false,
+    staleTime: 20_000,
+  });
+
+  const courseFlyLockQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'fly-lock', teacherQueryScope, selectedCourseId],
+    queryFn: () => getCampusTeacherCourseFlyLock(selectedCourseId),
+    enabled: !previewEnabled
+      && Boolean(selectedCourseId)
+      && activeTeacherSection === 'academic_management'
+      && showSelectedCourseWorkspace,
+    retry: false,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
   });
 
   const timelineCourseDetailQuery = useQuery({
@@ -3344,6 +3460,21 @@ function TeacherCampusHome({ forcePreview = false }) {
     staleTime: 20_000,
   });
 
+  const teacherCoexistencePolicyQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'coexistence-policy', teacherQueryScope],
+    queryFn: getCampusCoexistencePolicy,
+    enabled: !previewEnabled && activeTeacherSection === 'school_coexistence',
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const teacherCoexistenceInfractions = useMemo(
+    () => (Array.isArray(teacherCoexistencePolicyQuery.data?.policy?.infractions)
+      ? teacherCoexistencePolicyQuery.data.policy.infractions.filter((item) => item.active !== false && item.label)
+      : []),
+    [teacherCoexistencePolicyQuery.data?.policy?.infractions]
+  );
+
   const updateGradingSchemeMutation = useMutation({
     mutationFn: ({ courseId, payload }) => updateCampusTeacherGradingScheme(courseId, payload),
     onSuccess: (detail) => {
@@ -3448,6 +3579,36 @@ function TeacherCampusHome({ forcePreview = false }) {
     },
   });
 
+  const saveSubjectReportCardMutation = useMutation({
+    mutationFn: ({ courseId, payload }) => saveCampusTeacherCourseReportCard(courseId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'report-cards'] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'headroom-report-cards'] });
+    },
+  });
+
+  const saveHeadroomReportCardMutation = useMutation({
+    mutationFn: saveCampusTeacherHeadroomReportCard,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'headroom-report-cards'] });
+    },
+  });
+
+  const updateCourseFlyLockMutation = useMutation({
+    mutationFn: ({ courseId, payload }) => updateCampusTeacherCourseFlyLock(courseId, payload),
+    onSuccess: (data) => {
+      queryClient.setQueryData(
+        ['campus', 'teacher', 'fly-lock', teacherQueryScope, selectedCourseId],
+        (current) => ({
+          ...(current || {}),
+          lock: data?.lock || current?.lock,
+          message: data?.message,
+        })
+      );
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'fly-lock'] });
+    },
+  });
+
   const emptyTeacherWorkspace = useMemo(
     () => ({ teacher: null, courses: [], gradingScale: { minScore: 0, maxScore: 100, passingScore: 70 }, weeklySchedule: null, recentPosts: [] }),
     []
@@ -3486,7 +3647,11 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => courses.filter((course) => course.courseType !== 'guidance_routine'),
     [courses]
   );
-  const attendanceCourses = activeTeacherSection === 'guidance_routine' ? guidanceRoutineCourses : academicCourses;
+  const classAttendanceCourses = useMemo(
+    () => academicCourses.filter((course) => course.includeClassAttendance !== false),
+    [academicCourses]
+  );
+  const attendanceCourses = activeTeacherSection === 'guidance_routine' ? guidanceRoutineCourses : classAttendanceCourses;
   const attendanceSubjectGroups = useMemo(
     () => groupCoursesBySubject(attendanceCourses),
     [attendanceCourses]
@@ -3500,8 +3665,16 @@ function TeacherCampusHome({ forcePreview = false }) {
     [selectedAttendanceSubject]
   );
   const availableTeacherSectionOptions = useMemo(
-    () => teacherSectionOptions.filter((option) => option.key !== 'guidance_routine' || guidanceRoutineCourses.length > 0),
-    [guidanceRoutineCourses.length]
+    () => teacherSectionOptions.filter((option) => {
+      if (option.key === 'guidance_routine' || option.key === 'general_report_card') {
+        return guidanceRoutineCourses.length > 0;
+      }
+      if (option.key === 'attendance') {
+        return classAttendanceCourses.length > 0;
+      }
+      return true;
+    }),
+    [classAttendanceCourses.length, guidanceRoutineCourses.length]
   );
   const teacherStudentDirectory = useMemo(() => {
     if (previewEnabled) {
@@ -3873,6 +4046,256 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => getCourseAcademicPeriods(selectedCourseDetail?.course || selectedCourse),
     [selectedCourseDetail, selectedCourse]
   );
+
+  const subjectReportPeriods = useMemo(() => {
+    const fromApi = Array.isArray(subjectReportCardsQuery.data?.periods) ? subjectReportCardsQuery.data.periods : [];
+    return fromApi.length ? fromApi : selectedCourseAcademicPeriods.map((period) => ({
+      key: period.key,
+      name: period.name,
+    }));
+  }, [selectedCourseAcademicPeriods, subjectReportCardsQuery.data?.periods]);
+
+  const effectiveReportCardPeriodKey = reportCardPeriodKey || subjectReportPeriods[0]?.key || '';
+
+  const selectedSubjectReport = useMemo(() => {
+    const reports = Array.isArray(subjectReportCardsQuery.data?.reports) ? subjectReportCardsQuery.data.reports : [];
+    return reports.find((report) => String(report.academicPeriodKey) === String(effectiveReportCardPeriodKey)) || null;
+  }, [effectiveReportCardPeriodKey, subjectReportCardsQuery.data?.reports]);
+
+  const reportCardStudentRows = useMemo(() => {
+    const students = Array.isArray(selectedCourseDetail?.students) ? selectedCourseDetail.students : [];
+    return students.map((student) => {
+      const periods = buildStudentPeriods(student, selectedCourseAcademicPeriods);
+      const period = periods.find((item) => String(item.key) === String(effectiveReportCardPeriodKey)) || periods[0];
+      const savedObservation = selectedSubjectReport?.students?.find((entry) => String(entry.studentId) === String(student.studentId))?.observation || '';
+      return {
+        studentId: String(student.studentId),
+        name: student.name,
+        grade: student.grade,
+        periodAverage: period?.periodScore ?? null,
+        observation: Object.prototype.hasOwnProperty.call(reportCardObservations, student.studentId)
+          ? reportCardObservations[student.studentId]
+          : savedObservation,
+      };
+    });
+  }, [
+    effectiveReportCardPeriodKey,
+    reportCardObservations,
+    selectedCourseAcademicPeriods,
+    selectedCourseDetail?.students,
+    selectedSubjectReport,
+  ]);
+
+  const headroomReportSections = Array.isArray(headroomReportCardsQuery.data?.sections)
+    ? headroomReportCardsQuery.data.sections
+    : [];
+  const selectedHeadroomSection = useMemo(() => {
+    if (!headroomReportSections.length) return null;
+    return headroomReportSections.find((section) => String(section.sourceCourseKey) === String(headroomReportSectionKey))
+      || headroomReportSections[0];
+  }, [headroomReportSectionKey, headroomReportSections]);
+
+  const selectedHeadroomPeriodKey = headroomReportPeriodKey
+    || selectedHeadroomSection?.academicPeriodKey
+    || selectedHeadroomSection?.periods?.[0]?.key
+    || '';
+
+  useEffect(() => {
+    if (!subjectReportPeriods.length) return;
+    if (!reportCardPeriodKey || !subjectReportPeriods.some((period) => period.key === reportCardPeriodKey)) {
+      setReportCardPeriodKey(subjectReportPeriods[0].key);
+    }
+  }, [reportCardPeriodKey, subjectReportPeriods]);
+
+  useEffect(() => {
+    if (!selectedSubjectReport) {
+      setReportCardObservations({});
+      return;
+    }
+    const nextObservations = {};
+    (selectedSubjectReport.students || []).forEach((student) => {
+      nextObservations[String(student.studentId)] = String(student.observation || '');
+    });
+    setReportCardObservations(nextObservations);
+  }, [
+    effectiveReportCardPeriodKey,
+    selectedCourseId,
+    selectedSubjectReport?.id,
+    selectedSubjectReport?.updatedAt,
+    selectedSubjectReport?.status,
+  ]);
+
+  useEffect(() => {
+    if (!headroomReportSections.length) return;
+    if (!headroomReportSectionKey || !headroomReportSections.some((section) => section.sourceCourseKey === headroomReportSectionKey)) {
+      setHeadroomReportSectionKey(headroomReportSections[0].sourceCourseKey);
+    }
+  }, [headroomReportSectionKey, headroomReportSections]);
+
+  useEffect(() => {
+    const periods = selectedHeadroomSection?.periods || [];
+    if (!periods.length) return;
+    if (!headroomReportPeriodKey || !periods.some((period) => period.key === headroomReportPeriodKey)) {
+      setHeadroomReportPeriodKey(selectedHeadroomSection.academicPeriodKey || periods[0].key);
+    }
+  }, [headroomReportPeriodKey, selectedHeadroomSection]);
+
+  useEffect(() => {
+    const generalStudents = selectedHeadroomSection?.generalReport?.students || [];
+    if (!generalStudents.length) {
+      setHeadroomObservations({});
+      return;
+    }
+    const nextObservations = {};
+    generalStudents.forEach((student) => {
+      nextObservations[String(student.studentId)] = String(student.headroomObservation || '');
+    });
+    setHeadroomObservations(nextObservations);
+  }, [selectedHeadroomSection?.generalReport?.id, selectedHeadroomSection?.generalReport?.updatedAt, selectedHeadroomSection?.sourceCourseKey, selectedHeadroomPeriodKey]);
+
+  const onSubmitSubjectReportCard = async (nextStatus) => {
+    if (!selectedCourse?.id || !effectiveReportCardPeriodKey) {
+      setNotice({ type: 'error', text: 'Selecciona un curso y un periodo para el boletín.' });
+      return;
+    }
+
+    try {
+      await saveSubjectReportCardMutation.mutateAsync({
+        courseId: selectedCourse.id,
+        payload: {
+          academicPeriodKey: effectiveReportCardPeriodKey,
+          status: nextStatus,
+          students: reportCardStudentRows.map((student) => ({
+            studentId: student.studentId,
+            observation: String(student.observation || '').trim(),
+          })),
+        },
+      });
+      setNotice({
+        type: 'success',
+        text: nextStatus === 'submitted'
+          ? 'Boletín enviado al director de grupo.'
+          : 'Borrador del boletín guardado.',
+      });
+      await subjectReportCardsQuery.refetch();
+    } catch (error) {
+      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar el boletín.' });
+    }
+  };
+
+  const onSubmitHeadroomReportCard = async (nextStatus) => {
+    if (!selectedHeadroomSection?.sourceCourseKey || !selectedHeadroomPeriodKey) {
+      setNotice({ type: 'error', text: 'Selecciona el curso y el periodo del boletín general.' });
+      return;
+    }
+    if (!selectedHeadroomSection.allSubjectsSubmitted) {
+      setNotice({ type: 'error', text: 'Aún faltan materias por enviar su boletín.' });
+      return;
+    }
+
+    const baseStudents = selectedHeadroomSection.generalReport?.students?.length
+      ? selectedHeadroomSection.generalReport.students
+      : (() => {
+        const byStudent = new Map();
+        (selectedHeadroomSection.subjects || []).forEach((subjectItem) => {
+          (subjectItem.report?.students || []).forEach((student) => {
+            const studentId = String(student.studentId);
+            const current = byStudent.get(studentId) || {
+              studentId,
+              studentName: student.studentName,
+              subjectLines: [],
+            };
+            current.subjectLines.push({
+              subject: subjectItem.subject,
+              periodAverage: student.periodAverage,
+              teacherObservation: student.observation,
+              teacherName: subjectItem.report?.teacherName || '',
+            });
+            byStudent.set(studentId, current);
+          });
+        });
+        return Array.from(byStudent.values()).map((student) => {
+          const averages = student.subjectLines.map((line) => Number(line.periodAverage)).filter((value) => Number.isFinite(value));
+          return {
+            ...student,
+            overallAverage: averages.length
+              ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
+              : null,
+            headroomObservation: headroomObservations[student.studentId] || '',
+          };
+        });
+      })();
+
+    try {
+      await saveHeadroomReportCardMutation.mutateAsync({
+        sourceCourseKey: selectedHeadroomSection.sourceCourseKey,
+        academicPeriodKey: selectedHeadroomPeriodKey,
+        status: nextStatus,
+        students: baseStudents.map((student) => ({
+          studentId: student.studentId,
+          headroomObservation: String(
+            Object.prototype.hasOwnProperty.call(headroomObservations, student.studentId)
+              ? headroomObservations[student.studentId]
+              : (student.headroomObservation || '')
+          ).trim(),
+        })),
+      });
+      setNotice({
+        type: 'success',
+        text: nextStatus === 'published'
+          ? 'Boletín general publicado.'
+          : 'Borrador del boletín general guardado.',
+      });
+      await headroomReportCardsQuery.refetch();
+    } catch (error) {
+      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar el boletín general.' });
+    }
+  };
+
+  const courseFlyLock = courseFlyLockQuery.data?.lock || null;
+  const courseFlyLockSessionPreview = courseFlyLockQuery.data?.sessionPreview || null;
+  const canLockCourseFly = Boolean(courseFlyLockSessionPreview?.canLock || courseFlyLockSessionPreview?.inProgress);
+
+  const onToggleCourseFlyLock = async (nextActive) => {
+    if (!selectedCourse?.id) {
+      setNotice({ type: 'error', text: 'Selecciona un curso para bloquear FLY.' });
+      return;
+    }
+
+    if (nextActive && !canLockCourseFly) {
+      setNotice({
+        type: 'error',
+        text: courseFlyLockSessionPreview?.warning
+          || 'Solo puedes bloquear FLY mientras la clase de este curso esté en curso.',
+      });
+      return;
+    }
+
+    if (nextActive) {
+      const confirmed = window.confirm(
+        '¿Bloquear FLY para los alumnos de este curso mientras dictas la clase? Se liberará al terminar la sesión programada o cuando lo desbloquees manualmente.'
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    try {
+      const result = await updateCourseFlyLockMutation.mutateAsync({
+        courseId: selectedCourse.id,
+        payload: { active: nextActive },
+      });
+      setNotice({
+        type: 'success',
+        text: result?.message
+          || (nextActive ? 'FLY bloqueado para este curso.' : 'FLY desbloqueado para este curso.'),
+      });
+      await courseFlyLockQuery.refetch();
+    } catch (error) {
+      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo actualizar el bloqueo de FLY.' });
+    }
+  };
+
   const selectedCourseDraftAcademicPeriods = useMemo(
     () => academicPeriodDrafts.map((period, periodIndex) => ({
       key: slugifyComponentKey(period.key || period.name || `period_${periodIndex + 1}`),
@@ -4209,7 +4632,10 @@ function TeacherCampusHome({ forcePreview = false }) {
   const isTeacherPlannerEditable = Boolean(
     selectedTeacherPlannerCycle
     && isPlannerSubmissionOpen(selectedTeacherPlannerCycle)
-    && (!selectedTeacherPlannerRequest || selectedTeacherPlannerRequest.status === 'pending_coordination_review')
+    && (
+      !selectedTeacherPlannerRequest
+      || ['pending_coordination_review', 'returned_for_correction'].includes(selectedTeacherPlannerRequest.status)
+    )
   );
   const isBusy = updateGradingSchemeMutation.isPending
     || updateAcademicContentMutation.isPending
@@ -4221,6 +4647,9 @@ function TeacherCampusHome({ forcePreview = false }) {
     || createTeacherResourceRequestMutation.isPending
     || createTeacherSocialPublicationMutation.isPending
     || createTeacherDisciplineObservationMutation.isPending
+    || saveSubjectReportCardMutation.isPending
+    || saveHeadroomReportCardMutation.isPending
+    || updateCourseFlyLockMutation.isPending
     || teacherSocialMediaUploading;
 
   const onTeacherAttendanceRecordChange = (studentId, field, value) => {
@@ -4958,6 +5387,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       setClassScheduleDraft([]);
       setAcademicPeriodDrafts([]);
       setAcademicContentDrafts([]);
+      setExpandedAcademicContentTopicKey('');
       setStudentDrafts({});
       return;
     }
@@ -4973,6 +5403,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       setAcademicPeriodDrafts(buildAcademicPeriodDrafts(selectedCourseDetail.course));
       setAcademicContentDrafts(buildAcademicContentDrafts(selectedCourseDetail.course));
       setAcademicContentTopicInputs({});
+      setExpandedAcademicContentTopicKey('');
       setStudentDrafts(buildStudentDrafts(selectedCourseDetail));
     }
   }, [selectedCourse, selectedCourseDetail]);
@@ -5715,6 +6146,10 @@ function TeacherCampusHome({ forcePreview = false }) {
     )));
   };
 
+  const getAcademicContentTopicExpandKey = (period, periodIndex, topic, topicIndex) => (
+    `${period?.periodKey || periodIndex}:${topic?.key || topicIndex}`
+  );
+
   const onAddAcademicContentTopic = (periodIndex) => {
     const period = academicContentDrafts[periodIndex] || {};
     const inputKey = period.periodKey || `period_${periodIndex + 1}`;
@@ -5727,36 +6162,79 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
+    const topics = period.topics || [];
+    const nextTopic = {
+      ...createAcademicContentTopicDraft(topics.length),
+      title,
+      description,
+    };
+    const addedTopicKey = getAcademicContentTopicExpandKey(period, periodIndex, nextTopic, topics.length);
+
     setAcademicContentDrafts((currentDrafts) => currentDrafts.map((currentPeriod, index) => {
       if (index !== periodIndex) {
         return currentPeriod;
       }
 
-      const topics = currentPeriod.topics || [];
       return {
         ...currentPeriod,
         topics: [
-          ...topics,
-          {
-            ...createAcademicContentTopicDraft(topics.length),
-            title,
-            description,
-          },
+          ...(currentPeriod.topics || []),
+          nextTopic,
         ],
       };
     }));
     setAcademicContentTopicInputs((currentInputs) => ({
       ...currentInputs,
-      [inputKey]: { title: '', description: '' },
+      [inputKey]: { title: '', description: '', linkTitle: '', linkUrl: '' },
     }));
+    setExpandedAcademicContentTopicKey(addedTopicKey);
   };
 
   const onRemoveAcademicContentTopic = (periodIndex, topicIndex) => {
-    setAcademicContentDrafts((currentDrafts) => currentDrafts.map((period, index) => (
+    const period = academicContentDrafts[periodIndex] || {};
+    const topic = (period.topics || [])[topicIndex] || {};
+    const expandKey = getAcademicContentTopicExpandKey(period, periodIndex, topic, topicIndex);
+    setAcademicContentDrafts((currentDrafts) => currentDrafts.map((currentPeriod, index) => (
       index === periodIndex
-        ? { ...period, topics: (period.topics || []).filter((_, currentTopicIndex) => currentTopicIndex !== topicIndex) }
-        : period
+        ? { ...currentPeriod, topics: (currentPeriod.topics || []).filter((_, currentTopicIndex) => currentTopicIndex !== topicIndex) }
+        : currentPeriod
     )));
+    setExpandedAcademicContentTopicKey((currentKey) => (currentKey === expandKey ? '' : currentKey));
+  };
+
+  const onChangeAcademicContentTopicField = (periodIndex, topicIndex, field, value) => {
+    setAcademicContentDrafts((currentDrafts) => currentDrafts.map((period, index) => {
+      if (index !== periodIndex) return period;
+      return {
+        ...period,
+        topics: (period.topics || []).map((topic, currentTopicIndex) => (
+          currentTopicIndex === topicIndex ? { ...topic, [field]: value } : topic
+        )),
+      };
+    }));
+  };
+
+  const onToggleAcademicContentTopicExpanded = (period, periodIndex, topic, topicIndex) => {
+    const expandKey = getAcademicContentTopicExpandKey(period, periodIndex, topic, topicIndex);
+    setExpandedAcademicContentTopicKey((currentKey) => (currentKey === expandKey ? '' : expandKey));
+  };
+
+  const onToggleAcademicContentTopicCompleted = (periodIndex, topicIndex) => {
+    setAcademicContentDrafts((currentDrafts) => currentDrafts.map((period, index) => {
+      if (index !== periodIndex) return period;
+      return {
+        ...period,
+        topics: (period.topics || []).map((topic, currentTopicIndex) => {
+          if (currentTopicIndex !== topicIndex) return topic;
+          const completed = !topic.completed;
+          return {
+            ...topic,
+            completed,
+            completedAt: completed ? new Date().toISOString() : null,
+          };
+        }),
+      };
+    }));
   };
 
   const onChangeAcademicContentTopicInput = (period, periodIndex, field, value) => {
@@ -5764,10 +6242,112 @@ function TeacherCampusHome({ forcePreview = false }) {
     setAcademicContentTopicInputs((currentInputs) => ({
       ...currentInputs,
       [inputKey]: {
-        ...(currentInputs[inputKey] || { title: '', description: '' }),
+        ...(currentInputs[inputKey] || { title: '', description: '', linkTitle: '', linkUrl: '' }),
         [field]: value,
       },
     }));
+  };
+
+  const onAddAcademicContentTopicMaterialLink = (periodIndex, topicIndex) => {
+    const period = academicContentDrafts[periodIndex] || {};
+    const topic = (period.topics || [])[topicIndex] || {};
+    const linkDraft = topicLinkDrafts[`${period.periodKey || periodIndex}:${topic.key || topicIndex}`] || createAcademicContentMaterialLinkDraft();
+    const url = String(linkDraft.url || '').trim();
+    const title = String(linkDraft.title || '').trim() || url;
+
+    if (!url) {
+      setNotice({ type: 'error', text: 'Escribe el enlace del material de apoyo.' });
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      setNotice({ type: 'error', text: 'El enlace debe empezar por http:// o https://.' });
+      return;
+    }
+
+    setAcademicContentDrafts((currentDrafts) => currentDrafts.map((currentPeriod, index) => {
+      if (index !== periodIndex) return currentPeriod;
+      return {
+        ...currentPeriod,
+        topics: (currentPeriod.topics || []).map((currentTopic, currentTopicIndex) => {
+          if (currentTopicIndex !== topicIndex) return currentTopic;
+          return {
+            ...currentTopic,
+            materials: [
+              ...(currentTopic.materials || []),
+              {
+                sourceType: 'link',
+                kind: 'link',
+                title: title.slice(0, 120),
+                url,
+                fileName: '',
+                mimeType: 'text/uri-list',
+                sizeBytes: 0,
+                extension: '',
+                storage: 'external',
+              },
+            ],
+          };
+        }),
+      };
+    }));
+    setTopicLinkDrafts((current) => ({
+      ...current,
+      [`${period.periodKey || periodIndex}:${topic.key || topicIndex}`]: createAcademicContentMaterialLinkDraft(),
+    }));
+  };
+
+  const onRemoveAcademicContentTopicMaterial = (periodIndex, topicIndex, materialIndex) => {
+    setAcademicContentDrafts((currentDrafts) => currentDrafts.map((period, index) => {
+      if (index !== periodIndex) return period;
+      return {
+        ...period,
+        topics: (period.topics || []).map((topic, currentTopicIndex) => {
+          if (currentTopicIndex !== topicIndex) return topic;
+          return {
+            ...topic,
+            materials: (topic.materials || []).filter((_, currentMaterialIndex) => currentMaterialIndex !== materialIndex),
+          };
+        }),
+      };
+    }));
+  };
+
+  const onUploadAcademicContentTopicFiles = async (periodIndex, topicIndex, fileList) => {
+    if (!selectedCourse?.id) {
+      setNotice({ type: 'error', text: 'Selecciona un grado asignado.' });
+      return;
+    }
+    const selectedFiles = Array.from(fileList || []);
+    if (!selectedFiles.length) return;
+
+    const uploadKey = `${periodIndex}:${topicIndex}`;
+    setAcademicContentUploadingKey(uploadKey);
+    setNotice({ type: '', text: '' });
+    try {
+      const response = await uploadCampusTeacherAcademicContentMedia(selectedCourse.id, selectedFiles);
+      const materials = Array.isArray(response?.materials) ? response.materials : [];
+      if (!materials.length) {
+        throw new Error('No se pudo subir el material.');
+      }
+      setAcademicContentDrafts((currentDrafts) => currentDrafts.map((period, index) => {
+        if (index !== periodIndex) return period;
+        return {
+          ...period,
+          topics: (period.topics || []).map((topic, currentTopicIndex) => {
+            if (currentTopicIndex !== topicIndex) return topic;
+            return {
+              ...topic,
+              materials: [...(topic.materials || []), ...materials],
+            };
+          }),
+        };
+      }));
+      setNotice({ type: 'success', text: 'Material de apoyo agregado al tema.' });
+    } catch (error) {
+      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo subir el material.' });
+    } finally {
+      setAcademicContentUploadingKey('');
+    }
   };
 
   const onSaveAcademicContent = async () => {
@@ -5788,6 +6368,9 @@ function TeacherCampusHome({ forcePreview = false }) {
           title: String(topic.title || '').trim(),
           description: String(topic.description || '').trim(),
           order: Number(topic.order ?? (topicIndex + 1) * 10),
+          completed: Boolean(topic.completed),
+          completedAt: topic.completed ? (topic.completedAt || new Date().toISOString()) : null,
+          materials: Array.isArray(topic.materials) ? topic.materials : [],
         }))
         .filter((topic) => Boolean(topic.title)),
     }));
@@ -5852,6 +6435,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       materialKey: '',
       customMaterialName: '',
       quantity: '1',
+      pendingMaterials: [],
       activityTitle: '',
       purpose: '',
       activityDate: '',
@@ -5877,22 +6461,34 @@ function TeacherCampusHome({ forcePreview = false }) {
       materialKey: '',
       customMaterialName: '',
       quantity: '1',
+      pendingMaterials: [],
       activityTitle: '',
       purpose: '',
       activityDate: '',
     }));
 
-    const activities = (Array.isArray(request.plannerActivities) ? request.plannerActivities : []).map((activity, index) => ({
-      key: `${activity.id || index}:${activity.title}`,
-      date: toDateInputValue(activity.date),
-      title: activity.title || '',
-      purpose: activity.purpose || activity.description || '',
-      subject: activity.subject || '',
-      grade: activity.grade || '',
-      courseLabel: activity.courseLabel || '',
-      materialName: activity.materialName || '',
-      quantity: Number(activity.quantity || 0) || 1,
-    }));
+    const activities = (Array.isArray(request.plannerActivities) ? request.plannerActivities : []).map((activity, index) => {
+      const materials = Array.isArray(activity.materials) && activity.materials.length
+        ? activity.materials.map((item) => ({
+          materialName: item.materialName || '',
+          quantity: Math.max(1, Number(item.quantity || 1)),
+        }))
+        : (activity.materialName
+          ? [{ materialName: activity.materialName, quantity: Math.max(1, Number(activity.quantity || 1)) }]
+          : []);
+      return {
+        key: `${activity.id || index}:${activity.title}`,
+        date: toDateInputValue(activity.date),
+        title: activity.title || '',
+        purpose: activity.purpose || activity.description || '',
+        subject: activity.subject || '',
+        grade: activity.grade || '',
+        courseLabel: activity.courseLabel || '',
+        materials,
+        materialName: materials[0]?.materialName || '',
+        quantity: materials[0]?.quantity || 1,
+      };
+    });
 
     if (!activities.length && request.noMaterialsNeeded) {
       setTeacherResourcePlannerActivities([]);
@@ -5900,17 +6496,21 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
 
     if (!activities.length && Array.isArray(request.items) && request.items.length) {
-      setTeacherResourcePlannerActivities(request.items.map((item, index) => ({
-        key: `legacy-item-${item.id || index}`,
+      setTeacherResourcePlannerActivities([{
+        key: `legacy-items-${request.id || 'request'}`,
         date: toDateInputValue(request.neededByDate) || getTodayDateInputValue(),
-        title: item.item?.name || item.customName || 'Material solicitado',
+        title: 'Materiales solicitados',
         purpose: request.purpose || '',
         subject: '',
         grade: '',
         courseLabel: request.requestedForArea || '',
-        materialName: item.item?.name || item.customName || '',
-        quantity: Number(item.quantity || 1),
-      })));
+        materials: request.items.map((item) => ({
+          materialName: item.item?.name || item.customName || 'Material',
+          quantity: Math.max(1, Number(item.quantity || 1)),
+        })),
+        materialName: request.items[0]?.item?.name || request.items[0]?.customName || '',
+        quantity: Math.max(1, Number(request.items[0]?.quantity || 1)),
+      }]);
       return;
     }
 
@@ -5934,6 +6534,48 @@ function TeacherCampusHome({ forcePreview = false }) {
     loadTeacherPlannerRequestIntoDraft(existingRequest);
   };
 
+  const onAddTeacherResourceMaterial = () => {
+    if (!isTeacherPlannerEditable) {
+      setNotice({ type: 'error', text: 'Este planner ya no se puede editar.' });
+      return;
+    }
+    if (teacherResourceRequestDraft.noMaterialsNeeded) {
+      setNotice({ type: 'error', text: 'Desmarca “No necesito material” para agregar materiales.' });
+      return;
+    }
+
+    const materialName = resolveTeacherDraftMaterialName(teacherResourceRequestDraft);
+    const quantity = Math.max(1, Number(teacherResourceRequestDraft.quantity || 0));
+    if (!materialName) {
+      setNotice({ type: 'error', text: 'Selecciona o escribe el material.' });
+      return;
+    }
+
+    setTeacherResourceRequestDraft((currentDraft) => ({
+      ...currentDraft,
+      pendingMaterials: [
+        ...(Array.isArray(currentDraft.pendingMaterials) ? currentDraft.pendingMaterials : []),
+        {
+          key: `${materialName}:${quantity}:${Date.now()}`,
+          materialName,
+          quantity,
+        },
+      ],
+      materialKey: '',
+      customMaterialName: '',
+      quantity: '1',
+    }));
+    setNotice({ type: '', text: '' });
+  };
+
+  const onRemoveTeacherResourcePendingMaterial = (materialKey) => {
+    if (!isTeacherPlannerEditable) return;
+    setTeacherResourceRequestDraft((currentDraft) => ({
+      ...currentDraft,
+      pendingMaterials: (currentDraft.pendingMaterials || []).filter((item) => item.key !== materialKey),
+    }));
+  };
+
   const onAddTeacherResourceActivity = () => {
     if (!isTeacherPlannerEditable) {
       setNotice({ type: 'error', text: 'Este planner ya no se puede editar.' });
@@ -5950,22 +6592,34 @@ function TeacherCampusHome({ forcePreview = false }) {
     const courseLabel = selectedTeacherPlannerCourse
       ? (getCourseGroupLabel(selectedTeacherPlannerCourse) || getCourseDisplayTitle(selectedTeacherPlannerCourse))
       : '';
-    const materialName = teacherResourceRequestDraft.materialKey === '__other__'
-      ? String(teacherResourceRequestDraft.customMaterialName || '').trim()
-      : String(teacherResourceRequestDraft.materialKey || '').trim();
     const title = String(teacherResourceRequestDraft.activityTitle || '').trim();
     const purpose = String(teacherResourceRequestDraft.purpose || '').trim();
     const date = String(teacherResourceRequestDraft.activityDate || '').trim();
-    const quantity = Math.max(1, Number(teacherResourceRequestDraft.quantity || 0));
     const minDate = toDateInputValue(selectedTeacherPlannerCycle?.startDate);
     const maxDate = toDateInputValue(selectedTeacherPlannerCycle?.endDate);
+
+    const materials = [...(Array.isArray(teacherResourceRequestDraft.pendingMaterials) ? teacherResourceRequestDraft.pendingMaterials : [])];
+    const draftMaterialName = resolveTeacherDraftMaterialName(teacherResourceRequestDraft);
+    const draftQuantity = Math.max(1, Number(teacherResourceRequestDraft.quantity || 0));
+    if (draftMaterialName) {
+      materials.push({
+        key: `${draftMaterialName}:${draftQuantity}:${Date.now()}`,
+        materialName: draftMaterialName,
+        quantity: draftQuantity,
+      });
+    }
+
+    const normalizedMaterials = materials.map((item) => ({
+      materialName: String(item.materialName || '').trim(),
+      quantity: Math.max(1, Number(item.quantity || 1)),
+    })).filter((item) => item.materialName);
 
     if (!subjectLabel || !gradeLabel || !courseLabel) {
       setNotice({ type: 'error', text: 'Selecciona asignatura, grado y curso.' });
       return;
     }
-    if (!materialName) {
-      setNotice({ type: 'error', text: 'Selecciona o escribe el material.' });
+    if (!normalizedMaterials.length) {
+      setNotice({ type: 'error', text: 'Agrega al menos un material a la actividad.' });
       return;
     }
     if (!title || !purpose || !date) {
@@ -5984,15 +6638,16 @@ function TeacherCampusHome({ forcePreview = false }) {
     setTeacherResourcePlannerActivities((currentActivities) => [
       ...currentActivities,
       {
-        key: `${date}:${title}:${materialName}:${currentActivities.length}`,
+        key: `${date}:${title}:${normalizedMaterials[0].materialName}:${currentActivities.length}`,
         date,
         title,
         purpose,
         subject: subjectLabel,
         grade: gradeLabel,
         courseLabel,
-        materialName,
-        quantity,
+        materials: normalizedMaterials,
+        materialName: normalizedMaterials[0].materialName,
+        quantity: normalizedMaterials[0].quantity,
       },
     ]);
     resetTeacherPlannerDraftForSameCourse();
@@ -6009,22 +6664,41 @@ function TeacherCampusHome({ forcePreview = false }) {
     const noMaterialsNeeded = Boolean(teacherResourceRequestDraft.noMaterialsNeeded);
     const plannerActivities = noMaterialsNeeded
       ? []
-      : teacherResourcePlannerActivities.map((activity) => ({
-        date: activity.date,
-        title: activity.title,
-        description: activity.purpose,
-        purpose: activity.purpose,
-        subject: activity.subject,
-        grade: activity.grade,
-        courseLabel: activity.courseLabel,
-        materialName: activity.materialName,
-        quantity: activity.quantity,
-      }));
+      : teacherResourcePlannerActivities.map((activity) => {
+        const materials = Array.isArray(activity.materials) && activity.materials.length
+          ? activity.materials.map((item) => ({
+            materialName: item.materialName,
+            quantity: Math.max(1, Number(item.quantity || 1)),
+          }))
+          : [{
+            materialName: activity.materialName,
+            quantity: Math.max(1, Number(activity.quantity || 1)),
+          }];
+        return {
+          date: activity.date,
+          title: activity.title,
+          description: activity.purpose,
+          purpose: activity.purpose,
+          subject: activity.subject,
+          grade: activity.grade,
+          courseLabel: activity.courseLabel,
+          materials,
+          materialName: materials[0]?.materialName || '',
+          quantity: materials[0]?.quantity || 1,
+        };
+      });
 
     const areaParts = Array.from(new Set(
       teacherResourcePlannerActivities
         .map((activity) => [activity.subject, activity.grade, activity.courseLabel].filter(Boolean).join(' · '))
         .filter(Boolean)
+    ));
+
+    const flattenedItems = plannerActivities.flatMap((activity) => (
+      (activity.materials || []).map((material) => ({
+        customName: material.materialName,
+        quantity: material.quantity,
+      }))
     ));
 
     return {
@@ -6036,12 +6710,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         ? 'No necesito material para este periodo.'
         : (teacherResourcePlannerActivities[0]?.purpose || 'Planner docente'),
       plannerActivities,
-      items: noMaterialsNeeded
-        ? []
-        : teacherResourcePlannerActivities.map((activity) => ({
-          customName: activity.materialName,
-          quantity: activity.quantity,
-        })),
+      items: noMaterialsNeeded ? [] : flattenedItems,
     };
   };
 
@@ -6062,6 +6731,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
 
     try {
+      const wasReturnedForCorrection = selectedTeacherPlannerRequest?.status === 'returned_for_correction';
       await createTeacherResourceRequestMutation.mutateAsync({
         requestId: editingTeacherPlannerRequestId || selectedTeacherPlannerRequest?.id || '',
         payload: buildTeacherPlannerPayload(),
@@ -6070,7 +6740,9 @@ function TeacherCampusHome({ forcePreview = false }) {
       setNotice({
         type: 'success',
         text: editingTeacherPlannerRequestId || selectedTeacherPlannerRequest?.id
-          ? 'Planner actualizado correctamente.'
+          ? (wasReturnedForCorrection
+            ? 'Planner corregido y reenviado a coordinación.'
+            : 'Planner actualizado correctamente.')
           : 'Planner enviado a coordinación.',
       });
       const refreshed = await teacherResourceRequestsQuery.refetch();
@@ -6281,12 +6953,17 @@ function TeacherCampusHome({ forcePreview = false }) {
     const observationText = String(teacherDisciplineDraft.observation || '').trim();
     const incidentDate = String(teacherDisciplineDraft.incidentDate || '').trim();
     const incidentTime = String(teacherDisciplineDraft.incidentTime || '').trim();
+    const destination = teacherDisciplineDraft.destination === 'wellbeing' ? 'wellbeing' : 'coexistence';
     if (!teacherDisciplineDraft.courseId) {
       setNotice({ type: 'error', text: 'Selecciona el curso donde observaste la situación.' });
       return;
     }
     if (!teacherDisciplineDraft.studentId) {
       setNotice({ type: 'error', text: 'Selecciona el alumno correspondiente.' });
+      return;
+    }
+    if (destination === 'coexistence' && teacherCoexistenceInfractions.length > 0 && !String(teacherDisciplineDraft.infractionKey || '').trim()) {
+      setNotice({ type: 'error', text: 'Selecciona el tipo de falta definido por Rectoría.' });
       return;
     }
     if (!incidentDate || !incidentTime) {
@@ -6316,9 +6993,11 @@ function TeacherCampusHome({ forcePreview = false }) {
       }
 
       await createTeacherDisciplineObservationMutation.mutateAsync({
+        destination,
         courseId: teacherDisciplineDraft.courseId,
         studentId: teacherDisciplineDraft.studentId,
         observation: observationText,
+        infractionKey: destination === 'coexistence' ? teacherDisciplineDraft.infractionKey : '',
         incidentDate,
         incidentTime,
         incidentAt: incidentAtDate.toISOString(),
@@ -6326,10 +7005,16 @@ function TeacherCampusHome({ forcePreview = false }) {
       setTeacherDisciplineDraft((currentDraft) => ({
         ...currentDraft,
         observation: '',
+        infractionKey: '',
         incidentDate: getTodayDateInputValue(),
         incidentTime: getNowTimeInputValue(),
       }));
-      setNotice({ type: 'success', text: 'Observación enviada a Coordinación, Dirección, Psicología y Rectoría.' });
+      setNotice({
+        type: 'success',
+        text: destination === 'wellbeing'
+          ? 'Observación enviada a Bienestar / Psicología.'
+          : 'Observación enviada a Convivencia (Coordinación, Dirección y Rectoría).',
+      });
     } catch (error) {
       setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo enviar la observación de convivencia.' });
     }
@@ -8002,6 +8687,39 @@ function TeacherCampusHome({ forcePreview = false }) {
                         <h2>{getCourseDisplayTitle(selectedCourse)}</h2>
                         <p>{[selectedCourse.subject, `${selectedCourseCardStats?.studentCount || 0} estudiantes`, `${selectedCoursePosts.length} publicaciones`].filter(Boolean).join(' · ')}</p>
                       </div>
+                      <div className={`campus-teacher__fly-lock-control${courseFlyLock?.active ? ' is-locked' : ''}${!courseFlyLock?.active && !canLockCourseFly ? ' is-disabled' : ''}`}>
+                        <div className="campus-teacher__fly-lock-copy">
+                          <strong>FLY en clase</strong>
+                          <span>
+                            {courseFlyLock?.active
+                              ? `Bloqueado ${courseFlyLock.unlocksAtLabel || ''}`.trim()
+                              : (canLockCourseFly && courseFlyLockSessionPreview?.endTime
+                                ? `Clase en curso · se liberará a las ${courseFlyLockSessionPreview.endTime}`
+                                : 'Disponible para los alumnos')}
+                          </span>
+                          {courseFlyLock?.active && courseFlyLock.warning ? (
+                            <small>{courseFlyLock.warning}</small>
+                          ) : null}
+                          {!courseFlyLock?.active && courseFlyLockSessionPreview?.warning ? (
+                            <small>{courseFlyLockSessionPreview.warning}</small>
+                          ) : null}
+                        </div>
+                        <button
+                          className={courseFlyLock?.active ? 'campus-teacher__ghost-btn' : 'campus-teacher__action-btn'}
+                          disabled={
+                            isBusy
+                            || courseFlyLockQuery.isLoading
+                            || updateCourseFlyLockMutation.isPending
+                            || (!courseFlyLock?.active && !canLockCourseFly)
+                          }
+                          onClick={() => onToggleCourseFlyLock(!courseFlyLock?.active)}
+                          type="button"
+                        >
+                          {updateCourseFlyLockMutation.isPending
+                            ? 'Actualizando...'
+                            : (courseFlyLock?.active ? 'Desbloquear FLY' : 'Bloquear FLY')}
+                        </button>
+                      </div>
                     </div>
 
                     <article className="campus-teacher__activity-timeline campus-teacher__embedded-panel">
@@ -9315,6 +10033,113 @@ function TeacherCampusHome({ forcePreview = false }) {
                         {selectedCourseDetail && !selectedCourseDetail.students?.length ? <p className="campus-panel__meta">Este curso todavía no tiene estudiantes activos asociados al grupo {getCourseGroupLabel(selectedCourseDetail.course) || getCourseGradeLabel(selectedCourseDetail.course)}.</p> : null}
                       </article>
                     ) : null}
+
+                    {activeCourseWorkspaceTab === 'report_card' ? (
+                      <article className="campus-teacher__gradebook-panel campus-teacher__embedded-panel campus-teacher__report-card-panel">
+                        <div className="campus-teacher__classroom-head">
+                          <div>
+                            <h2 className="campus-teacher__classroom-title">Generar boletín</h2>
+                            <p className="campus-teacher__classroom-subtitle">
+                              Cierra el periodo con el promedio de cada alumno, agrega observaciones y envía el boletín al director de grupo.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="campus-teacher__report-card-toolbar">
+                          <label>
+                            Periodo
+                            <select
+                              onChange={(event) => setReportCardPeriodKey(event.target.value)}
+                              value={effectiveReportCardPeriodKey}
+                            >
+                              {subjectReportPeriods.map((period) => (
+                                <option key={period.key} value={period.key}>{period.name || period.key}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <span className={`campus-teacher__mode-pill${selectedSubjectReport?.status === 'submitted' ? ' is-success' : ''}`}>
+                            {selectedSubjectReport?.status === 'submitted' ? 'Enviado al director de grupo' : 'Borrador / pendiente'}
+                          </span>
+                        </div>
+
+                        {!subjectReportCardsQuery.data?.headroomTeacherUserId ? (
+                          <p className="campus-panel__meta">
+                            Este curso aún no tiene director de grupo asignado. Puedes armar el boletín, pero para enviarlo Rectoría debe asignar el headroom teacher.
+                          </p>
+                        ) : null}
+
+                        {subjectReportCardsQuery.isLoading || courseDetailQuery.isLoading ? (
+                          <p className="campus-panel__meta">Cargando promedios del periodo...</p>
+                        ) : null}
+
+                        <div className="campus-teacher__report-card-table-wrap">
+                          <table className="campus-teacher__report-card-table">
+                            <thead>
+                              <tr>
+                                <th>Alumno</th>
+                                <th>Promedio del periodo</th>
+                                <th>Observación</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {reportCardStudentRows.length ? reportCardStudentRows.map((student) => (
+                                <tr key={student.studentId}>
+                                  <td>
+                                    <strong>{student.name}</strong>
+                                    {student.grade ? <small>{student.grade}</small> : null}
+                                  </td>
+                                  <td>
+                                    {student.periodAverage === null || student.periodAverage === undefined
+                                      ? 'Sin promedio'
+                                      : student.periodAverage}
+                                  </td>
+                                  <td>
+                                    <textarea
+                                      disabled={selectedSubjectReport?.status === 'submitted' || saveSubjectReportCardMutation.isPending}
+                                      onChange={(event) => setReportCardObservations((current) => ({
+                                        ...current,
+                                        [student.studentId]: event.target.value,
+                                      }))}
+                                      placeholder="Observación del periodo para este alumno"
+                                      rows={2}
+                                      value={student.observation || ''}
+                                    />
+                                  </td>
+                                </tr>
+                              )) : (
+                                <tr>
+                                  <td colSpan={3}>No hay alumnos para este curso.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="campus-teacher__classroom-footer">
+                          <span className="campus-panel__meta">
+                            El promedio se toma del libro de notas del periodo seleccionado.
+                          </span>
+                          <div className="campus-teacher__report-card-actions">
+                            <button
+                              className="campus-teacher__ghost-btn"
+                              disabled={isBusy || selectedSubjectReport?.status === 'submitted'}
+                              onClick={() => onSubmitSubjectReportCard('draft')}
+                              type="button"
+                            >
+                              {saveSubjectReportCardMutation.isPending ? 'Guardando...' : 'Guardar borrador'}
+                            </button>
+                            <button
+                              className="campus-teacher__action-btn"
+                              disabled={isBusy || selectedSubjectReport?.status === 'submitted' || !subjectReportCardsQuery.data?.headroomTeacherUserId}
+                              onClick={() => onSubmitSubjectReportCard('submitted')}
+                              type="button"
+                            >
+                              {saveSubjectReportCardMutation.isPending ? 'Enviando...' : 'Enviar a director de grupo'}
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -9343,8 +10168,9 @@ function TeacherCampusHome({ forcePreview = false }) {
                         <div>
                           <span className="campus-panel__kicker">Planeación anual</span>
                           <h2>Temas por periodo académico</h2>
+                          <p className="campus-panel__meta">Agrega temas, despliega cada uno para editarlo o subir material, y marca los que ya impartiste.</p>
                         </div>
-                        <button className="campus-teacher__action-btn" disabled={isBusy || !selectedCourse} onClick={onSaveAcademicContent} type="button">
+                        <button className="campus-teacher__action-btn" disabled={isBusy || !selectedCourse || Boolean(academicContentUploadingKey)} onClick={onSaveAcademicContent} type="button">
                           {updateAcademicContentMutation.isPending ? 'Guardando...' : 'Guardar contenido'}
                         </button>
                       </div>
@@ -9387,16 +10213,129 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                             <div className="campus-teacher__grading-stack">
                               {(period.topics || []).length === 0 ? <p className="campus-panel__meta">Aún no hay temas para este periodo.</p> : null}
-                              {(period.topics || []).map((topic, topicIndex) => (
-                                <div className="campus-teacher__saved-topic-card" key={`${topic.key || 'topic'}-${topicIndex}`}>
-                                  <div>
-                                    <span className="campus-panel__kicker">Tema guardado</span>
-                                    <strong>{topic.title}</strong>
-                                    {topic.description ? <p>{topic.description}</p> : null}
-                                  </div>
-                                    <button className="campus-teacher__ghost-btn" onClick={() => onRemoveAcademicContentTopic(periodIndex, topicIndex)} type="button">Quitar</button>
+                              {(period.topics || []).map((topic, topicIndex) => {
+                                const linkDraftKey = `${period.periodKey || periodIndex}:${topic.key || topicIndex}`;
+                                const expandKey = getAcademicContentTopicExpandKey(period, periodIndex, topic, topicIndex);
+                                const isExpanded = expandedAcademicContentTopicKey === expandKey;
+                                const linkDraft = topicLinkDrafts[linkDraftKey] || createAcademicContentMaterialLinkDraft();
+                                const uploadKey = `${periodIndex}:${topicIndex}`;
+                                const isUploading = academicContentUploadingKey === uploadKey;
+                                return (
+                                <div
+                                  className={`campus-teacher__saved-topic-card${topic.completed ? ' is-completed' : ''}${isExpanded ? ' is-expanded' : ' is-collapsed'}`}
+                                  key={`${topic.key || 'topic'}-${topicIndex}`}
+                                >
+                                  <button
+                                    aria-expanded={isExpanded}
+                                    className="campus-teacher__saved-topic-toggle"
+                                    onClick={() => onToggleAcademicContentTopicExpanded(period, periodIndex, topic, topicIndex)}
+                                    type="button"
+                                  >
+                                    <div className="campus-teacher__saved-topic-toggle-copy">
+                                      <span className="campus-panel__kicker">{topic.completed ? 'Tema impartido' : 'Tema guardado'}</span>
+                                      <strong>{topic.title || 'Sin título'}</strong>
+                                    </div>
+                                    <span aria-hidden="true" className={`campus-teacher__saved-topic-chevron${isExpanded ? ' is-open' : ''}`}>⌄</span>
+                                  </button>
+
+                                  {isExpanded ? (
+                                    <div className="campus-teacher__saved-topic-card__body">
+                                      <div className="campus-teacher__saved-topic-card__main">
+                                        <label className="campus-teacher__saved-topic-check">
+                                          <input
+                                            checked={Boolean(topic.completed)}
+                                            onChange={() => onToggleAcademicContentTopicCompleted(periodIndex, topicIndex)}
+                                            type="checkbox"
+                                          />
+                                          <span>{topic.completed ? 'Tema impartido' : 'Marcar como impartido'}</span>
+                                        </label>
+
+                                        <label>
+                                          Tema de estudio
+                                          <input
+                                            onChange={(event) => onChangeAcademicContentTopicField(periodIndex, topicIndex, 'title', event.target.value)}
+                                            placeholder="Ej. Fracciones y resolución de problemas"
+                                            value={topic.title || ''}
+                                          />
+                                        </label>
+                                        <label>
+                                          Detalle o alcance
+                                          <input
+                                            onChange={(event) => onChangeAcademicContentTopicField(periodIndex, topicIndex, 'description', event.target.value)}
+                                            placeholder="Conceptos, competencias o actividades principales"
+                                            value={topic.description || ''}
+                                          />
+                                        </label>
+
+                                        {(topic.materials || []).length > 0 ? (
+                                          <ul className="campus-teacher__saved-topic-materials">
+                                            {(topic.materials || []).map((material, materialIndex) => (
+                                              <li key={`${material.url}-${materialIndex}`}>
+                                                <a href={resolveApiAssetUrl(material.url)} rel="noreferrer" target="_blank">
+                                                  {formatAcademicContentMaterialLabel(material)}
+                                                </a>
+                                                <button
+                                                  className="campus-teacher__ghost-btn"
+                                                  onClick={() => onRemoveAcademicContentTopicMaterial(periodIndex, topicIndex, materialIndex)}
+                                                  type="button"
+                                                >
+                                                  Quitar
+                                                </button>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        ) : (
+                                          <p className="campus-panel__meta">Sin material de apoyo todavía.</p>
+                                        )}
+
+                                        <div className="campus-teacher__saved-topic-attach">
+                                          <label className="campus-teacher__ghost-btn campus-teacher__saved-topic-upload">
+                                            {isUploading ? 'Subiendo...' : 'Subir archivo / diapositiva / video'}
+                                            <input
+                                              accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.zip,.txt,image/*,video/*,audio/*"
+                                              disabled={isUploading || isBusy}
+                                              multiple
+                                              onChange={(event) => {
+                                                onUploadAcademicContentTopicFiles(periodIndex, topicIndex, event.target.files);
+                                                event.target.value = '';
+                                              }}
+                                              type="file"
+                                            />
+                                          </label>
+                                          <div className="campus-teacher__saved-topic-link-row">
+                                            <input
+                                              onChange={(event) => setTopicLinkDrafts((current) => ({
+                                                ...current,
+                                                [linkDraftKey]: { ...linkDraft, title: event.target.value },
+                                              }))}
+                                              placeholder="Título del enlace (opcional)"
+                                              value={linkDraft.title}
+                                            />
+                                            <input
+                                              onChange={(event) => setTopicLinkDrafts((current) => ({
+                                                ...current,
+                                                [linkDraftKey]: { ...linkDraft, url: event.target.value },
+                                              }))}
+                                              placeholder="https://... video, Drive, Canva..."
+                                              value={linkDraft.url}
+                                            />
+                                            <button
+                                              className="campus-teacher__ghost-btn"
+                                              disabled={!String(linkDraft.url || '').trim()}
+                                              onClick={() => onAddAcademicContentTopicMaterialLink(periodIndex, topicIndex)}
+                                              type="button"
+                                            >
+                                              Agregar enlace
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <button className="campus-teacher__ghost-btn" onClick={() => onRemoveAcademicContentTopic(periodIndex, topicIndex)} type="button">Quitar tema</button>
+                                    </div>
+                                  ) : null}
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </section>
                           );
@@ -9410,6 +10349,191 @@ function TeacherCampusHome({ forcePreview = false }) {
                   <p className="campus-panel__meta">Selecciona un curso para continuar.</p>
                 ) : null}
               </div>
+            ) : null}
+
+            {activeTeacherSection === 'general_report_card' ? (
+              <article className="campus-teacher__gradebook-panel campus-teacher__embedded-panel campus-teacher__report-card-panel">
+                <header className="campus-teacher__classroom-head">
+                  <div>
+                    <span className="campus-panel__kicker">Director de grupo</span>
+                    <h2 className="campus-teacher__classroom-title">Boletín general</h2>
+                    <p className="campus-teacher__classroom-subtitle">
+                      Cuando todas las materias hayan enviado su boletín, consolida promedios, comentarios docentes y tu observación general.
+                    </p>
+                  </div>
+                </header>
+
+                {headroomReportCardsQuery.isLoading ? <p className="campus-panel__meta">Cargando boletines del curso...</p> : null}
+                {!headroomReportCardsQuery.isLoading && !headroomReportSections.length ? (
+                  <p className="campus-panel__meta">No tienes cursos asignados como director de grupo.</p>
+                ) : null}
+
+                {selectedHeadroomSection ? (
+                  <>
+                    <div className="campus-teacher__report-card-toolbar">
+                      <label>
+                        Curso
+                        <select
+                          onChange={(event) => {
+                            setHeadroomReportSectionKey(event.target.value);
+                            setHeadroomReportPeriodKey('');
+                          }}
+                          value={selectedHeadroomSection.sourceCourseKey}
+                        >
+                          {headroomReportSections.map((section) => (
+                            <option key={section.sourceCourseKey} value={section.sourceCourseKey}>
+                              {section.sectionLabel || section.sourceCourseKey}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Periodo
+                        <select
+                          onChange={(event) => setHeadroomReportPeriodKey(event.target.value)}
+                          value={selectedHeadroomPeriodKey}
+                        >
+                          {(selectedHeadroomSection.periods || []).map((period) => (
+                            <option key={period.key} value={period.key}>{period.name || period.key}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <span className={`campus-teacher__mode-pill${selectedHeadroomSection.allSubjectsSubmitted ? ' is-success' : ''}`}>
+                        {selectedHeadroomSection.allSubjectsSubmitted
+                          ? 'Todas las materias listas'
+                          : 'Esperando boletines de materias'}
+                      </span>
+                    </div>
+
+                    <div className="campus-teacher__report-card-checklist">
+                      <h3>Materias</h3>
+                      <ul>
+                        {(selectedHeadroomSection.subjects || []).map((subjectItem) => (
+                          <li key={subjectItem.campusCourseId} className={subjectItem.submitted ? 'is-ready' : 'is-pending'}>
+                            <strong>{subjectItem.subject}</strong>
+                            <span>{subjectItem.submitted ? 'Boletín enviado' : 'Pendiente'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {selectedHeadroomSection.allSubjectsSubmitted ? (
+                      <>
+                        <div className="campus-teacher__report-card-table-wrap">
+                          <table className="campus-teacher__report-card-table campus-teacher__report-card-table--general">
+                            <thead>
+                              <tr>
+                                <th>Alumno</th>
+                                <th>Materias / comentarios</th>
+                                <th>Promedio</th>
+                                <th>Observación general</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(selectedHeadroomSection.generalReport?.students?.length
+                                ? selectedHeadroomSection.generalReport.students
+                                : (() => {
+                                  const byStudent = new Map();
+                                  (selectedHeadroomSection.subjects || []).forEach((subjectItem) => {
+                                    (subjectItem.report?.students || []).forEach((student) => {
+                                      const studentId = String(student.studentId);
+                                      const current = byStudent.get(studentId) || {
+                                        studentId,
+                                        studentName: student.studentName,
+                                        subjectLines: [],
+                                      };
+                                      current.subjectLines.push({
+                                        subject: subjectItem.subject,
+                                        periodAverage: student.periodAverage,
+                                        teacherObservation: student.observation,
+                                        teacherName: subjectItem.report?.teacherName || '',
+                                      });
+                                      byStudent.set(studentId, current);
+                                    });
+                                  });
+                                  return Array.from(byStudent.values()).map((student) => {
+                                    const averages = student.subjectLines
+                                      .map((line) => Number(line.periodAverage))
+                                      .filter((value) => Number.isFinite(value));
+                                    return {
+                                      ...student,
+                                      overallAverage: averages.length
+                                        ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
+                                        : null,
+                                      headroomObservation: headroomObservations[student.studentId] || '',
+                                    };
+                                  });
+                                })()
+                              ).map((student) => (
+                                <tr key={student.studentId}>
+                                  <td><strong>{student.studentName}</strong></td>
+                                  <td>
+                                    <ul className="campus-teacher__report-card-subject-lines">
+                                      {(student.subjectLines || []).map((line, index) => (
+                                        <li key={`${student.studentId}-${line.subject}-${index}`}>
+                                          <strong>{line.subject}: {line.periodAverage ?? '—'}</strong>
+                                          <span>{line.teacherName ? `${line.teacherName}: ` : ''}{line.teacherObservation || 'Sin observación'}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </td>
+                                  <td>{student.overallAverage ?? '—'}</td>
+                                  <td>
+                                    <textarea
+                                      disabled={selectedHeadroomSection.generalReport?.status === 'published' || saveHeadroomReportCardMutation.isPending}
+                                      onChange={(event) => setHeadroomObservations((current) => ({
+                                        ...current,
+                                        [student.studentId]: event.target.value,
+                                      }))}
+                                      placeholder="Observación general del director de grupo"
+                                      rows={3}
+                                      value={
+                                        Object.prototype.hasOwnProperty.call(headroomObservations, student.studentId)
+                                          ? headroomObservations[student.studentId]
+                                          : (student.headroomObservation || '')
+                                      }
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="campus-teacher__classroom-footer">
+                          <span className="campus-panel__meta">
+                            {selectedHeadroomSection.generalReport?.status === 'published'
+                              ? 'Boletín general publicado.'
+                              : 'Puedes guardar borrador o publicar el boletín general.'}
+                          </span>
+                          <div className="campus-teacher__report-card-actions">
+                            <button
+                              className="campus-teacher__ghost-btn"
+                              disabled={isBusy || selectedHeadroomSection.generalReport?.status === 'published'}
+                              onClick={() => onSubmitHeadroomReportCard('draft')}
+                              type="button"
+                            >
+                              {saveHeadroomReportCardMutation.isPending ? 'Guardando...' : 'Guardar borrador'}
+                            </button>
+                            <button
+                              className="campus-teacher__action-btn"
+                              disabled={isBusy || selectedHeadroomSection.generalReport?.status === 'published'}
+                              onClick={() => onSubmitHeadroomReportCard('published')}
+                              type="button"
+                            >
+                              {saveHeadroomReportCardMutation.isPending ? 'Publicando...' : 'Publicar boletín general'}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="campus-panel__meta">
+                        Cuando todas las materias envíen su boletín de este periodo, podrás generar el boletín general aquí.
+                      </p>
+                    )}
+                  </>
+                ) : null}
+              </article>
             ) : null}
 
             {isAttendanceLikeSection ? (
@@ -9754,7 +10878,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                   <div className="campus-teacher__convivencia-card-head">
                     <div>
                       <h3>Nueva observación</h3>
-                      <p>El reporte queda disponible para Coordinación, Dirección, Psicología y Rectoría.</p>
+                      <p>
+                        {teacherDisciplineDraft.destination === 'wellbeing'
+                          ? 'Bienestar: el reporte llega a Psicología para acompañamiento.'
+                          : 'Convivencia: el reporte llega a Coordinación, Dirección y Rectoría para seguimiento disciplinario.'}
+                      </p>
                     </div>
                     <button
                       className="campus-teacher__convivencia-refresh"
@@ -9766,6 +10894,58 @@ function TeacherCampusHome({ forcePreview = false }) {
                       Actualizar
                     </button>
                   </div>
+
+                  <fieldset className="campus-teacher__convivencia-destination">
+                    <legend>¿A quién va dirigida?</legend>
+                    <div className="campus-teacher__convivencia-destination-options" role="radiogroup" aria-label="Destino de la observación">
+                      {teacherDisciplineDestinationOptions.map((option) => {
+                        const isSelected = teacherDisciplineDraft.destination === option.value;
+                        return (
+                          <label
+                            className={`campus-teacher__convivencia-destination-option${isSelected ? ' is-selected' : ''} is-${option.value}`}
+                            key={option.value}
+                          >
+                            <input
+                              checked={isSelected}
+                              name="discipline-destination"
+                              onChange={() => onTeacherDisciplineDraftChange('destination', option.value)}
+                              type="radio"
+                              value={option.value}
+                            />
+                            <strong>{option.label}</strong>
+                            <span>{option.description}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+
+                  {teacherDisciplineDraft.destination === 'coexistence' ? (
+                    <label className="campus-teacher__convivencia-field">
+                      <span>Tipo de falta (escala institucional)</span>
+                      <div className="campus-teacher__convivencia-select-shell">
+                        <select
+                          disabled={teacherCoexistencePolicyQuery.isLoading}
+                          onChange={(event) => onTeacherDisciplineDraftChange('infractionKey', event.target.value)}
+                          value={teacherDisciplineDraft.infractionKey || ''}
+                        >
+                          <option value="">
+                            {teacherCoexistencePolicyQuery.isLoading
+                              ? 'Cargando faltas...'
+                              : (teacherCoexistenceInfractions.length ? 'Seleccionar falta' : 'Sin faltas configuradas aún')}
+                          </option>
+                          {teacherCoexistenceInfractions.map((item) => (
+                            <option key={item.key} value={item.key}>
+                              {item.label} (−{item.deductionPercent}%)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <small className="campus-panel__meta">
+                        El descuento se aplica sobre el 100% de disciplina definido por Rectoría.
+                      </small>
+                    </label>
+                  ) : null}
 
                   <div className="campus-teacher__convivencia-fields">
                     <label className="campus-teacher__convivencia-field">
@@ -9908,7 +11088,11 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                   <div className="campus-teacher__convivencia-tip">
                     <span aria-hidden="true">i</span>
-                    <p>Sé objetivo: describe hechos concretos, evita juicios y registra el contexto de clase cuando sea relevante.</p>
+                    <p>
+                      {teacherDisciplineDraft.destination === 'wellbeing'
+                        ? 'Bienestar es para señales emocionales, relacionales o de acompañamiento psicológico. Sé objetivo y describe hechos concretos.'
+                        : 'Convivencia es para disciplina escolar y se calificará cuantitativamente. Sé objetivo: describe hechos concretos y evita juicios.'}
+                    </p>
                   </div>
 
                   <div className="campus-teacher__convivencia-footer">
@@ -9924,7 +11108,18 @@ function TeacherCampusHome({ forcePreview = false }) {
                     </div>
                     <button
                       className="campus-teacher__action-btn campus-teacher__convivencia-submit"
-                      disabled={isBusy || !teacherDisciplineDraft.courseId || !teacherDisciplineDraft.studentId || !teacherDisciplineDraft.incidentDate || !teacherDisciplineDraft.incidentTime}
+                      disabled={
+                        isBusy
+                        || !teacherDisciplineDraft.courseId
+                        || !teacherDisciplineDraft.studentId
+                        || !teacherDisciplineDraft.incidentDate
+                        || !teacherDisciplineDraft.incidentTime
+                        || (
+                          teacherDisciplineDraft.destination === 'coexistence'
+                          && teacherCoexistenceInfractions.length > 0
+                          && !teacherDisciplineDraft.infractionKey
+                        )
+                      }
                       type="submit"
                     >
                       <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
@@ -9964,8 +11159,19 @@ function TeacherCampusHome({ forcePreview = false }) {
                       {teacherDisciplineObservations.map((item) => (
                         <article className={`campus-teacher__convivencia-history-item status-${item.status}`} key={item.id}>
                           <div>
-                            <span className="campus-teacher__status-pill is-active">{teacherDisciplineStatusLabels[item.status] || item.status}</span>
+                            <div className="campus-teacher__convivencia-history-pills">
+                              <span className={`campus-teacher__status-pill is-destination-${item.destination === 'wellbeing' ? 'wellbeing' : 'coexistence'}`}>
+                                {teacherDisciplineDestinationLabels[item.destination] || 'Convivencia'}
+                              </span>
+                              <span className="campus-teacher__status-pill is-active">{teacherDisciplineStatusLabels[item.status] || item.status}</span>
+                            </div>
                             <h4>{item.studentName}</h4>
+                            {item.infractionLabel ? (
+                              <p className="campus-panel__meta">
+                                {item.infractionLabel}
+                                {item.deductionPercent ? ` · −${item.deductionPercent}%` : ''}
+                              </p>
+                            ) : null}
                             <p>{item.observation}</p>
                           </div>
                           <div className="campus-teacher__convivencia-history-meta">
@@ -10421,10 +11627,19 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                     {!isTeacherPlannerEditable ? (
                       <p className="campus-teacher__recursos-locked">
-                        {selectedTeacherPlannerRequest && selectedTeacherPlannerRequest.status !== 'pending_coordination_review'
+                        {selectedTeacherPlannerRequest
+                          && !['pending_coordination_review', 'returned_for_correction'].includes(selectedTeacherPlannerRequest.status)
                           ? 'Este planner ya avanzó en el flujo y no se puede editar aquí.'
                           : 'La fecha límite ya venció. Solo puedes consultar el historial.'}
                       </p>
+                    ) : null}
+
+                    {selectedTeacherPlannerRequest?.status === 'returned_for_correction' && selectedTeacherPlannerRequest.coordinationObservation ? (
+                      <div className="campus-teacher__recursos-return-banner">
+                        <strong>Devuelto para corrección</strong>
+                        <p>{selectedTeacherPlannerRequest.coordinationObservation}</p>
+                        <span>Corrige el planner y vuelve a enviarlo a coordinación.</span>
+                      </div>
                     ) : null}
 
                     {selectedTeacherPlannerRequest && !isTeacherPlannerEditable ? (
@@ -10442,8 +11657,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 <th>Asignatura</th>
                                 <th>Grado</th>
                                 <th>Curso</th>
-                                <th>Material</th>
-                                <th>Cant.</th>
+                                <th>Materiales</th>
                                 <th>Actividad</th>
                                 <th>Fecha</th>
                               </tr>
@@ -10455,8 +11669,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     <td>{activity.subject || '—'}</td>
                                     <td>{activity.grade || '—'}</td>
                                     <td>{activity.courseLabel || '—'}</td>
-                                    <td>{activity.materialName || '—'}</td>
-                                    <td>{activity.quantity || '—'}</td>
+                                    <td>{formatTeacherPlannerMaterialsLabel(activity)}</td>
                                     <td>
                                       <strong>{activity.title || '—'}</strong>
                                       {activity.purpose ? <small>{activity.purpose}</small> : null}
@@ -10466,7 +11679,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 ))
                               ) : (
                                 <tr>
-                                  <td colSpan={7}>
+                                  <td colSpan={6}>
                                     {(selectedTeacherPlannerRequest.items || []).map((entry) => `${entry.item?.name || entry.customName || 'Material'} x${entry.quantity}`).join(' · ') || 'Sin detalle de actividades.'}
                                   </td>
                                 </tr>
@@ -10493,6 +11706,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   onTeacherResourceDraftChange('noMaterialsNeeded', checked);
                                   if (checked) {
                                     setTeacherResourcePlannerActivities([]);
+                                    setTeacherResourceRequestDraft((currentDraft) => ({
+                                      ...currentDraft,
+                                      noMaterialsNeeded: true,
+                                      pendingMaterials: [],
+                                      materialKey: '',
+                                      customMaterialName: '',
+                                      quantity: '1',
+                                    }));
                                   }
                                 }}
                                 type="checkbox"
@@ -10612,6 +11833,42 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 </label>
                               ) : null}
 
+                              <div className="campus-teacher__recursos-add-row">
+                                <button className="campus-teacher__recursos-secondary" onClick={onAddTeacherResourceMaterial} type="button">
+                                  + Agregar material a esta actividad
+                                </button>
+                              </div>
+
+                              {(teacherResourceRequestDraft.pendingMaterials || []).length > 0 ? (
+                                <div className="campus-teacher__recursos-pending-materials">
+                                  <div className="campus-teacher__recursos-pending-materials__head">
+                                    <strong>Materiales de la actividad</strong>
+                                    <span>{teacherResourceRequestDraft.pendingMaterials.length}</span>
+                                  </div>
+                                  <ul>
+                                    {teacherResourceRequestDraft.pendingMaterials.map((item) => (
+                                      <li key={item.key}>
+                                        <span>{item.materialName} ×{item.quantity}</span>
+                                        <button
+                                          aria-label={`Quitar ${item.materialName}`}
+                                          className="campus-teacher__recursos-delete"
+                                          onClick={() => onRemoveTeacherResourcePendingMaterial(item.key)}
+                                          type="button"
+                                        >
+                                          <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                                            <path d="M5 7h14M10 11v6M14 11v6M9 7l1-2h4l1 2M8 7l1 12h6l1-12" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+                                          </svg>
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : (
+                                <p className="campus-panel__meta">
+                                  Puedes agregar varios materiales a la misma actividad antes de guardarla.
+                                </p>
+                              )}
+
                               <label className="campus-teacher__recursos-field is-wide">
                                 <span>Título de actividad</span>
                                 <div className="campus-teacher__recursos-input-shell is-plain">
@@ -10699,8 +11956,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     <th>Asignatura</th>
                                     <th>Grado</th>
                                     <th>Curso</th>
-                                    <th>Material</th>
-                                    <th>Cant.</th>
+                                    <th>Materiales</th>
                                     <th>Actividad</th>
                                     <th>Fecha</th>
                                     <th>Acciones</th>
@@ -10709,15 +11965,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 <tbody>
                                   {teacherResourcePlannerActivities.length === 0 ? (
                                     <tr>
-                                      <td colSpan={8}>Aún no has agregado actividades para este planner.</td>
+                                      <td colSpan={7}>Aún no has agregado actividades para este planner.</td>
                                     </tr>
                                   ) : teacherResourcePlannerActivities.map((activity) => (
                                     <tr key={activity.key}>
                                       <td>{activity.subject}</td>
                                       <td>{activity.grade}</td>
                                       <td>{activity.courseLabel}</td>
-                                      <td>{activity.materialName}</td>
-                                      <td>{activity.quantity}</td>
+                                      <td>{formatTeacherPlannerMaterialsLabel(activity)}</td>
                                       <td>
                                         <strong>{activity.title}</strong>
                                         {activity.purpose ? <small>{activity.purpose}</small> : null}
@@ -10771,7 +12026,9 @@ function TeacherCampusHome({ forcePreview = false }) {
                             </svg>
                             {createTeacherResourceRequestMutation.isPending
                               ? 'Enviando...'
-                              : (selectedTeacherPlannerRequest ? 'Actualizar y enviar' : 'Enviar planner')}
+                              : (selectedTeacherPlannerRequest?.status === 'returned_for_correction'
+                                ? 'Corregir y reenviar'
+                                : (selectedTeacherPlannerRequest ? 'Actualizar y enviar' : 'Enviar planner'))}
                           </button>
                         </div>
                       </>
@@ -10970,8 +12227,8 @@ function TeacherCampusHome({ forcePreview = false }) {
             {activeTeacherSection === 'staff_announcements' ? (
               <article className="campus-teacher__embedded-panel">
                 <StaffAnnouncementsPanel
-                  description="Recibe y confirma mensajes internos de rectoría y coordinación."
-                  mode="inbox"
+                  description="Envía y recibe mensajes internos del colegio. Elige a quién va dirigido cada comunicado."
+                  mode="manage"
                   title="Comunicados internos"
                 />
               </article>
@@ -11608,66 +12865,6 @@ function TeacherCampusHome({ forcePreview = false }) {
         </div>
         </div>
       </div>
-
-      <button
-        aria-label="Abrir ayuda por WhatsApp"
-        className="campus-teacher__support-fab"
-        onClick={() => setShowTeacherSupportHelp(true)}
-        title="Ayuda / reportar inconsistencia"
-        type="button"
-      >
-        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
-          <path d="M12 21a9 9 0 1 0-7.8-4.5L3 21l4.6-1.2A8.9 8.9 0 0 0 12 21Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
-          <path d="M8.4 10.2c.4-1 1.1-1.7 2-1.9.5-.1 1 .2 1.1.7l.3 1.1c.1.4 0 .8-.3 1L10.8 12c.5 1 1.4 1.9 2.4 2.4l.9-.7c.3-.2.7-.3 1-.3l1.1.3c.5.1.8.6.7 1.1-.2.9-.9 1.6-1.9 2" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
-        </svg>
-        <span>Ayuda</span>
-      </button>
-
-      {showTeacherSupportHelp ? (
-        <div
-          className="campus-teacher__support-modal-backdrop"
-          onClick={() => setShowTeacherSupportHelp(false)}
-          role="presentation"
-        >
-          <div
-            aria-labelledby="teacher-support-help-title"
-            aria-modal="true"
-            className="campus-teacher__support-modal"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-          >
-            <span className="campus-teacher__support-modal-kicker">Soporte Comergio</span>
-            <h3 id="teacher-support-help-title">¿Para qué es este botón?</h3>
-            <p>
-              Úsalo para pedir ayuda con el portal docente o para reportar una inconsistencia del software.
-              Te llevaremos a WhatsApp para escribirle al equipo de soporte.
-            </p>
-            <ul>
-              <li>Dudas de uso del portal</li>
-              <li>Errores o comportamientos inesperados</li>
-              <li>Sugerencias rápidas de mejora</li>
-            </ul>
-            <div className="campus-teacher__support-modal-actions">
-              <button
-                className="campus-teacher__support-modal-cancel"
-                onClick={() => setShowTeacherSupportHelp(false)}
-                type="button"
-              >
-                Cancelar
-              </button>
-              <a
-                className="campus-teacher__support-modal-continue"
-                href={COMERGIO_TEACHER_SUPPORT_WHATSAPP_URL}
-                onClick={() => setShowTeacherSupportHelp(false)}
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                Continuar a WhatsApp
-              </a>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }

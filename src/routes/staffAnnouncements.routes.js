@@ -17,19 +17,8 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-const senderRoles = ['rectoria', 'coordination', 'admin', 'direccion'];
-const inboxRoles = [
-  'teacher',
-  'psychology',
-  'nursing',
-  'academic_secretary',
-  'admissions',
-  'coordination',
-  'billing',
-  'rectoria',
-  'admin',
-  'direccion',
-];
+const senderRoles = [...STAFF_ANNOUNCEMENT_TARGET_ROLES];
+const inboxRoles = [...STAFF_ANNOUNCEMENT_TARGET_ROLES];
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -41,16 +30,17 @@ function isValidObjectId(value) {
 
 function roleLabel(role) {
   const labels = {
-    teacher: 'Docente',
-    psychology: 'Psicología',
+    teacher: 'Docentes',
+    psychology: 'Bienestar / Psicología',
     nursing: 'Enfermería',
     academic_secretary: 'Secretaría académica',
     admissions: 'Admisiones',
     coordination: 'Coordinación',
     billing: 'Cartera',
+    human_resources: 'Recursos humanos',
     rectoria: 'Rectoría',
-    admin: 'Admin',
     direccion: 'Dirección',
+    admin: 'Administración',
   };
   return labels[normalizeText(role)] || normalizeText(role) || 'Usuario';
 }
@@ -285,15 +275,20 @@ router.get('/:announcementId/recipients', roleMiddleware(senderRoles), async (re
 router.post('/', roleMiddleware(senderRoles), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.user;
+    const targetRoles = normalizeTargetRoles(req.body.targetRoles, []);
+    if (!targetRoles.length) {
+      return res.status(400).json({ message: 'Selecciona al menos un destinatario.' });
+    }
+
     const sender = await User.findOne({ _id: userId, schoolId }).select('name username role').lean();
     const announcement = await publishStaffAnnouncement({
       schoolId,
       senderUserId: userId,
-      senderName: normalizeText(sender?.name) || normalizeText(sender?.username) || 'Equipo directivo',
+      senderName: normalizeText(sender?.name) || normalizeText(sender?.username) || 'Equipo',
       senderRole: normalizeText(sender?.role) || normalizeText(role),
       title: req.body.title,
       body: req.body.body,
-      targetRoles: normalizeTargetRoles(req.body.targetRoles),
+      targetRoles,
       sourceType: 'manual',
     });
 

@@ -18,6 +18,7 @@ import { PortalBootSplash } from '../components/PortalBootSplash';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
 import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
 import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
+import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import { getSchoolDisplayName } from '../lib/schools';
 import './HumanResourcesPortal.css';
 
@@ -69,6 +70,7 @@ const priorityOptions = [
 
 const statusLabels = {
   pending_coordination_review: 'Revisión coordinación',
+  returned_for_correction: 'Devuelto a corrección',
   consolidated: 'Consolidada',
   pending_hr_review: 'Revisión RRHH',
   pending_purchasing_review: 'Gestión de compras',
@@ -169,6 +171,10 @@ function isAcademiaPurchaseArea(area) {
   return key === 'teaching' || key === 'academia';
 }
 
+function isGeneralPurchaseArea(area) {
+  return String(area?.key || '').trim() === 'general';
+}
+
 function isNursingPurchaseArea(area) {
   return String(area?.key || '').trim() === 'nursing';
 }
@@ -201,6 +207,30 @@ function getConsolidateMaterialRows(request) {
     unit: entry.unit || entry.item?.unit || 'unidad',
     unitCost: Math.max(0, Number(entry.unitCost || entry.item?.unitCost || 0)),
   })).filter((row) => row.quantity > 0);
+}
+
+function renderHistoryMaterials(request) {
+  const rows = getConsolidateMaterialRows(request);
+  if (!rows.length) return '—';
+  return (
+    <ul className="hr-portal__history-materials">
+      {rows.map((row) => (
+        <li key={row.id}>
+          <strong>{row.name}</strong>
+          <span> ×{row.quantity} {row.unit}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function getHistoryMovementLabel(request) {
+  if (isPlannerConsolidateRequest(request)) {
+    return request.plannerCycle?.title
+      || request.requestedForArea
+      || 'Consolidado de planners docentes';
+  }
+  return requestTypeLabels[request.requestType] || 'Solicitud de materiales';
 }
 
 function formatDate(value) {
@@ -354,6 +384,7 @@ function HumanResourcesPortal() {
   });
   const [items, setItems] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [dispatchConsolidates, setDispatchConsolidates] = useState([]);
   const [itemForm, setItemForm] = useState(emptyItemForm);
   const [requestForm, setRequestForm] = useState(emptyRequestForm);
   const [requestItems, setRequestItems] = useState([]);
@@ -368,6 +399,12 @@ function HumanResourcesPortal() {
   const [submitting, setSubmitting] = useState(false);
   const [activePortalView, setActivePortalView] = useState('operations');
   const [materialSearch, setMaterialSearch] = useState('');
+  const staffAnnouncementsUnreadQuery = useStaffAnnouncementUnreadCount(true);
+  const staffAnnouncementsUnreadCount = Number(
+    staffAnnouncementsUnreadQuery.data?.data?.unreadCount
+    ?? staffAnnouncementsUnreadQuery.data?.unreadCount
+    ?? 0
+  );
 
   const activeArea = useMemo(
     () => purchaseAreas.find((area) => String(area.id) === String(activeAreaId)) || null,
@@ -400,8 +437,22 @@ function HumanResourcesPortal() {
     [requests]
   );
 
+  const isAcademiaArea = isAcademiaPurchaseArea(activeArea);
+  const isGeneralArea = isGeneralPurchaseArea(activeArea);
+  const isNursingArea = isNursingPurchaseArea(activeArea);
+
   const historyEntries = useMemo(() => {
-    const mapped = requests.map(mapRequestToHistoryEntry);
+    const byId = new Map();
+    for (const request of requests) {
+      if (request.status === 'consolidated') continue;
+      byId.set(String(request.id), request);
+    }
+    if (isGeneralArea) {
+      for (const request of dispatchConsolidates) {
+        byId.set(String(request.id), request);
+      }
+    }
+    const mapped = Array.from(byId.values()).map(mapRequestToHistoryEntry);
     mapped.sort((a, b) => {
       const aTime = a.sortAt ? new Date(a.sortAt).getTime() : 0;
       const bTime = b.sortAt ? new Date(b.sortAt).getTime() : 0;
@@ -409,23 +460,22 @@ function HumanResourcesPortal() {
     });
     if (historyFilter === 'all') return mapped;
     return mapped.filter((entry) => entry.kind === historyFilter);
-  }, [requests, historyFilter]);
-
-  const isAcademiaArea = isAcademiaPurchaseArea(activeArea);
-  const isNursingArea = isNursingPurchaseArea(activeArea);
+  }, [requests, historyFilter, isGeneralArea, dispatchConsolidates]);
+  const showPlannerDispatchPanel = isManager && (isAcademiaArea || isGeneralArea);
   const plannerConsolidates = useMemo(() => {
-    if (!isAcademiaArea) return [];
-    return requests
-      .filter((request) => isPlannerConsolidateRequest(request))
-      .sort((a, b) => {
-        const aPending = a.status === 'pending_purchasing_review' ? 0 : 1;
-        const bPending = b.status === 'pending_purchasing_review' ? 0 : 1;
-        if (aPending !== bPending) return aPending - bPending;
-        const aTime = new Date(a.submittedToPurchasingAt || a.createdAt || 0).getTime();
-        const bTime = new Date(b.submittedToPurchasingAt || b.createdAt || 0).getTime();
-        return bTime - aTime;
-      });
-  }, [requests, isAcademiaArea]);
+    if (!showPlannerDispatchPanel) return [];
+    const source = isAcademiaArea
+      ? requests.filter((request) => isPlannerConsolidateRequest(request))
+      : dispatchConsolidates;
+    return [...source].sort((a, b) => {
+      const aPending = a.status === 'pending_purchasing_review' ? 0 : 1;
+      const bPending = b.status === 'pending_purchasing_review' ? 0 : 1;
+      if (aPending !== bPending) return aPending - bPending;
+      const aTime = new Date(a.submittedToPurchasingAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.submittedToPurchasingAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [requests, dispatchConsolidates, showPlannerDispatchPanel, isAcademiaArea]);
   const pendingPlannerConsolidates = useMemo(
     () => plannerConsolidates.filter((request) => request.status === 'pending_purchasing_review'),
     [plannerConsolidates]
@@ -565,16 +615,45 @@ function HumanResourcesPortal() {
 
     setItems(itemsResponse.data?.items || []);
     setDashboard(dashboardResponse.data || null);
-    return nextAreaId;
+    return { areaId: nextAreaId, areas };
   };
 
-  const loadRequests = async (areaIdOverride) => {
+  const loadRequests = async (areaIdOverride, areasOverride) => {
     const areaId = areaIdOverride ?? activeAreaId;
+    const areas = Array.isArray(areasOverride) && areasOverride.length
+      ? areasOverride
+      : purchaseAreas;
     const params = {
       ...(areaId ? { areaId } : {}),
     };
     const requestsResponse = await getHrSupplyRequests(params);
-    setRequests(requestsResponse.data?.requests || []);
+    const areaRequests = requestsResponse.data?.requests || [];
+    setRequests(areaRequests);
+
+    if (!isManager) {
+      setDispatchConsolidates([]);
+      return;
+    }
+
+    const academiaArea = areas.find((area) => isAcademiaPurchaseArea(area));
+    const activeIsAcademia = academiaArea && String(academiaArea.id) === String(areaId || '');
+    if (activeIsAcademia) {
+      setDispatchConsolidates(areaRequests.filter((request) => isPlannerConsolidateRequest(request)));
+      return;
+    }
+
+    if (academiaArea?.id) {
+      try {
+        const academiaResponse = await getHrSupplyRequests({ areaId: academiaArea.id });
+        setDispatchConsolidates(
+          (academiaResponse.data?.requests || []).filter((request) => isPlannerConsolidateRequest(request))
+        );
+      } catch {
+        setDispatchConsolidates([]);
+      }
+    } else {
+      setDispatchConsolidates([]);
+    }
   };
 
   const loadData = async ({ refreshAll = true, areaId } = {}) => {
@@ -586,10 +665,13 @@ function HumanResourcesPortal() {
 
     try {
       let resolvedAreaId = areaId ?? activeAreaId;
+      let areasForRequests = purchaseAreas;
       if (refreshAll) {
-        resolvedAreaId = await loadOverviewShell(areaId);
+        const shell = await loadOverviewShell(areaId);
+        resolvedAreaId = shell.areaId;
+        areasForRequests = shell.areas;
       }
-      await loadRequests(resolvedAreaId);
+      await loadRequests(resolvedAreaId, areasForRequests);
     } catch (error) {
       const apiMessage = error?.response?.data?.message;
       const networkDown = !error?.response && (error?.code === 'ERR_NETWORK' || /network|failed to fetch|econnrefused/i.test(String(error?.message || '')));
@@ -610,12 +692,12 @@ function HumanResourcesPortal() {
     let cancelled = false;
 
     loadOverviewShell()
-      .then((resolvedAreaId) => {
+      .then((shell) => {
         if (cancelled) return;
         setShellLoading(false);
         setHasLoadedOnce(true);
         setBackgroundLoading(true);
-        return loadRequests(resolvedAreaId);
+        return loadRequests(shell.areaId, shell.areas);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -665,8 +747,8 @@ function HumanResourcesPortal() {
     closeModal();
     setBackgroundLoading(true);
     try {
-      await loadOverviewShell(areaId);
-      await loadRequests(areaId);
+      const shell = await loadOverviewShell(areaId);
+      await loadRequests(shell.areaId, shell.areas);
     } catch (error) {
       setMessage(error?.response?.data?.message || 'No se pudo cambiar de área.');
     } finally {
@@ -971,19 +1053,19 @@ function HumanResourcesPortal() {
     try {
       await acceptHrPurchasingRequest(request.id, {
         deliveryNotes: isPlannerConsolidateRequest(request)
-          ? 'Entrega de materiales del planner consolidado registrada por Recursos.'
+          ? 'Despacho de materiales del planner consolidado confirmado por Recursos.'
           : request.requestType === 'purchase'
             ? 'Compra revisada y enviada a aprobación.'
-            : 'Aceptada por Recursos y gestion de compras.',
+            : 'Despacho confirmado por Recursos; stock descontado.',
       });
       setMessage(isPlannerConsolidateRequest(request)
-        ? 'Entrega del planner registrada.'
+        ? 'Despacho confirmado y stock descontado.'
         : request.requestType === 'purchase'
           ? 'Compra enviada a aprobación de rectoría o dirección.'
-          : 'Solicitud aceptada y stock descontado.');
+          : 'Despacho confirmado y stock descontado.');
       await loadData({ areaId: activeAreaId });
     } catch (error) {
-      setMessage(error?.response?.data?.message || 'No se pudo aceptar la solicitud.');
+      setMessage(error?.response?.data?.message || 'No se pudo confirmar el despacho.');
     } finally {
       setSubmitting(false);
     }
@@ -995,12 +1077,23 @@ function HumanResourcesPortal() {
 
   const schoolName = getSchoolDisplayName(user, 'Colegio');
   const portalLabel = isTeacher ? 'Materiales' : 'Recursos humanos';
-  const operationsNavItems = purchaseAreas.length > 0
-    ? purchaseAreas.map((area) => ({
-      key: areaNavKey(area.id),
-      label: area.name,
-    }))
-    : [{ key: 'operations', label: 'Operaciones' }];
+  const operationsNavItems = [
+    ...(purchaseAreas.length > 0
+      ? purchaseAreas.map((area) => ({
+        key: areaNavKey(area.id),
+        label: area.name,
+      }))
+      : [{ key: 'operations', label: 'Operaciones' }]),
+    {
+      key: 'staff_announcements',
+      label: (
+        <>
+          Comunicados internos
+          <StaffAnnouncementsUnreadBadge count={staffAnnouncementsUnreadCount} />
+        </>
+      ),
+    },
+  ];
   const shellActiveKey = isOperationsPortalView(activePortalView) && activeAreaId
     ? areaNavKey(activeAreaId)
     : activePortalView;
@@ -1019,7 +1112,7 @@ function HumanResourcesPortal() {
       )}
       {canAcceptPurchasing && request.status === 'pending_purchasing_review' && (
         <button type="button" onClick={() => onAcceptPurchasing(request)} disabled={submitting}>
-          {request.requestType === 'purchase' ? 'Enviar compra a aprobación' : 'Aceptar y descontar inventario'}
+          {request.requestType === 'purchase' ? 'Enviar compra a aprobación' : 'Confirmar despacho'}
         </button>
       )}
       {canDeliver && request.status === 'approved' && (
@@ -1457,6 +1550,15 @@ function HumanResourcesPortal() {
           />
         ) : null}
 
+        {activePortalView === 'staff_announcements' ? (
+          <StaffAnnouncementsPanel
+            className="hr-portal__panel"
+            description="Envía y recibe mensajes internos del colegio. Selecciona a quién va dirigido cada comunicado."
+            mode="manage"
+            title="Comunicados internos"
+          />
+        ) : null}
+
         {showOperations ? (
           <>
             {!isTeacher && purchaseAreas.length === 0 ? (
@@ -1520,18 +1622,18 @@ function HumanResourcesPortal() {
               </section>
             )}
 
-            {isManager && isAcademiaArea ? (
+            {isManager && showPlannerDispatchPanel ? (
               <section className="hr-portal__panel hr-portal__planners">
                 <div className="hr-portal__panel-heading">
                   <div className="hr-portal__panel-heading-main">
                     <span className="hr-portal__panel-icon is-green" aria-hidden="true"><IconClipboard /></span>
                     <div>
-                      <h2>Planners de coordinación</h2>
+                      <h2>Pendientes de despacho</h2>
                       <p>
-                        Consolidado de materiales que envió coordinación desde los planners docentes.
+                        Materiales consolidados desde Rectoría / coordinación para entregar desde inventario.
                         {pendingPlannerConsolidates.length
-                          ? ` ${pendingPlannerConsolidates.length} pendiente(s) de entrega.`
-                          : ' No hay entregas pendientes.'}
+                          ? ` ${pendingPlannerConsolidates.length} pendiente(s).`
+                          : ' No hay despachos pendientes.'}
                       </p>
                     </div>
                   </div>
@@ -1539,7 +1641,7 @@ function HumanResourcesPortal() {
 
                 {plannerConsolidates.length === 0 ? (
                   <p className="hr-portal__empty">
-                    Cuando coordinación consolide y envíe planners, aparecerán aquí con la tabla de materiales para entregar.
+                    Cuando Rectoría consolide y envíe planners, aparecerán aquí con la tabla de materiales para confirmar el despacho.
                   </p>
                 ) : (
                   <div className="hr-portal__planner-list">
@@ -1551,7 +1653,7 @@ function HumanResourcesPortal() {
                           <div className="hr-portal__planner-card-head">
                             <div>
                               <div className="hr-portal__history-badges">
-                                <span className="hr-portal__kind-badge is-request">Planner</span>
+                                <span className="hr-portal__kind-badge is-request">Consolidado</span>
                                 <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
                               </div>
                               <h3>
@@ -1576,7 +1678,7 @@ function HumanResourcesPortal() {
                                 onClick={() => onAcceptPurchasing(request)}
                               >
                                 <IconTruck />
-                                Registrar entrega
+                                Confirmar despacho
                               </button>
                             ) : null}
                           </div>
@@ -1799,47 +1901,64 @@ function HumanResourcesPortal() {
                   <p className="hr-portal__empty">
                     {isTeacher ? 'No hay solicitudes registradas.' : 'No hay movimientos registrados en esta área.'}
                   </p>
-                ) : historyEntries.map(({ request, kind, kindLabel }) => (
-                  <article key={request.id} className={`hr-portal__history-card status-${request.status}`}>
-                    <div className="hr-portal__history-main">
-                      <div>
-                        <div className="hr-portal__history-badges">
-                          <span className={`hr-portal__kind-badge is-${kind}`}>{kindLabel}</span>
-                          <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
-                        </div>
-                        <h3>
-                          {request.consolidatedFromRequestIds?.length
-                            ? 'Consolidado de planners docentes'
-                            : (requestTypeLabels[request.requestType] || 'Solicitud de materiales')}
-                        </h3>
-                        <p className="hr-portal__request-context">
-                          {[request.area?.name, getServiceAreaLabel(request.serviceArea), getCategoryLabel(request.needCategory), request.requestedForArea, request.requestedForPerson]
-                            .filter(Boolean)
-                            .join(' · ') || 'Sin área detallada'}
-                        </p>
-                        {request.plannerCycle ? <span>{request.plannerCycle.title}</span> : null}
-                        <p>{getRequestItemsLabel(request)}</p>
-                        {Number(request.estimatedTotal) > 0 ? (
-                          <p className="hr-portal__request-estimate">Total estimado: {formatCop(request.estimatedTotal)}</p>
-                        ) : null}
-                      </div>
-                      <div className="hr-portal__request-meta">
-                        <span>{request.requestedBy?.name || 'Usuario'}</span>
-                        <span>{formatDate(request.deliveredAt || request.updatedAt || request.createdAt)}</span>
-                        {request.neededByDate ? <span>Necesario: {formatDate(request.neededByDate)}</span> : null}
-                      </div>
-                    </div>
-                    {request.purpose && <p className="hr-portal__request-purpose">{request.purpose}</p>}
-                    {renderRequestWorkflowActions(request)}
-                    {(request.approvedBy || request.deliveredBy || request.rejectedBy) && (
-                      <div className="hr-portal__trace">
-                        {request.approvedBy && <span>Aprobó: {request.approvedBy.name} · {formatDate(request.approvedAt)}</span>}
-                        {request.deliveredBy && <span>Entregó: {request.deliveredBy.name} · {formatDate(request.deliveredAt)}</span>}
-                        {request.rejectedBy && <span>Rechazó: {request.rejectedBy.name} · {request.rejectionReason}</span>}
-                      </div>
-                    )}
-                  </article>
-                ))}
+                ) : (
+                  <div className="hr-portal__inventory-table-wrap hr-portal__history-table-wrap">
+                    <table className="hr-portal__inventory-table hr-portal__history-table">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Tipo</th>
+                          <th>Estado</th>
+                          <th>Movimiento</th>
+                          <th>Materiales</th>
+                          <th>Contexto</th>
+                          <th>Solicitante</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyEntries.map(({ request, kind, kindLabel, sortAt }) => (
+                          <tr key={request.id} className={`status-${request.status}`}>
+                            <td className="is-muted hr-portal__history-table__date">
+                              {formatDate(sortAt || request.deliveredAt || request.updatedAt || request.createdAt)}
+                            </td>
+                            <td>
+                              <span className={`hr-portal__kind-badge is-${kind === 'request' ? 'request' : kind === 'stock_in' ? 'stock' : 'delivery'}`}>
+                                {kindLabel}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
+                            </td>
+                            <td>
+                              <strong>{getHistoryMovementLabel(request)}</strong>
+                              {request.purpose ? (
+                                <div className="hr-portal__history-table__purpose">{request.purpose}</div>
+                              ) : null}
+                              {Number(request.estimatedTotal) > 0 ? (
+                                <div className="hr-portal__request-estimate">Total: {formatCop(request.estimatedTotal)}</div>
+                              ) : null}
+                            </td>
+                            <td>{renderHistoryMaterials(request)}</td>
+                            <td className="hr-portal__history-table__context">
+                              {[
+                                request.area?.name,
+                                getServiceAreaLabel(request.serviceArea),
+                                getCategoryLabel(request.needCategory),
+                                request.requestedForArea,
+                                request.requestedForPerson,
+                              ].filter(Boolean).join(' · ') || '—'}
+                            </td>
+                            <td className="is-muted">{request.requestedBy?.name || 'Usuario'}</td>
+                            <td className="hr-portal__history-table__actions">
+                              {renderRequestWorkflowActions(request)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </section>
 
