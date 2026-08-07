@@ -58,12 +58,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     // Forward APNs device token to Firebase (required when FirebaseAppDelegateProxyEnabled = NO)
+    // and notify Capacitor so @capacitor-firebase/messaging can finish FCM registration.
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: deviceToken)
+        NSLog("[Comergio][APNs] device token registered bytes=\(deviceToken.count)")
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("[APNs] Failed to register: \(error)")
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+        NSLog("[Comergio][APNs] Failed to register: \(error.localizedDescription)")
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {

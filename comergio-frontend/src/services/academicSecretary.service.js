@@ -82,6 +82,8 @@ export const updateAcademicSecretaryPensionDiscount = (studentId, data) => api.p
 export const createAcademicSecretaryChargeAdjustmentRequest = (data) => api.post('/academic-secretary/billing/charge-adjustment-requests', data);
 export const sendAcademicSecretaryReminder = (data) => api.post('/academic-secretary/billing/reminders', data);
 export const createAcademicSecretaryBillingFollowUp = (data) => api.post('/academic-secretary/billing/follow-ups', data);
+export const getAcademicSecretaryPushAudit = (params = {}) => api.get('/academic-secretary/push-audit', { params });
+export const sendAcademicSecretaryTestPush = (data) => api.post('/academic-secretary/push-audit/test-push', data);
 export const createAcademicManagementLevel = (data) => api.post('/academic-secretary/academic-management/levels', data);
 export const updateAcademicManagementLevelName = (levelKey, data) => api.patch(`/academic-secretary/academic-management/levels/${encodeURIComponent(levelKey)}`, data);
 export const createAcademicManagementSubject = (data) => api.post('/academic-secretary/academic-management/subjects', data);

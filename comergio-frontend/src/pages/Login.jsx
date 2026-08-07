@@ -136,7 +136,8 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
     const setupPushIfPossible = async () => {
       try {
-        const result = await ensurePortalPushNotifications();
+        // Force a new FCM token on login so stale/invalid iOS tokens are replaced.
+        const result = await ensurePortalPushNotifications({ forceRefresh: true });
         if (!result?.enabled) {
           console.warn('[PUSH_SETUP_DISABLED]', result?.reason || 'unknown');
           return;

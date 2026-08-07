@@ -53,6 +53,7 @@ import {
   getAcademicSecretaryBootstrap,
   getAcademicSecretaryBillingPayments,
   getAcademicSecretaryFeeSettings,
+  getAcademicSecretaryPushAudit,
   getAcademicSecretarySchoolRoutes,
   importAcademicSecretaryDatabase,
   requestAcademicSecretaryGradePromotion,
@@ -61,6 +62,7 @@ import {
   updateAcademicSecretaryBillingPayment,
   removeAcademicSecretarySchoolRouteStop,
   sendAcademicSecretaryReminder,
+  sendAcademicSecretaryTestPush,
   updateAcademicSecretaryDatabaseRow,
   updateAcademicSecretaryCommunicationAuthor,
   updateAcademicSecretaryCommunication,
@@ -86,6 +88,7 @@ const SECTION_OPTIONS = [
   { key: 'overview', label: 'Dashboard KPI' },
   { key: 'staff_announcements', label: 'Comunicados internos' },
   { key: 'communications', label: 'Comunicados (feed)' },
+  { key: 'push_audit', label: 'Auditoría push' },
   { key: 'family_emails', label: 'Correos a familias' },
   { key: 'costs', label: 'Costos' },
   { key: 'marketing', label: 'Marketing' },
@@ -95,6 +98,21 @@ const SECTION_OPTIONS = [
   { key: 'database', label: 'Base de datos' },
   { key: 'approvals', label: 'Autorización de comunicados' },
 ];
+
+const PUSH_AUDIT_TYPE_LABELS = {
+  'academic.communication': 'Comunicado feed',
+  'academic.push_test': 'Prueba push',
+  'academic.calendar_assignment': 'Asignación calendario',
+  'academic.course_assigned': 'Curso asignado',
+  'academic.billing.follow_up': 'Seguimiento cartera',
+  'academic.billing.reminder': 'Recordatorio cartera',
+  'academic.billing.charge_created': 'Cargo creado',
+  'academic.billing.payment_registered': 'Pago registrado',
+  'academic.billing.monthly_statement': 'Estado de cuenta',
+  'academic.billing.enrollment': 'Matrícula',
+  'order.created': 'Compra cafetería',
+  'cafeteria.promo': 'Promo cafetería',
+};
 
 const BILLING_SECTION_OPTIONS = [
   { key: 'overview', label: 'Alumnos' },
@@ -1810,6 +1828,24 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const [communicationEngagementModal, setCommunicationEngagementModal] = useState({ open: false, type: 'comments', item: null });
   const [deleteAuthorModal, setDeleteAuthorModal] = useState({ open: false, author: null });
   const [deleteCommentModal, setDeleteCommentModal] = useState({ open: false, communication: null, comment: null });
+  const [pushAuditFilters, setPushAuditFilters] = useState({
+    parentId: '',
+    type: '',
+    status: '',
+    from: '',
+    to: '',
+    q: '',
+  });
+  const [pushAuditRows, setPushAuditRows] = useState([]);
+  const [pushAuditMeta, setPushAuditMeta] = useState({ total: 0, totalPages: 1, limit: 50, summary: { pending: 0, sent: 0, failed: 0, total: 0 } });
+  const [pushAuditPage, setPushAuditPage] = useState(1);
+  const [pushAuditLoading, setPushAuditLoading] = useState(false);
+  const [pushAuditLoaded, setPushAuditLoaded] = useState(false);
+  const [testPushForm, setTestPushForm] = useState({
+    parentId: '',
+    title: 'Prueba push Comergio',
+    body: 'Esta es una notificación de prueba desde Secretaría académica.',
+  });
   const actionInFlightRef = useRef(false);
   const communicationPreviewUrlsRef = useRef(new Set());
 
@@ -2811,6 +2847,89 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       actionInFlightRef.current = false;
       setBusy(false);
     }
+  };
+
+  const loadPushAudit = async (filters = pushAuditFilters, page = pushAuditPage) => {
+    setPushAuditLoading(true);
+    try {
+      const params = {
+        page,
+        limit: pushAuditMeta.limit || 50,
+      };
+      Object.entries(filters || {}).forEach(([key, value]) => {
+        const safeValue = String(value || '').trim();
+        if (safeValue) params[key] = safeValue;
+      });
+
+      const response = await getAcademicSecretaryPushAudit(params);
+      setPushAuditRows(Array.isArray(response?.data?.items) ? response.data.items : []);
+      setPushAuditMeta({
+        total: Number(response?.data?.total || 0),
+        totalPages: Math.max(1, Number(response?.data?.totalPages || 1)),
+        limit: Number(response?.data?.limit || 50),
+        summary: response?.data?.summary || { pending: 0, sent: 0, failed: 0, total: 0 },
+      });
+      setPushAuditLoaded(true);
+    } catch (requestError) {
+      setError(getAcademicSecretaryRequestMessage(requestError, 'No se pudo cargar la auditoría push.'));
+    } finally {
+      setPushAuditLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection !== 'push_audit' || isBillingPortal) {
+      return;
+    }
+    if (pushAuditLoaded && pushAuditRows.length > 0) {
+      return;
+    }
+    loadPushAudit(pushAuditFilters, 1);
+    setPushAuditPage(1);
+  }, [activeSection, isBillingPortal]);
+
+  const onApplyPushAuditFilters = (event) => {
+    event.preventDefault();
+    setPushAuditPage(1);
+    loadPushAudit(pushAuditFilters, 1);
+  };
+
+  const onChangePushAuditPage = (nextPage) => {
+    const safePage = Math.max(1, Math.min(pushAuditMeta.totalPages, nextPage));
+    setPushAuditPage(safePage);
+    loadPushAudit(pushAuditFilters, safePage);
+  };
+
+  const onSendTestPush = (event) => {
+    event.preventDefault();
+    if (!String(testPushForm.parentId || '').trim()) {
+      setError('Selecciona un acudiente para probar el push.');
+      return;
+    }
+
+    runAction(async () => {
+      const response = await sendAcademicSecretaryTestPush({
+        parentId: testPushForm.parentId,
+        title: testPushForm.title,
+        body: testPushForm.body,
+      });
+      await loadPushAudit(pushAuditFilters, 1);
+      setPushAuditPage(1);
+
+      const status = response?.data?.notification?.status;
+      const tokensFound = Number(response?.data?.tokensFound || 0);
+      const serverMessage = String(response?.data?.message || '').trim();
+
+      if (!tokensFound) {
+        throw new Error('El acudiente no tiene dispositivos registrados para recibir push.');
+      }
+      if (status === 'failed') {
+        throw new Error(response?.data?.notification?.lastError || serverMessage || 'El push de prueba falló.');
+      }
+
+      setSuccess(serverMessage || 'Push de prueba enviado.');
+      return response;
+    });
   };
 
   const toggleMarketingApplicantSelection = (applicantId) => {
@@ -4841,6 +4960,231 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   ))}
                 </tbody>
               </table>
+            </div>
+          </article>
+        </section>
+      ) : null}
+
+      {activeSection === 'push_audit' && !isBillingPortal ? (
+        <section className="academic-secretary__grid academic-secretary__grid--content">
+          <article className="academic-secretary__panel">
+            <div className="academic-secretary__panel-head">
+              <div>
+                <h2>Probar push</h2>
+                <p>Envía una notificación de prueba a un acudiente seleccionado y verifica si llega o falla.</p>
+              </div>
+            </div>
+            <form className="academic-secretary__form" onSubmit={onSendTestPush}>
+              <div className="academic-secretary__form-grid">
+                <label>
+                  Acudiente
+                  <select
+                    required
+                    value={testPushForm.parentId}
+                    onChange={(event) => setTestPushForm((previous) => ({ ...previous, parentId: event.target.value }))}
+                  >
+                    <option value="">Selecciona un acudiente</option>
+                    {parentOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Título
+                  <input
+                    maxLength={120}
+                    required
+                    value={testPushForm.title}
+                    onChange={(event) => setTestPushForm((previous) => ({ ...previous, title: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <label>
+                Mensaje
+                <textarea
+                  maxLength={500}
+                  required
+                  rows={3}
+                  value={testPushForm.body}
+                  onChange={(event) => setTestPushForm((previous) => ({ ...previous, body: event.target.value }))}
+                />
+              </label>
+              <button className="btn btn-primary" disabled={busy || pushAuditLoading} type="submit">
+                {busy ? 'Enviando…' : 'Probar push'}
+              </button>
+            </form>
+          </article>
+
+          <article className="academic-secretary__panel">
+            <div className="academic-secretary__panel-head">
+              <div>
+                <h2>Auditoría de notificaciones push</h2>
+                <p>Historial de envíos con estado exitoso, fallido o pendiente.</p>
+              </div>
+            </div>
+
+            <div className="academic-secretary__summary-grid academic-secretary__push-audit-summary">
+              <div className="academic-secretary__mini-card">
+                <span>Total colegio</span>
+                <strong>{Number(pushAuditMeta.summary?.total || 0)}</strong>
+              </div>
+              <div className="academic-secretary__mini-card">
+                <span>Exitosos</span>
+                <strong>{Number(pushAuditMeta.summary?.sent || 0)}</strong>
+              </div>
+              <div className="academic-secretary__mini-card">
+                <span>Fallidos</span>
+                <strong>{Number(pushAuditMeta.summary?.failed || 0)}</strong>
+              </div>
+              <div className="academic-secretary__mini-card">
+                <span>Pendientes</span>
+                <strong>{Number(pushAuditMeta.summary?.pending || 0)}</strong>
+              </div>
+            </div>
+
+            <form className="academic-secretary__form academic-secretary__billing-history-filters" onSubmit={onApplyPushAuditFilters}>
+              <div className="academic-secretary__form-grid">
+                <label>
+                  Acudiente
+                  <select
+                    value={pushAuditFilters.parentId}
+                    onChange={(event) => setPushAuditFilters((previous) => ({ ...previous, parentId: event.target.value }))}
+                  >
+                    <option value="">Todos</option>
+                    {parentOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Tipo
+                  <select
+                    value={pushAuditFilters.type}
+                    onChange={(event) => setPushAuditFilters((previous) => ({ ...previous, type: event.target.value }))}
+                  >
+                    <option value="">Todos</option>
+                    {Object.entries(PUSH_AUDIT_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Estado
+                  <select
+                    value={pushAuditFilters.status}
+                    onChange={(event) => setPushAuditFilters((previous) => ({ ...previous, status: event.target.value }))}
+                  >
+                    <option value="">Todos</option>
+                    <option value="sent">Exitoso</option>
+                    <option value="failed">Fallido</option>
+                    <option value="pending">Pendiente</option>
+                  </select>
+                </label>
+                <label>
+                  Desde
+                  <input
+                    type="date"
+                    value={pushAuditFilters.from}
+                    onChange={(event) => setPushAuditFilters((previous) => ({ ...previous, from: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Hasta
+                  <input
+                    type="date"
+                    value={pushAuditFilters.to}
+                    onChange={(event) => setPushAuditFilters((previous) => ({ ...previous, to: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Buscar
+                  <input
+                    placeholder="Título, mensaje o error"
+                    value={pushAuditFilters.q}
+                    onChange={(event) => setPushAuditFilters((previous) => ({ ...previous, q: event.target.value }))}
+                  />
+                </label>
+              </div>
+              <button className="btn btn-primary" disabled={pushAuditLoading} type="submit">
+                {pushAuditLoading ? 'Cargando…' : 'Filtrar'}
+              </button>
+            </form>
+
+            <p><strong>Registros filtrados:</strong> {pushAuditMeta.total}</p>
+
+            <div className="academic-secretary__table-wrap">
+              <table className="academic-secretary__table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Acudiente</th>
+                    <th>Tipo</th>
+                    <th>Título</th>
+                    <th>Mensaje</th>
+                    <th>Estado</th>
+                    <th>Enviada</th>
+                    <th>Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pushAuditLoading && !pushAuditRows.length ? (
+                    <tr><td colSpan="8">Cargando auditoría…</td></tr>
+                  ) : null}
+                  {!pushAuditLoading && !pushAuditRows.length ? (
+                    <tr><td colSpan="8">No hay notificaciones push para los filtros seleccionados.</td></tr>
+                  ) : null}
+                  {pushAuditRows.map((row) => {
+                    const rowType = String(row?.payload?.type || '').trim();
+                    const status = String(row?.status || '').trim();
+                    const statusLabel = status === 'sent'
+                      ? 'Exitoso'
+                      : status === 'failed'
+                        ? 'Fallido'
+                        : status === 'pending'
+                          ? 'Pendiente'
+                          : status || 'N/A';
+                    return (
+                      <tr key={row._id}>
+                        <td>{formatDateTime(row.createdAt)}</td>
+                        <td>
+                          <strong>{row.parentId?.name || 'N/A'}</strong>
+                          <div>{row.parentId?.email || row.parentId?.username || '-'}</div>
+                        </td>
+                        <td>{PUSH_AUDIT_TYPE_LABELS[rowType] || rowType || 'N/A'}</td>
+                        <td>{row.title || 'N/A'}</td>
+                        <td>{row.body || 'N/A'}</td>
+                        <td>
+                          <span className={`academic-secretary__push-status academic-secretary__push-status--${status || 'unknown'}`}>
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td>{row.sentAt ? formatDateTime(row.sentAt) : '-'}</td>
+                        <td>{row.lastError || '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="academic-secretary__row-actions" style={{ marginTop: '1rem', gap: '0.75rem', alignItems: 'center' }}>
+              <button
+                className="btn"
+                disabled={pushAuditPage <= 1 || pushAuditLoading}
+                onClick={() => onChangePushAuditPage(pushAuditPage - 1)}
+                type="button"
+              >
+                Anterior
+              </button>
+              <span>Página {pushAuditPage} de {pushAuditMeta.totalPages}</span>
+              <button
+                className="btn"
+                disabled={pushAuditPage >= pushAuditMeta.totalPages || pushAuditLoading}
+                onClick={() => onChangePushAuditPage(pushAuditPage + 1)}
+                type="button"
+              >
+                Siguiente
+              </button>
             </div>
           </article>
         </section>

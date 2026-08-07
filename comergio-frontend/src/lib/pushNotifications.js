@@ -239,7 +239,72 @@ function isWebPushSupported() {
   );
 }
 
-async function ensureNativePushNotifications() {
+async function waitForIosApnsRegistration(timeoutMs = 8000) {
+  if (Capacitor.getPlatform() !== 'ios') {
+    return;
+  }
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const timer = setTimeout(finish, timeoutMs);
+
+    PushNotifications.addListener('registration', () => {
+      clearTimeout(timer);
+      finish();
+    }).catch(() => {
+      clearTimeout(timer);
+      finish();
+    });
+
+    PushNotifications.addListener('registrationError', (error) => {
+      console.warn('[APNS_REGISTRATION_ERROR]', error);
+      clearTimeout(timer);
+      finish();
+    }).catch(() => {
+      clearTimeout(timer);
+      finish();
+    });
+
+    PushNotifications.register().catch((error) => {
+      console.warn('[APNS_REGISTER_FAILED]', error?.message || error);
+      clearTimeout(timer);
+      finish();
+    });
+  });
+}
+
+async function obtainNativeFcmToken({ forceRefresh = false } = {}) {
+  if (Capacitor.getPlatform() === 'ios') {
+    // Ensure APNs device token is attached to Firebase before requesting FCM token.
+    // Without this, iOS can return an FCM-looking token that Firebase later rejects as invalid.
+    await waitForIosApnsRegistration();
+  }
+
+  if (forceRefresh) {
+    try {
+      await FirebaseMessaging.deleteToken();
+      localStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+      console.info('[PUSH_TOKEN_DELETED] Solicitando token FCM nuevo');
+    } catch (error) {
+      console.warn('[PUSH_TOKEN_DELETE_FAILED]', error?.message || error);
+    }
+  }
+
+  const tokenResult = await FirebaseMessaging.getToken();
+  const token = String(tokenResult?.token || '').trim();
+  if (!token) {
+    throw new Error('Firebase no devolvió token FCM');
+  }
+  return token;
+}
+
+async function ensureNativePushNotifications({ forceRefresh = false } = {}) {
   if (nativePushSetupPromise) {
     return nativePushSetupPromise;
   }
@@ -271,14 +336,9 @@ async function ensureNativePushNotifications() {
     let fcmResult = { token: '', reason: null };
 
     try {
-      const tokenResult = await FirebaseMessaging.getToken();
-      const token = String(tokenResult?.token || '').trim();
-
-      if (token) {
-        fcmResult = { token, reason: null };
-      } else {
-        fcmResult = { token: '', reason: 'Firebase no devolvió token FCM' };
-      }
+      // On login we force-refresh so stale/invalid iOS tokens are replaced.
+      const token = await obtainNativeFcmToken({ forceRefresh });
+      fcmResult = { token, reason: null };
     } catch (error) {
       fcmResult = {
         token: '',
@@ -302,7 +362,7 @@ async function ensureNativePushNotifications() {
       return { enabled: false, reason: `Error registrando token: ${err.message}` };
     }
 
-    return { enabled: true, tokenSource: 'fcm' };
+    return { enabled: true, tokenSource: forceRefresh ? 'fcm-refreshed' : 'fcm' };
   })();
 
   try {
@@ -370,14 +430,14 @@ async function ensureWebPushNotifications() {
   return { enabled: true };
 }
 
-export async function ensurePortalPushNotifications() {
+export async function ensurePortalPushNotifications(options = {}) {
   if (Capacitor.isNativePlatform()) {
-    return ensureNativePushNotifications();
+    return ensureNativePushNotifications(options);
   }
 
   return ensureWebPushNotifications();
 }
 
-export async function ensureParentPushNotifications() {
-  return ensurePortalPushNotifications();
+export async function ensureParentPushNotifications(options = {}) {
+  return ensurePortalPushNotifications(options);
 }

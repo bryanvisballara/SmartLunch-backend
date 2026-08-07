@@ -32,6 +32,8 @@ const PaymentTransaction = require('../models/paymentTransaction.model');
 const { ensureStudentWallet } = require('../utils/studentWallet');
 const { upsertStudentAccount } = require('../utils/studentAccount');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
+const Notification = require('../models/notification.model');
+const DeviceToken = require('../models/deviceToken.model');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
 const { runWithSchoolContext } = require('../config/db');
@@ -10441,6 +10443,192 @@ router.post('/billing/follow-ups', async (req, res) => {
     });
 
     return res.status(201).json({ followUp: serializeBillingFollowUp(followUp), pushDelivered, pushTokensFound, emailed });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/push-audit', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const {
+      parentId,
+      type,
+      status,
+      from,
+      to,
+      q,
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const limitNumber = Math.min(200, Math.max(1, Number(limit) || 50));
+    const filter = { schoolId };
+
+    if (parentId) {
+      if (!mongoose.Types.ObjectId.isValid(String(parentId))) {
+        return res.status(400).json({ message: 'parentId is invalid' });
+      }
+      filter.parentId = parentId;
+    }
+
+    if (status) {
+      const normalizedStatus = String(status || '').trim().toLowerCase();
+      if (!['pending', 'sent', 'failed'].includes(normalizedStatus)) {
+        return res.status(400).json({ message: 'status is invalid' });
+      }
+      filter.status = normalizedStatus;
+    }
+
+    if (type) {
+      filter['payload.type'] = String(type).trim();
+    }
+
+    const createdAtRange = {};
+    if (from) {
+      const fromDate = new Date(`${from}T00:00:00.000Z`);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ message: 'from date is invalid' });
+      }
+      createdAtRange.$gte = fromDate;
+    }
+    if (to) {
+      const toDate = new Date(`${to}T23:59:59.999Z`);
+      if (Number.isNaN(toDate.getTime())) {
+        return res.status(400).json({ message: 'to date is invalid' });
+      }
+      createdAtRange.$lte = toDate;
+    }
+    if (Object.keys(createdAtRange).length > 0) {
+      filter.createdAt = createdAtRange;
+    }
+
+    const search = String(q || '').trim();
+    if (search) {
+      filter.$and = filter.$and || [];
+      filter.$and.push({
+        $or: [
+          { title: { $regex: search, $options: 'i' } },
+          { body: { $regex: search, $options: 'i' } },
+          { lastError: { $regex: search, $options: 'i' } },
+        ],
+      });
+    }
+
+    const [items, total, statusCounts] = await Promise.all([
+      Notification.find(filter)
+        .populate('studentId', 'name schoolCode grade')
+        .populate('parentId', 'name username email')
+        .sort({ createdAt: -1 })
+        .skip((pageNumber - 1) * limitNumber)
+        .limit(limitNumber)
+        .lean(),
+      Notification.countDocuments(filter),
+      Notification.aggregate([
+        { $match: { schoolId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const summary = { pending: 0, sent: 0, failed: 0, total: 0 };
+    statusCounts.forEach((row) => {
+      const key = String(row._id || '');
+      const count = Number(row.count || 0);
+      if (Object.prototype.hasOwnProperty.call(summary, key)) {
+        summary[key] = count;
+      }
+      summary.total += count;
+    });
+
+    return res.status(200).json({
+      items,
+      page: pageNumber,
+      limit: limitNumber,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limitNumber)),
+      summary,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/push-audit/test-push', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const parentId = String(req.body?.parentId || '').trim();
+    const title = String(req.body?.title || 'Prueba push Comergio').trim().slice(0, 120);
+    const body = String(req.body?.body || 'Esta es una notificación de prueba desde Secretaría académica.').trim().slice(0, 500);
+
+    if (!mongoose.Types.ObjectId.isValid(parentId)) {
+      return res.status(400).json({ message: 'Selecciona un acudiente válido.' });
+    }
+    if (!title || !body) {
+      return res.status(400).json({ message: 'El título y el mensaje son obligatorios.' });
+    }
+
+    const parent = await User.findOne({
+      _id: parentId,
+      schoolId,
+      role: 'parent',
+      deletedAt: null,
+    }).select('_id name email username').lean();
+
+    if (!parent) {
+      return res.status(404).json({ message: 'Acudiente no encontrado en este colegio.' });
+    }
+
+    const tokens = await DeviceToken.find({
+      schoolId,
+      userId: parent._id,
+      status: 'active',
+    }).select('platform token lastSeenAt').lean();
+
+    const pushResult = await queueNotificationsForParents({
+      schoolId,
+      parentIds: [parent._id],
+      title,
+      body,
+      payload: {
+        type: 'academic.push_test',
+        url: buildParentPushUrl('academic.communication'),
+      },
+    });
+
+    const latest = await Notification.findOne({
+      schoolId,
+      parentId: parent._id,
+      'payload.type': 'academic.push_test',
+    })
+      .sort({ createdAt: -1 })
+      .populate('parentId', 'name username email')
+      .lean();
+
+    return res.status(200).json({
+      message: latest?.status === 'sent'
+        ? `Push de prueba enviado a ${parent.name || parent.email || 'acudiente'}.`
+        : latest?.status === 'failed'
+          ? `Push de prueba falló: ${latest?.lastError || 'sin detalle'}`
+          : `Push de prueba encolado para ${parent.name || parent.email || 'acudiente'}.`,
+      parent: {
+        id: String(parent._id),
+        name: parent.name || '',
+        email: parent.email || '',
+        username: parent.username || '',
+      },
+      tokens: tokens.map((token) => ({
+        platform: token.platform,
+        lastSeenAt: token.lastSeenAt || null,
+        prefix: String(token.token || '').slice(0, 18),
+      })),
+      tokensFound: Number(pushResult?.tokensFound || tokens.length || 0),
+      delivery: pushResult?.directDelivery || {
+        delivered: Number(pushResult?.directDelivered || 0),
+        failed: Number(pushResult?.directFailed || 0),
+      },
+      notification: latest,
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

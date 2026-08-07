@@ -77,6 +77,23 @@ router.post('/device-tokens', async (req, res) => {
 
     await ensureDeviceTokenIndexes();
 
+    // A physical device token must belong to one user. When someone logs in on the
+    // same phone, revoke that token from any other accounts in this school.
+    await DeviceToken.updateMany(
+      {
+        schoolId,
+        token,
+        status: 'active',
+        userId: { $ne: userId },
+      },
+      {
+        $set: {
+          status: 'revoked',
+          lastSeenAt: new Date(),
+        },
+      }
+    );
+
     const deviceToken = await DeviceToken.findOneAndUpdate(
       { schoolId, userId, token },
       {
