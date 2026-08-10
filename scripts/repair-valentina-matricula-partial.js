@@ -1,6 +1,6 @@
 /**
- * Reopen Valentina Ruiz Medina matricula charge with remaining $1.3M balance.
- * Total: $3.300.000 | Already paid (Wompi): $2.000.000 | Outstanding: $1.300.000
+ * Reopen Valentina Ruiz Medina matricula charge with remaining $1.1M balance.
+ * Total: $3.100.000 | Already paid (Wompi): $2.000.000 | Outstanding: $1.100.000
  */
 require('dotenv').config({ override: true });
 
@@ -12,7 +12,7 @@ const EnrollmentMatriculaProcess = require('../src/models/enrollmentMatriculaPro
 const SCHOOL_ID = 'Millennium School';
 const CHARGE_ID = '6a63d6d074e7ba6846756ca6';
 const PROCESS_ID = '6a63d6d274e7ba6846756cb6';
-const TOTAL_AMOUNT = 3300000;
+const TOTAL_AMOUNT = 3100000;
 const EXPECTED_PAID = 2000000;
 
 (async () => {
@@ -40,11 +40,11 @@ const EXPECTED_PAID = 2000000;
     charge.amountLocked = true;
     charge.amountAdjustmentNote = [
       'El excedente lo cancelan por transferencia.',
-      'Reapertura parcial: total acordado $3.300.000; $2.000.000 ya pagados (Wompi); saldo $1.300.000 pendiente por tarjeta en app.',
+      'Reapertura parcial: total acordado $3.100.000; $2.000.000 ya pagados (Wompi); saldo $1.100.000 pendiente por tarjeta en app.',
     ].join(' ');
     charge.description = [
       'Cargo de matrícula anual generado para el proceso de matrícula.',
-      'Valor ajustado de 4294662 a 3300000 (parcial: $2.000.000 pagados + $1.300.000 pendientes).',
+      'Valor ajustado a 3100000 (parcial: $2.000.000 pagados + $1.100.000 pendientes).',
     ].join(' ');
     charge.status = 'pending';
     charge.paidAt = null;
@@ -83,7 +83,7 @@ const EXPECTED_PAID = 2000000;
       paidTotal,
       outstanding,
       processStatus: process.status,
-      processPaymentStatus: process.payment?.status,
+      paymentStatus: process.payment?.status,
     });
   });
   process.exit(0);

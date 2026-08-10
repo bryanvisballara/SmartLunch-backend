@@ -12,8 +12,6 @@ const {
 } = require('./enrollmentMatricula.service');
 const {
   executeBillingPaymentDeletion,
-  isCarteraBillingPayment,
-  isGatewayBillingPaymentMethod,
   labelPaymentMethod,
 } = require('./academicBillingPaymentDeletion.service');
 
@@ -246,17 +244,6 @@ async function createBillingPaymentDeletionRequest({
     throw createHttpError('El pago no existe.', 404);
   }
 
-  if (isGatewayBillingPaymentMethod(payment.method)) {
-    throw createHttpError(
-      'Los pagos aprobados por pasarela o portal del acudiente no pueden anularse desde cartera.',
-      409
-    );
-  }
-
-  if (!isCarteraBillingPayment(payment)) {
-    throw createHttpError('Solo se pueden solicitar anulaciones de pagos registrados manualmente en cartera.', 409);
-  }
-
   const existingPending = await EnrollmentMatriculaPurgeRequest.findOne({
     schoolId,
     actionType: 'delete_billing_payment',
@@ -366,7 +353,7 @@ async function approveMatriculaPurgeRequest({
     result = await executeBillingPaymentDeletion({
       schoolId,
       paymentId: request.paymentId,
-      allowGateway: false,
+      allowGateway: true,
     });
   } else if (request.actionType === 'clear_consent') {
     result = await clearConsentForRectoria({

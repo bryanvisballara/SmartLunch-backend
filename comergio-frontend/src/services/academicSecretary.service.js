@@ -75,6 +75,8 @@ export const addAcademicSecretarySchoolRouteStop = (driverUserId, data) => api.p
 export const updateAcademicSecretarySchoolRouteStop = (driverUserId, stopId, data) => api.patch(`/campus/school-route/stops/${stopId}`, { ...data, driverUserId });
 export const removeAcademicSecretarySchoolRouteStop = (driverUserId, stopId) => api.delete(`/campus/school-route/stops/${stopId}`, { data: { driverUserId } });
 export const createAcademicSecretaryCharge = (data) => api.post('/academic-secretary/billing/charges', data);
+export const updateAcademicSecretaryChargeAmount = (chargeId, data) =>
+  api.patch(`/academic-secretary/billing/charges/${chargeId}`, data);
 export const registerAcademicSecretaryChargePayment = (chargeId, data) => api.post(`/academic-secretary/billing/charges/${chargeId}/pay`, data);
 export const updateAcademicSecretaryBillingPayment = (paymentId, data) =>
   api.patch(`/academic-secretary/billing/payments/${paymentId}`, data);

@@ -1,5 +1,7 @@
 const AcademicCharge = require('../models/academicCharge.model');
 const AcademicChargeAdjustmentRequest = require('../models/academicChargeAdjustmentRequest.model');
+const AcademicChargePayment = require('../models/academicChargePayment.model');
+const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
 const Student = require('../models/student.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const User = require('../models/user.model');
@@ -326,7 +328,120 @@ async function rejectChargeAdjustmentRequest({
   return serializeAdjustmentRequest(request);
 }
 
+async function applyAcademicChargeAmountUpdate({
+  schoolId,
+  chargeId,
+  amount,
+  notes = '',
+  userId = null,
+  userName = '',
+}) {
+  const chargeObjectId = toObjectId(chargeId);
+  if (!chargeObjectId) {
+    throw createHttpError('Cobro inválido.');
+  }
+
+  const charge = await AcademicCharge.findOne({
+    _id: chargeObjectId,
+    schoolId,
+    status: { $ne: 'cancelled' },
+  });
+  if (!charge) {
+    throw createHttpError('El cobro no existe.', 404);
+  }
+
+  const nextAmount = roundMoney(amount);
+  if (nextAmount <= 0) {
+    throw createHttpError('El valor del cobro debe ser mayor a cero.');
+  }
+
+  const payments = await AcademicChargePayment.find({
+    schoolId,
+    chargeId: charge._id,
+  }).select('amount paidAt method').lean();
+  const paidAmount = roundMoney(
+    payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  );
+
+  if (nextAmount < paidAmount) {
+    throw createHttpError(
+      `El valor no puede ser menor a lo ya pagado (${paidAmount.toLocaleString('es-CO')}).`,
+      409
+    );
+  }
+
+  const previousAmount = roundMoney(charge.amount);
+  if (nextAmount === previousAmount) {
+    throw createHttpError('El valor propuesto es igual al valor actual.');
+  }
+
+  if (!charge.originalAmount || Number(charge.originalAmount) <= 0) {
+    charge.originalAmount = previousAmount;
+  }
+  charge.amount = nextAmount;
+  charge.amountLocked = true;
+  charge.amountAdjustmentNote = normalizeText(notes)
+    || `Valor ajustado desde cartera por ${normalizeText(userName) || 'Cartera'}.`;
+  charge.amountAdjustedAt = new Date();
+  charge.amountAdjustedByUserId = userId || null;
+
+  const outstanding = Math.max(0, nextAmount - paidAmount);
+  if (outstanding <= 0) {
+    charge.status = 'paid';
+    charge.paidAt = payments[0]?.paidAt || charge.paidAt || new Date();
+    charge.paymentMethod = payments[0]?.method || charge.paymentMethod || '';
+  } else {
+    charge.status = new Date(charge.dueDate) < new Date() ? 'overdue' : 'pending';
+    charge.paidAt = null;
+    if (!paidAmount) {
+      charge.paymentMethod = '';
+    }
+  }
+
+  charge.description = [
+    normalizeText(charge.description),
+    `Valor ajustado de ${previousAmount} a ${nextAmount} desde cartera.`,
+  ].filter(Boolean).join(' ');
+  await charge.save();
+
+  if (String(charge.category || '') === 'annual_tuition') {
+    const process = await EnrollmentMatriculaProcess.findOne({ schoolId, chargeId: charge._id });
+    if (process) {
+      if (process.contractParamsSnapshot?.pricing) {
+        process.contractParamsSnapshot.pricing.proratedAnnualTuitionAmount = nextAmount;
+        process.contractParamsSnapshot.paidAmount = paidAmount;
+        process.markModified('contractParamsSnapshot');
+      }
+      if (outstanding > 0) {
+        process.status = 'payment_pending';
+        if (process.payment && typeof process.payment === 'object') {
+          process.payment = {
+            ...process.payment,
+            amount: paidAmount > 0 ? paidAmount : process.payment.amount,
+            status: paidAmount > 0 ? 'PARTIAL' : (process.payment.status || 'PENDING'),
+          };
+        }
+      } else if (paidAmount > 0 && process.payment && typeof process.payment === 'object') {
+        process.payment = {
+          ...process.payment,
+          amount: paidAmount,
+          status: 'PAID',
+        };
+      }
+      await process.save();
+    }
+  }
+
+  return {
+    charge,
+    previousAmount,
+    paidAmount,
+    outstandingAmount: outstanding,
+  };
+}
+
 module.exports = {
+  applyAcademicChargeAmountUpdate,
   createChargeAdjustmentRequest,
   listPendingChargeAdjustmentRequests,
   listResolvedChargeAdjustmentRequests,

@@ -121,7 +121,8 @@ router.use((req, res, next) => {
     || (req.path === '/billing/payments' && method === 'GET')
     || (req.path === '/billing/charges' && method === 'POST')
     || (/^\/billing\/charges\/[^/]+\/pay$/.test(req.path) && method === 'POST')
-    || (/^\/billing\/payments\/[^/]+$/.test(req.path) && method === 'DELETE')
+    || (/^\/billing\/charges\/[^/]+$/.test(req.path) && method === 'PATCH')
+    || (/^\/billing\/payments\/[^/]+$/.test(req.path) && ['PATCH', 'DELETE'].includes(method))
     || (/^\/billing\/payments\/[^/]+\/deletion-request$/.test(req.path) && method === 'POST')
     || (/^\/billing\/students\/[^/]+\/pension-discount$/.test(req.path) && method === 'PATCH')
     || (req.path === '/billing/reminders' && method === 'POST')
@@ -4656,7 +4657,9 @@ function buildAcademicStudentPaymentPlan({
       concept: charge?.concept || 'Matrícula anual',
       dueDate,
       status: isPaid ? 'paid' : (isOverdue ? 'overdue' : 'upcoming'),
-      statusLabel: isPaid ? 'Pagado' : (isOverdue ? 'En mora' : 'Pendiente'),
+      statusLabel: isPaid
+        ? 'Pagado'
+        : (paidAmount > 0 ? 'Pago parcial' : (isOverdue ? 'En mora' : 'Pendiente')),
       baseAmount: pricing.baseAmount,
       amount: isPaid ? effectiveAmount : outstandingAmount,
       chargeAmount: effectiveAmount,
@@ -4678,10 +4681,10 @@ function buildAcademicStudentPaymentPlan({
         return charge?.description || buildAcademicPaymentPlanBenefitDescription(pricing);
       })(),
       paymentMethod,
-      paymentMethodLabel: isPaid ? labelAcademicPaymentMethod(paymentMethod) : '',
-      paidAt: isPaid ? paidReferenceDate : null,
-      paymentNotes: isPaid ? latestPayment?.notes || '' : '',
-      paymentDetails: isPaid ? buildPaymentDetails(chargePayments) : [],
+      paymentMethodLabel: paidAmount > 0 ? labelAcademicPaymentMethod(paymentMethod) : '',
+      paidAt: isPaid ? paidReferenceDate : (paidAmount > 0 ? paidReferenceDate : null),
+      paymentNotes: paidAmount > 0 ? latestPayment?.notes || '' : '',
+      paymentDetails: buildPaymentDetails(chargePayments),
       existingChargeId: charge?._id || '',
       enrollmentContractMode: enrollmentProcess?.contractMode || '',
       enrollmentStatus: enrollmentProcess?.status || '',
@@ -4831,7 +4834,9 @@ function buildAcademicStudentPaymentPlan({
         concept: existingCharge?.concept || `Pensión ${formatAcademicMonthLabel(monthDate)}`,
         dueDate,
         status: isPaid ? 'paid' : (isOverdue ? 'overdue' : (isUpcoming ? 'upcoming' : 'pending')),
-        statusLabel: isPaid ? 'Pagado' : (isOverdue ? 'En mora' : 'Pendiente'),
+        statusLabel: isPaid
+          ? 'Pagado'
+          : (paidAmount > 0 ? 'Pago parcial' : (isOverdue ? 'En mora' : 'Pendiente')),
         baseAmount: monthlyBaseAmount,
         amount: isPaid ? effectiveAmount : outstandingAmount,
         chargeAmount: effectiveAmount,
@@ -4841,10 +4846,10 @@ function buildAcademicStudentPaymentPlan({
         benefitWindowLabel: pricing.benefitWindowLabel || '',
         benefitDescription: buildAcademicPaymentPlanBenefitDescription(pricing),
         paymentMethod,
-        paymentMethodLabel: isPaid ? labelAcademicPaymentMethod(paymentMethod) : '',
-        paidAt: isPaid ? paidReferenceDate : null,
-        paymentNotes: isPaid ? latestPayment?.notes || '' : '',
-        paymentDetails: isPaid ? buildPaymentDetails(chargePayments) : [],
+        paymentMethodLabel: paidAmount > 0 ? labelAcademicPaymentMethod(paymentMethod) : '',
+        paidAt: isPaid ? paidReferenceDate : (paidAmount > 0 ? paidReferenceDate : null),
+        paymentNotes: paidAmount > 0 ? latestPayment?.notes || '' : '',
+        paymentDetails: buildPaymentDetails(chargePayments),
         existingChargeId: existingCharge?._id || '',
       };
     })),
@@ -9925,6 +9930,42 @@ router.post('/billing/charges', async (req, res) => {
     return res.status(201).json({ createdCharges: createdCharges.length, charges: createdCharges.map((charge) => ({ _id: charge._id, id: charge._id })) });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/billing/charges/:chargeId', async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const chargeId = toObjectId(req.params.chargeId);
+    if (!chargeId) {
+      return res.status(400).json({ message: 'chargeId no es válido.' });
+    }
+
+    const { applyAcademicChargeAmountUpdate } = require('../services/academicChargeAdjustment.service');
+    const result = await applyAcademicChargeAmountUpdate({
+      schoolId,
+      chargeId,
+      amount: req.body?.amount,
+      notes: req.body?.notes || '',
+      userId,
+      userName: name,
+    });
+
+    const billing = await buildBillingSummary(schoolId);
+    return res.status(200).json({
+      message: 'Valor del cobro actualizado.',
+      charge: {
+        _id: result.charge._id,
+        amount: result.charge.amount,
+        status: result.charge.status,
+      },
+      previousAmount: result.previousAmount,
+      paidAmount: result.paidAmount,
+      outstandingAmount: result.outstandingAmount,
+      billing,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({ message: error.message });
   }
 });
 
