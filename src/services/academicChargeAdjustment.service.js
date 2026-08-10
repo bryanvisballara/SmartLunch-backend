@@ -332,6 +332,7 @@ async function applyAcademicChargeAmountUpdate({
   schoolId,
   chargeId,
   amount,
+  paidAmount: paidAmountInput = null,
   notes = '',
   userId = null,
   userName = '',
@@ -350,30 +351,104 @@ async function applyAcademicChargeAmountUpdate({
     throw createHttpError('El cobro no existe.', 404);
   }
 
-  const nextAmount = roundMoney(amount);
+  const payments = await AcademicChargePayment.find({
+    schoolId,
+    chargeId: charge._id,
+  }).sort({ paidAt: 1, createdAt: 1 });
+
+  const currentPaidAmount = roundMoney(
+    payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  );
+
+  let nextPaidAmount = currentPaidAmount;
+  if (paidAmountInput !== null && paidAmountInput !== undefined && paidAmountInput !== '') {
+    nextPaidAmount = roundMoney(paidAmountInput);
+    if (nextPaidAmount < 0) {
+      throw createHttpError('El valor pagado no puede ser negativo.');
+    }
+  }
+
+  const nextAmount = amount === null || amount === undefined || amount === ''
+    ? roundMoney(charge.amount)
+    : roundMoney(amount);
+
   if (nextAmount <= 0) {
     throw createHttpError('El valor del cobro debe ser mayor a cero.');
   }
 
-  const payments = await AcademicChargePayment.find({
-    schoolId,
-    chargeId: charge._id,
-  }).select('amount paidAt method').lean();
-  const paidAmount = roundMoney(
-    payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
-  );
-
-  if (nextAmount < paidAmount) {
+  if (nextAmount < nextPaidAmount) {
     throw createHttpError(
-      `El valor no puede ser menor a lo ya pagado (${paidAmount.toLocaleString('es-CO')}).`,
+      `El valor total no puede ser menor a lo ya pagado (${nextPaidAmount.toLocaleString('es-CO')}).`,
       409
     );
   }
 
   const previousAmount = roundMoney(charge.amount);
-  if (nextAmount === previousAmount) {
-    throw createHttpError('El valor propuesto es igual al valor actual.');
+  if (nextAmount === previousAmount && nextPaidAmount === currentPaidAmount) {
+    throw createHttpError('No hay cambios en el valor total ni en lo pagado.');
   }
+
+  if (nextPaidAmount !== currentPaidAmount) {
+    if (payments.length === 0) {
+      if (nextPaidAmount > 0) {
+        const parentId = charge.parentId
+          || (await resolvePrimaryParentForStudent(schoolId, charge.studentId))?._id;
+        if (!parentId) {
+          throw createHttpError('No se encontró acudiente para registrar el abono.');
+        }
+        await AcademicChargePayment.create({
+          schoolId,
+          chargeId: charge._id,
+          studentId: charge.studentId,
+          parentId,
+          recordedByUserId: userId || null,
+          recordedByRole: 'billing',
+          amount: nextPaidAmount,
+          method: normalizeText(charge.paymentMethod) || 'cash',
+          notes: normalizeText(notes) || 'Abono ajustado desde cartera',
+          paidAt: new Date(),
+        });
+      }
+    } else if (payments.length === 1) {
+      if (nextPaidAmount <= 0) {
+        await AcademicChargePayment.deleteOne({ _id: payments[0]._id, schoolId });
+      } else {
+        payments[0].amount = nextPaidAmount;
+        if (normalizeText(notes)) {
+          payments[0].notes = normalizeText(notes);
+        }
+        await payments[0].save();
+      }
+    } else {
+      // Multiple payments: scale/replace first payment so totals match requested paid amount.
+      const othersTotal = roundMoney(
+        payments.slice(1).reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+      );
+      const firstAmount = Math.max(0, nextPaidAmount - othersTotal);
+      if (firstAmount <= 0 && nextPaidAmount < othersTotal) {
+        throw createHttpError(
+          'Hay varios abonos; reduce o anula abonos individuales antes de bajar el total pagado.',
+          409
+        );
+      }
+      payments[0].amount = firstAmount > 0 ? firstAmount : Number(payments[0].amount || 0);
+      if (normalizeText(notes)) {
+        payments[0].notes = normalizeText(notes);
+      }
+      await payments[0].save();
+      if (firstAmount <= 0) {
+        await AcademicChargePayment.deleteOne({ _id: payments[0]._id, schoolId });
+      }
+    }
+  }
+
+  const refreshedPayments = await AcademicChargePayment.find({
+    schoolId,
+    chargeId: charge._id,
+  }).select('amount paidAt method').sort({ paidAt: 1, createdAt: 1 }).lean();
+  const paidAmount = roundMoney(
+    refreshedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  );
 
   if (!charge.originalAmount || Number(charge.originalAmount) <= 0) {
     charge.originalAmount = previousAmount;
@@ -388,19 +463,21 @@ async function applyAcademicChargeAmountUpdate({
   const outstanding = Math.max(0, nextAmount - paidAmount);
   if (outstanding <= 0) {
     charge.status = 'paid';
-    charge.paidAt = payments[0]?.paidAt || charge.paidAt || new Date();
-    charge.paymentMethod = payments[0]?.method || charge.paymentMethod || '';
+    charge.paidAt = refreshedPayments[0]?.paidAt || charge.paidAt || new Date();
+    charge.paymentMethod = refreshedPayments[0]?.method || charge.paymentMethod || '';
   } else {
     charge.status = new Date(charge.dueDate) < new Date() ? 'overdue' : 'pending';
     charge.paidAt = null;
     if (!paidAmount) {
       charge.paymentMethod = '';
+    } else {
+      charge.paymentMethod = refreshedPayments[0]?.method || charge.paymentMethod || '';
     }
   }
 
   charge.description = [
     normalizeText(charge.description),
-    `Valor ajustado de ${previousAmount} a ${nextAmount} desde cartera.`,
+    `Valor ajustado a total ${nextAmount} (pagado ${paidAmount}, pendiente ${outstanding}) desde cartera.`,
   ].filter(Boolean).join(' ');
   await charge.save();
 
@@ -414,18 +491,22 @@ async function applyAcademicChargeAmountUpdate({
       }
       if (outstanding > 0) {
         process.status = 'payment_pending';
-        if (process.payment && typeof process.payment === 'object') {
-          process.payment = {
-            ...process.payment,
-            amount: paidAmount > 0 ? paidAmount : process.payment.amount,
-            status: paidAmount > 0 ? 'PARTIAL' : (process.payment.status || 'PENDING'),
-          };
-        }
-      } else if (paidAmount > 0 && process.payment && typeof process.payment === 'object') {
         process.payment = {
-          ...process.payment,
+          ...(process.payment && typeof process.payment === 'object' ? process.payment : {}),
+          amount: paidAmount,
+          status: paidAmount > 0 ? 'PARTIAL' : 'PENDING',
+          method: refreshedPayments[0]?.method || process.payment?.method || charge.paymentMethod || '',
+          chargePaymentId: refreshedPayments[0]?._id || process.payment?.chargePaymentId || null,
+          paidAt: refreshedPayments[0]?.paidAt || process.payment?.paidAt || null,
+        };
+      } else if (paidAmount > 0) {
+        process.payment = {
+          ...(process.payment && typeof process.payment === 'object' ? process.payment : {}),
           amount: paidAmount,
           status: 'PAID',
+          method: refreshedPayments[0]?.method || process.payment?.method || charge.paymentMethod || '',
+          chargePaymentId: refreshedPayments[0]?._id || process.payment?.chargePaymentId || null,
+          paidAt: refreshedPayments[0]?.paidAt || process.payment?.paidAt || null,
         };
       }
       await process.save();

@@ -1183,11 +1183,19 @@ function createBillingPaymentDraft() {
 
 function createChargeAdjustmentDraft(row = null) {
   const currentAmount = Math.round(Number(row?.chargeAmount || row?.amount || 0));
+  const paidAmount = Math.round(Number(row?.paidAmount || 0));
+  const outstandingAmount = Math.max(0, Math.round(Number(
+    row?.outstandingAmount != null
+      ? row.outstandingAmount
+      : (currentAmount - paidAmount)
+  )));
   return {
-    mode: 'absolute',
+    mode: 'balance',
     percentValue: '',
     fixedValue: '',
     absoluteValue: currentAmount > 0 ? String(currentAmount) : '',
+    paidValue: String(paidAmount),
+    outstandingValue: String(outstandingAmount),
     notes: '',
   };
 }
@@ -1205,7 +1213,12 @@ function createManualChargeDraft() {
 
 function resolveChargeAdjustmentPreview(currentAmount, draft = {}) {
   const current = Math.max(0, Math.round(Number(currentAmount || 0)));
-  const mode = String(draft.mode || 'absolute');
+  const mode = String(draft.mode || 'balance');
+  if (mode === 'balance') {
+    const paid = Math.max(0, Math.round(Number(draft.paidValue || 0)));
+    const outstanding = Math.max(0, Math.round(Number(draft.outstandingValue || 0)));
+    return paid + outstanding;
+  }
   if (mode === 'percent') {
     const percent = Math.max(0, Math.min(100, Number(draft.percentValue || 0)));
     return Math.max(0, Math.round(current * (1 - (percent / 100))));
@@ -3597,15 +3610,17 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     || chargeAdjustmentModal.row?.amount
     || 0
   ));
-  const chargeAdjustmentPaidAmount = Math.round(Number(chargeAdjustmentModal.row?.paidAmount || 0));
+  const chargeAdjustmentCurrentPaidAmount = Math.round(Number(chargeAdjustmentModal.row?.paidAmount || 0));
+  const chargeAdjustmentPaidAmount = chargeAdjustmentDraft.mode === 'balance'
+    ? Math.max(0, Math.round(Number(chargeAdjustmentDraft.paidValue || 0)))
+    : chargeAdjustmentCurrentPaidAmount;
   const chargeAdjustmentProposedAmount = resolveChargeAdjustmentPreview(
     chargeAdjustmentCurrentAmount,
     chargeAdjustmentDraft,
   );
-  const chargeAdjustmentProposedOutstanding = Math.max(
-    0,
-    chargeAdjustmentProposedAmount - chargeAdjustmentPaidAmount,
-  );
+  const chargeAdjustmentProposedOutstanding = chargeAdjustmentDraft.mode === 'balance'
+    ? Math.max(0, Math.round(Number(chargeAdjustmentDraft.outstandingValue || 0)))
+    : Math.max(0, chargeAdjustmentProposedAmount - chargeAdjustmentPaidAmount);
 
   const onSubmitChargeAdjustmentRequest = async (event) => {
     event.preventDefault();
@@ -3618,15 +3633,18 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       return;
     }
     if (chargeAdjustmentProposedAmount <= 0) {
-      setError('El valor propuesto debe ser mayor a cero.');
+      setError('El valor total debe ser mayor a cero.');
       return;
     }
-    if (chargeAdjustmentProposedAmount === chargeAdjustmentCurrentAmount) {
-      setError('El valor propuesto es igual al valor actual.');
+    if (
+      chargeAdjustmentProposedAmount === chargeAdjustmentCurrentAmount
+      && chargeAdjustmentPaidAmount === chargeAdjustmentCurrentPaidAmount
+    ) {
+      setError('No hay cambios en lo pagado ni en el saldo pendiente.');
       return;
     }
     if (chargeAdjustmentProposedAmount < chargeAdjustmentPaidAmount) {
-      setError(`El valor no puede ser menor a lo ya pagado (${formatCurrency(chargeAdjustmentPaidAmount)}).`);
+      setError(`El valor total no puede ser menor a lo ya pagado (${formatCurrency(chargeAdjustmentPaidAmount)}).`);
       return;
     }
 
@@ -3634,6 +3652,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       const row = chargeAdjustmentModal.row;
       const response = await updateAcademicSecretaryChargeAmount(row.existingChargeId, {
         amount: chargeAdjustmentProposedAmount,
+        paidAmount: chargeAdjustmentPaidAmount,
         notes: chargeAdjustmentDraft.notes,
       });
       if (response?.data?.billing) {
@@ -3645,7 +3664,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         await loadBootstrap();
       }
       closeChargeAdjustmentModal();
-    }, 'Valor del cobro actualizado. El acudiente verá el saldo pendiente en la app.', activeSection);
+    }, 'Valores del cobro actualizados. El acudiente verá el saldo pendiente en la app.', activeSection);
   };
 
   const openManualChargeModal = () => {
@@ -6572,7 +6591,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
             <form className="academic-secretary__billing-payment-form" onSubmit={onSubmitChargeAdjustmentRequest}>
               <div className="academic-secretary__payment-detail-summary">
                 <div><span>Valor total actual</span><strong>{formatCurrency(chargeAdjustmentCurrentAmount)}</strong></div>
-                <div><span>Ya pagado</span><strong>{formatCurrency(chargeAdjustmentPaidAmount)}</strong></div>
+                <div><span>Ya pagado (actual)</span><strong>{formatCurrency(chargeAdjustmentCurrentPaidAmount)}</strong></div>
                 <div><span>Valor total nuevo</span><strong>{formatCurrency(chargeAdjustmentProposedAmount)}</strong></div>
                 <div><span>Pendiente para el padre</span><strong>{formatCurrency(chargeAdjustmentProposedOutstanding)}</strong></div>
               </div>
@@ -6583,11 +6602,36 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                   onChange={(event) => setChargeAdjustmentDraft((previous) => ({ ...previous, mode: event.target.value }))}
                   value={chargeAdjustmentDraft.mode}
                 >
+                  <option value="balance">Editar pagado y pendiente</option>
                   <option value="absolute">Colocar valor total nuevo</option>
                   <option value="percent">Descuento en %</option>
                   <option value="fixed">Descuento fijo</option>
                 </select>
               </label>
+              {chargeAdjustmentDraft.mode === 'balance' ? (
+                <div className="academic-secretary__form-row">
+                  <label>
+                    Ya pagado
+                    <input
+                      disabled={busy}
+                      min="0"
+                      onChange={(event) => setChargeAdjustmentDraft((previous) => ({ ...previous, paidValue: event.target.value }))}
+                      type="number"
+                      value={chargeAdjustmentDraft.paidValue}
+                    />
+                  </label>
+                  <label>
+                    Pendiente por pagar
+                    <input
+                      disabled={busy}
+                      min="0"
+                      onChange={(event) => setChargeAdjustmentDraft((previous) => ({ ...previous, outstandingValue: event.target.value }))}
+                      type="number"
+                      value={chargeAdjustmentDraft.outstandingValue}
+                    />
+                  </label>
+                </div>
+              ) : null}
               {chargeAdjustmentDraft.mode === 'percent' ? (
                 <label>
                   Descuento (%)
@@ -6638,7 +6682,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
               <div className="academic-secretary__actions">
                 <button className="btn btn-outline" disabled={busy} onClick={closeChargeAdjustmentModal} type="button">Cancelar</button>
                 <button className="btn btn-primary" disabled={busy || chargeAdjustmentProposedAmount <= 0 || chargeAdjustmentProposedAmount < chargeAdjustmentPaidAmount} type="submit">
-                  {busy ? 'Guardando...' : 'Guardar valor'}
+                  {busy ? 'Guardando...' : 'Guardar valores'}
                 </button>
               </div>
             </form>

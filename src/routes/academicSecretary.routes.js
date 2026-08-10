@@ -4457,9 +4457,17 @@ function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
 }
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date(), feeConfiguration = null) {
-  const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  const baseAmount = Math.max(0, Number(charge?.originalAmount || charge?.rawAmount || charge?.chargeAmount || charge?.amount || 0));
   if (charge?.amountLocked) {
-    const effectiveAmount = Math.max(0, Number(charge?.amount || baseAmount || 0));
+    // Billing summary may overwrite `amount` with outstanding; prefer explicit totals.
+    const effectiveAmount = Math.max(0, Number(
+      charge?.rawAmount
+      ?? charge?.chargeAmount
+      ?? charge?.totalAmount
+      ?? charge?.amount
+      ?? baseAmount
+      ?? 0
+    ));
     return {
       baseAmount,
       effectiveAmount,
@@ -4634,9 +4642,16 @@ function buildAcademicStudentPaymentPlan({
       chargeIsPaid ? paidReferenceDate : now,
       feeConfiguration
     );
+    const lockedOrStoredTotal = Number(
+      charge?.rawAmount
+      || charge?.chargeAmount
+      || charge?.amount
+      || pricing.effectiveAmount
+      || 0
+    );
     const effectiveAmount = chargeIsPaid
-      ? Number(rawPaidAmount || charge?.chargeAmount || charge?.amount || pricing.effectiveAmount || 0)
-      : Number(pricing.effectiveAmount || charge?.chargeAmount || charge?.amount || 0);
+      ? Number(rawPaidAmount || lockedOrStoredTotal || 0)
+      : Number(pricing.effectiveAmount || lockedOrStoredTotal || 0);
     const paidAmount = chargeIsPaid
       ? Number(rawPaidAmount || effectiveAmount || 0)
       : Math.min(effectiveAmount, rawPaidAmount || 0);
@@ -5648,6 +5663,7 @@ async function buildBillingSummary(schoolId) {
     const displayParentId = String(primaryParent?._id || charge.parentId?._id || charge.parentId || '').trim();
     const entry = {
       ...charge,
+      rawAmount: Number(charge.amount || 0),
       status: normalizedStatus,
       overdueMonths,
       baseAmount: pricing.baseAmount,
@@ -9946,6 +9962,9 @@ router.patch('/billing/charges/:chargeId', async (req, res) => {
       schoolId,
       chargeId,
       amount: req.body?.amount,
+      paidAmount: Object.prototype.hasOwnProperty.call(req.body || {}, 'paidAmount')
+        ? req.body.paidAmount
+        : null,
       notes: req.body?.notes || '',
       userId,
       userName: name,
