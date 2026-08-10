@@ -3509,7 +3509,18 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
         method: billingPaymentDraft.method,
         paidAt: billingPaymentDraft.paidAt,
         notes: billingPaymentDraft.notes,
-        settleAsPaid: Boolean(modalRow),
+        settleAsPaid: (() => {
+          const paymentAmount = Math.round(Number(billingPaymentDraft.amount || 0));
+          const outstanding = Math.round(Number(
+            modalRow?.outstandingAmount
+            || selectedCharge?.outstandingAmount
+            || selectedCharge?.amount
+            || modalRow?.amount
+            || modalRow?.chargeAmount
+            || 0
+          ));
+          return outstanding > 0 && paymentAmount >= outstanding;
+        })(),
         enrollmentContractMode: showEnrollmentContractModeField ? billingPaymentDraft.enrollmentContractMode : undefined,
       });
       const paidEnrollmentRow = modalRow?.category === 'annual_tuition';
@@ -4966,7 +4977,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       ) : null}
 
       {activeSection === 'push_audit' && !isBillingPortal ? (
-        <section className="academic-secretary__grid academic-secretary__grid--content">
+        <section className="academic-secretary__grid academic-secretary__grid--full">
           <article className="academic-secretary__panel">
             <div className="academic-secretary__panel-head">
               <div>

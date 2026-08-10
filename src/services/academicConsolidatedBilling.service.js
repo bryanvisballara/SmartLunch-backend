@@ -839,10 +839,14 @@ async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, refere
     const pricing = resolveMonthlyTuitionAmount(billingProfile, dueDate);
     pricingAmount = Math.max(0, Number(pricing.amount || charge?.amount || 0));
   } else if (String(charge?.category || '') === 'annual_tuition') {
-    const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
-    if (billingProfile && feeConfiguration) {
-      const pricing = resolveParentAnnualTuitionPricing(billingProfile, feeConfiguration, referenceDate);
-      pricingAmount = Math.max(0, Number(pricing.effectiveAmount || charge?.amount || 0));
+    if (charge?.amountLocked) {
+      pricingAmount = Math.max(0, Number(charge?.amount || 0));
+    } else {
+      const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+      if (billingProfile && feeConfiguration) {
+        const pricing = resolveParentAnnualTuitionPricing(billingProfile, feeConfiguration, referenceDate);
+        pricingAmount = Math.max(0, Number(pricing.effectiveAmount || charge?.amount || 0));
+      }
     }
   }
 
@@ -920,8 +924,22 @@ async function completeAcademicChargeGatewayPayment(paymentRecord, providerPaylo
     { session },
   );
 
-  charge.status = 'paid';
-  charge.paidAt = chargePayment.paidAt;
+  const { outstandingAmount: remainingAfterPayment } = await resolveOutstandingAcademicChargeAmount({
+    schoolId: charge.schoolId,
+    charge,
+    referenceDate: new Date(),
+  });
+
+  if (remainingAfterPayment <= 0) {
+    charge.status = 'paid';
+    charge.paidAt = chargePayment.paidAt;
+  } else if (charge.dueDate && new Date(charge.dueDate) < new Date()) {
+    charge.status = 'overdue';
+    charge.paidAt = null;
+  } else {
+    charge.status = 'pending';
+    charge.paidAt = null;
+  }
   charge.paymentMethod = chargePayment.method;
   await charge.save({ session });
 

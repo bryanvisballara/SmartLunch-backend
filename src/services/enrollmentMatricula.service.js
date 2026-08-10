@@ -500,13 +500,20 @@ const MATRICULA_SIGNATURE_REQUIRED_STATUSES = [
   'office_payment_confirmed',
 ];
 
+function isMatriculaPaymentFullyPaid(process = {}) {
+  const status = normalizeText(process?.payment?.status).toUpperCase();
+  if (!status || status.includes('PARTIAL')) {
+    return false;
+  }
+  return status === 'PAID' || status.includes('PAID');
+}
+
 function isProcessReadyForSigning(process = {}) {
   const status = normalizeText(process?.status);
-  if (MATRICULA_SIGNATURE_REQUIRED_STATUSES.includes(status)) {
+  if (MATRICULA_SIGNATURE_REQUIRED_STATUSES.includes(status) && isMatriculaPaymentFullyPaid(process)) {
     return true;
   }
-  return normalizeText(process?.payment?.status).includes('PAID')
-    || Boolean(process?.payment?.chargePaymentId);
+  return isMatriculaPaymentFullyPaid(process);
 }
 
 /** Orden: cada acudiente completa contrato (+ identidad) y luego pagaré (solo firma), antes del siguiente. */
@@ -610,7 +617,7 @@ function slimDocumentForParent(document = {}, { requireIdentity = false } = {}) 
 
 function serializeProcess(process, charge = null, { forParent = false } = {}) {
   const doc = process?.toObject ? process.toObject() : process;
-  const paymentConfirmed = normalizeText(doc?.payment?.status).includes('PAID') || Boolean(doc?.payment?.chargePaymentId);
+  const paymentConfirmed = isMatriculaPaymentFullyPaid(doc);
   const hideEnrollmentAmount = processLooksLikeMillennium(doc) && !paymentConfirmed;
   const requiredSigners = resolveRequiredSigners(doc);
   const contractProgress = getDocumentSigningProgress(doc, 'contract');
@@ -816,8 +823,25 @@ async function finalizeMatriculaPaidProcess({
     paidAt,
   });
 
-  charge.status = 'paid';
-  charge.paidAt = chargePayment.paidAt;
+  const previousPayments = await AcademicChargePayment.find({
+    schoolId: charge.schoolId,
+    chargeId: charge._id,
+  }).select('amount').lean();
+  const totalPaid = previousPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const chargeAmount = Math.max(0, Number(charge.amount || 0));
+  const remainingAmount = Math.max(0, Math.round(chargeAmount - totalPaid));
+  const isFullyPaid = remainingAmount <= 0;
+
+  if (isFullyPaid) {
+    charge.status = 'paid';
+    charge.paidAt = chargePayment.paidAt;
+  } else if (charge.dueDate && new Date(charge.dueDate) < new Date()) {
+    charge.status = 'overdue';
+    charge.paidAt = null;
+  } else {
+    charge.status = 'pending';
+    charge.paidAt = null;
+  }
   charge.paymentMethod = chargePayment.method;
   await charge.save();
 
@@ -828,18 +852,21 @@ async function finalizeMatriculaPaidProcess({
     billingProfile,
   });
 
-  process.status = 'contract_pending';
+  process.status = isFullyPaid ? 'contract_pending' : 'payment_pending';
   process.payment = {
     transactionId: normalizeText(paymentMeta.transactionId),
     reference: normalizeText(paymentMeta.reference),
-    amount: normalizedAmount,
+    amount: totalPaid,
     paidAt: chargePayment.paidAt,
-    status: 'PAID',
+    status: isFullyPaid ? 'PAID' : 'PARTIAL',
     method: chargePayment.method,
     chargePaymentId: chargePayment._id,
     paymentTransactionId: paymentMeta.paymentTransactionId || null,
   };
-  process.contractParamsSnapshot = contractParamsSnapshot;
+  process.contractParamsSnapshot = {
+    ...contractParamsSnapshot,
+    paidAmount: totalPaid,
+  };
   await process.save();
 
   return process;
@@ -852,7 +879,9 @@ async function completeMatriculaDirectPayment({ processId, schoolId, parentId })
     throw new Error('Proceso de matricula no encontrado.');
   }
 
-  if (process.payment?.chargePaymentId || process.payment?.status === 'PAID') {
+  const paymentStatus = normalizeText(process.payment?.status).toUpperCase();
+  const hasBlockingFullPayment = paymentStatus === 'PAID' || paymentStatus.endsWith('_PAID');
+  if (hasBlockingFullPayment && process.payment?.chargePaymentId) {
     return process;
   }
 
@@ -877,15 +906,23 @@ async function completeMatriculaDirectPayment({ processId, schoolId, parentId })
     ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
     : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
 
-  const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
-  const { effectiveAmount } = resolveChargeAmount(charge, billingProfile, feeConfiguration, new Date());
+  const { resolveOutstandingAcademicChargeAmount } = require('./academicConsolidatedBilling.service');
+  const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
+    schoolId,
+    charge,
+    referenceDate: new Date(),
+  });
+  if (outstandingAmount <= 0) {
+    return process;
+  }
+
   const reference = `MAT-${Date.now()}-${Math.floor(Math.random() * 1e6).toString().padStart(6, '0')}`;
 
   return finalizeMatriculaPaidProcess({
     process,
     charge,
     billingProfile,
-    paidAmount: effectiveAmount,
+    paidAmount: outstandingAmount,
     paymentMeta: {
       reference,
       transactionId: reference,
@@ -926,7 +963,16 @@ async function completeMatriculaGatewayPayment(paymentRecord, providerPayload, s
 
   const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId: charge.schoolId }).session(session).lean();
   const { effectiveAmount } = resolveChargeAmount(charge, billingProfile, feeConfiguration, new Date());
-  const paidAmount = Math.max(0, Number(paymentRecord.amount || effectiveAmount || 0));
+  const { resolveOutstandingAcademicChargeAmount } = require('./academicConsolidatedBilling.service');
+  const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
+    schoolId: charge.schoolId,
+    charge,
+    referenceDate: new Date(),
+  });
+  const paidAmount = Math.max(
+    0,
+    Math.round(Number(paymentRecord.amount || outstandingAmount || effectiveAmount || 0)),
+  );
 
   paymentRecord.providerTransactionId = providerTransactionId || paymentRecord.providerTransactionId;
   paymentRecord.status = 'approved';
@@ -1008,7 +1054,7 @@ async function signDocument({
   if (!['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(process.status)) {
     throw new Error('El pago debe estar confirmado antes de firmar.');
   }
-  if (!normalizeText(process.payment?.status).includes('PAID') && !process.payment?.chargePaymentId) {
+  if (!isMatriculaPaymentFullyPaid(process)) {
     throw new Error('Debes completar el pago antes de firmar.');
   }
 
@@ -1326,7 +1372,7 @@ function sanitizeZipEntryName(value, fallback = 'documento.pdf') {
 }
 
 function hasEnrollmentPaymentConfirmed(process = {}) {
-  return normalizeText(process.payment?.status).includes('PAID') || Boolean(process.payment?.chargePaymentId);
+  return isMatriculaPaymentFullyPaid(process);
 }
 
 function hasEnrollmentSignedDocuments(process = {}) {
@@ -1870,7 +1916,7 @@ async function getMatriculaRequirementForParent({ schoolId, parentId }) {
     chargeId: unpaidCharge._id,
   });
 
-  const paymentConfirmed = normalizeText(process?.payment?.status).includes('PAID') || Boolean(process?.payment?.chargePaymentId);
+  const paymentConfirmed = isMatriculaPaymentFullyPaid(process);
   const requiresSignature = MATRICULA_SIGNATURE_REQUIRED_STATUSES.includes(process.status);
 
   if (requiresSignature) {

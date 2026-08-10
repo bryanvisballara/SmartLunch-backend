@@ -2679,12 +2679,9 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
     }
 
     const AcademicCharge = require('../models/academicCharge.model');
-    const StudentBillingProfile = require('../models/studentBillingProfile.model');
-    const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
     const {
       findProcessAccessibleByParent,
       markPaymentPending,
-      resolveChargeAmount,
     } = require('../services/enrollmentMatricula.service');
 
     const parentUserId = role === 'admin' ? req.body?.parentUserId || userId : userId;
@@ -2698,14 +2695,6 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
       return res.status(404).json({ message: 'Proceso de matricula no encontrado.' });
     }
 
-    if (process.payment?.chargePaymentId || String(process.payment?.status || '').includes('PAID')) {
-      return res.status(409).json({ message: 'Este proceso de matricula ya tiene el pago confirmado.' });
-    }
-
-    if (!['consent_accepted', 'payment_pending'].includes(process.status)) {
-      return res.status(409).json({ message: 'Debes aceptar el consentimiento antes de pagar.' });
-    }
-
     const charge = await AcademicCharge.findOne({
       _id: process.chargeId,
       schoolId,
@@ -2717,17 +2706,33 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
       return res.status(404).json({ message: 'Cobro de matricula no encontrado o ya pagado.' });
     }
 
+    const { resolveOutstandingAcademicChargeAmount } = require('../services/academicConsolidatedBilling.service');
+    const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
+      schoolId,
+      charge,
+      referenceDate: new Date(),
+    });
+
+    if (outstandingAmount <= 0) {
+      return res.status(409).json({ message: 'Este proceso de matricula ya tiene el pago confirmado.' });
+    }
+
+    const paymentStatus = String(process.payment?.status || '').toUpperCase();
+    const isFullyPaidOnProcess = paymentStatus === 'PAID' || paymentStatus.endsWith('_PAID');
+    if (isFullyPaidOnProcess && outstandingAmount <= 0) {
+      return res.status(409).json({ message: 'Este proceso de matricula ya tiene el pago confirmado.' });
+    }
+
+    if (!['consent_accepted', 'payment_pending'].includes(process.status)) {
+      return res.status(409).json({ message: 'Debes aceptar el consentimiento antes de pagar.' });
+    }
+
     const allowed = await canAccessStudent(req.user, charge.studentId);
     if (!allowed) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const billingProfile = charge.billingProfileId
-      ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
-      : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
-    const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
-    const { effectiveAmount } = resolveChargeAmount(charge, billingProfile, feeConfiguration, new Date());
-    const amountInCents = Math.max(1, Math.round(Number(effectiveAmount || 0) * 100));
+    const amountInCents = Math.max(1, Math.round(Number(outstandingAmount || 0) * 100));
     if (!Number.isFinite(amountInCents) || amountInCents < 100) {
       return res.status(400).json({ message: 'Monto de matricula invalido.' });
     }
@@ -2766,7 +2771,7 @@ router.post('/wompi/matricula-checkout', async (req, res) => {
       schoolId,
       studentId: charge.studentId,
       parentId: userId,
-      amount: Math.round(Number(effectiveAmount || 0)),
+      amount: Math.round(Number(outstandingAmount || 0)),
       method: 'wompi',
       documentType: normalizeWompiLegalIdType(parentUser.documentType),
       documentNumber: String(parentUser.documentNumber || '').trim(),
