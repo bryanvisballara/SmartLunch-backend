@@ -505,14 +505,10 @@ function isMatriculaPaymentFullyPaid(process = {}) {
   if (!status || status.includes('PARTIAL')) {
     return false;
   }
-  return status === 'PAID' || status.includes('PAID');
+  return status === 'PAID' || /(^|_)PAID$/.test(status);
 }
 
 function isProcessReadyForSigning(process = {}) {
-  const status = normalizeText(process?.status);
-  if (MATRICULA_SIGNATURE_REQUIRED_STATUSES.includes(status) && isMatriculaPaymentFullyPaid(process)) {
-    return true;
-  }
   return isMatriculaPaymentFullyPaid(process);
 }
 
@@ -618,7 +614,15 @@ function slimDocumentForParent(document = {}, { requireIdentity = false } = {}) 
 function serializeProcess(process, charge = null, { forParent = false } = {}) {
   const doc = process?.toObject ? process.toObject() : process;
   const paymentConfirmed = isMatriculaPaymentFullyPaid(doc);
-  const hideEnrollmentAmount = processLooksLikeMillennium(doc) && !paymentConfirmed;
+  const paidAmountSoFar = Math.max(0, Math.round(Number(doc?.payment?.amount || 0)));
+  const chargeAmount = Math.max(0, Math.round(Number(charge?.amount || 0)));
+  const outstandingAmount = charge
+    ? Math.max(0, chargeAmount - paidAmountSoFar)
+    : 0;
+  // Millennium hides sticker price until first gateway attempt; always show remaining after a partial.
+  const hideEnrollmentAmount = processLooksLikeMillennium(doc)
+    && !paymentConfirmed
+    && paidAmountSoFar <= 0;
   const requiredSigners = resolveRequiredSigners(doc);
   const contractProgress = getDocumentSigningProgress(doc, 'contract');
   const pagareProgress = getDocumentSigningProgress(doc, 'pagare');
@@ -633,7 +637,10 @@ function serializeProcess(process, charge = null, { forParent = false } = {}) {
     charge: charge ? {
       _id: charge._id,
       concept: charge.concept,
-      amount: hideEnrollmentAmount ? null : charge.amount,
+      amount: hideEnrollmentAmount ? null : (outstandingAmount > 0 && paidAmountSoFar > 0 ? outstandingAmount : charge.amount),
+      totalAmount: hideEnrollmentAmount ? null : charge.amount,
+      paidAmount: hideEnrollmentAmount ? null : paidAmountSoFar,
+      outstandingAmount: hideEnrollmentAmount ? null : outstandingAmount,
       originalAmount: hideEnrollmentAmount ? null : charge.originalAmount,
       dueDate: charge.dueDate,
       category: charge.category,

@@ -97,13 +97,26 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
-function isPaymentConfirmedForSigning(process) {
-  const status = String(process?.status || '');
-  if (['payment_confirmed', 'contract_pending', 'pagare_pending', 'office_payment_confirmed'].includes(status)) {
-    return true;
+function isMatriculaPaymentFullyPaid(process) {
+  const paymentStatus = String(process?.payment?.status || '').toUpperCase();
+  if (!paymentStatus || paymentStatus.includes('PARTIAL')) {
+    return false;
   }
-  return String(process?.payment?.status || '').toUpperCase().includes('PAID')
-    || Boolean(process?.payment?.chargePaymentId);
+  return paymentStatus === 'PAID' || /(^|_)PAID$/.test(paymentStatus);
+}
+
+function isMatriculaPaymentPartial(process) {
+  const paymentStatus = String(process?.payment?.status || '').toUpperCase();
+  return paymentStatus.includes('PARTIAL')
+    || (
+      Boolean(process?.payment?.chargePaymentId)
+      && Number(process?.payment?.amount || 0) > 0
+      && !isMatriculaPaymentFullyPaid(process)
+    );
+}
+
+function isPaymentConfirmedForSigning(process) {
+  return isMatriculaPaymentFullyPaid(process);
 }
 
 function resolveActiveStep(process) {
@@ -114,7 +127,7 @@ function resolveActiveStep(process) {
 
   const status = String(process?.status || '');
   if (['intro_pending', 'consent_pending'].includes(status)) return 'consent';
-  if (['consent_accepted', 'payment_pending'].includes(status)) return 'payment';
+  if (['consent_accepted', 'payment_pending'].includes(status) || isMatriculaPaymentPartial(process)) return 'payment';
   if (['payment_confirmed', 'contract_pending', 'office_payment_confirmed'].includes(status)) return 'contract';
   if (status === 'pagare_pending') return 'pagare';
   if (status === 'completed') return 'done';
@@ -1645,17 +1658,25 @@ function MatriculaEnrollmentFlow({
                   {hideEnrollmentPaymentAmount ? (
                     <p className="matricula-flow-note">El valor se mostrará en la pasarela de pago.</p>
                   ) : (
-                    <strong>{formatCurrency(charge?.amount)}</strong>
+                    <strong>{formatCurrency(charge?.outstandingAmount ?? charge?.amount)}</strong>
                   )}
                   <p>{charge?.concept || 'Matrícula anual'}</p>
+                  {isMatriculaPaymentPartial(process) && Number(charge?.paidAmount || process?.payment?.amount || 0) > 0 ? (
+                    <p className="matricula-flow-note matricula-flow-note--muted">
+                      Abono registrado: {formatCurrency(charge?.paidAmount || process?.payment?.amount || 0)}
+                      {Number(charge?.totalAmount || 0) > 0 ? ` · Total: ${formatCurrency(charge.totalAmount)}` : ''}
+                    </p>
+                  ) : null}
                 </div>
                 <p className="matricula-flow-note">
                   Estado:
                   {' '}
                   <strong>{
-                    process.payment?.status === 'PAID' || process.payment?.chargePaymentId
+                    isMatriculaPaymentFullyPaid(process)
                       ? 'Pago confirmado'
-                      : 'Pendiente de pago'
+                      : isMatriculaPaymentPartial(process)
+                        ? 'Pago parcial · saldo pendiente'
+                        : 'Pendiente de pago'
                   }</strong>
                 </p>
                 {process.consent?.acceptedAt ? (
@@ -1663,14 +1684,16 @@ function MatriculaEnrollmentFlow({
                     Consentimiento registrado el {formatDateTime(process.consent.acceptedAt)}
                   </p>
                 ) : null}
-                {process.payment?.status === 'PAID' || process.payment?.chargePaymentId ? (
+                {isMatriculaPaymentFullyPaid(process) ? (
                   <button className="matricula-flow-primary" onClick={refreshProcess} type="button">
                     Continuar a firma de contrato
                   </button>
                 ) : (
                   <>
                     <button className="matricula-flow-primary" disabled={loading || wompiCheckoutLoading || switchingStudent} onClick={onStartPayment} type="button">
-                      {loading || wompiCheckoutLoading || switchingStudent ? 'Abriendo Wompi...' : 'Pagar matrícula con Wompi'}
+                      {loading || wompiCheckoutLoading || switchingStudent
+                        ? 'Abriendo Wompi...'
+                        : (isMatriculaPaymentPartial(process) ? 'Pagar saldo pendiente con Wompi' : 'Pagar matrícula con Wompi')}
                     </button>
                     {wompiCheckoutConfig?.reference ? (
                       <button className="matricula-flow-secondary" disabled={loading} onClick={refreshProcess} type="button">
