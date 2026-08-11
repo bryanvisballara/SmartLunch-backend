@@ -1098,6 +1098,8 @@ function AdminDashboard() {
     name: '',
     username: '',
     phone: '',
+    documentType: 'CC',
+    documentNumber: '',
     role: 'parent',
     assignedStoreId: '',
     coordinationScope: '',
@@ -3115,6 +3117,8 @@ function AdminDashboard() {
           name: user.name || '',
           username: user.username || '',
           phone: user.phone || '',
+          documentType: user.documentType || 'CC',
+          documentNumber: user.documentNumber || '',
           role: user.role || 'parent',
           assignedStoreId: String(user.assignedStoreId || ''),
           coordinationScope: user.coordinationScope || '',
@@ -4211,7 +4215,7 @@ function AdminDashboard() {
       return {
         title: 'Usuarios',
         fileBaseName: 'usuarios',
-        headers: ['Nombre', 'Usuario', 'Teléfono', 'Rol', 'Tienda asignada', 'Estado'],
+        headers: ['Nombre', 'Usuario', 'Teléfono', 'Tipo doc.', 'Documento', 'Rol', 'Tienda asignada', 'Estado'],
         rows: filteredEditEntityItems.map((item) => {
           const draft = getEditTableDraft(item);
           const assignedStoreName = stores.find((store) => String(store._id) === String(draft.assignedStoreId))?.name || 'N/A';
@@ -4219,6 +4223,8 @@ function AdminDashboard() {
             draft.name || 'N/A',
             draft.username || 'N/A',
             draft.phone || 'N/A',
+            draft.documentType || 'N/A',
+            draft.documentNumber || 'N/A',
             roleLabel(draft.role),
             draft.role === 'vendor' ? assignedStoreName : 'No aplica',
             statusLabel(draft.status),
@@ -4515,6 +4521,8 @@ function AdminDashboard() {
         name: item.name || '',
         username: item.username || '',
         phone: item.phone || '',
+        documentType: item.documentType || 'CC',
+        documentNumber: item.documentNumber || '',
         role: item.role || 'parent',
         assignedStoreId: String(item.assignedStoreId || ''),
         coordinationScope: item.coordinationScope || '',
@@ -4723,12 +4731,23 @@ function AdminDashboard() {
         return;
       }
 
+      if (targetRole === 'parent' && String(draft.documentNumber || '').replace(/\D/g, '').trim().length < 5) {
+        setError('Para acudientes debes indicar tipo y número de documento (mínimo 5 dígitos).');
+        return;
+      }
+
+      const normalizedUsername = String(draft.username || '').toLowerCase().trim();
       runAction(
         () =>
           updateAdminUser(itemId, {
             name: draft.name,
             username: draft.username,
             phone: draft.phone,
+            email: targetRole === 'parent' && normalizedUsername.includes('@')
+              ? normalizedUsername
+              : undefined,
+            documentType: targetRole === 'parent' ? (draft.documentType || 'CC') : undefined,
+            documentNumber: targetRole === 'parent' ? draft.documentNumber : undefined,
             role: targetRole,
             assignedStoreId: targetRole === 'vendor' ? draft.assignedStoreId || undefined : null,
             coordinationScope: targetRole === 'coordination' ? draft.coordinationScope : undefined,
@@ -4904,6 +4923,8 @@ function AdminDashboard() {
       name: '',
       username: '',
       phone: '',
+      documentType: 'CC',
+      documentNumber: '',
       role: 'parent',
       assignedStoreId: '',
       coordinationScope: '',
@@ -5005,12 +5026,23 @@ function AdminDashboard() {
         return;
       }
 
+      if (targetRole === 'parent' && String(editUserForm.documentNumber || '').replace(/\D/g, '').trim().length < 5) {
+        setError('Para acudientes debes indicar tipo y número de documento (mínimo 5 dígitos).');
+        return;
+      }
+
+      const normalizedUsername = String(editUserForm.username || '').toLowerCase().trim();
       runAction(
         () =>
           updateAdminUser(editItemId, {
             name: editUserForm.name,
             username: editUserForm.username,
             phone: editUserForm.phone,
+            email: targetRole === 'parent' && normalizedUsername.includes('@')
+              ? normalizedUsername
+              : undefined,
+            documentType: targetRole === 'parent' ? (editUserForm.documentType || 'CC') : undefined,
+            documentNumber: targetRole === 'parent' ? editUserForm.documentNumber : undefined,
             role: targetRole,
             assignedStoreId: targetRole === 'vendor'
               ? editUserForm.assignedStoreId || undefined
@@ -7598,6 +7630,7 @@ function AdminDashboard() {
           {activeModule === 'modify' && editEntity === 'parent' ? (
             <p className="helper" style={{ marginTop: '-0.25rem' }}>
               Plantilla requerida para acudientes: <strong>Nombre del acudiente</strong>, <strong>Nombre de usuario</strong>, <strong>Telefono</strong>.
+              En esta tabla también debes completar <strong>Tipo de documento</strong> y <strong>Documento</strong> al guardar.
             </p>
           ) : null}
 
@@ -7641,6 +7674,8 @@ function AdminDashboard() {
                     <th>Nombre</th>
                     <th>Usuario</th>
                     <th>Teléfono</th>
+                    <th>Tipo doc.</th>
+                    <th>Documento</th>
                     <th>Rol</th>
                     <th>Tienda asignada</th>
                     <th>Perfil académico</th>
@@ -7852,6 +7887,34 @@ function AdminDashboard() {
                           </td>
                           <td>
                             <input value={draft.phone} onChange={(event) => onEditTableDraftChange(item, 'phone', event.target.value)} />
+                          </td>
+                          <td>
+                            {(editEntity === 'parent' || draft.role === 'parent') ? (
+                              <select
+                                value={draft.documentType || 'CC'}
+                                onChange={(event) => onEditTableDraftChange(item, 'documentType', event.target.value)}
+                              >
+                                <option value="CC">CC</option>
+                                <option value="TI">TI</option>
+                                <option value="CE">CE</option>
+                                <option value="PP">Pasaporte</option>
+                                <option value="NIT">NIT</option>
+                              </select>
+                            ) : (
+                              <input value={draft.documentType || '—'} readOnly />
+                            )}
+                          </td>
+                          <td>
+                            {(editEntity === 'parent' || draft.role === 'parent') ? (
+                              <input
+                                inputMode="numeric"
+                                placeholder="Número"
+                                value={draft.documentNumber || ''}
+                                onChange={(event) => onEditTableDraftChange(item, 'documentNumber', event.target.value)}
+                              />
+                            ) : (
+                              <input value={draft.documentNumber || '—'} readOnly />
+                            )}
                           </td>
                           <td>
                             <input

@@ -1404,6 +1404,9 @@ router.patch('/users/:id', async (req, res) => {
         return res.status(409).json({ message: 'Username already registered' });
       }
       user.username = normalizedUsername;
+      if (!user.email && isValidEmail(normalizedUsername)) {
+        user.email = normalizedUsername;
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'phone')) {
@@ -1415,7 +1418,11 @@ router.patch('/users/:id', async (req, res) => {
       if (normalizedEmail && !isValidEmail(normalizedEmail)) {
         return res.status(400).json({ message: 'Invalid email' });
       }
-      user.email = normalizedEmail;
+      if (normalizedEmail) {
+        user.email = normalizedEmail;
+      } else if (isValidEmail(String(user.username || ''))) {
+        user.email = String(user.username).toLowerCase().trim();
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'documentType')) {
