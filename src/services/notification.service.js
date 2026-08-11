@@ -708,30 +708,77 @@ async function queueCafeteriaPromoNotifications({
       status: 'active',
     });
 
-    const retryJobs = insertedNotifications.map((notification) => ({
-      notificationId: String(notification._id),
-      schoolId,
-      parentId: String(notification.parentId),
-    }));
+    // Always deliver in-process first. Relying only on BullMQ leaves promos stuck
+    // in `pending` when the worker is down or Redis evicts jobs (allkeys-lru).
+    const directDelivery = { delivered: 0, failed: 0 };
+    const retryJobs = [];
 
-    let queueResult = { queued: false, reason: 'not_attempted', count: 0 };
-    try {
-      queueResult = await withTimeout(
-        enqueueNotificationJobs(retryJobs),
-        process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
-        'Notification queue timeout'
-      );
-    } catch (queueError) {
-      queueResult = {
-        queued: false,
-        reason: queueError.message || 'enqueue_failed',
-        count: 0,
-      };
+    for (const notification of insertedNotifications) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const delivery = await sendPushToParent({
+          schoolId,
+          parentId: notification.parentId,
+          title: notification.title,
+          body: notification.body,
+          payload: notification.payload,
+        });
+
+        if (delivery.delivered) {
+          directDelivery.delivered += 1;
+          console.info(`[PUSH_SENT] notificationId=${notification._id} parentId=${notification.parentId} type=cafeteria.promo`);
+          // eslint-disable-next-line no-await-in-loop
+          await Notification.updateOne(
+            { _id: notification._id },
+            { status: 'sent', sentAt: new Date(), lastError: null }
+          );
+          continue;
+        }
+
+        directDelivery.failed += 1;
+        const reason = delivery.reason || 'Push delivery failed';
+        console.warn(`[PUSH_FAILED] notificationId=${notification._id} parentId=${notification.parentId} reason=${reason}`);
+        // eslint-disable-next-line no-await-in-loop
+        await Notification.updateOne(
+          { _id: notification._id },
+          { status: 'failed', lastError: reason }
+        );
+        retryJobs.push({
+          notificationId: String(notification._id),
+          schoolId,
+          parentId: String(notification.parentId),
+        });
+      } catch (directError) {
+        directDelivery.failed += 1;
+        const reason = directError.message || 'Direct push delivery failed';
+        // eslint-disable-next-line no-await-in-loop
+        await Notification.updateOne(
+          { _id: notification._id },
+          { status: 'failed', lastError: reason }
+        );
+        retryJobs.push({
+          notificationId: String(notification._id),
+          schoolId,
+          parentId: String(notification.parentId),
+        });
+      }
     }
 
-    let directDelivery = { delivered: 0, failed: 0 };
-    if (!queueResult.queued) {
-      directDelivery = await deliverPendingNotificationsDirectly(insertedNotifications);
+    let queueResult = { queued: true, reason: 'all_delivered_direct', count: 0 };
+    if (retryJobs.length) {
+      try {
+        queueResult = await withTimeout(
+          enqueueNotificationJobs(retryJobs),
+          process.env.NOTIFICATION_QUEUE_TIMEOUT_MS || 2500,
+          'Notification queue timeout'
+        );
+      } catch (queueError) {
+        queueResult = {
+          queued: false,
+          reason: queueError.message || 'enqueue_failed',
+          count: 0,
+        };
+      }
     }
 
     return {
@@ -739,6 +786,7 @@ async function queueCafeteriaPromoNotifications({
       parentsTargeted: parentIds.length,
       tokensFound,
       queued: Boolean(queueResult.queued),
+      queuedCount: Number(queueResult.count || 0),
       queueReason: queueResult.reason || null,
       delivered: directDelivery.delivered,
       failed: directDelivery.failed,
