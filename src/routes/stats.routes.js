@@ -109,6 +109,57 @@ function parseMonthKey(value) {
   };
 }
 
+function parseDayKey(value) {
+  const normalized = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return null;
+  }
+
+  const [yearText, monthText, dayText] = normalized.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (
+    !Number.isInteger(year)
+    || !Number.isInteger(month)
+    || !Number.isInteger(day)
+    || month < 1
+    || month > 12
+    || day < 1
+    || day > 31
+  ) {
+    return null;
+  }
+
+  const start = bogotaLocalToUtcDate(year, month - 1, day);
+  const end = bogotaLocalToUtcDate(year, month - 1, day + 1);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return null;
+  }
+
+  return {
+    dayKey: normalized,
+    start,
+    end,
+  };
+}
+
+function listMonthKeysBetween(rangeStart, rangeEndExclusive) {
+  const keys = [];
+  if (!(rangeStart instanceof Date) || !(rangeEndExclusive instanceof Date)) {
+    return keys;
+  }
+
+  let cursor = startOfMonth(rangeStart);
+  while (cursor.getTime() < rangeEndExclusive.getTime()) {
+    keys.push(monthKeyFromDate(cursor));
+    const shifted = getBogotaShiftedDate(cursor);
+    cursor = bogotaLocalToUtcDate(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, 1);
+  }
+
+  return keys;
+}
+
 function getBogotaWeekKey(date) {
   const shifted = getBogotaShiftedDate(date);
   const day = shifted.getUTCDay();
@@ -363,6 +414,45 @@ router.get('/admin-home', async (req, res) => {
     const weekStart = startOfWeek(now);
     const previousWeekStart = new Date(weekStart.getTime() - (7 * 24 * 60 * 60 * 1000));
     const previousMonthStart = startOfMonth(new Date(monthStart.getTime() - 1));
+    const todayKey = getBogotaDayKey(now);
+    const requestedFrom = parseDayKey(req.query.from);
+    const requestedTo = parseDayKey(req.query.to);
+    if ((req.query.from && !requestedFrom) || (req.query.to && !requestedTo)) {
+      return res.status(400).json({ message: 'Las fechas del filtro deben usar el formato YYYY-MM-DD.' });
+    }
+    const rangeFrom = requestedFrom || parseDayKey(todayKey);
+    const rangeTo = requestedTo || requestedFrom || parseDayKey(todayKey);
+    if (!rangeFrom || !rangeTo) {
+      return res.status(400).json({ message: 'No se pudo resolver el rango de fechas del KPI.' });
+    }
+    if (rangeTo.start.getTime() < rangeFrom.start.getTime()) {
+      return res.status(400).json({ message: 'La fecha final no puede ser anterior a la fecha inicial.' });
+    }
+    const kpiRangeStart = rangeFrom.start;
+    const kpiRangeEnd = rangeTo.end;
+
+    const requestedAccountingFrom = parseDayKey(req.query.accountingFrom);
+    const requestedAccountingTo = parseDayKey(req.query.accountingTo);
+    if ((req.query.accountingFrom && !requestedAccountingFrom) || (req.query.accountingTo && !requestedAccountingTo)) {
+      return res.status(400).json({ message: 'Las fechas de contabilidad deben usar el formato YYYY-MM-DD.' });
+    }
+    const defaultAccountingFrom = parseDayKey(`${currentMonthKey}-01`) || rangeFrom;
+    const defaultAccountingTo = parseDayKey(todayKey) || rangeTo;
+    const accountingFrom = requestedAccountingFrom || (requestedMonth ? parseDayKey(`${requestedMonth.monthKey}-01`) : null) || defaultAccountingFrom;
+    const accountingTo = requestedAccountingTo
+      || (requestedMonth
+        ? parseDayKey(getBogotaDayKey(new Date(requestedMonth.end.getTime() - 1)))
+        : null)
+      || defaultAccountingTo;
+    if (!accountingFrom || !accountingTo) {
+      return res.status(400).json({ message: 'No se pudo resolver el rango de fechas de contabilidad.' });
+    }
+    if (accountingTo.start.getTime() < accountingFrom.start.getTime()) {
+      return res.status(400).json({ message: 'La fecha final de contabilidad no puede ser anterior a la fecha inicial.' });
+    }
+    const accountingRangeStart = accountingFrom.start;
+    const accountingRangeEnd = accountingTo.end;
+    const accountingMonthKeys = listMonthKeysBetween(accountingRangeStart, accountingRangeEnd);
 
     const orderMatch = {
       schoolId,
@@ -388,10 +478,13 @@ router.get('/admin-home', async (req, res) => {
       status: 'active',
       deletedAt: null,
       $or: [
-        { monthKey: currentMonthKey },
+        { monthKey: { $in: accountingMonthKeys.length ? accountingMonthKeys : [currentMonthKey] } },
         {
           monthKey: { $exists: false },
-          createdAt: { $gte: monthStart, $lt: monthEnd },
+          createdAt: { $gte: accountingRangeStart, $lt: accountingRangeEnd },
+        },
+        {
+          effectiveDate: { $gte: accountingRangeStart, $lt: accountingRangeEnd },
         },
       ],
     };
@@ -407,9 +500,13 @@ router.get('/admin-home', async (req, res) => {
       salesYesterday,
       salesPreviousWeek,
       salesPreviousMonth,
+      salesFiltered,
       utilityToday,
       utilityWeek,
       utilityMonth,
+      utilityFiltered,
+      utilityAccounting,
+      topupsFiltered,
       topStudentsAgg,
       topProductsAgg,
       profitabilityRaw,
@@ -452,9 +549,26 @@ router.get('/admin-home', async (req, res) => {
         { $match: { ...orderMatch, createdAt: { $gte: previousMonthStart, $lt: monthStart } } },
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
+      orderAggregate([
+        { $match: { ...orderMatch, createdAt: { $gte: kpiRangeStart, $lt: kpiRangeEnd } } },
+        { $group: { _id: null, total: { $sum: '$total' } } },
+      ]),
       getUtilityForPeriod(orderMatch, dayStart),
       getUtilityForPeriod(orderMatch, weekStart),
       getUtilityForPeriod(orderMatch, monthStart, monthEnd),
+      getUtilityForPeriod(orderMatch, kpiRangeStart, kpiRangeEnd),
+      getUtilityForPeriod(orderMatch, accountingRangeStart, accountingRangeEnd),
+      WalletTransaction.aggregate([
+        {
+          $match: {
+            schoolId,
+            type: 'recharge',
+            cancelledAt: null,
+            createdAt: { $gte: kpiRangeStart, $lt: kpiRangeEnd },
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]).allowDiskUse(true),
       orderAggregate([
         {
           $match: {
@@ -674,7 +788,7 @@ router.get('/admin-home', async (req, res) => {
         {
           $match: {
             ...orderMatch,
-            createdAt: { $gte: monthStart, $lt: monthEnd },
+            createdAt: { $gte: accountingRangeStart, $lt: accountingRangeEnd },
           },
         },
         {
@@ -692,7 +806,7 @@ router.get('/admin-home', async (req, res) => {
             schoolId,
             type: 'recharge',
             cancelledAt: null,
-            createdAt: { $gte: monthStart, $lt: monthEnd },
+            createdAt: { $gte: accountingRangeStart, $lt: accountingRangeEnd },
           },
         },
         {
@@ -994,6 +1108,17 @@ router.get('/admin-home', async (req, res) => {
 
     const fixedCostsOnly = fixedCosts.filter((item) => String(item.type || 'fixed') !== 'variable');
     const variableCostsOnly = fixedCosts.filter((item) => String(item.type || 'fixed') === 'variable');
+    const isWithinAccountingRange = (value) => {
+      const parsedDate = value ? new Date(value) : null;
+      if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+        return false;
+      }
+      const time = parsedDate.getTime();
+      return time >= accountingRangeStart.getTime() && time < accountingRangeEnd.getTime();
+    };
+    const resolveCostDate = (item) => item?.effectiveDate || item?.createdAt || item?.weekStart || null;
+    const fixedCostsInRange = fixedCostsOnly.filter((item) => isWithinAccountingRange(resolveCostDate(item)));
+    const variableCostsInRange = variableCostsOnly.filter((item) => isWithinAccountingRange(resolveCostDate(item)));
 
     const weeklyAccountingMap = new Map();
 
@@ -1048,9 +1173,12 @@ router.get('/admin-home', async (req, res) => {
 
     const addWeeklyCost = (item, field) => {
       // Prefer explicit effectiveDate (selected day) when available.
-      const baseDate = item?.effectiveDate || item?.createdAt || item?.weekStart;
+      const baseDate = resolveCostDate(item);
       const parsedDate = baseDate ? new Date(baseDate) : null;
       if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+        return;
+      }
+      if (!isWithinAccountingRange(parsedDate)) {
         return;
       }
 
@@ -1064,11 +1192,11 @@ router.get('/admin-home', async (req, res) => {
       dailyRow[field] += amount;
     };
 
-    for (const item of fixedCostsOnly) {
+    for (const item of fixedCostsInRange) {
       addWeeklyCost(item, 'fixedTotal');
     }
 
-    for (const item of variableCostsOnly) {
+    for (const item of variableCostsInRange) {
       addWeeklyCost(item, 'variableTotal');
     }
 
@@ -1167,9 +1295,9 @@ router.get('/admin-home', async (req, res) => {
       })
       .sort((a, b) => String(b.weekKey || '').localeCompare(String(a.weekKey || '')));
 
-    const totalFixedCosts = fixedCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const totalVariableCosts = variableCostsOnly.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const salesMonthTotal = Number(salesMonth[0]?.total || 0);
+    const totalFixedCosts = fixedCostsInRange.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const totalVariableCosts = variableCostsInRange.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const salesAccountingTotal = (accountingSalesRaw || []).reduce((sum, sale) => sum + Number(sale?.total || 0), 0);
     const paymentFeesMonthTotal = (accountingSalesRaw || []).reduce((sum, sale) => {
       const paymentMethod = String(sale?.paymentMethod || '').toLowerCase();
       const amount = Number(sale?.total || 0);
@@ -1181,8 +1309,8 @@ router.get('/admin-home', async (req, res) => {
       }
       return sum;
     }, 0);
-    const salesMonthNetTotal = salesMonthTotal - paymentFeesMonthTotal;
-    const utilityTheoreticalMonth = Number(utilityMonth || 0) - totalFixedCosts - totalVariableCosts;
+    const salesMonthNetTotal = salesAccountingTotal - paymentFeesMonthTotal;
+    const utilityTheoreticalMonth = Number(utilityAccounting || 0) - totalFixedCosts - totalVariableCosts;
     const utilityNetMonth = salesMonthNetTotal - totalFixedCosts - totalVariableCosts;
     const aiRecommendations = buildAiRecommendations({
       topStudents: topStudentsRaw,
@@ -1199,12 +1327,24 @@ router.get('/admin-home', async (req, res) => {
       salesYesterday: salesYesterday[0]?.total || 0,
       salesPreviousWeek: salesPreviousWeek[0]?.total || 0,
       salesPreviousMonth: salesPreviousMonth[0]?.total || 0,
+      salesFiltered: salesFiltered[0]?.total || 0,
+      topupsFiltered: topupsFiltered[0]?.total || 0,
+      utilityFiltered: utilityFiltered || 0,
+      kpiFrom: rangeFrom.dayKey,
+      kpiTo: rangeTo.dayKey,
+      accountingFrom: accountingFrom.dayKey,
+      accountingTo: accountingTo.dayKey,
+      salesAccounting: salesAccountingTotal,
       salesMonthNet: salesMonthNetTotal,
+      salesNet: salesMonthNetTotal,
       paymentFeesMonthTotal,
+      paymentFeesTotal: paymentFeesMonthTotal,
       utilityToday,
       utilityWeek,
-      utilityMonth,
+      utilityMonth: utilityAccounting || 0,
+      utilityAccounting: utilityAccounting || 0,
       utilityTheoreticalMonth,
+      utilityTheoretical: utilityTheoreticalMonth,
       lowStockCount: lowStockProducts.length,
       lowBalanceCount: normalizedBalances.length,
       topStudents: topStudentsRaw,
@@ -1214,11 +1354,12 @@ router.get('/admin-home', async (req, res) => {
       leastProfitableProductsByPercent,
       lowStockProducts,
       lowBalanceStudents: normalizedBalances,
-      fixedCosts: fixedCostsOnly,
-      variableCosts: variableCostsOnly,
+      fixedCosts: fixedCostsInRange,
+      variableCosts: variableCostsInRange,
       totalFixedCosts,
       totalVariableCosts,
       utilityNetMonth,
+      utilityNet: utilityNetMonth,
       accountingFeeSettings,
       weeklyAccountingSummary,
       aiRecommendations,

@@ -843,6 +843,13 @@ function AdminDashboard() {
   const [topupHistory, setTopupHistory] = useState([]);
   const [closureFilters, setClosureFilters] = useState({ storeId: '', date: '' });
   const [homeStoreId, setHomeStoreId] = useState('');
+  const [homeDateFrom, setHomeDateFrom] = useState(() => getBogotaDayKeyFromValue(new Date()) || currentDateIso());
+  const [homeDateTo, setHomeDateTo] = useState(() => getBogotaDayKeyFromValue(new Date()) || currentDateIso());
+  const [accountingDateFrom, setAccountingDateFrom] = useState(() => {
+    const today = getBogotaDayKeyFromValue(new Date()) || currentDateIso();
+    return `${String(today).slice(0, 7)}-01`;
+  });
+  const [accountingDateTo, setAccountingDateTo] = useState(() => getBogotaDayKeyFromValue(new Date()) || currentDateIso());
   const [accountingMonthFilter, setAccountingMonthFilter] = useState(currentMonthIso());
   const [expandedAccountingWeekKeys, setExpandedAccountingWeekKeys] = useState([]);
   const [notificationAuditFilters, setNotificationAuditFilters] = useState({
@@ -877,11 +884,16 @@ function AdminDashboard() {
   const [savingTopupStudentId, setSavingTopupStudentId] = useState('');
   const [fixedCostForm, setFixedCostForm] = useState({
     name: '',
+    amount: '',
+    storeId: '',
+    weekStart: currentDateIso(),
+  });
+  const [variableCostForm, setVariableCostForm] = useState({
+    name: '',
     supplierId: '',
     supplierOtherName: '',
     amount: '',
     storeId: '',
-    type: 'fixed',
     weekStart: currentDateIso(),
   });
   const [accountingFeeForm, setAccountingFeeForm] = useState({
@@ -2389,10 +2401,21 @@ function AdminDashboard() {
     });
   };
 
-  const loadHomepage = async (storeId = homeStoreId, month = accountingMonthFilter) => {
+  const loadHomepage = async (
+    storeId = homeStoreId,
+    month = accountingMonthFilter,
+    from = homeDateFrom,
+    to = homeDateTo,
+    accountingFrom = accountingDateFrom,
+    accountingTo = accountingDateTo,
+  ) => {
     const params = {
       ...(storeId ? { storeId } : {}),
       ...(month ? { month } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(accountingFrom ? { accountingFrom } : {}),
+      ...(accountingTo ? { accountingTo } : {}),
     };
     const [homeRes, feesRes] = await Promise.all([
       getAdminHomepage(params),
@@ -3764,48 +3787,81 @@ function AdminDashboard() {
   const onCreateFixedCost = (event) => {
     event.preventDefault();
 
-    const isVariable = fixedCostForm.type === 'variable';
-    if (isVariable && !fixedCostForm.supplierId) {
+    runAction(
+      () =>
+        createAdminFixedCost({
+          name: fixedCostForm.name,
+          supplierId: null,
+          supplierOtherName: '',
+          amount: Number(fixedCostForm.amount || 0),
+          storeId: fixedCostForm.storeId || null,
+          type: 'fixed',
+          weekStart: fixedCostForm.weekStart,
+        }),
+      'Costo fijo guardado.',
+      async () => {
+        setFixedCostForm((prev) => ({
+          ...prev,
+          name: '',
+          amount: '',
+        }));
+        await loadHomepage(
+          homeStoreId,
+          accountingMonthFilter,
+          homeDateFrom,
+          homeDateTo,
+          accountingDateFrom,
+          accountingDateTo,
+        );
+      }
+    );
+  };
+
+  const onCreateVariableCost = (event) => {
+    event.preventDefault();
+
+    if (!variableCostForm.supplierId) {
       setError('Selecciona un proveedor o "Otro" para costos variables.');
       return;
     }
 
-    if (isVariable && fixedCostForm.supplierId === 'other' && !String(fixedCostForm.supplierOtherName || '').trim()) {
+    if (variableCostForm.supplierId === 'other' && !String(variableCostForm.supplierOtherName || '').trim()) {
       setError('Escribe el concepto cuando seleccionas "Otro".');
       return;
     }
 
-    const selectedSupplier = suppliers.find((item) => String(item._id) === String(fixedCostForm.supplierId));
+    const selectedSupplier = suppliers.find((item) => String(item._id) === String(variableCostForm.supplierId));
 
     runAction(
       () =>
         createAdminFixedCost({
-          name: isVariable
-            ? (fixedCostForm.supplierId === 'other'
-              ? fixedCostForm.supplierOtherName
-              : (selectedSupplier?.name || fixedCostForm.name))
-            : fixedCostForm.name,
-          supplierId: isVariable && fixedCostForm.supplierId && fixedCostForm.supplierId !== 'other'
-            ? fixedCostForm.supplierId
-            : null,
-          supplierOtherName: isVariable && fixedCostForm.supplierId === 'other'
-            ? fixedCostForm.supplierOtherName
-            : '',
-          amount: Number(fixedCostForm.amount || 0),
-          storeId: fixedCostForm.storeId || null,
-          type: fixedCostForm.type || 'fixed',
-          weekStart: fixedCostForm.weekStart,
+          name: variableCostForm.supplierId === 'other'
+            ? variableCostForm.supplierOtherName
+            : (selectedSupplier?.name || variableCostForm.name),
+          supplierId: variableCostForm.supplierId !== 'other' ? variableCostForm.supplierId : null,
+          supplierOtherName: variableCostForm.supplierId === 'other' ? variableCostForm.supplierOtherName : '',
+          amount: Number(variableCostForm.amount || 0),
+          storeId: variableCostForm.storeId || null,
+          type: 'variable',
+          weekStart: variableCostForm.weekStart,
         }),
-      'Costo diario guardado.',
+      'Costo variable guardado.',
       async () => {
-        setFixedCostForm((prev) => ({
+        setVariableCostForm((prev) => ({
           ...prev,
           name: '',
           supplierId: '',
           supplierOtherName: '',
           amount: '',
         }));
-        await loadHomepage(homeStoreId);
+        await loadHomepage(
+          homeStoreId,
+          accountingMonthFilter,
+          homeDateFrom,
+          homeDateTo,
+          accountingDateFrom,
+          accountingDateTo,
+        );
       }
     );
   };
@@ -3916,8 +3972,15 @@ function AdminDashboard() {
   };
 
   const onDeleteFixedCost = (id) => {
-    runAction(() => deleteAdminFixedCost(id), 'Costo fijo eliminado.', async () => {
-      await loadHomepage(homeStoreId);
+    runAction(() => deleteAdminFixedCost(id), 'Costo eliminado.', async () => {
+      await loadHomepage(
+        homeStoreId,
+        accountingMonthFilter,
+        homeDateFrom,
+        homeDateTo,
+        accountingDateFrom,
+        accountingDateTo,
+      );
     });
   };
 
@@ -5169,7 +5232,7 @@ function AdminDashboard() {
     setLoading(true);
     clearMessages();
     try {
-      await loadHomepage(storeId, accountingMonthFilter);
+      await loadHomepage(storeId, accountingMonthFilter, homeDateFrom, homeDateTo, accountingDateFrom, accountingDateTo);
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo cargar el homepage KPI.');
     } finally {
@@ -5177,12 +5240,87 @@ function AdminDashboard() {
     }
   };
 
-  const onChangeAccountingMonth = async (month) => {
-    setAccountingMonthFilter(month);
+  const onChangeHomeDateRange = async (nextFrom, nextTo) => {
+    const normalizedFrom = String(nextFrom || '').trim();
+    const normalizedTo = String(nextTo || '').trim();
+    setHomeDateFrom(normalizedFrom);
+    setHomeDateTo(normalizedTo);
+
+    if (!normalizedFrom || !normalizedTo) {
+      return;
+    }
+
+    if (normalizedTo < normalizedFrom) {
+      setError('La fecha final no puede ser anterior a la fecha inicial.');
+      return;
+    }
+
     setLoading(true);
     clearMessages();
     try {
-      await loadHomepage(homeStoreId, month);
+      await loadHomepage(homeStoreId, accountingMonthFilter, normalizedFrom, normalizedTo, accountingDateFrom, accountingDateTo);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo filtrar el homepage KPI.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onChangeAccountingDateRange = async (nextFrom, nextTo) => {
+    const normalizedFrom = String(nextFrom || '').trim();
+    const normalizedTo = String(nextTo || '').trim();
+    setAccountingDateFrom(normalizedFrom);
+    setAccountingDateTo(normalizedTo);
+    if (normalizedFrom) {
+      setAccountingMonthFilter(String(normalizedFrom).slice(0, 7));
+    }
+
+    if (!normalizedFrom || !normalizedTo) {
+      return;
+    }
+
+    if (normalizedTo < normalizedFrom) {
+      setError('La fecha final no puede ser anterior a la fecha inicial.');
+      return;
+    }
+
+    setLoading(true);
+    clearMessages();
+    try {
+      await loadHomepage(
+        homeStoreId,
+        String(normalizedFrom).slice(0, 7),
+        homeDateFrom,
+        homeDateTo,
+        normalizedFrom,
+        normalizedTo,
+      );
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo filtrar el módulo de contabilidad.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onChangeAccountingMonth = async (month) => {
+    setAccountingMonthFilter(month);
+    const monthStart = month ? `${month}-01` : accountingDateFrom;
+    const monthEndCandidate = month
+      ? getBogotaDayKeyFromValue(new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0, 12, 0, 0)))
+      : accountingDateTo;
+    setAccountingDateFrom(monthStart);
+    setAccountingDateTo(monthEndCandidate || accountingDateTo);
+    setLoading(true);
+    clearMessages();
+    try {
+      await loadHomepage(
+        homeStoreId,
+        month,
+        homeDateFrom,
+        homeDateTo,
+        monthStart,
+        monthEndCandidate || accountingDateTo,
+      );
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo cargar el módulo de contabilidad.');
     } finally {
@@ -5193,6 +5331,8 @@ function AdminDashboard() {
   return (
     <StaffPortalShell
       activeKey={activeModule}
+      className="staff-portal-shell--admin"
+      enableMobileNav
       navItems={modules.map((moduleItem) => ({
         key: moduleItem.id,
         label: moduleItem.id === 'approvals' && pendingApprovalsCount > 0
@@ -5234,42 +5374,44 @@ function AdminDashboard() {
       {activeModule === 'home' ? (
         <section className="panel admin-section admin-home">
           {(() => {
-            const institutionalUsersCount = Object.values(homeData?.academicUsersByRole || {})
-              .reduce((sum, count) => sum + Number(count || 0), 0);
-            const dayDelta = resolveSalesDelta(homeData?.salesToday, homeData?.salesYesterday);
-            const weekDelta = resolveSalesDelta(homeData?.salesWeek, homeData?.salesPreviousWeek);
-            const monthDelta = resolveSalesDelta(homeData?.salesMonth, homeData?.salesPreviousMonth);
+            const formatKpiDateLabel = (isoDate) => {
+              const parsed = parseWeekKeyDateSafe(isoDate);
+              if (!parsed) return isoDate;
+              return parsed.toLocaleDateString('es-CO', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                timeZone: 'America/Bogota',
+              });
+            };
+            const rangeLabel = homeDateFrom && homeDateTo
+              ? (homeDateFrom === homeDateTo
+                ? formatKpiDateLabel(homeDateFrom)
+                : `${formatKpiDateLabel(homeDateFrom)} – ${formatKpiDateLabel(homeDateTo)}`)
+              : 'Selecciona un rango';
             const summaryCards = [
               {
                 tone: 'green',
                 icon: 'trend',
-                label: 'Ventas del día',
-                value: formatCurrency(homeData?.salesToday),
-                meta: `${Math.abs(dayDelta.percent).toFixed(0)}% vs ayer`,
-                direction: dayDelta.direction,
+                label: 'Ventas',
+                value: formatCurrency(homeData?.salesFiltered ?? homeData?.salesToday),
+                meta: rangeLabel,
+                direction: 'flat',
               },
               {
                 tone: 'blue',
-                icon: 'calendar',
-                label: 'Ventas de la semana',
-                value: formatCurrency(homeData?.salesWeek),
-                meta: `${Math.abs(weekDelta.percent).toFixed(0)}% vs semana pasada`,
-                direction: weekDelta.direction,
+                icon: 'wallet',
+                label: 'Recargas',
+                value: formatCurrency(homeData?.topupsFiltered),
+                meta: rangeLabel,
+                direction: 'flat',
               },
               {
                 tone: 'violet',
                 icon: 'chart',
-                label: 'Ventas del mes',
-                value: formatCurrency(homeData?.salesMonth),
-                meta: `${Math.abs(monthDelta.percent).toFixed(0)}% vs mes pasado`,
-                direction: monthDelta.direction,
-              },
-              {
-                tone: 'sky',
-                icon: 'users',
-                label: 'Usuarios institucionales',
-                value: String(institutionalUsersCount),
-                meta: 'Activos',
+                label: 'Utilidades',
+                value: formatCurrency(homeData?.utilityFiltered ?? homeData?.utilityToday),
+                meta: rangeLabel,
                 direction: 'flat',
               },
             ];
@@ -5281,18 +5423,37 @@ function AdminDashboard() {
                     <h3>Homepage KPI</h3>
                     <p>Resumen operativo de ventas, inventario y consumo.</p>
                   </div>
-                  <label className="admin-home__store">
-                    Tienda para KPIs
-                    <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
-                      <option value="">Todas las tiendas</option>
-                      {stores.map((store) => (
-                        <option key={store._id} value={store._id}>{store.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="admin-home__filters">
+                    <label className="admin-home__store">
+                      Desde
+                      <input
+                        type="date"
+                        value={homeDateFrom}
+                        onChange={(event) => onChangeHomeDateRange(event.target.value, homeDateTo || event.target.value)}
+                      />
+                    </label>
+                    <label className="admin-home__store">
+                      Hasta
+                      <input
+                        type="date"
+                        value={homeDateTo}
+                        min={homeDateFrom || undefined}
+                        onChange={(event) => onChangeHomeDateRange(homeDateFrom || event.target.value, event.target.value)}
+                      />
+                    </label>
+                    <label className="admin-home__store">
+                      Tienda para KPIs
+                      <select value={homeStoreId} onChange={(event) => onChangeHomeStore(event.target.value)}>
+                        <option value="">Todas las tiendas</option>
+                        {stores.map((store) => (
+                          <option key={store._id} value={store._id}>{store.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
 
-                <div className="admin-home__summary-grid">
+                <div className="admin-home__summary-grid admin-home__summary-grid--three">
                   {summaryCards.map((card) => (
                     <article className={`admin-home__summary-card tone-${card.tone}`} key={card.label}>
                       <span className="admin-home__icon" aria-hidden="true">
@@ -5302,8 +5463,6 @@ function AdminDashboard() {
                         <span className="admin-home__label">{card.label}</span>
                         <strong>{card.value}</strong>
                         <small className={`is-${card.direction}`}>
-                          {card.direction === 'up' ? <AccountingIcon name="arrowUp" /> : null}
-                          {card.direction === 'down' ? <AccountingIcon name="arrowDown" /> : null}
                           {card.meta}
                         </small>
                       </div>
@@ -5594,7 +5753,7 @@ function AdminDashboard() {
           <div className="admin-accounting__toolbar">
             <div>
               <h3>Contabilidad</h3>
-              <p>Control financiero de cafetería con consolidado semanal y mensual.</p>
+              <p>Control financiero de cafetería filtrado por el rango de fechas seleccionado.</p>
             </div>
             <form className="admin-accounting__filters" onSubmit={(event) => event.preventDefault()}>
               <label>
@@ -5607,11 +5766,20 @@ function AdminDashboard() {
                 </select>
               </label>
               <label>
-                Mes contable
+                Desde
                 <input
-                  type="month"
-                  value={accountingMonthFilter}
-                  onChange={(event) => onChangeAccountingMonth(event.target.value)}
+                  type="date"
+                  value={accountingDateFrom}
+                  onChange={(event) => onChangeAccountingDateRange(event.target.value, accountingDateTo || event.target.value)}
+                />
+              </label>
+              <label>
+                Hasta
+                <input
+                  type="date"
+                  value={accountingDateTo}
+                  min={accountingDateFrom || undefined}
+                  onChange={(event) => onChangeAccountingDateRange(accountingDateFrom || event.target.value, event.target.value)}
                 />
               </label>
             </form>
@@ -5621,43 +5789,40 @@ function AdminDashboard() {
             <header className="admin-accounting__panel-head">
               <div>
                 <h4>Resumen financiero</h4>
-                <p>Registro de costos por semana y consolidado automático de los acumulados del mes.</p>
+                <p>Resultados del rango filtrado, con costos y consolidado semanal incluidos.</p>
               </div>
             </header>
             <div className="admin-accounting__kpi-grid">
               {[
-                { tone: 'blue', icon: 'wallet', label: 'Utilidades del día', value: homeData?.utilityToday },
-                { tone: 'green', icon: 'calendar', label: 'Utilidades de la semana', value: homeData?.utilityWeek },
-                { tone: 'violet', icon: 'chart', label: 'Utilidades del mes', value: homeData?.utilityMonth },
                 {
                   tone: 'orange',
                   icon: 'cap',
-                  label: 'Utilidad teórica del mes',
-                  value: homeData?.utilityTheoreticalMonth ?? homeData?.utilityMonth,
-                  hint: 'Utilidades del mes - costos fijos - variables',
+                  label: 'Utilidad teórica',
+                  value: homeData?.utilityTheoretical ?? homeData?.utilityTheoreticalMonth ?? homeData?.utilityAccounting,
+                  hint: 'Utilidades - costos fijos - variables',
                 },
                 { tone: 'sky', icon: 'pie', label: 'Costos fijos', value: homeData?.totalFixedCosts },
                 { tone: 'rose', icon: 'trend', label: 'Costos variables', value: homeData?.totalVariableCosts },
                 {
                   tone: 'teal',
                   icon: 'qr',
-                  label: 'Comisiones QR + datáfono (mes)',
-                  value: homeData?.paymentFeesMonthTotal,
+                  label: 'Comisiones QR + datáfono',
+                  value: homeData?.paymentFeesTotal ?? homeData?.paymentFeesMonthTotal,
                   hint: 'Se descuentan para calcular ingresos netos reales',
                 },
                 {
                   tone: 'amber',
                   icon: 'cart',
-                  label: 'Ventas netas del mes',
-                  value: homeData?.salesMonthNet ?? homeData?.salesMonth,
-                  hint: 'Ventas del mes - comisiones QR/datáfono',
+                  label: 'Ventas netas',
+                  value: homeData?.salesNet ?? homeData?.salesMonthNet ?? homeData?.salesAccounting,
+                  hint: 'Ventas - comisiones QR/datáfono',
                 },
                 {
                   tone: 'purple',
                   icon: 'swap',
                   label: 'Ingresos - egresos',
-                  value: homeData?.utilityNetMonth,
-                  hint: 'Ventas netas del mes - costos fijos - variables',
+                  value: homeData?.utilityNet ?? homeData?.utilityNetMonth,
+                  hint: 'Ventas netas - costos fijos - variables',
                 },
               ].map((metric) => (
                 <div className={`admin-accounting__kpi tone-${metric.tone}`} key={metric.label}>
@@ -5750,47 +5915,123 @@ function AdminDashboard() {
             </div>
           </article>
 
-          <article className="admin-accounting__panel">
-            <header className="admin-accounting__panel-head">
-              <div>
-                <h4>Costos operativos (diarios)</h4>
-                <p>Registra los costos operativos del día a día de tu colegio.</p>
+          <div className="admin-accounting__costs-grid">
+            <article className="admin-accounting__panel">
+              <header className="admin-accounting__panel-head">
+                <div>
+                  <h4>Costos fijos</h4>
+                  <p>Registra y consulta los costos fijos del rango filtrado arriba.</p>
+                </div>
+                <span className="admin-accounting__panel-badge tone-sky" aria-hidden="true">
+                  <AccountingIcon name="inbox" />
+                </span>
+              </header>
+              <form className="admin-accounting__inline-form is-costs is-costs-fixed" onSubmit={onCreateFixedCost}>
+                <label>
+                  Fecha
+                  <input
+                    type="date"
+                    value={fixedCostForm.weekStart}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, weekStart: event.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="is-grow">
+                  Concepto
+                  <input
+                    value={fixedCostForm.name}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
+                    placeholder="Ej: Nómina"
+                    required
+                  />
+                </label>
+                <label>
+                  Valor
+                  <span className="admin-accounting__affix-field is-prefix">
+                    <em>$</em>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={fixedCostForm.amount}
+                      onChange={(event) => setFixedCostForm((prev) => ({ ...prev, amount: event.target.value }))}
+                      required
+                    />
+                  </span>
+                </label>
+                <label>
+                  Tienda (opcional)
+                  <select
+                    value={fixedCostForm.storeId}
+                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, storeId: event.target.value }))}
+                  >
+                    <option value="">Global (todas)</option>
+                    {stores.map((store) => (
+                      <option key={store._id} value={store._id}>{store.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button className="btn btn-primary admin-accounting__save-btn" type="submit">
+                  <AccountingIcon name="save" />
+                  Guardar costo fijo
+                </button>
+              </form>
+              <div className="admin-accounting__cost-totals is-single">
+                <div className="tone-blue">
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="inbox" /></span>
+                  <div>
+                    <span>Total costos fijos</span>
+                    <strong>{formatCurrency(homeData?.totalFixedCosts)}</strong>
+                  </div>
+                </div>
               </div>
-            </header>
-            <form className="admin-accounting__inline-form is-costs" onSubmit={onCreateFixedCost}>
-              <label>
-                Día
-                <input
-                  type="date"
-                  value={fixedCostForm.weekStart}
-                  onChange={(event) => setFixedCostForm((prev) => ({ ...prev, weekStart: event.target.value }))}
-                  required
-                />
-              </label>
-              <label>
-                Tipo
-                <select
-                  value={fixedCostForm.type}
-                  onChange={(event) => {
-                    const nextType = event.target.value;
-                    setFixedCostForm((prev) => ({
-                      ...prev,
-                      type: nextType,
-                      supplierId: nextType === 'variable' ? prev.supplierId : '',
-                      supplierOtherName: nextType === 'variable' ? prev.supplierOtherName : '',
-                    }));
-                  }}
-                >
-                  <option value="fixed">Fijo</option>
-                  <option value="variable">Variable</option>
-                </select>
-              </label>
-              {fixedCostForm.type === 'variable' ? (
+              {(homeData?.fixedCosts || []).length === 0 ? (
+                <p className="admin-accounting__empty">No hay costos fijos en el rango seleccionado.</p>
+              ) : (
+                <div className="admin-accounting__cost-list">
+                  {(homeData?.fixedCosts || []).map((item) => (
+                    <div className="admin-accounting__cost-row" key={item._id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <small>
+                          {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} ·{' '}
+                          {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
+                        </small>
+                      </div>
+                      <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
+                        Eliminar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+
+            <article className="admin-accounting__panel">
+              <header className="admin-accounting__panel-head">
+                <div>
+                  <h4>Costos variables</h4>
+                  <p>Registra y consulta los costos variables del rango filtrado arriba.</p>
+                </div>
+                <span className="admin-accounting__panel-badge tone-rose" aria-hidden="true">
+                  <AccountingIcon name="trend" />
+                </span>
+              </header>
+              <form className="admin-accounting__inline-form is-costs is-costs-variable" onSubmit={onCreateVariableCost}>
+                <label>
+                  Fecha
+                  <input
+                    type="date"
+                    value={variableCostForm.weekStart}
+                    onChange={(event) => setVariableCostForm((prev) => ({ ...prev, weekStart: event.target.value }))}
+                    required
+                  />
+                </label>
                 <label className="is-grow">
                   Concepto / Proveedor
                   <select
-                    value={fixedCostForm.supplierId}
-                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, supplierId: event.target.value }))}
+                    value={variableCostForm.supplierId}
+                    onChange={(event) => setVariableCostForm((prev) => ({ ...prev, supplierId: event.target.value }))}
                     required
                   >
                     <option value="">Selecciona proveedor</option>
@@ -5800,279 +6041,214 @@ function AdminDashboard() {
                     <option value="other">Otro</option>
                   </select>
                 </label>
+                {variableCostForm.supplierId === 'other' ? (
+                  <label className="is-grow">
+                    Concepto (otro)
+                    <input
+                      value={variableCostForm.supplierOtherName}
+                      onChange={(event) => setVariableCostForm((prev) => ({ ...prev, supplierOtherName: event.target.value }))}
+                      placeholder="Ej: Transporte de insumos"
+                      required
+                    />
+                  </label>
+                ) : null}
+                <label>
+                  Valor
+                  <span className="admin-accounting__affix-field is-prefix">
+                    <em>$</em>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={variableCostForm.amount}
+                      onChange={(event) => setVariableCostForm((prev) => ({ ...prev, amount: event.target.value }))}
+                      required
+                    />
+                  </span>
+                </label>
+                <label>
+                  Tienda (opcional)
+                  <select
+                    value={variableCostForm.storeId}
+                    onChange={(event) => setVariableCostForm((prev) => ({ ...prev, storeId: event.target.value }))}
+                  >
+                    <option value="">Global (todas)</option>
+                    {stores.map((store) => (
+                      <option key={store._id} value={store._id}>{store.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <button className="btn btn-primary admin-accounting__save-btn" type="submit">
+                  <AccountingIcon name="save" />
+                  Guardar costo variable
+                </button>
+              </form>
+              <div className="admin-accounting__cost-totals is-single">
+                <div className="tone-green">
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="doc" /></span>
+                  <div>
+                    <span>Total costos variables</span>
+                    <strong>{formatCurrency(homeData?.totalVariableCosts)}</strong>
+                  </div>
+                </div>
+              </div>
+              {(homeData?.variableCosts || []).length === 0 ? (
+                <p className="admin-accounting__empty">No hay costos variables en el rango seleccionado.</p>
               ) : (
-                <label className="is-grow">
-                  Concepto
-                  <input
-                    value={fixedCostForm.name}
-                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, name: event.target.value }))}
-                    placeholder="Ej: Nómina día sábado"
-                    required
-                  />
-                </label>
-              )}
-              {fixedCostForm.type === 'variable' && fixedCostForm.supplierId === 'other' ? (
-                <label className="is-grow">
-                  Concepto (otro)
-                  <input
-                    value={fixedCostForm.supplierOtherName}
-                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, supplierOtherName: event.target.value }))}
-                    placeholder="Ej: Transporte de insumos"
-                    required
-                  />
-                </label>
-              ) : null}
-              <label>
-                Valor
-                <span className="admin-accounting__affix-field is-prefix">
-                  <em>$</em>
-                  <input
-                    type="number"
-                    min="0"
-                    step="100"
-                    value={fixedCostForm.amount}
-                    onChange={(event) => setFixedCostForm((prev) => ({ ...prev, amount: event.target.value }))}
-                    required
-                  />
-                </span>
-              </label>
-              <label>
-                Tienda (opcional)
-                <select
-                  value={fixedCostForm.storeId}
-                  onChange={(event) => setFixedCostForm((prev) => ({ ...prev, storeId: event.target.value }))}
-                >
-                  <option value="">Global (todas)</option>
-                  {stores.map((store) => (
-                    <option key={store._id} value={store._id}>{store.name}</option>
+                <div className="admin-accounting__cost-list">
+                  {(homeData?.variableCosts || []).map((item) => (
+                    <div className="admin-accounting__cost-row" key={item._id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <small>
+                          {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} ·{' '}
+                          {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
+                        </small>
+                      </div>
+                      <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
+                        Eliminar
+                      </button>
+                    </div>
                   ))}
-                </select>
-              </label>
-              <button className="btn btn-primary admin-accounting__save-btn" type="submit">
-                <AccountingIcon name="save" />
-                Guardar costo diario
-              </button>
-            </form>
-            <div className="admin-accounting__cost-totals">
-              <div className="tone-blue">
-                <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="inbox" /></span>
-                <div>
-                  <span>Total costos fijos del mes</span>
-                  <strong>{formatCurrency(homeData?.totalFixedCosts)}</strong>
-                </div>
-              </div>
-              <div className="tone-green">
-                <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="doc" /></span>
-                <div>
-                  <span>Total costos variables del mes</span>
-                  <strong>{formatCurrency(homeData?.totalVariableCosts)}</strong>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <div className="admin-accounting__split">
-            <article className="admin-accounting__panel">
-              <header className="admin-accounting__panel-head">
-                <div>
-                  <h4>Consolidado semanal del mes</h4>
-                  <p>Ventas, costos y utilidades por semana.</p>
-                </div>
-                <span className="admin-accounting__panel-badge tone-blue" aria-hidden="true">
-                  <AccountingIcon name="calendar" />
-                </span>
-              </header>
-              {accountingWeeklyRows.length === 0 ? (
-                <p className="admin-accounting__empty">No hay costos semanales registrados para este mes.</p>
-              ) : (
-                <div className="approval-history-scroll approval-history-table-scroll admin-accounting__table-wrap">
-                  <table className="simple-table">
-                    <thead>
-                      <tr>
-                        <th>Semana</th>
-                        <th>Ventas efectivo</th>
-                        <th>Ventas QR</th>
-                        <th>Ventas datáfono</th>
-                        <th>Recargas semana</th>
-                        <th>Total ingresos netos semana</th>
-                        <th>Costos fijos</th>
-                        <th>Costos variables</th>
-                        <th>Total costos semana</th>
-                        <th>Utilidades semana</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {accountingWeeklyRows.map((row) => {
-                        const startDate = parseWeekKeyDateSafe(row.weekKey);
-                        if (!startDate) return null;
-
-                        const endDate = new Date(startDate.getTime());
-                        endDate.setUTCDate(endDate.getUTCDate() + 6);
-                        const isExpanded = expandedAccountingWeekKeys.includes(row.weekKey);
-                        const dailyRows = buildAccountingWeekDayRows(row.weekKey, row.dailyBreakdown);
-
-                        return (
-                          [
-                            <tr key={`${row.weekKey}-summary`}>
-                              <td>
-                                <button
-                                  className="admin-accounting-week-toggle"
-                                  onClick={() => {
-                                    setExpandedAccountingWeekKeys((prev) => (
-                                      prev.includes(row.weekKey)
-                                        ? prev.filter((weekKey) => weekKey !== row.weekKey)
-                                        : [...prev, row.weekKey]
-                                    ));
-                                  }}
-                                  type="button"
-                                >
-                                  <span>
-                                    {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
-                                    {' - '}
-                                    {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
-                                  </span>
-                                  <span>{isExpanded ? 'Ocultar días' : 'Ver días'}</span>
-                                </button>
-                              </td>
-                              <td>{formatCurrency(row.salesCashTotal)}</td>
-                              <td>{formatCurrency(row.salesQrTotal)}</td>
-                              <td>{formatCurrency(row.salesDataphoneTotal)}</td>
-                              <td>{formatCurrency(row.topupsTotal)}</td>
-                              <td>{formatCurrency(row.totalIncomeNetTotal)}</td>
-                              <td>{formatCurrency(row.fixedTotal)}</td>
-                              <td>{formatCurrency(row.variableTotal)}</td>
-                              <td>{formatCurrency(row.totalCostsTotal)}</td>
-                              <td>{formatCurrency(row.utilityTotal)}</td>
-                            </tr>,
-                            isExpanded ? (
-                              <tr className="admin-accounting-week-detail-row" key={`${row.weekKey}-detail`}>
-                                <td colSpan={10}>
-                                  <div className="approval-history-scroll approval-history-table-scroll admin-accounting-week-detail-wrap">
-                                    <table className="simple-table">
-                                      <thead>
-                                        <tr>
-                                          <th>Día</th>
-                                          <th>Ventas efectivo</th>
-                                          <th>Ventas QR</th>
-                                          <th>Ventas datáfono</th>
-                                          <th>Recargas del día</th>
-                                          <th>Total ingresos netos del día</th>
-                                          <th>Costos fijos</th>
-                                          <th>Costos variables</th>
-                                          <th>Total costos día</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {dailyRows.map((dayRow) => (
-                                          <tr key={`${row.weekKey}-${dayRow.dayLabel}`}>
-                                            <td>{dayRow.dayLabel}</td>
-                                            <td>{formatCurrency(dayRow.salesCashTotal)}</td>
-                                            <td>{formatCurrency(dayRow.salesQrTotal)}</td>
-                                            <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
-                                            <td>{formatCurrency(dayRow.topupsTotal)}</td>
-                                            <td>{formatCurrency(dayRow.totalIncomeNetTotal)}</td>
-                                            <td>
-                                              <button
-                                                className="admin-accounting-cost-trigger"
-                                                onClick={() => openAccountingCostDetailModal(dayRow, 'fixed')}
-                                                type="button"
-                                              >
-                                                {formatCurrency(dayRow.fixedTotal)}
-                                              </button>
-                                            </td>
-                                            <td>
-                                              <button
-                                                className="admin-accounting-cost-trigger"
-                                                onClick={() => openAccountingCostDetailModal(dayRow, 'variable')}
-                                                type="button"
-                                              >
-                                                {formatCurrency(dayRow.variableTotal)}
-                                              </button>
-                                            </td>
-                                            <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </td>
-                              </tr>
-                            ) : null,
-                          ]
-                        );
-                      })}
-                    </tbody>
-                  </table>
                 </div>
               )}
             </article>
-
-            <div className="admin-accounting__detail-stack">
-              <article className="admin-accounting__panel">
-                <header className="admin-accounting__panel-head">
-                  <div>
-                    <h4>Detalle costos fijos del mes</h4>
-                    <p>Listado de costos fijos registrados.</p>
-                  </div>
-                  <span className="admin-accounting__panel-badge tone-sky" aria-hidden="true">
-                    <AccountingIcon name="doc" />
-                  </span>
-                </header>
-                {(homeData?.fixedCosts || []).length === 0 ? (
-                  <p className="admin-accounting__empty">No hay costos fijos registrados.</p>
-                ) : (
-                  <div className="admin-accounting__cost-list">
-                    {(homeData?.fixedCosts || []).map((item) => (
-                      <div className="admin-accounting__cost-row" key={item._id}>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <small>
-                            {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} · Día{' '}
-                            {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
-                          </small>
-                        </div>
-                        <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
-                          Eliminar
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-
-              <article className="admin-accounting__panel">
-                <header className="admin-accounting__panel-head">
-                  <div>
-                    <h4>Detalle costos variables del mes</h4>
-                    <p>Listado de costos variables registrados.</p>
-                  </div>
-                  <span className="admin-accounting__panel-badge tone-rose" aria-hidden="true">
-                    <AccountingIcon name="trend" />
-                  </span>
-                </header>
-                {(homeData?.variableCosts || []).length === 0 ? (
-                  <p className="admin-accounting__empty">No hay costos variables registrados.</p>
-                ) : (
-                  <div className="admin-accounting__cost-list">
-                    {(homeData?.variableCosts || []).map((item) => (
-                      <div className="admin-accounting__cost-row" key={item._id}>
-                        <div>
-                          <strong>{item.name}</strong>
-                          <small>
-                            {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} · Día{' '}
-                            {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
-                          </small>
-                        </div>
-                        <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
-                          Eliminar
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-            </div>
           </div>
+
+          <article className="admin-accounting__panel">
+            <header className="admin-accounting__panel-head">
+              <div>
+                <h4>Consolidado semanal</h4>
+                <p>Ventas, costos y utilidades por semana del rango filtrado.</p>
+              </div>
+              <span className="admin-accounting__panel-badge tone-blue" aria-hidden="true">
+                <AccountingIcon name="calendar" />
+              </span>
+            </header>
+            {accountingWeeklyRows.length === 0 ? (
+              <p className="admin-accounting__empty">No hay consolidado semanal para el rango seleccionado.</p>
+            ) : (
+              <div className="approval-history-scroll approval-history-table-scroll admin-accounting__table-wrap">
+                <table className="simple-table">
+                  <thead>
+                    <tr>
+                      <th>Semana</th>
+                      <th>Ventas efectivo</th>
+                      <th>Ventas QR</th>
+                      <th>Ventas datáfono</th>
+                      <th>Recargas semana</th>
+                      <th>Total ingresos netos semana</th>
+                      <th>Costos fijos</th>
+                      <th>Costos variables</th>
+                      <th>Total costos semana</th>
+                      <th>Utilidades semana</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountingWeeklyRows.map((row) => {
+                      const startDate = parseWeekKeyDateSafe(row.weekKey);
+                      if (!startDate) return null;
+
+                      const endDate = new Date(startDate.getTime());
+                      endDate.setUTCDate(endDate.getUTCDate() + 6);
+                      const isExpanded = expandedAccountingWeekKeys.includes(row.weekKey);
+                      const dailyRows = buildAccountingWeekDayRows(row.weekKey, row.dailyBreakdown);
+
+                      return (
+                        [
+                          <tr key={`${row.weekKey}-summary`}>
+                            <td>
+                              <button
+                                className="admin-accounting-week-toggle"
+                                onClick={() => {
+                                  setExpandedAccountingWeekKeys((prev) => (
+                                    prev.includes(row.weekKey)
+                                      ? prev.filter((weekKey) => weekKey !== row.weekKey)
+                                      : [...prev, row.weekKey]
+                                  ));
+                                }}
+                                type="button"
+                              >
+                                <span>
+                                  {startDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                                  {' - '}
+                                  {endDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}
+                                </span>
+                                <span>{isExpanded ? 'Ocultar días' : 'Ver días'}</span>
+                              </button>
+                            </td>
+                            <td>{formatCurrency(row.salesCashTotal)}</td>
+                            <td>{formatCurrency(row.salesQrTotal)}</td>
+                            <td>{formatCurrency(row.salesDataphoneTotal)}</td>
+                            <td>{formatCurrency(row.topupsTotal)}</td>
+                            <td>{formatCurrency(row.totalIncomeNetTotal)}</td>
+                            <td>{formatCurrency(row.fixedTotal)}</td>
+                            <td>{formatCurrency(row.variableTotal)}</td>
+                            <td>{formatCurrency(row.totalCostsTotal)}</td>
+                            <td>{formatCurrency(row.utilityTotal)}</td>
+                          </tr>,
+                          isExpanded ? (
+                            <tr className="admin-accounting-week-detail-row" key={`${row.weekKey}-detail`}>
+                              <td colSpan={10}>
+                                <div className="approval-history-scroll approval-history-table-scroll admin-accounting-week-detail-wrap">
+                                  <table className="simple-table">
+                                    <thead>
+                                      <tr>
+                                        <th>Día</th>
+                                        <th>Ventas efectivo</th>
+                                        <th>Ventas QR</th>
+                                        <th>Ventas datáfono</th>
+                                        <th>Recargas del día</th>
+                                        <th>Total ingresos netos del día</th>
+                                        <th>Costos fijos</th>
+                                        <th>Costos variables</th>
+                                        <th>Total costos día</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {dailyRows.map((dayRow) => (
+                                        <tr key={`${row.weekKey}-${dayRow.dayLabel}`}>
+                                          <td>{dayRow.dayLabel}</td>
+                                          <td>{formatCurrency(dayRow.salesCashTotal)}</td>
+                                          <td>{formatCurrency(dayRow.salesQrTotal)}</td>
+                                          <td>{formatCurrency(dayRow.salesDataphoneTotal)}</td>
+                                          <td>{formatCurrency(dayRow.topupsTotal)}</td>
+                                          <td>{formatCurrency(dayRow.totalIncomeNetTotal)}</td>
+                                          <td>
+                                            <button
+                                              className="admin-accounting-cost-trigger"
+                                              onClick={() => openAccountingCostDetailModal(dayRow, 'fixed')}
+                                              type="button"
+                                            >
+                                              {formatCurrency(dayRow.fixedTotal)}
+                                            </button>
+                                          </td>
+                                          <td>
+                                            <button
+                                              className="admin-accounting-cost-trigger"
+                                              onClick={() => openAccountingCostDetailModal(dayRow, 'variable')}
+                                              type="button"
+                                            >
+                                              {formatCurrency(dayRow.variableTotal)}
+                                            </button>
+                                          </td>
+                                          <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : null,
+                        ]
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </article>
         </section>
       ) : null}
 
@@ -8074,7 +8250,7 @@ function AdminDashboard() {
 
                       {activeModule === 'modify' ? (
                         <td>
-                          <div className="row gap">
+                          <div className="row gap admin-modify-actions">
                             {editEntity === 'product' ? (
                               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                                 <input

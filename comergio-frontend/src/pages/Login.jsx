@@ -22,12 +22,10 @@ import { consumePostLoginRedirect } from '../lib/postLoginRedirect';
 import { getDefaultRouteByRole } from '../lib/defaultRouteByRole';
 import {
   SCHOOL_OPTIONS,
-  DEFAULT_SCHOOL_ID,
   areSchoolIdsCompatible,
   getSchoolOptionsByCountry,
   normalizeSchoolOptions,
   rememberSchoolOptions,
-  resolveStoredSchoolId,
 } from '../lib/schools';
 
 const DEV_DIRECT_LOGIN_PROFILES = {
@@ -154,9 +152,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const { token, user, setAuth, setUser } = useAuthStore();
   const [schoolOptions, setSchoolOptions] = useState(() => normalizeSchoolOptions(SCHOOL_OPTIONS));
   const [selectedCountry, setSelectedCountry] = useState(() => localStorage.getItem('selectedCountry') || COUNTRY_OPTIONS[0].id);
-  const [selectedSchoolId, setSelectedSchoolId] = useState(() => (
-    resolveStoredSchoolId(localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID, SCHOOL_OPTIONS)
-  ));
+  const [selectedSchoolId, setSelectedSchoolId] = useState('');
   const [schoolSearch, setSchoolSearch] = useState('');
   const [isCountryPickerOpen, setIsCountryPickerOpen] = useState(false);
   const [isSchoolPickerOpen, setIsSchoolPickerOpen] = useState(false);
@@ -198,7 +194,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const filteredSchoolOptions = useMemo(() => {
     const query = normalizeSearchText(schoolSearch);
     if (!query) {
-      return countrySchoolOptions;
+      return [];
     }
 
     return countrySchoolOptions.filter((school) => (
@@ -214,10 +210,6 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
       filteredSchoolOptions,
     })
   ), [schoolSearch, selectedSchoolId, countrySchoolOptions, filteredSchoolOptions]);
-
-  useEffect(() => {
-    setSchoolSearch(selectedSchool?.label || '');
-  }, [selectedSchool?.label]);
 
   useEffect(() => {
     localStorage.setItem('selectedCountry', selectedCountry);
@@ -246,13 +238,12 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
     const onPointerDown = (event) => {
       if (!schoolPickerRef.current?.contains(event.target)) {
         setIsSchoolPickerOpen(false);
-        setSchoolSearch(selectedSchool?.label || '');
       }
     };
 
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [isSchoolPickerOpen, selectedSchool?.label]);
+  }, [isSchoolPickerOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,22 +258,15 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
         const nextSchoolOptions = rememberSchoolOptions(fetchedSchoolOptions.length ? fetchedSchoolOptions : SCHOOL_OPTIONS);
         setSchoolOptions(nextSchoolOptions);
         setSelectedSchoolId((currentSchoolId) => {
-          if (schoolSelectionTouchedRef.current) {
-            if (!currentSchoolId) {
-              return '';
-            }
-
-            if (nextSchoolOptions.some((school) => school.id === currentSchoolId)) {
-              return currentSchoolId;
-            }
-
-            return resolveStoredSchoolId(currentSchoolId, nextSchoolOptions);
+          if (!currentSchoolId) {
+            return '';
           }
 
-          return resolveStoredSchoolId(
-            localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID,
-            nextSchoolOptions
-          );
+          if (nextSchoolOptions.some((school) => school.id === currentSchoolId)) {
+            return currentSchoolId;
+          }
+
+          return '';
         });
       })
       .catch(() => {
@@ -311,15 +295,11 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
   const selectCountryOption = (countryId) => {
     if (countryId !== selectedCountry) {
       setSelectedCountry(countryId);
-      const nextCountrySchools = getSchoolOptionsByCountry(schoolOptions, countryId);
-      const nextSchoolId = resolveStoredSchoolId(localStorage.getItem('selectedSchoolId') || DEFAULT_SCHOOL_ID, nextCountrySchools);
-      setSelectedSchoolId(nextSchoolId);
-      setSchoolSearch(nextCountrySchools.find((school) => school.id === nextSchoolId)?.label || '');
-      if (nextSchoolId) {
-        localStorage.setItem('selectedSchoolId', nextSchoolId);
-      } else {
-        localStorage.removeItem('selectedSchoolId');
-      }
+      schoolSelectionTouchedRef.current = true;
+      setSelectedSchoolId('');
+      setSchoolSearch('');
+      localStorage.removeItem('selectedSchoolId');
+      setIsSchoolPickerOpen(false);
     }
 
     setIsCountryPickerOpen(false);
@@ -837,27 +817,21 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
                 const nextValue = e.target.value;
                 schoolSelectionTouchedRef.current = true;
                 setSchoolSearch(nextValue);
-                setIsSchoolPickerOpen(true);
+                setIsSchoolPickerOpen(Boolean(String(nextValue || '').trim()));
                 if (selectedSchool && normalizeSearchText(nextValue) !== normalizeSearchText(selectedSchool.label)) {
                   setSelectedSchoolId('');
                 }
               }}
-              onFocus={() => setIsSchoolPickerOpen(true)}
-              placeholder="Busca tu colegio"
+              onFocus={() => {
+                if (normalizeSearchText(schoolSearch)) {
+                  setIsSchoolPickerOpen(true);
+                }
+              }}
+              placeholder="Selecciona tu colegio"
               role="combobox"
               spellCheck={false}
               value={schoolSearch}
             />
-            <button
-              aria-label="Mostrar colegios"
-              className={`login-school-combobox-toggle${isSchoolPickerOpen ? ' is-open' : ''}`}
-              onClick={() => setIsSchoolPickerOpen((currentValue) => !currentValue)}
-              type="button"
-            >
-              <svg aria-hidden="true" viewBox="0 0 20 20">
-                <path d="m5 7 5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-              </svg>
-            </button>
             {isSchoolPickerOpen ? (
               <div className="login-school-options" id="login-school-options" role="listbox">
                 {filteredSchoolOptions.length ? filteredSchoolOptions.map((school) => (
@@ -880,7 +854,9 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
                   </button>
                 )) : (
                   <span className="login-school-options-empty">
-                    {countrySchoolOptions.length ? 'No encontramos colegios con ese nombre.' : 'No hay colegios disponibles para este país.'}
+                    {normalizeSearchText(schoolSearch)
+                      ? 'No encontramos un colegio con ese nombre.'
+                      : 'Escribe para buscar tu colegio.'}
                   </span>
                 )}
               </div>

@@ -37,6 +37,9 @@ export default function InstitutionalPortalHeader({
   refreshLabel = 'Actualizar portal',
   enableNotifications = false,
   onNotificationNavigate = null,
+  showNavToggle = false,
+  navOpen = false,
+  onToggleNav,
 }) {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
@@ -151,6 +154,20 @@ export default function InstitutionalPortalHeader({
 
   return (
     <header className="staff-teacher-chrome__topbar institutional-portal-header">
+      {showNavToggle ? (
+        <button
+          aria-controls="staff-portal-nav"
+          aria-expanded={navOpen}
+          aria-label={navOpen ? 'Cerrar menú' : 'Abrir menú'}
+          className="staff-portal-shell__nav-toggle"
+          onClick={onToggleNav}
+          type="button"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+      ) : null}
       <div className="staff-teacher-chrome__topbar-spacer">
         {helperText ? (
           <div className="institutional-portal-header__helper-inline">

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import colibriLogo from '../../assets/colibrisinfondo.png';
 import { isComergioAcademySection } from '../comergio-academy/academyNav';
 import StaffComergioAcademyNav from './StaffComergioAcademyNav';
@@ -16,11 +17,57 @@ export default function StaffPortalShell({
   navItems = [],
   activeKey = '',
   onNavigate,
+  enableMobileNav = false,
+  className = '',
   children,
 }) {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (!enableMobileNav || !mobileNavOpen) {
+      return undefined;
+    }
+
+    const onEscape = (event) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', onEscape);
+    document.body.classList.add('staff-portal-mobile-nav-open');
+    return () => {
+      document.removeEventListener('keydown', onEscape);
+      document.body.classList.remove('staff-portal-mobile-nav-open');
+    };
+  }, [enableMobileNav, mobileNavOpen]);
+
+  const handleNavigate = (key) => {
+    onNavigate?.(key);
+    setMobileNavOpen(false);
+  };
+
   return (
-    <section className="staff-teacher-chrome__frame staff-portal-shell">
-      <aside className="staff-teacher-chrome__rail" aria-label={`Navegación de ${portalLabel}`}>
+    <section
+      className={[
+        'staff-teacher-chrome__frame',
+        'staff-portal-shell',
+        enableMobileNav ? 'staff-portal-shell--mobile-nav' : '',
+        mobileNavOpen ? 'is-nav-open' : '',
+        className,
+      ].filter(Boolean).join(' ')}
+    >
+      {enableMobileNav ? (
+        <button
+          aria-hidden={!mobileNavOpen}
+          aria-label="Cerrar menú"
+          className={`staff-portal-shell__nav-backdrop${mobileNavOpen ? ' is-visible' : ''}`}
+          onClick={() => setMobileNavOpen(false)}
+          tabIndex={mobileNavOpen ? 0 : -1}
+          type="button"
+        />
+      ) : null}
+      <aside className="staff-teacher-chrome__rail" aria-label={`Navegación de ${portalLabel}`} id="staff-portal-nav">
         <div className="staff-teacher-chrome__rail-brand">
           <div className="staff-teacher-chrome__rail-brand-copy">
             <img alt="Comergio" className="staff-teacher-chrome__rail-brand-logo" src={colibriLogo} />
@@ -29,6 +76,16 @@ export default function StaffPortalShell({
               <span>Conectamos tu colegio</span>
             </div>
           </div>
+          {enableMobileNav ? (
+            <button
+              aria-label="Cerrar menú"
+              className="staff-portal-shell__nav-close"
+              onClick={() => setMobileNavOpen(false)}
+              type="button"
+            >
+              ×
+            </button>
+          ) : null}
         </div>
 
         <nav className="staff-teacher-chrome__rail-nav">
@@ -39,7 +96,7 @@ export default function StaffPortalShell({
                 <button
                   key={item.key}
                   className={`staff-teacher-chrome__nav-item${activeKey === item.key ? ' is-active' : ''}`}
-                  onClick={() => onNavigate?.(item.key)}
+                  onClick={() => handleNavigate(item.key)}
                   type="button"
                 >
                   <span className="staff-teacher-chrome__nav-item-label">
@@ -53,7 +110,7 @@ export default function StaffPortalShell({
 
           <StaffComergioAcademyNav
             activeKey={isComergioAcademySection(activeKey) ? activeKey : ''}
-            onSelect={onNavigate}
+            onSelect={handleNavigate}
           />
         </nav>
 
@@ -76,11 +133,14 @@ export default function StaffPortalShell({
       <div className="staff-teacher-chrome__main">
         <StaffTeacherTopbar
           helperText={schoolName}
+          navOpen={mobileNavOpen}
           onLogout={onLogout}
           onRefresh={onRefresh}
+          onToggleNav={enableMobileNav ? () => setMobileNavOpen((current) => !current) : undefined}
           portalKicker={portalLabel}
           refreshDisabled={refreshDisabled}
           refreshLabel={refreshLabel}
+          showNavToggle={enableMobileNav}
           userName={userName}
         />
         <div className="staff-teacher-chrome__workspace">
