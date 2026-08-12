@@ -73,7 +73,7 @@ function POS() {
   const { currentStore, setCurrentStore } = useAuthStore();
   const [query, setQuery] = useState('');
   const [productQuery, setProductQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [allStudents, setAllStudents] = useState([]);
   const [students, setStudents] = useState([]);
   const [student, setStudent] = useState(null);
@@ -180,17 +180,18 @@ function POS() {
       }
     }
 
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    const categoryItems = Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    return [{ id: 'all', name: 'Todos' }, ...categoryItems];
   }, [products]);
 
   useEffect(() => {
-    if (categories.length === 0) {
-      setSelectedCategory('');
+    if (categories.length <= 1) {
+      setSelectedCategory('all');
       return;
     }
 
     if (!selectedCategory || !categories.some((category) => category.id === selectedCategory)) {
-      setSelectedCategory(categories[0].id);
+      setSelectedCategory('all');
     }
   }, [categories, selectedCategory]);
 
@@ -316,16 +317,22 @@ function POS() {
     refreshQueuedOrdersCount();
   };
 
+  const resetAfterSale = () => {
+    setItems([]);
+    setCashTendered('');
+    setSchoolBillingFor('');
+    setSchoolBillingResponsible('');
+    setProductQuery('');
+    setPaymentMethod('system');
+    resetCustomerAfterSale();
+  };
+
   const submitOrder = async (payload, cartSnapshot) => {
     const orderSummary = buildOrderSummaryFromCart(cartSnapshot, payload.paymentMethod);
 
     if (!navigator.onLine) {
       enqueueOfflineOrder(payload, orderSummary);
-      setItems([]);
-      setCashTendered('');
-      setSchoolBillingFor('');
-      setSchoolBillingResponsible('');
-      resetCustomerAfterSale();
+      resetAfterSale();
       setMessage('Sin internet: la orden quedo guardada en caché y se enviará automáticamente al volver la conexión.');
       return;
     }
@@ -349,22 +356,14 @@ function POS() {
         setLastOrderSummary(orderSummary);
       }
 
-      setItems([]);
-      setCashTendered('');
-      setSchoolBillingFor('');
-      setSchoolBillingResponsible('');
-      resetCustomerAfterSale();
+      resetAfterSale();
       setMessage('');
       setShowSuccessPopup(true);
       loadProducts();
     } catch (error) {
       if (isNetworkError(error)) {
         enqueueOfflineOrder(payload, orderSummary);
-        setItems([]);
-        setCashTendered('');
-        setSchoolBillingFor('');
-        setSchoolBillingResponsible('');
-        resetCustomerAfterSale();
+        resetAfterSale();
         setMessage('Internet inestable: la orden quedó en caché y se sincronizará automáticamente.');
       } else {
         setMessage(error?.response?.data?.message || 'No se pudo crear la orden');
@@ -611,7 +610,7 @@ function POS() {
     const queryText = productQuery.trim().toLowerCase();
 
     return products.filter((product) => {
-      const matchesCategory = selectedCategory ? product.categoryId === selectedCategory : false;
+      const matchesCategory = selectedCategory === 'all' || product.categoryId === selectedCategory;
       if (!matchesCategory) {
         return false;
       }
@@ -654,6 +653,8 @@ function POS() {
                 if (paymentMethod === 'system') {
                   setPaymentMethod('cash');
                 }
+              } else {
+                setPaymentMethod('system');
               }
             }}
           />
@@ -771,9 +772,9 @@ function POS() {
         </label>
 
         {productsLoading ? <p>Cargando productos...</p> : null}
-        {!productsLoading && categories.length === 0 ? <p>No hay categorías disponibles</p> : null}
-        {!productsLoading && selectedCategory && filteredProducts.length === 0 ? (
-          <p>No hay productos para esta categoría.</p>
+        {!productsLoading && products.length === 0 ? <p>No hay productos disponibles</p> : null}
+        {!productsLoading && products.length > 0 && filteredProducts.length === 0 ? (
+          <p>{selectedCategory === 'all' ? 'No hay productos para esta búsqueda.' : 'No hay productos para esta categoría.'}</p>
         ) : null}
         {!productsLoading ? (
           <div className="cards cards-compact pos-scroll-area">

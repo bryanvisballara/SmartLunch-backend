@@ -872,6 +872,10 @@ function AdminDashboard() {
     body: '',
     studentId: '',
   });
+  const [promoPushStudentQuery, setPromoPushStudentQuery] = useState('');
+  const [showPromoPushStudentOptions, setShowPromoPushStudentOptions] = useState(false);
+  const [notificationAuditStudentQuery, setNotificationAuditStudentQuery] = useState('');
+  const [showNotificationAuditStudentOptions, setShowNotificationAuditStudentOptions] = useState(false);
 
   const [manualTopup, setManualTopup] = useState({ studentId: '', amount: '', method: 'cash', notes: '' });
   const [topupStudentQuery, setTopupStudentQuery] = useState('');
@@ -1330,11 +1334,14 @@ function AdminDashboard() {
               store: req.storeId,
               targetStore: req.targetStoreId,
               requestedBy: req.requestedBy,
+              createdAt: req.createdAt || null,
               notes: req.notes || '',
               invoiceAmount: req.invoiceAmount,
               supplierName: req.supplierName || req.supplierId?.name || '',
               requests: [],
             };
+          } else if (req.createdAt && (!acc[key].createdAt || new Date(req.createdAt) < new Date(acc[key].createdAt))) {
+            acc[key].createdAt = req.createdAt;
           }
           acc[key].requests.push(req);
           return acc;
@@ -1626,6 +1633,32 @@ function AdminDashboard() {
       return name.includes(query) || schoolCode.includes(query);
     });
   }, [students, salesStudentQuery]);
+
+  const filteredPromoPushStudents = useMemo(() => {
+    const query = String(promoPushStudentQuery || '').trim().toLowerCase();
+    if (!query) {
+      return students;
+    }
+
+    return students.filter((student) => {
+      const name = String(student.name || '').toLowerCase();
+      const schoolCode = String(student.schoolCode || '').toLowerCase();
+      return name.includes(query) || schoolCode.includes(query);
+    });
+  }, [students, promoPushStudentQuery]);
+
+  const filteredNotificationAuditStudents = useMemo(() => {
+    const query = String(notificationAuditStudentQuery || '').trim().toLowerCase();
+    if (!query) {
+      return students;
+    }
+
+    return students.filter((student) => {
+      const name = String(student.name || '').toLowerCase();
+      const schoolCode = String(student.schoolCode || '').toLowerCase();
+      return name.includes(query) || schoolCode.includes(query);
+    });
+  }, [students, notificationAuditStudentQuery]);
 
   const filteredTopupStudents = useMemo(() => {
     const query = String(topupStudentQuery || '').trim().toLowerCase();
@@ -5799,7 +5832,7 @@ function AdminDashboard() {
                   icon: 'cap',
                   label: 'Utilidad teórica',
                   value: homeData?.utilityTheoretical ?? homeData?.utilityTheoreticalMonth ?? homeData?.utilityAccounting,
-                  hint: 'Utilidades - costos fijos - variables',
+                  hint: '(Ventas − costo de productos) − costos fijos',
                 },
                 { tone: 'sky', icon: 'pie', label: 'Costos fijos', value: homeData?.totalFixedCosts },
                 { tone: 'rose', icon: 'trend', label: 'Costos variables', value: homeData?.totalVariableCosts },
@@ -5818,11 +5851,18 @@ function AdminDashboard() {
                   hint: 'Ventas - comisiones QR/datáfono',
                 },
                 {
+                  tone: 'blue',
+                  icon: 'wallet',
+                  label: 'Recargas',
+                  value: homeData?.topupsAccounting ?? homeData?.topupsFiltered,
+                  hint: 'Recargas del rango filtrado',
+                },
+                {
                   tone: 'purple',
                   icon: 'swap',
                   label: 'Ingresos - egresos',
                   value: homeData?.utilityNet ?? homeData?.utilityNetMonth,
-                  hint: 'Ventas netas - costos fijos - variables',
+                  hint: 'Ventas netas + recargas - costos fijos - variables',
                 },
               ].map((metric) => (
                 <div className={`admin-accounting__kpi tone-${metric.tone}`} key={metric.label}>
@@ -6042,7 +6082,7 @@ function AdminDashboard() {
                   </select>
                 </label>
                 {variableCostForm.supplierId === 'other' ? (
-                  <label className="is-grow">
+                  <label className="is-grow is-full">
                     Concepto (otro)
                     <input
                       value={variableCostForm.supplierOtherName}
@@ -6781,19 +6821,54 @@ function AdminDashboard() {
             <form className="admin-form-grid" onSubmit={onSendPromoPush}>
               <label>
                 Destino
-                <select
-                  value={promoPushForm.studentId}
-                  onChange={(event) =>
-                    setPromoPushForm((prev) => ({ ...prev, studentId: event.target.value }))
-                  }
-                >
-                  <option value="">Todos los acudientes del colegio</option>
-                  {students.map((student) => (
-                    <option key={student._id} value={student._id}>
-                      Acudientes de {student.name || 'Alumno'} {student.schoolCode ? `(${student.schoolCode})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <div className="product-picker">
+                  <input
+                    placeholder="Todos los acudientes del colegio"
+                    value={promoPushStudentQuery}
+                    onFocus={() => setShowPromoPushStudentOptions(true)}
+                    onBlur={() => {
+                      setTimeout(() => {
+                        setShowPromoPushStudentOptions(false);
+                      }, 120);
+                    }}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setPromoPushStudentQuery(value);
+                      setPromoPushForm((prev) => ({ ...prev, studentId: '' }));
+                      setShowPromoPushStudentOptions(true);
+                    }}
+                  />
+                  {showPromoPushStudentOptions ? (
+                    <div className="product-picker-menu">
+                      <button
+                        className="product-picker-option"
+                        onMouseDown={() => {
+                          setPromoPushForm((prev) => ({ ...prev, studentId: '' }));
+                          setPromoPushStudentQuery('');
+                          setShowPromoPushStudentOptions(false);
+                        }}
+                        type="button"
+                      >
+                        Todos los acudientes del colegio
+                      </button>
+                      {filteredPromoPushStudents.map((student) => (
+                        <button
+                          className="product-picker-option"
+                          key={student._id}
+                          onMouseDown={() => {
+                            setPromoPushForm((prev) => ({ ...prev, studentId: student._id }));
+                            setPromoPushStudentQuery(`Acudientes de ${student.name || 'Alumno'}${student.schoolCode ? ` (${student.schoolCode})` : ''}`);
+                            setShowPromoPushStudentOptions(false);
+                          }}
+                          type="button"
+                        >
+                          Acudientes de {student.name || 'Alumno'} {student.schoolCode ? `(${student.schoolCode})` : ''}
+                        </button>
+                      ))}
+                      {filteredPromoPushStudents.length === 0 ? <p className="product-picker-empty">Sin coincidencias</p> : null}
+                    </div>
+                  ) : null}
+                </div>
               </label>
               <label>
                 Título del push
@@ -6827,19 +6902,54 @@ function AdminDashboard() {
           <form className="admin-form-grid" onSubmit={onApplyNotificationAuditFilters}>
             <label>
               Alumno
-              <select
-                value={notificationAuditFilters.studentId}
-                onChange={(event) =>
-                  setNotificationAuditFilters((prev) => ({ ...prev, studentId: event.target.value }))
-                }
-              >
-                <option value="">Todos</option>
-                {students.map((student) => (
-                  <option key={student._id} value={student._id}>
-                    {student.name || 'Alumno'} {student.schoolCode ? `(${student.schoolCode})` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="product-picker">
+                <input
+                  placeholder="Todos"
+                  value={notificationAuditStudentQuery}
+                  onFocus={() => setShowNotificationAuditStudentOptions(true)}
+                  onBlur={() => {
+                    setTimeout(() => {
+                      setShowNotificationAuditStudentOptions(false);
+                    }, 120);
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setNotificationAuditStudentQuery(value);
+                    setNotificationAuditFilters((prev) => ({ ...prev, studentId: '' }));
+                    setShowNotificationAuditStudentOptions(true);
+                  }}
+                />
+                {showNotificationAuditStudentOptions ? (
+                  <div className="product-picker-menu">
+                    <button
+                      className="product-picker-option"
+                      onMouseDown={() => {
+                        setNotificationAuditFilters((prev) => ({ ...prev, studentId: '' }));
+                        setNotificationAuditStudentQuery('');
+                        setShowNotificationAuditStudentOptions(false);
+                      }}
+                      type="button"
+                    >
+                      Todos
+                    </button>
+                    {filteredNotificationAuditStudents.map((student) => (
+                      <button
+                        className="product-picker-option"
+                        key={student._id}
+                        onMouseDown={() => {
+                          setNotificationAuditFilters((prev) => ({ ...prev, studentId: student._id }));
+                          setNotificationAuditStudentQuery(`${student.name || 'Alumno'}${student.schoolCode ? ` (${student.schoolCode})` : ''}`);
+                          setShowNotificationAuditStudentOptions(false);
+                        }}
+                        type="button"
+                      >
+                        {student.name || 'Alumno'} {student.schoolCode ? `(${student.schoolCode})` : ''}
+                      </button>
+                    ))}
+                    {filteredNotificationAuditStudents.length === 0 ? <p className="product-picker-empty">Sin coincidencias</p> : null}
+                  </div>
+                ) : null}
+              </div>
             </label>
             <label>
               Tipo
@@ -9351,6 +9461,7 @@ function AdminDashboard() {
             <div className="card" key={group.key}>
               <p>Tienda: {group.store?.name || 'N/A'} {group.targetStore?.name ? `-> ${group.targetStore.name}` : ''}</p>
               <p>Solicitado por: {group.requestedBy?.name || 'N/A'}</p>
+              <p>Solicitada el: {formatDateTime(group.createdAt)}</p>
               {group.type === 'in' && Number(group.invoiceAmount) > 0 ? (
                 <p>
                   Factura: {formatCurrency(group.invoiceAmount)}
@@ -9389,6 +9500,7 @@ function AdminDashboard() {
                   <p>Alumno: {request.studentId?.name || 'N/A'}</p>
                   <p>Monto: {formatCurrency(request.amount)}</p>
                   <p>Método: {request.method}</p>
+                  <p>Solicitada el: {formatDateTime(request.createdAt || request.requestDate)}</p>
                   <p>Observaciones: {request.notes || 'Sin observaciones'}</p>
                   <div className="row gap">
                     <button className="btn btn-primary" onClick={() => onApproveTopup(request._id)} type="button">Aprobar</button>
@@ -9404,6 +9516,7 @@ function AdminDashboard() {
                   <p>Orden: {request.orderId?._id || request.orderId}</p>
                   <p>Alumno: {request.orderId?.studentId?.name || 'Venta externa'}</p>
                   <p>Total: {formatCurrency(request.orderId?.total || 0)}</p>
+                  <p>Solicitada el: {formatDateTime(request.createdAt)}</p>
                   <p>Motivo: {request.reason || 'Sin motivo'}</p>
                   <div className="row gap">
                     <button className="btn btn-primary" onClick={() => onApproveCancellation(request._id)} type="button">Aprobar</button>
@@ -9417,7 +9530,7 @@ function AdminDashboard() {
             ? pendingGradePromotions.map((request) => (
                 <div className="card" key={request._id}>
                   <p>Solicitado por: {request.requestedByName || 'Secretaría académica'}</p>
-                  <p>Fecha: {formatDateTime(request.requestedAt)}</p>
+                  <p>Solicitada el: {formatDateTime(request.requestedAt || request.createdAt)}</p>
                   <p>Total alumnos: {request.totalStudents || 0}</p>
                   <p>Promocionables: {request.promotableStudents || 0}</p>
                   <p>Omitidos: {request.skippedStudents || 0}</p>

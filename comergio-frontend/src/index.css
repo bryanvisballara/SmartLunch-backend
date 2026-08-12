@@ -7056,13 +7056,36 @@ body.login-boot-active main.container {
 
 .admin-accounting__inline-form.is-costs-fixed,
 .admin-accounting__inline-form.is-costs-variable {
-  grid-template-columns: minmax(140px, 0.9fr) minmax(220px, 1.5fr) minmax(120px, 0.8fr) minmax(140px, 0.9fr) auto;
+  width: 100%;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
+  align-items: stretch;
+  align-self: stretch;
+}
+
+.admin-accounting__inline-form.is-costs-fixed > label:nth-child(3),
+.admin-accounting__inline-form.is-costs-variable > label:nth-child(3),
+.admin-accounting__inline-form.is-costs-fixed > label:nth-child(4),
+.admin-accounting__inline-form.is-costs-variable > label:nth-child(4) {
+  min-width: 0;
+}
+
+.admin-accounting__inline-form.is-costs-fixed .admin-accounting__save-btn,
+.admin-accounting__inline-form.is-costs-variable .admin-accounting__save-btn {
+  grid-column: 1 / -1;
+  width: 100%;
+  justify-self: stretch;
 }
 
 .admin-accounting__costs-grid {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.admin-accounting__costs-grid > .admin-accounting__panel {
+  min-width: 0;
+  align-content: start;
 }
 
 .admin-accounting__cost-totals.is-single {
@@ -7071,6 +7094,11 @@ body.login-boot-active main.container {
 
 .admin-accounting__inline-form .is-grow {
   min-width: 0;
+}
+
+.admin-accounting__inline-form.is-costs-fixed .is-full,
+.admin-accounting__inline-form.is-costs-variable .is-full {
+  grid-column: 1 / -1;
 }
 
 .admin-accounting__affix-field {
@@ -7186,6 +7214,18 @@ body.login-boot-active main.container {
 .admin-accounting__cost-list {
   display: grid;
   gap: 0.55rem;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.admin-accounting__costs-grid .admin-accounting__empty {
+  margin: 0;
+  padding: 0.95rem 1rem;
+  border: 1px dashed #d7dee8;
+  border-radius: 0.85rem;
+  background: #f8fafc;
+  text-align: center;
 }
 
 .admin-accounting__cost-row {
@@ -7296,15 +7336,23 @@ body.login-boot-active main.container {
   }
 
   .admin-accounting__inline-form,
-  .admin-accounting__inline-form.is-costs,
+  .admin-accounting__inline-form.is-costs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-accounting__inline-form.is-costs-fixed,
   .admin-accounting__inline-form.is-costs-variable {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.35fr);
   }
 
   .admin-accounting__save-btn {
     grid-column: 1 / -1;
     justify-self: start;
+  }
+
+  .admin-accounting__inline-form.is-costs-fixed .admin-accounting__save-btn,
+  .admin-accounting__inline-form.is-costs-variable .admin-accounting__save-btn {
+    justify-self: stretch;
   }
 
   .admin-accounting__split {

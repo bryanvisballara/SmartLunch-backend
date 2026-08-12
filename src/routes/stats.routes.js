@@ -1310,8 +1310,9 @@ router.get('/admin-home', async (req, res) => {
       return sum;
     }, 0);
     const salesMonthNetTotal = salesAccountingTotal - paymentFeesMonthTotal;
-    const utilityTheoreticalMonth = Number(utilityAccounting || 0) - totalFixedCosts - totalVariableCosts;
-    const utilityNetMonth = salesMonthNetTotal - totalFixedCosts - totalVariableCosts;
+    const topupsAccountingTotal = (topupsRaw || []).reduce((sum, topup) => sum + Number(topup?.amount || 0), 0);
+    const utilityTheoreticalMonth = Number(utilityAccounting || 0) - totalFixedCosts;
+    const utilityNetMonth = salesMonthNetTotal + topupsAccountingTotal - totalFixedCosts - totalVariableCosts;
     const aiRecommendations = buildAiRecommendations({
       topStudents: topStudentsRaw,
       lowStockProducts,
@@ -1337,6 +1338,7 @@ router.get('/admin-home', async (req, res) => {
       salesAccounting: salesAccountingTotal,
       salesMonthNet: salesMonthNetTotal,
       salesNet: salesMonthNetTotal,
+      topupsAccounting: topupsAccountingTotal,
       paymentFeesMonthTotal,
       paymentFeesTotal: paymentFeesMonthTotal,
       utilityToday,
