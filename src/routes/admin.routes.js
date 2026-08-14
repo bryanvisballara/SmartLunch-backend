@@ -301,6 +301,61 @@ function monthKeyFromDate(date) {
   return `${year}-${month}`;
 }
 
+async function resolveCostSupplierFields({
+  schoolId,
+  type,
+  name,
+  supplierId = null,
+  supplierOtherName = '',
+}) {
+  let normalizedName = String(name || '').trim();
+  let normalizedSupplierId = null;
+  let normalizedSupplierName = '';
+  const normalizedType = String(type || '').trim().toLowerCase();
+
+  if (normalizedType !== 'variable') {
+    return { normalizedName, normalizedSupplierId, normalizedSupplierName };
+  }
+
+  const supplierIdText = String(supplierId || '').trim();
+  const supplierOtherText = String(supplierOtherName || '').trim();
+
+  if (supplierIdText && supplierIdText !== 'other') {
+    if (!mongoose.Types.ObjectId.isValid(supplierIdText)) {
+      const error = new Error('Invalid supplierId');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const foundSupplier = await Supplier.findOne({
+      _id: supplierIdText,
+      schoolId,
+      deletedAt: null,
+    }).select('_id name').lean();
+
+    if (!foundSupplier) {
+      const error = new Error('Supplier not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    normalizedSupplierId = foundSupplier._id;
+    normalizedSupplierName = String(foundSupplier.name || '').trim();
+    normalizedName = normalizedSupplierName || normalizedName;
+  } else if (supplierIdText === 'other') {
+    if (!supplierOtherText) {
+      const error = new Error('supplierOtherName is required when supplier is other');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    normalizedSupplierName = supplierOtherText;
+    normalizedName = supplierOtherText;
+  }
+
+  return { normalizedName, normalizedSupplierId, normalizedSupplierName };
+}
+
 function normalizeObjectIdList(values = []) {
   if (!Array.isArray(values)) {
     return [];
@@ -899,41 +954,20 @@ router.post('/fixed-costs', async (req, res) => {
       return res.status(400).json({ message: 'Invalid type. Use fixed or variable' });
     }
 
-    let normalizedName = String(name || '').trim();
-    let normalizedSupplierId = null;
-    let normalizedSupplierName = '';
-
-    if (normalizedType === 'variable') {
-      const supplierIdText = String(supplierId || '').trim();
-      const supplierOtherText = String(supplierOtherName || '').trim();
-
-      if (supplierIdText && supplierIdText !== 'other') {
-        if (!mongoose.Types.ObjectId.isValid(supplierIdText)) {
-          return res.status(400).json({ message: 'Invalid supplierId' });
-        }
-
-        const foundSupplier = await Supplier.findOne({
-          _id: supplierIdText,
-          schoolId,
-          deletedAt: null,
-        }).select('_id name').lean();
-
-        if (!foundSupplier) {
-          return res.status(404).json({ message: 'Supplier not found' });
-        }
-
-        normalizedSupplierId = foundSupplier._id;
-        normalizedSupplierName = String(foundSupplier.name || '').trim();
-        normalizedName = normalizedSupplierName || normalizedName;
-      } else if (supplierIdText === 'other') {
-        if (!supplierOtherText) {
-          return res.status(400).json({ message: 'supplierOtherName is required when supplier is other' });
-        }
-
-        normalizedSupplierName = supplierOtherText;
-        normalizedName = supplierOtherText;
-      }
+    let resolvedSupplier;
+    try {
+      resolvedSupplier = await resolveCostSupplierFields({
+        schoolId,
+        type: normalizedType,
+        name,
+        supplierId,
+        supplierOtherName,
+      });
+    } catch (resolveError) {
+      return res.status(resolveError.statusCode || 400).json({ message: resolveError.message });
     }
+
+    const { normalizedName, normalizedSupplierId, normalizedSupplierName } = resolvedSupplier;
 
     if (!normalizedName) {
       return res.status(400).json({ message: 'name is required' });
@@ -961,6 +995,8 @@ router.post('/fixed-costs', async (req, res) => {
       weekStart: normalizedWeekStart,
       monthKey: monthKeyFromDate(normalizedEffectiveDate),
       status: 'active',
+      paid: false,
+      paidAt: null,
     });
 
     const populated = await FixedCost.findById(fixedCost._id)
@@ -968,6 +1004,100 @@ router.post('/fixed-costs', async (req, res) => {
       .populate('supplierId', 'name')
       .lean();
     return res.status(201).json(populated);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/fixed-costs/:id', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const cost = await FixedCost.findOne({
+      _id: req.params.id,
+      schoolId,
+      deletedAt: null,
+    });
+
+    if (!cost) {
+      return res.status(404).json({ message: 'Fixed cost not found' });
+    }
+
+    const updates = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'paid')) {
+      const nextPaid = req.body.paid === true || req.body.paid === 'true' || req.body.paid === 1 || req.body.paid === '1';
+      updates.paid = nextPaid;
+      updates.paidAt = nextPaid ? (cost.paidAt || new Date()) : null;
+    }
+
+    if (req.body?.amount !== undefined) {
+      if (Number(req.body.amount) < 0) {
+        return res.status(400).json({ message: 'amount must be >= 0' });
+      }
+      updates.amount = Number(req.body.amount || 0);
+    }
+
+    if (req.body?.storeId !== undefined) {
+      const nextStoreId = String(req.body.storeId || '').trim();
+      updates.storeId = nextStoreId || null;
+    }
+
+    if (req.body?.weekStart !== undefined) {
+      const normalizedEffectiveDate = normalizeBogotaDate(req.body.weekStart);
+      if (!normalizedEffectiveDate) {
+        return res.status(400).json({ message: 'Invalid weekStart date' });
+      }
+
+      const normalizedWeekStart = toBogotaWeekStartDate(normalizedEffectiveDate);
+      if (!normalizedWeekStart) {
+        return res.status(400).json({ message: 'Invalid weekStart date' });
+      }
+
+      updates.effectiveDate = normalizedEffectiveDate;
+      updates.weekStart = normalizedWeekStart;
+      updates.monthKey = monthKeyFromDate(normalizedEffectiveDate);
+    }
+
+    const hasSupplierUpdate = req.body?.supplierId !== undefined || req.body?.supplierOtherName !== undefined || req.body?.name !== undefined;
+    if (hasSupplierUpdate) {
+      let resolvedSupplier;
+      try {
+        resolvedSupplier = await resolveCostSupplierFields({
+          schoolId,
+          type: cost.type,
+          name: req.body?.name !== undefined ? req.body.name : cost.name,
+          supplierId: req.body?.supplierId !== undefined ? req.body.supplierId : (cost.supplierId || (cost.supplierName ? 'other' : null)),
+          supplierOtherName: req.body?.supplierOtherName !== undefined ? req.body.supplierOtherName : (cost.supplierName || ''),
+        });
+      } catch (resolveError) {
+        return res.status(resolveError.statusCode || 400).json({ message: resolveError.message });
+      }
+
+      if (!resolvedSupplier.normalizedName) {
+        return res.status(400).json({ message: 'name is required' });
+      }
+
+      updates.name = resolvedSupplier.normalizedName;
+      if (String(cost.type || 'fixed') === 'variable') {
+        updates.supplierId = resolvedSupplier.normalizedSupplierId;
+        updates.supplierName = resolvedSupplier.normalizedSupplierName;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'No fields to update' });
+    }
+
+    const updated = await FixedCost.findOneAndUpdate(
+      { _id: cost._id, schoolId, deletedAt: null },
+      { $set: updates },
+      { new: true }
+    )
+      .populate('storeId', 'name')
+      .populate('supplierId', 'name')
+      .lean();
+
+    return res.status(200).json(updated);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

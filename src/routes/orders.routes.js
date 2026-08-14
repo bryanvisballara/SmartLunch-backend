@@ -24,6 +24,29 @@ const {
 } = require('../utils/schoolBillingStatementDocument');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
 
+const PAYMENT_METHOD_FILTER_ALIASES = {
+  cash: ['cash'],
+  qr: ['qr'],
+  dataphone: ['dataphone'],
+  bold: ['bold', 'bold_auto_debit'],
+  epayco: ['epayco', 'epayco_auto_debit'],
+  system: ['system'],
+  school_billing: ['school_billing'],
+  transfer: ['transfer'],
+  daviplata: ['daviplata'],
+  bancolombia: ['bancolombia'],
+};
+
+function paymentMethodFilterValue(rawValue) {
+  const selected = String(rawValue || '').trim().toLowerCase();
+  if (!selected) {
+    return null;
+  }
+
+  const aliases = PAYMENT_METHOD_FILTER_ALIASES[selected] || [selected];
+  return aliases.length === 1 ? aliases[0] : { $in: aliases };
+}
+
 const router = express.Router();
 
 router.use(authMiddleware);
@@ -829,7 +852,10 @@ router.get('/', async (req, res) => {
     }
 
     if (paymentMethod) {
-      filter.paymentMethod = String(paymentMethod);
+      const methodFilter = paymentMethodFilterValue(paymentMethod);
+      if (methodFilter) {
+        filter.paymentMethod = methodFilter;
+      }
     }
 
     if (from || to) {

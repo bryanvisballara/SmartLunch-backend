@@ -10,6 +10,7 @@ export const getAiInsights = (params = {}) => api.get('/stats/ai-insights', { pa
 export const askAiInsights = (data) => api.post('/stats/ai-insights/ask', data);
 export const getAdminFixedCosts = (params = {}) => api.get('/admin/fixed-costs', { params });
 export const createAdminFixedCost = (data) => api.post('/admin/fixed-costs', data);
+export const updateAdminFixedCost = (id, data) => api.patch(`/admin/fixed-costs/${id}`, data);
 export const deleteAdminFixedCost = (id) => api.delete(`/admin/fixed-costs/${id}`);
 export const getAdminAccountingFees = () => api.get('/admin/accounting-fees');
 export const saveAdminAccountingFees = (data) => api.put('/admin/accounting-fees', data);

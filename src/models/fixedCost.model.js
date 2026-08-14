@@ -13,6 +13,8 @@ const fixedCostSchema = new mongoose.Schema(
     weekStart: { type: Date, required: true },
     monthKey: { type: String, required: true, trim: true, index: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+    paid: { type: Boolean, default: false, index: true },
+    paidAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true }

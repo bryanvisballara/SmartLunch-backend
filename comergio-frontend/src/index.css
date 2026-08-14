@@ -7071,9 +7071,42 @@ body.login-boot-active main.container {
 
 .admin-accounting__inline-form.is-costs-fixed .admin-accounting__save-btn,
 .admin-accounting__inline-form.is-costs-variable .admin-accounting__save-btn {
-  grid-column: 1 / -1;
+  grid-column: auto;
   width: 100%;
   justify-self: stretch;
+}
+
+.admin-accounting__form-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.admin-accounting__cost-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.9fr);
+  gap: 0.75rem;
+}
+
+.admin-accounting__cost-filters label {
+  display: grid;
+  gap: 0.35rem;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-accounting__cost-filters input,
+.admin-accounting__cost-filters select {
+  min-height: 2.55rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #d7dee8;
+  border-radius: 0.8rem;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  min-width: 0;
 }
 
 .admin-accounting__costs-grid {
@@ -7090,6 +7123,14 @@ body.login-boot-active main.container {
 
 .admin-accounting__cost-totals.is-single {
   grid-template-columns: 1fr;
+}
+
+.admin-accounting__cost-totals.is-summary {
+  grid-template-columns: 1fr 1fr;
+}
+
+.admin-accounting__cost-totals.is-summary > div:first-child {
+  grid-column: 1 / -1;
 }
 
 .admin-accounting__inline-form .is-grow {
@@ -7214,7 +7255,7 @@ body.login-boot-active main.container {
 .admin-accounting__cost-list {
   display: grid;
   gap: 0.55rem;
-  max-height: 280px;
+  max-height: 360px;
   overflow: auto;
   padding-right: 0.15rem;
 }
@@ -7231,12 +7272,22 @@ body.login-boot-active main.container {
 .admin-accounting__cost-row {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
   padding: 0.75rem 0.85rem;
   border: 1px solid #e8edf4;
   border-radius: 0.85rem;
   background: #fbfcfe;
+}
+
+.admin-accounting__cost-row.is-paid {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.admin-accounting__cost-row.is-unpaid {
+  background: #fff7ed;
+  border-color: #fed7aa;
 }
 
 .admin-accounting__cost-row strong,
@@ -7253,6 +7304,41 @@ body.login-boot-active main.container {
   margin-top: 0.2rem;
   color: #94a3b8;
   font-size: 0.74rem;
+}
+
+.admin-accounting__cost-status {
+  display: inline-flex;
+  margin-top: 0.45rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.admin-accounting__cost-status.is-paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.admin-accounting__cost-status.is-unpaid {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.admin-accounting__cost-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  flex: 0 1 auto;
+  max-width: 16rem;
+}
+
+.admin-accounting__cost-row-actions .btn {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.65rem;
+  white-space: nowrap;
 }
 
 .admin-accounting-week-toggle {
@@ -7368,8 +7454,23 @@ body.login-boot-active main.container {
   .admin-accounting__inline-form.is-costs,
   .admin-accounting__inline-form.is-costs-fixed,
   .admin-accounting__inline-form.is-costs-variable,
-  .admin-accounting__cost-totals {
+  .admin-accounting__cost-totals,
+  .admin-accounting__cost-totals.is-summary,
+  .admin-accounting__cost-filters {
     grid-template-columns: 1fr;
+  }
+
+  .admin-accounting__cost-row {
+    flex-direction: column;
+  }
+
+  .admin-accounting__cost-row-actions {
+    max-width: none;
+    width: 100%;
+  }
+
+  .admin-accounting__cost-row-actions .btn {
+    flex: 1 1 calc(50% - 0.4rem);
   }
 }
 

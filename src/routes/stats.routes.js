@@ -712,6 +712,7 @@ router.get('/admin-home', async (req, res) => {
         .lean(),
       FixedCost.find(fixedCostFilter)
         .populate('storeId', 'name')
+        .populate('supplierId', 'name')
         .sort({ createdAt: -1 })
         .lean(),
       Product.find(inventoryFilter)

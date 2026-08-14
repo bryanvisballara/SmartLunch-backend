@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   createAdminFixedCost,
+  updateAdminFixedCost,
   getAdminAccountingFees,
   createAdminCategory,
   createAdminProduct,
@@ -100,6 +101,61 @@ import { isComergioAcademySection } from '../components/comergio-academy/academy
 const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
 
+const toCostDateInput = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(0, 10);
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isCostPaid = (item) => Boolean(item?.paid || item?.paidAt);
+
+const getCostStoreId = (item) => String(item?.storeId?._id || item?.storeId || '');
+
+const getCostSupplierKey = (item) => {
+  const supplierId = item?.supplierId?._id || item?.supplierId;
+  if (supplierId) {
+    return String(supplierId);
+  }
+
+  const name = String(item?.supplierName || item?.name || '').trim().toLowerCase();
+  return name ? `name:${name}` : '';
+};
+
+const getCostSupplierLabel = (item) => (
+  item?.supplierId?.name || item?.supplierName || item?.name || 'Sin proveedor'
+);
+
+const summarizeCosts = (items = []) => {
+  return (items || []).reduce(
+    (acc, item) => {
+      const amount = Number(item?.amount || 0);
+      acc.total += amount;
+      if (isCostPaid(item)) {
+        acc.paid += amount;
+      } else {
+        acc.unpaid += amount;
+      }
+      return acc;
+    },
+    { total: 0, paid: 0, unpaid: 0, count: (items || []).length }
+  );
+};
+
 const formatDescriptionForTwoLines = (value) => {
   const description = String(value || '').trim();
   if (!description) {
@@ -144,6 +200,41 @@ const paymentMethodLabel = {
   mercadopago_auto_debit: 'Mercado Pago auto',
   bold_auto_debit: 'Bold auto',
   epayco_auto_debit: 'ePayco auto',
+};
+
+const HISTORY_PAYMENT_METHOD_OPTIONS = [
+  { value: '', label: 'Todos' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'qr', label: 'QR' },
+  { value: 'dataphone', label: 'Datáfono' },
+  { value: 'bold', label: 'Bold' },
+  { value: 'epayco', label: 'ePayco' },
+  { value: 'system', label: 'Sistema' },
+  { value: 'school_billing', label: 'Cuenta de cobro colegio' },
+];
+
+const PAYMENT_METHOD_FILTER_ALIASES = {
+  cash: ['cash'],
+  qr: ['qr'],
+  dataphone: ['dataphone'],
+  bold: ['bold', 'bold_auto_debit'],
+  epayco: ['epayco', 'epayco_auto_debit'],
+  system: ['system'],
+  school_billing: ['school_billing'],
+  transfer: ['transfer'],
+  daviplata: ['daviplata'],
+  bancolombia: ['bancolombia'],
+};
+
+const matchesPaymentMethodFilter = (value, filter) => {
+  const selected = String(filter || '').trim().toLowerCase();
+  if (!selected) {
+    return true;
+  }
+
+  const method = String(value || '').trim().toLowerCase();
+  const aliases = PAYMENT_METHOD_FILTER_ALIASES[selected] || [selected];
+  return aliases.includes(method);
 };
 
 const pushTypeLabel = {
@@ -900,6 +991,12 @@ function AdminDashboard() {
     storeId: '',
     weekStart: currentDateIso(),
   });
+  const [editingCostId, setEditingCostId] = useState('');
+  const [editingCostType, setEditingCostType] = useState('');
+  const [fixedCostQuery, setFixedCostQuery] = useState('');
+  const [fixedCostPaidFilter, setFixedCostPaidFilter] = useState('all');
+  const [variableCostSupplierFilter, setVariableCostSupplierFilter] = useState('');
+  const [variableCostPaidFilter, setVariableCostPaidFilter] = useState('all');
   const [accountingFeeForm, setAccountingFeeForm] = useState({
     dataphonePercent: '0',
     dataphoneFixedFee: '0',
@@ -1660,6 +1757,56 @@ function AdminDashboard() {
     });
   }, [students, notificationAuditStudentQuery]);
 
+  const filteredFixedCosts = useMemo(() => {
+    const query = String(fixedCostQuery || '').trim().toLowerCase();
+    return (homeData?.fixedCosts || []).filter((item) => {
+      if (fixedCostPaidFilter === 'paid' && !isCostPaid(item)) {
+        return false;
+      }
+      if (fixedCostPaidFilter === 'unpaid' && isCostPaid(item)) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const name = String(item?.name || '').toLowerCase();
+      const storeName = String(item?.storeId?.name || '').toLowerCase();
+      return name.includes(query) || storeName.includes(query);
+    });
+  }, [homeData?.fixedCosts, fixedCostQuery, fixedCostPaidFilter]);
+
+  const filteredVariableCosts = useMemo(() => {
+    return (homeData?.variableCosts || []).filter((item) => {
+      if (variableCostPaidFilter === 'paid' && !isCostPaid(item)) {
+        return false;
+      }
+      if (variableCostPaidFilter === 'unpaid' && isCostPaid(item)) {
+        return false;
+      }
+      if (!variableCostSupplierFilter) {
+        return true;
+      }
+      return getCostSupplierKey(item) === String(variableCostSupplierFilter);
+    });
+  }, [homeData?.variableCosts, variableCostPaidFilter, variableCostSupplierFilter]);
+
+  const variableCostSupplierOptions = useMemo(() => {
+    const map = new Map();
+    (homeData?.variableCosts || []).forEach((item) => {
+      const key = getCostSupplierKey(item);
+      if (!key || map.has(key)) {
+        return;
+      }
+      map.set(key, getCostSupplierLabel(item));
+    });
+    return Array.from(map.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label), 'es'));
+  }, [homeData?.variableCosts]);
+
+  const filteredFixedCostTotals = useMemo(() => summarizeCosts(filteredFixedCosts), [filteredFixedCosts]);
+  const filteredVariableCostTotals = useMemo(() => summarizeCosts(filteredVariableCosts), [filteredVariableCosts]);
+
   const filteredTopupStudents = useMemo(() => {
     const query = String(topupStudentQuery || '').trim().toLowerCase();
     if (!query) {
@@ -2266,6 +2413,9 @@ function AdminDashboard() {
         if (toDate && createdAt && createdAt > toDate) {
           return false;
         }
+        if (!matchesPaymentMethodFilter(item.method, salesFilters.paymentMethod)) {
+          return false;
+        }
         return true;
       })
       .map((item) => ({
@@ -2282,7 +2432,7 @@ function AdminDashboard() {
         requestedBy: item.createdBy?.name || 'N/A',
         _id: item._id,
       }));
-  }, [topupHistory, salesFilters.studentId, salesFilters.from, salesFilters.to]);
+  }, [topupHistory, salesFilters.studentId, salesFilters.from, salesFilters.to, salesFilters.paymentMethod]);
 
   const historyRows = useMemo(() => {
     return historyType === 'sales' ? salesRows : topupRows;
@@ -2539,13 +2689,12 @@ function AdminDashboard() {
       setSuppliers(suppliersRes.data || []);
 
       const firstStoreId = storesRes.data?.[0]?._id || '';
-      setClosureFilters((prev) => ({ ...prev, storeId: prev.storeId || firstStoreId }));
       setInventoryForm((prev) => ({ ...prev, storeId: prev.storeId || firstStoreId }));
 
       const secondaryLoads = await Promise.allSettled([
         loadApprovals(),
         loadOrders(),
-        loadClosures({ storeId: firstStoreId }),
+        loadClosures({ storeId: '', date: closureFilters.date }),
         loadHomepage(homeStoreId),
         loadMeriendasData(),
         loadMeriendasOperationsMonth(meriendasMonth),
@@ -2690,9 +2839,23 @@ function AdminDashboard() {
     }
   };
 
-  const loadTopupHistory = async () => {
+  const loadTopupHistory = async (filters = salesFilters) => {
+    const params = {};
+    if (filters.studentId) {
+      params.studentId = filters.studentId;
+    }
+    if (filters.from) {
+      params.from = filters.from;
+    }
+    if (filters.to) {
+      params.to = filters.to;
+    }
+    if (filters.paymentMethod) {
+      params.method = filters.paymentMethod;
+    }
+
     try {
-      const response = await getRechargeTransactions();
+      const response = await getRechargeTransactions(params);
       setTopupHistory(response.data || []);
       return;
     } catch {
@@ -2913,12 +3076,15 @@ function AdminDashboard() {
   }, [schoolBillingOrders, consolidatedBillingFilters.from, consolidatedBillingFilters.to]);
 
   const loadClosures = async (filters = closureFilters) => {
-    if (!filters.storeId) {
-      setClosures([]);
-      return;
+    const params = {};
+    if (filters.storeId) {
+      params.storeId = filters.storeId;
+    }
+    if (filters.date) {
+      params.date = filters.date;
     }
 
-    const response = await getDailyClosures(filters);
+    const response = await getDailyClosures(params);
     setClosures(response.data || []);
   };
 
@@ -3817,35 +3983,66 @@ function AdminDashboard() {
     );
   };
 
+  const reloadAccountingCosts = async () => {
+    await loadHomepage(
+      homeStoreId,
+      accountingMonthFilter,
+      homeDateFrom,
+      homeDateTo,
+      accountingDateFrom,
+      accountingDateTo,
+    );
+  };
+
+  const resetFixedCostForm = () => {
+    setFixedCostForm((prev) => ({
+      ...prev,
+      name: '',
+      amount: '',
+      storeId: '',
+      weekStart: currentDateIso(),
+    }));
+    if (editingCostType === 'fixed') {
+      setEditingCostId('');
+      setEditingCostType('');
+    }
+  };
+
+  const resetVariableCostForm = () => {
+    setVariableCostForm((prev) => ({
+      ...prev,
+      name: '',
+      supplierId: '',
+      supplierOtherName: '',
+      amount: '',
+      storeId: '',
+      weekStart: currentDateIso(),
+    }));
+    if (editingCostType === 'variable') {
+      setEditingCostId('');
+      setEditingCostType('');
+    }
+  };
+
   const onCreateFixedCost = (event) => {
     event.preventDefault();
+    const isEditing = Boolean(editingCostId) && editingCostType === 'fixed';
+    const payload = {
+      name: fixedCostForm.name,
+      supplierId: null,
+      supplierOtherName: '',
+      amount: Number(fixedCostForm.amount || 0),
+      storeId: fixedCostForm.storeId || null,
+      type: 'fixed',
+      weekStart: fixedCostForm.weekStart,
+    };
 
     runAction(
-      () =>
-        createAdminFixedCost({
-          name: fixedCostForm.name,
-          supplierId: null,
-          supplierOtherName: '',
-          amount: Number(fixedCostForm.amount || 0),
-          storeId: fixedCostForm.storeId || null,
-          type: 'fixed',
-          weekStart: fixedCostForm.weekStart,
-        }),
-      'Costo fijo guardado.',
+      () => (isEditing ? updateAdminFixedCost(editingCostId, payload) : createAdminFixedCost(payload)),
+      isEditing ? 'Costo fijo actualizado.' : 'Costo fijo guardado.',
       async () => {
-        setFixedCostForm((prev) => ({
-          ...prev,
-          name: '',
-          amount: '',
-        }));
-        await loadHomepage(
-          homeStoreId,
-          accountingMonthFilter,
-          homeDateFrom,
-          homeDateTo,
-          accountingDateFrom,
-          accountingDateTo,
-        );
+        resetFixedCostForm();
+        await reloadAccountingCosts();
       }
     );
   };
@@ -3864,37 +4061,25 @@ function AdminDashboard() {
     }
 
     const selectedSupplier = suppliers.find((item) => String(item._id) === String(variableCostForm.supplierId));
+    const isEditing = Boolean(editingCostId) && editingCostType === 'variable';
+    const payload = {
+      name: variableCostForm.supplierId === 'other'
+        ? variableCostForm.supplierOtherName
+        : (selectedSupplier?.name || variableCostForm.name),
+      supplierId: variableCostForm.supplierId !== 'other' ? variableCostForm.supplierId : 'other',
+      supplierOtherName: variableCostForm.supplierId === 'other' ? variableCostForm.supplierOtherName : '',
+      amount: Number(variableCostForm.amount || 0),
+      storeId: variableCostForm.storeId || null,
+      type: 'variable',
+      weekStart: variableCostForm.weekStart,
+    };
 
     runAction(
-      () =>
-        createAdminFixedCost({
-          name: variableCostForm.supplierId === 'other'
-            ? variableCostForm.supplierOtherName
-            : (selectedSupplier?.name || variableCostForm.name),
-          supplierId: variableCostForm.supplierId !== 'other' ? variableCostForm.supplierId : null,
-          supplierOtherName: variableCostForm.supplierId === 'other' ? variableCostForm.supplierOtherName : '',
-          amount: Number(variableCostForm.amount || 0),
-          storeId: variableCostForm.storeId || null,
-          type: 'variable',
-          weekStart: variableCostForm.weekStart,
-        }),
-      'Costo variable guardado.',
+      () => (isEditing ? updateAdminFixedCost(editingCostId, payload) : createAdminFixedCost(payload)),
+      isEditing ? 'Costo variable actualizado.' : 'Costo variable guardado.',
       async () => {
-        setVariableCostForm((prev) => ({
-          ...prev,
-          name: '',
-          supplierId: '',
-          supplierOtherName: '',
-          amount: '',
-        }));
-        await loadHomepage(
-          homeStoreId,
-          accountingMonthFilter,
-          homeDateFrom,
-          homeDateTo,
-          accountingDateFrom,
-          accountingDateTo,
-        );
+        resetVariableCostForm();
+        await reloadAccountingCosts();
       }
     );
   };
@@ -4006,20 +4191,56 @@ function AdminDashboard() {
 
   const onDeleteFixedCost = (id) => {
     runAction(() => deleteAdminFixedCost(id), 'Costo eliminado.', async () => {
-      await loadHomepage(
-        homeStoreId,
-        accountingMonthFilter,
-        homeDateFrom,
-        homeDateTo,
-        accountingDateFrom,
-        accountingDateTo,
-      );
+      if (String(editingCostId) === String(id)) {
+        if (editingCostType === 'variable') {
+          resetVariableCostForm();
+        } else {
+          resetFixedCostForm();
+        }
+      }
+      await reloadAccountingCosts();
+    });
+  };
+
+  const onToggleCostPaid = (item) => {
+    const nextPaid = !isCostPaid(item);
+    runAction(
+      () => updateAdminFixedCost(item._id, { paid: nextPaid }),
+      nextPaid ? 'Costo marcado como pagado.' : 'Costo marcado como no pagado.',
+      reloadAccountingCosts
+    );
+  };
+
+  const onEditFixedCost = (item) => {
+    setEditingCostId(String(item?._id || ''));
+    setEditingCostType('fixed');
+    setFixedCostForm({
+      name: item?.name || '',
+      amount: item?.amount ?? '',
+      storeId: getCostStoreId(item),
+      weekStart: toCostDateInput(item?.effectiveDate || item?.weekStart) || currentDateIso(),
+    });
+  };
+
+  const onEditVariableCost = (item) => {
+    const supplierId = item?.supplierId?._id || item?.supplierId
+      ? String(item?.supplierId?._id || item?.supplierId)
+      : (item?.supplierName ? 'other' : '');
+    setEditingCostId(String(item?._id || ''));
+    setEditingCostType('variable');
+    setVariableCostForm({
+      name: item?.name || '',
+      supplierId,
+      supplierOtherName: supplierId === 'other' ? (item?.supplierName || item?.name || '') : '',
+      amount: item?.amount ?? '',
+      storeId: getCostStoreId(item),
+      weekStart: toCostDateInput(item?.effectiveDate || item?.weekStart) || currentDateIso(),
     });
   };
 
   const onApplySalesFilters = (event) => {
     event.preventDefault();
-    const loadHistory = historyType === 'sales' ? () => loadOrders(salesFilters) : () => loadTopupHistory();
+    const loadHistory = historyType === 'sales' ? () => loadOrders(salesFilters) : () => loadTopupHistory(salesFilters);
     const successMessage = historyType === 'sales' ? 'Ventas filtradas.' : 'Recargas filtradas.';
     runAction(loadHistory, successMessage, async () => {
       setSalesPage(1);
@@ -4030,7 +4251,7 @@ function AdminDashboard() {
     setHistoryType(nextType);
     setSalesPage(1);
     clearMessages();
-    const loadHistory = nextType === 'sales' ? () => loadOrders(salesFilters) : () => loadTopupHistory();
+    const loadHistory = nextType === 'sales' ? () => loadOrders(salesFilters) : () => loadTopupHistory(salesFilters);
     setLoading(true);
     try {
       await loadHistory();
@@ -6011,38 +6232,93 @@ function AdminDashboard() {
                     ))}
                   </select>
                 </label>
-                <button className="btn btn-primary admin-accounting__save-btn" type="submit">
-                  <AccountingIcon name="save" />
-                  Guardar costo fijo
-                </button>
+                <div className="admin-accounting__form-actions">
+                  <button className="btn btn-primary admin-accounting__save-btn" type="submit">
+                    <AccountingIcon name="save" />
+                    {editingCostId && editingCostType === 'fixed' ? 'Guardar cambios' : 'Guardar costo fijo'}
+                  </button>
+                  {editingCostId && editingCostType === 'fixed' ? (
+                    <button className="btn admin-accounting__save-btn" onClick={resetFixedCostForm} type="button">
+                      Cancelar edición
+                    </button>
+                  ) : null}
+                </div>
               </form>
-              <div className="admin-accounting__cost-totals is-single">
+              <div className="admin-accounting__cost-filters">
+                <label>
+                  Buscar
+                  <input
+                    value={fixedCostQuery}
+                    onChange={(event) => setFixedCostQuery(event.target.value)}
+                    placeholder="Concepto o tienda"
+                  />
+                </label>
+                <label>
+                  Estado
+                  <select value={fixedCostPaidFilter} onChange={(event) => setFixedCostPaidFilter(event.target.value)}>
+                    <option value="all">Todos</option>
+                    <option value="unpaid">No pagados</option>
+                    <option value="paid">Pagados</option>
+                  </select>
+                </label>
+              </div>
+              <div className="admin-accounting__cost-totals is-summary">
                 <div className="tone-blue">
                   <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="inbox" /></span>
                   <div>
-                    <span>Total costos fijos</span>
-                    <strong>{formatCurrency(homeData?.totalFixedCosts)}</strong>
+                    <span>Total filtrado ({filteredFixedCostTotals.count})</span>
+                    <strong>{formatCurrency(filteredFixedCostTotals.total)}</strong>
+                  </div>
+                </div>
+                <div className="tone-green">
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="doc" /></span>
+                  <div>
+                    <span>Pagados</span>
+                    <strong>{formatCurrency(filteredFixedCostTotals.paid)}</strong>
+                  </div>
+                </div>
+                <div className="tone-amber">
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="trend" /></span>
+                  <div>
+                    <span>Pendientes</span>
+                    <strong>{formatCurrency(filteredFixedCostTotals.unpaid)}</strong>
                   </div>
                 </div>
               </div>
               {(homeData?.fixedCosts || []).length === 0 ? (
                 <p className="admin-accounting__empty">No hay costos fijos en el rango seleccionado.</p>
+              ) : filteredFixedCosts.length === 0 ? (
+                <p className="admin-accounting__empty">No hay costos fijos con esos filtros.</p>
               ) : (
                 <div className="admin-accounting__cost-list">
-                  {(homeData?.fixedCosts || []).map((item) => (
-                    <div className="admin-accounting__cost-row" key={item._id}>
-                      <div>
-                        <strong>{item.name}</strong>
-                        <small>
-                          {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} ·{' '}
-                          {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
-                        </small>
+                  {filteredFixedCosts.map((item) => {
+                    const paid = isCostPaid(item);
+                    return (
+                      <div className={`admin-accounting__cost-row ${paid ? 'is-paid' : 'is-unpaid'}`} key={item._id}>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <small>
+                            {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} ·{' '}
+                            {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
+                          </small>
+                          <span className={`admin-accounting__cost-status ${paid ? 'is-paid' : 'is-unpaid'}`}>
+                            {paid ? 'Pagado' : 'No pagado'}
+                          </span>
+                        </div>
+                        <div className="admin-accounting__cost-row-actions">
+                          <button className="btn" onClick={() => onToggleCostPaid(item)} type="button">
+                            {paid ? 'Marcar no pagado' : 'Marcar pagado'}
+                          </button>
+                          <button className="btn" onClick={() => onEditFixedCost(item)} type="button">
+                            Editar
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
+                            Eliminar
+                          </button>
+                        </div>
                       </div>
-                      <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
-                        Eliminar
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </article>
@@ -6118,38 +6394,97 @@ function AdminDashboard() {
                     ))}
                   </select>
                 </label>
-                <button className="btn btn-primary admin-accounting__save-btn" type="submit">
-                  <AccountingIcon name="save" />
-                  Guardar costo variable
-                </button>
+                <div className="admin-accounting__form-actions">
+                  <button className="btn btn-primary admin-accounting__save-btn" type="submit">
+                    <AccountingIcon name="save" />
+                    {editingCostId && editingCostType === 'variable' ? 'Guardar cambios' : 'Guardar costo variable'}
+                  </button>
+                  {editingCostId && editingCostType === 'variable' ? (
+                    <button className="btn admin-accounting__save-btn" onClick={resetVariableCostForm} type="button">
+                      Cancelar edición
+                    </button>
+                  ) : null}
+                </div>
               </form>
-              <div className="admin-accounting__cost-totals is-single">
+              <div className="admin-accounting__cost-filters">
+                <label>
+                  Proveedor
+                  <select
+                    value={variableCostSupplierFilter}
+                    onChange={(event) => setVariableCostSupplierFilter(event.target.value)}
+                  >
+                    <option value="">Todos los proveedores</option>
+                    {variableCostSupplierOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Estado
+                  <select value={variableCostPaidFilter} onChange={(event) => setVariableCostPaidFilter(event.target.value)}>
+                    <option value="all">Todos</option>
+                    <option value="unpaid">No pagados</option>
+                    <option value="paid">Pagados</option>
+                  </select>
+                </label>
+              </div>
+              <div className="admin-accounting__cost-totals is-summary">
                 <div className="tone-green">
                   <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="doc" /></span>
                   <div>
-                    <span>Total costos variables</span>
-                    <strong>{formatCurrency(homeData?.totalVariableCosts)}</strong>
+                    <span>Total filtrado ({filteredVariableCostTotals.count})</span>
+                    <strong>{formatCurrency(filteredVariableCostTotals.total)}</strong>
+                  </div>
+                </div>
+                <div className="tone-blue">
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="inbox" /></span>
+                  <div>
+                    <span>Pagados</span>
+                    <strong>{formatCurrency(filteredVariableCostTotals.paid)}</strong>
+                  </div>
+                </div>
+                <div className="tone-amber">
+                  <span className="admin-accounting__kpi-icon" aria-hidden="true"><AccountingIcon name="trend" /></span>
+                  <div>
+                    <span>Pendientes</span>
+                    <strong>{formatCurrency(filteredVariableCostTotals.unpaid)}</strong>
                   </div>
                 </div>
               </div>
               {(homeData?.variableCosts || []).length === 0 ? (
                 <p className="admin-accounting__empty">No hay costos variables en el rango seleccionado.</p>
+              ) : filteredVariableCosts.length === 0 ? (
+                <p className="admin-accounting__empty">No hay costos variables con esos filtros.</p>
               ) : (
                 <div className="admin-accounting__cost-list">
-                  {(homeData?.variableCosts || []).map((item) => (
-                    <div className="admin-accounting__cost-row" key={item._id}>
-                      <div>
-                        <strong>{item.name}</strong>
-                        <small>
-                          {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} ·{' '}
-                          {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
-                        </small>
+                  {filteredVariableCosts.map((item) => {
+                    const paid = isCostPaid(item);
+                    return (
+                      <div className={`admin-accounting__cost-row ${paid ? 'is-paid' : 'is-unpaid'}`} key={item._id}>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <small>
+                            {formatCurrency(item.amount)} · {item.storeId?.name || 'Global'} ·{' '}
+                            {new Date(item.effectiveDate || item.weekStart).toLocaleDateString('es-CO')}
+                          </small>
+                          <span className={`admin-accounting__cost-status ${paid ? 'is-paid' : 'is-unpaid'}`}>
+                            {paid ? 'Pagado' : 'No pagado'}
+                          </span>
+                        </div>
+                        <div className="admin-accounting__cost-row-actions">
+                          <button className="btn" onClick={() => onToggleCostPaid(item)} type="button">
+                            {paid ? 'Marcar no pagado' : 'Marcar pagado'}
+                          </button>
+                          <button className="btn" onClick={() => onEditVariableCost(item)} type="button">
+                            Editar
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
+                            Eliminar
+                          </button>
+                        </div>
                       </div>
-                      <button className="btn btn-ghost" onClick={() => onDeleteFixedCost(item._id)} type="button">
-                        Eliminar
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </article>
@@ -6380,22 +6715,19 @@ function AdminDashboard() {
                 </select>
               </label>
             ) : null}
-            {historyType === 'sales' ? (
-              <label>
-                Método de pago
-                <select
-                  value={salesFilters.paymentMethod}
-                  onChange={(event) => setSalesFilters((prev) => ({ ...prev, paymentMethod: event.target.value }))}
-                >
-                  <option value="">Todos</option>
-                  <option value="cash">Efectivo</option>
-                  <option value="dataphone">Datáfono</option>
-                  <option value="system">Sistema</option>
-                  <option value="qr">QR</option>
-                  <option value="school_billing">Cuenta de cobro colegio</option>
-                </select>
-              </label>
-            ) : null}
+            <label>
+              Método de pago
+              <select
+                value={salesFilters.paymentMethod}
+                onChange={(event) => setSalesFilters((prev) => ({ ...prev, paymentMethod: event.target.value }))}
+              >
+                {HISTORY_PAYMENT_METHOD_OPTIONS.map((option) => (
+                  <option key={option.value || 'all'} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button className="btn btn-primary" type="submit">
               {historyType === 'sales' ? 'Filtrar ventas' : 'Filtrar recargas'}
             </button>
@@ -9831,8 +10163,8 @@ function AdminDashboard() {
           <form className="admin-form-grid" onSubmit={onApplyClosureFilters}>
             <label>
               Tienda
-              <select value={closureFilters.storeId} onChange={(event) => setClosureFilters((prev) => ({ ...prev, storeId: event.target.value }))} required>
-                <option value="">Selecciona tienda</option>
+              <select value={closureFilters.storeId} onChange={(event) => setClosureFilters((prev) => ({ ...prev, storeId: event.target.value }))}>
+                <option value="">Todas</option>
                 {stores.map((store) => (
                   <option key={store._id} value={store._id}>{store.name}</option>
                 ))}
@@ -9853,6 +10185,7 @@ function AdminDashboard() {
                 <thead>
                   <tr>
                     <th>Fecha</th>
+                    <th>Tienda</th>
                     <th>Vendedor</th>
                     <th>Ingresos efectivo</th>
                     <th>Ingresos datáfono</th>
@@ -9874,6 +10207,7 @@ function AdminDashboard() {
                     return (
                       <tr key={closure._id}>
                         <td>{closure.date}</td>
+                        <td>{closure.storeId?.name || 'N/A'}</td>
                         <td>{closure.vendorId?.name || 'N/A'}</td>
                         <td>{formatCurrency(closure.systemCash)}</td>
                         <td>{formatCurrency(closure.systemDataphone)}</td>

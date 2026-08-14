@@ -14,6 +14,29 @@ const {
 } = require('../services/notification.service');
 const { ensureStudentWallet } = require('../utils/studentWallet');
 
+const PAYMENT_METHOD_FILTER_ALIASES = {
+  cash: ['cash'],
+  qr: ['qr'],
+  dataphone: ['dataphone'],
+  bold: ['bold', 'bold_auto_debit'],
+  epayco: ['epayco', 'epayco_auto_debit'],
+  system: ['system'],
+  school_billing: ['school_billing'],
+  transfer: ['transfer'],
+  daviplata: ['daviplata'],
+  bancolombia: ['bancolombia'],
+};
+
+function paymentMethodFilterValue(rawValue) {
+  const selected = String(rawValue || '').trim().toLowerCase();
+  if (!selected) {
+    return null;
+  }
+
+  const aliases = PAYMENT_METHOD_FILTER_ALIASES[selected] || [selected];
+  return aliases.length === 1 ? aliases[0] : { $in: aliases };
+}
+
 const router = express.Router();
 
 router.use(authMiddleware);
@@ -122,7 +145,7 @@ router.get('/balance', async (req, res) => {
 router.get('/recharges', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
-    const { studentId, from, to } = req.query;
+    const { studentId, from, to, method } = req.query;
 
     const filter = {
       schoolId,
@@ -136,6 +159,11 @@ router.get('/recharges', roleMiddleware('vendor', 'admin'), async (req, res) => 
 
     if (studentId) {
       filter.studentId = studentId;
+    }
+
+    const methodFilter = paymentMethodFilterValue(method);
+    if (methodFilter) {
+      filter.method = methodFilter;
     }
 
     if (from || to) {
