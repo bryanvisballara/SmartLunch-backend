@@ -5874,6 +5874,40 @@ button.campus-coordination__selected-item {
   word-break: break-word;
 }
 
+.campus-parent-mobile__finance-hero-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin: 0.2rem 0 0.1rem;
+}
+
+.campus-parent-mobile__finance-hero-nav h2 {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.campus-parent-mobile__finance-hero-arrow {
+  width: 2.45rem;
+  height: 2.45rem;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.55rem;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.campus-parent-mobile__finance-hero-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .campus-parent-mobile__hero-card.is-finance h2,
 .campus-parent-mobile__hero-card.is-finance p,
 .campus-parent-mobile__hero-card.is-finance small,

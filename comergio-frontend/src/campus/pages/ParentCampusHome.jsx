@@ -554,7 +554,47 @@ function resolveParentPayableCharge(charges = []) {
   return pendingCharges[0] || null;
 }
 
-function resolveParentFinanceHeroEyebrow(charge, concepts = []) {
+function isParentFinanceChargePaid(charge) {
+  if (!charge) {
+    return false;
+  }
+  const status = String(charge.status || '').toLowerCase();
+  if (status === 'paid') {
+    return true;
+  }
+  const outstanding = Number(charge.outstandingAmount ?? charge.amount ?? 0);
+  const paidAmount = Number(charge.paidAmount || 0);
+  return outstanding <= 0 && paidAmount > 0;
+}
+
+function buildParentFinancePlanCharges(charges = []) {
+  const sorted = sortParentFinanceCharges(charges).filter((charge) => {
+    const category = String(charge.category || '').toLowerCase();
+    const status = String(charge.status || '').toLowerCase();
+    if (status === 'cancelled') {
+      return false;
+    }
+    return ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'monthly_statement'].includes(category);
+  });
+  const individualCharges = sorted.filter((charge) => (
+    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'].includes(String(charge.category || '').toLowerCase())
+  ));
+  return individualCharges.length
+    ? individualCharges
+    : sorted.filter((charge) => String(charge.category || '').toLowerCase() === 'monthly_statement');
+}
+
+function resolveParentFinanceHeroEyebrow(charge, concepts = [], { paid = false } = {}) {
+  if (paid) {
+    const category = String(charge?.category || '').toLowerCase();
+    if (category === 'annual_tuition') {
+      return 'Matrícula pagada';
+    }
+    if (category === 'monthly_tuition') {
+      return 'Pensión pagada';
+    }
+    return 'Pagado';
+  }
   const conceptCategories = new Set((concepts || []).map((item) => String(item.category || '').toLowerCase()).filter(Boolean));
   if (conceptCategories.has('annual_tuition') && conceptCategories.has('monthly_tuition')) {
     return 'Matrícula y pensión pendientes';
@@ -6289,6 +6329,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const matriculaAccessRequestRef = useRef(0);
   const [showFinanceConceptsSheet, setShowFinanceConceptsSheet] = useState(false);
   const [financePaymentsPage, setFinancePaymentsPage] = useState(1);
+  const [financeHeroIndex, setFinanceHeroIndex] = useState(0);
   const [feedLikesSheetId, setFeedLikesSheetId] = useState('');
   const [feedCommentsSheetId, setFeedCommentsSheetId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
@@ -7136,10 +7177,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
     const childId = String(selectedChild._id || selectedChild.id || '');
     const childNameKey = normalizeLookupKey(selectedChild.name);
-    const pendingCharges = Array.isArray(academicBilling.currentCharges) && academicBilling.currentCharges.length
-      ? academicBilling.currentCharges
-      : (academicBilling.charges || []);
-    return pendingCharges.filter((charge) => {
+    const allCharges = Array.isArray(academicBilling.charges) && academicBilling.charges.length
+      ? academicBilling.charges
+      : (academicBilling.currentCharges || []);
+    return allCharges.filter((charge) => {
       const chargeStudentId = String(charge.studentId?._id || charge.studentId || '');
       return (childId && chargeStudentId === childId) || (childNameKey && normalizeLookupKey(charge.studentName) === childNameKey);
     });
@@ -7166,6 +7207,23 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         return rightTime - leftTime;
       });
   }, [academicBilling.paymentHistory, academicBilling.payments, selectedChild]);
+
+  const financePlanCharges = useMemo(
+    () => buildParentFinancePlanCharges(financeCharges),
+    [financeCharges],
+  );
+
+  const defaultFinanceHeroIndex = useMemo(() => {
+    const firstUnpaidIndex = financePlanCharges.findIndex((charge) => !isParentFinanceChargePaid(charge));
+    return firstUnpaidIndex >= 0 ? firstUnpaidIndex : 0;
+  }, [financePlanCharges]);
+
+  useEffect(() => {
+    setFinanceHeroIndex(defaultFinanceHeroIndex);
+  }, [defaultFinanceHeroIndex, selectedChildId]);
+
+  const selectedHeroCharge = financePlanCharges[Math.min(Math.max(financeHeroIndex, 0), Math.max(financePlanCharges.length - 1, 0))] || null;
+  const selectedHeroChargePaid = isParentFinanceChargePaid(selectedHeroCharge);
 
   const financePaymentsTotalPages = useMemo(
     () => Math.max(1, Math.ceil(financePayments.length / FINANCE_PAYMENTS_PAGE_SIZE)),
@@ -7274,6 +7332,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, []);
 
   const primaryPendingCharge = resolveParentPayableCharge(financeCharges);
+  const selectedHeroConcepts = selectedHeroCharge
+    ? [buildParentFinanceConceptFromCharge(selectedHeroCharge)]
+    : [];
+  const selectedHeroAmount = selectedHeroChargePaid ? 0 : Number(selectedHeroCharge?.outstandingAmount ?? selectedHeroCharge?.amount ?? 0);
+  const selectedHeroOriginalAmount = Number(
+    selectedHeroCharge?.chargeOriginalAmount
+    || selectedHeroCharge?.originalAmount
+    || selectedHeroCharge?.chargeAmount
+    || selectedHeroAmount
+    || 0,
+  );
   const shouldLockParentPortal = isMillenniumParent && (
     matriculaAccessGate === 'idle'
     || matriculaAccessGate === 'checking'
@@ -7285,37 +7354,37 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     && matriculaProcess
     && !matriculaProcess.isCompleted,
   );
-  const selectedFinanceConcepts = selectedFinanceSummary?.concepts || [];
-  const selectedFinanceConceptsTotal = selectedFinanceConcepts.reduce((sum, concept) => sum + Number(concept.amount || 0), 0);
-  const selectedFinanceConceptsOriginalTotal = selectedFinanceConcepts.reduce(
-    (sum, concept) => sum + Number(concept.originalAmount || concept.amount || 0),
-    0,
-  );
+  const selectedFinanceConcepts = selectedHeroConcepts;
+  const selectedFinanceConceptsTotal = selectedHeroAmount;
+  const selectedFinanceConceptsOriginalTotal = selectedHeroChargePaid ? 0 : selectedHeroOriginalAmount;
   const selectedFinanceAmount = selectedFinanceConceptsTotal;
   const selectedFinanceTotalAmount = selectedFinanceConceptsOriginalTotal;
   const selectedFinanceFullAmount = selectedFinanceSummary?.requiresDataSchoolContact ? 0 : selectedFinanceConceptsOriginalTotal;
-  const selectedFinanceHasDiscount = selectedFinanceFullAmount > selectedFinanceAmount;
-  const financeHeroEyebrow = resolveParentFinanceHeroEyebrow(primaryPendingCharge, selectedFinanceConcepts);
+  const selectedFinanceHasDiscount = !selectedHeroChargePaid && selectedFinanceFullAmount > selectedFinanceAmount && selectedFinanceAmount > 0;
+  const financeHeroEyebrow = resolveParentFinanceHeroEyebrow(selectedHeroCharge || primaryPendingCharge, selectedHeroConcepts, {
+    paid: Boolean(selectedHeroCharge && selectedHeroChargePaid),
+  });
   const financeHeroPayLabel = selectedFinanceSummary?.requiresDataSchoolContact
     ? 'WhatsApp DataSchool'
-    : (String(primaryPendingCharge?.category || '').toLowerCase() === 'annual_tuition'
+    : (String(selectedHeroCharge?.category || '').toLowerCase() === 'annual_tuition'
       ? 'Pagar matrícula'
-      : String(primaryPendingCharge?.category || '').toLowerCase() === 'monthly_tuition'
+      : String(selectedHeroCharge?.category || '').toLowerCase() === 'monthly_tuition'
         ? 'Pagar pensión'
         : 'Pagar');
   const hideEnrollmentPaymentAmount = shouldHideParentEnrollmentPaymentAmount({
     schoolId: user?.schoolId,
     schoolName: schoolDisplayName,
-  }) && String(primaryPendingCharge?.category || '').toLowerCase() === 'annual_tuition';
+  }) && String(selectedHeroCharge?.category || primaryPendingCharge?.category || '').toLowerCase() === 'annual_tuition'
+    && !selectedHeroChargePaid;
   const financeHeroNote = selectedFinanceSummary?.requiresDataSchoolContact
     ? `Tienes ${selectedFinanceSummary.overdueMonths} mensualidades vencidas.`
-    : selectedFinanceConcepts.length > 1
-      ? `${selectedFinanceConcepts.length} cobros pendientes · el siguiente pago es ${primaryPendingCharge?.concept || 'académico'}`
-      : primaryPendingCharge
-        ? (formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })
-          ? `Vence ${formatParentFinanceDate(primaryPendingCharge?.dueDate, { day: '2-digit', month: 'long' })} · ${primaryPendingCharge.concept || 'Cobro académico'}`
-          : (primaryPendingCharge.concept || 'Tienes un cobro académico pendiente'))
-        : 'No tienes pagos pendientes este mes';
+    : selectedHeroCharge
+      ? (selectedHeroChargePaid
+        ? `Pagado · ${selectedHeroCharge.concept || 'Cobro académico'}`
+        : (formatParentFinanceDate(selectedHeroCharge?.dueDate, { day: '2-digit', month: 'long' })
+          ? `Vence ${formatParentFinanceDate(selectedHeroCharge?.dueDate, { day: '2-digit', month: 'long' })} · ${selectedHeroCharge.concept || 'Cobro académico'}`
+          : (selectedHeroCharge.concept || 'Tienes un cobro académico pendiente')))
+      : 'No tienes pagos pendientes este mes';
 
   const handleNotificationNavigate = useCallback((path) => {
     const nextPath = String(path || '').trim();
@@ -7339,13 +7408,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       return;
     }
 
-    const payableChargeIds = primaryPendingCharge?._id ? [primaryPendingCharge._id] : [];
+    const payableChargeIds = selectedHeroCharge?._id && !selectedHeroChargePaid ? [selectedHeroCharge._id] : [];
 
     if (!payableChargeIds.length) {
       return;
     }
 
-    const chargeCategory = String(primaryPendingCharge?.category || '').toLowerCase();
+    const chargeCategory = String(selectedHeroCharge?.category || '').toLowerCase();
     const isAnnualTuition = chargeCategory === 'annual_tuition';
     const isWompiAcademicCharge = ['monthly_statement', 'monthly_tuition', 'enrollment_bonus', 'additional'].includes(chargeCategory);
 
@@ -7360,7 +7429,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           throw new Error('No se pudo iniciar el proceso de matricula.');
         }
         setMatriculaProcess(nextProcess);
-        setMatriculaFlowCharge(nextProcess.charge || primaryPendingCharge);
+        setMatriculaFlowCharge(nextProcess.charge || selectedHeroCharge);
         setMatriculaFlowPendingResume(false);
         setMatriculaFlowOpen(true);
         setShowFinanceConceptsSheet(false);
@@ -7445,10 +7514,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         <span className="campus-parent-mobile__eyebrow">
           {financeHeroEyebrow}
         </span>
-        {primaryPendingCharge ? (
+        {!selectedHeroChargePaid && (selectedHeroCharge || selectedFinanceSummary?.requiresDataSchoolContact) ? (
           <button
             className="campus-parent-mobile__finance-pay-button"
-            disabled={(!selectedFinanceSummary?.requiresDataSchoolContact && !primaryPendingCharge) || Boolean(payingChargeId)}
+            disabled={(!selectedFinanceSummary?.requiresDataSchoolContact && !selectedHeroCharge) || Boolean(payingChargeId)}
             onClick={onPayAcademicCharge}
             type="button"
           >
@@ -7459,19 +7528,41 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       <div className="campus-parent-mobile__finance-price-meta">
         {selectedFinanceSummary?.requiresDataSchoolContact ? <span className="campus-parent-mobile__finance-status-label">Gestión especial</span> : null}
         {!hideEnrollmentPaymentAmount && selectedFinanceHasDiscount ? <span className="campus-parent-mobile__finance-original-amount">{formatCurrency(selectedFinanceFullAmount)}</span> : null}
-        {!primaryPendingCharge ? <span className="campus-parent-mobile__finance-discount-tag">Estás al día</span> : null}
+        {selectedHeroChargePaid ? <span className="campus-parent-mobile__finance-discount-tag">Pagado</span> : null}
+        {!selectedHeroCharge ? <span className="campus-parent-mobile__finance-discount-tag">Estás al día</span> : null}
       </div>
-      <h2>
-        {selectedFinanceSummary?.requiresDataSchoolContact
-          ? 'Contacta DataSchool'
-          : (hideEnrollmentPaymentAmount
-            ? 'Matrícula pendiente'
-            : (primaryPendingCharge ? formatCurrency(selectedFinanceAmount) : formatCurrency(0)))}
-      </h2>
+      <div className="campus-parent-mobile__finance-hero-nav">
+        <button
+          aria-label="Mes anterior"
+          className="campus-parent-mobile__finance-hero-arrow"
+          disabled={financeHeroIndex <= 0 || financePlanCharges.length <= 1}
+          onClick={() => setFinanceHeroIndex((current) => Math.max(0, current - 1))}
+          type="button"
+        >
+          ‹
+        </button>
+        <h2>
+          {selectedFinanceSummary?.requiresDataSchoolContact
+            ? 'Contacta DataSchool'
+            : (hideEnrollmentPaymentAmount
+              ? 'Matrícula pendiente'
+              : formatCurrency(selectedHeroCharge ? selectedFinanceAmount : 0))}
+        </h2>
+        <button
+          aria-label="Mes siguiente"
+          className="campus-parent-mobile__finance-hero-arrow"
+          disabled={financeHeroIndex >= financePlanCharges.length - 1 || financePlanCharges.length <= 1}
+          onClick={() => setFinanceHeroIndex((current) => Math.min(financePlanCharges.length - 1, current + 1))}
+          type="button"
+        >
+          ›
+        </button>
+      </div>
       <span className="campus-parent-mobile__finance-current-note">
         {financeHeroNote}
+        {financePlanCharges.length > 1 ? ` · ${financeHeroIndex + 1} de ${financePlanCharges.length}` : ''}
       </span>
-      {selectedFinanceConcepts.length && !hideEnrollmentPaymentAmount ? (
+      {selectedHeroCharge && !hideEnrollmentPaymentAmount ? (
         <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">
           Ver detalle
         </button>
@@ -8880,7 +8971,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           ) : null}
           {selectedFinanceSummary?.requiresDataSchoolContact ? (
             <button className="campus-parent-mobile__finance-sheet-action" onClick={onPayAcademicCharge} type="button">Contactar DataSchool</button>
-          ) : primaryPendingCharge ? (
+          ) : selectedHeroCharge && !selectedHeroChargePaid ? (
             <button className="campus-parent-mobile__finance-sheet-action" disabled={Boolean(payingChargeId)} onClick={onPayAcademicCharge} type="button">
               {payingChargeId ? 'Procesando...' : financeHeroPayLabel}
             </button>

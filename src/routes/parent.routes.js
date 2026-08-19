@@ -1866,21 +1866,26 @@ function buildParentAcademicPricingGuide(profile = {}, feeConfiguration = {}) {
 }
 
 function serializeIndividualChargeForParent(charge = {}, billingProfile = null, paymentTotalsByChargeId = new Map(), referenceDate = new Date(), feeConfiguration = null) {
-  const pricing = resolveAcademicChargeAmounts(charge, billingProfile, referenceDate, feeConfiguration);
+  const pricingDate = String(charge.status || '').toLowerCase() === 'paid' && charge.paidAt
+    ? new Date(charge.paidAt)
+    : (charge.dueDate ? new Date(charge.dueDate) : referenceDate);
+  const pricing = resolveAcademicChargeAmounts(charge, billingProfile, pricingDate, feeConfiguration);
   const pricingAmount = Math.max(0, Number(pricing.effectiveAmount || 0));
-  const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0);
-  const settledPaidAmount = String(charge.status) === 'paid' && rawPaidAmount <= 0 ? pricingAmount : rawPaidAmount;
-  const outstandingAmount = String(charge.status) === 'paid' ? 0 : Math.max(0, pricingAmount - settledPaidAmount);
-  const dueDate = new Date(charge.dueDate);
-  const isOverdue = ['pending', 'overdue'].includes(String(charge.status)) && outstandingAmount > 0 && dueDate < referenceDate;
+  const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0) || Number(charge.paidAmount || 0);
+  const chargeIsPaid = String(charge.status || '').toLowerCase() === 'paid';
+  const settledPaidAmount = chargeIsPaid && rawPaidAmount <= 0 ? pricingAmount : rawPaidAmount;
+  const outstandingAmount = chargeIsPaid ? 0 : Math.max(0, pricingAmount - settledPaidAmount);
+  const isPaid = chargeIsPaid || (outstandingAmount <= 0 && settledPaidAmount > 0);
+  const dueDate = charge.dueDate ? new Date(charge.dueDate) : referenceDate;
+  const isOverdue = !isPaid && ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()) && dueDate < referenceDate;
 
   return {
     ...charge,
-    status: outstandingAmount <= 0 ? 'paid' : (isOverdue ? 'overdue' : charge.status),
-    amount: outstandingAmount,
+    status: isPaid ? 'paid' : (isOverdue ? 'overdue' : charge.status),
+    amount: isPaid ? 0 : outstandingAmount,
     chargeAmount: pricingAmount,
-    paidAmount: Math.min(pricingAmount, settledPaidAmount),
-    outstandingAmount,
+    paidAmount: isPaid ? Math.max(settledPaidAmount, pricingAmount) : Math.min(pricingAmount, settledPaidAmount),
+    outstandingAmount: isPaid ? 0 : outstandingAmount,
     benefitLabel: pricing.benefitLabel,
     chargeOriginalAmount: pricing.baseAmount,
     originalAmount: pricing.baseAmount,
@@ -1889,6 +1894,42 @@ function serializeIndividualChargeForParent(charge = {}, billingProfile = null, 
     studentCourse: charge.studentId?.course || charge.studentCourse || '',
     billingProfile,
   };
+}
+
+function dedupeParentMonthlyTuitionCharges(charges = []) {
+  const otherCharges = [];
+  const monthlyByKey = new Map();
+
+  for (const charge of charges || []) {
+    if (String(charge.category || '').toLowerCase() !== 'monthly_tuition') {
+      otherCharges.push(charge);
+      continue;
+    }
+
+    const studentId = String(charge.studentId?._id || charge.studentId || '');
+    const monthKey = String(charge.monthKey || '').trim() || (charge.dueDate ? buildMonthKey(charge.dueDate) : '');
+    const key = `${studentId}:${monthKey || charge._id}`;
+    const existing = monthlyByKey.get(key);
+    if (!existing) {
+      monthlyByKey.set(key, charge);
+      continue;
+    }
+
+    const existingPaid = String(existing.status || '').toLowerCase() === 'paid' || Number(existing.paidAmount || 0) > 0;
+    const nextPaid = String(charge.status || '').toLowerCase() === 'paid' || Number(charge.paidAmount || 0) > 0;
+    if (nextPaid && !existingPaid) {
+      monthlyByKey.set(key, charge);
+      continue;
+    }
+    if (!nextPaid && existingPaid) {
+      continue;
+    }
+    if (Number(charge.paidAmount || 0) > Number(existing.paidAmount || 0)) {
+      monthlyByKey.set(key, charge);
+    }
+  }
+
+  return [...otherCharges, ...monthlyByKey.values()];
 }
 
 function buildParentIndividualChargeConcepts(pendingCharges = []) {
@@ -5091,13 +5132,20 @@ router.get('/portal/academic-billing', async (req, res) => {
 
     const allCharges = [...statementCharges, ...individualCharges];
     const chargePayments = allCharges.length > 0
-      ? await AcademicChargePayment.find({ schoolId, chargeId: { $in: allCharges.map((charge) => charge._id) } }).select('chargeId amount').lean()
+      ? await AcademicChargePayment.find({ schoolId, chargeId: { $in: allCharges.map((charge) => charge._id) } }).select('chargeId amount paidAt createdAt').lean()
       : [];
     const paymentTotalsByChargeId = new Map();
+    const latestPaidAtByChargeId = new Map();
     chargePayments.forEach((payment) => {
       const chargeKey = String(payment.chargeId || '').trim();
       if (!chargeKey) return;
       paymentTotalsByChargeId.set(chargeKey, Number(paymentTotalsByChargeId.get(chargeKey) || 0) + Number(payment.amount || 0));
+      const paidAt = payment.paidAt || payment.createdAt;
+      if (!paidAt) return;
+      const existingPaidAt = latestPaidAtByChargeId.get(chargeKey);
+      if (!existingPaidAt || new Date(paidAt) > new Date(existingPaidAt)) {
+        latestPaidAtByChargeId.set(chargeKey, paidAt);
+      }
     });
 
     const billingProfileByStudentId = new Map(billingProfiles.map((profile) => [String(profile.studentId), profile]));
@@ -5115,7 +5163,60 @@ router.get('/portal/academic-billing', async (req, res) => {
       now,
       feeConfiguration,
     ));
-    const normalizedCharges = sortAcademicChargesForDisplay([...normalizedStatementCharges, ...normalizedIndividualCharges]);
+    const chargesToMarkPaid = individualCharges
+      .filter((charge, index) => {
+        const serialized = normalizedIndividualCharges[index];
+        return String(serialized?.status || '') === 'paid'
+          && ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase());
+      })
+      .map((charge) => charge._id)
+      .filter(Boolean);
+    if (chargesToMarkPaid.length) {
+      await AcademicCharge.bulkWrite(chargesToMarkPaid.map((chargeId) => ({
+        updateOne: {
+          filter: { _id: chargeId, schoolId, status: { $in: ['pending', 'overdue'] } },
+          update: {
+            $set: {
+              status: 'paid',
+              paidAt: latestPaidAtByChargeId.get(String(chargeId)) || now,
+            },
+          },
+        },
+      })));
+    }
+
+    const paidMonthlyKeys = new Set();
+    normalizedIndividualCharges.forEach((charge) => {
+      if (String(charge.category || '').toLowerCase() !== 'monthly_tuition') return;
+      if (String(charge.status || '').toLowerCase() !== 'paid') return;
+      const studentId = String(charge.studentId?._id || charge.studentId || '');
+      const monthKey = String(charge.monthKey || '').trim() || (charge.dueDate ? buildMonthKey(charge.dueDate) : '');
+      if (studentId && monthKey) {
+        paidMonthlyKeys.add(`${studentId}:${monthKey}`);
+      }
+    });
+    const duplicatePendingMonthlyIds = individualCharges
+      .filter((charge, index) => {
+        const serialized = normalizedIndividualCharges[index];
+        if (String(serialized?.category || '').toLowerCase() !== 'monthly_tuition') return false;
+        if (String(serialized?.status || '').toLowerCase() === 'paid') return false;
+        const studentId = String(charge.studentId?._id || charge.studentId || '');
+        const monthKey = String(charge.monthKey || '').trim() || (charge.dueDate ? buildMonthKey(charge.dueDate) : '');
+        return Boolean(studentId && monthKey && paidMonthlyKeys.has(`${studentId}:${monthKey}`));
+      })
+      .map((charge) => charge._id)
+      .filter(Boolean);
+    if (duplicatePendingMonthlyIds.length) {
+      await AcademicCharge.updateMany(
+        { _id: { $in: duplicatePendingMonthlyIds }, schoolId, status: { $in: ['pending', 'overdue'] } },
+        { $set: { status: 'cancelled' } },
+      );
+    }
+    const duplicatePendingMonthlyIdSet = new Set(duplicatePendingMonthlyIds.map((chargeId) => String(chargeId)));
+    const normalizedCharges = sortAcademicChargesForDisplay(dedupeParentMonthlyTuitionCharges([
+      ...normalizedStatementCharges,
+      ...normalizedIndividualCharges.filter((charge) => !duplicatePendingMonthlyIdSet.has(String(charge._id))),
+    ]));
     const chargesForParent = isMillenniumSchoolId(schoolId)
       ? normalizedCharges.map((charge) => redactParentEnrollmentChargeAmount(charge))
       : normalizedCharges;
@@ -5178,7 +5279,7 @@ router.get('/portal/academic-billing', async (req, res) => {
       currentCharges,
       studentSummaries,
       pricingGuides,
-      charges: currentCharges,
+      charges: chargesForParent,
       payments: payments.map((payment) => ({
         ...payment,
         studentName: payment.studentId?.name || 'Familia',
@@ -5246,7 +5347,10 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
       ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
       : null;
     const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
-    const pricing = resolveAcademicChargeAmounts(charge, billingProfile, new Date(), feeConfiguration);
+    const pricingDate = ['monthly_tuition', 'monthly_statement'].includes(String(charge.category || ''))
+      ? (charge.dueDate ? new Date(charge.dueDate) : new Date())
+      : new Date();
+    const pricing = resolveAcademicChargeAmounts(charge, billingProfile, pricingDate, feeConfiguration);
     const previousPayments = await AcademicChargePayment.find({ schoolId, chargeId: charge._id }).select('amount').lean();
     const previousPaidAmount = previousPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
     const outstandingAmount = Math.max(0, pricing.effectiveAmount - previousPaidAmount);
