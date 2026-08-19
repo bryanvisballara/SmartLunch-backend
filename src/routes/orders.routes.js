@@ -47,6 +47,57 @@ function paymentMethodFilterValue(rawValue) {
   return aliases.length === 1 ? aliases[0] : { $in: aliases };
 }
 
+function toIdString(value) {
+  if (!value) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value._id) {
+    return String(value._id);
+  }
+  return String(value);
+}
+
+async function attachCancellationInventoryPreview(schoolId, requests) {
+  const productIds = [];
+  for (const request of requests) {
+    for (const item of request?.orderId?.items || []) {
+      const productId = toIdString(item.productId);
+      if (productId) {
+        productIds.push(productId);
+      }
+    }
+  }
+
+  const uniqueIds = [...new Set(productIds)];
+  const products = uniqueIds.length
+    ? await Product.find({ schoolId, _id: { $in: uniqueIds } }).select('_id name stock storeId').lean()
+    : [];
+  const productsById = new Map(products.map((product) => [String(product._id), product]));
+
+  return requests.map((request) => {
+    const restoreStock = request.status !== 'approved';
+    const inventoryPreview = (request?.orderId?.items || []).map((item) => {
+      const product = productsById.get(toIdString(item.productId));
+      const quantity = Math.max(0, Number(item.quantity || 0));
+      const currentStock = product == null ? null : Number(product.stock || 0);
+      return {
+        productId: item.productId,
+        name: String(item.nameSnapshot || product?.name || 'Producto'),
+        quantity,
+        unitPrice: Number(item.unitPriceSnapshot || 0),
+        subtotal: Number(item.subtotal || 0),
+        currentStock,
+        projectedStock: currentStock == null ? null : currentStock + (restoreStock ? quantity : 0),
+      };
+    });
+
+    return { ...request, inventoryPreview };
+  });
+}
+
 const router = express.Router();
 
 router.use(authMiddleware);
@@ -1206,8 +1257,11 @@ router.get('/cancel-requests/list', async (req, res) => {
     const requests = await OrderCancellationRequest.find(filter)
       .populate({
         path: 'orderId',
-        select: 'studentId total paymentMethod status createdAt',
-        populate: { path: 'studentId', select: 'name schoolCode' },
+        select: 'studentId total paymentMethod status createdAt items storeId vendorId guestSale',
+        populate: [
+          { path: 'studentId', select: 'name schoolCode' },
+          { path: 'vendorId', select: 'name username' },
+        ],
       })
       .populate('storeId', 'name')
       .populate('requestedBy', 'name username')
@@ -1217,7 +1271,8 @@ router.get('/cancel-requests/list', async (req, res) => {
       .limit(200)
       .lean();
 
-    return res.status(200).json(requests);
+    const enriched = await attachCancellationInventoryPreview(schoolId, requests);
+    return res.status(200).json(enriched);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

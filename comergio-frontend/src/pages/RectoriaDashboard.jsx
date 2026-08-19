@@ -14399,8 +14399,8 @@ function RectoriaDashboard() {
       ) : null}
 
       {courseStudentsModal.open ? (
-        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label={`Alumnos del curso ${getCourseLabel(courseStudentsModal.courseKey)}`}>
-          <div className="rectoria-modal-card">
+        <div className="rectoria-modal-overlay rectoria-modal-overlay--constrained" role="dialog" aria-modal="true" aria-label={`Alumnos del curso ${getCourseLabel(courseStudentsModal.courseKey)}`}>
+          <div className="rectoria-modal-card rectoria-modal-card--course-students">
             <div className="rectoria-modal-head">
               <div>
                 <span className="rectoria-modal-eyebrow">Alumnos por curso</span>

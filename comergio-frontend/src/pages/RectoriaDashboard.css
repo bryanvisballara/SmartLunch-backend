@@ -5681,6 +5681,51 @@ button.rectoria-team-assignment-card.is-active {
   margin-top: 18px;
 }
 
+.rectoria-modal-overlay--constrained {
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rectoria-modal-card--course-students {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 720px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  margin-block: auto;
+  overflow: hidden;
+}
+
+.rectoria-modal-card--course-students .rectoria-modal-head {
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.rectoria-modal-card--course-students .rectoria-modal-close {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #0f172a;
+}
+
+.rectoria-modal-card--course-students .rectoria-course-students-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 14px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rectoria-modal-card--course-students .rectoria-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
 .rectoria-course-student-row {
   display: flex;
   align-items: center;

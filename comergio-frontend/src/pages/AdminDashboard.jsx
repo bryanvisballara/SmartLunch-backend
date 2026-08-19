@@ -100,6 +100,19 @@ import { isComergioAcademySection } from '../components/comergio-academy/academy
 
 const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString('es-CO') : 'N/A');
+const formatStockValue = (value) => (value == null ? 'N/A' : String(value));
+const stockToneClass = (value) => {
+  if (value == null) {
+    return '';
+  }
+  if (Number(value) < 0) {
+    return 'is-negative';
+  }
+  if (Number(value) === 0) {
+    return 'is-zero';
+  }
+  return 'is-ok';
+};
 
 const toCostDateInput = (value) => {
   if (!value) {
@@ -9843,19 +9856,108 @@ function AdminDashboard() {
             : null}
 
           {approvalModule === 'cancellations'
-            ? pendingCancellations.map((request) => (
-                <div className="card" key={request._id}>
-                  <p>Orden: {request.orderId?._id || request.orderId}</p>
-                  <p>Alumno: {request.orderId?.studentId?.name || 'Venta externa'}</p>
-                  <p>Total: {formatCurrency(request.orderId?.total || 0)}</p>
-                  <p>Solicitada el: {formatDateTime(request.createdAt)}</p>
-                  <p>Motivo: {request.reason || 'Sin motivo'}</p>
-                  <div className="row gap">
-                    <button className="btn btn-primary" onClick={() => onApproveCancellation(request._id)} type="button">Aprobar</button>
-                    <button className="btn" onClick={() => onRejectCancellation(request._id)} type="button">Rechazar</button>
-                  </div>
-                </div>
-              ))
+            ? pendingCancellations.map((request) => {
+                const inventoryPreview = Array.isArray(request.inventoryPreview) ? request.inventoryPreview : [];
+                const paymentLabel = paymentMethodLabel[request.orderId?.paymentMethod] || request.orderId?.paymentMethod || 'N/A';
+                return (
+                  <article className="card cancellation-request-card" key={request._id}>
+                    <header className="cancellation-request-card__header">
+                      <div className="cancellation-request-card__title">
+                        <span className="cancellation-request-card__badge">Pendiente</span>
+                        <h5>Anulación de venta</h5>
+                        <p>
+                          {request.storeId?.name || 'Tienda'}
+                          <span aria-hidden="true"> · </span>
+                          {paymentLabel}
+                        </p>
+                        <small>Orden {request.orderId?._id || request.orderId || 'N/A'}</small>
+                      </div>
+                      <div className="cancellation-request-card__total">
+                        <span>Total de la venta</span>
+                        <strong>{formatCurrency(request.orderId?.total || 0)}</strong>
+                      </div>
+                    </header>
+
+                    <dl className="cancellation-request-card__meta">
+                      <div>
+                        <dt>Solicitado por</dt>
+                        <dd>{request.requestedBy?.name || request.requestedBy?.username || 'N/A'}</dd>
+                      </div>
+                      <div>
+                        <dt>Alumno</dt>
+                        <dd>{request.orderId?.studentId?.name || 'Venta externa'}</dd>
+                      </div>
+                      <div>
+                        <dt>Venta realizada</dt>
+                        <dd>{formatDateTime(request.orderId?.createdAt)}</dd>
+                      </div>
+                      <div>
+                        <dt>Solicitud</dt>
+                        <dd>{formatDateTime(request.createdAt)}</dd>
+                      </div>
+                    </dl>
+
+                    <p className="cancellation-request-card__reason">
+                      <span>Motivo</span>
+                      {request.reason || 'Sin motivo'}
+                    </p>
+
+                    <div className="cancellation-request-card__products">
+                      <div className="cancellation-request-card__products-head">
+                        <h6>Productos a devolver</h6>
+                        <p>El stock actual ya descuenta esta venta. Si se anula, queda en la última columna.</p>
+                      </div>
+                      {inventoryPreview.length > 0 ? (
+                        <div className="cancellation-request-card__table-wrap">
+                          <table className="cancellation-request-card__table">
+                            <thead>
+                              <tr>
+                                <th>Producto</th>
+                                <th>Cant.</th>
+                                <th>Subtotal</th>
+                                <th>Stock actual</th>
+                                <th>Si se anula</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {inventoryPreview.map((item, index) => (
+                                <tr key={`${item.productId || item.name || 'item'}-${index}`}>
+                                  <td>
+                                    <strong>{item.name || 'Producto'}</strong>
+                                  </td>
+                                  <td>{item.quantity}</td>
+                                  <td>{formatCurrency(item.subtotal || 0)}</td>
+                                  <td>
+                                    <span className={`cancellation-request-card__stock ${stockToneClass(item.currentStock)}`}>
+                                      {formatStockValue(item.currentStock)}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span className={`cancellation-request-card__stock is-projected ${stockToneClass(item.projectedStock)}`}>
+                                      {formatStockValue(item.projectedStock)}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="cancellation-request-card__empty">No hay productos en esta venta.</p>
+                      )}
+                    </div>
+
+                    <div className="cancellation-request-card__actions">
+                      <button className="btn cancellation-request-card__reject" onClick={() => onRejectCancellation(request._id)} type="button">
+                        Rechazar
+                      </button>
+                      <button className="btn btn-primary cancellation-request-card__approve" onClick={() => onApproveCancellation(request._id)} type="button">
+                        Aprobar anulación
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
             : null}
 
           {approvalModule === 'grade-promotions'
@@ -10122,34 +10224,71 @@ function AdminDashboard() {
                 ) : null}
 
                 {selectedApprovalHistory.domain === 'cancellation' ? (
-                  <table className="simple-table">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Estado</th>
-                        <th>Orden</th>
-                        <th>Alumno</th>
-                        <th>Total</th>
-                        <th>Tienda</th>
-                        <th>Solicitado por</th>
-                        <th>Resuelto por</th>
-                        <th>Motivo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>{formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</td>
-                        <td>{selectedApprovalHistory.statusLabel}</td>
-                        <td>{selectedApprovalHistory.detail?.orderId?._id || selectedApprovalHistory.detail?.orderId || 'N/A'}</td>
-                        <td>{selectedApprovalHistory.detail?.orderId?.studentId?.name || 'Venta externa'}</td>
-                        <td>{formatCurrency(selectedApprovalHistory.detail?.orderId?.total || 0)}</td>
-                        <td>{selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</td>
-                        <td>{selectedApprovalHistory.detail?.requestedBy?.name || 'N/A'}</td>
-                        <td>{selectedApprovalHistory.decidedBy || 'N/A'}</td>
-                        <td>{selectedApprovalHistory.detail?.reason || 'Sin motivo'}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <>
+                    <table className="simple-table">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Estado</th>
+                          <th>Orden</th>
+                          <th>Alumno</th>
+                          <th>Total</th>
+                          <th>Tienda</th>
+                          <th>Solicitado por</th>
+                          <th>Resuelto por</th>
+                          <th>Motivo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>{formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</td>
+                          <td>{selectedApprovalHistory.statusLabel}</td>
+                          <td>{selectedApprovalHistory.detail?.orderId?._id || selectedApprovalHistory.detail?.orderId || 'N/A'}</td>
+                          <td>{selectedApprovalHistory.detail?.orderId?.studentId?.name || 'Venta externa'}</td>
+                          <td>{formatCurrency(selectedApprovalHistory.detail?.orderId?.total || 0)}</td>
+                          <td>{selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</td>
+                          <td>{selectedApprovalHistory.detail?.requestedBy?.name || selectedApprovalHistory.detail?.requestedBy?.username || 'N/A'}</td>
+                          <td>{selectedApprovalHistory.decidedBy || 'N/A'}</td>
+                          <td>{selectedApprovalHistory.detail?.reason || 'Sin motivo'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <p>Venta realizada el: {formatDateTime(selectedApprovalHistory.detail?.orderId?.createdAt)}</p>
+                    {(selectedApprovalHistory.detail?.inventoryPreview || []).length > 0 ? (
+                      <div className="cancellation-request-card__table-wrap">
+                        <table className="cancellation-request-card__table">
+                          <thead>
+                            <tr>
+                              <th>Producto</th>
+                              <th>Cant.</th>
+                              <th>Subtotal</th>
+                              <th>Stock actual</th>
+                              <th>Si se anula</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(selectedApprovalHistory.detail.inventoryPreview || []).map((item, index) => (
+                              <tr key={`${item.productId || item.name || 'item'}-${index}`}>
+                                <td><strong>{item.name || 'Producto'}</strong></td>
+                                <td>{item.quantity}</td>
+                                <td>{formatCurrency(item.subtotal || 0)}</td>
+                                <td>
+                                  <span className={`cancellation-request-card__stock ${stockToneClass(item.currentStock)}`}>
+                                    {formatStockValue(item.currentStock)}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={`cancellation-request-card__stock is-projected ${stockToneClass(item.projectedStock)}`}>
+                                    {formatStockValue(item.projectedStock)}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             ) : null}
