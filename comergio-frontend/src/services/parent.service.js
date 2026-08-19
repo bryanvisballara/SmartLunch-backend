@@ -11,7 +11,17 @@ export const getParentAcademicAttendance = (params = {}) => api.get('/parent/por
 export const getParentAssignments = (params = {}) => api.get('/parent/portal/assignments', { params });
 export const getParentAssignmentDetail = (assignmentId, params = {}) =>
 	api.get(`/parent/portal/assignments/${assignmentId}`, { params });
-export const getParentAcademicBilling = (params = {}) => api.get('/parent/portal/academic-billing', { params });
+let parentAcademicBillingRequest = null;
+export const getParentAcademicBilling = (params = {}) => {
+  if (parentAcademicBillingRequest) {
+    return parentAcademicBillingRequest;
+  }
+  parentAcademicBillingRequest = api.get('/parent/portal/academic-billing', { params })
+    .finally(() => {
+      parentAcademicBillingRequest = null;
+    });
+  return parentAcademicBillingRequest;
+};
 export const payParentAcademicCharge = (chargeId, data = {}) => api.post(`/parent/portal/academic-billing/charges/${chargeId}/pay`, data);
 export const createWompiAcademicChargeCheckout = (chargeId) => api.post('/payments/wompi/academic-charge-checkout', { chargeId });
 export const getWompiAcademicChargePaymentStatus = (params) => api.get('/payments/wompi/academic-charge-status', { params });

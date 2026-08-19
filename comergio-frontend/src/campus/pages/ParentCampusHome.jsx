@@ -584,6 +584,56 @@ function buildParentFinancePlanCharges(charges = []) {
     : sorted.filter((charge) => String(charge.category || '').toLowerCase() === 'monthly_statement');
 }
 
+function getBogotaYearMonthKey(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const formatted = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+  const match = String(formatted).match(/^(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : '';
+}
+
+function getParentFinanceChargeMonthKey(charge = {}) {
+  return getBogotaYearMonthKey(charge.dueDate)
+    || (String(charge.monthKey || '').trim().match(/^\d{4}-\d{2}$/) ? String(charge.monthKey).trim() : '');
+}
+
+function resolveParentFinanceHeroIndex(charges = [], referenceDate = new Date()) {
+  if (!charges.length) {
+    return 0;
+  }
+
+  const currentMonthKey = getBogotaYearMonthKey(referenceDate);
+  const currentMonthlyIndex = charges.findIndex((charge) => (
+    String(charge.category || '').toLowerCase() === 'monthly_tuition'
+    && getParentFinanceChargeMonthKey(charge) === currentMonthKey
+  ));
+  if (currentMonthlyIndex >= 0) {
+    return currentMonthlyIndex;
+  }
+
+  const currentPeriodIndex = charges.findIndex((charge) => (
+    getParentFinanceChargeMonthKey(charge) === currentMonthKey
+  ));
+  if (currentPeriodIndex >= 0) {
+    return currentPeriodIndex;
+  }
+
+  const previousPeriod = charges
+    .map((charge, index) => ({ index, monthKey: getParentFinanceChargeMonthKey(charge) }))
+    .filter((item) => item.monthKey && item.monthKey <= currentMonthKey)
+    .at(-1);
+
+  return previousPeriod ? previousPeriod.index : 0;
+}
+
 function resolveParentFinanceHeroEyebrow(charge, concepts = [], { paid = false } = {}) {
   if (paid) {
     const category = String(charge?.category || '').toLowerCase();
@@ -6795,13 +6845,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     });
 
     try {
-      const billingResponse = await getParentAcademicBilling().catch(() => null);
-      if (requestId !== matriculaAccessRequestRef.current) {
-        return;
-      }
-      if (billingResponse?.data) {
-        setAcademicBilling(billingResponse.data);
-      }
+      getParentAcademicBilling()
+        .then((billingResponse) => {
+          if (requestId !== matriculaAccessRequestRef.current) {
+            return;
+          }
+          if (billingResponse?.data) {
+            setAcademicBilling(billingResponse.data);
+          }
+        })
+        .catch(() => {});
 
       const [requirementResponse, pendingSignature] = await Promise.all([
         getEnrollmentMatriculaRequirement(),
@@ -7213,14 +7266,16 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     [financeCharges],
   );
 
-  const defaultFinanceHeroIndex = useMemo(() => {
-    const firstUnpaidIndex = financePlanCharges.findIndex((charge) => !isParentFinanceChargePaid(charge));
-    return firstUnpaidIndex >= 0 ? firstUnpaidIndex : 0;
-  }, [financePlanCharges]);
+  const financePlanChargeKey = financePlanCharges.map((charge) => String(charge._id || charge.monthKey || '')).join('|');
+
+  const defaultFinanceHeroIndex = useMemo(
+    () => resolveParentFinanceHeroIndex(financePlanCharges),
+    [financePlanChargeKey, financePlanCharges],
+  );
 
   useEffect(() => {
-    setFinanceHeroIndex(defaultFinanceHeroIndex);
-  }, [defaultFinanceHeroIndex, selectedChildId]);
+    setFinanceHeroIndex(resolveParentFinanceHeroIndex(financePlanCharges));
+  }, [defaultFinanceHeroIndex, financePlanChargeKey, selectedChildId]);
 
   const selectedHeroCharge = financePlanCharges[Math.min(Math.max(financeHeroIndex, 0), Math.max(financePlanCharges.length - 1, 0))] || null;
   const selectedHeroChargePaid = isParentFinanceChargePaid(selectedHeroCharge);
@@ -7560,7 +7615,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       </div>
       <span className="campus-parent-mobile__finance-current-note">
         {financeHeroNote}
-        {financePlanCharges.length > 1 ? ` · ${financeHeroIndex + 1} de ${financePlanCharges.length}` : ''}
       </span>
       {selectedHeroCharge && !hideEnrollmentPaymentAmount ? (
         <button className="campus-parent-mobile__finance-concepts-button" onClick={() => setShowFinanceConceptsSheet(true)} type="button">

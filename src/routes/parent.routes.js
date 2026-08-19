@@ -955,6 +955,14 @@ function buildMonthKey(dateValue) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function buildUtcYearMonthKey(dateValue) {
+  const date = dateValue ? new Date(dateValue) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return '';
+  }
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 function parseYearMonth(value, fallbackDate = new Date()) {
   const rawValue = normalizeText(value);
   const match = rawValue.match(/^(\d{4})-(\d{2})$/);
@@ -1608,14 +1616,30 @@ async function notifyParentAcademicChargeCreated({ schoolId, parentUserId, stude
   });
 }
 
-async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role, studentIds = [], billingProfiles = [], feeConfiguration = null, referenceDate = new Date() }) {
+async function ensureParentAcademicMonthlyCharges({
+  schoolId,
+  parentUserId,
+  role,
+  studentIds = [],
+  billingProfiles = [],
+  feeConfiguration = null,
+  academicGrades = [],
+  sendNotification = false,
+}) {
+  const { buildStudentMonthlyTuitionSchedule } = require('../services/academicConsolidatedBilling.service');
   const linkedStudentIdSet = new Set(studentIds.map((item) => String(item)));
   const profiles = (billingProfiles || []).filter((profile) => linkedStudentIdSet.has(String(profile.studentId)) && Number(profile.monthlyTuitionAmount || 0) > 0);
 
   for (const profile of profiles) {
-    const dueDates = buildAcademicCycleMonthlyDueDates(profile, referenceDate, feeConfiguration);
-    for (const dueDate of dueDates) {
-      const monthKey = buildMonthKey(dueDate);
+    const schedule = buildStudentMonthlyTuitionSchedule({
+      billingProfile: profile,
+      feeConfiguration,
+      academicGrades,
+    });
+    for (const { dueDate, monthKey } of schedule) {
+      if (!monthKey) {
+        continue;
+      }
       const existingCharge = await AcademicCharge.exists({
         schoolId,
         studentId: profile.studentId,
@@ -1630,7 +1654,8 @@ async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role
       const pricing = resolveAcademicChargeAmounts(
         { category: 'monthly_tuition', amount: Number(profile.monthlyTuitionAmount || 0), originalAmount: Number(profile.monthlyTuitionAmount || 0) },
         profile,
-        dueDate
+        dueDate,
+        feeConfiguration,
       );
       if (pricing.effectiveAmount <= 0) {
         continue;
@@ -1654,12 +1679,14 @@ async function ensureParentAcademicMonthlyCharges({ schoolId, parentUserId, role
         targetGrade: profile.grade,
       });
 
-      notifyParentAcademicChargeCreated({
-        schoolId,
-        parentUserId,
-        studentId: profile.studentId,
-        charge,
-      }).catch((error) => console.warn(`[PARENT_CHARGE_PUSH_WARNING] charge=${charge._id} error=${error.message}`));
+      if (sendNotification) {
+        notifyParentAcademicChargeCreated({
+          schoolId,
+          parentUserId,
+          studentId: profile.studentId,
+          charge,
+        }).catch((error) => console.warn(`[PARENT_CHARGE_PUSH_WARNING] charge=${charge._id} error=${error.message}`));
+      }
     }
   }
 }
@@ -1892,6 +1919,9 @@ function serializeIndividualChargeForParent(charge = {}, billingProfile = null, 
     studentName: charge.studentId?.name || charge.studentName || 'Familia',
     studentGrade: charge.studentId?.grade || charge.studentGrade || '',
     studentCourse: charge.studentId?.course || charge.studentCourse || '',
+    monthKey: String(charge.category || '').toLowerCase() === 'monthly_tuition'
+      ? (buildUtcYearMonthKey(charge.dueDate) || String(charge.monthKey || '').trim())
+      : charge.monthKey,
     billingProfile,
   };
 }
@@ -5031,6 +5061,8 @@ router.get('/portal/academic-billing', async (req, res) => {
     }
 
     const {
+      buildMonthKey: buildAcademicUtcMonthKey,
+      buildStudentMonthlyTuitionSchedule,
       ensureConsolidatedMonthlyCharge,
       refreshPendingIndividualTuitionCharges,
       serializeConsolidatedChargeForParent,
@@ -5057,6 +5089,7 @@ router.get('/portal/academic-billing', async (req, res) => {
       schoolId,
       feeConfiguration,
       referenceDate: now,
+      studentIds: linkedStudentIds,
     });
 
     billingProfiles = await StudentBillingProfile.find({ schoolId, active: true, studentId: { $in: linkedStudentIds } }).lean();
@@ -5086,10 +5119,14 @@ router.get('/portal/academic-billing', async (req, res) => {
       studentIds: linkedStudentIds,
       billingProfiles,
       feeConfiguration,
-      referenceDate: now,
+      academicGrades,
     });
 
-    await refreshPendingIndividualTuitionCharges({ schoolId, referenceDate: now });
+    await refreshPendingIndividualTuitionCharges({
+      schoolId,
+      referenceDate: now,
+      studentIds: linkedStudentIds,
+    });
 
     for (const profile of billingProfiles) {
       await ensureConsolidatedMonthlyCharge({
@@ -5108,7 +5145,7 @@ router.get('/portal/academic-billing', async (req, res) => {
 
     billingProfiles = await StudentBillingProfile.find({ schoolId, active: true, studentId: { $in: linkedStudentIds } }).lean();
 
-    const [statementCharges, individualCharges, payments] = await Promise.all([
+    const [statementCharges, fetchedIndividualCharges, payments] = await Promise.all([
       AcademicCharge.find({ schoolId, studentId: { $in: linkedStudentIds }, category: 'monthly_statement' })
         .populate('studentId', 'name grade course')
         .sort({ dueDate: -1, createdAt: -1 })
@@ -5129,6 +5166,58 @@ router.get('/portal/academic-billing', async (req, res) => {
         .limit(40)
         .lean(),
     ]);
+
+    const monthlyPlanKeysByStudentId = new Map();
+    billingProfiles.forEach((profile) => {
+      const studentId = String(profile.studentId || '');
+      if (!studentId) {
+        return;
+      }
+      monthlyPlanKeysByStudentId.set(studentId, new Set(
+        buildStudentMonthlyTuitionSchedule({
+          billingProfile: profile,
+          feeConfiguration,
+          academicGrades,
+        }).map((item) => item.monthKey).filter(Boolean),
+      ));
+    });
+    const isMonthlyChargeOnPaymentPlan = (charge) => {
+      if (String(charge.category || '').toLowerCase() !== 'monthly_tuition') {
+        return true;
+      }
+      if (['paid'].includes(String(charge.status || '').toLowerCase()) || Number(charge.paidAmount || 0) > 0) {
+        return true;
+      }
+      const studentId = String(charge.studentId?._id || charge.studentId || '');
+      const planKeys = monthlyPlanKeysByStudentId.get(studentId);
+      if (!planKeys || planKeys.size === 0) {
+        return true;
+      }
+      const monthKeys = [
+        String(charge.monthKey || '').trim(),
+        buildAcademicUtcMonthKey(charge.dueDate),
+        buildUtcYearMonthKey(charge.dueDate),
+      ].filter(Boolean);
+      return monthKeys.some((monthKey) => planKeys.has(monthKey));
+    };
+    const outOfPlanPendingMonthlyIds = fetchedIndividualCharges
+      .filter((charge) => (
+        String(charge.category || '').toLowerCase() === 'monthly_tuition'
+        && ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase())
+        && !isMonthlyChargeOnPaymentPlan(charge)
+      ))
+      .map((charge) => charge._id)
+      .filter(Boolean);
+    if (outOfPlanPendingMonthlyIds.length) {
+      await AcademicCharge.updateMany(
+        { _id: { $in: outOfPlanPendingMonthlyIds }, schoolId, status: { $in: ['pending', 'overdue'] } },
+        { $set: { status: 'cancelled' } },
+      );
+    }
+    const outOfPlanPendingMonthlyIdSet = new Set(outOfPlanPendingMonthlyIds.map((chargeId) => String(chargeId)));
+    const individualCharges = fetchedIndividualCharges.filter((charge) => (
+      !outOfPlanPendingMonthlyIdSet.has(String(charge._id)) && isMonthlyChargeOnPaymentPlan(charge)
+    ));
 
     const allCharges = [...statementCharges, ...individualCharges];
     const chargePayments = allCharges.length > 0

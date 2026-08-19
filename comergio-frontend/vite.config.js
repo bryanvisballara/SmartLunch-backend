@@ -6,7 +6,7 @@ import legacy from '@vitejs/plugin-legacy'
 export default defineConfig({
   appType: 'spa',
   server: {
-    host: '127.0.0.1',
+    host: true,
     port: 5173,
     // Fail instead of silently moving to 5174/5175 (Chrome keeps the old tab).
     strictPort: true,
@@ -18,7 +18,6 @@ export default defineConfig({
     },
     hmr: {
       overlay: true,
-      host: '127.0.0.1',
       port: 5173,
       clientPort: 5173,
     },

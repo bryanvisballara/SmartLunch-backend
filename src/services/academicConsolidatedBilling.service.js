@@ -108,6 +108,52 @@ function formatAcademicMonthLabel(date) {
   return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(parsed);
 }
 
+function buildStudentMonthlyTuitionSchedule({
+  billingProfile = {},
+  feeConfiguration = null,
+  academicGrades = [],
+} = {}) {
+  const schoolYearConfiguration = normalizeSchoolYearConfiguration(
+    feeConfiguration || {},
+    billingProfile.grade,
+    academicGrades,
+  );
+  const parsedEntryDate = parseAcademicCalendarDate(billingProfile.entryDate) || schoolYearConfiguration.startDate;
+  const schoolYearStartMonth = startOfMonthUtc(schoolYearConfiguration.startDate);
+  const schoolYearEndMonth = startOfMonthUtc(schoolYearConfiguration.endDate);
+  const entryMonth = startOfMonthUtc(parsedEntryDate);
+  const scheduleStartMonth = entryMonth.getTime() > schoolYearStartMonth.getTime()
+    ? entryMonth
+    : schoolYearStartMonth;
+  if (scheduleStartMonth.getTime() > schoolYearEndMonth.getTime()) {
+    return [];
+  }
+
+  const dueDay = Math.min(
+    28,
+    Math.max(1, Number(billingProfile.dueDay || DEFAULT_ACADEMIC_MONTHLY_DUE_DAY)),
+  );
+  const totalMonths = Math.max(1, getMonthDiffUtc(scheduleStartMonth, schoolYearEndMonth) + 1);
+
+  return Array.from({ length: totalMonths }, (_, index) => {
+    const monthDate = addMonthsUtc(scheduleStartMonth, index);
+    const dueDate = new Date(Date.UTC(
+      monthDate.getUTCFullYear(),
+      monthDate.getUTCMonth(),
+      dueDay,
+      5,
+      0,
+      0,
+      0,
+    ));
+    return {
+      monthKey: buildMonthKey(monthDate),
+      dueDate,
+      monthDate,
+    };
+  });
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(value || 0));
 }
@@ -623,25 +669,30 @@ async function loadBillingProfileForCharge({ schoolId, charge, profileCache }) {
   return profile;
 }
 
-async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate = new Date() }) {
+async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate = new Date(), studentIds = [] }) {
   const StudentBillingProfile = require('../models/studentBillingProfile.model');
-  const pendingCharges = await AcademicCharge.find({
+  const pendingQuery = {
     schoolId,
     category: 'monthly_statement',
     status: { $in: ['pending', 'overdue'] },
-  }).lean();
+  };
+  const scopedStudentIds = [...new Set((studentIds || []).map((item) => String(item)).filter(Boolean))];
+  if (scopedStudentIds.length) {
+    pendingQuery.studentId = { $in: scopedStudentIds };
+  }
+  const pendingCharges = await AcademicCharge.find(pendingQuery).lean();
 
   const profileCache = new Map();
   let refreshedCharges = 0;
   const omitAnnualTuition = shouldOmitAnnualTuitionFromMonthlyStatement(schoolId);
 
   // Also strip matrícula from statements when it was already collected as a standalone paid charge.
-  const studentIds = [...new Set(pendingCharges.map((charge) => String(charge.studentId || '')).filter(Boolean))];
+  const chargeStudentIds = [...new Set(pendingCharges.map((charge) => String(charge.studentId || '')).filter(Boolean))];
   const paidAnnualStudentIds = new Set();
-  if (!omitAnnualTuition && studentIds.length) {
+  if (!omitAnnualTuition && chargeStudentIds.length) {
     const paidAnnualCharges = await AcademicCharge.find({
       schoolId,
-      studentId: { $in: studentIds },
+      studentId: { $in: chargeStudentIds },
       category: 'annual_tuition',
       status: 'paid',
     }).select('studentId').lean();
@@ -794,9 +845,15 @@ async function syncSchoolBillingProfilesFromFeeConfiguration({
   schoolId,
   feeConfiguration,
   referenceDate = new Date(),
+  studentIds = [],
 }) {
   const StudentBillingProfile = require('../models/studentBillingProfile.model');
-  const profiles = await StudentBillingProfile.find({ schoolId, active: true }).lean();
+  const profileQuery = { schoolId, active: true };
+  const scopedStudentIds = [...new Set((studentIds || []).map((item) => String(item)).filter(Boolean))];
+  if (scopedStudentIds.length) {
+    profileQuery.studentId = { $in: scopedStudentIds };
+  }
+  const profiles = await StudentBillingProfile.find(profileQuery).lean();
   let updatedProfiles = 0;
 
   for (const profile of profiles) {
@@ -810,8 +867,16 @@ async function syncSchoolBillingProfilesFromFeeConfiguration({
     updatedProfiles += 1;
   }
 
-  const refreshedStatementCharges = await refreshPendingMonthlyStatementCharges({ schoolId, referenceDate });
-  const refreshedIndividualCharges = await refreshPendingIndividualTuitionCharges({ schoolId, referenceDate });
+  const refreshedStatementCharges = await refreshPendingMonthlyStatementCharges({
+    schoolId,
+    referenceDate,
+    studentIds: scopedStudentIds,
+  });
+  const refreshedIndividualCharges = await refreshPendingIndividualTuitionCharges({
+    schoolId,
+    referenceDate,
+    studentIds: scopedStudentIds,
+  });
 
   return {
     updatedProfiles,
@@ -962,6 +1027,7 @@ module.exports = {
   buildBillingProfileFeeSyncFields,
   buildConsolidatedMonthlyStatement,
   buildMonthKey,
+  buildStudentMonthlyTuitionSchedule,
   completeAcademicChargeGatewayPayment,
   ensureConsolidatedMonthlyCharge,
   ensureSchoolConsolidatedMonthlyCharges,
