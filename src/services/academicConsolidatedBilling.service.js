@@ -5,7 +5,7 @@ const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('./notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
-const { findGradeFeeSetting, getFeeGradeAliases } = require('../utils/feeGradeMatching');
+const { findGradeFeeSetting, getFeeGradeAliases, resolveSchoolYearLevelSetting } = require('../utils/feeGradeMatching');
 const {
   resolveParentAnnualTuitionPricing,
 } = require('./academicBenefitPricing.service');
@@ -51,23 +51,6 @@ function parseAcademicCalendarDate(value) {
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return null;
   return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
-}
-
-function resolveSchoolYearLevelSetting(configuration = {}, grade = '', academicGrades = []) {
-  const aliases = new Set(getFeeGradeAliases(grade));
-  const schoolYearLevels = Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : [];
-  const byGradeKeys = schoolYearLevels.find((levelSetting) => {
-    const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
-    return gradeKeys.some((gradeKey) => getFeeGradeAliases(gradeKey).some((alias) => aliases.has(alias)));
-  });
-  if (byGradeKeys) return byGradeKeys;
-  const matchedGrade = (Array.isArray(academicGrades) ? academicGrades : []).find((gradeItem) => {
-    const gradeItemAliases = getFeeGradeAliases(gradeItem?.key || gradeItem?.grade);
-    return gradeItemAliases.some((alias) => aliases.has(alias));
-  });
-  const levelKey = normalizeText(matchedGrade?.levelKey).toLowerCase();
-  if (!levelKey) return null;
-  return schoolYearLevels.find((levelSetting) => normalizeText(levelSetting?.levelKey).toLowerCase() === levelKey) || null;
 }
 
 function normalizeSchoolYearConfiguration(configuration = {}, grade = '', academicGrades = []) {
@@ -886,14 +869,18 @@ async function syncSchoolBillingProfilesFromFeeConfiguration({
   };
 }
 
-async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, referenceDate = new Date() }) {
+async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, referenceDate = new Date(), session = null }) {
   const StudentBillingProfile = require('../models/studentBillingProfile.model');
   const AcademicChargePayment = require('../models/academicChargePayment.model');
   const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
 
-  const billingProfile = charge?.billingProfileId
-    ? await StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId }).lean()
-    : await StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true }).lean();
+  const profileQuery = charge?.billingProfileId
+    ? StudentBillingProfile.findOne({ _id: charge.billingProfileId, schoolId })
+    : StudentBillingProfile.findOne({ schoolId, studentId: charge.studentId, active: true });
+  if (session) {
+    profileQuery.session(session);
+  }
+  const billingProfile = await profileQuery.lean();
 
   let pricingAmount = Math.max(0, Number(charge?.amount || 0));
   if (String(charge?.category || '') === 'monthly_statement' && billingProfile) {
@@ -907,7 +894,11 @@ async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, refere
     if (charge?.amountLocked) {
       pricingAmount = Math.max(0, Number(charge?.amount || 0));
     } else {
-      const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
+      const feeQuery = AcademicFeeConfiguration.findOne({ schoolId });
+      if (session) {
+        feeQuery.session(session);
+      }
+      const feeConfiguration = await feeQuery.lean();
       if (billingProfile && feeConfiguration) {
         const pricing = resolveParentAnnualTuitionPricing(billingProfile, feeConfiguration, referenceDate);
         pricingAmount = Math.max(0, Number(pricing.effectiveAmount || charge?.amount || 0));
@@ -915,7 +906,11 @@ async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, refere
     }
   }
 
-  const previousPayments = await AcademicChargePayment.find({ schoolId, chargeId: charge._id }).select('amount').lean();
+  const paymentQuery = AcademicChargePayment.find({ schoolId, chargeId: charge._id }).select('amount');
+  if (session) {
+    paymentQuery.session(session);
+  }
+  const previousPayments = await paymentQuery.lean();
   const previousPaidAmount = previousPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const outstandingAmount = Math.max(0, Math.round(pricingAmount - previousPaidAmount));
 
@@ -955,7 +950,8 @@ async function completeAcademicChargeGatewayPayment(paymentRecord, providerPaylo
   const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
     schoolId: charge.schoolId,
     charge,
-    referenceDate: new Date(),
+    referenceDate: parseAcademicCalendarDate(charge.dueDate) || new Date(),
+    session,
   });
 
   const paidAmount = Math.max(
@@ -989,11 +985,14 @@ async function completeAcademicChargeGatewayPayment(paymentRecord, providerPaylo
     { session },
   );
 
-  const { outstandingAmount: remainingAfterPayment } = await resolveOutstandingAcademicChargeAmount({
+  const { pricingAmount, previousPaidAmount } = await resolveOutstandingAcademicChargeAmount({
     schoolId: charge.schoolId,
     charge,
-    referenceDate: new Date(),
+    referenceDate: parseAcademicCalendarDate(charge.dueDate) || chargePayment.paidAt || new Date(),
+    session,
   });
+  const totalPaidAmount = previousPaidAmount >= paidAmount ? previousPaidAmount : previousPaidAmount + paidAmount;
+  const remainingAfterPayment = Math.max(0, Math.round(pricingAmount - totalPaidAmount));
 
   if (remainingAfterPayment <= 0) {
     charge.status = 'paid';

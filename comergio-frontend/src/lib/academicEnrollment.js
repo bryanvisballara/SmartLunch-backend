@@ -84,6 +84,18 @@ function normalizeAcademicLateEnrollmentSurchargeType(value) {
   return ['percent', 'fixed'].includes(normalizeText(value)) ? normalizeText(value) : 'none';
 }
 
+function isNumericGradeKey(value) {
+  return /^\d{1,2}$/.test(normalizeText(value).toLowerCase());
+}
+
+function isEducationalLevelKey(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized || isNumericGradeKey(normalized)) {
+    return false;
+  }
+  return /^(maternal|kinder|prep|prejardin|jardin|transicion|toddlers|infants|nursery|k-grade|kgrade)(?:[\s_-]+\d{1,2})?$/i.test(normalized);
+}
+
 function getAcademicGradeAliases(value) {
   const normalized = normalizeText(value).toLowerCase();
   if (!normalized) return [];
@@ -96,6 +108,13 @@ function getAcademicGradeAliases(value) {
   else if (normalizedLetters.includes('jardin')) aliases.add('jardin');
   if (normalizedLetters.includes('transicion')) aliases.add('transicion');
 
+  const kinderMatch = normalized.match(/^kinder[\s_-]*(\d{1,2})?$/i);
+  if (kinderMatch?.[1]) {
+    aliases.add(`kinder_${kinderMatch[1]}`);
+    aliases.add(`kinder-${kinderMatch[1]}`);
+    aliases.add(`kinder ${kinderMatch[1]}`);
+  }
+
   normalized.split(':').map((part) => normalizeText(part).toLowerCase()).filter(Boolean).forEach((part) => aliases.add(part));
 
   const sectionMatch = normalized.match(/^(\d{1,2})\s*[-_/ ]?\s*[a-z]$/i);
@@ -104,36 +123,136 @@ function getAcademicGradeAliases(value) {
   }
 
   const numericMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:\s*[-_/ ]?\s*[a-z])?(?:$|[^\d])/i);
-  if (numericMatch) {
+  if (numericMatch && !isEducationalLevelKey(normalized) && !/(kinder|prejardin|jardin|transicion|preescolar|maternal)/.test(normalizedLetters)) {
     aliases.add(numericMatch[1]);
   }
 
   return [...aliases].filter(Boolean);
 }
 
-function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '', options = {}) {
-  const { academicGrades = [] } = options;
-  const aliases = new Set(getAcademicGradeAliases(grade));
-  const schoolYearLevels = Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : [];
-
-  const byGradeKeys = schoolYearLevels.find((levelSetting) => {
-    const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
-    return gradeKeys.some((gradeKey) => getAcademicGradeAliases(gradeKey).some((alias) => aliases.has(alias)));
-  });
-  if (byGradeKeys) {
-    return byGradeKeys;
+function inferAcademicLevelKeyFromGrade(grade = '') {
+  const normalized = normalizeText(grade)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  if (!normalized) {
+    return '';
   }
 
-  const matchedGrade = (Array.isArray(academicGrades) ? academicGrades : []).find((gradeItem) => {
-    const gradeAliases = getAcademicGradeAliases(gradeItem?.key || gradeItem?.grade);
-    return gradeAliases.some((alias) => aliases.has(alias));
-  });
-  const levelKey = normalizeText(matchedGrade?.levelKey).toLowerCase();
-  if (!levelKey) {
+  const compact = normalized.replace(/[\s_-]+/g, '');
+  if (/(maternal|infants|toddlers|nursery|prejardin|preescolar|preschool|jardin|transicion|kinder|kgrade|^k\d)/.test(compact)) {
+    return 'preescolar';
+  }
+  if (/primaria|primary|elemental/.test(compact)) {
+    return 'primaria';
+  }
+  if (/secundaria|bachiller|media|highschool/.test(compact)) {
+    return 'secundaria';
+  }
+
+  const numberMatch = normalized.match(/(?:^|[^\d])(\d{1,2})(?:$|[^\d])/);
+  const gradeNumber = Number(numberMatch?.[1] || 0);
+  if (gradeNumber >= 1 && gradeNumber <= 5) {
+    return 'primaria';
+  }
+  if (gradeNumber >= 6 && gradeNumber <= 13) {
+    return 'secundaria';
+  }
+
+  return '';
+}
+
+function findSchoolYearLevelByLevelKey(schoolYearLevels = [], levelKey = '') {
+  const normalizedKey = normalizeText(levelKey).toLowerCase();
+  if (!normalizedKey) {
     return null;
   }
 
-  return schoolYearLevels.find((levelSetting) => normalizeText(levelSetting?.levelKey).toLowerCase() === levelKey) || null;
+  const aliasesByLevel = {
+    preescolar: ['preescolar', 'preschool', 'pre-escolar', 'inicial'],
+    primaria: ['primaria', 'primary', 'elemental', 'basica primaria'],
+    secundaria: ['secundaria', 'bachillerato', 'bachiller', 'media', 'highschool', 'high school', 'basica secundaria'],
+  };
+  const aliases = aliasesByLevel[normalizedKey] || [normalizedKey];
+
+  return (Array.isArray(schoolYearLevels) ? schoolYearLevels : []).find((levelSetting) => {
+    const settingKey = normalizeText(levelSetting?.levelKey).toLowerCase();
+    const settingLabel = normalizeText(levelSetting?.label)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    return aliases.some((alias) => (
+      settingKey === alias
+      || settingKey.includes(alias)
+      || settingLabel === alias
+      || settingLabel.includes(alias)
+    ));
+  }) || null;
+}
+
+function findAcademicStructureGrade(grade = '', academicGrades = []) {
+  const grades = Array.isArray(academicGrades) ? academicGrades : [];
+  const aliases = new Set(getAcademicGradeAliases(grade));
+  const queryIsNumeric = isNumericGradeKey(grade);
+  const queryIsEducational = isEducationalLevelKey(grade);
+
+  const ranked = grades
+    .map((gradeItem) => {
+      const key = gradeItem?.key || gradeItem?.grade || '';
+      const itemIsNumeric = isNumericGradeKey(key);
+      const itemIsEducational = isEducationalLevelKey(key);
+      if ((queryIsEducational && itemIsNumeric) || (queryIsNumeric && itemIsEducational)) {
+        return { gradeItem, score: -1 };
+      }
+      const itemAliases = new Set([
+        ...getAcademicGradeAliases(key),
+        ...getAcademicGradeAliases(gradeItem?.label || ''),
+      ]);
+      const overlap = [...aliases].filter((alias) => itemAliases.has(alias)).length;
+      return { gradeItem, score: overlap };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  return ranked[0]?.gradeItem || null;
+}
+
+function schoolYearLevelMatchesGradeKeys(levelSetting = {}, grade = '') {
+  const gradeKeys = Array.isArray(levelSetting?.gradeKeys) ? levelSetting.gradeKeys : [];
+  const aliases = new Set(getAcademicGradeAliases(grade));
+  const queryIsNumeric = isNumericGradeKey(grade);
+  const queryIsEducational = isEducationalLevelKey(grade);
+
+  return gradeKeys.some((gradeKey) => {
+    const itemIsNumeric = isNumericGradeKey(gradeKey);
+    const itemIsEducational = isEducationalLevelKey(gradeKey);
+    if ((queryIsEducational && itemIsNumeric) || (queryIsNumeric && itemIsEducational)) {
+      return false;
+    }
+    return getAcademicGradeAliases(gradeKey).some((alias) => aliases.has(alias));
+  });
+}
+
+function resolveAcademicSchoolYearLevelSetting(configuration = {}, grade = '', options = {}) {
+  const { academicGrades = [] } = options;
+  const schoolYearLevels = Array.isArray(configuration?.schoolYearLevels) ? configuration.schoolYearLevels : [];
+  if (!schoolYearLevels.length) {
+    return null;
+  }
+
+  const matchedGrade = findAcademicStructureGrade(grade, academicGrades);
+  const byStructureLevel = findSchoolYearLevelByLevelKey(schoolYearLevels, matchedGrade?.levelKey);
+  if (byStructureLevel) {
+    return byStructureLevel;
+  }
+
+  const byInferredLevel = findSchoolYearLevelByLevelKey(schoolYearLevels, inferAcademicLevelKeyFromGrade(grade));
+  if (byInferredLevel) {
+    return byInferredLevel;
+  }
+
+  return schoolYearLevels.find((levelSetting) => schoolYearLevelMatchesGradeKeys(levelSetting, grade)) || null;
 }
 
 function formatAcademicMonthLabel(date) {
