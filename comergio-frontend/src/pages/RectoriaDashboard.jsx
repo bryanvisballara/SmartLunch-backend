@@ -2951,6 +2951,7 @@ function createEmptyTeamTeacherAssignment() {
     teacherUserId: '',
     subjectKeys: [],
     gradeKeys: [],
+    gradesBySubject: {},
     weeklyHours: 0,
   };
 }
@@ -2962,6 +2963,52 @@ function getTeamTeacherAssignmentSubjectKeys(assignment = {}) {
 
   const legacySubjectKey = String(assignment.subjectKey || '').trim();
   return legacySubjectKey ? [legacySubjectKey] : [];
+}
+
+function normalizeTeamTeacherAssignmentGradeKeys(gradeKeys = []) {
+  return Array.from(new Set((Array.isArray(gradeKeys) ? gradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
+}
+
+function getTeamTeacherAssignmentGradesBySubject(assignment = {}) {
+  const raw = assignment?.gradesBySubject && typeof assignment.gradesBySubject === 'object'
+    ? assignment.gradesBySubject
+    : {};
+  const gradesBySubject = {};
+
+  Object.entries(raw).forEach(([subjectKey, gradeKeys]) => {
+    const normalizedSubjectKey = String(subjectKey || '').trim();
+    if (!normalizedSubjectKey) {
+      return;
+    }
+    gradesBySubject[normalizedSubjectKey] = normalizeTeamTeacherAssignmentGradeKeys(gradeKeys);
+  });
+
+  const subjectKeys = getTeamTeacherAssignmentSubjectKeys(assignment);
+  const legacyGradeKeys = normalizeTeamTeacherAssignmentGradeKeys(assignment.gradeKeys);
+  if (legacyGradeKeys.length > 0) {
+    subjectKeys.forEach((subjectKey) => {
+      if (!gradesBySubject[subjectKey] || gradesBySubject[subjectKey].length === 0) {
+        gradesBySubject[subjectKey] = [...legacyGradeKeys];
+      }
+    });
+  }
+
+  return gradesBySubject;
+}
+
+function getTeamTeacherAssignmentGradeKeysForSubject(assignment = {}, subjectKey = '') {
+  const normalizedSubjectKey = String(subjectKey || '').trim();
+  if (!normalizedSubjectKey) {
+    return [];
+  }
+  return getTeamTeacherAssignmentGradesBySubject(assignment)[normalizedSubjectKey] || [];
+}
+
+function getTeamTeacherAssignmentSelectedGradeKeys(assignment = {}) {
+  const gradesBySubject = getTeamTeacherAssignmentGradesBySubject(assignment);
+  return Array.from(new Set(
+    getTeamTeacherAssignmentSubjectKeys(assignment).flatMap((subjectKey) => gradesBySubject[subjectKey] || []),
+  ));
 }
 
 function resolveSubjectAssignmentGradeKeys(subject = {}, selectedGradeKeys = []) {
@@ -5548,9 +5595,7 @@ function RectoriaDashboard() {
   }, [academicSubjectLoadTemplates, educationalLevelSummaries.length, selectedTeamGroup, selectedTeamRole]);
 
   const teamTeacherAssignmentCoursePreview = useMemo(() => {
-    const selectedGradeKeys = Array.from(new Set(
-      (teamTeacherAssignment.gradeKeys || []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean),
-    ));
+    const selectedGradeKeys = getTeamTeacherAssignmentSelectedGradeKeys(teamTeacherAssignment);
     if (!selectedGradeKeys.length) {
       return [];
     }
@@ -5592,7 +5637,9 @@ function RectoriaDashboard() {
     courseOptionsByGrade,
     getGradeLabel,
     getLevelLabel,
+    teamTeacherAssignment.gradesBySubject,
     teamTeacherAssignment.gradeKeys,
+    teamTeacherAssignment.subjectKeys,
   ]);
 
   const teamTeacherAssignmentIncludedCourseCount = useMemo(
@@ -6180,15 +6227,20 @@ function RectoriaDashboard() {
         (item) => String(item.teacherUserId || '').trim() === teacherUserId,
       );
       const subjectKeys = Array.from(new Set(existingAssignments.map((item) => String(item.subjectKey || '').trim()).filter(Boolean)));
-      const gradeKeys = Array.from(new Set(existingAssignments.flatMap((item) => (
-        Array.isArray(item.gradeKeys) ? item.gradeKeys : []
-      )).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
+      const gradesBySubject = existingAssignments.reduce((accumulator, item) => {
+        const subjectKey = String(item.subjectKey || '').trim();
+        if (!subjectKey) {
+          return accumulator;
+        }
+        accumulator[subjectKey] = normalizeTeamTeacherAssignmentGradeKeys(item.gradeKeys);
+        return accumulator;
+      }, {});
 
       setTeamTeacherAssignment({
         ...createEmptyTeamTeacherAssignment(),
         teacherUserId: value,
         subjectKeys,
-        gradeKeys,
+        gradesBySubject,
       });
       return;
     }
@@ -6199,20 +6251,30 @@ function RectoriaDashboard() {
     }));
   };
 
-  const onToggleTeamTeacherAssignmentGrade = (gradeKey) => {
-    setTeamTeacherAssignment((prev) => ({
-      ...prev,
-      gradeKeys: prev.gradeKeys.includes(gradeKey)
-        ? prev.gradeKeys.filter((item) => item !== gradeKey)
-        : [...prev.gradeKeys, gradeKey],
-    }));
+  const onToggleTeamTeacherAssignmentGrade = (subjectKey, gradeKey) => {
+    const normalizedSubjectKey = String(subjectKey || '').trim();
+    const normalizedGradeKey = String(gradeKey || '').trim();
+    if (!normalizedSubjectKey || !normalizedGradeKey) {
+      return;
+    }
+
+    setTeamTeacherAssignment((prev) => {
+      const gradesBySubject = { ...getTeamTeacherAssignmentGradesBySubject(prev) };
+      const currentGradeKeys = gradesBySubject[normalizedSubjectKey] || [];
+      gradesBySubject[normalizedSubjectKey] = currentGradeKeys.includes(normalizedGradeKey)
+        ? currentGradeKeys.filter((item) => item !== normalizedGradeKey)
+        : [...currentGradeKeys, normalizedGradeKey];
+
+      return {
+        ...prev,
+        gradesBySubject,
+        gradeKeys: [],
+      };
+    });
   };
 
   const onCancelTeamTeacherAssignment = () => {
-    setTeamTeacherAssignment((prev) => ({
-      ...createEmptyTeamTeacherAssignment(),
-      teacherUserId: prev.teacherUserId,
-    }));
+    setTeamTeacherAssignment(createEmptyTeamTeacherAssignment());
     setTeamTeacherCoursesPreviewOpen(false);
     setTeamTeacherGradesHelpOpen(false);
   };
@@ -6225,11 +6287,29 @@ function RectoriaDashboard() {
         return prev;
       }
 
+      const gradesBySubject = { ...getTeamTeacherAssignmentGradesBySubject(prev) };
+      const isSelected = currentSubjectKeys.includes(normalizedSubjectKey);
+      if (isSelected) {
+        delete gradesBySubject[normalizedSubjectKey];
+        return {
+          ...prev,
+          subjectKeys: currentSubjectKeys.filter((item) => item !== normalizedSubjectKey),
+          gradesBySubject,
+          gradeKeys: [],
+        };
+      }
+
+      const existingAssignment = academicSubjectLoadTemplates.find((item) => (
+        String(item.teacherUserId || '').trim() === String(prev.teacherUserId || '').trim()
+        && String(item.subjectKey || '').trim() === normalizedSubjectKey
+      ));
+      gradesBySubject[normalizedSubjectKey] = normalizeTeamTeacherAssignmentGradeKeys(existingAssignment?.gradeKeys);
+
       return {
         ...prev,
-        subjectKeys: currentSubjectKeys.includes(normalizedSubjectKey)
-          ? currentSubjectKeys.filter((item) => item !== normalizedSubjectKey)
-          : [...currentSubjectKeys, normalizedSubjectKey],
+        subjectKeys: [...currentSubjectKeys, normalizedSubjectKey],
+        gradesBySubject,
+        gradeKeys: [],
       };
     });
   };
@@ -6273,7 +6353,7 @@ function RectoriaDashboard() {
   const onSaveTeamTeacherAssignment = async () => {
     const normalizedTeacherUserId = String(teamTeacherAssignment.teacherUserId || '').trim();
     const normalizedSubjectKeys = getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment);
-    const normalizedGradeKeys = Array.from(new Set((teamTeacherAssignment.gradeKeys || []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean)));
+    const gradesBySubject = getTeamTeacherAssignmentGradesBySubject(teamTeacherAssignment);
 
     if (!normalizedTeacherUserId) {
       setError('Selecciona el docente que se va a vincular.');
@@ -6285,16 +6365,17 @@ function RectoriaDashboard() {
       return;
     }
 
-    if (normalizedGradeKeys.length === 0) {
-      setError('Selecciona al menos un grado para la vinculación docente.');
-      return;
-    }
-
     const assignmentsToSave = [];
 
     for (const normalizedSubjectKey of normalizedSubjectKeys) {
       const subject = academicStructureDraft.subjects.find((item) => String(item.key || '').trim() === normalizedSubjectKey);
-      const gradeKeysForSubject = resolveSubjectAssignmentGradeKeys(subject, normalizedGradeKeys);
+      const selectedGradeKeys = gradesBySubject[normalizedSubjectKey] || [];
+      if (selectedGradeKeys.length === 0) {
+        setError(`Selecciona los grados para ${subject?.label || normalizedSubjectKey}. Cada asignatura puede cubrirse en grados distintos.`);
+        return;
+      }
+
+      const gradeKeysForSubject = resolveSubjectAssignmentGradeKeys(subject, selectedGradeKeys);
 
       if (gradeKeysForSubject.length === 0) {
         setError(`La asignatura ${subject?.label || normalizedSubjectKey} no tiene grados en común con tu selección. Revísala en el mapa de asignaturas.`);
@@ -6319,11 +6400,11 @@ function RectoriaDashboard() {
       ));
 
       assignmentsToSave.push({
-        key: existingAssignment?.key || `subject_load_template_${normalizedSubjectKey}_${Date.now()}`,
+        key: existingAssignment?.key || `subject_load_template_${normalizedSubjectKey}_${normalizedTeacherUserId}`,
         subjectKey: normalizedSubjectKey,
         teacherUserId: normalizedTeacherUserId,
         weeklyHours: Math.max(Number(existingAssignment?.weeklyHours || 0), 0),
-        gradeKeys: Array.from(new Set([...(existingAssignment?.gradeKeys || []), ...gradeKeysForSubject])),
+        gradeKeys: gradeKeysForSubject,
         order: Number(existingAssignment?.order || (academicSubjectLoadTemplates.length + assignmentsToSave.length + 1) * 10),
       });
     }
@@ -6350,12 +6431,9 @@ function RectoriaDashboard() {
       return;
     }
 
-    setTeamTeacherAssignment((prev) => ({
-      ...createEmptyTeamTeacherAssignment(),
-      teacherUserId: prev.teacherUserId,
-      subjectKeys: normalizedSubjectKeys,
-      gradeKeys: normalizedGradeKeys,
-    }));
+    setTeamTeacherAssignment(createEmptyTeamTeacherAssignment());
+    setTeamTeacherCoursesPreviewOpen(false);
+    setTeamTeacherGradesHelpOpen(false);
   };
 
   const onSaveHeadroomTeacherAssignment = async () => {
@@ -10209,7 +10287,7 @@ function RectoriaDashboard() {
                         </span>
                         <div>
                           <h4>Vinculación docente a asignaturas</h4>
-                          <p>Selecciona el docente, una o más asignaturas y los grados que dictará en cada una.</p>
+                          <p>Selecciona el docente, las asignaturas y los grados de cada materia.</p>
                         </div>
                       </div>
 
@@ -10268,8 +10346,8 @@ function RectoriaDashboard() {
                           <div className="rectoria-team-grades-cover__title">
                             <span className="rectoria-team-grades-cover__step" aria-hidden="true">3</span>
                             <div>
-                              <h5>Grados a cubrir</h5>
-                              <p>Selecciona uno o más grados para esta vinculación</p>
+                              <h5>Grados por asignatura</h5>
+                              <p>Cada materia puede cubrirse en grados distintos</p>
                             </div>
                           </div>
                           <button
@@ -10284,83 +10362,95 @@ function RectoriaDashboard() {
 
                         {teamTeacherGradesHelpOpen ? (
                           <p className="rectoria-team-grades-cover__tip">
-                            Elige los grados en los que el docente dictará las asignaturas seleccionadas. Los cursos de cada grado se incluyen automáticamente al guardar la vinculación.
+                            Elige los grados de cada asignatura por separado. Así un docente puede dictar L.A. en Kinder 3, 4 y 5, y PBL o Math solo en Kinder 5.
                           </p>
                         ) : null}
 
                         <div className="rectoria-team-grades-cover__body">
-                          <div className="rectoria-team-grades-cover__prompt">
-                            <span className="rectoria-team-grades-cover__prompt-icon" aria-hidden="true">
-                              <TeamGradCapIcon />
-                            </span>
-                            <span>Selecciona los grados.</span>
-                          </div>
-
-                          {gradeOptionsForSubjects.length === 0 ? (
+                          {getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment).length === 0 ? (
+                            <div className="rectoria-team-grades-cover__prompt">
+                              <span className="rectoria-team-grades-cover__prompt-icon" aria-hidden="true">
+                                <TeamGradCapIcon />
+                              </span>
+                              <span>Primero selecciona las asignaturas. Luego marca los grados de cada una.</span>
+                            </div>
+                          ) : gradeOptionsForSubjects.length === 0 ? (
                             <p className="rectoria-role-empty">Primero configura grados en Gestión académica.</p>
-                          ) : (
-                            <>
-                              {teamTeacherGradePickerGroups.earlyYears.length > 0 ? (
-                                <div className="rectoria-team-grades-cover__group">
-                                  <span className="rectoria-team-grades-cover__group-label">Primeros años</span>
-                                  <div className="rectoria-team-grades-cover__pills">
-                                    {teamTeacherGradePickerGroups.earlyYears.map((grade) => {
-                                      const selected = (teamTeacherAssignment.gradeKeys || []).includes(grade.value);
-                                      return (
-                                        <button
-                                          key={`team-teacher-early-${grade.value}`}
-                                          className={`rectoria-team-grade-pill${selected ? ' is-selected' : ''}`}
-                                          disabled={busy}
-                                          onClick={() => onToggleTeamTeacherAssignmentGrade(grade.value)}
-                                          type="button"
-                                          title={grade.label}
-                                        >
-                                          <span className="rectoria-team-grade-pill__icon" aria-hidden="true">
-                                            <TeamEarlyGradeIcon variant={grade.earlyIcon} />
-                                          </span>
-                                          <span>{grade.displayLabel}</span>
-                                          {selected ? (
-                                            <span className="rectoria-team-grade-pill__check" aria-hidden="true">
-                                              <TeamCheckIcon />
-                                            </span>
-                                          ) : null}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
+                          ) : getTeamTeacherAssignmentSubjectKeys(teamTeacherAssignment).map((subjectKey) => {
+                            const subjectLabel = subjectOptionsForSchedule.find((subject) => subject.value === subjectKey)?.label || subjectKey;
+                            const selectedGradeKeys = getTeamTeacherAssignmentGradeKeysForSubject(teamTeacherAssignment, subjectKey);
+                            return (
+                              <article className="rectoria-team-grades-cover__subject" key={`team-teacher-grades-${subjectKey}`}>
+                                <div className="rectoria-team-grades-cover__prompt">
+                                  <span className="rectoria-team-grades-cover__prompt-icon" aria-hidden="true">
+                                    <OverviewBookIcon />
+                                  </span>
+                                  <span>{subjectLabel}</span>
+                                  <small>{selectedGradeKeys.length} grado{selectedGradeKeys.length === 1 ? '' : 's'}</small>
                                 </div>
-                              ) : null}
 
-                              {teamTeacherGradePickerGroups.courseGrades.length > 0 ? (
-                                <div className="rectoria-team-grades-cover__group">
-                                  <span className="rectoria-team-grades-cover__group-label">Cursos</span>
-                                  <div className="rectoria-team-grades-cover__courses">
-                                    {teamTeacherGradePickerGroups.courseGrades.map((grade) => {
-                                      const selected = (teamTeacherAssignment.gradeKeys || []).includes(grade.value);
-                                      const isCircle = grade.kind === 'number';
-                                      return (
-                                        <button
-                                          key={`team-teacher-course-${grade.value}`}
-                                          className={`${isCircle ? 'rectoria-team-grade-circle' : 'rectoria-team-grade-pill'}${selected ? ' is-selected' : ''}`}
-                                          disabled={busy}
-                                          onClick={() => onToggleTeamTeacherAssignmentGrade(grade.value)}
-                                          type="button"
-                                          title={grade.label}
-                                        >
-                                          <span>{grade.displayLabel}</span>
-                                          {selected ? (
-                                            <span className={`${isCircle ? 'rectoria-team-grade-circle__check' : 'rectoria-team-grade-pill__check'}`} aria-hidden="true">
-                                              <TeamCheckIcon />
+                                {teamTeacherGradePickerGroups.earlyYears.length > 0 ? (
+                                  <div className="rectoria-team-grades-cover__group">
+                                    <span className="rectoria-team-grades-cover__group-label">Primeros años</span>
+                                    <div className="rectoria-team-grades-cover__pills">
+                                      {teamTeacherGradePickerGroups.earlyYears.map((grade) => {
+                                        const selected = selectedGradeKeys.includes(grade.value);
+                                        return (
+                                          <button
+                                            key={`team-teacher-${subjectKey}-early-${grade.value}`}
+                                            className={`rectoria-team-grade-pill${selected ? ' is-selected' : ''}`}
+                                            disabled={busy}
+                                            onClick={() => onToggleTeamTeacherAssignmentGrade(subjectKey, grade.value)}
+                                            type="button"
+                                            title={grade.label}
+                                          >
+                                            <span className="rectoria-team-grade-pill__icon" aria-hidden="true">
+                                              <TeamEarlyGradeIcon variant={grade.earlyIcon} />
                                             </span>
-                                          ) : null}
-                                        </button>
-                                      );
-                                    })}
+                                            <span>{grade.displayLabel}</span>
+                                            {selected ? (
+                                              <span className="rectoria-team-grade-pill__check" aria-hidden="true">
+                                                <TeamCheckIcon />
+                                              </span>
+                                            ) : null}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
-                              ) : null}
-                            </>
-                          )}
+                                ) : null}
+
+                                {teamTeacherGradePickerGroups.courseGrades.length > 0 ? (
+                                  <div className="rectoria-team-grades-cover__group">
+                                    <span className="rectoria-team-grades-cover__group-label">Cursos</span>
+                                    <div className="rectoria-team-grades-cover__courses">
+                                      {teamTeacherGradePickerGroups.courseGrades.map((grade) => {
+                                        const selected = selectedGradeKeys.includes(grade.value);
+                                        const isCircle = grade.kind === 'number';
+                                        return (
+                                          <button
+                                            key={`team-teacher-${subjectKey}-course-${grade.value}`}
+                                            className={`${isCircle ? 'rectoria-team-grade-circle' : 'rectoria-team-grade-pill'}${selected ? ' is-selected' : ''}`}
+                                            disabled={busy}
+                                            onClick={() => onToggleTeamTeacherAssignmentGrade(subjectKey, grade.value)}
+                                            type="button"
+                                            title={grade.label}
+                                          >
+                                            <span>{grade.displayLabel}</span>
+                                            {selected ? (
+                                              <span className={`${isCircle ? 'rectoria-team-grade-circle__check' : 'rectoria-team-grade-pill__check'}`} aria-hidden="true">
+                                                <TeamCheckIcon />
+                                              </span>
+                                            ) : null}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })}
                         </div>
 
                         <div className="rectoria-team-grades-cover__included">

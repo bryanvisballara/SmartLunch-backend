@@ -2028,8 +2028,8 @@ function normalizeAcademicScheduleSubjectLoads(subjectLoads, { allowedSubjectKey
   }
 
   const dedupedLoads = Array.from(new Map(
-    normalizedLoads.map((item) => [item.subjectKey, item])
-  ).values()).sort((left, right) => Number(left.order || 0) - Number(right.order || 0));
+    normalizedLoads.map((item) => [`${item.subjectKey}::${item.teacherUserId || 'unassigned'}`, item])
+  ).values()).sort((left, right) => Number(left.order || 0) - Number(right.order || 0) || String(left.teacherUserId || '').localeCompare(String(right.teacherUserId || '')));
 
   return { ok: true, subjectLoads: dedupedLoads };
 }
@@ -2088,9 +2088,9 @@ function normalizeAcademicSubjectLoadTemplates(subjectLoadTemplates, { allowedSu
   const assignmentIndex = new Set();
   for (const template of normalizedTemplates) {
     for (const gradeKey of template.gradeKeys) {
-      const assignmentKey = `${template.subjectKey}::${gradeKey}`;
+      const assignmentKey = `${template.subjectKey}::${gradeKey}::${template.teacherUserId || 'unassigned'}`;
       if (assignmentIndex.has(assignmentKey)) {
-        return { ok: false, message: 'No puedes registrar dos cargas compartidas para la misma asignatura en el mismo grado.' };
+        return { ok: false, message: 'Este docente ya está vinculado a esa asignatura en el mismo grado.' };
       }
       assignmentIndex.add(assignmentKey);
     }
@@ -2208,7 +2208,17 @@ function syncAcademicGradeSchedulesFromTemplates(configuration, { gradeKeys = []
   targetGradeKeys.forEach((gradeKey) => {
     const gradeSchedule = ensureAcademicGradeSchedule(configuration, gradeKey);
     const nextSubjectLoads = buildAcademicSubjectLoadsFromTemplates(configuration?.subjectLoadTemplates, gradeKey);
-    const loadMap = new Map(nextSubjectLoads.map((load) => [load.subjectKey, load]));
+    const loadMap = new Map();
+    nextSubjectLoads.forEach((load) => {
+      const existing = loadMap.get(load.subjectKey);
+      if (!existing) {
+        loadMap.set(load.subjectKey, load);
+        return;
+      }
+      if (Number(load.weeklyHours || 0) > Number(existing.weeklyHours || 0)) {
+        loadMap.set(load.subjectKey, { ...existing, weeklyHours: load.weeklyHours });
+      }
+    });
     const allowedSlots = createDefaultAcademicScheduleTemplate(configuration?.scheduleSettings, { gradeKey, allowedGradeKeys });
     const existingEntries = Array.isArray(gradeSchedule?.weeklySchedule) && gradeSchedule.weeklySchedule.length > 0
       ? gradeSchedule.weeklySchedule
@@ -2374,9 +2384,38 @@ function normalizeAcademicWeeklyScheduleEntries(entries, { subjectLoadMap = new 
   };
 }
 
+function collapseAcademicSubjectLoadsForSchedule(subjectLoads) {
+  const bySubject = new Map();
+  (Array.isArray(subjectLoads) ? subjectLoads : []).forEach((load) => {
+    const subjectKey = slugifyAcademicStructureKey(load?.subjectKey);
+    if (!subjectKey) {
+      return;
+    }
+
+    const weeklyHours = Math.max(0, Number(load?.weeklyHours || 0));
+    const existing = bySubject.get(subjectKey);
+    if (!existing) {
+      bySubject.set(subjectKey, {
+        subjectKey,
+        weeklyHours,
+        teacherUserId: load?.teacherUserId ? String(load.teacherUserId) : null,
+        order: Number(load?.order || 0),
+      });
+      return;
+    }
+
+    existing.weeklyHours = Math.max(existing.weeklyHours, weeklyHours);
+    if (!existing.teacherUserId && load?.teacherUserId) {
+      existing.teacherUserId = String(load.teacherUserId);
+    }
+  });
+
+  return Array.from(bySubject.values());
+}
+
 function generateAcademicWeeklySchedule({ slotTemplates = [], subjectLoads = [], conflictIndex = new Map(), teachingAvailability = [], gradeKey = '' }) {
   const loadOccurrences = [];
-  subjectLoads.forEach((load) => {
+  collapseAcademicSubjectLoadsForSchedule(subjectLoads).forEach((load) => {
     for (let index = 0; index < Number(load.weeklyHours || 0); index += 1) {
       loadOccurrences.push({
         subjectKey: load.subjectKey,
@@ -8007,8 +8046,8 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
     const gradeSchedule = ensureAcademicGradeSchedule(configuration, gradeKey);
     const allowedGradeKeys = new Set(serialized.grades.map((item) => item.key));
     const breakSlotMap = buildAcademicBreakSlotIndex(configuration.scheduleBreaks, gradeKey, { scheduleSettings: configuration.scheduleSettings, allowedGradeKeys });
-    const loadMap = new Map((Array.isArray(gradeSchedule.subjectLoads) ? gradeSchedule.subjectLoads : []).map((load) => [slugifyAcademicStructureKey(load.subjectKey), {
-      subjectKey: slugifyAcademicStructureKey(load.subjectKey),
+    const loadMap = new Map(collapseAcademicSubjectLoadsForSchedule(gradeSchedule.subjectLoads).map((load) => [load.subjectKey, {
+      subjectKey: load.subjectKey,
       weeklyHours: Number(load.weeklyHours || 0),
       teacherUserId: load.teacherUserId ? String(load.teacherUserId) : null,
     }]));
@@ -8145,7 +8184,11 @@ router.post('/academic-management/schedules/:gradeKey/gio-ai/generate', async (r
     });
     const generationResult = generateGioAiAcademicWeeklySchedule({
       slotTemplates: normalizedTemplates.weeklySchedule,
-      subjectLoads,
+      subjectLoads: collapseAcademicSubjectLoadsForSchedule(subjectLoads).map((load) => ({
+        ...load,
+        subjectLabel: subjectLabelByKey.get(load.subjectKey) || load.subjectKey,
+        teacherName: teacherNameById.get(load.teacherUserId) || '',
+      })),
       conflictIndex: buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
       teacherBusyIntervals: buildTeacherBusyIntervals(serialized.gradeSchedules, { skipScheduleKey: `${gradeKey}::${courseKey}` }),
       teachingAvailability: configuration.teachingAvailability,
