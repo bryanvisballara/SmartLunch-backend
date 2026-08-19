@@ -76,6 +76,7 @@ import {
   sendAcademicSecretaryReminder,
   updateAcademicSecretaryCommunicationAuthor,
   updateAcademicSecretaryDatabaseRow,
+  deleteAcademicSecretaryDatabaseRow,
   updateAcademicManagementCourseName,
   updateAcademicManagementCourseHeadroomTeacher,
   updateAcademicManagementLevelName,
@@ -2230,6 +2231,14 @@ function SaveIcon() {
   );
 }
 
+function DatabaseTrashIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M5 8h14M10 11v5M14 11v5M8.5 8l.7-2h5.6l.7 2M7 8l.8 11h8.4L17 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
 const ACADEMIC_DATABASE_HEADERS = [
   'Grado',
   'Apellidos',
@@ -3206,6 +3215,7 @@ function RectoriaDashboard() {
   const [courseStudentsModal, setCourseStudentsModal] = useState({ open: false, courseKey: '', gradeKey: '' });
   const [editingAcademicRowId, setEditingAcademicRowId] = useState('');
   const [academicDatabaseDrafts, setAcademicDatabaseDrafts] = useState({});
+  const [deleteAcademicDatabaseModal, setDeleteAcademicDatabaseModal] = useState({ open: false, item: null });
   const [academicDatabaseFilters, setAcademicDatabaseFilters] = useState({
     level: '',
     grade: '',
@@ -8901,6 +8911,50 @@ function RectoriaDashboard() {
     }
   };
 
+  const onOpenDeleteAcademicDatabaseRow = (item) => {
+    if (!item?._id) return;
+    setDeleteAcademicDatabaseModal({ open: true, item });
+  };
+
+  const onCloseDeleteAcademicDatabaseRow = () => {
+    if (busy) return;
+    setDeleteAcademicDatabaseModal({ open: false, item: null });
+  };
+
+  const onConfirmDeleteAcademicDatabaseRow = async () => {
+    const item = deleteAcademicDatabaseModal.item;
+    const rowId = String(item?._id || '');
+    if (!rowId) return;
+
+    clearMessages();
+    setBusy(true);
+    try {
+      const response = await deleteAcademicSecretaryDatabaseRow(rowId);
+      await loadPortal({ silent: true });
+      setEditingAcademicRowId((current) => (current === rowId ? '' : current));
+      setAcademicDatabaseDrafts((previous) => {
+        const next = { ...previous };
+        delete next[rowId];
+        return next;
+      });
+      setDeleteAcademicDatabaseModal({ open: false, item: null });
+      const deletedParents = Array.isArray(response?.data?.deletedParents) ? response.data.deletedParents : [];
+      const keptParents = Array.isArray(response?.data?.keptParents) ? response.data.keptParents : [];
+      const parentNote = deletedParents.length
+        ? ` También se eliminaron los acudientes: ${deletedParents.join(', ')}.`
+        : '';
+      const keptNote = keptParents.length
+        ? ` Se conservaron acudientes con otros hijos activos: ${keptParents.join(', ')}.`
+        : '';
+      setSuccess(`${response?.data?.message || 'Alumno eliminado de la base académica.'}${parentNote}${keptNote}`);
+      setActiveSection('database');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo eliminar al alumno.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onRequestGradePromotion = async () => {
     clearMessages();
     setBusy(true);
@@ -13099,6 +13153,7 @@ function RectoriaDashboard() {
                           <div className="rectoria-database-row-actions">
                             <button aria-label="Editar fila" className="rectoria-database-icon-button" onClick={() => onEditAcademicDatabaseRow(item)} type="button"><PencilIcon /></button>
                             <button aria-label="Guardar fila" className="rectoria-database-icon-button is-primary" disabled={!isEditing || busy} onClick={() => onSaveAcademicDatabaseRow(item)} type="button"><SaveIcon /></button>
+                            <button aria-label={`Eliminar ${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Eliminar alumno'} className="rectoria-database-icon-button is-danger" disabled={busy} onClick={() => onOpenDeleteAcademicDatabaseRow(item)} title="Eliminar alumno y acudientes" type="button"><DatabaseTrashIcon /></button>
                           </div>
                         </td>
                       </tr>
@@ -14211,6 +14266,32 @@ function RectoriaDashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteAcademicDatabaseModal.open ? (
+        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Confirmar eliminación de alumno">
+          <div className="rectoria-modal-card">
+            <div className="rectoria-modal-head">
+              <div>
+                <span className="rectoria-modal-eyebrow">Base de datos académica</span>
+                <h3>¿Eliminar a {`${deleteAcademicDatabaseModal.item?.firstName || ''} ${deleteAcademicDatabaseModal.item?.lastName || ''}`.trim() || 'este alumno'}?</h3>
+                <p>Se retira al estudiante de la base, cartera y rutas. Los acudientes también se eliminan, salvo que tengan otro hijo activo en el colegio.</p>
+              </div>
+              <button className="rectoria-modal-close" type="button" onClick={onCloseDeleteAcademicDatabaseRow} disabled={busy}>Cerrar</button>
+            </div>
+            <div className="rectoria-database-delete-summary">
+              {deleteAcademicDatabaseModal.item?.motherName ? <p><strong>Madre:</strong> {deleteAcademicDatabaseModal.item.motherName}</p> : null}
+              {deleteAcademicDatabaseModal.item?.fatherName ? <p><strong>Padre:</strong> {deleteAcademicDatabaseModal.item.fatherName}</p> : null}
+              {!deleteAcademicDatabaseModal.item?.motherName && !deleteAcademicDatabaseModal.item?.fatherName ? <p>Este alumno no tiene acudientes vinculados.</p> : null}
+            </div>
+            <div className="rectoria-modal-actions">
+              <button className="btn" type="button" onClick={onCloseDeleteAcademicDatabaseRow} disabled={busy}>Cancelar</button>
+              <button className="btn btn-danger" type="button" onClick={onConfirmDeleteAcademicDatabaseRow} disabled={busy}>
+                {busy ? 'Eliminando...' : 'Eliminar alumno'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

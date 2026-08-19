@@ -14,6 +14,7 @@ export const saveAcademicSecretaryFeeSettings = (data) => api.put('/academic-sec
 export const getAcademicSecretaryCommunicationRequests = () => api.get('/academic-secretary/communication-requests');
 export const getAcademicSecretaryDatabase = () => api.get('/academic-secretary/database');
 export const updateAcademicSecretaryDatabaseRow = (studentId, data) => api.patch(`/academic-secretary/database/${studentId}`, data);
+export const deleteAcademicSecretaryDatabaseRow = (studentId) => api.delete(`/academic-secretary/database/${studentId}`);
 export const generateAcademicSecretaryAiCopy = (data) => api.post('/academic-secretary/communications/ai-copy', data);
 export const importAcademicSecretaryDatabase = (file) => {
 	const formData = new FormData();

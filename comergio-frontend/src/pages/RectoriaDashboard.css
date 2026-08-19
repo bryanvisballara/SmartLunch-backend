@@ -5875,6 +5875,22 @@ button.rectoria-team-assignment-card.is-active {
   color: #1d4ed8;
 }
 
+.rectoria-database-icon-button.is-danger {
+  background: #fee2e2;
+  color: #b42318;
+}
+
+.rectoria-database-delete-summary {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 18px;
+  color: #334155;
+}
+
+.rectoria-database-delete-summary p {
+  margin: 0;
+}
+
 .rectoria-database-icon-button:disabled,
 .rectoria-promote-button:disabled,
 .rectoria-database-button:disabled {

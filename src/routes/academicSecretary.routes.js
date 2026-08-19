@@ -8612,6 +8612,92 @@ router.patch('/database/:studentId', async (req, res) => {
   }
 });
 
+router.delete('/database/:studentId', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const studentId = toObjectId(req.params.studentId);
+    if (!studentId) {
+      return res.status(400).json({ message: 'Alumno inválido para eliminar.' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null });
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el alumno solicitado.' });
+    }
+
+    const now = new Date();
+    const parentLinks = await ParentStudentLink.find({ schoolId, studentId: student._id }).select('parentId').lean();
+    const parentIds = [...new Set(parentLinks.map((link) => String(link.parentId || '')).filter(Boolean))];
+
+    student.deletedAt = now;
+    student.status = 'inactive';
+    await student.save();
+
+    if (student.userId) {
+      await User.updateOne(
+        { _id: student.userId, schoolId, deletedAt: null },
+        { $set: { deletedAt: now, status: 'inactive' } },
+      );
+    }
+
+    await ParentStudentLink.updateMany(
+      { schoolId, studentId: student._id, status: 'active' },
+      { $set: { status: 'inactive' } },
+    );
+    await StudentBillingProfile.updateMany(
+      { schoolId, studentId: student._id },
+      { $set: { active: false } },
+    );
+    await AcademicCharge.updateMany(
+      { schoolId, studentId: student._id, status: { $in: ['pending', 'overdue'] } },
+      { $set: { status: 'cancelled' } },
+    );
+    await CampusSchoolRoute.updateMany(
+      { schoolId, 'stops.studentId': student._id },
+      { $pull: { stops: { studentId: student._id } } },
+    );
+
+    const deletedParentNames = [];
+    const keptParentNames = [];
+    for (const parentId of parentIds) {
+      const parentObjectId = toObjectId(parentId);
+      if (!parentObjectId) {
+        continue;
+      }
+
+      const stillLinked = await ParentStudentLink.exists({
+        schoolId,
+        parentId: parentObjectId,
+        studentId: { $ne: student._id },
+        status: 'active',
+      });
+      const parent = await User.findOne({ _id: parentObjectId, schoolId, role: 'parent' }).select('name deletedAt').lean();
+      const parentName = normalizeText(parent?.name) || 'Acudiente';
+
+      if (stillLinked) {
+        keptParentNames.push(parentName);
+        continue;
+      }
+
+      await User.updateOne(
+        { _id: parentObjectId, schoolId, role: 'parent', deletedAt: null },
+        { $set: { deletedAt: now, status: 'inactive' } },
+      );
+      deletedParentNames.push(parentName);
+    }
+
+    return res.status(200).json({
+      message: 'Alumno eliminado de la base académica.',
+      studentId: String(student._id),
+      studentName: normalizeText(student.name) || `${normalizeText(student.firstName)} ${normalizeText(student.lastName)}`.trim(),
+      deletedParents: deletedParentNames,
+      keptParents: keptParentNames,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/database/promotions/request', async (req, res) => {
   try {
     const { schoolId, userId, name } = req.user;
