@@ -5042,9 +5042,15 @@ function RectoriaDashboard() {
   }), [academicStructureDraft.scheduleBreaks, academicStructureDraft.scheduleSettings]);
 
   const selectedGradeSchedule = useMemo(() => {
-    const courseSchedule = academicStructureDraft.gradeSchedules.find((schedule) => schedule.gradeKey === selectedScheduleGradeKey && String(schedule.courseKey || '') === selectedScheduleCourseKey);
-    const gradeSchedule = academicStructureDraft.gradeSchedules.find((schedule) => schedule.gradeKey === selectedScheduleGradeKey && !String(schedule.courseKey || '').trim());
-    const existingSchedule = courseSchedule || gradeSchedule;
+    const matchingSchedules = academicStructureDraft.gradeSchedules.filter((schedule) => String(schedule.gradeKey || '').trim() === String(selectedScheduleGradeKey || '').trim());
+    const courseSchedule = matchingSchedules.find((schedule) => String(schedule.courseKey || '').trim().toUpperCase() === String(selectedScheduleCourseKey || '').trim().toUpperCase());
+    const gradeSchedule = matchingSchedules.find((schedule) => !String(schedule.courseKey || '').trim());
+    const scheduleHasVisibleEntries = (schedule) => Array.isArray(schedule?.weeklySchedule) && schedule.weeklySchedule.some((entry) => (
+      String(entry?.entryType || 'class') === 'break' || String(entry?.subjectKey || '').trim()
+    ));
+    const existingSchedule = [courseSchedule, gradeSchedule, ...matchingSchedules].find(scheduleHasVisibleEntries)
+      || courseSchedule
+      || gradeSchedule;
     const subjectLoadSource = gradeSchedule || existingSchedule;
     const subjectLoadMap = new Map((Array.isArray(subjectLoadSource?.subjectLoads) ? subjectLoadSource.subjectLoads : []).map((load) => [load.subjectKey, load]));
     const subjectLoads = selectedScheduleSubjects.map((subject, index) => ({
@@ -7680,6 +7686,10 @@ function RectoriaDashboard() {
       weeklySchedule,
       hiddenFromFamilies,
     });
+
+    if (weeklySchedule.length === 0) {
+      return undefined;
+    }
 
     if (scheduleAutosaveSignatureRef.current === signature) {
       return undefined;

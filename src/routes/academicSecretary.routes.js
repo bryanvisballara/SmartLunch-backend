@@ -8026,6 +8026,12 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
       return res.status(400).json({ message: normalizedWeeklySchedule.message });
     }
 
+    if (!academicGradeScheduleHasEntries({ weeklySchedule: normalizedWeeklySchedule.weeklySchedule })
+      && academicGradeScheduleHasEntries(gradeSchedule)
+      && req.body?.allowEmptySchedule !== true) {
+      return res.status(200).json({ academicStructure: serializeAcademicStructureForRequester(req, configuration) });
+    }
+
     const serializedWithCurrentSchedules = serializeAcademicStructureConfiguration(configuration);
     const subjectLabelByKey = new Map(serialized.subjects.map((subject) => [subject.key, subject.label || subject.key]));
     const gradeLabelByKey = new Map(serialized.grades.map((item) => [item.key, item.label || item.key]));
