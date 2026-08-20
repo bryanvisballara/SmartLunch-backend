@@ -2244,6 +2244,56 @@
   resize: vertical;
 }
 
+.rectoria-schedule-teacher-field {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.rectoria-schedule-teacher-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.rectoria-schedule-teacher-picker {
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.rectoria-schedule-teacher-option {
+  display: flex !important;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 11px 12px;
+  border-top: 1px solid #e2e8f0;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.rectoria-schedule-teacher-option:first-child {
+  border-top: 0;
+}
+
+.rectoria-schedule-teacher-option.is-all {
+  background: #f8fafc;
+}
+
+.rectoria-schedule-teacher-option.is-selected {
+  background: #eff6ff;
+}
+
+.rectoria-modal-form .rectoria-schedule-teacher-option input {
+  width: auto;
+  margin: 0;
+}
+
 .rectoria-success-summary-grid {
   display: grid;
   gap: 12px;

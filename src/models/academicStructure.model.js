@@ -179,6 +179,7 @@ const academicStructureGradeScheduleEntrySchema = new mongoose.Schema(
     breakKey: { type: String, trim: true, default: '' },
     breakLabel: { type: String, trim: true, default: '' },
     teacherUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    teacherUserIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: [] },
   },
   { _id: false }
 );

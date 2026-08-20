@@ -1611,8 +1611,31 @@ function createDefaultAcademicScheduleTemplate(scheduleSettings = ACADEMIC_SCHED
       breakKey: '',
       breakLabel: '',
       teacherUserId: null,
+      teacherUserIds: [],
     }))
   ));
+}
+
+function collectAcademicScheduleTeacherIds(entry) {
+  const ids = [];
+  const seen = new Set();
+  const push = (value) => {
+    const id = String(value || '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  (Array.isArray(entry?.teacherUserIds) ? entry.teacherUserIds : []).forEach(push);
+  push(entry?.teacherUserId);
+  return ids;
+}
+
+function buildAcademicScheduleTeacherFields(teacherIds = []) {
+  const ids = uniqueNormalizedValues(Array.isArray(teacherIds) ? teacherIds : [teacherIds]);
+  return {
+    teacherUserId: ids[0] || null,
+    teacherUserIds: ids,
+  };
 }
 
 function shuffleArray(values = []) {
@@ -1627,6 +1650,11 @@ function shuffleArray(values = []) {
 function buildAcademicScheduleConflictMessage({ teacherName, subjectLabel, slot, conflictingGradeLabel }) {
   const weekdayLabel = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][Number(slot?.weekday || 1) - 1] || `Día ${slot?.weekday}`;
   return `${teacherName || 'El docente seleccionado'} ya tiene ${subjectLabel || 'una clase'} asignada en ${conflictingGradeLabel || 'otro grado'} el ${weekdayLabel} en el bloque ${slot?.block} (${slot?.startTime || '--:--'} - ${slot?.endTime || '--:--'}).`;
+}
+
+function allowsSharedClassroomTeacherConflicts(schoolId) {
+  // Millennium groups several grades in the same classroom (Infants+K2, 2+3+4), so the same teacher can appear in more than one course at the same time.
+  return isMillenniumSchoolId(schoolId);
 }
 
 function buildTeacherConflictIndex(gradeSchedules, { skipGradeKey = '' } = {}) {
@@ -1645,23 +1673,24 @@ function buildTeacherConflictIndex(gradeSchedules, { skipGradeKey = '' } = {}) {
         return;
       }
 
-      const teacherUserId = String(entry?.teacherUserId || '').trim();
       const subjectKey = slugifyAcademicStructureKey(entry?.subjectKey);
       const weekday = Number(entry?.weekday || 0);
       const block = Number(entry?.block || 0);
-      if (!teacherUserId || !subjectKey || !weekday || !block) {
+      if (!subjectKey || !weekday || !block) {
         return;
       }
 
       const slotKey = buildAcademicScheduleSlotKey(weekday, block);
-      conflicts.set(`${teacherUserId}::${slotKey}`, {
-        gradeKey: currentGradeKey,
-        courseKey: currentCourseKey,
-        subjectKey,
-        weekday,
-        block,
-        startTime: normalizeAcademicScheduleTime(entry?.startTime),
-        endTime: normalizeAcademicScheduleTime(entry?.endTime),
+      collectAcademicScheduleTeacherIds(entry).forEach((teacherUserId) => {
+        conflicts.set(`${teacherUserId}::${slotKey}`, {
+          gradeKey: currentGradeKey,
+          courseKey: currentCourseKey,
+          subjectKey,
+          weekday,
+          block,
+          startTime: normalizeAcademicScheduleTime(entry?.startTime),
+          endTime: normalizeAcademicScheduleTime(entry?.endTime),
+        });
       });
     });
   });
@@ -1675,13 +1704,14 @@ function buildTeacherBusyIntervals(gradeSchedules, { skipScheduleKey = '' } = {}
     const scheduleKey = `${normalizeAcademicStructureGradeKey(gradeSchedule?.gradeKey)}::${normalizeText(gradeSchedule?.courseKey)}`;
     if (scheduleKey === skipScheduleKey) return;
     (Array.isArray(gradeSchedule?.weeklySchedule) ? gradeSchedule.weeklySchedule : []).forEach((entry) => {
-      const teacherUserId = normalizeText(entry?.teacherUserId);
       const weekday = Number(entry?.weekday || 0);
       const startMinutes = academicScheduleTimeToMinutes(entry?.startTime);
       const endMinutes = academicScheduleTimeToMinutes(entry?.endTime);
-      if (!teacherUserId || !weekday || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) return;
-      if (!busyByTeacherId.has(teacherUserId)) busyByTeacherId.set(teacherUserId, []);
-      busyByTeacherId.get(teacherUserId).push({ weekday, startMinutes, endMinutes });
+      if (!weekday || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) return;
+      collectAcademicScheduleTeacherIds(entry).forEach((teacherUserId) => {
+        if (!busyByTeacherId.has(teacherUserId)) busyByTeacherId.set(teacherUserId, []);
+        busyByTeacherId.get(teacherUserId).push({ weekday, startMinutes, endMinutes });
+      });
     });
   });
   return busyByTeacherId;
@@ -1883,6 +1913,7 @@ function applyAcademicScheduleBreaksToConfiguration(configuration) {
           breakKey: breakEntry.key,
           breakLabel: breakEntry.label,
           teacherUserId: null,
+          teacherUserIds: [],
         });
         return;
       }
@@ -1897,7 +1928,7 @@ function applyAcademicScheduleBreaksToConfiguration(configuration) {
         subjectKey: entryType === 'break' ? '' : slugifyAcademicStructureKey(entry?.subjectKey),
         breakKey: entryType === 'break' ? normalizeText(entry?.breakKey) : '',
         breakLabel: entryType === 'break' ? normalizeText(entry?.breakLabel) || 'Break' : '',
-        teacherUserId: entryType === 'break' ? null : (entry?.teacherUserId || null),
+        ...buildAcademicScheduleTeacherFields(entryType === 'break' ? [] : collectAcademicScheduleTeacherIds(entry)),
       });
     });
 
@@ -1914,6 +1945,7 @@ function applyAcademicScheduleBreaksToConfiguration(configuration) {
         breakKey: breakEntry.key,
         breakLabel: breakEntry.label,
         teacherUserId: null,
+        teacherUserIds: [],
       });
     });
 
@@ -2227,7 +2259,7 @@ function syncAcademicGradeSchedulesFromTemplates(configuration, { gradeKeys = []
     gradeSchedule.subjectLoads = nextSubjectLoads;
     gradeSchedule.weeklySchedule = existingEntries.map((entry) => {
       if (normalizeText(entry?.entryType || 'class') === 'break') {
-        return { ...entry, subjectKey: '', teacherUserId: null };
+        return { ...entry, subjectKey: '', teacherUserId: null, teacherUserIds: [] };
       }
 
       const subjectKey = slugifyAcademicStructureKey(entry?.subjectKey);
@@ -2236,13 +2268,17 @@ function syncAcademicGradeSchedulesFromTemplates(configuration, { gradeKeys = []
           ...entry,
           subjectKey: '',
           teacherUserId: null,
+          teacherUserIds: [],
         };
       }
 
+      const existingTeacherIds = collectAcademicScheduleTeacherIds(entry);
       return {
         ...entry,
         subjectKey,
-        teacherUserId: loadMap.get(subjectKey)?.teacherUserId || null,
+        ...buildAcademicScheduleTeacherFields(existingTeacherIds.length
+          ? existingTeacherIds
+          : [loadMap.get(subjectKey)?.teacherUserId]),
       };
     });
   });
@@ -2301,8 +2337,11 @@ function normalizeAcademicWeeklyScheduleEntries(entries, { subjectLoadMap = new 
       const slotTemplate = scheduleBlockMap.get(slotKey);
       const entryType = breakSlot ? 'break' : (normalizeText(entry?.entryType || 'class') === 'break' ? 'break' : 'class');
       const subjectKey = slugifyAcademicStructureKey(entry?.subjectKey);
-      const entryTeacherUserId = String(entry?.teacherUserId || '').trim();
       const configuredLoad = subjectKey ? subjectLoadMap.get(subjectKey) : null;
+      const requestedTeacherIds = collectAcademicScheduleTeacherIds(entry);
+      const effectiveTeacherIds = requestedTeacherIds.length
+        ? requestedTeacherIds
+        : (configuredLoad?.teacherUserId ? [String(configuredLoad.teacherUserId)] : []);
 
       if (!ACADEMIC_SCHEDULE_WEEKDAYS.includes(weekday)) {
         return { invalid: true, message: 'Cada bloque del horario debe tener un día de lunes a sábado.' };
@@ -2324,15 +2363,15 @@ function normalizeAcademicWeeklyScheduleEntries(entries, { subjectLoadMap = new 
         return { invalid: true, message: 'El horario solo puede usar asignaturas que tengan carga horaria configurada para este grado.' };
       }
 
-      const effectiveTeacherUserId = entryTeacherUserId || configuredLoad?.teacherUserId || null;
-
-      if (entryType !== 'break' && subjectKey && effectiveTeacherUserId && !isAcademicScheduleSlotAllowedByTeachingAvailability({
+      const unavailableTeacher = effectiveTeacherIds.find((teacherUserId) => !isAcademicScheduleSlotAllowedByTeachingAvailability({
         teachingAvailability,
-        teacherUserId: effectiveTeacherUserId,
+        teacherUserId,
         subjectKey,
         gradeKey,
         slot: slotTemplate,
-      })) {
+      }));
+
+      if (entryType !== 'break' && subjectKey && unavailableTeacher) {
         return { invalid: true, message: 'La disponibilidad docente configurada no permite ubicar esa asignatura en ese bloque.' };
       }
 
@@ -2346,7 +2385,7 @@ function normalizeAcademicWeeklyScheduleEntries(entries, { subjectLoadMap = new 
         subjectKey: entryType === 'break' ? '' : (subjectKey || ''),
         breakKey: entryType === 'break' ? (breakSlot?.key || normalizeText(entry?.breakKey)) : '',
         breakLabel: entryType === 'break' ? (breakSlot?.label || normalizeText(entry?.breakLabel) || 'Break') : '',
-        teacherUserId: entryType === 'break' ? null : (subjectKey ? effectiveTeacherUserId : null),
+        ...buildAcademicScheduleTeacherFields(entryType === 'break' || !subjectKey ? [] : effectiveTeacherIds),
         order: Number(entry?.order || (index + 1) * 10),
       };
     })
@@ -2435,11 +2474,11 @@ function generateAcademicWeeklySchedule({ slotTemplates = [], subjectLoads = [],
   }
 
   for (let attempt = 0; attempt < 120; attempt += 1) {
-    const shuffledSlots = shuffleArray(classSlots).map((slot) => ({ ...slot, entryType: 'class', subjectKey: '', breakKey: '', breakLabel: '', teacherUserId: null }));
+    const shuffledSlots = shuffleArray(classSlots).map((slot) => ({ ...slot, entryType: 'class', subjectKey: '', breakKey: '', breakLabel: '', teacherUserId: null, teacherUserIds: [] }));
     const remainingSlots = [...shuffledSlots];
     const nextSchedule = slotTemplates.map((slot) => (normalizeText(slot?.entryType || 'class') === 'break'
-      ? { ...slot, entryType: 'break', subjectKey: '', teacherUserId: null }
-      : { ...slot, entryType: 'class', subjectKey: '', breakKey: '', breakLabel: '', teacherUserId: null }));
+      ? { ...slot, entryType: 'break', subjectKey: '', teacherUserId: null, teacherUserIds: [] }
+      : { ...slot, entryType: 'class', subjectKey: '', breakKey: '', breakLabel: '', teacherUserId: null, teacherUserIds: [] }));
     let failed = false;
 
     const sortedOccurrences = shuffleArray(loadOccurrences).sort((left, right) => {
@@ -2485,6 +2524,7 @@ function generateAcademicWeeklySchedule({ slotTemplates = [], subjectLoads = [],
       }
       scheduleEntry.subjectKey = occurrence.subjectKey;
       scheduleEntry.teacherUserId = occurrence.teacherUserId || null;
+      scheduleEntry.teacherUserIds = occurrence.teacherUserId ? [String(occurrence.teacherUserId)] : [];
     }
 
     if (!failed) {
@@ -2865,7 +2905,7 @@ function generateGioAiAcademicWeeklySchedule({
       }));
       const weeklySchedule = slotTemplates.map((slot) => {
         if (normalizeText(slot?.entryType) === 'break') {
-          return { ...slot, subjectKey: '', teacherUserId: null };
+          return { ...slot, subjectKey: '', teacherUserId: null, teacherUserIds: [] };
         }
         const assignment = assignments.get(buildAcademicScheduleSlotKey(slot.weekday, slot.block));
         return {
@@ -2874,7 +2914,7 @@ function generateGioAiAcademicWeeklySchedule({
           subjectKey: assignment?.subjectKey || '',
           breakKey: '',
           breakLabel: '',
-          teacherUserId: assignment?.teacherUserId || null,
+          ...buildAcademicScheduleTeacherFields(assignment?.teacherUserId ? [assignment.teacherUserId] : []),
         };
       }).sort((left, right) => Number(left.weekday) - Number(right.weekday) || Number(left.block) - Number(right.block));
       return { ok: true, weeklySchedule };
@@ -3190,7 +3230,8 @@ function serializeAcademicStructureConfiguration(configuration) {
           subjectKey: normalizeText(entry?.entryType || 'class') === 'break' ? '' : slugifyAcademicStructureKey(entry?.subjectKey),
           breakKey: normalizeText(entry?.entryType || 'class') === 'break' ? normalizeText(entry?.breakKey) : '',
           breakLabel: normalizeText(entry?.entryType || 'class') === 'break' ? normalizeText(entry?.breakLabel) : '',
-          teacherUserId: normalizeText(entry?.entryType || 'class') === 'break' ? null : (entry?.teacherUserId ? String(entry.teacherUserId) : null),
+          teacherUserId: normalizeText(entry?.entryType || 'class') === 'break' ? null : (collectAcademicScheduleTeacherIds(entry)[0] || null),
+          teacherUserIds: normalizeText(entry?.entryType || 'class') === 'break' ? [] : collectAcademicScheduleTeacherIds(entry),
           order: Number(entry?.order || (entryIndex + 1) * 10),
         }))
         .filter((entry) => ACADEMIC_SCHEDULE_WEEKDAYS.includes(entry.weekday) && Number(entry.block) > 0 && entry.startTime && entry.endTime)
@@ -7905,9 +7946,11 @@ router.put('/academic-management/schedules/:gradeKey/load', async (req, res) => 
           breakKey: breakSlotMap.get(buildAcademicScheduleSlotKey(entry?.weekday, entry?.block))?.key || '',
           breakLabel: breakSlotMap.get(buildAcademicScheduleSlotKey(entry?.weekday, entry?.block))?.label || '',
           teacherUserId: null,
+          teacherUserIds: [],
         };
       }
 
+      const existingTeacherIds = collectAcademicScheduleTeacherIds(entry);
       return {
         key: normalizeText(entry?.key) || buildAcademicScheduleSlotKey(entry?.weekday, entry?.block),
         weekday: Number(entry?.weekday || 0),
@@ -7918,7 +7961,9 @@ router.put('/academic-management/schedules/:gradeKey/load', async (req, res) => 
         subjectKey,
         breakKey: '',
         breakLabel: '',
-        teacherUserId: loadMap.get(subjectKey)?.teacherUserId || null,
+        ...buildAcademicScheduleTeacherFields(existingTeacherIds.length
+          ? existingTeacherIds
+          : [loadMap.get(subjectKey)?.teacherUserId]),
       };
     });
     applyAcademicScheduleBreaksToConfiguration(configuration);
@@ -7984,28 +8029,33 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
     const serializedWithCurrentSchedules = serializeAcademicStructureConfiguration(configuration);
     const subjectLabelByKey = new Map(serialized.subjects.map((subject) => [subject.key, subject.label || subject.key]));
     const gradeLabelByKey = new Map(serialized.grades.map((item) => [item.key, item.label || item.key]));
-    const teacherIds = uniqueNormalizedValues(normalizedWeeklySchedule.weeklySchedule.map((entry) => entry.teacherUserId)).filter((value) => mongoose.Types.ObjectId.isValid(value));
+    const teacherIds = uniqueNormalizedValues(normalizedWeeklySchedule.weeklySchedule.flatMap((entry) => collectAcademicScheduleTeacherIds(entry))).filter((value) => mongoose.Types.ObjectId.isValid(value));
     const teachers = teacherIds.length > 0
       ? await User.find({ schoolId, _id: { $in: teacherIds }, role: 'teacher', status: 'active', deletedAt: null }).select('_id name').lean()
       : [];
     const teacherNameById = new Map(teachers.map((teacher) => [String(teacher._id), teacher.name || 'Docente']));
-    const teacherConflicts = buildTeacherConflictIndex(serializedWithCurrentSchedules.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` });
+    const teacherConflicts = allowsSharedClassroomTeacherConflicts(schoolId)
+      ? new Map()
+      : buildTeacherConflictIndex(serializedWithCurrentSchedules.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` });
 
     for (const entry of normalizedWeeklySchedule.weeklySchedule) {
-      if (!entry.subjectKey || !entry.teacherUserId) {
+      const entryTeacherIds = collectAcademicScheduleTeacherIds(entry);
+      if (!entry.subjectKey || entryTeacherIds.length === 0) {
         continue;
       }
 
-      const conflict = teacherConflicts.get(`${entry.teacherUserId}::${buildAcademicScheduleSlotKey(entry.weekday, entry.block)}`);
-      if (conflict) {
-        return res.status(400).json({
-          message: buildAcademicScheduleConflictMessage({
-            teacherName: teacherNameById.get(String(entry.teacherUserId)) || 'El docente seleccionado',
-            subjectLabel: subjectLabelByKey.get(entry.subjectKey) || entry.subjectKey,
-            slot: entry,
-            conflictingGradeLabel: conflict.courseKey ? `curso ${conflict.courseKey}` : `grado ${gradeLabelByKey.get(conflict.gradeKey) || conflict.gradeKey}`,
-          }),
-        });
+      for (const teacherUserId of entryTeacherIds) {
+        const conflict = teacherConflicts.get(`${teacherUserId}::${buildAcademicScheduleSlotKey(entry.weekday, entry.block)}`);
+        if (conflict) {
+          return res.status(400).json({
+            message: buildAcademicScheduleConflictMessage({
+              teacherName: teacherNameById.get(String(teacherUserId)) || 'El docente seleccionado',
+              subjectLabel: subjectLabelByKey.get(entry.subjectKey) || entry.subjectKey,
+              slot: entry,
+              conflictingGradeLabel: conflict.courseKey ? `curso ${conflict.courseKey}` : `grado ${gradeLabelByKey.get(conflict.gradeKey) || conflict.gradeKey}`,
+            }),
+          });
+        }
       }
     }
 
@@ -8060,9 +8110,11 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
     }
 
     const generationResult = generateAcademicWeeklySchedule({
-      slotTemplates: normalizedTemplates.weeklySchedule.map((entry) => ({ ...entry, subjectKey: '', teacherUserId: null })),
+      slotTemplates: normalizedTemplates.weeklySchedule.map((entry) => ({ ...entry, subjectKey: '', teacherUserId: null, teacherUserIds: [] })),
       subjectLoads: Array.from(loadMap.values()).filter((load) => Number(load.weeklyHours || 0) > 0),
-      conflictIndex: buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: gradeKey }),
+      conflictIndex: allowsSharedClassroomTeacherConflicts(schoolId)
+        ? new Map()
+        : buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: gradeKey }),
       teachingAvailability: configuration.teachingAvailability,
       gradeKey,
     });
@@ -8147,6 +8199,7 @@ router.post('/academic-management/schedules/:gradeKey/gio-ai/generate', async (r
       ...entry,
       subjectKey: '',
       teacherUserId: null,
+      teacherUserIds: [],
       entryType: breakSlotMap.has(buildAcademicScheduleSlotKey(entry?.weekday, entry?.block)) ? 'break' : 'class',
     }));
     const normalizedTemplates = normalizeAcademicWeeklyScheduleEntries(emptySlotTemplates, {
@@ -8189,8 +8242,12 @@ router.post('/academic-management/schedules/:gradeKey/gio-ai/generate', async (r
         subjectLabel: subjectLabelByKey.get(load.subjectKey) || load.subjectKey,
         teacherName: teacherNameById.get(load.teacherUserId) || '',
       })),
-      conflictIndex: buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
-      teacherBusyIntervals: buildTeacherBusyIntervals(serialized.gradeSchedules, { skipScheduleKey: `${gradeKey}::${courseKey}` }),
+      conflictIndex: allowsSharedClassroomTeacherConflicts(schoolId)
+        ? new Map()
+        : buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
+      teacherBusyIntervals: allowsSharedClassroomTeacherConflicts(schoolId)
+        ? new Map()
+        : buildTeacherBusyIntervals(serialized.gradeSchedules, { skipScheduleKey: `${gradeKey}::${courseKey}` }),
       teachingAvailability: configuration.teachingAvailability,
       gradeKey,
       constraints,

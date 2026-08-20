@@ -1745,6 +1745,36 @@ function normalizeAcademicScheduleSlotKey(weekday, block) {
   return `d${Number(weekday)}_b${Number(block)}`;
 }
 
+function collectAcademicScheduleTeacherIds(entry) {
+  const ids = [];
+  const seen = new Set();
+  const push = (value) => {
+    const id = String(value || '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  (Array.isArray(entry?.teacherUserIds) ? entry.teacherUserIds : []).forEach(push);
+  push(entry?.teacherUserId);
+  return ids;
+}
+
+function buildAcademicScheduleTeacherFields(teacherIds = []) {
+  const ids = collectAcademicScheduleTeacherIds({ teacherUserIds: teacherIds });
+  return {
+    teacherUserId: ids[0] || '',
+    teacherUserIds: ids,
+  };
+}
+
+function formatAcademicScheduleTeacherLabel(entry, teacherLabels = {}, fallback = 'Sin docente fijo') {
+  const labels = collectAcademicScheduleTeacherIds(entry)
+    .map((id) => String(teacherLabels[id] || '').trim())
+    .filter(Boolean);
+  if (labels.length === 0) return fallback;
+  return labels.join(' · ');
+}
+
 function academicScheduleTimeToMinutes(value) {
   const normalized = normalizeText(value);
   if (!/^\d{2}:\d{2}$/.test(normalized)) {
@@ -2713,6 +2743,7 @@ function normalizeAcademicStructureDraft(raw) {
             breakKey: String(entry?.breakKey || '').trim(),
             breakLabel: String(entry?.breakLabel || '').trim(),
             teacherUserId: String(entry?.entryType || 'class').trim() === 'break' ? '' : String(entry?.teacherUserId || '').trim(),
+            teacherUserIds: String(entry?.entryType || 'class').trim() === 'break' ? [] : collectAcademicScheduleTeacherIds(entry),
             order: Number(entry?.order || (entryIndex + 1) * 10),
           }))
           .filter((entry) => entry.weekday && entry.block && entry.startTime && entry.endTime),
@@ -3290,7 +3321,7 @@ function RectoriaDashboard() {
   const [scheduleDropPreview, setScheduleDropPreview] = useState(null);
   const [selectedScheduleSlotKey, setSelectedScheduleSlotKey] = useState('');
   const [scheduleClipboardEntry, setScheduleClipboardEntry] = useState(null);
-  const [scheduleSlotModal, setScheduleSlotModal] = useState({ open: false, mode: 'create', slotKey: '', weekday: 0, block: 0, startTime: '', endTime: '', entryType: 'class', subjectKey: '', teacherUserId: '', breakKey: 'break' });
+  const [scheduleSlotModal, setScheduleSlotModal] = useState({ open: false, mode: 'create', slotKey: '', weekday: 0, block: 0, startTime: '', endTime: '', entryType: 'class', subjectKey: '', teacherUserId: '', teacherUserIds: [], breakKey: 'break' });
   const [gioAiScheduleModal, setGioAiScheduleModal] = useState({
     open: false,
     instructions: '',
@@ -4885,15 +4916,15 @@ function RectoriaDashboard() {
       const candidateMap = new Map();
       const existingSchedule = academicStructureDraft.gradeSchedules.find((schedule) => schedule.gradeKey === selectedScheduleGradeKey && String(schedule.courseKey || '') === selectedScheduleCourseKey)
         || academicStructureDraft.gradeSchedules.find((schedule) => schedule.gradeKey === selectedScheduleGradeKey && !String(schedule.courseKey || '').trim());
-      const existingLoad = (Array.isArray(existingSchedule?.subjectLoads) ? existingSchedule.subjectLoads : [])
-        .find((load) => String(load.subjectKey || '').trim() === subjectKey && String(load.teacherUserId || '').trim());
-      if (existingLoad?.teacherUserId) {
-        const teacherUserId = String(existingLoad.teacherUserId || '').trim();
+      const existingLoads = (Array.isArray(existingSchedule?.subjectLoads) ? existingSchedule.subjectLoads : [])
+        .filter((load) => String(load.subjectKey || '').trim() === subjectKey && String(load.teacherUserId || '').trim());
+      existingLoads.forEach((load) => {
+        const teacherUserId = String(load.teacherUserId || '').trim();
         candidateMap.set(teacherUserId, {
           value: teacherUserId,
           label: teacherLabelById[teacherUserId] || 'Docente asignado',
         });
-      }
+      });
       academicSubjectLoadTemplates
         .filter((template) => (
           String(template.subjectKey || '').trim() === subjectKey
@@ -5034,6 +5065,7 @@ function RectoriaDashboard() {
         breakKey: String(entry.breakKey || '').trim(),
         breakLabel: String(entry.breakLabel || '').trim(),
         teacherUserId: String(entry.teacherUserId || '').trim(),
+        teacherUserIds: collectAcademicScheduleTeacherIds(entry),
       })).filter((entry) => entry.entryType === 'break' || entry.subjectKey)
       : [];
 
@@ -5778,11 +5810,13 @@ function RectoriaDashboard() {
       });
 
       (Array.isArray(gradeSchedule.weeklySchedule) ? gradeSchedule.weeklySchedule : []).forEach((entry) => {
-        const teacherUserId = String(entry.teacherUserId || '').trim();
         const subjectKey = String(entry.subjectKey || '').trim();
-        if (String(entry.entryType || 'class') !== 'break' && teacherUserId && subjectKey) {
-          scheduleAssignments.set(`${teacherUserId}::${subjectKey}`, { teacherUserId, subjectKey });
+        if (String(entry.entryType || 'class') === 'break' || !subjectKey) {
+          return;
         }
+        collectAcademicScheduleTeacherIds(entry).forEach((teacherUserId) => {
+          scheduleAssignments.set(`${teacherUserId}::${subjectKey}`, { teacherUserId, subjectKey });
+        });
       });
 
       scheduleAssignments.forEach((assignment) => {
@@ -7102,17 +7136,20 @@ function RectoriaDashboard() {
         : createDefaultAcademicScheduleTemplate(academicStructureDraft.scheduleSettings, { gradeKey }))
         .map((entry) => {
           if (entry.entryType === 'break') {
-            return { ...entry, subjectKey: '', teacherUserId: '' };
+            return { ...entry, subjectKey: '', ...buildAcademicScheduleTeacherFields([]) };
           }
 
           const selectedLoad = nextLoadMap.get(entry.subjectKey);
           if (!entry.subjectKey || !selectedLoad) {
-            return { ...entry, teacherUserId: '' };
+            return { ...entry, ...buildAcademicScheduleTeacherFields([]) };
           }
 
+          const existingTeacherIds = collectAcademicScheduleTeacherIds(entry);
           return {
             ...entry,
-            teacherUserId: String(selectedLoad.teacherUserId || '').trim(),
+            ...buildAcademicScheduleTeacherFields(existingTeacherIds.length
+              ? existingTeacherIds
+              : [selectedLoad.teacherUserId]),
           };
         });
 
@@ -7142,7 +7179,8 @@ function RectoriaDashboard() {
       endTime: academicScheduleMinutesToTime(endMinutes),
       entryType: payload.entryType === 'break' ? 'break' : 'class',
       subjectKey: payload.entryType === 'break' ? '' : subjectKey,
-      teacherUserId: payload.entryType === 'break' ? '' : String(payload.teacherUserId || '').trim(),
+      teacherUserId: payload.entryType === 'break' ? '' : String(payload.teacherUserId || collectAcademicScheduleTeacherIds(payload)[0] || '').trim(),
+      teacherUserIds: payload.entryType === 'break' ? [] : collectAcademicScheduleTeacherIds(payload),
       breakKey: payload.entryType === 'break' ? (block?.key || 'break') : '',
       breakLabel: payload.entryType === 'break' ? (block?.label || 'Break') : '',
     };
@@ -7154,8 +7192,15 @@ function RectoriaDashboard() {
       const loadMap = new Map((Array.isArray(currentSchedule.subjectLoads) ? currentSchedule.subjectLoads : []).map((load) => [load.subjectKey, load]));
       const currentWeeklySchedule = Array.isArray(currentSchedule.weeklySchedule) ? currentSchedule.weeklySchedule : [];
       const withTeacher = nextEntry.entryType === 'break'
-        ? { ...nextEntry, subjectKey: '', teacherUserId: '', breakLabel: nextEntry.breakLabel || 'Break' }
-        : { ...nextEntry, teacherUserId: String(nextEntry.teacherUserId || loadMap.get(nextEntry.subjectKey)?.teacherUserId || selectedScheduleTeacherBySubjectKey[nextEntry.subjectKey] || '').trim(), breakKey: '', breakLabel: '' };
+        ? { ...nextEntry, subjectKey: '', ...buildAcademicScheduleTeacherFields([]), breakLabel: nextEntry.breakLabel || 'Break' }
+        : {
+          ...nextEntry,
+          ...buildAcademicScheduleTeacherFields(collectAcademicScheduleTeacherIds(nextEntry).length
+            ? collectAcademicScheduleTeacherIds(nextEntry)
+            : [loadMap.get(nextEntry.subjectKey)?.teacherUserId || selectedScheduleTeacherBySubjectKey[nextEntry.subjectKey]]),
+          breakKey: '',
+          breakLabel: '',
+        };
       const nextWeeklySchedule = [
         ...currentWeeklySchedule.filter((entry) => String(entry.key) !== String(nextEntry.key)),
         withTeacher,
@@ -7202,6 +7247,18 @@ function RectoriaDashboard() {
     const slotTemplate = selectedScheduleConfiguredSlotByKey[slotKey];
     if (!slotTemplate && !existingEntry) return;
     const subjectKey = overrides.subjectKey || existingEntry?.subjectKey || selectedScheduleSubjects[0]?.key || '';
+    const teacherFields = buildAcademicScheduleTeacherFields(
+      Array.isArray(overrides.teacherUserIds)
+        ? overrides.teacherUserIds
+        : collectAcademicScheduleTeacherIds({
+          teacherUserId: Object.prototype.hasOwnProperty.call(overrides, 'teacherUserId') ? overrides.teacherUserId : existingEntry?.teacherUserId,
+          teacherUserIds: existingEntry?.teacherUserIds,
+        })
+    );
+    const fallbackTeacherId = teacherFields.teacherUserId || selectedScheduleTeacherBySubjectKey[subjectKey] || '';
+    const resolvedTeacherFields = teacherFields.teacherUserIds.length
+      ? teacherFields
+      : buildAcademicScheduleTeacherFields(fallbackTeacherId ? [fallbackTeacherId] : []);
     setScheduleSlotModal({
       open: true,
       mode: existingEntry ? 'edit' : 'create',
@@ -7212,7 +7269,8 @@ function RectoriaDashboard() {
       endTime: overrides.endTime || existingEntry?.endTime || (slotTemplate ? slotTemplate.endTime : ''),
       entryType: overrides.entryType || (existingEntry?.entryType === 'break' ? 'break' : 'class'),
       subjectKey,
-      teacherUserId: overrides.teacherUserId || existingEntry?.teacherUserId || selectedScheduleTeacherBySubjectKey[subjectKey] || '',
+      teacherUserId: resolvedTeacherFields.teacherUserId,
+      teacherUserIds: resolvedTeacherFields.teacherUserIds,
       breakKey: overrides.breakKey || existingEntry?.breakKey || 'break',
     });
   };
@@ -7220,8 +7278,9 @@ function RectoriaDashboard() {
   const onSaveScheduleSlotModal = (event) => {
     event.preventDefault();
     const teacherCandidates = selectedScheduleTeacherOptionsBySubjectKey[scheduleSlotModal.subjectKey] || [];
-    if (scheduleSlotModal.entryType !== 'break' && teacherCandidates.length > 1 && !scheduleSlotModal.teacherUserId) {
-      setError('Selecciona el docente que dictará esta materia en el bloque.');
+    const selectedTeacherIds = collectAcademicScheduleTeacherIds(scheduleSlotModal);
+    if (scheduleSlotModal.entryType !== 'break' && teacherCandidates.length > 1 && selectedTeacherIds.length === 0) {
+      setError('Selecciona al menos un docente que dictará esta materia en el bloque.');
       return;
     }
     const nextEntry = buildScheduleEntryForSlot(scheduleSlotModal.slotKey, scheduleSlotModal);
@@ -7298,7 +7357,7 @@ function RectoriaDashboard() {
         endTime: slotTemplate.endTime,
         entryType: 'class',
         subjectKey: '',
-        teacherUserId: '',
+        ...buildAcademicScheduleTeacherFields([]),
       }];
 
       const nextWeeklySchedule = scheduleWithTarget
@@ -7312,7 +7371,9 @@ function RectoriaDashboard() {
             ...entry,
             entryType: 'class',
             subjectKey: normalizedSubjectKey,
-            teacherUserId: normalizedSubjectKey ? String(nextLoad?.teacherUserId || selectedScheduleTeacherBySubjectKey[normalizedSubjectKey] || '').trim() : '',
+            ...buildAcademicScheduleTeacherFields(normalizedSubjectKey
+              ? [nextLoad?.teacherUserId || selectedScheduleTeacherBySubjectKey[normalizedSubjectKey]]
+              : []),
             breakKey: '',
             breakLabel: '',
           };
@@ -7350,7 +7411,7 @@ function RectoriaDashboard() {
         endTime: slotTemplate.endTime,
         entryType: 'break',
         subjectKey: '',
-        teacherUserId: '',
+        ...buildAcademicScheduleTeacherFields([]),
       }];
 
       const nextWeeklySchedule = scheduleWithTarget
@@ -7363,7 +7424,7 @@ function RectoriaDashboard() {
             ...entry,
             entryType: 'break',
             subjectKey: '',
-            teacherUserId: '',
+            ...buildAcademicScheduleTeacherFields([]),
             breakKey: block.key,
             breakLabel: block.label,
           };
@@ -7441,6 +7502,7 @@ function RectoriaDashboard() {
         entryType: 'class',
         subjectKey,
         teacherUserId: '',
+        teacherUserIds: [],
         startTime: slotTemplate?.startTime || '',
         endTime: slotTemplate ? academicScheduleMinutesToTime((academicScheduleTimeToMinutes(slotTemplate.startTime) ?? 0) + 15) : '',
       });
@@ -12805,8 +12867,16 @@ function RectoriaDashboard() {
                                   const top = ((startMinutes - selectedScheduleBoardWindow.start) / 15) * selectedScheduleBoardRowHeight;
                                   const height = Math.max(selectedScheduleBoardRowHeight, ((endMinutes - startMinutes) / 15) * selectedScheduleBoardRowHeight);
                                   const subject = selectedScheduleSubjects.find((item) => item.key === entry.subjectKey);
-                                  const resolvedTeacherUserId = String(entry.teacherUserId || selectedScheduleTeacherBySubjectKey[entry.subjectKey] || '').trim();
-                                  const teacherLabel = resolvedTeacherUserId ? (teacherLabelById[resolvedTeacherUserId] || 'Docente asignado') : 'Sin docente fijo';
+                                  const teacherLabel = formatAcademicScheduleTeacherLabel(
+                                    {
+                                      teacherUserId: entry.teacherUserId || selectedScheduleTeacherBySubjectKey[entry.subjectKey] || '',
+                                      teacherUserIds: collectAcademicScheduleTeacherIds(entry),
+                                    },
+                                    teacherLabelById,
+                                    selectedScheduleTeacherBySubjectKey[entry.subjectKey]
+                                      ? (teacherLabelById[selectedScheduleTeacherBySubjectKey[entry.subjectKey]] || 'Docente asignado')
+                                      : 'Sin docente fijo'
+                                  );
 
                                   if (entry.entryType === 'break') {
                                     const breakBlock = scheduleBlockByKey[String(entry.breakKey || '').trim()];
@@ -13004,11 +13074,24 @@ function RectoriaDashboard() {
 
                         <label>
                           Tipo de bloque
-                          <select value={scheduleSlotModal.entryType} onChange={(event) => setScheduleSlotModal((previous) => ({
-                            ...previous,
-                            entryType: event.target.value,
-                            teacherUserId: event.target.value === 'break' ? '' : (selectedScheduleTeacherBySubjectKey[previous.subjectKey] || previous.teacherUserId || ''),
-                          }))}>
+                          <select value={scheduleSlotModal.entryType} onChange={(event) => setScheduleSlotModal((previous) => {
+                            const nextType = event.target.value;
+                            if (nextType === 'break') {
+                              return {
+                                ...previous,
+                                entryType: nextType,
+                                ...buildAcademicScheduleTeacherFields([]),
+                              };
+                            }
+                            const fallbackTeacherId = selectedScheduleTeacherBySubjectKey[previous.subjectKey] || previous.teacherUserId || '';
+                            return {
+                              ...previous,
+                              entryType: nextType,
+                              ...buildAcademicScheduleTeacherFields(collectAcademicScheduleTeacherIds(previous).length
+                                ? collectAcademicScheduleTeacherIds(previous)
+                                : (fallbackTeacherId ? [fallbackTeacherId] : [])),
+                            };
+                          })}>
                             <option value="class">Asignatura</option>
                             <option value="break">Bloque especial</option>
                           </select>
@@ -13027,25 +13110,82 @@ function RectoriaDashboard() {
                               Asignatura
                               <select value={scheduleSlotModal.subjectKey} onChange={(event) => {
                                 const nextSubjectKey = event.target.value;
+                                const nextCandidates = selectedScheduleTeacherOptionsBySubjectKey[nextSubjectKey] || [];
+                                const nextTeacherFields = buildAcademicScheduleTeacherFields(
+                                  nextCandidates.length === 1 ? [nextCandidates[0].value] : []
+                                );
                                 setScheduleSlotModal((previous) => ({
                                   ...previous,
                                   subjectKey: nextSubjectKey,
-                                  teacherUserId: selectedScheduleTeacherBySubjectKey[nextSubjectKey] || '',
+                                  teacherUserId: nextTeacherFields.teacherUserId,
+                                  teacherUserIds: nextTeacherFields.teacherUserIds,
                                 }));
                               }}>
                                 <option value="">Selecciona una asignatura</option>
                                 {selectedScheduleSubjects.map((subject) => <option key={`modal-subject-${subject.key}`} value={subject.key}>{subject.label}</option>)}
                               </select>
                             </label>
-                            <label>
-                              Docente
-                              <select value={scheduleSlotModal.teacherUserId} onChange={(event) => setScheduleSlotModal((previous) => ({ ...previous, teacherUserId: event.target.value }))}>
-                                <option value="">Selecciona un docente</option>
-                                {(selectedScheduleTeacherOptionsBySubjectKey[scheduleSlotModal.subjectKey] || []).map((teacher) => (
-                                  <option key={`modal-subject-teacher-${teacher.value}`} value={teacher.value}>{teacher.label}</option>
-                                ))}
-                              </select>
-                            </label>
+                            {(() => {
+                              const teacherCandidates = selectedScheduleTeacherOptionsBySubjectKey[scheduleSlotModal.subjectKey] || [];
+                              const selectedTeacherIds = collectAcademicScheduleTeacherIds(scheduleSlotModal);
+                              const selectedSet = new Set(selectedTeacherIds);
+                              const allSelected = teacherCandidates.length > 0 && teacherCandidates.every((teacher) => selectedSet.has(teacher.value));
+
+                              const applyTeacherIds = (nextIds) => {
+                                const nextFields = buildAcademicScheduleTeacherFields(nextIds);
+                                setScheduleSlotModal((previous) => ({
+                                  ...previous,
+                                  teacherUserId: nextFields.teacherUserId,
+                                  teacherUserIds: nextFields.teacherUserIds,
+                                }));
+                              };
+
+                              if (teacherCandidates.length <= 1) {
+                                return (
+                                  <label>
+                                    Docente
+                                    <select value={scheduleSlotModal.teacherUserId} onChange={(event) => applyTeacherIds(event.target.value ? [event.target.value] : [])}>
+                                      <option value="">Selecciona un docente</option>
+                                      {teacherCandidates.map((teacher) => (
+                                        <option key={`modal-subject-teacher-${teacher.value}`} value={teacher.value}>{teacher.label}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                );
+                              }
+
+                              return (
+                                <div className="rectoria-schedule-teacher-field">
+                                  <span>Docente</span>
+                                  <p className="rectoria-schedule-teacher-hint">Puedes marcar Todos o elegir varios docentes para este bloque.</p>
+                                  <div className="rectoria-schedule-teacher-picker" role="group" aria-label="Docentes del bloque">
+                                    <label className={`rectoria-schedule-teacher-option is-all${allSelected ? ' is-selected' : ''}`}>
+                                      <input
+                                        checked={allSelected}
+                                        onChange={(event) => applyTeacherIds(event.target.checked ? teacherCandidates.map((teacher) => teacher.value) : [])}
+                                        type="checkbox"
+                                      />
+                                      Todos
+                                    </label>
+                                    {teacherCandidates.map((teacher) => {
+                                      const checked = selectedSet.has(teacher.value);
+                                      return (
+                                        <label className={`rectoria-schedule-teacher-option${checked ? ' is-selected' : ''}`} key={`modal-subject-teacher-${teacher.value}`}>
+                                          <input
+                                            checked={checked}
+                                            onChange={() => applyTeacherIds(checked
+                                              ? selectedTeacherIds.filter((id) => id !== teacher.value)
+                                              : [...selectedTeacherIds, teacher.value])}
+                                            type="checkbox"
+                                          />
+                                          {teacher.label}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </>
                         )}
 

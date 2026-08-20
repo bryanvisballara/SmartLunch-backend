@@ -205,7 +205,23 @@ function buildAcademicTeacherAssignmentIndex({
 
     (Array.isArray(schedule?.weeklySchedule) ? schedule.weeklySchedule : []).forEach((entry) => {
       if (normalizeText(entry?.entryType || 'class') === 'break') return;
-      registerAssignment(entry?.subjectKey, entry?.teacherUserId, matchingGradeKey);
+      const teacherIds = [];
+      const seen = new Set();
+      const pushTeacherId = (value) => {
+        const id = normalizeText(value);
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        teacherIds.push(id);
+      };
+      (Array.isArray(entry?.teacherUserIds) ? entry.teacherUserIds : []).forEach(pushTeacherId);
+      pushTeacherId(entry?.teacherUserId);
+      if (teacherIds.length === 0) {
+        registerAssignment(entry?.subjectKey, entry?.teacherUserId, matchingGradeKey);
+        return;
+      }
+      teacherIds.forEach((teacherUserId) => {
+        registerAssignment(entry?.subjectKey, teacherUserId, matchingGradeKey);
+      });
     });
   });
 

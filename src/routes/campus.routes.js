@@ -2232,9 +2232,19 @@ function weeklyScheduleEntryMatchesTeacher(entry, teacherUserId, teacherSubjectK
     return false;
   }
 
-  const entryTeacherUserId = normalizeText(entry?.teacherUserId);
-  if (entryTeacherUserId) {
-    return entryTeacherUserId === normalizeText(teacherUserId);
+  const entryTeacherIds = [];
+  const seen = new Set();
+  const pushTeacherId = (value) => {
+    const id = normalizeText(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    entryTeacherIds.push(id);
+  };
+  (Array.isArray(entry?.teacherUserIds) ? entry.teacherUserIds : []).forEach(pushTeacherId);
+  pushTeacherId(entry?.teacherUserId);
+
+  if (entryTeacherIds.length > 0) {
+    return entryTeacherIds.includes(normalizeText(teacherUserId));
   }
 
   const entrySubjectKey = normalizeText(entry?.subjectKey);

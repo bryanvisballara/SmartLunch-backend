@@ -13,6 +13,28 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+export function collectAcademicScheduleTeacherIds(entry) {
+  const ids = [];
+  const seen = new Set();
+  const push = (value) => {
+    const id = String(value || '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  (Array.isArray(entry?.teacherUserIds) ? entry.teacherUserIds : []).forEach(push);
+  push(entry?.teacherUserId);
+  return ids;
+}
+
+export function formatAcademicScheduleTeacherLabel(entry, teacherLabels = {}, fallback = 'Sin docente') {
+  const labels = collectAcademicScheduleTeacherIds(entry)
+    .map((id) => normalizeText(teacherLabels[id]))
+    .filter(Boolean);
+  if (labels.length === 0) return fallback;
+  return labels.join(' · ');
+}
+
 function normalizeGradeKey(value) {
   return normalizeText(value);
 }
@@ -145,6 +167,7 @@ export function buildScheduleBoardModel({
       breakKey: String(entry?.breakKey || '').trim(),
       breakLabel: String(entry?.breakLabel || '').trim(),
       teacherUserId: String(entry?.teacherUserId || '').trim(),
+      teacherUserIds: collectAcademicScheduleTeacherIds(entry),
       title: String(entry?.title || '').trim(),
       secondary: String(entry?.secondary || '').trim(),
       meta: String(entry?.meta || '').trim(),

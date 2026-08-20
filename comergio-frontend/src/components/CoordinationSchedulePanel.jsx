@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { resolveGradeCourses } from '../lib/academicGradeCourses';
+import { collectAcademicScheduleTeacherIds, formatAcademicScheduleTeacherLabel } from '../lib/academicScheduleBoard';
 import CoordinationScheduleBoard from './CoordinationScheduleBoard';
 import '../pages/SchoolCreationWizard.css';
 import './CoordinationSchedulePanel.css';
@@ -32,7 +33,7 @@ function buildBoardEntry(entry, {
 }) {
   const isBreak = String(entry?.entryType || 'class').trim() === 'break';
   const subjectLabel = subjectLabelByKey[entry?.subjectKey] || entry?.subjectKey || 'Materia';
-  const teacherLabel = teacherLabels[String(entry?.teacherUserId || '')] || 'Sin docente';
+  const teacherLabel = formatAcademicScheduleTeacherLabel(entry, teacherLabels, 'Sin docente');
 
   return {
     key: String(entry?.key || `${entry?.weekday}-${entry?.block}-${entry?.subjectKey || entry?.breakKey || 'slot'}`),
@@ -45,6 +46,7 @@ function buildBoardEntry(entry, {
     breakKey: String(entry?.breakKey || '').trim(),
     breakLabel: String(entry?.breakLabel || '').trim(),
     teacherUserId: String(entry?.teacherUserId || '').trim(),
+    teacherUserIds: collectAcademicScheduleTeacherIds(entry),
     title: isBreak ? (String(entry?.breakLabel || '').trim() || 'Break') : subjectLabel,
     secondary: isBreak
       ? ''
@@ -115,23 +117,25 @@ export default function CoordinationSchedulePanel({
 
       (Array.isArray(schedule.weeklySchedule) ? schedule.weeklySchedule : []).forEach((entry) => {
         if (String(entry?.entryType || 'class') === 'break') return;
-        const teacherId = String(entry?.teacherUserId || '').trim();
-        if (!teacherId) return;
+        const teacherIds = collectAcademicScheduleTeacherIds(entry);
+        if (teacherIds.length === 0) return;
 
-        const current = teacherMap.get(teacherId) || {
-          teacherId,
-          teacherName: teacherLabels[teacherId] || 'Docente',
-          weeklySchedule: [],
-        };
+        teacherIds.forEach((teacherId) => {
+          const current = teacherMap.get(teacherId) || {
+            teacherId,
+            teacherName: teacherLabels[teacherId] || 'Docente',
+            weeklySchedule: [],
+          };
 
-        current.weeklySchedule.push(buildBoardEntry(entry, {
-          subjectLabelByKey,
-          teacherLabels,
-          gradeLabel,
-          courseLabel,
-          viewMode: 'teachers',
-        }));
-        teacherMap.set(teacherId, current);
+          current.weeklySchedule.push(buildBoardEntry(entry, {
+            subjectLabelByKey,
+            teacherLabels,
+            gradeLabel,
+            courseLabel,
+            viewMode: 'teachers',
+          }));
+          teacherMap.set(teacherId, current);
+        });
       });
     });
 

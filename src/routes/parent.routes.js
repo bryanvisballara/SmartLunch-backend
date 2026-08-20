@@ -2662,6 +2662,20 @@ function findParentAcademicStructureSchedule(academicStructure, { gradeValues = 
   return pickBestParentGradeSchedule(gradeSchedules, normalizedCourseValues);
 }
 
+function collectParentScheduleTeacherIds(entry) {
+  const ids = [];
+  const seen = new Set();
+  const push = (value) => {
+    const id = normalizeText(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  (Array.isArray(entry?.teacherUserIds) ? entry.teacherUserIds : []).forEach(push);
+  push(entry?.teacherUserId);
+  return ids;
+}
+
 async function buildParentAcademicScheduleFromStructure({ academicStructure, gradeValues = [], courseValues = [], courseTitleValues = [] }) {
   const gradeSchedule = findParentAcademicStructureSchedule(academicStructure, { gradeValues, courseValues, courseTitleValues });
   if (gradeSchedule?.hiddenFromFamilies === true) {
@@ -2676,7 +2690,7 @@ async function buildParentAcademicScheduleFromStructure({ academicStructure, gra
 
   const subjectLabelByKey = buildLookupMap(academicStructure?.subjects || []);
   const teacherIds = Array.from(new Set(entries
-    .map((entry) => normalizeText(entry?.teacherUserId))
+    .flatMap((entry) => collectParentScheduleTeacherIds(entry))
     .filter((teacherId) => mongoose.Types.ObjectId.isValid(teacherId))));
   const teachers = teacherIds.length
     ? await User.find({ _id: { $in: teacherIds } }).select('name').lean()
@@ -2698,7 +2712,10 @@ async function buildParentAcademicScheduleFromStructure({ academicStructure, gra
       const subject = entryType === 'break'
         ? (normalizeText(entry?.breakLabel) || 'Break')
         : (subjectLabelByKey.get(subjectKey) || subjectKey || 'Clase');
-      const teacherName = teacherNameById.get(normalizeText(entry?.teacherUserId)) || '';
+      const teacherName = collectParentScheduleTeacherIds(entry)
+        .map((teacherId) => teacherNameById.get(teacherId))
+        .filter(Boolean)
+        .join(' · ');
 
       return {
         courseId: normalizeText(entry?.key) || `${weekday}-${entry?.block || startTime}`,
