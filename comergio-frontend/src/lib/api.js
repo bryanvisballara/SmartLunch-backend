@@ -34,6 +34,10 @@ async function refreshSession() {
   return response.data?.token;
 }
 
+export function getApiBaseUrl() {
+  return String(apiBaseUrl || '').replace(/\/+$/, '');
+}
+
 export function resolveApiAssetUrl(value) {
   const rawUrl = String(value || '').trim();
   if (!rawUrl) {

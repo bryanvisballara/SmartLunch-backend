@@ -27,6 +27,7 @@ const ROUTE_FALLBACKS = [
   'academic-secretary/admissions/stage/resultados',
   'academic-secretary/admissions/stage/matriculados',
   'pos',
+  'comandera',
   'daily-closure',
   'topups',
   'wallet',

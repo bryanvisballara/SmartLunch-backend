@@ -96,6 +96,7 @@ import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademy
 import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
 import useAuthStore from '../store/auth.store';
 import { getSchoolDisplayName } from '../lib/schools';
+import { formatOrderCustomerName } from '../lib/orderCustomerName';
 import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
 
 const formatCurrency = (value) => `$${Number(value || 0).toLocaleString('es-CO')}`;
@@ -2398,7 +2399,7 @@ function AdminDashboard() {
     return orders.map((order) => ({
       store: order.storeId?.name || 'N/A',
       orderNumber: order.orderNumber || order._id,
-      student: order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A'),
+      student: formatOrderCustomerName(order),
       pedidos: (order.items || []).map((item) => `${Number(item.quantity || 0)}x ${item.nameSnapshot || 'Producto'}`).join(', ') || 'N/A',
       paymentMethod: paymentMethodLabel[order.paymentMethod] || order.paymentMethod || 'N/A',
       amountRaw: Number(order.total || 0),
@@ -7024,7 +7025,7 @@ function AdminDashboard() {
                         <td>{order.orderNumber || order._id}</td>
                         <td>{order.storeId?.name || 'N/A'}</td>
                         <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
-                        <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
+                        <td>{formatOrderCustomerName(order)}</td>
                         <td>{order.schoolBillingFor || 'N/A'}</td>
                         <td>{order.schoolBillingResponsible || 'N/A'}</td>
                         <td>{formatCurrency(order.total)}</td>
@@ -7078,7 +7079,7 @@ function AdminDashboard() {
                         <td>{order.orderNumber || order._id}</td>
                         <td>{order.storeId?.name || 'N/A'}</td>
                         <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
-                        <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'N/A')}</td>
+                        <td>{formatOrderCustomerName(order)}</td>
                         <td>{order.schoolBillingFor || 'N/A'}</td>
                         <td>{order.schoolBillingResponsible || 'N/A'}</td>
                         <td>{formatCurrency(order.total)}</td>
@@ -9885,7 +9886,7 @@ function AdminDashboard() {
                       </div>
                       <div>
                         <dt>Alumno</dt>
-                        <dd>{request.orderId?.studentId?.name || 'Venta externa'}</dd>
+                        <dd>{formatOrderCustomerName(request.orderId || { guestSale: true })}</dd>
                       </div>
                       <div>
                         <dt>Venta realizada</dt>
@@ -10166,7 +10167,7 @@ function AdminDashboard() {
                               <td>{formatDateTime(item.decidedAt || item.createdAt)}</td>
                               <td>{item.statusLabel}</td>
                               <td>{item.detail?.orderId?._id || item.detail?.orderId || 'N/A'}</td>
-                              <td>{item.detail?.orderId?.studentId?.name || 'Venta externa'}</td>
+                              <td>{formatOrderCustomerName(item.detail?.orderId || { guestSale: true })}</td>
                               <td>{formatCurrency(item.detail?.orderId?.total || 0)}</td>
                               <td>{item.detail?.storeId?.name || 'N/A'}</td>
                               <td>{item.decidedBy || 'N/A'}</td>
@@ -10244,7 +10245,7 @@ function AdminDashboard() {
                           <td>{formatDateTime(selectedApprovalHistory.decidedAt || selectedApprovalHistory.createdAt)}</td>
                           <td>{selectedApprovalHistory.statusLabel}</td>
                           <td>{selectedApprovalHistory.detail?.orderId?._id || selectedApprovalHistory.detail?.orderId || 'N/A'}</td>
-                          <td>{selectedApprovalHistory.detail?.orderId?.studentId?.name || 'Venta externa'}</td>
+                          <td>{formatOrderCustomerName(selectedApprovalHistory.detail?.orderId || { guestSale: true })}</td>
                           <td>{formatCurrency(selectedApprovalHistory.detail?.orderId?.total || 0)}</td>
                           <td>{selectedApprovalHistory.detail?.storeId?.name || 'N/A'}</td>
                           <td>{selectedApprovalHistory.detail?.requestedBy?.name || selectedApprovalHistory.detail?.requestedBy?.username || 'N/A'}</td>

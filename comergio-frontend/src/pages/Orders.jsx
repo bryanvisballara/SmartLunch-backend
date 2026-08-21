@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getOrders } from '../services/orders.service';
 import { getStudents } from '../services/students.service';
 import useAuthStore from '../store/auth.store';
+import { formatOrderCustomerName } from '../lib/orderCustomerName';
 
 function Orders() {
   const { user, currentStore } = useAuthStore();
@@ -428,7 +429,7 @@ function Orders() {
                 finalVisibleOrders.map((order) => (
                   <tr key={order._id}>
                     <td title={order._id}>{formatOrderNumber(order._id)}</td>
-                    <td>{order.studentId?.name || (order.guestSale ? 'Venta externa' : 'Sin alumno')}</td>
+                    <td>{formatOrderCustomerName(order)}</td>
                     <td>{formatOrderItems(order.items)}</td>
                     <td>{formatPaymentMethod(order.paymentMethod)}</td>
                     <td>${Number(order.total || 0).toLocaleString('es-CO')}</td>

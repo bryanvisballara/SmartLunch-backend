@@ -8896,6 +8896,37 @@ body.login-boot-active main.container {
   width: auto;
 }
 
+.pos-comandera-toggle {
+  margin: 0 0 0.75rem;
+  min-height: 44px;
+  gap: 0.7rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #eff6ff;
+  font-size: 1rem;
+  align-items: flex-start;
+}
+
+.pos-comandera-toggle input[type='checkbox'] {
+  width: 26px;
+  height: 26px;
+  margin: 0.1rem 0 0;
+  flex-shrink: 0;
+}
+
+.pos-comandera-toggle span {
+  display: grid;
+  gap: 0.15rem;
+  font-weight: 700;
+}
+
+.pos-comandera-toggle small {
+  font-weight: 500;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
 .pos-external-sale-option {
   margin-top: 0.2rem;
   min-height: 44px;

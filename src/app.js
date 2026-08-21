@@ -165,6 +165,12 @@ app.use(helmet());
 app.use(
   compression({
     threshold: 1024,
+    filter: (req, res) => {
+      if (String(req.originalUrl || req.url || '').includes('/comandera/stream')) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
   })
 );
 app.use((req, res, next) => {

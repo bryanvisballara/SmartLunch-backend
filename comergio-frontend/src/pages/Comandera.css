@@ -1,0 +1,240 @@
+.comandera-page {
+  gap: 1rem;
+}
+
+.comandera-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.comandera-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 36px;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.comandera-live i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.comandera-live.is-on {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.comandera-live.is-on i {
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18);
+}
+
+.comandera-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: 720px;
+}
+
+.comandera-header h2,
+.comandera-header p {
+  margin: 0;
+}
+
+.comandera-header p {
+  margin-top: 0.35rem;
+  color: #475569;
+}
+
+.comandera-banner {
+  margin: 0.85rem 0 0;
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+}
+
+.comandera-empty {
+  margin: 0;
+  padding: 1.2rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px dashed #cbd5e1;
+  color: #64748b;
+}
+
+.comandera-ticket {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.7rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.comandera-ticket.is-new {
+  border-color: #86efac;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  animation: comandera-in 0.35s ease;
+}
+
+@keyframes comandera-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.comandera-ticket-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.comandera-customer {
+  margin: 0;
+  font-size: 1.55rem;
+  line-height: 1.15;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.comandera-customer small {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+}
+
+.comandera-meta {
+  margin: 0;
+  color: #64748b;
+}
+
+.comandera-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.comandera-items li {
+  display: flex;
+  gap: 0.55rem;
+  font-size: 1.08rem;
+}
+
+.comandera-items strong {
+  min-width: 2.2rem;
+}
+
+.comandera-ticket-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.comandera-wait {
+  color: #475569;
+  font-weight: 700;
+}
+
+.comandera-wait.is-late {
+  color: #b45309;
+}
+
+.comandera-dispatch-btn {
+  min-height: 48px;
+  min-width: 140px;
+  font-size: 1rem;
+}
+
+.comandera-done-panel h3 {
+  margin: 0 0 0.7rem;
+}
+
+.comandera-done-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.comandera-done-list li {
+  display: grid;
+  gap: 0.35rem;
+  color: #475569;
+}
+
+.comandera-done-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.comandera-more-info {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #1d4ed8;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.comandera-done-items {
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem 0 0.15rem 0.1rem;
+  display: grid;
+  gap: 0.2rem;
+  color: #334155;
+}
+
+@media (max-width: 720px) {
+  .comandera-header {
+    flex-direction: column;
+  }
+
+  .comandera-ticket-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .comandera-done-row {
+    grid-template-columns: auto 1fr;
+  }
+}

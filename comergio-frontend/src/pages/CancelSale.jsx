@@ -4,6 +4,7 @@ import { getStudents } from '../services/students.service';
 import { getDailyClosures } from '../services/dailyClosure.service';
 import DismissibleNotice from '../components/DismissibleNotice';
 import useAuthStore from '../store/auth.store';
+import { formatOrderCustomerName } from '../lib/orderCustomerName';
 
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
@@ -161,19 +162,27 @@ function CancelSale() {
     return map;
   }, [students]);
 
-  const resolveStudent = (studentRef) => {
+  const resolveStudent = (orderOrStudentRef) => {
+    const looksLikeOrder = Boolean(orderOrStudentRef) && (
+      Object.prototype.hasOwnProperty.call(orderOrStudentRef, 'guestSale')
+      || Object.prototype.hasOwnProperty.call(orderOrStudentRef, 'guestName')
+      || Object.prototype.hasOwnProperty.call(orderOrStudentRef, 'studentId')
+    );
+    const order = looksLikeOrder ? orderOrStudentRef : null;
+    const studentRef = order ? order.studentId : orderOrStudentRef;
+
     if (!studentRef) {
-      return { name: 'Venta externa', schoolCode: '' };
+      return { name: formatOrderCustomerName(order || { guestSale: true }), schoolCode: '' };
     }
 
     if (typeof studentRef === 'object') {
       return {
-        name: studentRef.name || studentNameMap.get(String(studentRef._id || ''))?.name || 'N/A',
+        name: studentRef.name || studentNameMap.get(String(studentRef._id || ''))?.name || formatOrderCustomerName(order || {}),
         schoolCode: studentRef.schoolCode || studentNameMap.get(String(studentRef._id || ''))?.schoolCode || '',
       };
     }
 
-    return studentNameMap.get(String(studentRef)) || { name: 'N/A', schoolCode: '' };
+    return studentNameMap.get(String(studentRef)) || { name: formatOrderCustomerName(order || {}), schoolCode: '' };
   };
 
   const requestCancel = async (orderId) => {
@@ -532,8 +541,8 @@ function CancelSale() {
             <div className="card" key={order._id}>
               <p>Orden: {order._id}</p>
               <p>
-                Alumno: {resolveStudent(order.studentId).name}
-                {resolveStudent(order.studentId).schoolCode ? ` (${resolveStudent(order.studentId).schoolCode})` : ''}
+                Alumno: {resolveStudent(order).name}
+                {resolveStudent(order).schoolCode ? ` (${resolveStudent(order).schoolCode})` : ''}
               </p>
               <p>Productos: {(order.items || []).map((item) => `${item.quantity}x ${item.nameSnapshot}`).join(', ') || 'N/A'}</p>
               {order.guestSale ? <p>Tipo: Venta externa</p> : null}
@@ -573,8 +582,8 @@ function CancelSale() {
               <div className="card" key={request._id}>
                 <p>Orden: {request.orderId?._id || request.orderId}</p>
                 <p>
-                  Alumno: {resolveStudent(request.orderId?.studentId).name}
-                  {resolveStudent(request.orderId?.studentId).schoolCode ? ` (${resolveStudent(request.orderId?.studentId).schoolCode})` : ''}
+                  Alumno: {resolveStudent(request.orderId).name}
+                  {resolveStudent(request.orderId).schoolCode ? ` (${resolveStudent(request.orderId).schoolCode})` : ''}
                 </p>
                 {request.orderId?.guestSale ? <p>Tipo: Venta externa</p> : null}
                 <p>Método: {request.orderId?.paymentMethod || 'N/A'}</p>
@@ -593,8 +602,8 @@ function CancelSale() {
               <div className="card" key={request._id}>
                 <p>Orden: {request.orderId?._id || request.orderId}</p>
                 <p>
-                  Alumno: {resolveStudent(request.orderId?.studentId).name}
-                  {resolveStudent(request.orderId?.studentId).schoolCode ? ` (${resolveStudent(request.orderId?.studentId).schoolCode})` : ''}
+                  Alumno: {resolveStudent(request.orderId).name}
+                  {resolveStudent(request.orderId).schoolCode ? ` (${resolveStudent(request.orderId).schoolCode})` : ''}
                 </p>
                 {request.orderId?.guestSale ? <p>Tipo: Venta externa</p> : null}
                 <p>Método: {request.orderId?.paymentMethod || 'N/A'}</p>

@@ -6,6 +6,7 @@ const storeSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true },
     location: { type: String, trim: true },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
+    comanderaEnabled: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true }

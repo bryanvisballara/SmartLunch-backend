@@ -34,6 +34,9 @@ function OrderSummary({
   disabledPaymentMethods = [],
   cashTendered = '',
   onCashTenderedChange,
+  sellToGuest = false,
+  guestName = '',
+  onGuestNameChange,
   schoolBillingFor = '',
   onSchoolBillingForChange,
   schoolBillingResponsible = '',
@@ -90,6 +93,21 @@ function OrderSummary({
         );
       })}
       <hr />
+      {sellToGuest ? (
+        <div className="cash-change-panel">
+          <label>
+            Nombre del alumno o cliente
+            <input
+              type="text"
+              value={guestName}
+              onChange={(event) => onGuestNameChange?.(event.target.value)}
+              placeholder="Ej: Ana Pérez"
+              maxLength={80}
+            />
+          </label>
+          <p className="cash-change-result">Este nombre aparece en la comandera para entregar el pedido.</p>
+        </div>
+      ) : null}
       <div className="row strong">
         <span>Total</span>
         <span>${Number(total).toLocaleString('es-CO')}</span>

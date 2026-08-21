@@ -7,7 +7,7 @@ import { getStudentById, getStudents } from '../services/students.service';
 import { getBalance } from '../services/wallet.service';
 import { createOrder, getOrders } from '../services/orders.service';
 import { getProducts } from '../services/products.service';
-import { getStores } from '../services/stores.service';
+import { getStores, updateStoreComandera } from '../services/stores.service';
 import useAuthStore from '../store/auth.store';
 import { scheduleLocalStorageJsonSave } from '../lib/nonBlockingStorage';
 
@@ -78,6 +78,7 @@ function POS() {
   const [students, setStudents] = useState([]);
   const [student, setStudent] = useState(null);
   const [sellToGuest, setSellToGuest] = useState(false);
+  const [guestName, setGuestName] = useState('');
   const [studentDetails, setStudentDetails] = useState(null);
   const [balance, setBalance] = useState(null);
   const [spentToday, setSpentToday] = useState(0);
@@ -94,6 +95,7 @@ function POS() {
   const [lastOrderSummary, setLastOrderSummary] = useState(null);
   const [message, setMessage] = useState('');
   const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [comanderaSaving, setComanderaSaving] = useState(false);
   const [queueSyncing, setQueueSyncing] = useState(false);
   const [queuedOrdersCount, setQueuedOrdersCount] = useState(0);
 
@@ -114,16 +116,26 @@ function POS() {
   const loadProducts = async () => {
     try {
       setProductsLoading(true);
-      let activeStoreId = currentStore?._id || null;
+      let activeStore = currentStore || null;
 
-      if (!activeStoreId) {
+      try {
         const storesResponse = await getStores();
-        const firstStore = storesResponse.data?.[0] || null;
-        if (firstStore?._id) {
-          setCurrentStore(firstStore);
-          activeStoreId = firstStore._id;
+        const stores = storesResponse.data || [];
+        const matched = activeStore?._id
+          ? stores.find((store) => String(store._id) === String(activeStore._id))
+          : stores[0];
+        if (matched?._id) {
+          const flagChanged = Boolean(matched.comanderaEnabled) !== Boolean(activeStore?.comanderaEnabled);
+          if (String(matched._id) !== String(activeStore?._id) || flagChanged || matched.name !== activeStore?.name) {
+            setCurrentStore(matched);
+          }
+          activeStore = matched;
         }
+      } catch {
+        // Keep the current store if the list cannot be refreshed.
       }
+
+      const activeStoreId = activeStore?._id || null;
 
       if (!activeStoreId) {
         setProducts([]);
@@ -388,8 +400,8 @@ function POS() {
   }, []);
 
   const selectedStoreId = useMemo(() => {
-    return items[0]?.storeId || null;
-  }, [items]);
+    return items[0]?.storeId || currentStore?._id || null;
+  }, [items, currentStore?._id]);
 
   const cartTotal = useMemo(
     () => items.reduce((sum, item) => sum + toSafeNumber(item.price) * toSafeNumber(item.quantity), 0),
@@ -500,6 +512,7 @@ function POS() {
     setBalance(null);
     setSpentToday(0);
     setSellToGuest(false);
+    setGuestName('');
     setQuery('');
     setStudents([]);
     setMessage('');
@@ -511,6 +524,7 @@ function POS() {
     setBalance(null);
     setSpentToday(0);
     setSellToGuest(false);
+    setGuestName('');
     setQuery('');
     setStudents([]);
   };
@@ -596,13 +610,14 @@ function POS() {
     return {
       ...(sellToGuest ? {} : { studentId: student._id }),
       guestSale: sellToGuest,
+      guestName: sellToGuest ? String(guestName || '').trim() : '',
       storeId: selectedStoreId,
       paymentMethod,
       schoolBillingFor: paymentMethod === 'school_billing' ? String(schoolBillingFor || '').trim() : '',
       schoolBillingResponsible: paymentMethod === 'school_billing' ? String(schoolBillingResponsible || '').trim() : '',
       items: items.map((item) => ({ productId: item._id, quantity: item.quantity })),
     };
-  }, [student, sellToGuest, items, selectedStoreId, paymentMethod, schoolBillingFor, schoolBillingResponsible]);
+  }, [student, sellToGuest, guestName, items, selectedStoreId, paymentMethod, schoolBillingFor, schoolBillingResponsible]);
 
   const canCheckout = items.length > 0;
 
@@ -623,10 +638,47 @@ function POS() {
     });
   }, [products, productQuery, selectedCategory]);
 
+  const toggleComandera = async (enabled) => {
+    const storeId = currentStore?._id;
+    if (!storeId || comanderaSaving) {
+      return;
+    }
+
+    setComanderaSaving(true);
+    try {
+      const response = await updateStoreComandera(storeId, { enabled });
+      const updatedStore = response?.data || { ...currentStore, comanderaEnabled: enabled };
+      setCurrentStore({
+        ...currentStore,
+        ...updatedStore,
+        comanderaEnabled: Boolean(updatedStore.comanderaEnabled),
+      });
+      setMessage(enabled
+        ? 'Comandera activada: las próximas ventas irán a despacho.'
+        : 'Comandera desactivada: las próximas ventas no irán a la cola.');
+    } catch (error) {
+      setMessage(error?.response?.data?.message || 'No se pudo actualizar la comandera');
+    } finally {
+      setComanderaSaving(false);
+    }
+  };
+
   return (
     <div className="page-grid pos-layout">
       <section className="panel">
         <h2>Selecciona el alumno</h2>
+        <label className="payment-option pos-comandera-toggle">
+          <input
+            type="checkbox"
+            checked={Boolean(currentStore?.comanderaEnabled)}
+            disabled={comanderaSaving || !currentStore?._id}
+            onChange={(event) => toggleComandera(event.target.checked)}
+          />
+          <span>
+            Comandera
+            <small>Si está activa, las ventas cobradas aparecen en despacho.</small>
+          </span>
+        </label>
         <div className="row gap student-search-row">
           <input
             placeholder="Escribe el nombre del estudiante"
@@ -654,6 +706,7 @@ function POS() {
                   setPaymentMethod('cash');
                 }
               } else {
+                setGuestName('');
                 setPaymentMethod('system');
               }
             }}
@@ -723,7 +776,7 @@ function POS() {
 
         {sellToGuest ? (
           <div className="panel soft">
-            <p>Venta a cliente no registrado.</p>
+            <p>Venta a cliente no registrado. Escribe el nombre en la tarjeta de cobro para identificar el pedido en la comandera.</p>
           </div>
         ) : null}
 
@@ -815,6 +868,11 @@ function POS() {
             return;
           }
 
+          if (sellToGuest && String(guestName || '').trim().length < 2) {
+            openValidationPopup('En venta externa debes escribir el nombre de quien recibe el pedido.');
+            return;
+          }
+
           if (sellToGuest && paymentMethod === 'system') {
             setMessage('Venta a cliente no registrado no permite pago por sistema');
             return;
@@ -837,6 +895,9 @@ function POS() {
         disabled={!canCheckout}
         cashTendered={cashTendered}
         onCashTenderedChange={setCashTendered}
+        sellToGuest={sellToGuest}
+        guestName={guestName}
+        onGuestNameChange={setGuestName}
         schoolBillingFor={schoolBillingFor}
         onSchoolBillingForChange={setSchoolBillingFor}
         schoolBillingResponsible={schoolBillingResponsible}

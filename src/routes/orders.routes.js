@@ -8,6 +8,8 @@ const Product = require('../models/product.model');
 const Wallet = require('../models/wallet.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 const Order = require('../models/order.model');
+const Store = require('../models/store.model');
+const User = require('../models/user.model');
 const SchoolBillingStatement = require('../models/schoolBillingStatement.model');
 const DailyClosure = require('../models/dailyClosure.model');
 const OrderCancellationRequest = require('../models/orderCancellationRequest.model');
@@ -23,6 +25,8 @@ const {
   resolveStatementHeaderParties,
 } = require('../utils/schoolBillingStatementDocument');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
+const { runWithSchoolContext } = require('../config/db');
+const { publishComanderaChange, subscribeComanderaChange } = require('../utils/comanderaHub');
 
 const PAYMENT_METHOD_FILTER_ALIASES = {
   cash: ['cash'],
@@ -110,6 +114,93 @@ function startOfDay(date) {
 
 function endOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+}
+
+function startOfBogotaDay(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const [yearText, monthText, dayText] = formatter.format(date).split('-');
+  return bogotaLocalToUtcDate(Number(yearText), Number(monthText) - 1, Number(dayText), 0, 0, 0, 0);
+}
+
+function populateComanderaOrder(query) {
+  return query
+    .populate('studentId', 'name schoolCode grade course')
+    .populate('vendorId', 'name username');
+}
+
+async function resolveComanderaStoreId(req) {
+  const { role, userId } = req.user;
+  if (role === 'vendor') {
+    const user = await User.findById(userId).select('assignedStoreId');
+    return String(user?.assignedStoreId || '');
+  }
+
+  return String(req.query.storeId || req.body?.storeId || '').trim();
+}
+
+function sortComanderaPending(orders = []) {
+  return [...orders].sort((left, right) => {
+    const leftTime = new Date(left?.createdAt || 0).getTime();
+    const rightTime = new Date(right?.createdAt || 0).getTime();
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    return String(left?._id || '').localeCompare(String(right?._id || ''));
+  });
+}
+
+function comanderaSnapshotFingerprint(payload) {
+  const pendingIds = (payload?.pending || []).map((order) => String(order._id)).join(',');
+  const dispatchedIds = (payload?.dispatchedToday || []).map((order) => String(order._id)).join(',');
+  return `${pendingIds}|${dispatchedIds}|${payload?.store?.comanderaEnabled ? 1 : 0}`;
+}
+
+async function loadComanderaSnapshot(schoolId, storeId) {
+  const store = await Store.findOne({ _id: storeId, schoolId, deletedAt: null }).select('_id name comanderaEnabled').lean();
+  if (!store) {
+    return null;
+  }
+
+  const [pending, dispatchedToday] = await Promise.all([
+    populateComanderaOrder(
+      Order.find({
+        schoolId,
+        storeId,
+        status: 'completed',
+        dispatchStatus: 'pending',
+      })
+    )
+      .sort({ createdAt: 1, _id: 1 })
+      .limit(150)
+      .lean(),
+    populateComanderaOrder(
+      Order.find({
+        schoolId,
+        storeId,
+        status: 'completed',
+        dispatchStatus: 'dispatched',
+        dispatchedAt: { $gte: startOfBogotaDay() },
+      })
+    )
+      .sort({ dispatchedAt: -1 })
+      .limit(40)
+      .lean(),
+  ]);
+
+  return {
+    store: {
+      _id: store._id,
+      name: store.name,
+      comanderaEnabled: Boolean(store.comanderaEnabled),
+    },
+    pending: sortComanderaPending(pending),
+    dispatchedToday,
+  };
 }
 
 function bogotaLocalToUtcDate(year, monthIndex, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
@@ -645,10 +736,12 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       paymentMethod,
       items,
       guestSale = false,
+      guestName: guestNameRaw = '',
       schoolBillingFor = '',
       schoolBillingResponsible = '',
     } = req.body;
     const isGuestSale = Boolean(guestSale);
+    const guestName = isGuestSale ? String(guestNameRaw || '').trim() : '';
 
     if (!storeId || !paymentMethod || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'storeId, paymentMethod and items are required' });
@@ -662,6 +755,14 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
       return res.status(400).json({ message: 'Guest sales cannot use system payment method' });
     }
 
+    if (isGuestSale && guestName.length < 2) {
+      return res.status(400).json({ message: 'guestName is required for guest sales' });
+    }
+
+    if (guestName.length > 80) {
+      return res.status(400).json({ message: 'guestName is too long' });
+    }
+
     if (paymentMethod === 'school_billing') {
       if (!String(schoolBillingFor || '').trim() || !String(schoolBillingResponsible || '').trim()) {
         return res.status(400).json({ message: 'schoolBillingFor and schoolBillingResponsible are required for school billing orders' });
@@ -670,6 +771,12 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
     session = await mongoose.startSession();
     session.startTransaction();
+
+    const store = await Store.findOne({ _id: storeId, schoolId, deletedAt: null }).session(session);
+    if (!store) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Store not found' });
+    }
 
     let student = null;
     if (!isGuestSale) {
@@ -781,6 +888,7 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
           schoolId,
           studentId: student?._id || null,
           guestSale: isGuestSale,
+          guestName,
           storeId,
           vendorId: userId,
           paymentMethod,
@@ -792,6 +900,7 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
           items: orderItems,
           total,
           status: 'completed',
+          dispatchStatus: store.comanderaEnabled ? 'pending' : 'not_required',
         },
       ],
       { session }
@@ -820,6 +929,10 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
     }
 
     await session.commitTransaction();
+
+    if (order.dispatchStatus === 'pending') {
+      publishComanderaChange(schoolId, storeId);
+    }
 
     // Push notifications are queued outside the HTTP request path.
     if (student) {
@@ -941,6 +1054,112 @@ router.get('/', async (req, res) => {
     return res.status(200).json(orders);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/comandera', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const storeId = await resolveComanderaStoreId(req);
+    if (!storeId) {
+      return res.status(400).json({ message: 'storeId is required' });
+    }
+
+    const snapshot = await loadComanderaSnapshot(schoolId, storeId);
+    if (!snapshot) {
+      return res.status(404).json({ message: 'Store not found' });
+    }
+
+    return res.status(200).json(snapshot);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/comandera/stream', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  const { schoolId } = req.user;
+  let storeId;
+  try {
+    storeId = await resolveComanderaStoreId(req);
+    if (!storeId) {
+      return res.status(400).json({ message: 'storeId is required' });
+    }
+
+    const initial = await loadComanderaSnapshot(schoolId, storeId);
+    if (!initial) {
+      return res.status(404).json({ message: 'Store not found' });
+    }
+
+    req.socket?.setTimeout?.(0);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    let lastFingerprint = '';
+    let closed = false;
+
+    const sendSnapshot = async ({ force = false } = {}) => {
+      if (closed) {
+        return;
+      }
+      const snapshot = await runWithSchoolContext(schoolId, () => loadComanderaSnapshot(schoolId, storeId));
+      if (!snapshot || closed) {
+        return;
+      }
+      const fingerprint = comanderaSnapshotFingerprint(snapshot);
+      if (!force && fingerprint === lastFingerprint) {
+        return;
+      }
+      lastFingerprint = fingerprint;
+      res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
+    };
+
+    lastFingerprint = comanderaSnapshotFingerprint(initial);
+    res.write(`event: snapshot\ndata: ${JSON.stringify(initial)}\n\n`);
+    if (typeof res.flush === 'function') {
+      res.flush();
+    }
+
+    const onChange = () => {
+      sendSnapshot({ force: true }).catch(() => {});
+    };
+    const unsubscribe = subscribeComanderaChange(schoolId, storeId, onChange);
+    const poll = setInterval(() => {
+      sendSnapshot().catch(() => {});
+    }, 2000);
+    const heartbeat = setInterval(() => {
+      if (closed) {
+        return;
+      }
+      res.write(': ping\n\n');
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
+    }, 15000);
+
+    const close = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      clearInterval(poll);
+      clearInterval(heartbeat);
+      unsubscribe();
+      res.end();
+    };
+
+    req.on('close', close);
+    req.on('aborted', close);
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ message: error.message });
+    }
+    res.end();
   }
 });
 
@@ -1257,7 +1476,7 @@ router.get('/cancel-requests/list', async (req, res) => {
     const requests = await OrderCancellationRequest.find(filter)
       .populate({
         path: 'orderId',
-        select: 'studentId total paymentMethod status createdAt items storeId vendorId guestSale',
+        select: 'studentId total paymentMethod status createdAt items storeId vendorId guestSale guestName',
         populate: [
           { path: 'studentId', select: 'name schoolCode' },
           { path: 'vendorId', select: 'name username' },
@@ -1348,6 +1567,10 @@ router.post('/cancel-requests/:id/approve', roleMiddleware('admin'), async (req,
 
     await session.commitTransaction();
 
+    if (order.dispatchStatus === 'pending') {
+      publishComanderaChange(schoolId, order.storeId);
+    }
+
     return res.status(200).json({
       message: 'Order cancellation approved',
       orderId: order._id,
@@ -1383,6 +1606,43 @@ router.post('/cancel-requests/:id/reject', roleMiddleware('admin'), async (req, 
     await cancelRequest.save();
 
     return res.status(200).json(cancelRequest);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/:id/dispatch', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  try {
+    const { schoolId, role, userId } = req.user;
+    const order = await Order.findOne({ _id: req.params.id, schoolId, status: 'completed' });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    if (role === 'vendor') {
+      const assignedStoreId = await resolveComanderaStoreId(req);
+      if (!assignedStoreId || String(order.storeId) !== assignedStoreId) {
+        return res.status(403).json({ message: 'You can only dispatch orders from your assigned store' });
+      }
+    }
+
+    if (order.dispatchStatus === 'dispatched') {
+      const populated = await populateComanderaOrder(Order.findById(order._id)).lean();
+      return res.status(200).json(populated);
+    }
+
+    if (order.dispatchStatus !== 'pending') {
+      return res.status(400).json({ message: 'Order is not waiting for dispatch' });
+    }
+
+    order.dispatchStatus = 'dispatched';
+    order.dispatchedAt = new Date();
+    order.dispatchedBy = userId;
+    await order.save();
+    publishComanderaChange(schoolId, order.storeId);
+
+    const populated = await populateComanderaOrder(Order.findById(order._id)).lean();
+    return res.status(200).json(populated);
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -1460,6 +1720,10 @@ router.post('/:id/cancel', roleMiddleware('admin'), async (req, res) => {
     );
 
     await session.commitTransaction();
+
+    if (order.dispatchStatus === 'pending') {
+      publishComanderaChange(schoolId, order.storeId);
+    }
 
     return res.status(200).json({
       message: 'Order cancelled successfully',

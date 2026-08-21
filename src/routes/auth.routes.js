@@ -126,7 +126,7 @@ async function findUserWithSchoolCandidates({ schoolId, filter, populateAssigned
       });
 
       if (populateAssignedStore) {
-        query = query.populate('assignedStoreId', 'name status');
+        query = query.populate('assignedStoreId', 'name status comanderaEnabled');
       }
 
       return query;
@@ -903,18 +903,25 @@ function pruneAuthSessions(sessions) {
     .slice(-MAX_AUTH_SESSIONS_PER_USER);
 }
 
+function serializeAssignedStore(source) {
+  if (!source || typeof source !== 'object' || !source._id) {
+    return null;
+  }
+
+  return {
+    _id: source._id,
+    name: source.name,
+    status: source.status,
+    comanderaEnabled: Boolean(source.comanderaEnabled),
+  };
+}
+
 function buildAuthResponse(user, refreshToken, schoolName = '', staffFeatures = {}) {
   const token = signAccessToken(user);
   const assignedStoreSource = user?.assignedStoreId && typeof user.assignedStoreId === 'object' && user.assignedStoreId.name
     ? user.assignedStoreId
     : null;
-  const assignedStore = assignedStoreSource
-    ? {
-      _id: assignedStoreSource._id,
-      name: assignedStoreSource.name,
-      status: assignedStoreSource.status,
-    }
-    : null;
+  const assignedStore = serializeAssignedStore(assignedStoreSource);
 
   return {
     token,
@@ -1085,7 +1092,7 @@ router.post('/refresh', async (req, res) => {
           expiresAt: { $gt: now },
         },
       },
-    }).populate('assignedStoreId', 'name status');
+    }).populate('assignedStoreId', 'name status comanderaEnabled');
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid refresh token' });
@@ -1523,7 +1530,7 @@ router.get('/me', authMiddleware, async (req, res) => {
     ensureStoreModelForSchool(req.user.schoolId);
     const user = await User.findById(req.user.userId)
       .select('-passwordHash -webauthn')
-      .populate('assignedStoreId', 'name status');
+      .populate('assignedStoreId', 'name status comanderaEnabled');
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -1537,13 +1544,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       ...user.toObject(),
       schoolName,
       staffFeatures,
-      assignedStore: user.assignedStoreId
-        ? {
-          _id: user.assignedStoreId._id,
-          name: user.assignedStoreId.name,
-          status: user.assignedStoreId.status,
-        }
-        : null,
+      assignedStore: serializeAssignedStore(user.assignedStoreId),
       assignedStoreId: user.assignedStoreId?._id || null,
     });
   } catch (error) {

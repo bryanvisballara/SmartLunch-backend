@@ -16,6 +16,7 @@ const orderSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null },
     guestSale: { type: Boolean, default: false },
+    guestName: { type: String, trim: true, default: '' },
     storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     paymentMethod: { type: String, enum: ['system', 'cash', 'transfer', 'qr', 'dataphone', 'school_billing'], required: true },
@@ -28,11 +29,15 @@ const orderSchema = new mongoose.Schema(
     items: { type: [orderItemSchema], required: true },
     total: { type: Number, required: true },
     status: { type: String, enum: ['completed', 'cancelled'], default: 'completed' },
+    dispatchStatus: { type: String, enum: ['pending', 'dispatched', 'not_required'], default: 'not_required', index: true },
+    dispatchedAt: { type: Date, default: null },
+    dispatchedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
 );
 
 orderSchema.index({ storeId: 1, createdAt: -1 });
+orderSchema.index({ schoolId: 1, storeId: 1, dispatchStatus: 1, createdAt: 1 });
 orderSchema.index({ studentId: 1, createdAt: -1 });
 orderSchema.index({ schoolId: 1, studentId: 1, createdAt: -1 });
 orderSchema.index({ createdAt: -1 });

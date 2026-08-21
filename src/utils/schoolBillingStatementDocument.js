@@ -162,7 +162,7 @@ function serializeStatementOrder(order = {}) {
     storeName: String(order.storeId?.name || order.storeName || ''),
     vendorName: String(order.vendorId?.name || order.vendorId?.username || order.vendorName || ''),
     studentName: order.guestSale
-      ? 'Venta externa'
+      ? (String(order.guestName || '').trim() || 'Venta externa')
       : String(order.studentId?.name || order.studentName || 'N/A'),
     total: Number(order.total || 0),
     createdAt: order.createdAt || null,
