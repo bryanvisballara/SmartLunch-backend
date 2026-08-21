@@ -6,7 +6,7 @@ export function formatOrderCustomerName(order = {}) {
 
   const guestName = String(order?.guestName || '').trim();
   if (order?.guestSale) {
-    return guestName || 'Venta externa';
+    return guestName || 'Sin nombre';
   }
 
   return guestName || 'Sin alumno';

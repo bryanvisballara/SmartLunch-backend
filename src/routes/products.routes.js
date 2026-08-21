@@ -2,6 +2,7 @@ const express = require('express');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const Product = require('../models/product.model');
+const User = require('../models/user.model');
 const { DEFAULT_TTL_SECONDS, getMenuCache, setMenuCache } = require('../services/menuCache.service');
 const { deriveThumbUrlFromImageUrl, normalizeStoredImageUrl } = require('../utils/imageUpload');
 require('../models/category.model');
@@ -80,7 +81,7 @@ function dedupeProductsForParent(products) {
 
 router.get('/', async (req, res) => {
   try {
-    const { schoolId: tokenSchoolId, role } = req.user;
+    const { schoolId: tokenSchoolId, role, userId } = req.user;
     const {
       schoolId: requestedSchoolId,
       storeId,
@@ -102,8 +103,17 @@ router.get('/', async (req, res) => {
       deletedAt: null,
     };
 
-    if (storeId) {
-      filter.storeId = storeId;
+    let scopedStoreId = String(storeId || '').trim();
+    if (role === 'vendor') {
+      const vendor = await User.findById(userId).select('assignedStoreId');
+      scopedStoreId = String(vendor?.assignedStoreId || '');
+      if (!scopedStoreId) {
+        return res.status(400).json({ message: 'Vendor has no assigned store' });
+      }
+    }
+
+    if (scopedStoreId) {
+      filter.storeId = scopedStoreId;
     }
 
     if (categoryId) {
@@ -121,7 +131,7 @@ router.get('/', async (req, res) => {
     const cacheKey = [
       tokenSchoolId,
       String(role || ''),
-      String(storeId || ''),
+      String(scopedStoreId || ''),
       String(categoryId || ''),
       String(status || ''),
       String(includeInactive || ''),

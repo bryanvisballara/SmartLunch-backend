@@ -4,7 +4,10 @@ const hub = new EventEmitter();
 hub.setMaxListeners(200);
 
 function channelKey(schoolId, storeId) {
-  return `${String(schoolId || '').trim()}:${String(storeId || '').trim()}`;
+  const storeKey = storeId && typeof storeId === 'object' && storeId._id
+    ? String(storeId._id)
+    : String(storeId || '').trim();
+  return `${String(schoolId || '').trim()}:${storeKey}`;
 }
 
 function publishComanderaChange(schoolId, storeId) {

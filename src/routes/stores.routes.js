@@ -12,8 +12,18 @@ router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
   try {
-    const { schoolId } = req.user;
-    const stores = await Store.find({ schoolId, deletedAt: null, status: 'active' })
+    const { schoolId, role, userId } = req.user;
+    const filter = { schoolId, deletedAt: null, status: 'active' };
+
+    if (role === 'vendor') {
+      const user = await User.findById(userId).select('assignedStoreId');
+      if (!user?.assignedStoreId) {
+        return res.status(200).json([]);
+      }
+      filter._id = user.assignedStoreId;
+    }
+
+    const stores = await Store.find(filter)
       .select('_id name location status comanderaEnabled')
       .sort({ name: 1 })
       .lean();

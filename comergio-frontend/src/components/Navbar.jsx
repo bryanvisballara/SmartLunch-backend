@@ -39,6 +39,7 @@ function Navbar() {
           username: profile.username,
           role: profile.role,
           assignedStore: profile.assignedStore || null,
+          assignedStoreId: profile.assignedStore?._id || profile.assignedStoreId || null,
           staffFeatures: profile.staffFeatures || {},
         });
       } catch (error) {
@@ -51,12 +52,18 @@ function Navbar() {
 
   useEffect(() => {
     const loadStore = async () => {
-      if (!token || user?.role !== 'vendor' || currentStore?._id) {
+      if (!token || user?.role !== 'vendor') {
         return;
       }
 
       if (user?.assignedStore?._id) {
-        setCurrentStore(user.assignedStore);
+        if (String(currentStore?._id || '') !== String(user.assignedStore._id)) {
+          setCurrentStore(user.assignedStore);
+        }
+        return;
+      }
+
+      if (currentStore?._id) {
         return;
       }
 
@@ -72,7 +79,7 @@ function Navbar() {
     };
 
     loadStore();
-  }, [token, user?.role, currentStore?._id, setCurrentStore]);
+  }, [token, user?.role, user?.assignedStore, currentStore?._id, setCurrentStore]);
 
   const isVendor = user?.role === 'vendor';
   const isAdmin = user?.role === 'admin';

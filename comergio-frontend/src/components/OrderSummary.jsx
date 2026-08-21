@@ -37,6 +37,8 @@ function OrderSummary({
   sellToGuest = false,
   guestName = '',
   onGuestNameChange,
+  guestWithoutName = false,
+  onGuestWithoutNameChange,
   schoolBillingFor = '',
   onSchoolBillingForChange,
   schoolBillingResponsible = '',
@@ -99,13 +101,26 @@ function OrderSummary({
             Nombre del alumno o cliente
             <input
               type="text"
-              value={guestName}
+              value={guestWithoutName ? '' : guestName}
               onChange={(event) => onGuestNameChange?.(event.target.value)}
-              placeholder="Ej: Ana Pérez"
+              placeholder={guestWithoutName ? 'Sin nombre' : 'Ej: Ana Pérez'}
               maxLength={80}
+              disabled={guestWithoutName}
             />
           </label>
-          <p className="cash-change-result">Este nombre aparece en la comandera para entregar el pedido.</p>
+          <label className="payment-option pos-external-sale-option">
+            <input
+              type="checkbox"
+              checked={guestWithoutName}
+              onChange={(event) => onGuestWithoutNameChange?.(event.target.checked)}
+            />
+            <span>Sin nombre</span>
+          </label>
+          <p className="cash-change-result">
+            {guestWithoutName
+              ? 'La comandera mostrará esta venta como sin nombre.'
+              : 'Si lo escribes, ese nombre aparece en la comandera. Si no, marca Sin nombre.'}
+          </p>
         </div>
       ) : null}
       <div className="row strong">

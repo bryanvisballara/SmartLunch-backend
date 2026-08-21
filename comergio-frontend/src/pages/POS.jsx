@@ -70,7 +70,7 @@ const toSafeNumber = (value) => {
 const normalizeId = (value) => String(value || '');
 
 function POS() {
-  const { currentStore, setCurrentStore } = useAuthStore();
+  const { currentStore, setCurrentStore, user } = useAuthStore();
   const [query, setQuery] = useState('');
   const [productQuery, setProductQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -79,6 +79,7 @@ function POS() {
   const [student, setStudent] = useState(null);
   const [sellToGuest, setSellToGuest] = useState(false);
   const [guestName, setGuestName] = useState('');
+  const [guestWithoutName, setGuestWithoutName] = useState(false);
   const [studentDetails, setStudentDetails] = useState(null);
   const [balance, setBalance] = useState(null);
   const [spentToday, setSpentToday] = useState(0);
@@ -116,20 +117,27 @@ function POS() {
   const loadProducts = async () => {
     try {
       setProductsLoading(true);
-      let activeStore = currentStore || null;
+      const assignedStore = user?.assignedStore || null;
+      const assignedStoreId = String(assignedStore?._id || user?.assignedStoreId?._id || user?.assignedStoreId || '');
+      let activeStore = assignedStore || currentStore || null;
 
       try {
         const storesResponse = await getStores();
         const stores = storesResponse.data || [];
-        const matched = activeStore?._id
-          ? stores.find((store) => String(store._id) === String(activeStore._id))
-          : stores[0];
+        const preferredId = assignedStoreId || String(activeStore?._id || '');
+        const matched = preferredId
+          ? stores.find((store) => String(store._id) === preferredId)
+          : (user?.role === 'vendor' ? stores[0] || null : stores[0] || null);
         if (matched?._id) {
           const flagChanged = Boolean(matched.comanderaEnabled) !== Boolean(activeStore?.comanderaEnabled);
           if (String(matched._id) !== String(activeStore?._id) || flagChanged || matched.name !== activeStore?.name) {
             setCurrentStore(matched);
           }
           activeStore = matched;
+        } else if (user?.role === 'vendor') {
+          setProducts([]);
+          setMessage('Este vendedor no tiene una tienda asignada');
+          return;
         }
       } catch {
         // Keep the current store if the list cannot be refreshed.
@@ -156,6 +164,14 @@ function POS() {
 
   useEffect(() => {
     loadProducts();
+  }, [currentStore?._id, user?.assignedStore?._id]);
+
+  useEffect(() => {
+    const storeId = String(currentStore?._id || '');
+    if (!storeId) {
+      return;
+    }
+    setItems((previous) => previous.filter((item) => !item.storeId || String(item.storeId) === storeId));
   }, [currentStore?._id]);
 
   useEffect(() => {
@@ -400,7 +416,7 @@ function POS() {
   }, []);
 
   const selectedStoreId = useMemo(() => {
-    return items[0]?.storeId || currentStore?._id || null;
+    return currentStore?._id || items[0]?.storeId || null;
   }, [items, currentStore?._id]);
 
   const cartTotal = useMemo(
@@ -513,6 +529,7 @@ function POS() {
     setSpentToday(0);
     setSellToGuest(false);
     setGuestName('');
+    setGuestWithoutName(false);
     setQuery('');
     setStudents([]);
     setMessage('');
@@ -525,6 +542,7 @@ function POS() {
     setSpentToday(0);
     setSellToGuest(false);
     setGuestName('');
+    setGuestWithoutName(false);
     setQuery('');
     setStudents([]);
   };
@@ -610,14 +628,14 @@ function POS() {
     return {
       ...(sellToGuest ? {} : { studentId: student._id }),
       guestSale: sellToGuest,
-      guestName: sellToGuest ? String(guestName || '').trim() : '',
+      guestName: sellToGuest && !guestWithoutName ? String(guestName || '').trim() : '',
       storeId: selectedStoreId,
       paymentMethod,
       schoolBillingFor: paymentMethod === 'school_billing' ? String(schoolBillingFor || '').trim() : '',
       schoolBillingResponsible: paymentMethod === 'school_billing' ? String(schoolBillingResponsible || '').trim() : '',
       items: items.map((item) => ({ productId: item._id, quantity: item.quantity })),
     };
-  }, [student, sellToGuest, guestName, items, selectedStoreId, paymentMethod, schoolBillingFor, schoolBillingResponsible]);
+  }, [student, sellToGuest, guestWithoutName, guestName, items, selectedStoreId, paymentMethod, schoolBillingFor, schoolBillingResponsible]);
 
   const canCheckout = items.length > 0;
 
@@ -707,6 +725,7 @@ function POS() {
                 }
               } else {
                 setGuestName('');
+                setGuestWithoutName(false);
                 setPaymentMethod('system');
               }
             }}
@@ -776,7 +795,7 @@ function POS() {
 
         {sellToGuest ? (
           <div className="panel soft">
-            <p>Venta a cliente no registrado. Escribe el nombre en la tarjeta de cobro para identificar el pedido en la comandera.</p>
+            <p>Venta a cliente no registrado. El nombre es opcional: escríbelo o marca Sin nombre en la tarjeta de cobro.</p>
           </div>
         ) : null}
 
@@ -868,11 +887,6 @@ function POS() {
             return;
           }
 
-          if (sellToGuest && String(guestName || '').trim().length < 2) {
-            openValidationPopup('En venta externa debes escribir el nombre de quien recibe el pedido.');
-            return;
-          }
-
           if (sellToGuest && paymentMethod === 'system') {
             setMessage('Venta a cliente no registrado no permite pago por sistema');
             return;
@@ -897,7 +911,19 @@ function POS() {
         onCashTenderedChange={setCashTendered}
         sellToGuest={sellToGuest}
         guestName={guestName}
-        onGuestNameChange={setGuestName}
+        onGuestNameChange={(value) => {
+          setGuestName(value);
+          if (String(value || '').trim()) {
+            setGuestWithoutName(false);
+          }
+        }}
+        guestWithoutName={guestWithoutName}
+        onGuestWithoutNameChange={(checked) => {
+          setGuestWithoutName(Boolean(checked));
+          if (checked) {
+            setGuestName('');
+          }
+        }}
         schoolBillingFor={schoolBillingFor}
         onSchoolBillingForChange={setSchoolBillingFor}
         schoolBillingResponsible={schoolBillingResponsible}

@@ -54,7 +54,17 @@ function Comandera() {
   const highlightTimersRef = useRef(new Map());
   currentStoreRef.current = currentStore;
 
+  const assignedStoreId = String(user?.assignedStore?._id || user?.assignedStoreId?._id || user?.assignedStoreId || '');
+
   const ensureStoreId = useCallback(async () => {
+    if (user?.role === 'vendor' && assignedStoreId) {
+      if (String(currentStoreRef.current?._id || '') !== assignedStoreId && user?.assignedStore?._id) {
+        setCurrentStore(user.assignedStore);
+        currentStoreRef.current = user.assignedStore;
+      }
+      return assignedStoreId;
+    }
+
     const existingId = currentStoreRef.current?._id;
     if (existingId) {
       return existingId;
@@ -69,10 +79,22 @@ function Comandera() {
     }
 
     return '';
-  }, [setCurrentStore]);
+  }, [assignedStoreId, setCurrentStore, user?.assignedStore, user?.role]);
 
   const applySnapshot = useCallback((payload = {}) => {
-    const nextPending = sortPendingTickets(Array.isArray(payload.pending) ? payload.pending : []);
+    const expectedStoreId = String(user?.assignedStore?._id || user?.assignedStoreId?._id || user?.assignedStoreId || currentStoreRef.current?._id || '');
+    const payloadStoreId = String(payload.store?._id || '');
+    if (expectedStoreId && payloadStoreId && payloadStoreId !== expectedStoreId) {
+      return;
+    }
+    const nextPending = sortPendingTickets(Array.isArray(payload.pending) ? payload.pending : [])
+      .filter((order) => {
+        if (!expectedStoreId) {
+          return true;
+        }
+        const orderStoreId = String(order.storeId?._id || order.storeId || payload.store?._id || '');
+        return !orderStoreId || orderStoreId === expectedStoreId;
+      });
     const previousIds = pendingIdsRef.current;
     const nextIds = new Set(nextPending.map((order) => String(order._id)));
     const arrived = nextPending
@@ -81,7 +103,15 @@ function Comandera() {
 
     pendingIdsRef.current = nextIds;
     setPending(nextPending);
-    setDispatchedToday(Array.isArray(payload.dispatchedToday) ? payload.dispatchedToday : []);
+    setDispatchedToday(
+      (Array.isArray(payload.dispatchedToday) ? payload.dispatchedToday : []).filter((order) => {
+        if (!expectedStoreId) {
+          return true;
+        }
+        const orderStoreId = String(order.storeId?._id || order.storeId || payload.store?._id || '');
+        return !orderStoreId || orderStoreId === expectedStoreId;
+      })
+    );
     setComanderaEnabled(Boolean(payload.store?.comanderaEnabled));
     setLoading(false);
     setMessage('');
@@ -117,7 +147,7 @@ function Comandera() {
         setCurrentStore(nextStore);
       }
     }
-  }, [setCurrentStore]);
+  }, [setCurrentStore, user?.assignedStore?._id, user?.assignedStoreId]);
 
   const loadTickets = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -133,7 +163,7 @@ function Comandera() {
         return;
       }
 
-      const params = user?.role === 'admin' ? { storeId } : {};
+      const params = { storeId };
       const response = await getComanderaOrders(params);
       applySnapshot(response.data || {});
     } catch (error) {
@@ -195,7 +225,7 @@ function Comandera() {
         }
 
         await subscribeComanderaOrders({
-          storeId: user?.role === 'admin' ? storeId : undefined,
+          storeId,
           signal: controller.signal,
           onSnapshot: (payload) => {
             if (cancelled) {

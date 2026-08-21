@@ -143,6 +143,14 @@ async function resolveComanderaStoreId(req) {
   return String(req.query.storeId || req.body?.storeId || '').trim();
 }
 
+function toStoreObjectId(storeId) {
+  const raw = String(storeId || '').trim();
+  if (!raw || !mongoose.Types.ObjectId.isValid(raw)) {
+    return null;
+  }
+  return new mongoose.Types.ObjectId(raw);
+}
+
 function sortComanderaPending(orders = []) {
   return [...orders].sort((left, right) => {
     const leftTime = new Date(left?.createdAt || 0).getTime();
@@ -161,7 +169,12 @@ function comanderaSnapshotFingerprint(payload) {
 }
 
 async function loadComanderaSnapshot(schoolId, storeId) {
-  const store = await Store.findOne({ _id: storeId, schoolId, deletedAt: null }).select('_id name comanderaEnabled').lean();
+  const storeObjectId = toStoreObjectId(storeId);
+  if (!storeObjectId) {
+    return null;
+  }
+
+  const store = await Store.findOne({ _id: storeObjectId, schoolId, deletedAt: null }).select('_id name comanderaEnabled').lean();
   if (!store) {
     return null;
   }
@@ -170,7 +183,7 @@ async function loadComanderaSnapshot(schoolId, storeId) {
     populateComanderaOrder(
       Order.find({
         schoolId,
-        storeId,
+        storeId: storeObjectId,
         status: 'completed',
         dispatchStatus: 'pending',
       })
@@ -181,7 +194,7 @@ async function loadComanderaSnapshot(schoolId, storeId) {
     populateComanderaOrder(
       Order.find({
         schoolId,
-        storeId,
+        storeId: storeObjectId,
         status: 'completed',
         dispatchStatus: 'dispatched',
         dispatchedAt: { $gte: startOfBogotaDay() },
@@ -729,10 +742,10 @@ function resolveLowBalanceAlertTransition({ currentLevel = 'none', nextBalance =
 router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
   let session;
   try {
-    const { schoolId, userId } = req.user;
+    const { schoolId, userId, role } = req.user;
     const {
       studentId,
-      storeId,
+      storeId: requestedStoreId,
       paymentMethod,
       items,
       guestSale = false,
@@ -742,6 +755,15 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
     } = req.body;
     const isGuestSale = Boolean(guestSale);
     const guestName = isGuestSale ? String(guestNameRaw || '').trim() : '';
+    let storeId = String(requestedStoreId || '').trim();
+
+    if (role === 'vendor') {
+      const vendor = await User.findById(userId).select('assignedStoreId');
+      storeId = String(vendor?.assignedStoreId || '');
+      if (!storeId) {
+        return res.status(400).json({ message: 'Vendor has no assigned store' });
+      }
+    }
 
     if (!storeId || !paymentMethod || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: 'storeId, paymentMethod and items are required' });
@@ -753,10 +775,6 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
     if (isGuestSale && paymentMethod === 'system') {
       return res.status(400).json({ message: 'Guest sales cannot use system payment method' });
-    }
-
-    if (isGuestSale && guestName.length < 2) {
-      return res.status(400).json({ message: 'guestName is required for guest sales' });
     }
 
     if (guestName.length > 80) {

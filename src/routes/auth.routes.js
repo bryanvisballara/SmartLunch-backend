@@ -918,7 +918,7 @@ function serializeAssignedStore(source) {
 
 function buildAuthResponse(user, refreshToken, schoolName = '', staffFeatures = {}) {
   const token = signAccessToken(user);
-  const assignedStoreSource = user?.assignedStoreId && typeof user.assignedStoreId === 'object' && user.assignedStoreId.name
+  const assignedStoreSource = user?.assignedStoreId && typeof user.assignedStoreId === 'object' && user.assignedStoreId._id
     ? user.assignedStoreId
     : null;
   const assignedStore = serializeAssignedStore(assignedStoreSource);
@@ -937,6 +937,7 @@ function buildAuthResponse(user, refreshToken, schoolName = '', staffFeatures = 
       linkedStudentId: user.linkedStudentId ? String(user.linkedStudentId) : '',
       biometricEnabled: Boolean(user.webauthn?.credentials?.length),
       assignedStore,
+      assignedStoreId: assignedStore?._id || null,
       staffFeatures: normalizeStaffFeatures(staffFeatures),
     },
   };
