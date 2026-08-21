@@ -6414,7 +6414,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
     return {
       ...parentAppFeatures,
-      games: studentGamesAvailable && !studentFlyLocked,
+      games: Boolean(parentAppFeatures.games) && studentGamesAvailable && !studentFlyLocked,
     };
   }, [parentAppFeatures, studentPortalMode, studentGamesAvailable, studentFlyLocked]);
   const activeSection = useMemo(() => {
@@ -6510,14 +6510,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     () => parentAppSections.filter((section) => isParentSectionEnabled(section.key, portalAppFeatures)),
     [portalAppFeatures]
   );
-  const visibleStudentAppSections = useMemo(() => {
-    return parentAppSections.filter((section) => {
-      if (section.key === 'finance') {
-        return false;
-      }
-      return isParentSectionEnabled(section.key, portalAppFeatures);
-    });
-  }, [portalAppFeatures]);
+  const visibleStudentAppSections = useMemo(() => (
+    parentAppSections.filter((section) => isParentSectionEnabled(section.key, portalAppFeatures))
+  ), [portalAppFeatures]);
   const visiblePortalAppSections = studentPortalMode ? visibleStudentAppSections : visibleParentAppSections;
   const visibleParentCareMenuItems = useMemo(
     () => parentCareMenuItems.filter((item) => parentAppFeatures[item.id] !== false),

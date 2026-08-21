@@ -15,6 +15,7 @@ const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.mod
 const SuperAdminSchoolDeleteRequest = require('../models/superAdminSchoolDeleteRequest.model');
 const { getSchoolDisplayName, updateSchoolDisplayName } = require('../utils/schoolDisplayName');
 const { normalizeStaffFeatures } = require('../utils/staffFeatures');
+const { normalizeStudentFeatures } = require('../utils/studentFeatures');
 const dianInvoicingService = require('../services/dianInvoicing.service');
 const { sendBrevoEmail } = require('../services/brevo.service');
 const multer = require('multer');
@@ -134,6 +135,7 @@ async function bootstrapSchoolTenant({
         pricePerStudent: normalizePricePerStudent(pricePerStudent),
         parentFeatures: normalizeParentFeatures({}),
         staffFeatures: normalizeStaffFeatures({}),
+        studentFeatures: normalizeStudentFeatures({}),
         notes: '',
         updatedBy: normalizeText(updatedBy),
       },
@@ -148,6 +150,7 @@ function serializeSettings(settings = {}) {
     pricePerStudent: normalizePricePerStudent(settings.pricePerStudent),
     parentFeatures: normalizeParentFeatures(settings.parentFeatures || {}),
     staffFeatures: normalizeStaffFeatures(settings.staffFeatures || {}),
+    studentFeatures: normalizeStudentFeatures(settings.studentFeatures || {}),
     billingParty: dianInvoicingService.serializeBillingParty(settings.billingParty || {}),
     notes: normalizeText(settings.notes),
     updatedAt: settings.updatedAt || null,
@@ -357,6 +360,10 @@ router.patch('/schools/:schoolId/settings', async (req, res) => {
 
     if (req.body?.staffFeatures !== undefined) {
       updates.staffFeatures = normalizeStaffFeatures(req.body.staffFeatures);
+    }
+
+    if (req.body?.studentFeatures !== undefined) {
+      updates.studentFeatures = normalizeStudentFeatures(req.body.studentFeatures);
     }
 
     if (req.body?.billingParty !== undefined) {

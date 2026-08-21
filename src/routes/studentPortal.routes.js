@@ -26,6 +26,8 @@ const {
 const PsychologyCase = require('../models/psychologyCase.model');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const Wallet = require('../models/wallet.model');
+const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
+const { normalizeStudentFeatures } = require('../utils/studentFeatures');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
 const { runWithSchoolContext } = require('../config/db');
 const {
@@ -39,17 +41,14 @@ const parentRoutes = require('./parent.routes');
 const router = express.Router();
 const H = parentRoutes.academicPortalHelpers || {};
 
-const STUDENT_PORTAL_FEATURES = {
-  home: true,
-  finance: false,
-  academic: true,
-  cafeteria: true,
-  nursing: true,
-  wellbeing: true,
-  coexistence: true,
-  transport: true,
-  games: true,
-};
+async function loadStudentPortalFeatures(schoolId, { flyLocked = false } = {}) {
+  const settings = await SuperAdminSchoolSettings.findOne({ schoolId }).select('studentFeatures').lean();
+  const features = normalizeStudentFeatures(settings?.studentFeatures || {});
+  return {
+    ...features,
+    games: Boolean(features.games) && !flyLocked,
+  };
+}
 
 function serializeStudentFeedItem(item = {}, currentUserId = '') {
   const likes = Array.isArray(item.likes) ? item.likes : [];
@@ -322,10 +321,7 @@ router.get('/portal/overview', async (req, res) => {
 
     const flyLockStatus = await resolveStudentFlyLockStatus({ schoolId, student });
     const coexistenceScore = await buildStudentCoexistenceScore({ schoolId, studentId: student._id });
-    const parentAppFeatures = {
-      ...STUDENT_PORTAL_FEATURES,
-      games: Boolean(STUDENT_PORTAL_FEATURES.games) && !flyLockStatus.flyLocked,
-    };
+    const parentAppFeatures = await loadStudentPortalFeatures(schoolId, { flyLocked: flyLockStatus.flyLocked });
 
     return res.status(200).json({
       student: {

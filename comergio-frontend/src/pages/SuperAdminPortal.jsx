@@ -18,6 +18,7 @@ import InformaDraftsPanel from '../components/comergio-academy/InformaDraftsPane
 import '../components/comergio-academy/InformaPanel.css';
 import '../components/comergio-academy/InformaDraftsPanel.css';
 import { STAFF_FEATURE_OPTIONS, normalizeStaffFeatures } from '../lib/staffFeatures';
+import { STUDENT_FEATURE_OPTIONS, normalizeStudentFeatures } from '../lib/studentFeatures';
 import './SuperAdminPortal.css';
 
 const SA_SECTIONS = [
@@ -68,6 +69,10 @@ function getDefaultStaffFeatures(features = {}) {
   return normalizeStaffFeatures(features);
 }
 
+function getDefaultStudentFeatures(features = {}) {
+  return normalizeStudentFeatures(features);
+}
+
 function buildBillingPartyDraft(party = {}) {
   return {
     legalName: party.legalName || '',
@@ -94,6 +99,7 @@ function buildDraftFromSchool(school = {}) {
     notes: school.settings?.notes || '',
     parentFeatures: getDefaultFeatures(school.settings?.parentFeatures || {}),
     staffFeatures: getDefaultStaffFeatures(school.settings?.staffFeatures || {}),
+    studentFeatures: getDefaultStudentFeatures(school.settings?.studentFeatures || {}),
     billingParty: buildBillingPartyDraft(school.settings?.billingParty || {
       legalName: school.schoolName || '',
     }),
@@ -962,6 +968,33 @@ function SuperAdminPortal() {
                               ...currentDraft,
                               parentFeatures: {
                                 ...getDefaultFeatures(currentDraft.parentFeatures),
+                                [feature.key]: event.target.checked,
+                              },
+                            }))}
+                            type="checkbox"
+                          />
+                          <span>{feature.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="super-admin-feature-panel">
+                    <div className="super-admin-panel-head">
+                      <div>
+                        <h3>Opciones visibles para los alumnos</h3>
+                        <p>Al desactivar una opción, desaparece de la barra inferior de los alumnos de este colegio.</p>
+                      </div>
+                    </div>
+                    <div className="sa-feature-grid">
+                      {STUDENT_FEATURE_OPTIONS.map((feature) => (
+                        <label className="sa-toggle" key={feature.key}>
+                          <input
+                            checked={Boolean(selectedDraft.studentFeatures?.[feature.key])}
+                            onChange={(event) => updateDraft(selectedSchool.schoolId, (currentDraft) => ({
+                              ...currentDraft,
+                              studentFeatures: {
+                                ...getDefaultStudentFeatures(currentDraft.studentFeatures),
                                 [feature.key]: event.target.checked,
                               },
                             }))}

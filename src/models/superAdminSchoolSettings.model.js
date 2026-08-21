@@ -30,6 +30,21 @@ const staffFeatureSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const studentFeatureSchema = new mongoose.Schema(
+  {
+    home: { type: Boolean, default: true },
+    finance: { type: Boolean, default: false },
+    academic: { type: Boolean, default: true },
+    cafeteria: { type: Boolean, default: true },
+    games: { type: Boolean, default: true },
+    nursing: { type: Boolean, default: true },
+    wellbeing: { type: Boolean, default: true },
+    coexistence: { type: Boolean, default: true },
+    transport: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
 const schoolBillingPartySchema = new mongoose.Schema(
   {
     legalName: { type: String, trim: true, default: '' },
@@ -57,6 +72,7 @@ const superAdminSchoolSettingsSchema = new mongoose.Schema(
     pricePerStudent: { type: Number, min: 0, default: 0 },
     parentFeatures: { type: parentFeatureSchema, default: () => ({}) },
     staffFeatures: { type: staffFeatureSchema, default: () => ({}) },
+    studentFeatures: { type: studentFeatureSchema, default: () => ({}) },
     billingParty: { type: schoolBillingPartySchema, default: () => ({}) },
     notes: { type: String, trim: true, default: '' },
     updatedBy: { type: String, trim: true, default: '' },
