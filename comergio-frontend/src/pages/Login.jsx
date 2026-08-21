@@ -433,6 +433,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
           role: profile.role,
           biometricEnabled: Boolean(profile.biometricEnabled),
           assignedStore: profile.assignedStore || null,
+          staffFeatures: profile.staffFeatures || {},
         };
 
         setUser(hydratedUser);

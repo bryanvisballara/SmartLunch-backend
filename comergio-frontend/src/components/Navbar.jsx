@@ -39,6 +39,7 @@ function Navbar() {
           username: profile.username,
           role: profile.role,
           assignedStore: profile.assignedStore || null,
+          staffFeatures: profile.staffFeatures || {},
         });
       } catch (error) {
         // If token is stale, keep current state and let user log out explicitly.

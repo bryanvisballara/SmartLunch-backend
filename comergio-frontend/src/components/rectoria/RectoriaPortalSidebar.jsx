@@ -4,6 +4,8 @@ import {
   DIRECCION_PORTAL_NAV,
   RECTORIA_PORTAL_NAV,
 } from './rectoriaPortalNav';
+import { filterStaffPortalNav } from '../../lib/staffFeatures';
+import useAuthStore from '../../store/auth.store';
 import { useComergioAcademyNotificationCounts } from '../comergio-academy/useComergioAcademyNotificationCounts';
 import '../comergio-academy/ComergioAcademyPanel.css';
 import TeEscuchamosLabel from '../community/TeEscuchamosLabel';
@@ -91,9 +93,13 @@ export default function RectoriaPortalSidebar({
   schoolName = 'Colegio',
   portalLabel = 'Rectoría',
 }) {
-  const nav = isCoordinationPortal
-    ? COORDINATION_PORTAL_NAV
-    : (isDireccionPortal ? DIRECCION_PORTAL_NAV : RECTORIA_PORTAL_NAV);
+  const user = useAuthStore((state) => state.user);
+  const nav = filterStaffPortalNav(
+    isCoordinationPortal
+      ? COORDINATION_PORTAL_NAV
+      : (isDireccionPortal ? DIRECCION_PORTAL_NAV : RECTORIA_PORTAL_NAV),
+    user,
+  );
   const [expandedNestedSection, setExpandedNestedSection] = useState('');
   const previousActiveSectionRef = useRef(activeSection);
   const academyCounts = useComergioAcademyNotificationCounts();

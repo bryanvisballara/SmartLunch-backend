@@ -24,6 +24,7 @@ const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const MeriendaSubscription = require('../models/meriendaSubscription.model');
 const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
+const { normalizeStaffFeatures } = require('../utils/staffFeatures');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
 const { resolvePrimaryParentEmailForStudent } = require('../utils/studentParentContact');
 const {
@@ -902,7 +903,7 @@ function pruneAuthSessions(sessions) {
     .slice(-MAX_AUTH_SESSIONS_PER_USER);
 }
 
-function buildAuthResponse(user, refreshToken, schoolName = '') {
+function buildAuthResponse(user, refreshToken, schoolName = '', staffFeatures = {}) {
   const token = signAccessToken(user);
   const assignedStoreSource = user?.assignedStoreId && typeof user.assignedStoreId === 'object' && user.assignedStoreId.name
     ? user.assignedStoreId
@@ -929,8 +930,14 @@ function buildAuthResponse(user, refreshToken, schoolName = '') {
       linkedStudentId: user.linkedStudentId ? String(user.linkedStudentId) : '',
       biometricEnabled: Boolean(user.webauthn?.credentials?.length),
       assignedStore,
+      staffFeatures: normalizeStaffFeatures(staffFeatures),
     },
   };
+}
+
+async function loadStaffFeaturesForSchool(schoolId) {
+  const settings = await SuperAdminSchoolSettings.findOne({ schoolId }).select('staffFeatures').lean();
+  return normalizeStaffFeatures(settings?.staffFeatures || {});
 }
 
 async function issueAuthResponse(user) {
@@ -948,8 +955,11 @@ async function issueAuthResponse(user) {
     .slice(-MAX_AUTH_SESSIONS_PER_USER);
   await user.save();
 
-  const schoolName = await getSchoolDisplayName(user.schoolId);
-  return buildAuthResponse(user, refreshToken, schoolName);
+  const [schoolName, staffFeatures] = await Promise.all([
+    getSchoolDisplayName(user.schoolId),
+    loadStaffFeaturesForSchool(user.schoolId),
+  ]);
+  return buildAuthResponse(user, refreshToken, schoolName, staffFeatures);
 }
 
 function ensureParent(user, res) {
@@ -1105,8 +1115,11 @@ router.post('/refresh', async (req, res) => {
     ].slice(-MAX_AUTH_SESSIONS_PER_USER);
     await user.save();
 
-    const schoolName = await getSchoolDisplayName(user.schoolId);
-    return res.status(200).json(buildAuthResponse(user, rotatedRefreshToken, schoolName));
+    const [schoolName, staffFeatures] = await Promise.all([
+      getSchoolDisplayName(user.schoolId),
+      loadStaffFeaturesForSchool(user.schoolId),
+    ]);
+    return res.status(200).json(buildAuthResponse(user, rotatedRefreshToken, schoolName, staffFeatures));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }
@@ -1515,11 +1528,15 @@ router.get('/me', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const schoolName = await getSchoolDisplayName(user.schoolId);
+    const [schoolName, staffFeatures] = await Promise.all([
+      getSchoolDisplayName(user.schoolId),
+      loadStaffFeaturesForSchool(user.schoolId),
+    ]);
 
     return res.status(200).json({
       ...user.toObject(),
       schoolName,
+      staffFeatures,
       assignedStore: user.assignedStoreId
         ? {
           _id: user.assignedStoreId._id,

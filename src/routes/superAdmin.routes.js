@@ -14,6 +14,7 @@ const DeviceToken = require('../models/deviceToken.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const SuperAdminSchoolDeleteRequest = require('../models/superAdminSchoolDeleteRequest.model');
 const { getSchoolDisplayName, updateSchoolDisplayName } = require('../utils/schoolDisplayName');
+const { normalizeStaffFeatures } = require('../utils/staffFeatures');
 const dianInvoicingService = require('../services/dianInvoicing.service');
 const { sendBrevoEmail } = require('../services/brevo.service');
 const multer = require('multer');
@@ -132,6 +133,7 @@ async function bootstrapSchoolTenant({
         subscriptionStatus: SUBSCRIPTION_STATUSES.has(subscriptionStatus) ? subscriptionStatus : 'subscribed',
         pricePerStudent: normalizePricePerStudent(pricePerStudent),
         parentFeatures: normalizeParentFeatures({}),
+        staffFeatures: normalizeStaffFeatures({}),
         notes: '',
         updatedBy: normalizeText(updatedBy),
       },
@@ -145,6 +147,7 @@ function serializeSettings(settings = {}) {
     subscriptionStatus: SUBSCRIPTION_STATUSES.has(settings.subscriptionStatus) ? settings.subscriptionStatus : 'subscribed',
     pricePerStudent: normalizePricePerStudent(settings.pricePerStudent),
     parentFeatures: normalizeParentFeatures(settings.parentFeatures || {}),
+    staffFeatures: normalizeStaffFeatures(settings.staffFeatures || {}),
     billingParty: dianInvoicingService.serializeBillingParty(settings.billingParty || {}),
     notes: normalizeText(settings.notes),
     updatedAt: settings.updatedAt || null,
@@ -351,6 +354,10 @@ router.patch('/schools/:schoolId/settings', async (req, res) => {
       notes: normalizeText(req.body?.notes),
       updatedBy: normalizeText(req.user?.username || req.user?.name),
     };
+
+    if (req.body?.staffFeatures !== undefined) {
+      updates.staffFeatures = normalizeStaffFeatures(req.body.staffFeatures);
+    }
 
     if (req.body?.billingParty !== undefined) {
       updates.billingParty = dianInvoicingService.serializeBillingParty(req.body.billingParty);

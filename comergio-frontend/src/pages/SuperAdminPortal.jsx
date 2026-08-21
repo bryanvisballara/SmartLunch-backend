@@ -17,6 +17,7 @@ import InformaPanel from '../components/comergio-academy/InformaPanel';
 import InformaDraftsPanel from '../components/comergio-academy/InformaDraftsPanel';
 import '../components/comergio-academy/InformaPanel.css';
 import '../components/comergio-academy/InformaDraftsPanel.css';
+import { STAFF_FEATURE_OPTIONS, normalizeStaffFeatures } from '../lib/staffFeatures';
 import './SuperAdminPortal.css';
 
 const SA_SECTIONS = [
@@ -63,6 +64,10 @@ function getDefaultFeatures(features = {}) {
   }, {});
 }
 
+function getDefaultStaffFeatures(features = {}) {
+  return normalizeStaffFeatures(features);
+}
+
 function buildBillingPartyDraft(party = {}) {
   return {
     legalName: party.legalName || '',
@@ -88,6 +93,7 @@ function buildDraftFromSchool(school = {}) {
     pricePerStudent: String(Number(school.settings?.pricePerStudent || 0)),
     notes: school.settings?.notes || '',
     parentFeatures: getDefaultFeatures(school.settings?.parentFeatures || {}),
+    staffFeatures: getDefaultStaffFeatures(school.settings?.staffFeatures || {}),
     billingParty: buildBillingPartyDraft(school.settings?.billingParty || {
       legalName: school.schoolName || '',
     }),
@@ -956,6 +962,33 @@ function SuperAdminPortal() {
                               ...currentDraft,
                               parentFeatures: {
                                 ...getDefaultFeatures(currentDraft.parentFeatures),
+                                [feature.key]: event.target.checked,
+                              },
+                            }))}
+                            type="checkbox"
+                          />
+                          <span>{feature.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="super-admin-feature-panel">
+                    <div className="super-admin-panel-head">
+                      <div>
+                        <h3>Opciones visibles para el staff</h3>
+                        <p>Al desactivar un portal, el equipo de este colegio deja de verlo y no puede entrar.</p>
+                      </div>
+                    </div>
+                    <div className="sa-feature-grid">
+                      {STAFF_FEATURE_OPTIONS.map((feature) => (
+                        <label className="sa-toggle" key={feature.key}>
+                          <input
+                            checked={Boolean(selectedDraft.staffFeatures?.[feature.key])}
+                            onChange={(event) => updateDraft(selectedSchool.schoolId, (currentDraft) => ({
+                              ...currentDraft,
+                              staffFeatures: {
+                                ...getDefaultStaffFeatures(currentDraft.staffFeatures),
                                 [feature.key]: event.target.checked,
                               },
                             }))}

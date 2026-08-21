@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../../lib/authNavigation';
 import { getSchoolDisplayName } from '../../lib/schools';
+import { isTeacherSectionEnabled } from '../../lib/staffFeatures';
 import colibriLogo from '../../assets/colibrisinfondo.png';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
@@ -3666,6 +3667,9 @@ function TeacherCampusHome({ forcePreview = false }) {
   );
   const availableTeacherSectionOptions = useMemo(
     () => teacherSectionOptions.filter((option) => {
+      if (!isTeacherSectionEnabled(option.key, authUser)) {
+        return false;
+      }
       if (option.key === 'guidance_routine' || option.key === 'general_report_card') {
         return guidanceRoutineCourses.length > 0;
       }
@@ -3674,8 +3678,13 @@ function TeacherCampusHome({ forcePreview = false }) {
       }
       return true;
     }),
-    [classAttendanceCourses.length, guidanceRoutineCourses.length]
+    [authUser, classAttendanceCourses.length, guidanceRoutineCourses.length]
   );
+  useEffect(() => {
+    if (!isTeacherSectionEnabled(activeTeacherSection, authUser)) {
+      setActiveTeacherSection('dashboard');
+    }
+  }, [activeTeacherSection, authUser]);
   const teacherStudentDirectory = useMemo(() => {
     if (previewEnabled) {
       return buildPreviewTeacherStudentDirectory(previewWorkspace);

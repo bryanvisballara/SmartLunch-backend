@@ -24,9 +24,10 @@ import CommunityReportsPanel from '../components/community/CommunityReportsPanel
 import StaffAnnouncementsPanel, { useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
 import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
-import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection, COORDINATION_PORTAL_NAV, DIRECCION_PORTAL_NAV } from '../components/rectoria/rectoriaPortalNav';
+import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection, COORDINATION_PORTAL_NAV, DIRECCION_PORTAL_NAV, RECTORIA_PORTAL_NAV } from '../components/rectoria/rectoriaPortalNav';
 import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
+import { filterStaffPortalNav } from '../lib/staffFeatures';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
@@ -3352,15 +3353,12 @@ function RectoriaDashboard() {
 
   const allowedSectionKeys = useMemo(
     () => {
-      if (isCoordinationPortal) {
-        return flattenRectoriaNavKeys(COORDINATION_PORTAL_NAV);
-      }
-      if (isDireccionPortal) {
-        return flattenRectoriaNavKeys(DIRECCION_PORTAL_NAV);
-      }
-      return flattenRectoriaNavKeys();
+      const portalNav = isCoordinationPortal
+        ? COORDINATION_PORTAL_NAV
+        : (isDireccionPortal ? DIRECCION_PORTAL_NAV : RECTORIA_PORTAL_NAV);
+      return flattenRectoriaNavKeys(filterStaffPortalNav(portalNav, user));
     },
-    [isCoordinationPortal, isDireccionPortal],
+    [isCoordinationPortal, isDireccionPortal, user],
   );
   const communicationAuthors = useMemo(() => (billingBootstrap.communicationAuthors || []).filter((author) => author && author._id), [billingBootstrap.communicationAuthors]);
   const defaultCommunicationAuthor = communicationAuthors.find((author) => author.isDefault) || null;

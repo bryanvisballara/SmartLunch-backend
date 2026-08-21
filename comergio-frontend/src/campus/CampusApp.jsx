@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import CampusShell from './CampusShell';
 import { getCampusMe, getCampusNavigation } from './services/campus.service';
 import useAuthStore from '../store/auth.store';
+import { isStaffFeatureEnabled } from '../lib/staffFeatures';
+import StaffPortalDisabled from '../components/staff-chrome/StaffPortalDisabled';
 import CampusLanding from './pages/CampusLanding';
 import ParentCampusHome from './pages/ParentCampusHome';
 import StudentCampusHome from './pages/StudentCampusHome';
@@ -162,11 +164,19 @@ function CampusApp({ forcePreview = false }) {
             path="student"
           />
           <Route
-            element={memberTypes.has('campus_teacher') ? <TeacherCampusHome /> : <Navigate replace to={routeBase} />}
+            element={
+              !isStaffFeatureEnabled(user, 'teaching')
+                ? <StaffPortalDisabled featureKey="teaching" />
+                : (memberTypes.has('campus_teacher') ? <TeacherCampusHome /> : <Navigate replace to={routeBase} />)
+            }
             path="teacher"
           />
           <Route
-            element={memberTypes.has('campus_coordination') ? <CoordinationCampusHome /> : <Navigate replace to={routeBase} />}
+            element={
+              !isStaffFeatureEnabled(user, 'coordination')
+                ? <StaffPortalDisabled featureKey="coordination" />
+                : (memberTypes.has('campus_coordination') ? <CoordinationCampusHome /> : <Navigate replace to={routeBase} />)
+            }
             path="coordination"
           />
           <Route
@@ -215,11 +225,19 @@ function CampusApp({ forcePreview = false }) {
           path="student"
         />
         <Route
-          element={memberTypes.has('campus_teacher') ? <TeacherCampusHome /> : <Navigate replace to="/campus" />}
+          element={
+            !isStaffFeatureEnabled(user, 'teaching')
+              ? <StaffPortalDisabled featureKey="teaching" />
+              : (memberTypes.has('campus_teacher') ? <TeacherCampusHome /> : <Navigate replace to="/campus" />)
+          }
           path="teacher"
         />
         <Route
-          element={memberTypes.has('campus_coordination') ? <CoordinationCampusHome /> : <Navigate replace to="/campus" />}
+          element={
+            !isStaffFeatureEnabled(user, 'coordination')
+              ? <StaffPortalDisabled featureKey="coordination" />
+              : (memberTypes.has('campus_coordination') ? <CoordinationCampusHome /> : <Navigate replace to="/campus" />)
+          }
           path="coordination"
         />
         <Route

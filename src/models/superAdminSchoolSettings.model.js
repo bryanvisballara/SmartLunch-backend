@@ -14,6 +14,22 @@ const parentFeatureSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const staffFeatureSchema = new mongoose.Schema(
+  {
+    purchasing: { type: Boolean, default: true },
+    billing: { type: Boolean, default: true },
+    academicSecretary: { type: Boolean, default: true },
+    nursing: { type: Boolean, default: true },
+    coexistence: { type: Boolean, default: true },
+    psychology: { type: Boolean, default: true },
+    teaching: { type: Boolean, default: true },
+    coordination: { type: Boolean, default: true },
+    direccion: { type: Boolean, default: true },
+    rectoria: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
 const schoolBillingPartySchema = new mongoose.Schema(
   {
     legalName: { type: String, trim: true, default: '' },
@@ -40,6 +56,7 @@ const superAdminSchoolSettingsSchema = new mongoose.Schema(
     subscriptionStatus: { type: String, enum: ['subscribed', 'trial', 'paused', 'disabled'], default: 'subscribed' },
     pricePerStudent: { type: Number, min: 0, default: 0 },
     parentFeatures: { type: parentFeatureSchema, default: () => ({}) },
+    staffFeatures: { type: staffFeatureSchema, default: () => ({}) },
     billingParty: { type: schoolBillingPartySchema, default: () => ({}) },
     notes: { type: String, trim: true, default: '' },
     updatedBy: { type: String, trim: true, default: '' },

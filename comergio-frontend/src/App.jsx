@@ -9,8 +9,11 @@ import { resolveComergioAppUrl } from './lib/deepLinks';
 import { savePostLoginRedirect } from './lib/postLoginRedirect';
 import { ensurePortalPushNotifications, registerPushNotificationNavigation } from './lib/pushNotifications';
 import { getDefaultRouteByRole, INSTITUTIONAL_PLACEHOLDER_ROLES } from './lib/defaultRouteByRole';
+import { isStaffFeatureEnabled } from './lib/staffFeatures';
 import StaffSupportWhatsAppFab from './components/staff-chrome/StaffSupportWhatsAppFab';
+import StaffPortalDisabled from './components/staff-chrome/StaffPortalDisabled';
 import { LOGIN_PATH } from './lib/authNavigation';
+import { me } from './services/auth.service';
 import { useAndroidNavInset } from './hooks/useAndroidNavInset';
 import Login from './pages/Login';
 import StudentDevPreviewLogin from './pages/StudentDevPreviewLogin';
@@ -124,6 +127,15 @@ function RequireRole({ isAuthenticated, userRole, allowedRoles, children }) {
   return children;
 }
 
+function RequireStaffFeature({ featureKey, children }) {
+  const user = useAuthStore((state) => state.user);
+  if (!isStaffFeatureEnabled(user, featureKey)) {
+    return <StaffPortalDisabled featureKey={featureKey} />;
+  }
+
+  return children;
+}
+
 function PublicOnly({ isAuthenticated, userRole, children }) {
   if (isAuthenticated) {
     return <Navigate replace to={getDefaultRouteByRole(userRole)} />;
@@ -148,7 +160,7 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
   useAndroidNavInset();
-  const { token, user } = useAuthStore();
+  const { token, user, setUser } = useAuthStore();
   const normalizedPathname = location.pathname !== '/'
     ? location.pathname.replace(/\/+$/, '')
     : '/';
@@ -258,6 +270,33 @@ function App() {
       document.body.classList.remove('staff-portal-chrome-route-active');
     };
   }, [isStaffPortalChromeRoute]);
+
+  useEffect(() => {
+    if (!token || !userRole || userRole === 'super_admin') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    me()
+      .then((response) => {
+        if (cancelled || !response.data?.staffFeatures) {
+          return;
+        }
+        const currentUser = useAuthStore.getState().user;
+        if (!currentUser) {
+          return;
+        }
+        setUser({
+          ...currentUser,
+          staffFeatures: response.data.staffFeatures,
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setUser, token, userRole]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('login-route-active', isAuthFlowRoute);
@@ -485,7 +524,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <TeacherCampusHome />
+                <RequireStaffFeature featureKey="teaching">
+                  <TeacherCampusHome />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/campus/teacher"
@@ -615,7 +656,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['rectoria', 'admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <RectoriaDashboard />
+                <RequireStaffFeature featureKey="rectoria">
+                  <RectoriaDashboard />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/rectoria"
@@ -623,7 +666,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['coordination', 'rectoria', 'admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <RectoriaDashboard />
+                <RequireStaffFeature featureKey="coordination">
+                  <RectoriaDashboard />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/coordinacion"
@@ -631,7 +676,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['direccion', 'rectoria', 'admin']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <RectoriaDashboard />
+                <RequireStaffFeature featureKey="direccion">
+                  <RectoriaDashboard />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/direccion"
@@ -639,7 +686,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['academic_secretary', 'admin', 'rectoria']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <AcademicSecretaryDashboard />
+                <RequireStaffFeature featureKey="academicSecretary">
+                  <AcademicSecretaryDashboard />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/academic-secretary"
@@ -647,7 +696,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['academic_secretary', 'admissions', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <AdmissionsDashboard />
+                <RequireStaffFeature featureKey="academicSecretary">
+                  <AdmissionsDashboard />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/academic-secretary/admissions"
@@ -655,7 +706,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['academic_secretary', 'admissions', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <AdmissionsDashboard />
+                <RequireStaffFeature featureKey="academicSecretary">
+                  <AdmissionsDashboard />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/academic-secretary/admissions/stage/:stageKey"
@@ -663,7 +716,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['billing', 'admin', 'rectoria']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <AcademicSecretaryDashboard portalMode="billing" />
+                <RequireStaffFeature featureKey="billing">
+                  <AcademicSecretaryDashboard portalMode="billing" />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/cartera"
@@ -671,7 +726,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['nursing', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <NursingPortal />
+                <RequireStaffFeature featureKey="nursing">
+                  <NursingPortal />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/enfermeria"
@@ -679,7 +736,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['psychology', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <PsychologyPortal />
+                <RequireStaffFeature featureKey="psychology">
+                  <PsychologyPortal />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/psicologia"
@@ -687,7 +746,9 @@ function App() {
           <Route
             element={(
               <RequireRole allowedRoles={['human_resources', 'teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>
-                <HumanResourcesPortal />
+                <RequireStaffFeature featureKey="purchasing">
+                  <HumanResourcesPortal />
+                </RequireStaffFeature>
               </RequireRole>
             )}
             path="/recursos-humanos"
