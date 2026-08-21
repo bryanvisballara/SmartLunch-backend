@@ -6097,7 +6097,7 @@ function AdminDashboard() {
                   icon: 'swap',
                   label: 'Ingresos - egresos',
                   value: homeData?.utilityNet ?? homeData?.utilityNetMonth,
-                  hint: 'Ventas netas + recargas - costos fijos - variables',
+                  hint: 'Ventas (efectivo + QR + datáfono) + recargas - costos fijos - variables',
                 },
               ].map((metric) => (
                 <div className={`admin-accounting__kpi tone-${metric.tone}`} key={metric.label}>
