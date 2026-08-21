@@ -1,1 +1,0 @@
-System.register(["./index-legacy-7Kve-G5L.js"],function(e,n){"use strict";var t,r;return{setters:[function(e){t=e.r,r=e._}],execute:function(){e("Badge",t("Badge",{web:function(){return r(function(){return n.import("./web-legacy-c_YHcbgI.js")},void 0).then(function(e){return new e.BadgeWeb})}}))}}});
