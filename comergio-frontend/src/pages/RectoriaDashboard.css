@@ -5791,7 +5791,7 @@ button.rectoria-team-assignment-card.is-active {
 .rectoria-modal-card--course-students {
   display: flex;
   flex-direction: column;
-  width: min(100%, 720px);
+  width: min(100%, 920px);
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
   margin-block: auto;
@@ -5828,7 +5828,8 @@ button.rectoria-team-assignment-card.is-active {
 }
 
 .rectoria-course-student-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -5851,6 +5852,49 @@ button.rectoria-team-assignment-card.is-active {
 .rectoria-course-student-meta {
   color: #475569;
   font-weight: 600;
+}
+
+.rectoria-course-student-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rectoria-course-student-move label {
+  display: grid;
+  gap: 4px;
+  min-width: 140px;
+  margin: 0;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rectoria-course-student-move .rectoria-select,
+.rectoria-course-student-move .btn {
+  min-height: 2.35rem;
+}
+
+@media (max-width: 760px) {
+  .rectoria-course-student-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rectoria-course-student-move {
+    justify-content: stretch;
+  }
+
+  .rectoria-course-student-move label {
+    flex: 1 1 140px;
+  }
+
+  .rectoria-course-student-move .btn {
+    width: 100%;
+  }
 }
 
 .rectoria-role-empty {

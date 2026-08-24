@@ -12347,6 +12347,37 @@ button.campus-teacher__nav-item-toggle {
   font-size: 1rem;
 }
 
+.campus-teacher__classroom-grade-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.campus-teacher__classroom-grade-switch button {
+  min-height: 1.85rem;
+  padding: 0.15rem 0.7rem;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.campus-teacher__classroom-grade-switch button.is-all {
+  padding-inline: 0.9rem;
+  text-transform: none;
+}
+
+.campus-teacher__classroom-grade-switch button.is-active {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
 .campus-teacher__activity-timeline {
   display: grid;
   gap: 0.9rem;
@@ -15396,6 +15427,26 @@ button.campus-teacher__home-kpi-card:focus-visible {
 .campus-teacher__cursos-status-pill.is-muted {
   background: #f1f5f9;
   color: #64748b;
+}
+
+.campus-teacher__cursos-grade-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.15rem 0 0.2rem;
+}
+
+.campus-teacher__cursos-grade-chips span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.45rem;
+  padding: 0.05rem 0.55rem;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.74rem;
+  font-weight: 750;
 }
 
 .campus-teacher__cursos-card-facts {

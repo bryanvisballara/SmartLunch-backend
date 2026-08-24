@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
-const { resolveGradeCourses, gradeHasCourse, normalizeGradeCourseKey } = require('../utils/academicGradeCourses');
+const { resolveGradeCourses, gradeHasCourse, gradeUsesImplicitCourse, normalizeGradeCourseKey } = require('../utils/academicGradeCourses');
 const { getFeeGradeAliases, findGradeFeeSetting, canonicalizeGradeFeeSettingsForStructure, resolveAcademicStructureGradeKey, findAcademicStructureGradeForStudent, resolveSchoolYearLevelSetting } = require('../utils/feeGradeMatching');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
@@ -8493,14 +8493,11 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
     const { schoolId } = req.user;
     const isCoordinationUser = String(req.user?.role || '').trim() === 'coordination';
     const studentId = toObjectId(req.params.studentId);
-    const courseKey = normalizeText(req.body?.course).toUpperCase().replace(/\s+/g, '');
+    const requestedGradeKey = normalizeAcademicStructureGradeKey(req.body?.grade);
+    const courseKey = normalizeGradeCourseKey(req.body?.course);
 
     if (!studentId) {
       return res.status(400).json({ message: 'Alumno invalido.' });
-    }
-
-    if (!courseKey) {
-      return res.status(400).json({ message: 'Debes seleccionar un curso para asignar.' });
     }
 
     const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null });
@@ -8508,54 +8505,87 @@ router.patch('/academic-management/students/:studentId/course', async (req, res)
       return res.status(404).json({ message: 'No se encontró el alumno solicitado.' });
     }
 
-    const studentGradeLevel = normalizeAcademicStructureGradeKey(student.grade);
-    if (!studentGradeLevel) {
-      return res.status(400).json({ message: 'El alumno debe tener un grado asignado antes de definir su curso.' });
-    }
-
     const configuration = await ensureAcademicStructureConfiguration(schoolId);
     const serialized = serializeAcademicStructureConfiguration(configuration);
-    const grade = findAcademicStructureGradeForStudent(student.grade, serialized.grades);
+    const currentGrade = findAcademicStructureGradeForStudent(student.grade, serialized.grades);
+    const targetGrade = requestedGradeKey
+      ? (serialized.grades || []).find((grade) => (
+        normalizeAcademicStructureGradeKey(grade?.key) === requestedGradeKey
+        || normalizeAcademicStructureGradeKey(grade?.label) === requestedGradeKey
+      ))
+      : currentGrade;
 
-    if (!grade) {
-      return res.status(400).json({ message: 'El grado del alumno todavía no existe en la estructura académica.' });
+    if (!targetGrade) {
+      return res.status(400).json({
+        message: requestedGradeKey
+          ? 'El grado seleccionado todavía no existe en la estructura académica.'
+          : 'El alumno debe tener un grado asignado antes de definir su curso.',
+      });
     }
 
     if (isCoordinationUser) {
       const allowedLevelKeys = resolveCoordinationLevelKeys(serialized, req.user?.coordinationScope);
-      if (!allowedLevelKeys.has(normalizeText(grade.levelKey))) {
-        return res.status(403).json({ message: 'No tienes permiso para asignar cursos fuera de tu nivel de coordinación.' });
+      if (!allowedLevelKeys.has(normalizeText(targetGrade.levelKey))) {
+        return res.status(403).json({ message: 'No tienes permiso para asignar alumnos fuera de tu nivel de coordinación.' });
       }
     }
 
-    const normalizedCourseKey = normalizeGradeCourseKey(courseKey);
-    if (!gradeHasCourse(grade, normalizedCourseKey)) {
-      return res.status(400).json({ message: 'El curso seleccionado no pertenece al grado del alumno.' });
+    const targetCourses = resolveGradeCourses(targetGrade);
+    let selectedCourse = courseKey
+      ? targetCourses.find((course) => normalizeGradeCourseKey(course.key) === courseKey)
+      : null;
+
+    if (courseKey && !selectedCourse) {
+      return res.status(400).json({ message: 'El curso seleccionado no pertenece al grado destino.' });
     }
 
-    const selectedCourse = resolveGradeCourses(grade).find((course) => normalizeGradeCourseKey(course.key) === normalizedCourseKey);
+    if (!selectedCourse && (targetCourses.length === 1 || gradeUsesImplicitCourse(targetGrade))) {
+      selectedCourse = targetCourses[0] || null;
+    }
+
     if (!selectedCourse) {
-      return res.status(400).json({ message: 'El curso seleccionado no pertenece al grado del alumno.' });
+      return res.status(400).json({ message: 'Debes seleccionar un curso para asignar.' });
     }
 
+    const previousGradeKey = normalizeText(student.grade);
     const previousCourseKey = normalizeText(student.course);
+    const nextGradeKey = normalizeText(targetGrade.key);
+    const nextCourseKey = normalizeText(selectedCourse.key);
+    const gradeChanged = normalizeAcademicStructureGradeKey(previousGradeKey) !== normalizeAcademicStructureGradeKey(nextGradeKey);
+    const courseChanged = normalizeGradeCourseKey(previousCourseKey) !== normalizeGradeCourseKey(nextCourseKey);
+
+    student.grade = nextGradeKey;
     student.course = selectedCourse.key;
     await student.save();
+    await ensureStudentCohortMembership(student, schoolId);
+
+    if (gradeChanged) {
+      const billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
+      if (billingProfile) {
+        billingProfile.grade = nextGradeKey;
+        await billingProfile.save();
+      }
+    }
 
     let courseAssignmentNotification = { notificationsCreated: 0, tokensFound: 0 };
-    if (previousCourseKey !== selectedCourse.key) {
-      const courseLabel = buildAcademicCourseDisplayLabel(grade, selectedCourse, grade.courses) || selectedCourse.label || selectedCourse.key;
+    if (gradeChanged || courseChanged) {
+      const courseLabel = buildAcademicCourseDisplayLabel(targetGrade, selectedCourse, targetGrade.courses)
+        || selectedCourse.label
+        || selectedCourse.key;
+      const gradeLabel = normalizeText(targetGrade.label || targetGrade.key);
       try {
         courseAssignmentNotification = await queueStudentParentNotification({
           schoolId,
           studentId: student._id,
-          title: 'Curso asignado',
-          body: `El alumno ${student.name || 'seleccionado'} ha sido asignado al curso ${courseLabel}.`,
+          title: gradeChanged ? 'Cambio de grado' : 'Curso asignado',
+          body: gradeChanged
+            ? `El alumno ${student.name || 'seleccionado'} fue movido al grado ${gradeLabel}.`
+            : `El alumno ${student.name || 'seleccionado'} ha sido asignado al curso ${courseLabel}.`,
           payload: {
-            type: 'academic.course_assigned',
+            type: gradeChanged ? 'academic.grade_moved' : 'academic.course_assigned',
             courseKey: selectedCourse.key,
             courseLabel,
-            gradeKey: grade.key,
+            gradeKey: targetGrade.key,
             studentId: String(student._id),
             url: buildParentPushUrl('academic.course_assigned', { studentId: student._id }),
           },

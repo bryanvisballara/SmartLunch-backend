@@ -3338,7 +3338,8 @@ function RectoriaDashboard() {
   const [editCourseModal, setEditCourseModal] = useState({ open: false, gradeKey: '', courseKey: '', courseLabel: '', error: '' });
   const [deleteGradeModal, setDeleteGradeModal] = useState({ open: false, gradeKey: '', password: '', error: '' });
   const [deleteCourseModal, setDeleteCourseModal] = useState({ open: false, gradeKey: '', courseKey: '', password: '', error: '' });
-  const [courseStudentsModal, setCourseStudentsModal] = useState({ open: false, courseKey: '', gradeKey: '' });
+  const [courseStudentsModal, setCourseStudentsModal] = useState({ open: false, courseKey: '', gradeKey: '', error: '' });
+  const [courseStudentMoveDrafts, setCourseStudentMoveDrafts] = useState({});
   const [editingAcademicRowId, setEditingAcademicRowId] = useState('');
   const [academicDatabaseDrafts, setAcademicDatabaseDrafts] = useState({});
   const [deleteAcademicDatabaseModal, setDeleteAcademicDatabaseModal] = useState({ open: false, item: null });
@@ -7882,7 +7883,7 @@ function RectoriaDashboard() {
       }
       if (updatedStudent?._id) {
         setStudents((prev) => prev.map((student) => (String(student._id) === String(updatedStudent._id)
-          ? { ...student, course: updatedStudent.course }
+          ? { ...student, grade: updatedStudent.grade || student.grade, course: updatedStudent.course }
           : student)));
         setStudentDrafts((prev) => ({
           ...prev,
@@ -7896,6 +7897,76 @@ function RectoriaDashboard() {
       setSuccess('Curso asignado correctamente.');
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo guardar la asignación del curso.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCourseStudentMoveDraftChange = (studentId, field, value) => {
+    setCourseStudentMoveDrafts((currentDrafts) => {
+      const currentDraft = currentDrafts[studentId] || { grade: '', course: '' };
+      if (field === 'grade') {
+        const nextCourses = courseOptionsByGrade[value] || [];
+        const nextCourse = nextCourses.length === 1 ? nextCourses[0].value : '';
+        return {
+          ...currentDrafts,
+          [studentId]: { grade: value, course: nextCourse },
+        };
+      }
+      return {
+        ...currentDrafts,
+        [studentId]: { ...currentDraft, [field]: value },
+      };
+    });
+  };
+
+  const onMoveCourseStudent = async (studentId) => {
+    const draft = courseStudentMoveDrafts[studentId] || {};
+    const nextGradeKey = String(draft.grade || '').trim();
+    const nextCourseKey = String(draft.course || '').trim();
+    const nextCourses = courseOptionsByGrade[nextGradeKey] || [];
+    const resolvedCourseKey = nextCourseKey || (nextCourses.length === 1 ? nextCourses[0].value : '');
+
+    setCourseStudentsModal((currentModal) => ({ ...currentModal, error: '' }));
+    clearMessages();
+
+    if (!nextGradeKey) {
+      setCourseStudentsModal((currentModal) => ({ ...currentModal, error: 'Selecciona el grado destino.' }));
+      return;
+    }
+
+    if (!resolvedCourseKey && nextCourses.length > 1) {
+      setCourseStudentsModal((currentModal) => ({ ...currentModal, error: 'Selecciona el curso del grado destino.' }));
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await assignAcademicManagementStudentCourse(studentId, {
+        grade: nextGradeKey,
+        ...(resolvedCourseKey ? { course: resolvedCourseKey } : {}),
+      });
+      const updatedStudent = response?.data?.student || response?.student || null;
+      const updatedStructure = response?.data?.academicStructure || response?.academicStructure || null;
+      if (updatedStructure) {
+        syncAcademicStructureState(updatedStructure);
+      }
+      if (updatedStudent?._id) {
+        setStudents((prev) => prev.map((student) => (String(student._id) === String(updatedStudent._id)
+          ? { ...student, grade: updatedStudent.grade || student.grade, course: updatedStudent.course }
+          : student)));
+      }
+      setCourseStudentMoveDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts };
+        delete nextDrafts[studentId];
+        return nextDrafts;
+      });
+      setSuccess('Alumno movido correctamente.');
+    } catch (requestError) {
+      setCourseStudentsModal((currentModal) => ({
+        ...currentModal,
+        error: requestError?.response?.data?.message || 'No se pudo mover al alumno.',
+      }));
     } finally {
       setBusy(false);
     }
@@ -8292,11 +8363,13 @@ function RectoriaDashboard() {
   };
 
   const openCourseStudentsModal = (gradeKey, courseKey) => {
-    setCourseStudentsModal({ open: true, courseKey, gradeKey });
+    setCourseStudentMoveDrafts({});
+    setCourseStudentsModal({ open: true, courseKey, gradeKey, error: '' });
   };
 
   const closeCourseStudentsModal = () => {
-    setCourseStudentsModal({ open: false, courseKey: '', gradeKey: '' });
+    setCourseStudentMoveDrafts({});
+    setCourseStudentsModal({ open: false, courseKey: '', gradeKey: '', error: '' });
   };
 
   const closeDeleteGradeModal = () => {
@@ -14954,23 +15027,78 @@ function RectoriaDashboard() {
                 <span className="rectoria-modal-eyebrow">Alumnos por curso</span>
                 <h3>{getCourseLabel(courseStudentsModal.courseKey)}</h3>
                 <p>
-                  {getGradeLabel(courseStudentsModal.gradeKey)} · {selectedCourseStudents.length} alumno(s)
+                  {getGradeLabel(courseStudentsModal.gradeKey)} · {selectedCourseStudents.length} alumno(s). Elige un grado destino y pulsa Mover.
                 </p>
               </div>
               <button className="rectoria-modal-close" type="button" onClick={closeCourseStudentsModal}>Cerrar</button>
             </div>
 
             <div className="rectoria-course-students-list">
-              {selectedCourseStudents.length === 0 ? <p className="rectoria-role-empty">Este curso no tiene alumnos asignados.</p> : selectedCourseStudents.map((student) => (
+              {courseStudentsModal.error ? <p className="rectoria-modal-error">{courseStudentsModal.error}</p> : null}
+              {selectedCourseStudents.length === 0 ? <p className="rectoria-role-empty">Este curso no tiene alumnos asignados.</p> : selectedCourseStudents.map((student) => {
+                const studentId = String(student._id);
+                const currentGradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades)
+                  || normalizeAcademicGradeKey(student.grade)
+                  || String(courseStudentsModal.gradeKey || '');
+                const moveDraft = courseStudentMoveDrafts[studentId] || { grade: '', course: '' };
+                const destinationCourses = courseOptionsByGrade[moveDraft.grade] || [];
+                const showCourseSelect = destinationCourses.length > 1;
+                const resolvedDestinationCourse = moveDraft.course || (destinationCourses.length === 1 ? destinationCourses[0].value : '');
+                const currentCourseKey = String(courseStudentsModal.courseKey || '').trim();
+                const isUnchanged = Boolean(moveDraft.grade)
+                  && String(moveDraft.grade) === String(currentGradeKey)
+                  && (!resolvedDestinationCourse || String(resolvedDestinationCourse) === currentCourseKey);
+                return (
                 <article className="rectoria-course-student-row" key={student._id}>
                   <div>
                     <strong>{student.name || 'Alumno'}</strong>
+                    <p>{student.grade ? getGradeLabel(normalizeAcademicGradeKey(student.grade)) : 'Sin grado'}</p>
                   </div>
-                  <div className="rectoria-course-student-meta">
-                    <span>{student.grade ? getGradeLabel(normalizeAcademicGradeKey(student.grade)) : 'Sin grado'}</span>
+                  <div className="rectoria-course-student-move">
+                    <label>
+                      <span>Mover a</span>
+                      <select
+                        className="rectoria-select"
+                        disabled={busy}
+                        value={moveDraft.grade}
+                        onChange={(event) => onCourseStudentMoveDraftChange(studentId, 'grade', event.target.value)}
+                      >
+                        <option value="">Selecciona un grado</option>
+                        {academicStructureDraft.grades.map((grade) => (
+                          <option key={grade.key} value={grade.key}>
+                            {grade.label || getGradeLabel(grade.key) || grade.key}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {showCourseSelect ? (
+                      <label>
+                        <span>Curso</span>
+                        <select
+                          className="rectoria-select"
+                          disabled={busy || !moveDraft.grade}
+                          value={moveDraft.course}
+                          onChange={(event) => onCourseStudentMoveDraftChange(studentId, 'course', event.target.value)}
+                        >
+                          <option value="">Selecciona un curso</option>
+                          {destinationCourses.map((course) => (
+                            <option key={course.value} value={course.value}>{course.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <button
+                      className="btn btn-primary"
+                      disabled={busy || !moveDraft.grade || isUnchanged || (showCourseSelect && !moveDraft.course)}
+                      onClick={() => onMoveCourseStudent(studentId)}
+                      type="button"
+                    >
+                      {busy ? 'Moviendo...' : 'Mover'}
+                    </button>
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
 
             <div className="rectoria-modal-actions">

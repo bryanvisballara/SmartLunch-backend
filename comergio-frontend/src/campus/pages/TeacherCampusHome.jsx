@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Select from 'react-select';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../../lib/authNavigation';
 import { getSchoolDisplayName } from '../../lib/schools';
@@ -2006,13 +2006,138 @@ function getCourseGradeLabel(course) {
 
 function getCourseGradeGroupLabel(course) {
   const subjectLabel = normalizeCourseDisplayText(course?.subject);
-  const gradeLabel = getCourseGradeLabel(course);
+  const classroomLabel = normalizeCourseDisplayText(course?.classroomGroupLabel);
+  const gradeLabel = classroomLabel || getCourseGradeLabel(course);
+
+  if (subjectLabel && classroomLabel) {
+    return `${subjectLabel} · ${classroomLabel}`;
+  }
+
+  const displayTitle = getCourseDisplayTitle(course);
+  if (classroomLabel) {
+    return displayTitle;
+  }
 
   if (subjectLabel && gradeLabel) {
     return `${subjectLabel} · ${gradeLabel}`;
   }
 
-  return gradeLabel || subjectLabel || getCourseDisplayTitle(course);
+  return gradeLabel || subjectLabel || displayTitle;
+}
+
+function collectNativeGradeLabels(courses = []) {
+  const labels = [];
+  const seen = new Set();
+
+  (Array.isArray(courses) ? courses : []).forEach((course) => {
+    const label = getNativeCourseGradeLabel(course) || normalizeCourseDisplayText(course?.studentGradeKey);
+    const key = normalizeCourseDisplayKey(label);
+    if (!label || !key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    labels.push(label);
+  });
+
+  return labels.sort((left, right) => left.localeCompare(right, 'es', { numeric: true, sensitivity: 'base' }));
+}
+
+function formatClassroomGroupGradesLabel(courses = []) {
+  const labels = collectNativeGradeLabels(courses);
+  if (labels.length === 0) {
+    return '';
+  }
+  if (labels.length === 1) {
+    return `Grado ${labels[0]}`;
+  }
+  if (labels.length === 2) {
+    return `Grados ${labels[0]} y ${labels[1]}`;
+  }
+  return `Grados ${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
+}
+
+const CLASSROOM_GRADE_SCOPE_ALL = 'all';
+
+function attachCourseContextToStudents(detail, course) {
+  const courseId = String(detail?.course?.id || course?.id || '');
+  const gradeLabel = getNativeCourseGradeLabel(course || detail?.course) || normalizeCourseDisplayText(course?.gradeLevel || detail?.course?.gradeLevel) || '';
+  return (Array.isArray(detail?.students) ? detail.students : []).map((student) => ({
+    ...student,
+    courseId: String(student.courseId || courseId),
+    gradeLabel: student.gradeLabel || gradeLabel,
+    grade: student.grade || gradeLabel,
+  }));
+}
+
+function resolveWorkspaceStudentCourseId(student, fallbackCourseId = '') {
+  return String(student?.courseId || fallbackCourseId || '');
+}
+
+function mergeClassroomGroupPosts(posts = []) {
+  const groups = new Map();
+
+  (Array.isArray(posts) ? posts : []).forEach((post) => {
+    const key = `${normalizeCourseDisplayKey(post?.type)}::${normalizeCourseDisplayKey(post?.title)}`;
+    const current = groups.get(key);
+    if (!current) {
+      groups.set(key, {
+        ...post,
+        siblingPostIds: [String(post?.id || '')].filter(Boolean),
+        siblingCourseIds: [String(post?.courseId || '')].filter(Boolean),
+      });
+      return;
+    }
+
+    const postId = String(post?.id || '');
+    const courseId = String(post?.courseId || '');
+    if (postId && !current.siblingPostIds.includes(postId)) {
+      current.siblingPostIds.push(postId);
+    }
+    if (courseId && !current.siblingCourseIds.includes(courseId)) {
+      current.siblingCourseIds.push(courseId);
+    }
+  });
+
+  return Array.from(groups.values());
+}
+
+function mergeAssignmentSubmissionRows(rowSets = []) {
+  const groups = new Map();
+
+  (Array.isArray(rowSets) ? rowSets : []).flat().forEach((assignment) => {
+    if (!assignment) {
+      return;
+    }
+    const key = `${normalizeCourseDisplayKey(assignment?.type)}::${normalizeCourseDisplayKey(assignment?.title)}`;
+    const current = groups.get(key);
+    if (!current) {
+      groups.set(key, {
+        ...assignment,
+        students: [...(Array.isArray(assignment.students) ? assignment.students : [])],
+      });
+      return;
+    }
+
+    const seen = new Set((current.students || []).map((student) => String(student.studentId)));
+    (Array.isArray(assignment.students) ? assignment.students : []).forEach((student) => {
+      const studentId = String(student?.studentId || '');
+      if (!studentId || seen.has(studentId)) {
+        return;
+      }
+      current.students.push(student);
+      seen.add(studentId);
+    });
+  });
+
+  return Array.from(groups.values()).map((assignment) => {
+    const students = Array.isArray(assignment.students) ? assignment.students : [];
+    const submittedCount = students.filter((student) => Boolean(student.submitted)).length;
+    return {
+      ...assignment,
+      submittedCount,
+      pendingCount: Math.max(0, students.length - submittedCount),
+    };
+  });
 }
 
 function buildGradeAliasSet(course, groupLabel) {
@@ -2176,11 +2301,23 @@ function getCourseViewAccent(course, index = 0) {
 
 function getCourseGradeGroupKey(course) {
   const subjectKey = normalizeCourseDisplayKey(course?.subject || 'asignatura');
-  if (course?.classroomGroupKey) {
-    return `${subjectKey}::classroom:${normalizeCourseDisplayKey(course.classroomGroupKey)}`;
+  const classroomKey = normalizeCourseDisplayKey(course?.classroomGroupKey || course?.classroomGroupLabel);
+  if (classroomKey) {
+    return `${subjectKey}::classroom:${classroomKey}`;
   }
-  const gradeKey = normalizeCourseDisplayKey(getCourseGradeLabel(course) || course?.title || 'grado');
-  return `${subjectKey}::${gradeKey}`;
+
+  const nativeGrade = normalizeCourseDisplayKey(getNativeCourseGradeLabel(course) || course?.studentGradeKey);
+  const displayTitle = normalizeCourseDisplayKey(getCourseDisplayTitle(course));
+  if (
+    displayTitle
+    && nativeGrade
+    && !displayTitle.includes(nativeGrade)
+    && !displayTitle.includes(normalizeCourseDisplayKey(course?.studentGradeKey))
+  ) {
+    return `${subjectKey}::title:${displayTitle}`;
+  }
+
+  return `${subjectKey}::${nativeGrade || displayTitle || 'grado'}`;
 }
 
 function getAdministrativeCourseGroupKey(course) {
@@ -2194,11 +2331,18 @@ function buildCourseGradeGroups(courses) {
     const key = getCourseGradeGroupKey(course);
     const currentGroup = groupMap.get(key) || {
       key,
-      title: getCourseGradeGroupLabel(course),
+      title: normalizeCourseDisplayText(course?.classroomGroupLabel)
+        ? getCourseGradeGroupLabel(course)
+        : getCourseDisplayTitle(course),
       subject: normalizeCourseDisplayText(course?.subject),
       grade: getCourseGradeLabel(course),
       courses: [],
     };
+
+    if (normalizeCourseDisplayText(course?.classroomGroupLabel) && !normalizeCourseDisplayText(currentGroup.grade)) {
+      currentGroup.grade = course.classroomGroupLabel;
+      currentGroup.title = getCourseGradeGroupLabel(course);
+    }
 
     currentGroup.courses.push(course);
     groupMap.set(key, currentGroup);
@@ -2207,7 +2351,13 @@ function buildCourseGradeGroups(courses) {
   return Array.from(groupMap.values())
     .map((group) => ({
       ...group,
-      courses: group.courses.sort((left, right) => getCourseGroupLabel(left).localeCompare(getCourseGroupLabel(right), 'es')),
+      gradeLabels: collectNativeGradeLabels(group.courses),
+      gradesLabel: formatClassroomGroupGradesLabel(group.courses),
+      courses: group.courses.sort((left, right) => {
+        const leftGrade = getNativeCourseGradeLabel(left) || getCourseGroupLabel(left);
+        const rightGrade = getNativeCourseGradeLabel(right) || getCourseGroupLabel(right);
+        return leftGrade.localeCompare(rightGrade, 'es', { numeric: true, sensitivity: 'base' });
+      }),
     }))
     .sort((left, right) => left.title.localeCompare(right.title, 'es'));
 }
@@ -3252,6 +3402,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const topbarNotificationsBadgeCount = generalNotificationsUnreadCount + academyUnreadTotal;
   const [selectedSubjectKey, setSelectedSubjectKey] = useState('');
   const [selectedPortalGradeKey, setSelectedPortalGradeKey] = useState('');
+  const [classroomGradeScope, setClassroomGradeScope] = useState(CLASSROOM_GRADE_SCOPE_ALL);
   const [activeCourseWorkspaceTab, setActiveCourseWorkspaceTab] = useState('grading');
   const [selectedSubmissionAssignmentId, setSelectedSubmissionAssignmentId] = useState('');
   const [showSelectedCourseWorkspace, setShowSelectedCourseWorkspace] = useState(false);
@@ -3976,10 +4127,102 @@ function TeacherCampusHome({ forcePreview = false }) {
   const selectedCourseDetail = previewEnabled
     ? (selectedCourse ? previewWorkspace.courseDetails?.[selectedCourse.id] || null : null)
     : (courseDetailQuery.data || null);
-  const assignmentSubmissionRows = useMemo(
-    () => (Array.isArray(assignmentSubmissionsQuery.data?.assignments) ? assignmentSubmissionsQuery.data.assignments : []),
-    [assignmentSubmissionsQuery.data?.assignments]
+  const isSharedClassroomWorkspace = selectedPortalGradeCourses.length > 1;
+  const isClassroomGroupAllScope = isSharedClassroomWorkspace && classroomGradeScope === CLASSROOM_GRADE_SCOPE_ALL;
+  const workspaceTargetCourses = isClassroomGroupAllScope
+    ? selectedPortalGradeCourses
+    : (selectedCourse ? [selectedCourse] : []);
+  const siblingCourseIds = useMemo(
+    () => selectedPortalGradeCourses
+      .map((course) => String(course.id || ''))
+      .filter((courseId) => courseId && courseId !== String(selectedCourseId || '')),
+    [selectedCourseId, selectedPortalGradeCourses]
   );
+  const siblingCourseDetailQueries = useQueries({
+    queries: siblingCourseIds.map((courseId) => ({
+      queryKey: ['campus', 'teacher', 'course', teacherQueryScope, courseId],
+      queryFn: () => getCampusTeacherCourseDetail(courseId),
+      enabled: !previewEnabled
+        && isClassroomGroupAllScope
+        && showSelectedCourseWorkspace
+        && activeTeacherSection === 'academic_management'
+        && Boolean(courseId),
+      retry: false,
+      staleTime: 30_000,
+    })),
+  });
+  const siblingAssignmentSubmissionQueries = useQueries({
+    queries: siblingCourseIds.map((courseId) => ({
+      queryKey: ['campus', 'teacher', 'assignment-submissions', teacherQueryScope, courseId],
+      queryFn: () => getCampusTeacherAssignmentSubmissions(courseId),
+      enabled: !previewEnabled
+        && isClassroomGroupAllScope
+        && showSelectedCourseWorkspace
+        && activeTeacherSection === 'academic_management'
+        && activeCourseWorkspaceTab === 'submissions'
+        && Boolean(courseId),
+      retry: false,
+      staleTime: 20_000,
+    })),
+  });
+  const assignmentSubmissionRows = useMemo(() => {
+    const primaryRows = Array.isArray(assignmentSubmissionsQuery.data?.assignments)
+      ? assignmentSubmissionsQuery.data.assignments
+      : [];
+    if (!isClassroomGroupAllScope) {
+      return primaryRows;
+    }
+    const siblingRows = siblingAssignmentSubmissionQueries.flatMap((query) => (
+      Array.isArray(query.data?.assignments) ? query.data.assignments : []
+    ));
+    return mergeAssignmentSubmissionRows([primaryRows, siblingRows]);
+  }, [
+    assignmentSubmissionsQuery.data?.assignments,
+    isClassroomGroupAllScope,
+    siblingAssignmentSubmissionQueries,
+  ]);
+  const workspaceStudents = useMemo(() => {
+    if (!isClassroomGroupAllScope) {
+      return attachCourseContextToStudents(selectedCourseDetail, selectedCourse);
+    }
+
+    const details = [
+      selectedCourseDetail,
+      ...siblingCourseDetailQueries.map((query) => query.data),
+    ].filter(Boolean);
+    const byStudentId = new Map();
+
+    details.forEach((detail) => {
+      const course = courses.find((entry) => String(entry.id) === String(detail?.course?.id))
+        || detail?.course
+        || selectedCourse;
+      attachCourseContextToStudents(detail, course).forEach((student) => {
+        const studentId = String(student.studentId || '');
+        if (!studentId || byStudentId.has(studentId)) {
+          return;
+        }
+        byStudentId.set(studentId, student);
+      });
+    });
+
+    return Array.from(byStudentId.values()).sort((left, right) => {
+      const gradeCompare = String(left.gradeLabel || left.grade || '').localeCompare(
+        String(right.gradeLabel || right.grade || ''),
+        'es',
+        { numeric: true, sensitivity: 'base' }
+      );
+      if (gradeCompare !== 0) {
+        return gradeCompare;
+      }
+      return String(left.name || '').localeCompare(String(right.name || ''), 'es', { sensitivity: 'base' });
+    });
+  }, [
+    courses,
+    isClassroomGroupAllScope,
+    selectedCourse,
+    selectedCourseDetail,
+    siblingCourseDetailQueries,
+  ]);
   const selectedSubmissionAssignment = useMemo(
     () => assignmentSubmissionRows.find((item) => String(item.id) === String(selectedSubmissionAssignmentId)) || assignmentSubmissionRows[0] || null,
     [assignmentSubmissionRows, selectedSubmissionAssignmentId]
@@ -4049,19 +4292,39 @@ function TeacherCampusHome({ forcePreview = false }) {
         return normalizeSubjectLabel(course.subject) === coursesSubjectFilter;
       });
 
-    return sourceCourses.map((course, index) => {
-      const stats = buildCourseCardStats(course, previewEnabled ? previewWorkspace : null);
+    const buildRow = (course, index, extras = {}) => {
+      const stats = extras.stats || buildCourseCardStats(course, previewEnabled ? previewWorkspace : null);
       const accent = getCourseViewAccent(course, index);
       const performanceLevel = resolveTeacherPerformanceLevel(stats.averageScore, gradingScale);
       return {
+        key: extras.key || course.id,
         course,
         stats,
         accent,
         performanceColor: performanceLevel?.color || '',
-        title: getCourseDisplayTitle(course),
-        subtitle: getCourseDisplaySubtitle(course) || 'Curso asignado',
+        title: extras.title || getCourseDisplayTitle(course),
+        subtitle: extras.subtitle || getCourseDisplaySubtitle(course) || 'Curso asignado',
+        gradesLabel: extras.gradesLabel || '',
+        gradeLabels: Array.isArray(extras.gradeLabels) ? extras.gradeLabels : [],
       };
-    });
+    };
+
+    if (activeTeacherSection === 'academic_management') {
+      return buildCourseGradeGroups(sourceCourses).map((group, index) => {
+        const firstCourse = group.courses[0];
+        const groupedStats = buildCourseGradeGroupStats(group, previewEnabled ? previewWorkspace : null);
+        return buildRow(firstCourse, index, {
+          key: group.key,
+          title: group.title,
+          subtitle: group.gradesLabel || (groupedStats.courseCount === 1 ? '1 curso asignado' : `${groupedStats.courseCount} cursos asignados`),
+          gradesLabel: group.gradesLabel,
+          gradeLabels: group.gradeLabels,
+          stats: groupedStats,
+        });
+      });
+    }
+
+    return sourceCourses.map((course, index) => buildRow(course, index));
   }, [
     academicCourses,
     activeTeacherSection,
@@ -4114,6 +4377,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     setSelectedCourseId(course.id);
     setTimelineCourseId(course.id);
     setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setClassroomGradeScope(CLASSROOM_GRADE_SCOPE_ALL);
     setActiveCourseWorkspaceTab(tab);
     setShowSelectedCourseWorkspace(true);
     setCoursesDetailOpen(false);
@@ -4250,7 +4514,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   }, [effectiveReportCardPeriodKey, subjectReportCardsQuery.data?.reports]);
 
   const reportCardStudentRows = useMemo(() => {
-    const students = Array.isArray(selectedCourseDetail?.students) ? selectedCourseDetail.students : [];
+    const students = Array.isArray(workspaceStudents) ? workspaceStudents : [];
     return students.map((student) => {
       const periods = buildStudentPeriods(student, selectedCourseAcademicPeriods);
       const period = periods.find((item) => String(item.key) === String(effectiveReportCardPeriodKey)) || periods[0];
@@ -4269,8 +4533,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     effectiveReportCardPeriodKey,
     reportCardObservations,
     selectedCourseAcademicPeriods,
-    selectedCourseDetail?.students,
     selectedSubjectReport,
+    workspaceStudents,
   ]);
 
   const headroomReportSections = Array.isArray(headroomReportCardsQuery.data?.sections)
@@ -4527,28 +4791,58 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => gradebookAssignmentOptions.find((assignment) => assignment.key === selectedGradebookAssignmentKey) || gradebookAssignmentOptions[0] || null,
     [gradebookAssignmentOptions, selectedGradebookAssignmentKey]
   );
-  const gradingCourseTitle = selectedCourse ? getCourseOptionLabel(selectedCourse) : 'Curso';
+  const gradingCourseTitle = isClassroomGroupAllScope
+    ? (selectedPortalGradeGroup?.title || (selectedCourse ? getCourseOptionLabel(selectedCourse) : 'Curso'))
+    : (selectedCourse ? getCourseOptionLabel(selectedCourse) : 'Curso');
   const gradingPeriods = Array.isArray(academicPeriodDrafts) ? academicPeriodDrafts : [];
   const selectedCourseSchedule = useMemo(
     () => sanitizeClassSessions(selectedCourseDetail?.course?.classSessions || selectedCourse?.classSessions || []),
     [selectedCourseDetail, selectedCourse]
   );
-  const selectedCourseCardStats = useMemo(
-    () => (selectedCourse ? buildCourseCardStats(selectedCourse, previewEnabled ? previewWorkspace : null) : null),
-    [previewEnabled, previewWorkspace, selectedCourse]
-  );
+  const selectedCourseCardStats = useMemo(() => {
+    if (isClassroomGroupAllScope && selectedPortalGradeGroup) {
+      return buildCourseGradeGroupStats(selectedPortalGradeGroup, previewEnabled ? previewWorkspace : null);
+    }
+    return selectedCourse ? buildCourseCardStats(selectedCourse, previewEnabled ? previewWorkspace : null) : null;
+  }, [isClassroomGroupAllScope, previewEnabled, previewWorkspace, selectedCourse, selectedPortalGradeGroup]);
   const selectedCoursePosts = useMemo(() => {
-    if (!selectedCourse) {
-      return [];
+    const collectPostsForCourse = (course, detail) => {
+      const detailedPosts = detail?.posts || course?.posts;
+      if (Array.isArray(detailedPosts) && detailedPosts.length > 0) {
+        return detailedPosts;
+      }
+      return recentPosts.filter((post) => String(post.courseId) === String(course?.id || ''));
+    };
+
+    if (!isClassroomGroupAllScope) {
+      if (!selectedCourse) {
+        return [];
+      }
+      return collectPostsForCourse(selectedCourse, selectedCourseDetail);
     }
 
-    const detailedPosts = selectedCourseDetail?.posts || selectedCourse.posts;
-    if (Array.isArray(detailedPosts) && detailedPosts.length > 0) {
-      return detailedPosts;
-    }
+    const siblingDetailsByCourseId = new Map(
+      siblingCourseDetailQueries
+        .map((query) => query.data)
+        .filter((detail) => detail?.course?.id)
+        .map((detail) => [String(detail.course.id), detail])
+    );
+    const mergedPosts = workspaceTargetCourses.flatMap((course) => {
+      const detail = String(course.id) === String(selectedCourse?.id)
+        ? selectedCourseDetail
+        : siblingDetailsByCourseId.get(String(course.id));
+      return collectPostsForCourse(course, detail);
+    });
 
-    return recentPosts.filter((post) => post.courseId === selectedCourse.id);
-  }, [recentPosts, selectedCourse, selectedCourseDetail]);
+    return mergeClassroomGroupPosts(mergedPosts);
+  }, [
+    isClassroomGroupAllScope,
+    recentPosts,
+    selectedCourse,
+    selectedCourseDetail,
+    siblingCourseDetailQueries,
+    workspaceTargetCourses,
+  ]);
   const selectedCourseAssignmentPosts = useMemo(
     () => selectedCoursePosts.filter((post) => String(post?.status || '').toLowerCase() !== 'archived'),
     [selectedCoursePosts]
@@ -4558,9 +4852,9 @@ function TeacherCampusHome({ forcePreview = false }) {
     [selectedGradebookAssignment, selectedCourseAssignmentPosts]
   );
   const selectedGradebookAssignmentStudents = useMemo(() => {
-    const students = Array.isArray(selectedCourseDetail?.students) ? selectedCourseDetail.students : [];
+    const students = Array.isArray(workspaceStudents) ? workspaceStudents : [];
     return students.filter((student) => campusAudienceAppliesToStudent(selectedGradebookAssignmentAudience, student.studentId));
-  }, [selectedCourseDetail?.students, selectedGradebookAssignmentAudience]);
+  }, [selectedGradebookAssignmentAudience, workspaceStudents]);
   const selectedCourseTimelineCalendar = useMemo(
     () => buildCourseTimelineCalendar(timelineMonth, selectedCourseSchedule, selectedCoursePosts),
     [timelineMonth, selectedCoursePosts, selectedCourseSchedule]
@@ -5112,11 +5406,11 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   useEffect(() => {
     const studentId = String(pendingGradebookFocus?.studentId || '').trim();
-    if (!studentId || !selectedCourseDetail?.students) {
+    if (!studentId || !workspaceStudents.length) {
       return;
     }
 
-    const matchedStudent = selectedCourseDetail.students.find(
+    const matchedStudent = workspaceStudents.find(
       (student) => String(student.studentId) === studentId
     );
     if (!matchedStudent) {
@@ -5137,7 +5431,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
       });
     }
-  }, [pendingGradebookFocus, selectedCourseDetail]);
+  }, [pendingGradebookFocus, workspaceStudents]);
 
   useEffect(() => {
     if (!showClassworkCreateMenu || typeof document === 'undefined') {
@@ -5415,6 +5709,10 @@ function TeacherCampusHome({ forcePreview = false }) {
       }
     }
   }, [portalSectionGradeGroups, selectedCourseId, selectedPortalGradeKey]);
+
+  useEffect(() => {
+    setClassroomGradeScope(CLASSROOM_GRADE_SCOPE_ALL);
+  }, [selectedPortalGradeKey]);
 
   useEffect(() => {
     setSubcomponentDrafts({});
@@ -5951,6 +6249,10 @@ function TeacherCampusHome({ forcePreview = false }) {
     };
 
     if (!payload.courseId) {
+      payload.courseId = String(workspaceTargetCourses[0]?.id || selectedCourseId || '').trim();
+    }
+
+    if (!payload.courseId) {
       setNotice({ type: 'error', text: 'Selecciona un curso para la publicación.' });
       return;
     }
@@ -5986,7 +6288,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     const gradebookWeight = Number(postDraft.gradebookWeight);
 
     if (shouldAddToGradebook) {
-      if (payload.courseId !== selectedCourseId) {
+      const allowedCourseIds = new Set(workspaceTargetCourses.map((course) => String(course.id)));
+      if (!allowedCourseIds.has(String(payload.courseId)) && payload.courseId !== selectedCourseId) {
         setNotice({ type: 'error', text: 'Para agregar al libro de notas, usa el curso abierto en este espacio de trabajo.' });
         return;
       }
@@ -6087,90 +6390,109 @@ function TeacherCampusHome({ forcePreview = false }) {
           await updatePostMutation.mutateAsync({ postId: editingPostId, payload: updatePayloadBase });
         }
       } else {
-        const selectedCourseForPost = courses.find((course) => course.id === payload.courseId) || selectedCourse || null;
+        const studentCourseIdByStudentId = new Map(
+          workspaceStudents.map((student) => [
+            String(student.studentId),
+            resolveWorkspaceStudentCourseId(student, selectedCourseId),
+          ])
+        );
+        const publishCourseIds = (!editingPostId && isClassroomGroupAllScope)
+          ? workspaceTargetCourses.map((course) => String(course.id)).filter(Boolean)
+          : [payload.courseId];
         const hasFiles = filesToUpload.length > 0;
 
-        if (hasFiles) {
-          const formData = new FormData();
-          formData.append('courseId', payload.courseId);
-          formData.append('type', payload.type);
-          formData.append('title', payload.title);
-          formData.append('body', payload.body);
-          formData.append('status', payload.status);
-          formData.append('deliveryMode', payload.deliveryMode);
-          formData.append('materialLinks', JSON.stringify(normalizedLinks));
-          formData.append('allowStudentSubmission', payload.allowStudentSubmission ? 'true' : 'false');
-          formData.append('targetType', payload.targetType);
-          formData.append('targetStudentIds', JSON.stringify(payload.targetStudentIds));
-          formData.append('sourceCourseKey', selectedCourseForPost?.sourceCourseKey || '');
-          formData.append('section', selectedCourseForPost?.section || '');
-          formData.append('subject', selectedCourseForPost?.subject || '');
-          formData.append('studentGradeKey', selectedCourseForPost?.studentGradeKey || '');
-          formData.append('courseTitle', selectedCourseForPost?.title || '');
+        for (const publishCourseId of publishCourseIds) {
+          const selectedCourseForPost = courses.find((course) => String(course.id) === String(publishCourseId)) || selectedCourse || null;
+          const courseTargetStudentIds = payload.targetType === 'students'
+            ? payload.targetStudentIds.filter((studentId) => studentCourseIdByStudentId.get(String(studentId)) === String(publishCourseId))
+            : payload.targetStudentIds;
 
-          if (shouldAddToGradebook) {
-            formData.append('gradebookAssignment', JSON.stringify({
-              enabled: true,
-              academicPeriodKey: selectedPostGradebookPeriod.key,
-              componentKey: selectedPostGradebookComponent.key,
-              weight: gradebookWeight,
-              topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
-              subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
-              subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
-            }));
+          if (payload.targetType === 'students' && courseTargetStudentIds.length === 0 && publishCourseIds.length > 1) {
+            continue;
           }
 
-          if (payload.deliveryMode === 'date') {
-            formData.append('dueAt', payload.dueAt ? new Date(payload.dueAt).toISOString() : '');
+          if (hasFiles) {
+            const formData = new FormData();
+            formData.append('courseId', publishCourseId);
+            formData.append('type', payload.type);
+            formData.append('title', payload.title);
+            formData.append('body', payload.body);
+            formData.append('status', payload.status);
+            formData.append('deliveryMode', payload.deliveryMode);
+            formData.append('materialLinks', JSON.stringify(normalizedLinks));
+            formData.append('allowStudentSubmission', payload.allowStudentSubmission ? 'true' : 'false');
+            formData.append('targetType', payload.targetType);
+            formData.append('targetStudentIds', JSON.stringify(courseTargetStudentIds));
+            formData.append('sourceCourseKey', selectedCourseForPost?.sourceCourseKey || '');
+            formData.append('section', selectedCourseForPost?.section || '');
+            formData.append('subject', selectedCourseForPost?.subject || '');
+            formData.append('studentGradeKey', selectedCourseForPost?.studentGradeKey || '');
+            formData.append('courseTitle', selectedCourseForPost?.title || '');
+
+            if (shouldAddToGradebook) {
+              formData.append('gradebookAssignment', JSON.stringify({
+                enabled: true,
+                academicPeriodKey: selectedPostGradebookPeriod.key,
+                componentKey: selectedPostGradebookComponent.key,
+                weight: gradebookWeight,
+                topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
+                subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
+                subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
+              }));
+            }
+
+            if (payload.deliveryMode === 'date') {
+              formData.append('dueAt', payload.dueAt ? new Date(payload.dueAt).toISOString() : '');
+            } else {
+              formData.append('scheduledClassDate', payload.scheduledClassDate || '');
+              formData.append('scheduledClassSession', JSON.stringify(payload.scheduledClassSession || {}));
+            }
+
+            filesToUpload.forEach((file) => {
+              formData.append('files', file);
+            });
+
+            await createPostMutation.mutateAsync(formData);
           } else {
-            formData.append('scheduledClassDate', payload.scheduledClassDate || '');
-            formData.append('scheduledClassSession', JSON.stringify(payload.scheduledClassSession || {}));
-          }
-
-          filesToUpload.forEach((file) => {
-            formData.append('files', file);
-          });
-
-          await createPostMutation.mutateAsync(formData);
-        } else {
-          const jsonPayload = {
-            courseId: payload.courseId,
-            type: payload.type,
-            title: payload.title,
-            body: payload.body,
-            status: payload.status,
-            deliveryMode: payload.deliveryMode,
-            materialLinks: normalizedLinks,
-            allowStudentSubmission: Boolean(payload.allowStudentSubmission),
-            targetType: payload.targetType,
-            targetStudentIds: payload.targetStudentIds,
-            sourceCourseKey: selectedCourseForPost?.sourceCourseKey || '',
-            section: selectedCourseForPost?.section || '',
-            subject: selectedCourseForPost?.subject || '',
-            studentGradeKey: selectedCourseForPost?.studentGradeKey || '',
-            courseTitle: selectedCourseForPost?.title || '',
-          };
-
-          if (shouldAddToGradebook) {
-            jsonPayload.gradebookAssignment = {
-              enabled: true,
-              academicPeriodKey: selectedPostGradebookPeriod.key,
-              componentKey: selectedPostGradebookComponent.key,
-              weight: gradebookWeight,
-              topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
-              subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
-              subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
+            const jsonPayload = {
+              courseId: publishCourseId,
+              type: payload.type,
+              title: payload.title,
+              body: payload.body,
+              status: payload.status,
+              deliveryMode: payload.deliveryMode,
+              materialLinks: normalizedLinks,
+              allowStudentSubmission: Boolean(payload.allowStudentSubmission),
+              targetType: payload.targetType,
+              targetStudentIds: courseTargetStudentIds,
+              sourceCourseKey: selectedCourseForPost?.sourceCourseKey || '',
+              section: selectedCourseForPost?.section || '',
+              subject: selectedCourseForPost?.subject || '',
+              studentGradeKey: selectedCourseForPost?.studentGradeKey || '',
+              courseTitle: selectedCourseForPost?.title || '',
             };
-          }
 
-          if (payload.deliveryMode === 'date') {
-            jsonPayload.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
-          } else {
-            jsonPayload.scheduledClassDate = payload.scheduledClassDate || null;
-            jsonPayload.scheduledClassSession = payload.scheduledClassSession || null;
-          }
+            if (shouldAddToGradebook) {
+              jsonPayload.gradebookAssignment = {
+                enabled: true,
+                academicPeriodKey: selectedPostGradebookPeriod.key,
+                componentKey: selectedPostGradebookComponent.key,
+                weight: gradebookWeight,
+                topic: String(postDraft.gradebookTopic || payload.type || '').trim(),
+                subcomponentName: String(postDraft.gradebookSubcomponentTitle || payload.title || '').trim(),
+                subcomponentDescription: String(postDraft.gradebookSubcomponentDescription || payload.body || '').trim(),
+              };
+            }
 
-          await createPostMutation.mutateAsync(jsonPayload);
+            if (payload.deliveryMode === 'date') {
+              jsonPayload.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
+            } else {
+              jsonPayload.scheduledClassDate = payload.scheduledClassDate || null;
+              jsonPayload.scheduledClassSession = payload.scheduledClassSession || null;
+            }
+
+            await createPostMutation.mutateAsync(jsonPayload);
+          }
         }
       }
 
@@ -7444,13 +7766,17 @@ function TeacherCampusHome({ forcePreview = false }) {
           };
         });
       } else {
-        await updateGradingSchemeMutation.mutateAsync({
-          courseId: selectedCourse.id,
+        const schemeCourseIds = isClassroomGroupAllScope
+          ? workspaceTargetCourses.map((course) => String(course.id)).filter(Boolean)
+          : [selectedCourse.id];
+        const uniqueSchemeCourseIds = [...new Set(schemeCourseIds)];
+        await Promise.all(uniqueSchemeCourseIds.map((courseId) => updateGradingSchemeMutation.mutateAsync({
+          courseId,
           payload: {
             academicPeriods: normalizedPeriods,
             allowIncompleteWeights: !strictTotals,
           },
-        });
+        })));
       }
 
       if (!silentNotices) {
@@ -7617,7 +7943,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         });
       } else {
         await saveGradesMutation.mutateAsync({
-          courseId: selectedCourseDetail.course.id,
+          courseId: resolveWorkspaceStudentCourseId(student, selectedCourseDetail.course.id),
           studentId: student.studentId,
           payload: { grades: payloadGrades },
         });
@@ -7752,7 +8078,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         });
       } else {
         await Promise.all(submittedStudentGrades.map(({ student, grade }) => saveGradesMutation.mutateAsync({
-          courseId: selectedCourseDetail.course.id,
+          courseId: resolveWorkspaceStudentCourseId(student, selectedCourseDetail.course.id),
           studentId: student.studentId,
           payload: { grades: [grade] },
         })));
@@ -7802,7 +8128,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         await onSaveStudentGrades(student);
       } else {
         await saveGradesMutation.mutateAsync({
-          courseId: selectedCourseDetail.course.id,
+          courseId: resolveWorkspaceStudentCourseId(student, selectedCourseDetail.course.id),
           studentId: student.studentId,
           payload: { grades: [payloadGrade] },
         });
@@ -8651,7 +8977,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                         {coursesPagedRows.map((row) => (
                           <article
                             className="campus-teacher__cursos-card"
-                            key={row.course.id}
+                            key={row.key || row.course.id}
                             style={{ '--campus-course-accent': row.accent.accent, '--campus-course-soft': row.accent.soft, '--campus-course-ink': row.accent.ink }}
                           >
                             <div className="campus-teacher__cursos-card-top">
@@ -8674,7 +9000,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                             </div>
                             <h3>{row.title}</h3>
                             <span className="campus-teacher__cursos-status-pill is-active">Activo</span>
-                            <p className="campus-teacher__cursos-card-subtitle">1 curso asignado</p>
+                            <p className="campus-teacher__cursos-card-subtitle">{row.gradesLabel || row.subtitle || 'Curso asignado'}</p>
+                            {(row.gradeLabels || []).length > 0 ? (
+                              <div className="campus-teacher__cursos-grade-chips" aria-label={row.gradesLabel || 'Grados del grupo'}>
+                                {(row.gradeLabels || []).map((gradeLabel) => (
+                                  <span key={gradeLabel}>{gradeLabel}</span>
+                                ))}
+                              </div>
+                            ) : null}
                             <ul className="campus-teacher__cursos-card-facts">
                               <li>
                                 <svg aria-hidden="true" fill="none" viewBox="0 0 24 24"><path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" stroke="currentColor" strokeWidth="1.7" /><circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" /><path d="M19 19v-1a3.5 3.5 0 0 0-2.5-3.3M16.5 5.2a3 3 0 0 1 0 5.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" /></svg>
@@ -8714,7 +9047,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </thead>
                           <tbody>
                             {coursesPagedRows.map((row) => (
-                              <tr key={row.course.id} onClick={() => openCatalogCourse(row.course)}>
+                              <tr key={row.key || row.course.id} onClick={() => openCatalogCourse(row.course)}>
                                 <td>
                                   <div className="campus-teacher__cursos-table-course">
                                     <span className="campus-teacher__cursos-card-icon is-compact" style={{ '--campus-course-accent': row.accent.accent, '--campus-course-soft': row.accent.soft }} aria-hidden="true">
@@ -8725,7 +9058,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     </span>
                                     <div>
                                       <strong>{row.title}</strong>
-                                      <span>1 curso asignado</span>
+                                      <span>{row.gradesLabel || row.subtitle || 'Curso asignado'}</span>
                                     </div>
                                   </div>
                                 </td>
@@ -8858,11 +9191,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <div className="campus-teacher__course-top">
                             <div>
                               <h4>{gradeGroup.title}</h4>
-                              <span className="campus-teacher__course-subtitle">{cardStats.courseCount} curso{cardStats.courseCount === 1 ? '' : 's'} asignado{cardStats.courseCount === 1 ? '' : 's'}</span>
+                              <span className="campus-teacher__course-subtitle">
+                                {gradeGroup.gradesLabel || `${cardStats.courseCount} curso${cardStats.courseCount === 1 ? '' : 's'} asignado${cardStats.courseCount === 1 ? '' : 's'}`}
+                              </span>
                             </div>
                             <span className="campus-teacher__status-pill is-active">Activo</span>
                           </div>
                           <div className="campus-teacher__course-facts">
+                            {gradeGroup.gradesLabel ? <span>🏫 {gradeGroup.gradesLabel}</span> : null}
                             <span>👥 {cardStats.studentCount} alumnos</span>
                             <span>📊 Promedio: {cardStats.averageScore === null ? 'Sin notas' : cardStats.averageScore}</span>
                             <span>⚠️ {cardStats.atRiskCount} en riesgo</span>
@@ -8916,8 +9252,48 @@ function TeacherCampusHome({ forcePreview = false }) {
                       </button>
                       <div className="campus-teacher__course-open-copy">
                         <span className="campus-panel__kicker">{selectedCourse.subject || 'Asignatura'}</span>
-                        <h2>{getCourseDisplayTitle(selectedCourse)}</h2>
-                        <p>{[selectedCourse.subject, `${selectedCourseCardStats?.studentCount || 0} estudiantes`, `${selectedCoursePosts.length} publicaciones`].filter(Boolean).join(' · ')}</p>
+                        <h2>{selectedPortalGradeGroup?.title || getCourseDisplayTitle(selectedCourse)}</h2>
+                        <p>{[
+                          selectedPortalGradeGroup?.gradesLabel || selectedCourse.subject,
+                          `${selectedCourseCardStats?.studentCount || 0} estudiantes`,
+                          `${selectedCoursePosts.length} publicaciones`,
+                        ].filter(Boolean).join(' · ')}</p>
+                        {selectedPortalGradeCourses.length > 1 ? (
+                          <div className="campus-teacher__classroom-grade-switch">
+                            <button
+                              className={isClassroomGroupAllScope ? 'is-active is-all' : 'is-all'}
+                              onClick={() => {
+                                const firstCourse = selectedPortalGradeCourses[0];
+                                setClassroomGradeScope(CLASSROOM_GRADE_SCOPE_ALL);
+                                if (firstCourse?.id && !selectedPortalGradeCourses.some((course) => String(course.id) === String(selectedCourse?.id))) {
+                                  setSelectedCourseId(firstCourse.id);
+                                  setTimelineCourseId(firstCourse.id);
+                                }
+                              }}
+                              type="button"
+                            >
+                              Todos
+                            </button>
+                            {selectedPortalGradeCourses.map((course) => {
+                              const gradeLabel = getNativeCourseGradeLabel(course) || getCourseGroupLabel(course) || 'Grado';
+                              const isActive = !isClassroomGroupAllScope && String(course.id) === String(selectedCourse.id);
+                              return (
+                                <button
+                                  className={isActive ? 'is-active' : ''}
+                                  key={course.id}
+                                  onClick={() => {
+                                    setClassroomGradeScope(String(course.id));
+                                    setSelectedCourseId(course.id);
+                                    setTimelineCourseId(course.id);
+                                  }}
+                                  type="button"
+                                >
+                                  {gradeLabel}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                       </div>
                       <div className={`campus-teacher__fly-lock-control${courseFlyLock?.active ? ' is-locked' : ''}${!courseFlyLock?.active && !canLockCourseFly ? ' is-disabled' : ''}`}>
                         <div className="campus-teacher__fly-lock-copy">
@@ -9284,14 +9660,20 @@ function TeacherCampusHome({ forcePreview = false }) {
                               <aside className="campus-teacher__classwork-composer-rail">
                                 <label className="campus-teacher__classwork-rail-field">
                                   <span>Para</span>
-                                  <select value={postDraft.courseId} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, courseId: event.target.value }))}>
-                                    <option value="">Selecciona un curso</option>
-                                    {courses.map((course) => (
-                                      <option key={course.id} value={course.id}>
-                                        {getCourseDisplayTitle(course)}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  {isClassroomGroupAllScope ? (
+                                    <select disabled value="all">
+                                      <option value="all">{selectedPortalGradeGroup?.gradesLabel || 'Todos los grados'}</option>
+                                    </select>
+                                  ) : (
+                                    <select value={postDraft.courseId} onChange={(event) => setPostDraft((currentDraft) => ({ ...currentDraft, courseId: event.target.value }))}>
+                                      <option value="">Selecciona un curso</option>
+                                      {courses.map((course) => (
+                                        <option key={course.id} value={course.id}>
+                                          {getCourseDisplayTitle(course)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
                                 </label>
 
                                 <label className="campus-teacher__classwork-rail-field">
@@ -9305,18 +9687,27 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   </select>
                                 </label>
 
-                                {postDraft.targetType === 'students' && selectedCourseDetail?.students?.length > 0 ? (
+                                {postDraft.targetType === 'students' && workspaceStudents.length > 0 ? (
                                   <div className="campus-teacher__classwork-rail-field">
                                     <span>Alumnos</span>
                                     <Select
                                       isMulti
-                                      options={selectedCourseDetail.students.map((student) => ({
+                                      options={workspaceStudents.map((student) => ({
                                         value: student.studentId,
-                                        label: student.name,
+                                        label: student.gradeLabel || student.grade
+                                          ? `${student.name} · ${student.gradeLabel || student.grade}`
+                                          : student.name,
                                       }))}
                                       value={(postDraft.targetStudentIds || []).map((id) => {
-                                        const student = selectedCourseDetail.students.find((entry) => entry.studentId === id);
-                                        return student ? { value: student.studentId, label: student.name } : null;
+                                        const student = workspaceStudents.find((entry) => entry.studentId === id);
+                                        return student
+                                          ? {
+                                            value: student.studentId,
+                                            label: student.gradeLabel || student.grade
+                                              ? `${student.name} · ${student.gradeLabel || student.grade}`
+                                              : student.name,
+                                          }
+                                          : null;
                                       }).filter(Boolean)}
                                       onChange={(selectedOptions) => {
                                         setPostDraft((currentDraft) => ({
@@ -9571,11 +9962,16 @@ function TeacherCampusHome({ forcePreview = false }) {
 
                             <div className="campus-teacher__classwork-list">
                               {selectedCourseAssignmentPosts.length === 0 ? (
-                                <p className="campus-teacher__classwork-empty">Aún no hay asignaciones publicadas en este curso.</p>
+                                <p className="campus-teacher__classwork-empty">
+                                  {isClassroomGroupAllScope
+                                    ? 'Aún no hay asignaciones publicadas en estos grados.'
+                                    : 'Aún no hay asignaciones publicadas en este curso.'}
+                                </p>
                               ) : (
                                 selectedCourseAssignmentPosts.map((post) => {
                                   const tone = getClassworkTypeTone(post.type);
                                   const isMenuOpen = openPostMenuId === post.id;
+                                  const gradeCount = Array.isArray(post.siblingCourseIds) ? post.siblingCourseIds.length : 0;
                                   return (
                                     <article className="campus-teacher__classwork-item" key={post.id}>
                                       <span className={`campus-teacher__classwork-type-icon is-${tone}`}>
@@ -9587,7 +9983,10 @@ function TeacherCampusHome({ forcePreview = false }) {
                                         type="button"
                                       >
                                         <strong>{post.title || 'Sin título'}</strong>
-                                        <span>{formatPostTypeLabel(post.type)} · {formatDeliveryLabel(post)}</span>
+                                        <span>
+                                          {formatPostTypeLabel(post.type)} · {formatDeliveryLabel(post)}
+                                          {isClassroomGroupAllScope && gradeCount > 1 ? ` · ${gradeCount} grados` : ''}
+                                        </span>
                                       </button>
                                       <span className="campus-teacher__classwork-item-date">Publicado {formatPostedDate(post)}</span>
                                       <div className="campus-teacher__classwork-item-menu">
@@ -9975,7 +10374,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                         </div>
                         {!previewEnabled && selectedCourse && courseDetailQuery.isLoading ? <p className="campus-panel__meta">Cargando estudiantes y notas del curso...</p> : null}
                         {!previewEnabled && selectedCourse && courseDetailQuery.isError ? <p className="campus-panel__meta">No se pudo cargar el detalle del curso.</p> : null}
-                        {selectedCourseDetail?.students?.length ? (
+                        {workspaceStudents.length ? (
                           <div className="campus-teacher__gradebook-shell">
                             <input
                               className="campus-teacher__gradebook-search"
@@ -10002,7 +10401,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                             </div>
                             {gradebookMode === 'student' ? (
                             <div className="campus-teacher__gradebook-stack campus-teacher__gradebook-stack--classroom">
-                              {selectedCourseDetail.students
+                              {workspaceStudents
                                 .filter(student => !gradebookSearch || student.name.toLowerCase().includes(gradebookSearch.toLowerCase()))
                                 .map((student) => {
                                   const studentPeriods = applyGradeDraftsToStudentPeriods(
@@ -10402,7 +10801,13 @@ function TeacherCampusHome({ forcePreview = false }) {
                             )}
                           </div>
                         ) : null}
-                        {selectedCourseDetail && !selectedCourseDetail.students?.length ? <p className="campus-panel__meta">Este curso todavía no tiene estudiantes activos asociados al grupo {getCourseGroupLabel(selectedCourseDetail.course) || getCourseGradeLabel(selectedCourseDetail.course)}.</p> : null}
+                        {selectedCourse && !workspaceStudents.length ? (
+                          <p className="campus-panel__meta">
+                            {isClassroomGroupAllScope
+                              ? 'Este grupo todavía no tiene estudiantes activos en los grados seleccionados.'
+                              : `Este curso todavía no tiene estudiantes activos asociados al grupo ${getCourseGroupLabel(selectedCourseDetail?.course || selectedCourse) || getCourseGradeLabel(selectedCourseDetail?.course || selectedCourse)}.`}
+                          </p>
+                        ) : null}
                       </article>
                     ) : null}
 
