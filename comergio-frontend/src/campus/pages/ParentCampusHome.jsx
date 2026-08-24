@@ -6477,8 +6477,18 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       setSelectedChildId(launchParams.studentId);
     }
 
-    if (launchParams.academicView && validAcademicViews.has(launchParams.academicView)) {
-      setActiveAcademicView(launchParams.academicView);
+    const nextAcademicView = launchParams.assignmentId
+      ? 'academic-assignments'
+      : (launchParams.academicView && validAcademicViews.has(launchParams.academicView)
+        ? launchParams.academicView
+        : '');
+
+    if (launchParams.assignmentId) {
+      setFocusedAssignmentId(launchParams.assignmentId);
+    }
+
+    if (nextAcademicView) {
+      setActiveAcademicView(nextAcademicView);
       setShowAcademicMenu(false);
 
       if (usesRoutedSections) {
@@ -6486,6 +6496,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         const nextSearch = new URLSearchParams(location.search);
         if (useQuerySectionRouting) {
           nextSearch.set('section', 'academic');
+        }
+        if (nextAcademicView) {
+          nextSearch.set('academicView', nextAcademicView);
+        }
+        if (launchParams.assignmentId) {
+          nextSearch.set('assignmentId', launchParams.assignmentId);
         }
         const nextPath = nextSearch.toString() ? `${academicTarget.split('?')[0]}?${nextSearch.toString()}` : academicTarget;
         const currentPath = `${location.pathname}${location.search || ''}`;
@@ -7441,6 +7457,20 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     if (!nextPath) {
       return;
     }
+
+    const [pathname, search = ''] = nextPath.split('?');
+    const launchParams = readParentNotificationLaunchParams(search ? `?${search}` : '', pathname);
+    if (launchParams.studentId) {
+      setSelectedChildId(launchParams.studentId);
+    }
+    if (launchParams.assignmentId) {
+      setFocusedAssignmentId(launchParams.assignmentId);
+      setActiveAcademicView('academic-assignments');
+      setShowAcademicMenu(false);
+    } else if (launchParams.academicView) {
+      setActiveAcademicView(launchParams.academicView);
+    }
+
     navigate(nextPath);
   }, [navigate]);
 
@@ -8110,7 +8140,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     };
 
     syncFlyLock();
-    const intervalId = window.setInterval(syncFlyLock, 10_000);
+    const intervalId = window.setInterval(syncFlyLock, activeSection === 'games' ? 45_000 : 10_000);
 
     const onVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
@@ -8127,7 +8157,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
       document.removeEventListener('visibilitychange', onVisibilityOrFocus);
       window.removeEventListener('focus', onVisibilityOrFocus);
     };
-  }, [studentPortalMode]);
+  }, [activeSection, studentPortalMode]);
 
   useEffect(() => {
     if (!studentPortalMode || !studentFlyLocked) {

@@ -34,7 +34,7 @@ const BACKGROUND_LAYERS = [
   { id: 'cyber-sunset', name: 'Ciudad del futuro', src: '/game/bg-cyber-sunset.png', accent: '#c084fc' },
 ];
 
-const BG_TRANSITION_MS = 1600;
+const BG_TRANSITION_MS = 720;
 
 const SOUNDS = {
   flap: '/game/flap.wav',
@@ -119,7 +119,7 @@ function createSoundPlayer(soundUrl, volume = 0.85) {
       return fallbackPool;
     }
 
-    fallbackPool = Array.from({ length: 6 }, () => {
+    fallbackPool = Array.from({ length: 2 }, () => {
       const audio = new Audio(soundUrl);
       audio.preload = 'auto';
       audio.volume = volume;
@@ -290,106 +290,11 @@ function drawGroundOverlay(ctx, width, height, groundHeight, accent) {
   ctx.globalAlpha = 1;
 }
 
-function drawScanlineOverlay(ctx, width, height, opacity = 0.1) {
-  ctx.save();
-  ctx.fillStyle = `rgba(0, 0, 0, ${opacity})`;
-  for (let y = 0; y < height; y += 4) {
-    ctx.fillRect(0, y, width, 1);
-  }
-  ctx.restore();
-}
-
-function drawCyberParticles(ctx, x, height, progress) {
-  const particleCount = 18;
-  ctx.save();
-  for (let index = 0; index < particleCount; index += 1) {
-    const seed = index * 17.13;
-    const y = (height / particleCount) * index + Math.sin(progress * 18 + seed) * 14;
-    const size = 2 + (index % 3);
-    const tone = index % 2 === 0 ? 'rgba(0, 210, 255, 0.9)' : 'rgba(192, 132, 252, 0.9)';
-    ctx.fillStyle = tone;
-    ctx.fillRect(x - 8 - (index % 4) * 3, y, size, size);
-  }
-  ctx.restore();
-}
-
-function drawFuturisticBackgroundTransition(ctx, width, height, fromImage, toImage, progress, parallax, accent) {
-  const eased = easeInOutCubic(progress);
-  const wipeX = width * eased;
-  const glitch = Math.sin(progress * Math.PI * 10) * (1 - progress) * 22;
-  const wipeEdge = clamp(wipeX + glitch, 0, width);
-
-  // Fondo viejo a la derecha; el nuevo se revela a la izquierda conforme avanza la línea.
-  drawCoverImage(ctx, fromImage, width, height, parallax);
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, wipeEdge, height);
-  ctx.clip();
-  drawCoverImage(ctx, toImage, width, height, parallax * 1.08);
-  ctx.restore();
-
-  if (progress > 0.12 && progress < 0.88) {
-    const bandHeight = 8 + Math.sin(progress * Math.PI * 6) * 4;
-    ctx.save();
-    ctx.globalAlpha = 0.22 * Math.sin(progress * Math.PI);
-    ctx.fillStyle = 'rgba(0, 210, 255, 0.85)';
-    ctx.fillRect(0, height * (0.2 + progress * 0.55), width, bandHeight);
-    ctx.fillStyle = 'rgba(255, 110, 199, 0.65)';
-    ctx.fillRect(0, height * (0.35 + progress * 0.35), width, bandHeight * 0.7);
-    ctx.restore();
-  }
-
-  const beamX = wipeEdge;
-  const beamGradient = ctx.createLinearGradient(beamX - 48, 0, beamX + 48, 0);
-  beamGradient.addColorStop(0, 'rgba(0, 210, 255, 0)');
-  beamGradient.addColorStop(0.42, 'rgba(0, 210, 255, 0.15)');
-  beamGradient.addColorStop(0.5, 'rgba(0, 255, 255, 0.95)');
-  beamGradient.addColorStop(0.58, 'rgba(192, 132, 252, 0.2)');
-  beamGradient.addColorStop(1, 'rgba(192, 132, 252, 0)');
-  ctx.fillStyle = beamGradient;
-  ctx.fillRect(beamX - 56, 0, 112, height);
-
-  drawCyberParticles(ctx, beamX, height, progress);
-  drawScanlineOverlay(ctx, width, height, 0.08 + Math.sin(progress * Math.PI) * 0.08);
-
-  if (progress > 0.05 && progress < 0.95) {
-    ctx.save();
-    ctx.globalAlpha = 0.18 * Math.sin(progress * Math.PI);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-  }
-
-  drawGroundOverlay(ctx, width, height, DEFAULTS.groundHeight, accent);
-}
-
-function drawSceneBackground(ctx, width, height, layer, image, parallax, transitionState, images, now) {
-  if (transitionState) {
-    const progress = clamp(
-      (now - transitionState.startedAt) / transitionState.duration,
-      0,
-      1,
-    );
-    drawFuturisticBackgroundTransition(
-      ctx,
-      width,
-      height,
-      images[transitionState.from],
-      images[transitionState.to],
-      progress,
-      parallax,
-      layer.accent,
-    );
-    return;
-  }
-
-  if (!drawCoverImage(ctx, image, width, height, parallax)) {
-    drawFallbackBackground(ctx, width, height, layer.accent);
-    return;
-  }
-
-  drawGroundOverlay(ctx, width, height, DEFAULTS.groundHeight, layer.accent);
+function getRenderDpr() {
+  const raw = window.devicePixelRatio || 1;
+  const compact = (window.innerWidth || 400) <= 520
+    || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || '');
+  return Math.min(raw, compact ? 1.25 : 1.5);
 }
 
 function getPipeHitMetrics() {
@@ -405,44 +310,41 @@ function drawPillarColumn(ctx, x, y, columnHeight, columnWidth, pillarImage, fli
   const drawWidth = columnWidth - padding;
   const drawX = x + padding / 2;
 
-  ctx.save();
-
   if (!pillarImage?.complete || !pillarImage.naturalWidth) {
     ctx.fillStyle = 'rgba(46, 196, 232, 0.35)';
     ctx.fillRect(drawX, y, drawWidth, columnHeight);
+    return;
+  }
+
+  if (flipped) {
+    ctx.save();
+    ctx.translate(drawX + drawWidth / 2, y + columnHeight);
+    ctx.scale(1, -1);
+    ctx.drawImage(pillarImage, -drawWidth / 2, 0, drawWidth, columnHeight);
     ctx.restore();
     return;
   }
 
-  const tileHeight = drawWidth * (pillarImage.naturalHeight / pillarImage.naturalWidth);
-  const step = Math.max(tileHeight * 0.9, 48);
-
-  if (flipped) {
-    ctx.translate(drawX + drawWidth / 2, y + columnHeight);
-    ctx.scale(1, -1);
-    for (let offset = 0; offset < columnHeight; offset += step) {
-      const segmentHeight = Math.min(tileHeight, columnHeight - offset);
-      ctx.drawImage(pillarImage, -drawWidth / 2, offset, drawWidth, segmentHeight);
-    }
-  } else {
-    for (let offset = 0; offset < columnHeight; offset += step) {
-      const segmentTop = y + offset;
-      const segmentHeight = Math.min(tileHeight, y + columnHeight - segmentTop);
-      ctx.drawImage(pillarImage, drawX, segmentTop, drawWidth, segmentHeight);
-    }
-  }
-
-  ctx.restore();
+  ctx.drawImage(pillarImage, drawX, y, drawWidth, columnHeight);
 }
 
 function drawStarBadge(ctx, star) {
+  const outer = 11;
+  const inner = 4.6;
   ctx.save();
   ctx.translate(star.x, star.y);
   ctx.rotate(star.spin);
-  ctx.font = '22px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(star.collected ? '✨' : '⭐', 0, 0);
+  ctx.fillStyle = star.collected ? '#ffe082' : '#ffd54a';
+  ctx.beginPath();
+  for (let index = 0; index < 5; index += 1) {
+    const outerAngle = (index * Math.PI * 2) / 5 - Math.PI / 2;
+    const innerAngle = outerAngle + Math.PI / 5;
+    const command = index === 0 ? 'moveTo' : 'lineTo';
+    ctx[command](Math.cos(outerAngle) * outer, Math.sin(outerAngle) * outer);
+    ctx.lineTo(Math.cos(innerAngle) * inner, Math.sin(innerAngle) * inner);
+  }
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 
@@ -564,22 +466,30 @@ export function createColibriFlappyGame(root, options = {}) {
   shell.append(backButton, canvas);
   root.replaceChildren(shell);
 
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true })
+    || canvas.getContext('2d', { alpha: false })
+    || canvas.getContext('2d');
   const sprite = new Image();
+  sprite.decoding = 'async';
   sprite.src = SPRITE_URL;
   let spriteTrim = null;
 
   const backgroundImages = BACKGROUND_LAYERS.map((layer) => {
     const image = new Image();
+    image.decoding = 'async';
     image.src = layer.src;
     return image;
   });
 
   const pillarImages = PILLAR_TYPES.map((pillar) => {
     const image = new Image();
+    image.decoding = 'async';
     image.src = pillar.src;
     return image;
   });
+
+  const backgroundCache = BACKGROUND_LAYERS.map(() => document.createElement('canvas'));
+  const backgroundCacheReady = BACKGROUND_LAYERS.map(() => false);
 
   const flapSound = createSoundPlayer(SOUNDS.flap, 0.8);
   const passSound = createSoundPlayer(SOUNDS.pass, 0.75);
@@ -592,10 +502,13 @@ export function createColibriFlappyGame(root, options = {}) {
   let animationId = 0;
   let lastSpawn = 0;
   let lastFrameNow = performance.now();
+  let lastUpdateNow = 0;
   let paused = false;
+  let pausedByVisibility = document.visibilityState === 'hidden';
   let mounted = true;
   let scoreSubmitted = false;
-  let bgScroll = 0;
+  let hudTopInset = 44;
+  let resizeTimer = 0;
 
   const state = {
     mode: 'ready',
@@ -674,17 +587,114 @@ export function createColibriFlappyGame(root, options = {}) {
     };
   }
 
+  function configureContext(target) {
+    target.setTransform(dpr, 0, 0, dpr, 0, 0);
+    target.imageSmoothingEnabled = true;
+    target.imageSmoothingQuality = dpr > 1.25 ? 'low' : 'medium';
+  }
+
+  function refreshHudTopInset() {
+    const canvasTop = canvas.getBoundingClientRect().top;
+    const backTop = backButton.getBoundingClientRect().top;
+    const inferredSafeTop = Math.max(0, backTop - canvasTop - 12);
+    const viewportTop = Math.max(0, window.visualViewport?.offsetTop || 0);
+    hudTopInset = Math.max(inferredSafeTop, viewportTop, 44);
+  }
+
+  function paintBackgroundCache(index) {
+    const cache = backgroundCache[index];
+    cache.width = Math.max(1, Math.round(width * dpr));
+    cache.height = Math.max(1, Math.round(height * dpr));
+    const cacheCtx = cache.getContext('2d', { alpha: false }) || cache.getContext('2d');
+    configureContext(cacheCtx);
+
+    const layer = BACKGROUND_LAYERS[index];
+    const image = backgroundImages[index];
+    if (!drawCoverImage(cacheCtx, image, width, height, 0)) {
+      drawFallbackBackground(cacheCtx, width, height, layer.accent);
+    } else {
+      drawGroundOverlay(cacheCtx, width, height, DEFAULTS.groundHeight, layer.accent);
+    }
+    backgroundCacheReady[index] = true;
+  }
+
+  function rebuildBackgroundCache() {
+    BACKGROUND_LAYERS.forEach((_, index) => paintBackgroundCache(index));
+  }
+
+  function blitCachedBackground(index) {
+    const cache = backgroundCache[index];
+    if (backgroundCacheReady[index] && cache.width && cache.height) {
+      ctx.drawImage(cache, 0, 0, width, height);
+      return;
+    }
+
+    const layer = BACKGROUND_LAYERS[index];
+    if (!drawCoverImage(ctx, backgroundImages[index], width, height, 0)) {
+      drawFallbackBackground(ctx, width, height, layer.accent);
+      return;
+    }
+    drawGroundOverlay(ctx, width, height, DEFAULTS.groundHeight, layer.accent);
+  }
+
+  function drawSceneBackground(now) {
+    if (state.bgTransition) {
+      const progress = clamp(
+        (now - state.bgTransition.startedAt) / state.bgTransition.duration,
+        0,
+        1,
+      );
+      blitCachedBackground(state.bgTransition.from);
+      ctx.save();
+      ctx.globalAlpha = easeInOutCubic(progress);
+      blitCachedBackground(state.bgTransition.to);
+      ctx.restore();
+      return;
+    }
+
+    blitCachedBackground(state.displayedBgIndex);
+  }
+
   function resize() {
     const size = getPlayAreaSize();
+    const nextDpr = getRenderDpr();
+    const prevHeight = height;
+    const sameSize = Math.abs(size.width - width) < 4
+      && Math.abs(size.height - height) < 4
+      && nextDpr === dpr
+      && canvas.width > 0;
+
+    if (sameSize) {
+      refreshHudTopInset();
+      return;
+    }
+
     width = size.width;
     height = size.height;
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    dpr = nextDpr;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    configureContext(ctx);
+    rebuildBackgroundCache();
+    refreshHudTopInset();
+
+    if (state.mode === 'playing' && prevHeight > 0) {
+      state.bird.y *= height / prevHeight;
+      return;
+    }
+
     resetBirdPosition(false);
+  }
+
+  function scheduleResize() {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      if (!mounted) return;
+      resize();
+      render();
+    }, 120);
   }
 
   function resetBirdPosition(resetVelocity = true) {
@@ -704,7 +714,6 @@ export function createColibriFlappyGame(root, options = {}) {
     state.bgTransition = null;
     lastSpawn = 0;
     scoreSubmitted = false;
-    bgScroll = 0;
     resetBirdPosition(true);
   }
 
@@ -861,9 +870,8 @@ export function createColibriFlappyGame(root, options = {}) {
     state.bird.vy = DEFAULTS.flapVelocity;
   }
 
-  function update(now) {
+  function update(now, dt) {
     const speedMultiplier = getDifficultyMultiplier();
-    bgScroll += DEFAULTS.pipeSpeed * 0.4 * speedMultiplier;
     updateBackgroundTransition(now);
 
     if (!state.bgTransition && getTargetBgIndex() !== state.displayedBgIndex) {
@@ -872,21 +880,21 @@ export function createColibriFlappyGame(root, options = {}) {
 
     if (state.mode !== 'playing') {
       if (state.mode === 'ready') {
-        state.bird.y += Math.sin(now / 280) * 0.35;
+        state.bird.y = height * 0.42 + Math.sin(now / 280) * 6;
       }
       return;
     }
 
-    state.bird.vy += DEFAULTS.gravity;
+    state.bird.vy += DEFAULTS.gravity * dt;
     state.bird.vy = clamp(state.bird.vy, -9, 11);
-    state.bird.y += state.bird.vy;
+    state.bird.y += state.bird.vy * dt;
 
     if (now - lastSpawn >= DEFAULTS.spawnEveryMs && spawnPipe()) {
       lastSpawn = now;
     }
 
     state.pipes.forEach((pipe) => {
-      pipe.x -= DEFAULTS.pipeSpeed * speedMultiplier;
+      pipe.x -= DEFAULTS.pipeSpeed * speedMultiplier * dt;
       if (!pipe.passed && pipe.x + DEFAULTS.pipeWidth < state.bird.x) {
         pipe.passed = true;
         state.score += 1;
@@ -898,8 +906,8 @@ export function createColibriFlappyGame(root, options = {}) {
     state.pipes = state.pipes.filter((pipe) => pipe.x + DEFAULTS.pipeWidth > -20);
 
     state.stars.forEach((star) => {
-      star.x -= DEFAULTS.pipeSpeed * speedMultiplier;
-      star.spin += 0.06;
+      star.x -= DEFAULTS.pipeSpeed * speedMultiplier * dt;
+      star.spin += 0.06 * dt;
     });
     state.stars = state.stars.filter((star) => star.x > -30);
 
@@ -914,12 +922,7 @@ export function createColibriFlappyGame(root, options = {}) {
   }
 
   function getHudTopInset() {
-    const canvasTop = canvas.getBoundingClientRect().top;
-    const backTop = backButton.getBoundingClientRect().top;
-    const inferredSafeTop = Math.max(0, backTop - canvasTop - 12);
-    const viewportTop = Math.max(0, window.visualViewport?.offsetTop || 0);
-
-    return Math.max(inferredSafeTop, viewportTop, 44);
+    return hudTopInset;
   }
 
   function getHudLayout() {
@@ -960,7 +963,7 @@ export function createColibriFlappyGame(root, options = {}) {
       ctx.font = '500 14px system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255,255,255,0.72)';
       ctx.fillText('Esquiva los postes del colegio', width / 2, height * 0.58 + 28);
-      ctx.fillText('⭐ Recoge insignias Comergio', width / 2, height * 0.58 + 50);
+      ctx.fillText('Recoge insignias Comergio', width / 2, height * 0.58 + 50);
     }
 
     if (state.mode === 'over') {
@@ -977,19 +980,7 @@ export function createColibriFlappyGame(root, options = {}) {
 
   function render(now = lastFrameNow) {
     const layer = getActiveLayer();
-    const currentImage = backgroundImages[state.bgTransition ? state.bgTransition.from : state.displayedBgIndex];
-
-    drawSceneBackground(
-      ctx,
-      width,
-      height,
-      layer,
-      currentImage,
-      -bgScroll * 0.06,
-      state.bgTransition,
-      backgroundImages,
-      now,
-    );
+    drawSceneBackground(now);
 
     state.pipes.forEach((pipe) => {
       const topHeight = pipe.gapY;
@@ -1007,12 +998,27 @@ export function createColibriFlappyGame(root, options = {}) {
 
   function loop(now) {
     if (!mounted) return;
+
     lastFrameNow = now;
-    if (!paused) {
-      update(now);
-      render();
+    const running = !paused && !pausedByVisibility;
+
+    if (running) {
+      const dt = lastUpdateNow ? Math.min(32, now - lastUpdateNow) / (1000 / 60) : 1;
+      lastUpdateNow = now;
+      update(now, dt);
+      render(now);
+    } else {
+      lastUpdateNow = 0;
     }
+
     animationId = window.requestAnimationFrame(loop);
+  }
+
+  function onVisibilityChange() {
+    pausedByVisibility = document.visibilityState === 'hidden';
+    if (!pausedByVisibility) {
+      lastUpdateNow = 0;
+    }
   }
 
   function ensureSoundsUnlocked() {
@@ -1048,28 +1054,17 @@ export function createColibriFlappyGame(root, options = {}) {
 
   shell.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', scheduleResize);
+  document.addEventListener('visibilitychange', onVisibilityChange);
 
   sprite.addEventListener('load', () => {
     spriteTrim = computeSpriteTrim(sprite);
-    if (mounted) {
-      render();
-    }
   });
 
-  backgroundImages.forEach((image) => {
+  backgroundImages.forEach((image, index) => {
     image.addEventListener('load', () => {
-      if (mounted) {
-        render();
-      }
-    });
-  });
-
-  pillarImages.forEach((image) => {
-    image.addEventListener('load', () => {
-      if (mounted) {
-        render();
-      }
+      if (!mounted) return;
+      paintBackgroundCache(index);
     });
   });
 
@@ -1083,6 +1078,7 @@ export function createColibriFlappyGame(root, options = {}) {
     },
     resume() {
       paused = false;
+      lastUpdateNow = 0;
     },
     resize() {
       resize();
@@ -1091,9 +1087,11 @@ export function createColibriFlappyGame(root, options = {}) {
     destroy() {
       mounted = false;
       window.cancelAnimationFrame(animationId);
+      window.clearTimeout(resizeTimer);
       shell.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('resize', resize);
+      window.removeEventListener('resize', scheduleResize);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       delete root.dataset.colibriGameActive;
       root.replaceChildren();
       if (activeColibriGameInstance === gameApi) {

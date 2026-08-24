@@ -1534,8 +1534,10 @@ router.patch('/users/:id', async (req, res) => {
         return res.status(409).json({ message: 'Username already registered' });
       }
       user.username = normalizedUsername;
-      if (!user.email && isValidEmail(normalizedUsername)) {
+      if (isValidEmail(normalizedUsername)) {
         user.email = normalizedUsername;
+      } else if (!isValidEmail(user.email)) {
+        user.email = '';
       }
     }
 
@@ -1552,6 +1554,8 @@ router.patch('/users/:id', async (req, res) => {
         user.email = normalizedEmail;
       } else if (isValidEmail(String(user.username || ''))) {
         user.email = String(user.username).toLowerCase().trim();
+      } else if (!isValidEmail(user.email)) {
+        user.email = '';
       }
     }
 

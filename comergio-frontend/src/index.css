@@ -695,10 +695,7 @@ body.games-route-active,
 body.games-route-active #root,
 body.games-route-active #root > div,
 body.games-route-active .campus-app-main {
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
   background: linear-gradient(160deg, #0b2530 0%, #1d6972 48%, #0d3b66 100%);
   --app-shell-background: #0d3b66;
 }

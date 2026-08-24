@@ -62,6 +62,10 @@ export function getCampusTeacherCourseDetail(courseId) {
   return api.get(`/campus/teacher/courses/${courseId}`).then((response) => response.data);
 }
 
+export function getCampusTeacherAssignmentSubmissions(courseId) {
+  return api.get(`/campus/teacher/courses/${courseId}/assignment-submissions`).then((response) => response.data);
+}
+
 export function getCampusTeacherAttendance(params = {}) {
   return api.get('/campus/teacher/attendance', { params }).then((response) => response.data);
 }

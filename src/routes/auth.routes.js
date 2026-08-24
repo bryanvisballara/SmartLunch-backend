@@ -1049,7 +1049,9 @@ router.post('/login', async (req, res) => {
     const identifierFilter = {
       status: 'active',
       deletedAt: null,
-      $or: [{ username: normalizedIdentifier }, { email: normalizedIdentifier }],
+      $or: isValidEmail(normalizedIdentifier)
+        ? [{ username: normalizedIdentifier }, { email: normalizedIdentifier }]
+        : [{ username: normalizedIdentifier }],
     };
 
     // Credentials are school-scoped: never fall back to another tenant when schoolId is provided.

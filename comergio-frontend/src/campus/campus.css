@@ -10125,14 +10125,11 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
 .campus-parent-mobile-app.is-games-section {
   --parent-bg: #0d3b66;
   gap: 0;
-  background: linear-gradient(160deg, #0b2530 0%, #1d6972 48%, #0d3b66 100%);
+  background: #0d3b66;
   padding-left: 0;
   padding-right: 0;
   padding-bottom: 0;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
 }
 
 .campus-parent-mobile-app.has-parent-portal-header.is-games-section {
@@ -10144,10 +10141,7 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   margin: 0;
   padding: 0;
   width: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
   background: transparent;
 }
 
@@ -10157,10 +10151,7 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
 
 .campus-parent-mobile-app.is-games-section .colibri-flappy-view {
   width: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
 }
 
 .campus-parent-mobile__game-promo {
@@ -11585,6 +11576,9 @@ button.campus-teacher__nav-item-toggle {
 
 .campus-teacher__topbar-dropdown--notifications {
   width: min(340px, calc(100vw - 2rem));
+  min-width: 0;
+  max-width: calc(100vw - 1.5rem);
+  box-sizing: border-box;
 }
 
 .campus-teacher__topbar-dropdown--notifications header {
@@ -12947,6 +12941,151 @@ button.campus-teacher__nav-item-toggle {
   font-size: 0.875rem;
 }
 
+.campus-teacher__classwork-empty span {
+  display: block;
+  margin-top: 0.35rem;
+  color: #80868b;
+}
+
+.campus-teacher__submissions-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 0.35rem 0 1rem;
+}
+
+.campus-teacher__submissions-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.4fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.campus-teacher__submissions-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.campus-teacher__submissions-item {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #e8eaed;
+  border-radius: 12px;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+}
+
+.campus-teacher__submissions-item strong {
+  font-size: 0.95rem;
+}
+
+.campus-teacher__submissions-item span,
+.campus-teacher__submissions-item small {
+  color: #5f6368;
+  font-size: 0.8rem;
+}
+
+.campus-teacher__submissions-item.is-selected {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.12);
+}
+
+.campus-teacher__submissions-detail {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid #e8eaed;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.campus-teacher__submissions-detail header span {
+  color: #1a73e8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.campus-teacher__submissions-detail header h3 {
+  margin: 0.15rem 0 0;
+}
+
+.campus-teacher__submissions-detail header p {
+  margin: 0.2rem 0 0;
+  color: #5f6368;
+}
+
+.campus-teacher__submissions-students {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.campus-teacher__submissions-student {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #eceff1;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.campus-teacher__submissions-student.is-submitted {
+  background: #f3faf4;
+  border-color: #cde9d4;
+}
+
+.campus-teacher__submissions-student-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.campus-teacher__submissions-student-head div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.campus-teacher__submissions-student-head span,
+.campus-teacher__submissions-student-head em {
+  font-size: 0.8rem;
+  color: #5f6368;
+  font-style: normal;
+}
+
+.campus-teacher__submissions-student-body p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.campus-teacher__submissions-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.campus-teacher__submissions-files a,
+.campus-teacher__submissions-files span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: #174ea6;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (max-width: 860px) {
+  .campus-teacher__submissions-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .campus-teacher__classwork-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -13071,6 +13210,13 @@ button.campus-teacher__nav-item-toggle {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.campus-teacher__assignment-detail-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .campus-teacher__assignment-detail-title {
@@ -18357,6 +18503,28 @@ button.campus-teacher__home-kpi-card:focus-visible {
 
   .campus-teacher__topbar-search input {
     font-size: 0.86rem;
+  }
+
+  .campus-teacher__topbar-dropdown--notifications {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 4.15rem);
+    left: max(0.7rem, env(safe-area-inset-left, 0px));
+    right: max(0.7rem, env(safe-area-inset-right, 0px));
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 5.25rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 90;
+  }
+
+  .campus-teacher__topbar-dropdown--notifications .campus-teacher__topbar-dropdown-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .campus-teacher__topbar-profile-copy {

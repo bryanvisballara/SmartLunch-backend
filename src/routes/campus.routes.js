@@ -11,6 +11,7 @@ const CampusCourse = require('../models/campusCourse.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const CampusPost = require('../models/campusPost.model');
+const CampusPostSubmission = require('../models/campusPostSubmission.model');
 const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
 const CampusSubjectReportCard = require('../models/campusSubjectReportCard.model');
 const CampusGeneralReportCard = require('../models/campusGeneralReportCard.model');
@@ -39,6 +40,11 @@ const {
   queueStudentUserNotifications,
 } = require('../services/notification.service');
 const { getCampusAccessContext } = require('../utils/campusAccess');
+const {
+  filterStudentsByCampusAudience,
+  parseCampusAssignmentAudience,
+  serializeCampusAssignmentAudience,
+} = require('../utils/campusPostAudience');
 const {
   MAX_CAMPUS_MATERIAL_FILE_BYTES,
   MAX_CAMPUS_MATERIAL_FILES,
@@ -1451,6 +1457,8 @@ function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
             date: normalizeText(subcomponent.date),
             topic: normalizeText(subcomponent.topic),
             description: normalizeText(subcomponent.description),
+            targetType: serializeCampusAssignmentAudience(subcomponent).targetType,
+            targetStudentIds: serializeCampusAssignmentAudience(subcomponent).targetStudentIds,
             score: entry ? Number(entry.score) : null,
             feedback: normalizeText(entry?.feedback),
             gradedAt: entry?.gradedAt || null,
@@ -1572,6 +1580,7 @@ function normalizeGradingComponents(rawComponents, options = {}) {
 
       subcomponentWeightTotal += weight;
 
+      const audience = serializeCampusAssignmentAudience(subcomponent);
       return {
         key,
         name,
@@ -1580,6 +1589,8 @@ function normalizeGradingComponents(rawComponents, options = {}) {
         topic: normalizeText(subcomponent?.topic),
         description: normalizeText(subcomponent?.description),
         order: Number.isFinite(Number(subcomponent?.order)) ? Number(subcomponent.order) : (index + 1),
+        targetType: audience.targetType,
+        targetStudentIds: audience.targetStudentIds,
       };
     }).filter((subcomponent) => Boolean(subcomponent.name));
 
@@ -1762,7 +1773,7 @@ function normalizeAcademicPeriods(rawAcademicPeriods, options = {}) {
   };
 }
 
-function buildPostGradebookAssignmentUpdate(rawAssignment, course, postTitle, deliveryDate) {
+function buildPostGradebookAssignmentUpdate(rawAssignment, course, postTitle, deliveryDate, audience = null) {
   const assignment = parseMaybeJson(rawAssignment, rawAssignment || {});
   if (!assignment || assignment.enabled !== true) {
     return { ok: true, periods: null };
@@ -1835,6 +1846,10 @@ function buildPostGradebookAssignmentUpdate(rawAssignment, course, postTitle, de
               topic: normalizeText(assignment.topic || course.subject || course.title),
               description: subcomponentDescription,
               order: existingSubcomponents.length + 1,
+              targetType: audience?.targetType === 'students' ? 'students' : 'course',
+              targetStudentIds: audience?.targetType === 'students'
+                ? (Array.isArray(audience.targetStudentIds) ? audience.targetStudentIds.map((id) => String(id)) : [])
+                : [],
             },
           ],
         }
@@ -2020,15 +2035,20 @@ function serializeCourse(course, options = {}) {
           weight: Number(component.weight || 0),
           order: Number(component.order || 0),
           subcomponents: Array.isArray(component.subcomponents)
-            ? component.subcomponents.map((subcomponent) => ({
-              key: normalizeText(subcomponent.key),
-              name: normalizeText(subcomponent.name),
-              weight: Number(subcomponent.weight || 0),
-              date: normalizeText(subcomponent.date),
-              topic: normalizeText(subcomponent.topic),
-              description: normalizeText(subcomponent.description),
-              order: Number(subcomponent.order || 0),
-            }))
+            ? component.subcomponents.map((subcomponent) => {
+              const audience = serializeCampusAssignmentAudience(subcomponent);
+              return {
+                key: normalizeText(subcomponent.key),
+                name: normalizeText(subcomponent.name),
+                weight: Number(subcomponent.weight || 0),
+                date: normalizeText(subcomponent.date),
+                topic: normalizeText(subcomponent.topic),
+                description: normalizeText(subcomponent.description),
+                order: Number(subcomponent.order || 0),
+                targetType: audience.targetType,
+                targetStudentIds: audience.targetStudentIds,
+              };
+            })
             : [],
         }))
         : [],
@@ -2041,15 +2061,20 @@ function serializeCourse(course, options = {}) {
         weight: Number(component.weight || 0),
         order: Number(component.order || 0),
         subcomponents: Array.isArray(component.subcomponents)
-          ? component.subcomponents.map((subcomponent) => ({
-            key: normalizeText(subcomponent.key),
-            name: normalizeText(subcomponent.name),
-            weight: Number(subcomponent.weight || 0),
-            date: normalizeText(subcomponent.date),
-            topic: normalizeText(subcomponent.topic),
-            description: normalizeText(subcomponent.description),
-            order: Number(subcomponent.order || 0),
-          }))
+          ? component.subcomponents.map((subcomponent) => {
+            const audience = serializeCampusAssignmentAudience(subcomponent);
+            return {
+              key: normalizeText(subcomponent.key),
+              name: normalizeText(subcomponent.name),
+              weight: Number(subcomponent.weight || 0),
+              date: normalizeText(subcomponent.date),
+              topic: normalizeText(subcomponent.topic),
+              description: normalizeText(subcomponent.description),
+              order: Number(subcomponent.order || 0),
+              targetType: audience.targetType,
+              targetStudentIds: audience.targetStudentIds,
+            };
+          })
           : [],
       }))
       : [],
@@ -2749,7 +2774,38 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
   }
 }
 
+function serializeTeacherSubmissionAttachment(attachment = {}) {
+  return {
+    sourceType: normalizeText(attachment.sourceType) || 'file',
+    kind: normalizeText(attachment.kind) || 'file',
+    title: normalizeText(attachment.title),
+    url: normalizeText(attachment.url),
+    fileName: normalizeText(attachment.fileName),
+    mimeType: normalizeText(attachment.mimeType),
+    sizeBytes: Number(attachment.sizeBytes || 0),
+    extension: normalizeText(attachment.extension),
+    storage: normalizeText(attachment.storage),
+  };
+}
+
+function serializeTeacherStudentSubmission(submission = null) {
+  if (!submission) {
+    return null;
+  }
+
+  return {
+    id: String(submission._id || submission.id || ''),
+    note: normalizeText(submission.note),
+    status: normalizeText(submission.status) || 'submitted',
+    submittedAt: submission.submittedAt || submission.createdAt || null,
+    attachments: Array.isArray(submission.attachments)
+      ? submission.attachments.map(serializeTeacherSubmissionAttachment)
+      : [],
+  };
+}
+
 function serializePost(post) {
+  const audience = serializeCampusAssignmentAudience(post);
   return {
     id: String(post._id),
     courseId: String(post.courseId?._id || post.courseId || ''),
@@ -2782,6 +2838,8 @@ function serializePost(post) {
       }))
       : [],
     allowStudentSubmission: Boolean(post.allowStudentSubmission),
+    targetType: audience.targetType,
+    targetStudentIds: audience.targetStudentIds,
     status: normalizeText(post.status) || 'published',
     publishedAt: post.publishedAt || null,
     createdAt: post.createdAt,
@@ -2948,7 +3006,11 @@ async function notifyCampusPostPublished({ schoolId, course, post, students }) {
             subject: normalizeText(course?.subject),
             postType,
             studentId,
-            url: buildParentPushUrl('campus.teacher_post_published', { studentId, postType }),
+            url: buildParentPushUrl('campus.teacher_post_published', {
+              studentId,
+              postType,
+              postId: String(post?._id || ''),
+            }),
           },
         };
       },
@@ -2968,7 +3030,11 @@ async function notifyCampusPostPublished({ schoolId, course, post, students }) {
             subject: normalizeText(course?.subject),
             postType,
             studentId: String(student.studentId || student._id || student.id || ''),
-            url: buildStudentPushUrl('campus.teacher_post_published'),
+            audience: 'student',
+            url: buildStudentPushUrl('campus.teacher_post_published', {
+              postType,
+              postId: String(post?._id || ''),
+            }),
           },
         }),
       })
@@ -2981,7 +3047,10 @@ async function notifyCampusPostPublished({ schoolId, course, post, students }) {
 async function queueCampusPostPublishedNotifications({ schoolId, teacherUserId, course, post }) {
   return runWithSchoolContext(schoolId, async () => {
     const detail = await buildTeacherCourseDetail({ schoolId, teacherUserId, course });
-    const students = Array.isArray(detail?.students) ? detail.students : [];
+    const students = filterStudentsByCampusAudience(
+      Array.isArray(detail?.students) ? detail.students : [],
+      post
+    );
     if (!students.length) {
       console.warn(`[CAMPUS_POST_NOTIFY_WARNING] post=${post?._id || ''} course=${course?._id || ''} empty_roster`);
     }
@@ -3590,14 +3659,19 @@ function normalizeAssignmentTitleForMatch(value) {
 function buildGradebookAssignmentOptions(periods) {
   return (Array.isArray(periods) ? periods : []).flatMap((period) => (
     (period.gradingComponents || []).flatMap((component) => (
-      (component.subcomponents || []).map((subcomponent) => ({
-        key: [period.key, component.key, subcomponent.key].map((part) => normalizeText(part)).join('::'),
-        periodKey: period.key,
-        componentKey: component.key,
-        subcomponentKey: subcomponent.key,
-        subcomponentName: subcomponent.name,
-        label: `${subcomponent.name || 'Asignacion sin nombre'} · ${component.name || 'Componente'}`,
-      }))
+      (component.subcomponents || []).map((subcomponent) => {
+        const audience = serializeCampusAssignmentAudience(subcomponent);
+        return {
+          key: [period.key, component.key, subcomponent.key].map((part) => normalizeText(part)).join('::'),
+          periodKey: period.key,
+          componentKey: component.key,
+          subcomponentKey: subcomponent.key,
+          subcomponentName: subcomponent.name,
+          label: `${subcomponent.name || 'Asignacion sin nombre'} · ${component.name || 'Componente'}`,
+          targetType: audience.targetType,
+          targetStudentIds: audience.targetStudentIds,
+        };
+      })
     ))
   ));
 }
@@ -3630,6 +3704,45 @@ function resolveGradebookAssignmentForPostTitle(title, periods) {
   return partialMatch || null;
 }
 
+function applyPostAudiencesToAcademicPeriods(periods, posts) {
+  const targetedPosts = (Array.isArray(posts) ? posts : []).filter((post) => (
+    serializeCampusAssignmentAudience(post).targetType === 'students'
+  ));
+  if (!targetedPosts.length) {
+    return Array.isArray(periods) ? periods : [];
+  }
+
+  return (Array.isArray(periods) ? periods : []).map((period) => ({
+    ...period,
+    gradingComponents: (period.gradingComponents || []).map((component) => ({
+      ...component,
+      subcomponents: (component.subcomponents || []).map((subcomponent) => {
+        const current = serializeCampusAssignmentAudience(subcomponent);
+        if (current.targetType === 'students') {
+          return { ...subcomponent, ...current };
+        }
+
+        const matchingPost = targetedPosts.find((post) => {
+          const postName = normalizeAssignmentMatchKey(post.title);
+          const subName = normalizeAssignmentMatchKey(subcomponent.name);
+          return postName === subName
+            || normalizeAssignmentTitleForMatch(post.title) === normalizeAssignmentTitleForMatch(subcomponent.name);
+        });
+        if (!matchingPost) {
+          return subcomponent;
+        }
+
+        const audience = serializeCampusAssignmentAudience(matchingPost);
+        return {
+          ...subcomponent,
+          targetType: audience.targetType,
+          targetStudentIds: audience.targetStudentIds,
+        };
+      }),
+    })),
+  }));
+}
+
 function countStudentsGradedForAssignment(students, assignment) {
   const roster = Array.isArray(students) ? students : [];
   if (!assignment || roster.length === 0) {
@@ -3658,7 +3771,7 @@ function isPostPendingGrading(post, academicPeriods, students) {
     return false;
   }
 
-  const roster = Array.isArray(students) ? students : [];
+  const roster = filterStudentsByCampusAudience(Array.isArray(students) ? students : [], post);
   if (roster.length === 0) {
     return false;
   }
@@ -4182,10 +4295,140 @@ router.get('/teacher/courses/:id', requireCampusTeacherAccess, async (req, res) 
 
     return res.status(200).json({
       ...detail,
+      course: {
+        ...detail.course,
+        academicPeriods: applyPostAudiencesToAcademicPeriods(detail.course?.academicPeriods, posts),
+        gradingComponents: applyPostAudiencesToAcademicPeriods(
+          [{ gradingComponents: detail.course?.gradingComponents || [] }],
+          posts
+        )[0]?.gradingComponents || [],
+      },
       posts: serializeArray(posts, serializePost),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/teacher/courses/:id/assignment-submissions', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const { id } = req.params;
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Invalid course id' });
+    }
+
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId: id,
+      sync: true,
+      allowInactive: true,
+    });
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const [detail, posts] = await Promise.all([
+      buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course }),
+      CampusPost.find({
+        schoolId,
+        teacherUserId: userId,
+        courseId: course._id,
+        status: { $ne: 'archived' },
+      })
+        .populate('courseId', 'title')
+        .sort({ dueAt: 1, scheduledClassDate: 1, createdAt: -1 })
+        .lean(),
+    ]);
+
+    const students = Array.isArray(detail?.students) ? detail.students : [];
+    const postIds = (posts || []).map((post) => post._id).filter(Boolean);
+    const submissions = postIds.length
+      ? await CampusPostSubmission.find({
+        schoolId,
+        postId: { $in: postIds },
+      })
+        .populate('studentId', 'name schoolCode grade')
+        .lean()
+      : [];
+
+    const submissionsByPostId = new Map();
+    submissions.forEach((submission) => {
+      const postId = String(submission.postId || '');
+      if (!postId) {
+        return;
+      }
+      const current = submissionsByPostId.get(postId) || [];
+      current.push(submission);
+      submissionsByPostId.set(postId, current);
+    });
+
+    const assignments = (posts || [])
+      .filter((post) => Boolean(post.allowStudentSubmission) || submissionsByPostId.has(String(post._id)))
+      .map((post) => {
+        const postSubmissions = submissionsByPostId.get(String(post._id)) || [];
+        const submissionByStudentId = new Map(
+          postSubmissions.map((submission) => [
+            String(submission.studentId?._id || submission.studentId || ''),
+            submission,
+          ])
+        );
+        const seenStudentIds = new Set();
+        const audienceStudents = filterStudentsByCampusAudience(students, post);
+        const studentRows = audienceStudents.map((student) => {
+          const studentId = String(student.studentId || '');
+          seenStudentIds.add(studentId);
+          const submission = submissionByStudentId.get(studentId);
+          return {
+            studentId,
+            studentName: normalizeText(student.name),
+            studentSchoolCode: normalizeText(student.schoolCode),
+            studentGrade: normalizeText(student.grade),
+            submitted: Boolean(submission),
+            submission: serializeTeacherStudentSubmission(submission),
+          };
+        });
+
+        postSubmissions.forEach((submission) => {
+          const studentId = String(submission.studentId?._id || submission.studentId || '');
+          if (!studentId || seenStudentIds.has(studentId)) {
+            return;
+          }
+          seenStudentIds.add(studentId);
+          studentRows.push({
+            studentId,
+            studentName: normalizeText(submission.studentId?.name) || 'Alumno',
+            studentSchoolCode: normalizeText(submission.studentId?.schoolCode),
+            studentGrade: normalizeText(submission.studentId?.grade),
+            submitted: true,
+            submission: serializeTeacherStudentSubmission(submission),
+          });
+        });
+
+        studentRows.sort((left, right) => {
+          if (Boolean(left.submitted) !== Boolean(right.submitted)) {
+            return left.submitted ? -1 : 1;
+          }
+          return String(left.studentName || '').localeCompare(String(right.studentName || ''), 'es', { sensitivity: 'base' });
+        });
+
+        return {
+          ...serializePost(post),
+          submittedCount: studentRows.filter((row) => row.submitted).length,
+          pendingCount: studentRows.filter((row) => !row.submitted).length,
+          students: studentRows,
+        };
+      });
+
+    return res.status(200).json({
+      courseId: String(course._id),
+      studentCount: students.length,
+      assignments,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron cargar las entregas.' });
   }
 });
 
@@ -4609,6 +4852,10 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
     const scheduledClassSession = normalizeScheduledClassSession(req.body.scheduledClassSession);
     const allowStudentSubmission = req.body.allowStudentSubmission === true
       || ['true', '1', 'yes', 'on'].includes(String(req.body.allowStudentSubmission || '').trim().toLowerCase());
+    const audienceResult = parseCampusAssignmentAudience(req.body);
+    if (!audienceResult.ok) {
+      return res.status(400).json({ message: audienceResult.message });
+    }
 
     if (!courseLookup.courseId && !courseLookup.sourceCourseKey && !(courseLookup.subject && (courseLookup.section || courseLookup.studentGradeKey))) {
       return res.status(400).json({ message: 'Invalid course id' });
@@ -4692,7 +4939,8 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
       req.body.gradebookAssignment,
       course,
       title,
-      deliveryMode === 'date' ? dueAt : scheduledClassDate
+      deliveryMode === 'date' ? dueAt : scheduledClassDate,
+      audienceResult
     );
     if (!gradebookAssignmentResult.ok) {
       return res.status(400).json({ message: gradebookAssignmentResult.message });
@@ -4718,6 +4966,8 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
         scheduledClassSession: deliveryMode === 'class' ? scheduledClassSession : null,
         attachments,
         allowStudentSubmission,
+        targetType: audienceResult.targetType,
+        targetStudentIds: audienceResult.targetStudentIds,
         status,
         publishedAt: status === 'published' ? new Date() : null,
       });
@@ -5885,6 +6135,25 @@ router.patch('/teacher/posts/:id', requireCampusTeacherAccess, (req, res) => {
         if (Object.prototype.hasOwnProperty.call(req.body, 'allowStudentSubmission')) {
           post.allowStudentSubmission = req.body.allowStudentSubmission === true
             || ['true', '1', 'yes', 'on'].includes(String(req.body.allowStudentSubmission || '').trim().toLowerCase());
+        }
+
+        if (
+          Object.prototype.hasOwnProperty.call(req.body, 'targetType')
+          || Object.prototype.hasOwnProperty.call(req.body, 'targetStudentIds')
+        ) {
+          const audienceResult = parseCampusAssignmentAudience({
+            targetType: Object.prototype.hasOwnProperty.call(req.body, 'targetType')
+              ? req.body.targetType
+              : post.targetType,
+            targetStudentIds: Object.prototype.hasOwnProperty.call(req.body, 'targetStudentIds')
+              ? req.body.targetStudentIds
+              : post.targetStudentIds,
+          });
+          if (!audienceResult.ok) {
+            return res.status(400).json({ message: audienceResult.message });
+          }
+          post.targetType = audienceResult.targetType;
+          post.targetStudentIds = audienceResult.targetStudentIds;
         }
 
         if (Object.prototype.hasOwnProperty.call(req.body, 'type')) {

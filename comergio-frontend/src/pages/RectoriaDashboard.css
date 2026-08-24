@@ -88,8 +88,8 @@
 
 .rectoria-sidebar-subnav {
   display: grid;
-  gap: 6px;
-  padding-left: 10px;
+  gap: 2px;
+  padding-left: 8px;
   border-left: 2px solid #dbe3ef;
 }
 
@@ -97,27 +97,29 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 40px;
-  padding: 8px 10px;
+  gap: 8px;
+  min-height: 0;
+  padding: 0.22rem 0.45rem;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 7px;
   background: transparent;
   color: #475569;
-  font-weight: 750;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.2;
   text-align: left;
 }
 
 .rectoria-sidebar-subitem strong {
   display: inline-flex;
-  min-width: 24px;
-  min-height: 24px;
+  min-width: 18px;
+  min-height: 18px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   background: #e2e8f0;
   color: #0f172a;
-  font-size: 0.78rem;
+  font-size: 0.64rem;
 }
 
 .rectoria-sidebar-subitem.is-active {
@@ -1867,6 +1869,32 @@
 .rectoria-communication-card h4 {
   color: #0f172a;
   font-size: 1.08rem;
+}
+
+.rectoria-family-feed-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rectoria-family-feed-media-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rectoria-family-feed-media-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .rectoria-communication-actions {

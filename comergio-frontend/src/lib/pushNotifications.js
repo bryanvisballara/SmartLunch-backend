@@ -59,7 +59,11 @@ export function registerPushNotificationNavigation(handler) {
 }
 
 function openPushTarget(rawPayload = {}) {
-  const path = resolveNotificationPath(rawPayload);
+  const payload = {
+    ...(rawPayload && typeof rawPayload === 'object' ? rawPayload : {}),
+    ...(rawPayload?.payload && typeof rawPayload.payload === 'object' ? rawPayload.payload : {}),
+  };
+  const path = resolveNotificationPath(payload);
   if (!path) {
     return;
   }

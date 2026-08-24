@@ -2,10 +2,8 @@
   --colibri-flappy-bg: linear-gradient(160deg, #0b2530 0%, #1d6972 48%, #0d3b66 100%);
   position: relative;
   width: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
+  height: 100%;
   margin: 0;
   background: var(--colibri-flappy-bg);
 }
@@ -24,8 +22,16 @@
 }
 
 .colibri-flappy-view.is-playing {
-  --colibri-flappy-bg: linear-gradient(180deg, #0d3b66 0%, #1d6972 55%, #0b2530 100%);
-  background: var(--colibri-flappy-bg);
+  --colibri-flappy-bg: #0d3b66;
+  background: #0d3b66;
+  height: 100dvh;
+  overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
+}
+
+.colibri-flappy-view.is-playing::before {
+  content: none;
 }
 
 .colibri-flappy-screen {
@@ -36,10 +42,7 @@
 .colibri-flappy-screen.is-active {
   display: block;
   width: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
 }
 
 .colibri-flappy-menu-card {
@@ -47,10 +50,7 @@
   flex-direction: column;
   gap: 18px;
   width: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
   padding: calc(env(safe-area-inset-top, 0px) + 0.75rem) 20px calc(6.5rem + env(safe-area-inset-bottom, 0px));
   border: 0;
   border-radius: 0;
@@ -149,15 +149,12 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  min-height: 100vh;
-  min-height: 100svh;
   min-height: 100dvh;
-  min-height: 100lvh;
   border: 0;
   border-radius: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, #0d3b66 0%, #1d6972 55%, #0b2530 100%);
-  touch-action: manipulation;
+  background: #0d3b66;
+  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }

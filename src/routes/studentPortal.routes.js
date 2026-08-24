@@ -29,6 +29,7 @@ const Wallet = require('../models/wallet.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { normalizeStudentFeatures } = require('../utils/studentFeatures');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
+const { campusAudienceAppliesToStudent } = require('../utils/campusPostAudience');
 const { runWithSchoolContext } = require('../config/db');
 const {
   MAX_CAMPUS_MATERIAL_FILES,
@@ -287,6 +288,7 @@ router.get('/portal/overview', async (req, res) => {
         gradeValues,
         courseValues,
         courseTitleValues,
+        studentId: studentObjectId,
       })
       : [];
 
@@ -488,6 +490,7 @@ router.get('/portal/academic-calendar', async (req, res) => {
       items: [
         ...posts
           .filter((post) => H.isParentEvaluativePostType(post.type))
+          .filter((post) => campusAudienceAppliesToStudent(post, student._id))
           .map(H.serializeParentAcademicCalendarPost),
         ...assignments.map(H.serializeParentAcademicCalendarAssignment),
       ].filter((item) => item.id && item.date).sort((left, right) => new Date(left.date) - new Date(right.date)),
@@ -759,7 +762,9 @@ router.get('/portal/assignments', async (req, res) => {
       .sort({ scheduledClassDate: 1, dueAt: 1, publishedAt: -1, createdAt: -1 })
       .lean();
 
-    const evaluativePosts = posts.filter((post) => H.isParentEvaluativePostType(post.type));
+    const evaluativePosts = posts
+      .filter((post) => H.isParentEvaluativePostType(post.type))
+      .filter((post) => campusAudienceAppliesToStudent(post, student._id));
     const postIds = evaluativePosts.map((post) => post._id);
     const submissions = postIds.length
       ? await CampusPostSubmission.find({
@@ -814,7 +819,7 @@ router.get('/portal/assignments/:id', async (req, res) => {
       .populate('courseId', 'title subject section studentGradeKey')
       .lean();
 
-    if (!post || !H.isParentEvaluativePostType(post.type)) {
+    if (!post || !H.isParentEvaluativePostType(post.type) || !campusAudienceAppliesToStudent(post, student._id)) {
       return res.status(404).json({ message: 'Asignación no encontrada.' });
     }
 
@@ -865,6 +870,10 @@ router.post('/portal/assignments/:id/submissions', uploadCampusMaterialsMiddlewa
 
       if (!post || !H.isParentEvaluativePostType(post.type)) {
         return res.status(404).json({ message: 'Asignación no encontrada.' });
+      }
+
+      if (!campusAudienceAppliesToStudent(post, student._id)) {
+        return res.status(403).json({ message: 'Esta asignación no está dirigida a este alumno.' });
       }
 
       if (!post.allowStudentSubmission) {

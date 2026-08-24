@@ -33,6 +33,7 @@ import {
   createCampusTeacherParentFeedRequest,
   getCampusTeacherAttendance,
   getCampusTeacherCourseDetail,
+  getCampusTeacherAssignmentSubmissions,
   getCampusTeacherDisciplineObservations,
   getCampusCoexistencePolicy,
   getCampusTeacherFamilyFeed,
@@ -494,6 +495,7 @@ const teacherDisciplineDestinationLabels = {
 const teacherCourseWorkspaceTabs = [
   { key: 'grading', label: 'Estructura de notas' },
   { key: 'posts', label: 'Asignación' },
+  { key: 'submissions', label: 'Entrega de asignaciones' },
   { key: 'gradebook', label: 'Libro de notas' },
   { key: 'report_card', label: 'Generar boletín' },
 ];
@@ -719,6 +721,27 @@ function formatPostedDate(post) {
   }
 
   return parsed.toLocaleDateString('es', { month: 'short', day: 'numeric' });
+}
+
+function formatSubmissionDateTime(value) {
+  if (!value) {
+    return 'Sin fecha';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Sin fecha';
+  }
+  return parsed.toLocaleString('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatSubmissionAttachmentLabel(attachment = {}) {
+  return String(attachment.fileName || attachment.title || attachment.url || 'Archivo').trim() || 'Archivo';
 }
 
 function getClassworkTypeTone(type) {
@@ -2485,6 +2508,45 @@ function normalizeAssignmentTitleForMatch(value) {
   );
 }
 
+function campusAudienceAppliesToStudent(audience, studentId) {
+  const targetType = String(audience?.targetType || 'course').trim();
+  const ids = Array.isArray(audience?.targetStudentIds)
+    ? audience.targetStudentIds.map((id) => String(id?._id || id || '').trim()).filter(Boolean)
+    : [];
+  if (targetType !== 'students' || ids.length === 0) {
+    return true;
+  }
+  return ids.includes(String(studentId || '').trim());
+}
+
+function resolveAssignmentAudience(assignment, posts = []) {
+  if (String(assignment?.targetType || '') === 'students' && Array.isArray(assignment?.targetStudentIds) && assignment.targetStudentIds.length) {
+    return {
+      targetType: 'students',
+      targetStudentIds: assignment.targetStudentIds.map((id) => String(id)),
+    };
+  }
+
+  const matchingPost = (Array.isArray(posts) ? posts : []).find((post) => {
+    if (String(post?.targetType || '') !== 'students' || !Array.isArray(post.targetStudentIds) || post.targetStudentIds.length === 0) {
+      return false;
+    }
+    const postName = normalizeCourseDisplayKey(post.title);
+    const assignmentName = normalizeCourseDisplayKey(assignment?.subcomponentName);
+    return postName === assignmentName
+      || normalizeAssignmentTitleForMatch(post.title) === normalizeAssignmentTitleForMatch(assignment?.subcomponentName);
+  });
+
+  if (matchingPost) {
+    return {
+      targetType: 'students',
+      targetStudentIds: matchingPost.targetStudentIds.map((id) => String(id)),
+    };
+  }
+
+  return { targetType: 'course', targetStudentIds: [] };
+}
+
 function resolveGradebookAssignmentKeyForPostTitle(title, assignmentOptions) {
   const options = Array.isArray(assignmentOptions) ? assignmentOptions : [];
   if (!options.length) {
@@ -2545,7 +2607,9 @@ function isPostPendingGrading(post, course, workspace) {
   const detail = workspace?.courseDetails?.[course?.id] || null;
   const courseAcademicPeriods = getCourseAcademicPeriods(detail?.course || course);
   const assignmentOptions = buildGradebookAssignmentOptions(courseAcademicPeriods);
-  const students = (detail?.students || []).map((student) => ({
+  const students = (detail?.students || [])
+    .filter((student) => campusAudienceAppliesToStudent(post, student.studentId))
+    .map((student) => ({
     ...student,
     periods: buildStudentPeriods(student, courseAcademicPeriods),
   }));
@@ -2624,6 +2688,8 @@ function buildGradebookAssignmentOptions(periods) {
       weight: Number(subcomponent.weight || 0),
       date: subcomponent.date || '',
       topic: subcomponent.topic || '',
+      targetType: subcomponent.targetType || 'course',
+      targetStudentIds: Array.isArray(subcomponent.targetStudentIds) ? subcomponent.targetStudentIds : [],
       label: `${subcomponent.name || 'Asignacion sin nombre'} · ${component.name || 'Componente'}`,
     }))
   )));
@@ -3117,6 +3183,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [selectedSubjectKey, setSelectedSubjectKey] = useState('');
   const [selectedPortalGradeKey, setSelectedPortalGradeKey] = useState('');
   const [activeCourseWorkspaceTab, setActiveCourseWorkspaceTab] = useState('grading');
+  const [selectedSubmissionAssignmentId, setSelectedSubmissionAssignmentId] = useState('');
   const [showSelectedCourseWorkspace, setShowSelectedCourseWorkspace] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [timelineMonth, setTimelineMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -3243,6 +3310,17 @@ function TeacherCampusHome({ forcePreview = false }) {
     enabled: !previewEnabled && Boolean(selectedCourseId),
     retry: false,
     staleTime: 30_000,
+  });
+
+  const assignmentSubmissionsQuery = useQuery({
+    queryKey: ['campus', 'teacher', 'assignment-submissions', teacherQueryScope, selectedCourseId],
+    queryFn: () => getCampusTeacherAssignmentSubmissions(selectedCourseId),
+    enabled: !previewEnabled
+      && Boolean(selectedCourseId)
+      && activeTeacherSection === 'academic_management'
+      && activeCourseWorkspaceTab === 'submissions',
+    retry: false,
+    staleTime: 20_000,
   });
 
   const subjectReportCardsQuery = useQuery({
@@ -3507,6 +3585,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'calendar'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'assignment-submissions', teacherQueryScope] });
     },
   });
 
@@ -3516,6 +3595,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'calendar'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'assignment-submissions', teacherQueryScope] });
     },
   });
 
@@ -3826,6 +3906,14 @@ function TeacherCampusHome({ forcePreview = false }) {
   const selectedCourseDetail = previewEnabled
     ? (selectedCourse ? previewWorkspace.courseDetails?.[selectedCourse.id] || null : null)
     : (courseDetailQuery.data || null);
+  const assignmentSubmissionRows = useMemo(
+    () => (Array.isArray(assignmentSubmissionsQuery.data?.assignments) ? assignmentSubmissionsQuery.data.assignments : []),
+    [assignmentSubmissionsQuery.data?.assignments]
+  );
+  const selectedSubmissionAssignment = useMemo(
+    () => assignmentSubmissionRows.find((item) => String(item.id) === String(selectedSubmissionAssignmentId)) || assignmentSubmissionRows[0] || null,
+    [assignmentSubmissionRows, selectedSubmissionAssignmentId]
+  );
   const selectedCourseGradingScale = useMemo(
     () => normalizeCampusGradingScale(selectedCourseDetail?.course?.gradingScale || selectedCourse?.gradingScale || workspace.gradingScale || {}),
     [selectedCourseDetail, selectedCourse, workspace.gradingScale]
@@ -4381,6 +4469,14 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => selectedCoursePosts.filter((post) => String(post?.status || '').toLowerCase() !== 'archived'),
     [selectedCoursePosts]
   );
+  const selectedGradebookAssignmentAudience = useMemo(
+    () => resolveAssignmentAudience(selectedGradebookAssignment, selectedCourseAssignmentPosts),
+    [selectedGradebookAssignment, selectedCourseAssignmentPosts]
+  );
+  const selectedGradebookAssignmentStudents = useMemo(() => {
+    const students = Array.isArray(selectedCourseDetail?.students) ? selectedCourseDetail.students : [];
+    return students.filter((student) => campusAudienceAppliesToStudent(selectedGradebookAssignmentAudience, student.studentId));
+  }, [selectedCourseDetail?.students, selectedGradebookAssignmentAudience]);
   const selectedCourseTimelineCalendar = useMemo(
     () => buildCourseTimelineCalendar(timelineMonth, selectedCourseSchedule, selectedCoursePosts),
     [timelineMonth, selectedCoursePosts, selectedCourseSchedule]
@@ -4994,7 +5090,12 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   useEffect(() => {
     setExpandedGradingComponentKey('');
-  }, [selectedCourseId, activeCourseWorkspaceTab]);
+    setSelectedSubmissionAssignmentId('');
+  }, [selectedCourseId]);
+
+  useEffect(() => {
+    setExpandedGradingComponentKey('');
+  }, [activeCourseWorkspaceTab]);
 
   useEffect(() => {
     if (activeTeacherSection !== 'academic_management') {
@@ -6002,6 +6103,14 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   const onCancelEditPost = () => {
     closeAssignmentComposer();
+  };
+
+  const openAssignmentSubmissions = (post) => {
+    setOpenPostMenuId('');
+    setSelectedAssignmentDetail(null);
+    setShowAssignmentComposer(false);
+    setSelectedSubmissionAssignmentId(String(post?.id || ''));
+    setActiveCourseWorkspaceTab('submissions');
   };
 
   const onEditPost = (post) => {
@@ -7074,6 +7183,8 @@ function TeacherCampusHome({ forcePreview = false }) {
           topic: String(subcomponent.topic || '').trim(),
           description: String(subcomponent.description || '').trim(),
           order: Number(subcomponent.order ?? (subcomponentIndex + 1)),
+          targetType: subcomponent.targetType === 'students' ? 'students' : 'course',
+          targetStudentIds: Array.isArray(subcomponent.targetStudentIds) ? subcomponent.targetStudentIds.map(String) : [],
         })).filter((subcomponent) => Boolean(subcomponent.name)),
       })),
     }));
@@ -7279,6 +7390,13 @@ function TeacherCampusHome({ forcePreview = false }) {
       .flatMap((period) => (period.gradingComponents || []).flatMap((component) => {
         if ((component.subcomponents || []).length > 0) {
           return (component.subcomponents || []).map((subcomponent) => {
+            const audience = resolveAssignmentAudience({
+              ...subcomponent,
+              subcomponentName: subcomponent.name,
+            }, selectedCourseAssignmentPosts);
+            if (!campusAudienceAppliesToStudent(audience, student.studentId)) {
+              return null;
+            }
             const draftValue = studentDrafts?.[student.studentId]?.[buildGradeDraftKey(period.key, component.key, subcomponent.key)];
             const trimmedScore = String(draftValue?.score ?? '').trim();
             if (!trimmedScore) {
@@ -7422,7 +7540,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
-    const submittedStudentGrades = (selectedCourseDetail.students || []).map((student) => {
+    const submittedStudentGrades = selectedGradebookAssignmentStudents.map((student) => {
       const draftValue = studentDrafts?.[student.studentId]?.[buildGradeDraftKey(
         selectedGradebookAssignment.periodKey,
         selectedGradebookAssignment.componentKey,
@@ -8818,13 +8936,22 @@ function TeacherCampusHome({ forcePreview = false }) {
                               >
                                 ← Volver a asignaciones
                               </button>
-                              <button
-                                className="campus-teacher__classwork-create-btn"
-                                onClick={() => onEditPost(assignmentDetailPost)}
-                                type="button"
-                              >
-                                Editar
-                              </button>
+                              <div className="campus-teacher__assignment-detail-head-actions">
+                                <button
+                                  className="campus-teacher__ghost-btn"
+                                  onClick={() => openAssignmentSubmissions(assignmentDetailPost)}
+                                  type="button"
+                                >
+                                  Ver entregas
+                                </button>
+                                <button
+                                  className="campus-teacher__classwork-create-btn"
+                                  onClick={() => onEditPost(assignmentDetailPost)}
+                                  type="button"
+                                >
+                                  Editar
+                                </button>
+                              </div>
                             </header>
                             <div className="campus-teacher__assignment-detail-title">
                               <span className={`campus-teacher__classwork-type-icon is-${getClassworkTypeTone(assignmentDetailPost.type)}`}>
@@ -9376,6 +9503,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                         </button>
                                         {isMenuOpen ? (
                                           <div className="campus-teacher__classwork-item-dropdown" role="menu">
+                                            <button onClick={() => openAssignmentSubmissions(post)} role="menuitem" type="button">Ver entregas</button>
                                             <button onClick={() => onEditPost(post)} role="menuitem" type="button">Editar</button>
                                             <button onClick={() => { setOpenPostMenuId(''); onArchivePost(post); }} role="menuitem" type="button">Eliminar</button>
                                           </div>
@@ -9389,6 +9517,121 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </>
                         )}
                       </div>
+                    ) : null}
+                    {activeCourseWorkspaceTab === 'submissions' ? (
+                      <article className="campus-teacher__submissions-panel campus-teacher__embedded-panel">
+                        <div className="campus-teacher__classroom-head">
+                          <div>
+                            <h2 className="campus-teacher__classroom-title">Entrega de asignaciones</h2>
+                            <p className="campus-teacher__classroom-subtitle">
+                              Revisa lo que cada alumno subió en las tareas con entrega habilitada.
+                            </p>
+                          </div>
+                        </div>
+
+                        {assignmentSubmissionsQuery.isLoading ? (
+                          <p className="campus-panel__meta">Cargando entregas de los alumnos...</p>
+                        ) : null}
+
+                        {assignmentSubmissionsQuery.isError ? (
+                          <p className="campus-panel__meta">
+                            {assignmentSubmissionsQuery.error?.response?.data?.message
+                              || assignmentSubmissionsQuery.error?.message
+                              || 'No se pudieron cargar las entregas.'}
+                          </p>
+                        ) : null}
+
+                        {!assignmentSubmissionsQuery.isLoading && !assignmentSubmissionsQuery.isError && assignmentSubmissionRows.length === 0 ? (
+                          <div className="campus-teacher__classwork-empty">
+                            <p>Aún no hay asignaciones con entrega de alumnos en este curso.</p>
+                            <span>Activa “Permitir entrega del alumno” al crear una tarea para ver las evidencias aquí.</span>
+                          </div>
+                        ) : null}
+
+                        {assignmentSubmissionRows.length > 0 ? (
+                          <div className="campus-teacher__submissions-layout">
+                            <div className="campus-teacher__submissions-list">
+                              {assignmentSubmissionRows.map((assignment) => {
+                                const isSelected = String(selectedSubmissionAssignment?.id) === String(assignment.id);
+                                return (
+                                  <button
+                                    className={`campus-teacher__submissions-item${isSelected ? ' is-selected' : ''}`}
+                                    key={assignment.id}
+                                    onClick={() => setSelectedSubmissionAssignmentId(assignment.id)}
+                                    type="button"
+                                  >
+                                    <strong>{assignment.title || 'Sin título'}</strong>
+                                    <span>{formatPostTypeLabel(assignment.type)} · {formatDeliveryLabel(assignment)}</span>
+                                    <small>
+                                      {assignment.submittedCount || 0} entrega{(assignment.submittedCount || 0) === 1 ? '' : 's'}
+                                      {' · '}
+                                      {assignment.pendingCount || 0} pendiente{(assignment.pendingCount || 0) === 1 ? '' : 's'}
+                                    </small>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {selectedSubmissionAssignment ? (
+                              <div className="campus-teacher__submissions-detail">
+                                <header>
+                                  <span>{formatPostTypeLabel(selectedSubmissionAssignment.type)}</span>
+                                  <h3>{selectedSubmissionAssignment.title || 'Sin título'}</h3>
+                                  <p>{formatDeliveryLabel(selectedSubmissionAssignment)}</p>
+                                </header>
+
+                                <div className="campus-teacher__submissions-students">
+                                  {(selectedSubmissionAssignment.students || []).map((student) => {
+                                    const attachments = Array.isArray(student.submission?.attachments) ? student.submission.attachments : [];
+                                    return (
+                                      <article
+                                        className={`campus-teacher__submissions-student${student.submitted ? ' is-submitted' : ' is-pending'}`}
+                                        key={student.studentId}
+                                      >
+                                        <div className="campus-teacher__submissions-student-head">
+                                          <div>
+                                            <strong>{student.studentName || 'Alumno'}</strong>
+                                            <span>{student.studentGrade || student.studentSchoolCode || 'Sin código'}</span>
+                                          </div>
+                                          <em>{student.submitted ? `Entregó ${formatSubmissionDateTime(student.submission?.submittedAt)}` : 'Sin entrega'}</em>
+                                        </div>
+
+                                        {student.submitted ? (
+                                          <div className="campus-teacher__submissions-student-body">
+                                            {student.submission?.note ? <p>{student.submission.note}</p> : null}
+                                            {attachments.length ? (
+                                              <div className="campus-teacher__submissions-files">
+                                                {attachments.map((attachment, index) => {
+                                                  const href = resolveApiAssetUrl(attachment.url);
+                                                  const label = formatSubmissionAttachmentLabel(attachment);
+                                                  return href ? (
+                                                    <a
+                                                      href={href}
+                                                      key={`${student.studentId}-${index}`}
+                                                      rel="noreferrer"
+                                                      target="_blank"
+                                                    >
+                                                      {label}
+                                                    </a>
+                                                  ) : (
+                                                    <span key={`${student.studentId}-${index}`}>{label}</span>
+                                                  );
+                                                })}
+                                              </div>
+                                            ) : (
+                                              <span className="campus-panel__meta">Entregó una nota, sin archivos adjuntos.</span>
+                                            )}
+                                          </div>
+                                        ) : null}
+                                      </article>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </article>
                     ) : null}
                     {activeCourseWorkspaceTab === 'grading' ? (
                       <article className="campus-teacher__grading-editor campus-teacher__grading-editor--classroom campus-teacher__embedded-panel">
@@ -9718,7 +9961,15 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                         const isComponentOpen = Boolean(openGradebookComponents?.[componentRowKey]);
                                                         const matchingDraftPeriod = selectedCourseDraftAcademicPeriods.find((draftPeriod) => draftPeriod.key === period.key);
                                                         const matchingDraftComponent = matchingDraftPeriod?.gradingComponents?.find((draftComponent) => draftComponent.key === score.componentKey);
-                                                        const visibleSubcomponents = matchingDraftComponent?.subcomponents || [];
+                                                        const visibleSubcomponents = (matchingDraftComponent?.subcomponents || []).filter((subcomponent) => (
+                                                          campusAudienceAppliesToStudent(
+                                                            resolveAssignmentAudience({
+                                                              ...subcomponent,
+                                                              subcomponentName: subcomponent.name,
+                                                            }, selectedCourseAssignmentPosts),
+                                                            student.studentId
+                                                          )
+                                                        ));
 
                                                         return (
                                                           <section className="campus-teacher__gradebook-component-card" key={`${student.studentId}-${period.key}-${score.componentKey}`}>
@@ -9922,6 +10173,13 @@ function TeacherCampusHome({ forcePreview = false }) {
                                           .filter(Boolean)
                                           .join(' · ')}
                                       </span>
+                                      {selectedGradebookAssignmentAudience.targetType === 'students' ? (
+                                        <span>
+                                          Solo {selectedGradebookAssignmentStudents.map((student) => student.name).filter(Boolean).join(', ') || 'alumnos seleccionados'}
+                                          {' · '}
+                                          {selectedGradebookAssignmentStudents.length} alumno{selectedGradebookAssignmentStudents.length === 1 ? '' : 's'}
+                                        </span>
+                                      ) : null}
                                     </div>
                                   ) : null}
                                 </div>
@@ -9941,7 +10199,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {selectedCourseDetail.students
+                                          {selectedGradebookAssignmentStudents
                                             .filter(student => !gradebookSearch || student.name.toLowerCase().includes(gradebookSearch.toLowerCase()))
                                             .map((student) => {
                                               const draftKey = buildGradeDraftKey(

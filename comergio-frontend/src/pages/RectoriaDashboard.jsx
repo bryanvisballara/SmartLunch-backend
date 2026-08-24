@@ -239,6 +239,30 @@ function normalizeSchoolYearLevelSettings(raw = {}, academicGrades = [], academi
   });
 }
 
+function formatFamilyFeedOrigin(item = {}) {
+  const role = String(item.publisherRole || '').trim();
+  if (role === 'teacher') return 'Docente';
+  if (role === 'parent') return 'Acudiente';
+  if (role === 'student') return 'Alumno';
+  if (role === 'secretary') return 'Secretaría académica';
+  return 'Institucional';
+}
+
+function formatFamilyFeedAudience(item = {}) {
+  const type = String(item.audienceType || 'general').trim();
+  if (type === 'general') return 'Todo el colegio';
+  if (type === 'grade') {
+    const grades = Array.isArray(item.gradeTargets) ? item.gradeTargets.filter(Boolean) : [];
+    return grades.length ? `Grado · ${grades.join(', ')}` : 'Por grado';
+  }
+  if (type === 'course' || type === 'course_students') {
+    const courses = Array.isArray(item.courseTargets) ? item.courseTargets.filter(Boolean) : [];
+    return courses.length ? `Curso · ${courses.join(', ')}` : 'Por curso';
+  }
+  if (type === 'individual') return 'Individual';
+  return type || 'Audiencia';
+}
+
 function RectoriaCommunicationMediaPreview({ items = [] }) {
   if (!Array.isArray(items) || items.length === 0) {
     return <p className="rectoria-communication-media-empty">El docente no adjuntó contenido visual.</p>;
@@ -2561,7 +2585,7 @@ function normalizeAcademicGradingScale(raw = {}) {
   const performanceLevels = (Array.isArray(sourceScale?.performanceLevels) ? sourceScale.performanceLevels : defaultAcademicPerformanceLevels)
     .map((level, index) => ({
       key: String(level?.key || `performance_level_${index + 1}`).trim(),
-      label: String(level?.label || '').trim(),
+      label: String(level?.label || ''),
       minScore: Number.isFinite(Number(level?.minScore)) ? Number(level.minScore) : normalizedMin,
       maxScore: Number.isFinite(Number(level?.maxScore)) ? Number(level.maxScore) : normalizedMax,
       color: String(level?.color || defaultAcademicPerformanceLevels[index]?.color || '#174a68').trim(),
@@ -3268,6 +3292,12 @@ function RectoriaDashboard() {
   const [selectedCommunicationRequestId, setSelectedCommunicationRequestId] = useState('');
   const [communicationApprovalDraft, setCommunicationApprovalDraft] = useState(createInstitutionalApprovalDraft(null));
   const [createdUserModal, setCreatedUserModal] = useState({ open: false, name: '', role: '', username: '' });
+  const [updatedUserModal, setUpdatedUserModal] = useState({
+    open: false,
+    name: '',
+    username: '',
+    passwordChanged: false,
+  });
   const [followUpModal, setFollowUpModal] = useState({ open: false, type: '', item: null, title: '', body: '' });
   const [overviewInsightModal, setOverviewInsightModal] = useState({
     open: false,
@@ -3370,6 +3400,10 @@ function RectoriaDashboard() {
   );
 
   useEffect(() => {
+    if (activeSection === 'communications') {
+      setActiveSection('family_feed');
+      return;
+    }
     if (!allowedSectionKeys.includes(activeSection)) {
       setActiveSection(allowedSectionKeys[0] || 'overview');
     }
@@ -4001,8 +4035,8 @@ function RectoriaDashboard() {
       setRefreshing(true);
     } else {
       setShellLoading(true);
+      clearMessages();
     }
-    clearMessages();
 
     try {
       const { failedSections: shellFailures, nextAcademicStructure } = await loadOverviewShell();
@@ -4224,6 +4258,11 @@ function RectoriaDashboard() {
   const pendingCommunicationRequests = useMemo(
     () => (billingBootstrap.communicationRequests || []).filter((request) => request.status === 'pending'),
     [billingBootstrap.communicationRequests]
+  );
+
+  const familyFeedCommunications = useMemo(
+    () => (billingBootstrap.communications || []).filter((item) => item?.channels?.feed !== false),
+    [billingBootstrap.communications]
   );
 
   const selectedCommunicationRequest = useMemo(
@@ -6180,6 +6219,10 @@ function RectoriaDashboard() {
     setCreatedUserModal({ open: false, name: '', role: '', username: '' });
   };
 
+  const closeUpdatedUserModal = () => {
+    setUpdatedUserModal({ open: false, name: '', username: '', passwordChanged: false });
+  };
+
   const onSaveEditedUser = async (event) => {
     event.preventDefault();
     const userId = String(editUserModal.userId || '').trim();
@@ -6210,14 +6253,21 @@ function RectoriaDashboard() {
     setBusy(true);
     setEditUserModal((previous) => ({ ...previous, error: '' }));
     try {
+      const passwordChanged = Boolean(password.trim());
       await updateAdminUser(userId, {
         name,
         username,
-        ...(password.trim() ? { password: password.trim() } : {}),
+        ...(username.includes('@') ? { email: username } : {}),
+        ...(passwordChanged ? { password: password.trim() } : {}),
       });
       setEditUserModal(createEmptyEditUserModal());
-      setSuccess('Integrante actualizado correctamente.');
       await loadPortal({ silent: true });
+      setUpdatedUserModal({
+        open: true,
+        name,
+        username,
+        passwordChanged,
+      });
     } catch (requestError) {
       setEditUserModal((previous) => ({
         ...previous,
@@ -9194,6 +9244,7 @@ function RectoriaDashboard() {
         schoolName={schoolName}
         studentsMissingPlacementCount={studentsMissingPlacementCount}
         communityReportsPendingCount={communityReportsPendingCount}
+        publicationApprovalsPendingCount={pendingCommunicationRequests.length}
         staffAnnouncementsUnreadCount={staffAnnouncementsUnreadCount}
         onExpandedGroupChange={setExpandedSidebarGroup}
         onSectionChange={setActiveSection}
@@ -9219,6 +9270,10 @@ function RectoriaDashboard() {
           enableNotifications
           helperText={institutionalHeaderConfig.helperText}
           onNotificationNavigate={(sectionKey) => {
+            if (sectionKey === 'communications' || sectionKey === 'approvals') {
+              setActiveSection(sectionKey === 'approvals' ? 'publication_approvals' : 'family_feed');
+              return;
+            }
             if (sectionKey) {
               setActiveSection(sectionKey);
             }
@@ -9788,12 +9843,12 @@ function RectoriaDashboard() {
         </div>
       ) : null}
 
-      {activeSection === 'communications' ? (
+      {activeSection === 'publish_communication' ? (
         <div className="rectoria-stack">
           <section className="panel rectoria-panel rectoria-communications-panel">
             <div className="rectoria-panel-heading">
               <div>
-                <span className="rectoria-panel-kicker">Publicación institucional</span>
+                <span className="rectoria-panel-kicker">Publicar</span>
                 <h3>Nuevo comunicado</h3>
                 <p>Publica en el feed de familias con envío de push y correo a los acudientes seleccionados.</p>
               </div>
@@ -9836,13 +9891,17 @@ function RectoriaDashboard() {
               <div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} type="submit">Publicar comunicado</button></div>
             </form>
           </section>
+        </div>
+      ) : null}
 
+      {activeSection === 'publication_approvals' ? (
+        <div className="rectoria-stack">
           <section className="panel rectoria-panel rectoria-communications-panel">
             <div className="rectoria-panel-heading">
               <div>
-                <span className="rectoria-panel-kicker">Solicitudes de publicación</span>
-                <h3>Aprobar comunicados</h3>
-                <p>Revisa, ajusta y publica solicitudes enviadas por docentes.</p>
+                <span className="rectoria-panel-kicker">Autorizaciones</span>
+                <h3>Solicitudes de publicación</h3>
+                <p>Revisa, ajusta y publica solicitudes enviadas por docentes, acudientes y alumnos.</p>
               </div>
               <strong className="rectoria-communication-count">{billingBootstrap.communicationRequestCounts?.pending || 0} pendientes</strong>
             </div>
@@ -9853,23 +9912,46 @@ function RectoriaDashboard() {
               {!selectedCommunicationRequest ? <p className="rectoria-empty-state">Selecciona una solicitud para revisarla.</p> : <div className="rectoria-approval-editor"><div className="rectoria-communication-original"><h4>Original</h4><label>Título<input disabled readOnly value={selectedCommunicationRequest.originalTitle || selectedCommunicationRequest.title || ''} /></label><label>Mensaje<textarea disabled readOnly value={selectedCommunicationRequest.originalBody || selectedCommunicationRequest.body || ''} /></label><label>Curso solicitado<input disabled readOnly value={formatCommunicationCourseTargets(selectedCommunicationRequest.courseTargets, selectedCommunicationRequest.courseTitle)} /></label><div><h4>Adjuntos</h4><RectoriaCommunicationMediaPreview items={selectedCommunicationRequest.media || []} /></div></div><form className="rectoria-communication-form" onSubmit={(event) => event.preventDefault()}><h4>Versión a publicar</h4><label>Título<input value={communicationApprovalDraft.title} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={communicationApprovalDraft.body} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="rectoria-communication-form-grid"><label>Audiencia<select value={communicationApprovalDraft.audienceType} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{communicationApprovalDraft.audienceType === 'grade' ? <label>Grados<select multiple value={communicationApprovalDraft.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setCommunicationApprovalDraft)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}{communicationApprovalDraft.audienceType === 'course' ? <label>Cursos<select multiple value={communicationApprovalDraft.courseTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'courseTargets', setCommunicationApprovalDraft)}>{courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}</select></label> : null}</div>{communicationApprovalDraft.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={communicationApprovalDraft.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setCommunicationApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={communicationApprovalDraft.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setCommunicationApprovalDraft)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div><h4>Adjuntos a publicar</h4><RectoriaCommunicationMediaPreview items={communicationApprovalDraft.media || []} /></div><label>Notas de revisión<textarea value={communicationApprovalDraft.reviewNotes} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveCommunicationRequest} type="button">Aprobar y publicar</button><button className="btn" disabled={busy} onClick={onRejectCommunicationRequest} type="button">Rechazar</button></div></form></div>}
             </div>
           </section>
+        </div>
+      ) : null}
 
+      {activeSection === 'family_feed' ? (
+        <div className="rectoria-stack">
           <section className="panel rectoria-panel rectoria-communications-panel">
             <div className="rectoria-panel-heading">
               <div>
                 <span className="rectoria-panel-kicker">Feed de familias</span>
-                <h3>Comunicados académicos</h3>
-                <p>Consulta las publicaciones enviadas a acudientes y modera comentarios cuando sea necesario.</p>
+                <h3>Publicaciones de toda la institución</h3>
+                <p>Docentes, alumnos, acudientes, secretaría académica y este portal. Aquí ves el feed completo, sin filtrar por curso.</p>
               </div>
+              <strong className="rectoria-communication-count">{familyFeedCommunications.length} publicaciones</strong>
             </div>
             <div className="rectoria-communications-list">
-              {(billingBootstrap.communications || []).length === 0 ? <p className="rectoria-empty-state">Aún no hay comunicados enviados.</p> : (billingBootstrap.communications || []).map((item) => (
+              {familyFeedCommunications.length === 0 ? <p className="rectoria-empty-state">Aún no hay publicaciones en el feed de familias.</p> : familyFeedCommunications.map((item) => (
                 <article className="rectoria-communication-card" key={item._id}>
                   <div>
-                    <span>{item.authorName || 'Secretaría académica'} · {formatDateTime(item.sentAt || item.createdAt)}</span>
+                    <span>{item.authorName || 'Institucional'} · {formatFamilyFeedOrigin(item)} · {formatFamilyFeedAudience(item)} · {formatDateTime(item.sentAt || item.createdAt)}</span>
                     <h4>{item.title}</h4>
                     <p>{item.body}</p>
                   </div>
+                  {(item.media || []).length ? (
+                    <div className="rectoria-family-feed-media">
+                      {(item.media || []).slice(0, 4).map((mediaItem, index) => {
+                        const previewSrc = resolveApiAssetUrl(mediaItem.thumbUrl || mediaItem.src);
+                        return (
+                          <a
+                            className="rectoria-family-feed-media-thumb"
+                            href={mediaItem.src || '#'}
+                            key={`${item._id}-media-${index}`}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            {mediaItem.kind === 'video' ? <span>Video</span> : <img alt={mediaItem.alt || `Adjunto ${index + 1}`} src={previewSrc} />}
+                          </a>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                   <div className="rectoria-communication-actions">
                     <button onClick={() => setCommunicationEngagementModal({ open: true, type: 'likes', item })} type="button">{item.likesCount || item.likes?.length || 0} likes</button>
                     <button onClick={() => setCommunicationEngagementModal({ open: true, type: 'comments', item })} type="button">{item.commentsCount || item.comments?.length || 0} comentarios</button>
@@ -14236,6 +14318,45 @@ function RectoriaDashboard() {
               </div>
               <div className="rectoria-modal-actions">
                 <button className="btn btn-primary" type="button" onClick={closeCreatedUserModal}>Entendido</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {updatedUserModal.open ? (
+        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Integrante actualizado correctamente">
+          <div className="rectoria-modal-card rectoria-modal-card--success">
+            <div className="rectoria-modal-head">
+              <div>
+                <span className="rectoria-modal-eyebrow rectoria-modal-eyebrow--success">Cambios guardados</span>
+                <h3>El acceso del integrante ya quedó actualizado</h3>
+                <p>
+                  {updatedUserModal.passwordChanged
+                    ? 'El correo de acceso y la contraseña ya se pueden usar para entrar al portal.'
+                    : 'El correo de acceso ya se puede usar para entrar al portal. La contraseña no se modificó.'}
+                </p>
+              </div>
+              <button className="rectoria-modal-close" type="button" onClick={closeUpdatedUserModal}>Cerrar</button>
+            </div>
+
+            <div className="rectoria-modal-form">
+              <div className="rectoria-success-summary-grid">
+                <div className="rectoria-success-summary-card">
+                  <span>Integrante</span>
+                  <strong>{updatedUserModal.name || 'Usuario'}</strong>
+                </div>
+                <div className="rectoria-success-summary-card">
+                  <span>Correo de acceso</span>
+                  <strong>{updatedUserModal.username || 'Sin correo'}</strong>
+                </div>
+                <div className="rectoria-success-summary-card">
+                  <span>Contraseña</span>
+                  <strong>{updatedUserModal.passwordChanged ? 'Actualizada' : 'Sin cambios'}</strong>
+                </div>
+              </div>
+              <div className="rectoria-modal-actions">
+                <button className="btn btn-primary" type="button" onClick={closeUpdatedUserModal}>Entendido</button>
               </div>
             </div>
           </div>

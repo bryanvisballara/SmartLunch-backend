@@ -18,7 +18,37 @@ function buildParentNotificationSectionPath(sectionKey, extraQuery = '') {
   return `${basePath}${separator}${normalizedExtraQuery}`;
 }
 
+function isAssignmentLikeNotification(payload = {}) {
+  const type = normalizeText(payload.type);
+  if (type === 'academic.calendar_assignment') {
+    return true;
+  }
+  if (type !== 'campus.teacher_post_published') {
+    return false;
+  }
+
+  const postType = normalizeText(payload.postType).toLowerCase();
+  if (!postType) {
+    return true;
+  }
+
+  return !['aviso', 'announcement', 'material', 'comunicado'].includes(postType);
+}
+
+function readAssignmentId(payload = {}) {
+  return normalizeText(payload.postId || payload.assignmentId);
+}
+
+function buildAssignmentViewQuery(assignmentId) {
+  return `academicView=academic-assignments&assignmentId=${encodeURIComponent(assignmentId)}`;
+}
+
 export function resolveStudentNotificationPath(payload = {}) {
+  const assignmentId = readAssignmentId(payload);
+  if (isAssignmentLikeNotification(payload) && assignmentId) {
+    return `/student/academic?${buildAssignmentViewQuery(assignmentId)}`;
+  }
+
   const explicitUrl = normalizeText(payload.url);
   if (explicitUrl.startsWith('/student')) {
     return explicitUrl;
@@ -35,7 +65,7 @@ export function resolveStudentNotificationPath(payload = {}) {
 
     case 'campus.teacher_post_published':
     case 'academic.calendar_assignment':
-      return '/student?academicView=academic-calendar';
+      return '/student/academic?academicView=academic-calendar';
 
     case 'academic.course_assigned':
       return '/student?academicView=academic-performance';
@@ -61,8 +91,11 @@ export function resolveStudentNotificationPath(payload = {}) {
 }
 
 export function resolveNotificationPath(payload = {}, options = {}) {
+  const explicitUrl = normalizeText(payload.url);
   const audience = normalizeText(payload.audience || options.audience);
-  const preferStudent = Boolean(options.preferStudent) || audience === 'student';
+  const preferStudent = Boolean(options.preferStudent)
+    || audience === 'student'
+    || explicitUrl.startsWith('/student');
   if (preferStudent) {
     return resolveStudentNotificationPath(payload);
   }
@@ -71,13 +104,9 @@ export function resolveNotificationPath(payload = {}, options = {}) {
 }
 
 export function resolveParentNotificationPath(payload = {}) {
-  const explicitUrl = normalizeText(payload.url);
-  if (explicitUrl.startsWith('/')) {
-    return explicitUrl;
-  }
-
   const type = normalizeText(payload.type);
   const studentId = normalizeText(payload.studentId);
+  const assignmentId = readAssignmentId(payload);
   const withStudent = (path) => {
     if (!studentId) {
       return path;
@@ -86,6 +115,15 @@ export function resolveParentNotificationPath(payload = {}) {
     const separator = path.includes('?') ? '&' : '?';
     return `${path}${separator}studentId=${encodeURIComponent(studentId)}`;
   };
+
+  if (isAssignmentLikeNotification(payload) && assignmentId) {
+    return withStudent(buildParentNotificationSectionPath('academic', buildAssignmentViewQuery(assignmentId)));
+  }
+
+  const explicitUrl = normalizeText(payload.url);
+  if (explicitUrl.startsWith('/')) {
+    return explicitUrl;
+  }
 
   switch (type) {
     case 'academic.communication':
@@ -147,6 +185,7 @@ export function readParentNotificationLaunchParams(search = '', pathname = '') {
   return {
     studentId: normalizeText(params.get('studentId')),
     academicView: normalizeText(params.get('academicView')),
+    assignmentId: normalizeText(params.get('assignmentId')),
     section: resolveParentNotificationSection(pathname, search),
   };
 }

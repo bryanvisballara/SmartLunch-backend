@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { getFeeGradeAliases, findGradeFeeSetting } = require('../utils/feeGradeMatching');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
+const { campusAudienceAppliesToStudent } = require('../utils/campusPostAudience');
 const {
   isMillenniumSchoolId,
   redactParentEnrollmentChargeAmount,
@@ -2177,6 +2178,7 @@ async function buildParentUpcomingAssignments({
   gradeValues = [],
   courseValues = [],
   courseTitleValues = [],
+  studentId = '',
 }) {
   const courseIds = await resolveParentUpcomingAssignmentCourseIds({
     schoolId,
@@ -2217,6 +2219,7 @@ async function buildParentUpcomingAssignments({
 
   return posts
     .filter((post) => isParentEvaluativePostType(post.type))
+    .filter((post) => campusAudienceAppliesToStudent(post, studentId))
     .map((post) => serializeParentAcademicCalendarPost(post))
     .filter((item) => item.id)
     .filter((item) => {
@@ -4048,6 +4051,7 @@ router.get('/portal/overview', async (req, res) => {
       gradeValues: selectedStudentGradeValues,
       courseValues: selectedStudentCourseValues,
       courseTitleValues: selectedStudentCourseTitleValues,
+      studentId: selectedStudentObjectId,
     });
     const academicStructureScheduleCourses = Array.isArray(academicStructureSchedule?.courses) ? academicStructureSchedule.courses : [];
     const academicStructureScheduleSlots = Array.isArray(academicStructureSchedule?.slots) ? academicStructureSchedule.slots : [];
@@ -4784,6 +4788,7 @@ router.get('/portal/academic-calendar', async (req, res) => {
       items: [
         ...posts
           .filter((post) => isParentEvaluativePostType(post.type))
+          .filter((post) => campusAudienceAppliesToStudent(post, student._id))
           .map(serializeParentAcademicCalendarPost),
         ...assignments.map(serializeParentAcademicCalendarAssignment),
       ].filter((item) => item.id && item.date).sort((left, right) => new Date(left.date) - new Date(right.date)),
@@ -4808,7 +4813,9 @@ router.get('/portal/assignments', roleMiddleware('parent', 'admin'), async (req,
       .populate('courseId', 'title subject section studentGradeKey')
       .sort({ scheduledClassDate: 1, dueAt: 1, publishedAt: -1, createdAt: -1 })
       .lean();
-    const evaluativePosts = posts.filter((post) => isParentEvaluativePostType(post.type));
+    const evaluativePosts = posts
+      .filter((post) => isParentEvaluativePostType(post.type))
+      .filter((post) => campusAudienceAppliesToStudent(post, student._id));
     const postIds = evaluativePosts.map((post) => post._id);
     const submissions = postIds.length
       ? await CampusPostSubmission.find({
@@ -4854,7 +4861,7 @@ router.get('/portal/assignments/:id', roleMiddleware('parent', 'admin'), async (
       .populate('courseId', 'title subject section studentGradeKey')
       .lean();
 
-    if (!post || !isParentEvaluativePostType(post.type)) {
+    if (!post || !isParentEvaluativePostType(post.type) || !campusAudienceAppliesToStudent(post, student._id)) {
       return res.status(404).json({ message: 'Asignación no encontrada.' });
     }
 

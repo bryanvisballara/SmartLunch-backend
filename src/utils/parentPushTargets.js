@@ -12,9 +12,12 @@ function withStudentQuery(path, studentId) {
   return `${path}${separator}studentId=${encodeURIComponent(normalizedStudentId)}`;
 }
 
-function buildAcademicPath({ academicView = 'academic-performance', studentId } = {}) {
+function buildAcademicPath({ academicView = 'academic-performance', studentId, assignmentId } = {}) {
   const view = normalizeText(academicView) || 'academic-performance';
-  return withStudentQuery(`/parent/academic?academicView=${encodeURIComponent(view)}`, studentId);
+  const assignmentQuery = normalizeText(assignmentId)
+    ? `&assignmentId=${encodeURIComponent(normalizeText(assignmentId))}`
+    : '';
+  return withStudentQuery(`/parent/academic?academicView=${encodeURIComponent(view)}${assignmentQuery}`, studentId);
 }
 
 function getCampusPostCategoryLabel(postType = '') {
@@ -75,6 +78,13 @@ function buildParentPushUrl(notificationType = '', options = {}) {
       return buildAcademicPath({ academicView: 'academic-attendance', studentId });
 
     case 'campus.teacher_post_published':
+      if (isEvaluativeCampusPostType(options.postType) && normalizeText(options.postId)) {
+        return buildAcademicPath({
+          academicView: 'academic-assignments',
+          studentId,
+          assignmentId: options.postId,
+        });
+      }
       return isEvaluativeCampusPostType(options.postType)
         ? buildAcademicPath({ academicView: 'academic-calendar', studentId })
         : withStudentQuery('/parent', studentId);

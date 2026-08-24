@@ -27,8 +27,20 @@ export const RECTORIA_CONTROL_CENTER_NAV_GROUP = {
   ],
 };
 
+export const FAMILY_COMMUNICATION_NAV_GROUP = {
+  type: 'group',
+  key: 'family_communication',
+  label: 'Comunicación con familias',
+  items: [
+    { key: 'family_feed', label: 'Feed de familias' },
+    { key: 'publication_approvals', label: 'Autorizaciones' },
+    { key: 'publish_communication', label: 'Publicar' },
+  ],
+};
+
 export const COORDINATION_PORTAL_NAV = [
   { type: 'item', key: 'overview', label: 'Tablero de nivel' },
+  FAMILY_COMMUNICATION_NAV_GROUP,
   RECTORIA_CONTROL_CENTER_NAV_GROUP,
   {
     type: 'group',
@@ -38,7 +50,6 @@ export const COORDINATION_PORTAL_NAV = [
       { key: 'students', label: 'Gestión académica' },
     ],
   },
-  { type: 'item', key: 'communications', label: 'Comunicados a familias' },
   { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
   { type: 'item', key: 'resources', label: 'Recursos y compras' },
   { type: 'item', key: 'schedule', label: 'Horario académico' },
@@ -47,6 +58,7 @@ export const COORDINATION_PORTAL_NAV = [
 
 export const RECTORIA_PORTAL_NAV = [
   { type: 'item', key: 'overview', label: 'Resumen institucional' },
+  FAMILY_COMMUNICATION_NAV_GROUP,
   { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
   RECTORIA_CONTROL_CENTER_NAV_GROUP,
   {

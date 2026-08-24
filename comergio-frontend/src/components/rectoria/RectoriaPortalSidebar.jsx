@@ -54,6 +54,9 @@ function resolveGroupBadgeCount(groupKey, counts = {}) {
   if (groupKey === 'comergio_academy_group') {
     return Number(counts.academyTotal || 0);
   }
+  if (groupKey === 'family_communication') {
+    return Number(counts.publicationApprovals || 0);
+  }
   return 0;
 }
 
@@ -73,6 +76,9 @@ function resolveItemBadgeCount(itemKey, counts = {}) {
   if (itemKey === 'informa') {
     return Number(counts.academyInforma || 0);
   }
+  if (itemKey === 'publication_approvals') {
+    return Number(counts.publicationApprovals || 0);
+  }
   return 0;
 }
 
@@ -84,6 +90,7 @@ export default function RectoriaPortalSidebar({
   matriculaAuthorizationPendingCount = 0,
   studentsMissingPlacementCount = 0,
   communityReportsPendingCount = 0,
+  publicationApprovalsPendingCount = 0,
   staffAnnouncementsUnreadCount = 0,
   onSectionChange,
   onExpandedGroupChange,
@@ -110,6 +117,7 @@ export default function RectoriaPortalSidebar({
     academyConecta: academyCounts.conecta,
     academyInforma: academyCounts.informa,
     academyTotal: academyCounts.total,
+    publicationApprovals: publicationApprovalsPendingCount,
   };
 
   useEffect(() => {

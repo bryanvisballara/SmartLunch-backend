@@ -160,6 +160,7 @@ export default function ParentNotificationCenter({
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [panelStyle, setPanelStyle] = useState({});
+  const [isCompactPanel, setIsCompactPanel] = useState(false);
   const rootRef = useRef(null);
   const bellRef = useRef(null);
   const panelRef = useRef(null);
@@ -214,24 +215,59 @@ export default function ParentNotificationCenter({
 
     const placePanel = () => {
       const rect = bellRef.current.getBoundingClientRect();
-      const width = Math.min(360, window.innerWidth - 24);
-      const right = Math.max(12, window.innerWidth - rect.right);
-      const top = Math.min(rect.bottom + 10, window.innerHeight - 120);
+      const viewport = window.visualViewport;
+      const viewportWidth = Math.round(viewport?.width || window.innerWidth);
+      const viewportHeight = Math.round(viewport?.height || window.innerHeight);
+      const viewportOffsetTop = Math.round(viewport?.offsetTop || 0);
+      const isCompact = viewportWidth <= 520;
+      setIsCompactPanel(isCompact);
+
+      if (isCompact) {
+        setPanelStyle({
+          position: 'fixed',
+          left: 'max(0.7rem, env(safe-area-inset-left, 0px))',
+          right: 'max(0.7rem, env(safe-area-inset-right, 0px))',
+          top: 'max(4.85rem, calc(env(safe-area-inset-top, 0px) + 4.25rem))',
+          bottom: 'max(0.85rem, env(safe-area-inset-bottom, 0px))',
+          width: 'auto',
+          maxWidth: 'none',
+          maxHeight: 'none',
+        });
+        return;
+      }
+
+      const margin = 12;
+      const width = Math.min(360, Math.max(240, viewportWidth - (margin * 2)));
+      const left = Math.min(
+        Math.max(margin, rect.right - width),
+        viewportWidth - width - margin
+      );
+      const top = Math.min(
+        rect.bottom + 10 + viewportOffsetTop,
+        viewportOffsetTop + viewportHeight - 180
+      );
+      const maxHeight = Math.max(160, viewportOffsetTop + viewportHeight - top - margin);
+
       setPanelStyle({
         position: 'fixed',
-        top: `${top}px`,
-        right: `${right}px`,
+        top: `${Math.max(margin, top)}px`,
+        left: `${left}px`,
+        right: 'auto',
         width: `${width}px`,
-        maxHeight: `${Math.max(180, window.innerHeight - top - 16)}px`,
+        maxHeight: `${maxHeight}px`,
       });
     };
 
     placePanel();
     window.addEventListener('resize', placePanel);
     window.addEventListener('scroll', placePanel, true);
+    window.visualViewport?.addEventListener('resize', placePanel);
+    window.visualViewport?.addEventListener('scroll', placePanel);
     return () => {
       window.removeEventListener('resize', placePanel);
       window.removeEventListener('scroll', placePanel, true);
+      window.visualViewport?.removeEventListener('resize', placePanel);
+      window.visualViewport?.removeEventListener('scroll', placePanel);
     };
   }, [isOpen]);
 
@@ -277,7 +313,11 @@ export default function ParentNotificationCenter({
   };
 
   const handleOpen = (item) => {
-    const path = resolveNotificationPath(item.payload || item, { preferStudent });
+    const payload = {
+      ...(item && typeof item === 'object' ? item : {}),
+      ...(item?.payload && typeof item.payload === 'object' ? item.payload : {}),
+    };
+    const path = resolveNotificationPath(payload, { preferStudent });
     setIsOpen(false);
     if (typeof navigationHandler === 'function' && path) {
       navigationHandler(path, item);
@@ -295,7 +335,7 @@ export default function ParentNotificationCenter({
   const panel = isOpen ? createPortal(
     <div
       aria-label="Notificaciones"
-      className="parent-notification-panel"
+      className={`parent-notification-panel${isCompactPanel ? ' parent-notification-panel--compact' : ''}`}
       ref={panelRef}
       role="dialog"
       style={panelStyle}

@@ -437,8 +437,10 @@ button.staff-teacher-chrome__nav-item,
 
 .staff-teacher-chrome__topbar-dropdown--notifications {
   width: min(360px, calc(100vw - 2rem));
-  min-width: 280px;
+  min-width: 0;
+  max-width: calc(100vw - 1.5rem);
   padding: 0.55rem;
+  box-sizing: border-box;
 }
 
 .staff-teacher-chrome__topbar-dropdown--notifications header {
@@ -642,6 +644,28 @@ button.staff-teacher-chrome__nav-item,
       max(0.75rem, env(safe-area-inset-right, 0px))
       calc(env(safe-area-inset-bottom, 0px) + 1.25rem)
       max(0.75rem, env(safe-area-inset-left, 0px));
+  }
+
+  .staff-portal-shell--mobile-nav .staff-teacher-chrome__topbar-dropdown--notifications {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 4.05rem);
+    left: max(0.7rem, env(safe-area-inset-left, 0px));
+    right: max(0.7rem, env(safe-area-inset-right, 0px));
+    width: auto;
+    max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 5.1rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 90;
+  }
+
+  .staff-portal-shell--mobile-nav .staff-teacher-chrome__topbar-dropdown-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 

@@ -6636,7 +6636,7 @@ router.get('/bootstrap', async (req, res) => {
     const [parentsResult, studentsResult, communicationsResult, communicationAuthorsResult, campusCoursesResult, calendarAssignmentsResult, billingResult, requestSummaryResult, academicDatabaseResult, academicStructureResult] = await Promise.allSettled([
       User.find({ schoolId, role: 'parent', deletedAt: null }).select('name email phone documentNumber address').sort({ name: 1 }).lean(),
       Student.find({ schoolId, deletedAt: null }).select('name firstName lastName grade course documentNumber gender birthDate bloodType birthPlace address').sort({ name: 1 }).lean(),
-      AcademicCommunication.find({ schoolId }).sort({ sentAt: -1, createdAt: -1 }).limit(25).lean(),
+      AcademicCommunication.find({ schoolId }).sort({ sentAt: -1, createdAt: -1 }).limit(250).lean(),
       AcademicCommunicationAuthor.find({ schoolId, active: true }).sort({ isDefault: -1, name: 1, createdAt: 1 }).lean(),
       CampusCourse.find({ schoolId, status: 'active' }).select('title subject gradeLevel section studentGradeKey academicContent').sort({ title: 1 }).lean(),
       AcademicCalendarAssignment.find({ schoolId, status: 'published' }).sort({ scheduledAt: 1, createdAt: -1 }).limit(80).lean(),
@@ -9352,6 +9352,11 @@ router.post('/communications', async (req, res) => {
     const normalizedMedia = normalizeCommunicationMedia(media);
     const selectedAuthor = await resolveCommunicationAuthor({ schoolId, authorId, authorName, authorPhotoUrl, authorThumbUrl });
 
+    const requesterRole = String(req.user.role || '').trim();
+    const publisherRole = ['teacher', 'parent', 'student'].includes(requesterRole)
+      ? requesterRole
+      : (requesterRole === 'academic_secretary' ? 'secretary' : '');
+
     const communication = await AcademicCommunication.create({
       schoolId,
       createdByUserId: userId,
@@ -9360,6 +9365,7 @@ router.post('/communications', async (req, res) => {
       authorName: selectedAuthor.authorName,
       authorPhotoUrl: selectedAuthor.authorPhotoUrl,
       authorThumbUrl: selectedAuthor.authorThumbUrl,
+      publisherRole,
       title: normalizeText(title),
       body: normalizeText(body),
       audienceType: normalizedAudienceType,

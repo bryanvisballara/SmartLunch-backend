@@ -9,6 +9,8 @@ const campusGradingSubcomponentSchema = new mongoose.Schema(
     topic: { type: String, trim: true, default: '' },
     description: { type: String, trim: true, default: '' },
     order: { type: Number, default: 0 },
+    targetType: { type: String, enum: ['course', 'students'], default: 'course' },
+    targetStudentIds: { type: [String], default: [] },
   },
   { _id: false }
 );

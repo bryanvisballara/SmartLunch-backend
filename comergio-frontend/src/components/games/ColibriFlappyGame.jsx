@@ -78,19 +78,25 @@ export default function ColibriFlappyGame({ playerName = '' }) {
         gameInstanceRef.current = instance;
         instance.resize();
 
+        let resizeTimer = 0;
         const resizeGame = () => {
-          gameInstanceRef.current?.resize?.();
+          window.clearTimeout(resizeTimer);
+          resizeTimer = window.setTimeout(() => {
+            gameInstanceRef.current?.resize?.();
+          }, 140);
         };
 
-        window.addEventListener('resize', resizeGame);
-        window.visualViewport?.addEventListener('resize', resizeGame);
+        window.addEventListener('resize', resizeGame, { passive: true });
+        window.visualViewport?.addEventListener('resize', resizeGame, { passive: true });
         instance.__resizeHandler = resizeGame;
+        instance.__clearResizeTimer = () => window.clearTimeout(resizeTimer);
       });
     });
 
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frameId);
+      instance?.__clearResizeTimer?.();
       if (instance?.__resizeHandler) {
         window.removeEventListener('resize', instance.__resizeHandler);
         window.visualViewport?.removeEventListener('resize', instance.__resizeHandler);
