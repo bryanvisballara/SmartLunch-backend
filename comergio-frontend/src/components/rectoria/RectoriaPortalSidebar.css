@@ -1,51 +1,70 @@
 .rectoria-rail.staff-teacher-chrome__rail {
+  --rectoria-nav-row: 36px;
+  --rectoria-nav-font: 0.84rem;
+  --rectoria-nav-pad-x: 0.7rem;
+  --rectoria-nav-radius: 10px;
+  --rectoria-nav-gap: 0.18rem;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  padding: 0.55rem 0.55rem 0.75rem;
-  gap: 0.4rem;
+  padding: 0.75rem 0.7rem 0.85rem;
+  gap: 0.65rem;
 }
 
 .rectoria-rail .staff-teacher-chrome__rail-brand {
-  gap: 0.45rem;
-  padding: 0.15rem 0.2rem 0.5rem;
+  gap: 0.55rem;
+  padding: 0.2rem 0.25rem 0.7rem;
 }
 
 .rectoria-rail .staff-teacher-chrome__rail-brand-logo {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
 }
 
 .rectoria-rail .staff-teacher-chrome__rail-brand-copy {
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 .rectoria-rail .staff-teacher-chrome__rail-brand-copy strong {
-  font-size: 0.92rem;
+  font-size: 1.05rem;
 }
 
 .rectoria-rail .staff-teacher-chrome__rail-brand-copy span {
-  font-size: 0.62rem;
+  font-size: 0.68rem;
 }
 
-.rectoria-rail .staff-teacher-chrome__rail-nav,
+.rectoria-rail.staff-teacher-chrome__rail .staff-teacher-chrome__rail-nav,
 .rectoria-rail__nav {
-  display: grid;
-  gap: 0.14rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--rectoria-nav-gap);
 }
 
-.rectoria-rail .staff-teacher-chrome__rail-group {
-  gap: 0.1rem;
+.rectoria-rail .staff-teacher-chrome__rail-group,
+.rectoria-rail__group {
+  display: grid;
+  gap: var(--rectoria-nav-gap);
 }
 
 .rectoria-rail button.staff-teacher-chrome__nav-item,
-.rectoria-rail .staff-teacher-chrome__nav-item {
-  gap: 0.35rem;
-  min-height: 0;
-  padding: 0.28rem 0.5rem;
-  border-radius: 8px;
-  font-size: 0.76rem;
-  font-weight: 600;
+.rectoria-rail .staff-teacher-chrome__nav-item,
+.rectoria-rail__item,
+.rectoria-rail__group-toggle,
+.rectoria-rail__child,
+.rectoria-rail .academy-rail__btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--rectoria-nav-row);
+  height: var(--rectoria-nav-row);
+  margin: 0;
+  padding: 0 var(--rectoria-nav-pad-x);
+  border-radius: var(--rectoria-nav-radius);
+  font-size: var(--rectoria-nav-font);
+  font-weight: 650;
   line-height: 1.2;
 }
 
@@ -54,22 +73,23 @@
   justify-content: space-between;
 }
 
+.rectoria-rail__group-toggle.is-active,
+.rectoria-rail__group.has-active-child > .rectoria-rail__group-toggle,
+.rectoria-rail__group.is-open > .rectoria-rail__group-toggle {
+  min-height: var(--rectoria-nav-row);
+  height: var(--rectoria-nav-row);
+  padding: 0 var(--rectoria-nav-pad-x);
+}
+
 .rectoria-rail__child {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  width: 100%;
-  min-height: 0;
-  padding: 0.22rem 0.45rem;
   border: 0;
-  border-radius: 7px;
   background: transparent;
   color: #475569;
   font: inherit;
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.2;
+  font-size: var(--rectoria-nav-font);
+  font-weight: 650;
   text-align: left;
   cursor: pointer;
 }
@@ -93,47 +113,45 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rectoria-rail__badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.05rem;
-  height: 1.05rem;
-  padding: 0 0.28rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.32rem;
   border-radius: 999px;
   background: #dc2626;
   color: #fff;
-  font-size: 0.62rem;
+  font-size: 0.66rem;
   font-weight: 800;
   line-height: 1;
   flex-shrink: 0;
 }
 
 .rectoria-rail__chevron {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   color: #94a3b8;
 }
 
-.rectoria-rail__group {
-  display: grid;
-  gap: 2px;
-}
-
 .rectoria-rail__children {
   display: grid;
-  gap: 1px;
-  padding: 1px 0 3px 8px;
-  margin-left: 6px;
+  gap: var(--rectoria-nav-gap);
+  padding: 0 0 2px 8px;
+  margin-left: 8px;
   border-left: 1px solid #e8eaed;
 }
 
 .rectoria-rail__child-block {
   display: grid;
-  gap: 2px;
+  gap: var(--rectoria-nav-gap);
 }
 
 .rectoria-rail__child--expandable {
@@ -142,39 +160,35 @@
 
 .rectoria-rail__nested {
   display: grid;
-  gap: 2px;
-  margin: 1px 0 2px 6px;
+  gap: var(--rectoria-nav-gap);
+  margin: 0 0 2px 6px;
   padding-left: 8px;
   border-left: 1px solid #e8eaed;
 }
 
 .rectoria-rail__nested .rectoria-sidebar-subitem {
-  border-radius: 10px;
+  min-height: var(--rectoria-nav-row);
+  height: var(--rectoria-nav-row);
+  padding: 0 0.65rem;
+  border-radius: var(--rectoria-nav-radius);
+  font-size: var(--rectoria-nav-font);
+  font-weight: 650;
 }
 
 .rectoria-rail .academy-rail__label {
-  margin: 0.25rem 0 0.15rem;
-  padding: 0 0.45rem;
-  font-size: 0.6rem;
+  margin: 0.35rem 0 0.2rem;
+  padding: 0 0.7rem;
+  font-size: 0.66rem;
 }
 
 .rectoria-rail .academy-rail__list {
-  gap: 0.12rem;
-}
-
-.rectoria-rail .academy-rail__btn {
-  gap: 0.4rem;
-  padding: 0.28rem 0.5rem;
-  border-radius: 8px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  line-height: 1.2;
+  gap: var(--rectoria-nav-gap);
 }
 
 .rectoria-rail .academy-rail__btn-icon,
 .rectoria-rail .academy-rail__btn-icon svg {
-  width: 0.95rem;
-  height: 0.95rem;
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 @media (max-width: 900px) {

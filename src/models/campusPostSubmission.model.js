@@ -32,5 +32,6 @@ const campusPostSubmissionSchema = new mongoose.Schema(
 
 campusPostSubmissionSchema.index({ schoolId: 1, postId: 1, studentId: 1 }, { unique: true });
 campusPostSubmissionSchema.index({ schoolId: 1, studentId: 1, submittedAt: -1 });
+campusPostSubmissionSchema.index({ schoolId: 1, courseId: 1, submittedAt: -1 });
 
 module.exports = registerSchoolScopedModel('CampusPostSubmission', campusPostSubmissionSchema);

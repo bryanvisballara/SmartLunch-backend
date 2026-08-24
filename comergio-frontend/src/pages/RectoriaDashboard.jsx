@@ -47,6 +47,9 @@ import {
   createAcademicCalendarAssignment,
   createAcademicManagementCourse,
   createAcademicManagementGrade,
+  createAcademicManagementClassroomGroup,
+  updateAcademicManagementClassroomGroup,
+  deleteAcademicManagementClassroomGroup,
   createAcademicManagementLevel,
   createAcademicManagementSubject,
   importAcademicSecretaryDatabase,
@@ -128,6 +131,7 @@ const ROLE_OPTIONS = [
 ];
 const ACADEMIC_MANAGEMENT_SECTION_OPTIONS = [
   { key: 'grades_courses', label: 'Grados y cursos' },
+  { key: 'classroom_groups', label: 'Aulas compartidas' },
   { key: 'periods', label: 'Periodos y calificaciones' },
   { key: 'subjects', label: 'Asignaturas' },
   { key: 'schedule', label: 'Horario académico' },
@@ -2142,6 +2146,9 @@ function filterAcademicStructureByLevelKeys(academicStructure = {}, levelKeys = 
         .map((group) => ({ ...group, gradeKeys: filterGradeKeys(group.gradeKeys) }))
         .filter((group) => group.gradeKeys.length > 0),
     },
+    classroomGroups: (Array.isArray(academicStructure.classroomGroups) ? academicStructure.classroomGroups : [])
+      .map((group) => ({ ...group, gradeKeys: filterGradeKeys(group.gradeKeys) }))
+      .filter((group) => group.gradeKeys.length > 0),
   };
 }
 
@@ -2662,6 +2669,7 @@ function createEmptyAcademicStructureDraft() {
     levels: [],
     subjects: [],
     grades: [],
+    classroomGroups: [],
     scheduleSettings: normalizeAcademicScheduleSettings({ groups: [] }),
     scheduleBreaks: [],
     teachingAvailability: [],
@@ -2677,6 +2685,7 @@ function normalizeAcademicStructureDraft(raw) {
   const levels = Array.isArray(raw?.levels) ? raw.levels : [];
   const subjects = Array.isArray(raw?.subjects) ? raw.subjects : [];
   const grades = Array.isArray(raw?.grades) ? raw.grades : [];
+  const classroomGroups = Array.isArray(raw?.classroomGroups) ? raw.classroomGroups : [];
   const scheduleSettings = normalizeAcademicScheduleSettings(raw?.scheduleSettings || { groups: [] });
   const scheduleBreaks = Array.isArray(raw?.scheduleBreaks) ? raw.scheduleBreaks : [];
   const teachingAvailability = normalizeAcademicTeachingAvailability(raw?.teachingAvailability);
@@ -2730,6 +2739,14 @@ function normalizeAcademicStructureDraft(raw) {
         };
       })
       .filter((grade) => grade.key),
+    classroomGroups: classroomGroups
+      .map((group, groupIndex) => ({
+        key: String(group?.key || group?.label || '').trim(),
+        label: String(group?.label || group?.key || '').trim(),
+        gradeKeys: (Array.isArray(group?.gradeKeys) ? group.gradeKeys : []).map((gradeKey) => String(gradeKey || '').trim()).filter(Boolean),
+        order: Number(group?.order || (groupIndex + 1) * 10),
+      }))
+      .filter((group) => group.key && group.label && group.gradeKeys.length > 0),
     scheduleSettings,
     scheduleBreaks: scheduleBreaks
       .map((item, index) => ({
@@ -3343,6 +3360,8 @@ function RectoriaDashboard() {
   const [selectedLevelKeyForGrade, setSelectedLevelKeyForGrade] = useState('');
   const [levelGradeSelections, setLevelGradeSelections] = useState({});
   const [newGradeName, setNewGradeName] = useState('');
+  const [classroomGroupForm, setClassroomGroupForm] = useState({ label: '', gradeKeys: [] });
+  const [editingClassroomGroupKey, setEditingClassroomGroupKey] = useState('');
   const [courseForms, setCourseForms] = useState({});
   const [selectedScheduleGradeKey, setSelectedScheduleGradeKey] = useState('');
   const [selectedScheduleCourseKey, setSelectedScheduleCourseKey] = useState('');
@@ -7904,6 +7923,87 @@ function RectoriaDashboard() {
     }
   };
 
+  const resetClassroomGroupForm = () => {
+    setClassroomGroupForm({ label: '', gradeKeys: [] });
+    setEditingClassroomGroupKey('');
+  };
+
+  const onToggleClassroomGroupGrade = (gradeKey) => {
+    const normalizedGradeKey = String(gradeKey || '').trim();
+    if (!normalizedGradeKey) {
+      return;
+    }
+
+    setClassroomGroupForm((current) => {
+      const selected = new Set(current.gradeKeys || []);
+      if (selected.has(normalizedGradeKey)) {
+        selected.delete(normalizedGradeKey);
+      } else {
+        selected.add(normalizedGradeKey);
+      }
+      return { ...current, gradeKeys: Array.from(selected) };
+    });
+  };
+
+  const onEditClassroomGroup = (group) => {
+    setEditingClassroomGroupKey(String(group?.key || ''));
+    setClassroomGroupForm({
+      label: String(group?.label || ''),
+      gradeKeys: Array.isArray(group?.gradeKeys) ? group.gradeKeys : [],
+    });
+  };
+
+  const onSaveClassroomGroup = async (event) => {
+    event.preventDefault();
+    clearMessages();
+
+    const label = String(classroomGroupForm.label || '').trim();
+    const gradeKeys = Array.isArray(classroomGroupForm.gradeKeys) ? classroomGroupForm.gradeKeys : [];
+    if (!label) {
+      setError('Escribe el nombre del aula o grupo, por ejemplo Explorers o Collaborators.');
+      return;
+    }
+    if (gradeKeys.length === 0) {
+      setError('Selecciona al menos un grado para ese aula.');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = editingClassroomGroupKey
+        ? await updateAcademicManagementClassroomGroup(editingClassroomGroupKey, { label, gradeKeys })
+        : await createAcademicManagementClassroomGroup({ label, gradeKeys });
+      syncAcademicStructureState(response?.data?.academicStructure || {});
+      resetClassroomGroupForm();
+      setSuccess(editingClassroomGroupKey ? 'Aula compartida actualizada.' : 'Aula compartida creada.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo guardar el aula compartida.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteClassroomGroup = async (group) => {
+    const confirmed = window.confirm(`¿Eliminar el aula "${group?.label || group?.key}"? Los grados volverán a mostrarse por separado a los docentes.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const response = await deleteAcademicManagementClassroomGroup(group.key);
+      syncAcademicStructureState(response?.data?.academicStructure || {});
+      if (editingClassroomGroupKey === group.key) {
+        resetClassroomGroupForm();
+      }
+      setSuccess('Aula compartida eliminada.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo eliminar el aula compartida.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onCreateEducationalLevel = async (event) => {
     event.preventDefault();
     clearMessages();
@@ -11963,6 +12063,95 @@ function RectoriaDashboard() {
               </div>
             </section>
             </>
+          ) : null}
+
+          {activeSection === 'students' && activeAcademicManagementSection === 'classroom_groups' && !isCoordinationPortal ? (
+            <section className="panel rectoria-panel">
+              <div className="rectoria-section-header">
+                <div>
+                  <h3>Aulas compartidas</h3>
+                  <p>
+                    Si varios grados dictan clase en el mismo salón, agrúpalos y dales un nombre.
+                    Ese nombre es el que verán los docentes al calificar, pasar asistencia y consultar su horario.
+                  </p>
+                </div>
+              </div>
+
+              <form className="rectoria-inline-form rectoria-classroom-group-form" onSubmit={onSaveClassroomGroup}>
+                <label className="rectoria-grade-create-name">
+                  Nombre del aula o grupo
+                  <input
+                    maxLength={48}
+                    onChange={(event) => setClassroomGroupForm((current) => ({ ...current, label: event.target.value }))}
+                    placeholder="Ej. Explorers, Collaborators"
+                    value={classroomGroupForm.label}
+                  />
+                </label>
+                <button className="btn btn-primary" disabled={busy || !String(classroomGroupForm.label || '').trim() || classroomGroupForm.gradeKeys.length === 0} type="submit">
+                  {editingClassroomGroupKey ? 'Guardar cambios' : 'Crear aula'}
+                </button>
+                {editingClassroomGroupKey ? (
+                  <button className="btn" disabled={busy} onClick={resetClassroomGroupForm} type="button">
+                    Cancelar
+                  </button>
+                ) : null}
+              </form>
+
+              {academicStructureDraft.grades.length === 0 ? (
+                <p className="rectoria-inline-help">Primero crea los grados en “Grados y cursos” para poder agruparlos aquí.</p>
+              ) : (
+                <>
+                  <p className="rectoria-inline-help">Selecciona los grados que comparten el mismo salón.</p>
+                  <div className="rectoria-break-grade-picker">
+                    {academicStructureDraft.grades.map((grade) => {
+                      const occupiedBy = (academicStructureDraft.classroomGroups || []).find((group) => (
+                        group.key !== editingClassroomGroupKey
+                        && (Array.isArray(group.gradeKeys) ? group.gradeKeys : []).includes(grade.key)
+                      ));
+                      const isSelected = classroomGroupForm.gradeKeys.includes(grade.key);
+                      return (
+                        <button
+                          className={`rectoria-break-grade-chip${isSelected ? ' is-selected' : ''}`}
+                          disabled={busy || Boolean(occupiedBy)}
+                          key={`classroom-group-grade-${grade.key}`}
+                          onClick={() => onToggleClassroomGroupGrade(grade.key)}
+                          title={occupiedBy ? `Ya pertenece a ${occupiedBy.label}` : undefined}
+                          type="button"
+                        >
+                          {grade.label || grade.key}
+                          {occupiedBy ? ` · ${occupiedBy.label}` : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <div className="rectoria-classroom-group-list">
+                {(academicStructureDraft.classroomGroups || []).length === 0 ? (
+                  <p className="rectoria-role-empty">Todavía no hay aulas compartidas. Ejemplo: Explorers para 1.°, Collaborators para 2.°, 3.° y 4.°.</p>
+                ) : (academicStructureDraft.classroomGroups || []).map((group) => (
+                  <article className="rectoria-grade-course-card" key={group.key}>
+                    <div>
+                      <strong>{group.label}</strong>
+                      <p>
+                        {(Array.isArray(group.gradeKeys) ? group.gradeKeys : [])
+                          .map((gradeKey) => getGradeLabel(gradeKey) || gradeKey)
+                          .join(', ') || 'Sin grados'}
+                      </p>
+                    </div>
+                    <div className="rectoria-subject-actions">
+                      <button className="btn" disabled={busy} onClick={() => onEditClassroomGroup(group)} type="button">
+                        Editar
+                      </button>
+                      <button className="btn btn-danger" disabled={busy} onClick={() => onDeleteClassroomGroup(group)} type="button">
+                        Eliminar
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
           ) : null}
 
           {activeSection === 'students' && activeAcademicManagementSection === 'subjects' && !isCoordinationPortal ? (

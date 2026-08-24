@@ -1027,6 +1027,7 @@ function buildTeacherWeeklyScheduleFallback(courses) {
     { key: 5, label: 'Viernes', shortLabel: 'Vie' },
   ];
   const entries = [];
+  const seenSharedBlocks = new Set();
 
   (courses || []).forEach((course) => {
     sanitizeClassSessions(course.classSessions).forEach((session) => {
@@ -1035,14 +1036,24 @@ function buildTeacherWeeklyScheduleFallback(courses) {
         return;
       }
 
+      const sharedBlockKey = course.classroomGroupKey
+        ? `${course.classroomGroupKey}::${course.subject}::${weekday}:${session.startTime}:${session.endTime}`
+        : `${course.id}:${weekday}:${session.startTime}:${session.endTime}`;
+      if (seenSharedBlocks.has(sharedBlockKey)) {
+        return;
+      }
+      seenSharedBlocks.add(sharedBlockKey);
+
       entries.push({
-        key: `${course.id}:${weekday}:${session.startTime}:${session.endTime}`,
+        key: sharedBlockKey,
           startDate: '',
           endDate: '',
         courseId: course.id,
         courseTitle: getCourseOptionLabel(course),
         subject: course.subject,
         studentGradeKey: course.studentGradeKey,
+        classroomGroupKey: course.classroomGroupKey || '',
+        classroomGroupLabel: course.classroomGroupLabel || '',
         colorToken: course.colorToken,
         weekday,
         startTime: session.startTime,
@@ -1137,7 +1148,7 @@ function exportTeacherWeeklyScheduleCsv(schedule, weekdays = []) {
           `${item.startTime || ''} - ${item.endTime || ''}`.trim(),
           item.courseTitle || '',
           item.subject || '',
-          item.studentGradeKey || '',
+          item.classroomGroupLabel || item.studentGradeKey || '',
           item.label || '',
         ]);
       });
@@ -1873,6 +1884,27 @@ function buildTeacherManagementOverview(courses, posts, workspace, options = {})
     tomorrowLabel,
     tomorrowActivities,
     tomorrowActivitiesCount: tomorrowActivities.length,
+    assignmentSubmissionCount: Number.isFinite(Number(options.assignmentSubmissionCount))
+      ? Number(options.assignmentSubmissionCount)
+      : (Array.isArray(options.assignmentSubmissions) ? options.assignmentSubmissions.length : 0),
+    assignmentSubmissions: Array.isArray(options.assignmentSubmissions)
+      ? options.assignmentSubmissions
+        .map((item) => ({
+          id: String(item?.id || '').trim(),
+          courseId: String(item?.courseId || '').trim(),
+          postId: String(item?.postId || '').trim(),
+          studentId: String(item?.studentId || '').trim(),
+          studentName: String(item?.studentName || '').trim() || 'Estudiante',
+          studentGrade: String(item?.studentGrade || '').trim(),
+          studentSchoolCode: String(item?.studentSchoolCode || '').trim(),
+          assignmentTitle: String(item?.assignmentTitle || '').trim() || formatPostTypeLabel(item?.assignmentType) || 'Actividad',
+          assignmentType: formatPostTypeLabel(item?.assignmentType) || String(item?.assignmentType || 'Actividad').trim(),
+          courseTitle: String(item?.courseTitle || '').trim() || 'Curso',
+          submittedAt: item?.submittedAt || null,
+          submittedAtLabel: String(item?.submittedAtLabel || '').trim() || formatDateTimeLabel(item?.submittedAt),
+        }))
+        .filter((item) => item.id && item.courseId)
+      : [],
   };
 }
 
@@ -1945,7 +1977,7 @@ function extractGradeNumberLabel(value) {
   return ordinalGrades.get(normalizedKey) || '';
 }
 
-function getCourseGradeLabel(course) {
+function getNativeCourseGradeLabel(course) {
   const educationalLabel = resolveEducationalGradeLabel(course);
   if (educationalLabel) {
     return educationalLabel;
@@ -1960,7 +1992,16 @@ function getCourseGradeLabel(course) {
     return `Kinder ${gradeNumber}`;
   }
 
-  return gradeNumber || normalizeCourseDisplayText(course?.gradeLevel || course?.studentGradeKey || getCourseGroupLabel(course));
+  return gradeNumber || normalizeCourseDisplayText(course?.gradeLevel || course?.studentGradeKey || '');
+}
+
+function getCourseGradeLabel(course) {
+  const classroomGroupLabel = normalizeCourseDisplayText(course?.classroomGroupLabel);
+  if (classroomGroupLabel) {
+    return classroomGroupLabel;
+  }
+
+  return getNativeCourseGradeLabel(course) || normalizeCourseDisplayText(getCourseGroupLabel(course));
 }
 
 function getCourseGradeGroupLabel(course) {
@@ -2004,6 +2045,11 @@ function buildGradeAliasSet(course, groupLabel) {
 }
 
 function getCourseGroupLabel(course) {
+  const classroomGroupLabel = normalizeCourseDisplayText(course?.classroomGroupLabel);
+  if (classroomGroupLabel) {
+    return classroomGroupLabel;
+  }
+
   const educationalLabel = resolveEducationalGradeLabel(course);
   if (educationalLabel) {
     return educationalLabel;
@@ -2062,6 +2108,19 @@ function getCourseOptionLabel(course) {
   return getCourseDisplayTitle(course);
 }
 
+function getAttendanceCourseLabel(course) {
+  const classroomGroupLabel = normalizeCourseDisplayText(course?.classroomGroupLabel);
+  if (classroomGroupLabel) {
+    const nativeGradeLabel = getNativeCourseGradeLabel(course);
+    if (nativeGradeLabel && normalizeCourseDisplayKey(nativeGradeLabel) !== normalizeCourseDisplayKey(classroomGroupLabel)) {
+      return `${classroomGroupLabel} · ${nativeGradeLabel}`;
+    }
+    return classroomGroupLabel;
+  }
+
+  return getCourseGroupLabel(course) || getCourseOptionLabel(course);
+}
+
 function getCourseDisplaySubtitle(course) {
   const subjectLabel = normalizeCourseDisplayText(course?.subject);
   const groupLabel = getCourseGroupLabel(course);
@@ -2117,6 +2176,9 @@ function getCourseViewAccent(course, index = 0) {
 
 function getCourseGradeGroupKey(course) {
   const subjectKey = normalizeCourseDisplayKey(course?.subject || 'asignatura');
+  if (course?.classroomGroupKey) {
+    return `${subjectKey}::classroom:${normalizeCourseDisplayKey(course.classroomGroupKey)}`;
+  }
   const gradeKey = normalizeCourseDisplayKey(getCourseGradeLabel(course) || course?.title || 'grado');
   return `${subjectKey}::${gradeKey}`;
 }
@@ -2662,6 +2724,14 @@ function TeacherDashboardKpiIcon({ kind }) {
         <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
           <rect height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" width="16" x="4" y="5" />
           <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'submissions':
+      return (
+        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+          <path d="M14 3v5h5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+          <path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" />
+          <path d="M9 13h6M9 17h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
         </svg>
       );
     case 'health':
@@ -4101,9 +4171,19 @@ function TeacherCampusHome({ forcePreview = false }) {
       previewEnabled ? previewWorkspace : null,
       {
         pendingGradingItems: overviewMetricsQuery.data?.pendingGradingItems,
+        assignmentSubmissions: overviewMetricsQuery.data?.assignmentSubmissions,
+        assignmentSubmissionCount: overviewMetricsQuery.data?.assignmentSubmissionCount,
       }
     ),
-    [previewEnabled, academicCourses, overviewMetricsQuery.data?.pendingGradingItems, previewWorkspace, recentPosts]
+    [
+      previewEnabled,
+      academicCourses,
+      overviewMetricsQuery.data?.assignmentSubmissionCount,
+      overviewMetricsQuery.data?.assignmentSubmissions,
+      overviewMetricsQuery.data?.pendingGradingItems,
+      previewWorkspace,
+      recentPosts,
+    ]
   );
   const dashboardCoursePerformance = useMemo(() => {
     const maxScore = Number(gradingScale?.maxScore || 100);
@@ -4133,6 +4213,10 @@ function TeacherCampusHome({ forcePreview = false }) {
   const visibleDashboardCoursePerformance = useMemo(
     () => dashboardCoursePerformance.slice(0, 8),
     [dashboardCoursePerformance]
+  );
+  const visibleDashboardAssignmentSubmissions = useMemo(
+    () => (Array.isArray(integralOverview.assignmentSubmissions) ? integralOverview.assignmentSubmissions.slice(0, 8) : []),
+    [integralOverview.assignmentSubmissions]
   );
   const teacherWelcomeName = getTeacherFirstName(teacherName);
   const todayWelcomeLabel = formatLongWeekdayDate(new Date());
@@ -5704,6 +5788,21 @@ function TeacherCampusHome({ forcePreview = false }) {
     setActiveCourseWorkspaceTab('gradebook');
     setGradebookMode('assignment');
     setSelectedGradebookAssignmentKey(assignmentKey || assignmentOptions[0]?.key || '');
+  };
+
+  const openAssignmentSubmissionsFromDashboard = (item) => {
+    const course = academicCourses.find((entry) => String(entry.id) === String(item?.courseId));
+    if (!course) {
+      setNotice({ type: 'error', text: 'No se encontró el curso de esa entrega.' });
+      return;
+    }
+
+    setActiveIntegralModal('');
+    setSelectedAssignmentDetail(null);
+    setShowAssignmentComposer(false);
+    setActiveTeacherSection('academic_management');
+    openAcademicManagementWorkspace(course, 'submissions');
+    setSelectedSubmissionAssignmentId(String(item?.postId || ''));
   };
 
   const closeTeacherQuickSearch = () => {
@@ -10869,7 +10968,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)} disabled={!teacherAttendanceCoursesForSubject.length}>
                               <option value="">{teacherAttendanceCoursesForSubject.length ? 'Seleccionar curso' : 'Sin cursos'}</option>
                               {teacherAttendanceCoursesForSubject.map((course) => (
-                                <option key={course.id} value={course.id}>{getCourseGroupLabel(course)}</option>
+                                <option key={course.id} value={course.id}>{getAttendanceCourseLabel(course)}</option>
                               ))}
                             </select>
                           </div>
@@ -10885,7 +10984,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </svg>
                           <select value={teacherAttendanceCourseId} onChange={(event) => setTeacherAttendanceCourseId(event.target.value)}>
                             <option value="">Seleccionar curso</option>
-                            {attendanceCourses.map((course) => <option key={course.id} value={course.id}>{getCourseOptionLabel(course)}</option>)}
+                            {attendanceCourses.map((course) => <option key={course.id} value={course.id}>{getAttendanceCourseLabel(course)}</option>)}
                           </select>
                         </div>
                       </label>
@@ -11102,7 +11201,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                       <strong>
                         {selectedTeacherAttendanceCourse
                           ? (teacherAttendanceType === 'subject_class'
-                            ? [selectedAttendanceSubject?.label, getCourseGroupLabel(selectedTeacherAttendanceCourse)].filter(Boolean).join(' · ')
+                            ? [selectedAttendanceSubject?.label, getAttendanceCourseLabel(selectedTeacherAttendanceCourse)].filter(Boolean).join(' · ')
                             : getCourseOptionLabel(selectedTeacherAttendanceCourse))
                           : 'Sin curso seleccionado'}
                       </strong>
@@ -12536,7 +12635,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                 </header>
 
                 <div className={`campus-teacher__home-kpi-grid${isOverviewMetricsLoading ? ' is-loading' : ''}`}>
-                  {isOverviewMetricsLoading ? Array.from({ length: 5 }, (_, index) => (
+                  {isOverviewMetricsLoading ? Array.from({ length: 6 }, (_, index) => (
                     <article className="campus-teacher__home-kpi-card is-skeleton" key={`teacher-home-kpi-skeleton-${index}`} aria-hidden="true">
                       <span />
                       <strong />
@@ -12634,6 +12733,26 @@ function TeacherCampusHome({ forcePreview = false }) {
                         <strong>{integralOverview.tomorrowActivitiesCount}</strong>
                         <p>{integralOverview.tomorrowActivitiesCount > 0 ? integralOverview.tomorrowLabel : 'Nada programado'}</p>
                         <span className="campus-teacher__home-kpi-link">Ver agenda →</span>
+                      </button>
+
+                      <button
+                        className={`campus-teacher__home-kpi-card tone-submissions${integralOverview.assignmentSubmissionCount > 0 ? ' has-alert' : ''}`}
+                        onClick={() => setActiveIntegralModal('submissions')}
+                        type="button"
+                      >
+                        <span className="campus-teacher__home-kpi-icon" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="submissions" />
+                        </span>
+                        <span className="campus-teacher__home-kpi-label">Entregas</span>
+                        <strong>{integralOverview.assignmentSubmissionCount}</strong>
+                        <p>
+                          {integralOverview.assignmentSubmissionCount > 0
+                            ? (integralOverview.assignmentSubmissions[0]?.studentName
+                              ? `Última: ${integralOverview.assignmentSubmissions[0].studentName}`
+                              : 'Alumnos que ya entregaron')
+                            : 'Aún no hay entregas'}
+                        </p>
+                        <span className="campus-teacher__home-kpi-link">Ver quién entregó →</span>
                       </button>
                     </>
                   )}
@@ -12826,6 +12945,58 @@ function TeacherCampusHome({ forcePreview = false }) {
                   </article>
                 </div>
 
+                <article className="campus-teacher__home-submissions" id="teacher-home-submissions">
+                    <header className="campus-teacher__home-card-head">
+                      <div className="campus-teacher__home-card-title">
+                        <span className="campus-teacher__home-card-icon tone-submissions" aria-hidden="true">
+                          <TeacherDashboardKpiIcon kind="submissions" />
+                        </span>
+                        <div>
+                          <strong>Entregas de asignaciones</strong>
+                          <p>Quién ha entregado actividades</p>
+                        </div>
+                      </div>
+                      <button
+                        className="campus-teacher__home-text-link"
+                        onClick={() => setActiveIntegralModal('submissions')}
+                        type="button"
+                      >
+                        Ver todas →
+                      </button>
+                    </header>
+
+                    <div className="campus-teacher__home-submissions-list">
+                      {isOverviewMetricsLoading ? (
+                        <p className="campus-teacher__home-day-empty">Cargando entregas de los alumnos...</p>
+                      ) : visibleDashboardAssignmentSubmissions.length > 0 ? visibleDashboardAssignmentSubmissions.map((item) => (
+                        <button
+                          className="campus-teacher__home-submission-row"
+                          key={item.id}
+                          onClick={() => openAssignmentSubmissionsFromDashboard(item)}
+                          type="button"
+                        >
+                          <div className="campus-teacher__home-submission-copy">
+                            <strong>{item.studentName}</strong>
+                            <span>
+                              {item.assignmentTitle}
+                              {item.courseTitle ? ` · ${item.courseTitle}` : ''}
+                            </span>
+                          </div>
+                          <em>{item.submittedAtLabel}</em>
+                        </button>
+                      )) : (
+                        <p className="campus-teacher__home-day-empty">
+                          Todavía no hay entregas de alumnos en tus asignaciones.
+                        </p>
+                      )}
+                    </div>
+                    {!isOverviewMetricsLoading && integralOverview.assignmentSubmissionCount > visibleDashboardAssignmentSubmissions.length ? (
+                      <p className="campus-teacher__home-performance-more">
+                        Mostrando {visibleDashboardAssignmentSubmissions.length} de {integralOverview.assignmentSubmissionCount}. Usa “Ver todas” para el resto.
+                      </p>
+                    ) : null}
+                  </article>
+
                 {activeIntegralModal === 'risk' ? (
                   <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setActiveIntegralModal('')} role="presentation">
                     <div
@@ -12929,6 +13100,58 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <p>{item.description}</p>
                           </article>
                         )) : <p className="campus-panel__meta">No hay tareas, quiz, exposiciones u otras actividades evaluativas programadas para mañana.</p>}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeIntegralModal === 'submissions' ? (
+                  <div className="campus-teacher__timeline-modal-backdrop" onClick={() => setActiveIntegralModal('')} role="presentation">
+                    <div
+                      aria-label="Entregas de asignaciones"
+                      aria-modal="true"
+                      className="campus-teacher__timeline-modal"
+                      onClick={(event) => event.stopPropagation()}
+                      role="dialog"
+                    >
+                      <div className="campus-teacher__timeline-modal-head">
+                        <div>
+                          <span className="campus-panel__kicker">Entregas</span>
+                          <h3>
+                            {integralOverview.assignmentSubmissionCount === 1
+                              ? '1 alumno ya entregó una actividad'
+                              : `${integralOverview.assignmentSubmissionCount} entregas de alumnos`}
+                          </h3>
+                        </div>
+                        <button className="campus-teacher__ghost-btn" onClick={() => setActiveIntegralModal('')} type="button">
+                          Cerrar
+                        </button>
+                      </div>
+
+                      <div className="campus-teacher__timeline-modal-body">
+                        {integralOverview.assignmentSubmissions.length > 0 ? integralOverview.assignmentSubmissions.map((item) => (
+                          <button
+                            className="campus-teacher__timeline-modal-item is-activity is-clickable"
+                            key={item.id}
+                            onClick={() => openAssignmentSubmissionsFromDashboard(item)}
+                            type="button"
+                          >
+                            <span className="campus-teacher__timeline-modal-item-kind">{item.assignmentType}</span>
+                            <strong>{item.studentName}</strong>
+                            <span>
+                              {item.assignmentTitle}
+                              {item.courseTitle ? ` · ${item.courseTitle}` : ''}
+                              {item.studentGrade ? ` · ${item.studentGrade}` : ''}
+                            </span>
+                            <p>Entregó {item.submittedAtLabel}.</p>
+                            <span className="campus-teacher__timeline-modal-item-action">Ver evidencia</span>
+                          </button>
+                        )) : <p className="campus-panel__meta">Todavía no hay entregas de alumnos en tus asignaciones.</p>}
+                        {integralOverview.assignmentSubmissionCount > integralOverview.assignmentSubmissions.length ? (
+                          <p className="campus-panel__meta">
+                            Mostrando las {integralOverview.assignmentSubmissions.length} entregas más recientes.
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </div>

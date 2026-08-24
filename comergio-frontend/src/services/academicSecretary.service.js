@@ -92,6 +92,9 @@ export const updateAcademicManagementLevelName = (levelKey, data) => api.patch(`
 export const createAcademicManagementSubject = (data) => api.post('/academic-secretary/academic-management/subjects', data);
 export const updateAcademicManagementSubject = (subjectKey, data) => api.patch(`/academic-secretary/academic-management/subjects/${encodeURIComponent(subjectKey)}`, data);
 export const createAcademicManagementGrade = (data) => api.post('/academic-secretary/academic-management/grades', data);
+export const createAcademicManagementClassroomGroup = (data) => api.post('/academic-secretary/academic-management/classroom-groups', data);
+export const updateAcademicManagementClassroomGroup = (groupKey, data) => api.patch(`/academic-secretary/academic-management/classroom-groups/${encodeURIComponent(groupKey)}`, data);
+export const deleteAcademicManagementClassroomGroup = (groupKey) => api.delete(`/academic-secretary/academic-management/classroom-groups/${encodeURIComponent(groupKey)}`);
 export const updateAcademicManagementGradeName = (gradeKey, data) => api.patch(`/academic-secretary/academic-management/grades/${encodeURIComponent(gradeKey)}`, data);
 export const updateAcademicManagementGradeLevel = (gradeKey, data) => api.patch(`/academic-secretary/academic-management/grades/${encodeURIComponent(gradeKey)}/level`, data);
 export const updateAcademicManagementSubjectGrades = (subjectKey, data) => api.put(`/academic-secretary/academic-management/subjects/${encodeURIComponent(subjectKey)}/grades`, data);

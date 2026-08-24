@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
+const { resolveClassroomGroupForCourse } = require('../utils/classroomGroups');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -104,6 +105,21 @@ function isValidObjectId(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function formatTeacherDateTimeLabel(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return 'Sin fecha';
+  }
+
+  return date.toLocaleString('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Bogota',
+  });
 }
 
 function parsePickupCoordinate(value) {
@@ -1012,6 +1028,7 @@ function buildTeacherWeeklySchedule(courses) {
     { key: 5, label: 'Viernes', shortLabel: 'Vie' },
   ];
   const entries = [];
+  const seenSharedBlocks = new Set();
 
   for (const course of Array.isArray(courses) ? courses : []) {
     const normalizedCourse = serializeCourse(course);
@@ -1022,12 +1039,22 @@ function buildTeacherWeeklySchedule(courses) {
         continue;
       }
 
+      const sharedBlockKey = normalizedCourse.classroomGroupKey
+        ? `${normalizedCourse.classroomGroupKey}::${normalizedCourse.subject}::${weekday}:${normalizeText(session.startTime)}:${normalizeText(session.endTime)}`
+        : `${normalizedCourse.id}:${weekday}:${normalizeText(session.startTime)}:${normalizeText(session.endTime)}`;
+      if (seenSharedBlocks.has(sharedBlockKey)) {
+        continue;
+      }
+      seenSharedBlocks.add(sharedBlockKey);
+
       entries.push({
-        key: `${normalizedCourse.id}:${weekday}:${normalizeText(session.startTime)}:${normalizeText(session.endTime)}`,
+        key: sharedBlockKey,
         courseId: normalizedCourse.id,
         courseTitle: normalizedCourse.title,
         subject: normalizedCourse.subject,
         studentGradeKey: normalizedCourse.studentGradeKey,
+        classroomGroupKey: normalizedCourse.classroomGroupKey,
+        classroomGroupLabel: normalizedCourse.classroomGroupLabel,
         colorToken: normalizedCourse.colorToken,
         weekday,
         startTime: normalizeText(session.startTime),
@@ -1999,6 +2026,11 @@ function buildAcademicContentGradeScopeQuery({ schoolId, course }) {
 function serializeCourse(course, options = {}) {
   const academicPeriods = getCourseAcademicPeriods(course);
   const academicContent = buildCourseAcademicContent(course);
+  const classroomGroup = options.academicStructure
+    ? resolveClassroomGroupForCourse(options.academicStructure.classroomGroups, course)
+    : null;
+  const classroomGroupKey = classroomGroup?.key || normalizeText(course.classroomGroupKey);
+  const classroomGroupLabel = classroomGroup?.label || normalizeText(course.classroomGroupLabel);
   return {
     id: String(course._id),
     teacherUserId: normalizeText(course.teacherUserId),
@@ -2010,6 +2042,8 @@ function serializeCourse(course, options = {}) {
     gradeLevel: normalizeText(course.gradeLevel),
     section: normalizeText(course.section),
     studentGradeKey: normalizeText(course.studentGradeKey),
+    classroomGroupKey,
+    classroomGroupLabel,
     includeClassAttendance: course.includeClassAttendance !== false,
     description: normalizeText(course.description),
     colorToken: normalizeText(course.colorToken) || '#2a6f97',
@@ -2406,21 +2440,28 @@ function buildTeacherAcademicCourseCandidates({ academicStructure, teacherUserId
     }
 
     const grade = gradesByKey.get(normalizedGradeKey) || null;
-    const gradeLabel = normalizeText(grade?.label || normalizedGradeKey);
+    const classroomGroup = resolveClassroomGroupForCourse(academicStructure?.classroomGroups, {
+      studentGradeKey: normalizedGradeKey,
+      gradeLevel: normalizeText(grade?.label || normalizedGradeKey),
+    });
+    const nativeGradeLabel = normalizeText(grade?.label || normalizedGradeKey);
+    const displayGradeLabel = normalizeText(classroomGroup?.label || nativeGradeLabel);
     const courseMetadata = normalizedCourseKey === 'general'
       ? { sourceCourseKey: '', label: '' }
       : resolveAcademicCourseMetadata(grade, normalizedCourseKey);
-    const courseLabel = courseMetadata.label;
+    const courseLabel = classroomGroup ? '' : courseMetadata.label;
     const subjectLabel = subjectsByKey.get(normalizedSubjectKey) || normalizedSubjectKey;
     const candidate = {
       key: candidateKey,
       sourceCourseKey: courseMetadata.sourceCourseKey,
-      title: buildAcademicCourseTitle({ subjectLabel, gradeLabel, courseLabel }) || subjectLabel || gradeLabel,
+      title: buildAcademicCourseTitle({ subjectLabel, gradeLabel: displayGradeLabel, courseLabel }) || subjectLabel || displayGradeLabel,
       subjectKey: normalizedSubjectKey,
       subject: subjectLabel,
-      gradeLevel: gradeLabel,
+      gradeLevel: nativeGradeLabel,
       section: courseLabel,
       studentGradeKey: normalizedGradeKey,
+      classroomGroupKey: classroomGroup?.key || '',
+      classroomGroupLabel: classroomGroup?.label || '',
       classSessions: [],
     };
 
@@ -2572,15 +2613,22 @@ function buildTeacherGuidanceCourseCandidates({ academicStructure, teacherUserId
       .map((course) => {
         const courseKey = normalizeText(course?.key).toUpperCase();
         const courseLabel = normalizeText(course?.label || course?.section || courseKey);
+        const classroomGroup = resolveClassroomGroupForCourse(academicStructure?.classroomGroups, {
+          studentGradeKey: gradeKey,
+          gradeLevel: gradeLabel,
+        });
+        const displayGroupLabel = normalizeText(classroomGroup?.label || courseLabel || gradeLabel);
         return {
           key: `${gradeKey}::${courseKey}::guidance_routine`,
           courseType: 'guidance_routine',
           sourceCourseKey: courseKey,
-          title: `Guidance Routine · ${courseLabel || gradeLabel}`,
+          title: `Guidance Routine · ${displayGroupLabel}`,
           subject: 'Guidance Routine',
           gradeLevel: gradeLabel,
           section: courseLabel,
           studentGradeKey: gradeKey,
+          classroomGroupKey: classroomGroup?.key || '',
+          classroomGroupLabel: classroomGroup?.label || '',
           classSessions: [],
         };
       });
@@ -2639,6 +2687,9 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       existingCourse.subject = candidate.subject;
       existingCourse.gradeLevel = candidate.gradeLevel;
       existingCourse.section = candidate.section || existingCourse.section || '';
+      existingCourse.studentGradeKey = existingCourse.studentGradeKey || candidate.studentGradeKey;
+      existingCourse.classroomGroupKey = candidate.classroomGroupKey || '';
+      existingCourse.classroomGroupLabel = candidate.classroomGroupLabel || '';
       const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, {
         subject: existingCourse.subject || candidate.subject,
         studentGradeKey: existingCourse.studentGradeKey || candidate.studentGradeKey,
@@ -2673,6 +2724,8 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       gradeLevel: candidate.gradeLevel,
       section: candidate.section,
       studentGradeKey: candidate.studentGradeKey,
+      classroomGroupKey: candidate.classroomGroupKey || '',
+      classroomGroupLabel: candidate.classroomGroupLabel || '',
       description: 'Curso sincronizado desde Rectoría.',
       classSessions: candidate.classSessions,
       academicPeriods: candidate.courseType === 'guidance_routine' ? [] : academicPeriods,
@@ -3410,13 +3463,13 @@ async function requireCampusCoordinationAccess(req, res, next) {
 
 async function buildTeacherCourseDetail({ schoolId, teacherUserId, course, gradingScale = null, academicStructure = null }) {
   return runWithSchoolContext(schoolId, async () => {
-    const structure = academicStructure || await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects').lean();
+    const structure = academicStructure || await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects classroomGroups').lean();
     const resolvedClassSessions = resolveTeacherCourseClassSessionsFromStructure(structure, teacherUserId, course);
     const courseForSerialization = resolvedClassSessions.length > 0
       && (!Array.isArray(course?.classSessions) || course.classSessions.length === 0)
       ? { ...course, classSessions: resolvedClassSessions }
       : course;
-    const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale });
+    const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale, academicStructure: structure });
     const academicPeriods = Array.isArray(normalizedCourse.academicPeriods) ? normalizedCourse.academicPeriods : [];
     let students = await Student.find(buildTeacherCourseRosterQuery({ schoolId, course }))
       .select('name schoolCode grade course status')
@@ -3616,7 +3669,7 @@ function buildTeacherOverviewCourseCards({
       && (!Array.isArray(course.classSessions) || course.classSessions.length === 0)
       ? { ...course, classSessions: resolvedClassSessions }
       : course;
-    const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale: courseGradingScale });
+    const normalizedCourse = serializeCourse(courseForSerialization, { gradingScale: courseGradingScale, academicStructure });
     const courseId = String(course._id);
     const rosterStudents = schoolStudents.filter((student) => studentBelongsToCourse(student, course));
     const academicPeriods = getCourseAcademicPeriods(courseForSerialization);
@@ -3897,18 +3950,24 @@ async function loadStudentsForTeacherCourses(schoolId, courses) {
 
 function enrichTeacherOverviewCourses(academicStructure, teacherUserId, courses) {
   return courses.map((course) => {
-    const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, course);
+    const classroomGroup = resolveClassroomGroupForCourse(academicStructure?.classroomGroups, course);
+    const withClassroomGroup = {
+      ...course,
+      classroomGroupKey: classroomGroup?.key || course.classroomGroupKey || '',
+      classroomGroupLabel: classroomGroup?.label || course.classroomGroupLabel || '',
+    };
+    const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, withClassroomGroup);
     if (resolvedClassSessions.length > 0 && (!Array.isArray(course.classSessions) || course.classSessions.length === 0)) {
-      return { ...course, classSessions: resolvedClassSessions };
+      return { ...withClassroomGroup, classSessions: resolvedClassSessions };
     }
-    return course;
+    return withClassroomGroup;
   });
 }
 
 async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
   await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId: userId });
 
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels').lean();
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups').lean();
   const [teacherUser, courses, recentPosts, gradingContext] = await Promise.all([
     User.findOne({ _id: userId, schoolId })
       .select('_id name username campusPhotoUrl campusPhotoThumbUrl')
@@ -3929,7 +3988,7 @@ async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
   const normalizedCourses = enrichedOverviewCourses.map((course) => {
     const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
     return {
-      ...serializeCourse(course, { gradingScale: courseGradingScale }),
+      ...serializeCourse(course, { gradingScale: courseGradingScale, academicStructure }),
       includeClassAttendance: resolveIncludeClassAttendanceForCourse(academicStructure, course),
       stats: buildEmptyCourseStats(),
     };
@@ -3952,17 +4011,30 @@ async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
 }
 
 async function buildTeacherOverviewMetrics({ schoolId, userId }) {
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels').lean();
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups').lean();
   const gradingContext = await loadCampusGradingContext(schoolId);
   const courses = await CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
     .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
     .lean();
 
-  const [allCoursePosts, schoolStudents] = await Promise.all([
+  const courseObjectIds = courses.map((course) => course._id).filter(Boolean);
+  const [allCoursePosts, schoolStudents, assignmentSubmissionTotal, recentAssignmentSubmissions] = await Promise.all([
     CampusPost.find({ schoolId, teacherUserId: userId })
       .select('courseId type status title body dueAt scheduledClassDate deliveryMode updatedAt createdAt')
       .lean(),
     loadStudentsForTeacherCourses(schoolId, courses),
+    courseObjectIds.length
+      ? CampusPostSubmission.countDocuments({ schoolId, courseId: { $in: courseObjectIds } })
+      : 0,
+    courseObjectIds.length
+      ? CampusPostSubmission.find({ schoolId, courseId: { $in: courseObjectIds } })
+        .sort({ submittedAt: -1, createdAt: -1 })
+        .limit(40)
+        .populate('studentId', 'name schoolCode grade')
+        .populate('postId', 'title type')
+        .populate('courseId', 'title subject gradeLevel section')
+        .lean()
+      : [],
   ]);
 
   const postsByCourseId = new Map();
@@ -4118,6 +4190,40 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
       const rightTime = new Date(right.dueAt || right.scheduledClassDate || right.updatedAt || 0).getTime();
       return leftTime - rightTime;
     }),
+    assignmentSubmissionCount: Number(assignmentSubmissionTotal || 0),
+    assignmentSubmissions: (Array.isArray(recentAssignmentSubmissions) ? recentAssignmentSubmissions : [])
+      .map((submission) => {
+        const course = submission.courseId && typeof submission.courseId === 'object' && (submission.courseId.title || submission.courseId.subject)
+          ? submission.courseId
+          : null;
+        const post = submission.postId && typeof submission.postId === 'object' && (submission.postId.title || submission.postId.type)
+          ? submission.postId
+          : null;
+        const student = submission.studentId && typeof submission.studentId === 'object' && submission.studentId.name
+          ? submission.studentId
+          : null;
+        const submittedAt = submission.submittedAt || submission.createdAt || null;
+        const courseTitle = [
+          normalizeText(course?.subject),
+          normalizeText(course?.gradeLevel || course?.section || course?.title),
+        ].filter(Boolean).join(' · ') || normalizeText(course?.title) || 'Curso';
+
+        return {
+          id: String(submission._id || ''),
+          courseId: String(submission.courseId?._id || submission.courseId || ''),
+          postId: String(submission.postId?._id || submission.postId || ''),
+          studentId: String(submission.studentId?._id || submission.studentId || ''),
+          studentName: normalizeText(student?.name) || 'Estudiante',
+          studentGrade: normalizeText(student?.grade),
+          studentSchoolCode: normalizeText(student?.schoolCode),
+          assignmentTitle: normalizeText(post?.title) || normalizeText(post?.type) || 'Actividad',
+          assignmentType: normalizeText(post?.type) || 'Actividad',
+          courseTitle,
+          submittedAt,
+          submittedAtLabel: formatTeacherDateTimeLabel(submittedAt),
+        };
+      })
+      .filter((item) => item.id && item.courseId),
   };
 }
 
@@ -4284,7 +4390,7 @@ router.get('/teacher/courses/:id', requireCampusTeacherAccess, async (req, res) 
 
     const gradingContext = await loadCampusGradingContext(schoolId);
     const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
-    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels').lean();
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups').lean();
     const [detail, posts] = await Promise.all([
       buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course, gradingScale: courseGradingScale, academicStructure }),
       CampusPost.find({ schoolId, teacherUserId: userId, courseId: course._id })
@@ -6395,7 +6501,7 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
       });
 
       return {
-        ...serializeCourse(course, { gradingScale: courseGradingScale }),
+        ...serializeCourse(course, { gradingScale: courseGradingScale, academicStructure }),
         stats: buildCourseCardStats({
           courseDetail,
           posts: postsByCourseId.get(String(course._id)) || [],

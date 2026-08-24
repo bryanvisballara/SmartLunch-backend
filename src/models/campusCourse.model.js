@@ -122,6 +122,8 @@ const campusCourseSchema = new mongoose.Schema(
     gradeLevel: { type: String, trim: true, default: '' },
     section: { type: String, trim: true, default: '' },
     studentGradeKey: { type: String, required: true, trim: true, index: true },
+    classroomGroupKey: { type: String, trim: true, default: '' },
+    classroomGroupLabel: { type: String, trim: true, default: '' },
     description: { type: String, trim: true, default: '' },
     colorToken: { type: String, trim: true, default: '#2a6f97' },
     classSessions: { type: [campusClassSessionSchema], default: [] },

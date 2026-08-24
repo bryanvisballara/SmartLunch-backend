@@ -36,6 +36,17 @@ const academicStructureLevelSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const academicStructureClassroomGroupSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, trim: true },
+    label: { type: String, required: true, trim: true },
+    gradeKeys: { type: [String], default: [] },
+    order: { type: Number, default: 0 },
+    status: { type: String, enum: ['active', 'archived'], default: 'active' },
+  },
+  { _id: false }
+);
+
 const academicStructureSubjectSchema = new mongoose.Schema(
   {
     key: { type: String, required: true, trim: true },
@@ -236,6 +247,7 @@ const academicStructureSchema = new mongoose.Schema(
     levels: { type: [academicStructureLevelSchema], default: [] },
     subjects: { type: [academicStructureSubjectSchema], default: [] },
     grades: { type: [academicStructureGradeSchema], default: [] },
+    classroomGroups: { type: [academicStructureClassroomGroupSchema], default: [] },
     scheduleSettings: { type: academicStructureScheduleSettingsSchema, default: () => ({ groups: [] }) },
     scheduleBreaks: { type: [academicStructureScheduleBreakSchema], default: [] },
     teachingAvailability: { type: [academicStructureTeachingAvailabilitySchema], default: [] },

@@ -36,6 +36,14 @@ const Notification = require('../models/notification.model');
 const DeviceToken = require('../models/deviceToken.model');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
+const {
+  findClassroomGroupGradeConflict,
+  gradesShareClassroomGroup,
+  removeGradeFromClassroomGroups,
+  serializeClassroomGroups,
+  slugifyClassroomGroupKey,
+  uniqueClassroomGroupValues,
+} = require('../utils/classroomGroups');
 const { runWithSchoolContext } = require('../config/db');
 const {
   applyMonthlyTuitionAdditionalDiscount,
@@ -1652,9 +1660,34 @@ function buildAcademicScheduleConflictMessage({ teacherName, subjectLabel, slot,
   return `${teacherName || 'El docente seleccionado'} ya tiene ${subjectLabel || 'una clase'} asignada en ${conflictingGradeLabel || 'otro grado'} el ${weekdayLabel} en el bloque ${slot?.block} (${slot?.startTime || '--:--'} - ${slot?.endTime || '--:--'}).`;
 }
 
-function allowsSharedClassroomTeacherConflicts(schoolId) {
+function allowsSharedClassroomTeacherConflicts(schoolId, { classroomGroups = [], leftGradeKey = '', rightGradeKey = '' } = {}) {
+  if (leftGradeKey && rightGradeKey && gradesShareClassroomGroup(classroomGroups, leftGradeKey, rightGradeKey)) {
+    return true;
+  }
   // Millennium groups several grades in the same classroom (Infants+K2, 2+3+4), so the same teacher can appear in more than one course at the same time.
   return isMillenniumSchoolId(schoolId);
+}
+
+function filterTeacherConflictsOutsideClassroomGroup(conflictIndex, classroomGroups, currentGradeKey) {
+  if (!currentGradeKey || !(Array.isArray(classroomGroups) && classroomGroups.length > 0)) {
+    return conflictIndex;
+  }
+
+  const filtered = new Map();
+  (conflictIndex || new Map()).forEach((conflict, key) => {
+    if (!gradesShareClassroomGroup(classroomGroups, currentGradeKey, conflict?.gradeKey)) {
+      filtered.set(key, conflict);
+    }
+  });
+  return filtered;
+}
+
+function collectSharedClassroomGradeKeys(classroomGroups, gradeKey) {
+  const normalizedGradeKey = normalizeAcademicStructureGradeKey(gradeKey);
+  const group = (Array.isArray(classroomGroups) ? classroomGroups : []).find((item) => (
+    uniqueClassroomGroupValues(item?.gradeKeys).includes(normalizedGradeKey)
+  ));
+  return group ? uniqueClassroomGroupValues(group.gradeKeys) : [];
 }
 
 function buildTeacherConflictIndex(gradeSchedules, { skipGradeKey = '' } = {}) {
@@ -1698,11 +1731,14 @@ function buildTeacherConflictIndex(gradeSchedules, { skipGradeKey = '' } = {}) {
   return conflicts;
 }
 
-function buildTeacherBusyIntervals(gradeSchedules, { skipScheduleKey = '' } = {}) {
+function buildTeacherBusyIntervals(gradeSchedules, { skipScheduleKey = '', skipGradeKeys = [] } = {}) {
+  const skippedGradeKeys = new Set((Array.isArray(skipGradeKeys) ? skipGradeKeys : []).map((gradeKey) => normalizeAcademicStructureGradeKey(gradeKey)).filter(Boolean));
   const busyByTeacherId = new Map();
   (Array.isArray(gradeSchedules) ? gradeSchedules : []).forEach((gradeSchedule) => {
-    const scheduleKey = `${normalizeAcademicStructureGradeKey(gradeSchedule?.gradeKey)}::${normalizeText(gradeSchedule?.courseKey)}`;
+    const currentGradeKey = normalizeAcademicStructureGradeKey(gradeSchedule?.gradeKey);
+    const scheduleKey = `${currentGradeKey}::${normalizeText(gradeSchedule?.courseKey)}`;
     if (scheduleKey === skipScheduleKey) return;
+    if (skippedGradeKeys.has(currentGradeKey) && scheduleKey !== skipScheduleKey) return;
     (Array.isArray(gradeSchedule?.weeklySchedule) ? gradeSchedule.weeklySchedule : []).forEach((entry) => {
       const weekday = Number(entry?.weekday || 0);
       const startMinutes = academicScheduleTimeToMinutes(entry?.startTime);
@@ -3176,6 +3212,7 @@ function serializeAcademicStructureConfiguration(configuration) {
 
   const subjectKeySet = new Set(subjects.map((subject) => subject.key));
   const gradeKeySet = new Set(grades.map((grade) => grade.key));
+  const classroomGroups = serializeClassroomGroups(configuration?.classroomGroups, gradeKeySet);
   const teacherAvailability = (Array.isArray(configuration?.teachingAvailability) ? configuration.teachingAvailability : [])
     .map((item, index) => ({
       key: normalizeText(item?.key) || `teaching_availability_${index + 1}`,
@@ -3277,6 +3314,7 @@ function serializeAcademicStructureConfiguration(configuration) {
     levels,
     subjects,
     grades,
+    classroomGroups,
     scheduleSettings: {
       groups: scheduleSettings.groups.map((group, index) => {
         const groupBlocks = buildAcademicScheduleBlocksFromGroup(group);
@@ -3517,6 +3555,7 @@ async function ensureAcademicStructureConfiguration(schoolId) {
     levels: [],
     subjects: [],
     grades: [],
+    classroomGroups: [],
     scheduleSettings: ACADEMIC_SCHEDULE_DEFAULT_SETTINGS,
     scheduleBreaks: [],
     teachingAvailability: [],
@@ -6982,6 +7021,131 @@ router.post('/academic-management/grades', async (req, res) => {
   }
 });
 
+router.post('/academic-management/classroom-groups', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const label = normalizeText(req.body?.label || req.body?.name);
+    const configuration = await ensureAcademicStructureConfiguration(schoolId);
+    const serialized = serializeAcademicStructureConfiguration(configuration);
+    const gradeKeySet = new Set(serialized.grades.map((grade) => grade.key));
+    const gradeKeys = uniqueClassroomGroupValues(req.body?.gradeKeys)
+      .map((gradeKey) => normalizeAcademicStructureGradeKey(gradeKey))
+      .filter((gradeKey) => gradeKeySet.has(gradeKey));
+    const key = slugifyClassroomGroupKey(req.body?.key || label);
+
+    if (!label || !key) {
+      return res.status(400).json({ message: 'Debes indicar el nombre del aula o grupo.' });
+    }
+
+    if (gradeKeys.length === 0) {
+      return res.status(400).json({ message: 'Selecciona al menos un grado para este aula.' });
+    }
+
+    if (serialized.classroomGroups.some((group) => group.key === key)) {
+      return res.status(409).json({ message: 'Ya existe un aula con ese nombre. Usa otro nombre o edita el grupo actual.' });
+    }
+
+    const gradeConflict = findClassroomGroupGradeConflict(serialized.classroomGroups, gradeKeys);
+    if (gradeConflict) {
+      return res.status(409).json({
+        message: `El grado ya pertenece al aula "${gradeConflict.label}". Un grado solo puede estar en un aula compartida.`,
+      });
+    }
+
+    configuration.classroomGroups = serializeClassroomGroups([
+      ...serialized.classroomGroups,
+      {
+        key,
+        label,
+        gradeKeys,
+        order: (serialized.classroomGroups.length + 1) * 10,
+        status: 'active',
+      },
+    ], gradeKeySet);
+    await configuration.save();
+
+    return res.status(201).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/academic-management/classroom-groups/:groupKey', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const groupKey = slugifyClassroomGroupKey(req.params?.groupKey);
+    const configuration = await ensureAcademicStructureConfiguration(schoolId);
+    const serialized = serializeAcademicStructureConfiguration(configuration);
+    const currentGroup = serialized.classroomGroups.find((group) => group.key === groupKey);
+
+    if (!currentGroup) {
+      return res.status(404).json({ message: 'El aula compartida no existe.' });
+    }
+
+    const gradeKeySet = new Set(serialized.grades.map((grade) => grade.key));
+    const nextLabel = normalizeText(req.body?.label || req.body?.name) || currentGroup.label;
+    const nextGradeKeys = Array.isArray(req.body?.gradeKeys)
+      ? uniqueClassroomGroupValues(req.body.gradeKeys)
+        .map((gradeKey) => normalizeAcademicStructureGradeKey(gradeKey))
+        .filter((gradeKey) => gradeKeySet.has(gradeKey))
+      : currentGroup.gradeKeys;
+
+    if (!nextLabel) {
+      return res.status(400).json({ message: 'Debes indicar el nombre del aula o grupo.' });
+    }
+
+    if (nextGradeKeys.length === 0) {
+      return res.status(400).json({ message: 'Selecciona al menos un grado para este aula.' });
+    }
+
+    const gradeConflict = findClassroomGroupGradeConflict(serialized.classroomGroups, nextGradeKeys, { ignoreGroupKey: groupKey });
+    if (gradeConflict) {
+      return res.status(409).json({
+        message: `El grado ya pertenece al aula "${gradeConflict.label}". Un grado solo puede estar en un aula compartida.`,
+      });
+    }
+
+    configuration.classroomGroups = serializeClassroomGroups(
+      serialized.classroomGroups.map((group) => (
+        group.key === groupKey
+          ? { ...group, label: nextLabel, gradeKeys: nextGradeKeys }
+          : group
+      )),
+      gradeKeySet
+    );
+    await configuration.save();
+
+    return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/academic-management/classroom-groups/:groupKey', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const groupKey = slugifyClassroomGroupKey(req.params?.groupKey);
+    const configuration = await ensureAcademicStructureConfiguration(schoolId);
+    const serialized = serializeAcademicStructureConfiguration(configuration);
+    const currentGroup = serialized.classroomGroups.find((group) => group.key === groupKey);
+
+    if (!currentGroup) {
+      return res.status(404).json({ message: 'El aula compartida no existe.' });
+    }
+
+    const gradeKeySet = new Set(serialized.grades.map((grade) => grade.key));
+    configuration.classroomGroups = serializeClassroomGroups(
+      serialized.classroomGroups.filter((group) => group.key !== groupKey),
+      gradeKeySet
+    );
+    await configuration.save();
+
+    return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
 router.post('/academic-management/levels', async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -7628,6 +7792,7 @@ router.delete('/academic-management/grades/:gradeKey', async (req, res) => {
           status: 'active',
         })),
       }));
+    configuration.classroomGroups = removeGradeFromClassroomGroups(serialized.classroomGroups, gradeKey);
     configuration.subjects = serialized.subjects.map((subject, index) => ({
       ...subject,
       gradeKeys: (Array.isArray(subject.gradeKeys) ? subject.gradeKeys : []).filter((item) => item !== gradeKey),
@@ -8040,9 +8205,13 @@ router.put('/academic-management/schedules/:gradeKey/weekly', async (req, res) =
       ? await User.find({ schoolId, _id: { $in: teacherIds }, role: 'teacher', status: 'active', deletedAt: null }).select('_id name').lean()
       : [];
     const teacherNameById = new Map(teachers.map((teacher) => [String(teacher._id), teacher.name || 'Docente']));
-    const teacherConflicts = allowsSharedClassroomTeacherConflicts(schoolId)
+    const teacherConflicts = isMillenniumSchoolId(schoolId)
       ? new Map()
-      : buildTeacherConflictIndex(serializedWithCurrentSchedules.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` });
+      : filterTeacherConflictsOutsideClassroomGroup(
+        buildTeacherConflictIndex(serializedWithCurrentSchedules.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
+        serializedWithCurrentSchedules.classroomGroups,
+        gradeKey
+      );
 
     for (const entry of normalizedWeeklySchedule.weeklySchedule) {
       const entryTeacherIds = collectAcademicScheduleTeacherIds(entry);
@@ -8118,9 +8287,13 @@ router.post('/academic-management/schedules/:gradeKey/generate', async (req, res
     const generationResult = generateAcademicWeeklySchedule({
       slotTemplates: normalizedTemplates.weeklySchedule.map((entry) => ({ ...entry, subjectKey: '', teacherUserId: null, teacherUserIds: [] })),
       subjectLoads: Array.from(loadMap.values()).filter((load) => Number(load.weeklyHours || 0) > 0),
-      conflictIndex: allowsSharedClassroomTeacherConflicts(schoolId)
+      conflictIndex: isMillenniumSchoolId(schoolId)
         ? new Map()
-        : buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: gradeKey }),
+        : filterTeacherConflictsOutsideClassroomGroup(
+          buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: gradeKey }),
+          serialized.classroomGroups,
+          gradeKey
+        ),
       teachingAvailability: configuration.teachingAvailability,
       gradeKey,
     });
@@ -8248,12 +8421,19 @@ router.post('/academic-management/schedules/:gradeKey/gio-ai/generate', async (r
         subjectLabel: subjectLabelByKey.get(load.subjectKey) || load.subjectKey,
         teacherName: teacherNameById.get(load.teacherUserId) || '',
       })),
-      conflictIndex: allowsSharedClassroomTeacherConflicts(schoolId)
+      conflictIndex: isMillenniumSchoolId(schoolId)
         ? new Map()
-        : buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
-      teacherBusyIntervals: allowsSharedClassroomTeacherConflicts(schoolId)
+        : filterTeacherConflictsOutsideClassroomGroup(
+          buildTeacherConflictIndex(serialized.gradeSchedules, { skipGradeKey: `${gradeKey}::${courseKey}` }),
+          serialized.classroomGroups,
+          gradeKey
+        ),
+      teacherBusyIntervals: isMillenniumSchoolId(schoolId)
         ? new Map()
-        : buildTeacherBusyIntervals(serialized.gradeSchedules, { skipScheduleKey: `${gradeKey}::${courseKey}` }),
+        : buildTeacherBusyIntervals(serialized.gradeSchedules, {
+          skipScheduleKey: `${gradeKey}::${courseKey}`,
+          skipGradeKeys: collectSharedClassroomGradeKeys(serialized.classroomGroups, gradeKey),
+        }),
       teachingAvailability: configuration.teachingAvailability,
       gradeKey,
       constraints,

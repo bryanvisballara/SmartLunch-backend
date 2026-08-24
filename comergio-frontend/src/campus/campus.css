@@ -14144,7 +14144,7 @@ button.campus-teacher__nav-item-toggle {
 
 .campus-teacher__home-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
@@ -14286,6 +14286,16 @@ button.campus-teacher__home-kpi-card:focus-visible {
   color: #1d4ed8;
 }
 
+.campus-teacher__home-kpi-card.tone-submissions .campus-teacher__home-kpi-icon {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.campus-teacher__home-kpi-card.tone-submissions .campus-teacher__home-kpi-link {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
 .campus-teacher__home-kpi-card.is-skeleton span,
 .campus-teacher__home-kpi-card.is-skeleton strong,
 .campus-teacher__home-kpi-card.is-skeleton p,
@@ -14389,6 +14399,11 @@ button.campus-teacher__home-kpi-card:focus-visible {
 .campus-teacher__home-card-icon.tone-performance {
   background: #ecfdf5;
   color: #059669;
+}
+
+.campus-teacher__home-card-icon.tone-submissions {
+  background: #f5f3ff;
+  color: #7c3aed;
 }
 
 .campus-teacher__home-card-icon svg {
@@ -14698,6 +14713,84 @@ button.campus-teacher__home-kpi-card:focus-visible {
   color: #64748b;
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.campus-teacher__home-submissions {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1.15rem 1.2rem 1.2rem;
+  border: 1px solid #e8edf5;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+}
+
+.campus-teacher__home-submissions-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+@media (min-width: 900px) {
+  .campus-teacher__home-submissions-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .campus-teacher__home-submissions-list .campus-teacher__home-day-empty {
+    grid-column: 1 / -1;
+  }
+}
+
+.campus-teacher__home-submission-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+  width: 100%;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid #eef2f7;
+  border-radius: 14px;
+  background: #f8fafc;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.campus-teacher__home-submission-row:hover,
+.campus-teacher__home-submission-row:focus-visible {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.campus-teacher__home-submission-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.campus-teacher__home-submission-copy strong {
+  color: #0f2744;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.campus-teacher__home-submission-copy span {
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.campus-teacher__home-submission-row em {
+  flex: 0 0 auto;
+  color: #6d28d9;
+  font-size: 0.74rem;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .campus-teacher__horario-panel {
@@ -15778,6 +15871,12 @@ button.campus-teacher__home-kpi-card:focus-visible {
 
   .campus-teacher__cursos-page-controls {
     justify-content: center;
+  }
+}
+
+@media (max-width: 1480px) {
+  .campus-teacher__home-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
