@@ -31,6 +31,8 @@ require('./campusAttendanceSession.model');
 require('./campusPost.model');
 require('./campusPostSubmission.model');
 require('./campusGradeEntry.model');
+require('./campusCoexistencePolicy.model');
+require('./campusDisciplineObservation.model');
 require('./nursingVisit.model');
 require('./studentMedicalProfileRevision.model');
 require('./psychologyCase.model');

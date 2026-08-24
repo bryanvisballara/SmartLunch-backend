@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
+import { groupCoexistenceInfractions } from '../../lib/coexistenceInfractions';
 
 function createEmptyInfraction(order = 10) {
   return {
     key: '',
+    code: '',
+    categoryKey: '',
+    categoryLabel: '',
     label: '',
     deductionPercent: 5,
+    severityPercent: 0,
     description: '',
     active: true,
     order,
@@ -27,8 +32,12 @@ export default function RectoriaCoexistencePolicyPanel({
       Array.isArray(policy?.infractions) && policy.infractions.length
         ? policy.infractions.map((item, index) => ({
             key: item.key || '',
+            code: item.code || '',
+            categoryKey: item.categoryKey || '',
+            categoryLabel: item.categoryLabel || '',
             label: item.label || '',
             deductionPercent: Number(item.deductionPercent ?? 0),
+            severityPercent: Number(item.severityPercent ?? 0),
             description: item.description || '',
             active: item.active !== false,
             order: Number(item.order ?? (index + 1) * 10),
@@ -36,6 +45,11 @@ export default function RectoriaCoexistencePolicyPanel({
         : [createEmptyInfraction(10)]
     );
   }, [policy]);
+
+  const groupedInfractions = useMemo(
+    () => groupCoexistenceInfractions(infractions),
+    [infractions]
+  );
 
   const activeCount = useMemo(
     () => infractions.filter((item) => item.active !== false && String(item.label || '').trim()).length,
@@ -100,8 +114,8 @@ export default function RectoriaCoexistencePolicyPanel({
           <span className="rectoria-kicker">Convivencia escolar</span>
           <h2>Calificación cuantitativa de disciplina</h2>
           <p>
-            Todos los alumnos parten de un puntaje base. Define las faltas y el porcentaje que se descuenta
-            cuando un docente registra una observación de convivencia.
+            Todos los alumnos parten de un puntaje base de 100. Define las faltas del cuadro de disciplina y los
+            puntos que se descuentan cuando un docente registra una observación de convivencia.
           </p>
         </div>
         <div className="rectoria-coexistence-policy__score-pill">
@@ -138,58 +152,75 @@ export default function RectoriaCoexistencePolicyPanel({
         </div>
 
         <div className="rectoria-coexistence-policy__list">
-          {infractions.map((item, index) => (
-            <article className={`rectoria-coexistence-policy__card${item.active === false ? ' is-inactive' : ''}`} key={`${item.key || 'new'}-${index}`}>
-              <div className="rectoria-coexistence-policy__card-top">
-                <span className="rectoria-coexistence-policy__card-index">Falta {index + 1}</span>
-                <button
-                  aria-label={`Quitar falta ${index + 1}`}
-                  className="rectoria-coexistence-policy__remove-btn"
-                  disabled={infractions.length <= 1}
-                  onClick={() => onRemoveInfraction(index)}
-                  type="button"
-                >
-                  Quitar
-                </button>
-              </div>
-              <div className="rectoria-coexistence-policy__card-grid">
-                <label>
-                  <span>Nombre de la falta</span>
-                  <input
-                    onChange={(event) => onChangeInfraction(index, 'label', event.target.value)}
-                    placeholder="Ej. Llegada tarde"
-                    value={item.label}
-                  />
-                </label>
-                <label>
-                  <span>Descuento (%)</span>
-                  <input
-                    max={100}
-                    min={0}
-                    onChange={(event) => onChangeInfraction(index, 'deductionPercent', event.target.value)}
-                    step={0.5}
-                    type="number"
-                    value={item.deductionPercent}
-                  />
-                </label>
-                <label className="rectoria-coexistence-policy__toggle">
-                  <input
-                    checked={item.active !== false}
-                    onChange={(event) => onChangeInfraction(index, 'active', event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>Activa para docentes</span>
-                </label>
-              </div>
-              <label>
-                <span>Descripción (opcional)</span>
-                <input
-                  onChange={(event) => onChangeInfraction(index, 'description', event.target.value)}
-                  placeholder="Detalle breve de cuándo aplica"
-                  value={item.description}
-                />
-              </label>
-            </article>
+          {groupedInfractions.map((group) => (
+            <section className="rectoria-coexistence-policy__group" key={group.key}>
+              {groupedInfractions.length > 1 || group.key !== '_other' ? (
+                <h4 className="rectoria-coexistence-policy__group-title">{group.label}</h4>
+              ) : null}
+              {group.items.map(({ item, index }) => (
+                <article className={`rectoria-coexistence-policy__card${item.active === false ? ' is-inactive' : ''}`} key={`${item.key || item.code || 'new'}-${index}`}>
+                  <div className="rectoria-coexistence-policy__card-top">
+                    <span className="rectoria-coexistence-policy__card-index">
+                      {item.code ? `Falta ${item.code}` : `Falta ${index + 1}`}
+                    </span>
+                    <button
+                      aria-label={`Quitar falta ${item.code || index + 1}`}
+                      className="rectoria-coexistence-policy__remove-btn"
+                      disabled={infractions.length <= 1}
+                      onClick={() => onRemoveInfraction(index)}
+                      type="button"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                  <div className="rectoria-coexistence-policy__card-grid">
+                    <label>
+                      <span>Código</span>
+                      <input
+                        onChange={(event) => onChangeInfraction(index, 'code', event.target.value)}
+                        placeholder="Ej. C1"
+                        value={item.code}
+                      />
+                    </label>
+                    <label>
+                      <span>Puntos a descontar</span>
+                      <input
+                        max={100}
+                        min={0}
+                        onChange={(event) => onChangeInfraction(index, 'deductionPercent', event.target.value)}
+                        step={1}
+                        type="number"
+                        value={item.deductionPercent}
+                      />
+                    </label>
+                    <label className="rectoria-coexistence-policy__toggle">
+                      <input
+                        checked={item.active !== false}
+                        onChange={(event) => onChangeInfraction(index, 'active', event.target.checked)}
+                        type="checkbox"
+                      />
+                      <span>Activa para docentes</span>
+                    </label>
+                  </div>
+                  <label>
+                    <span>Nombre de la falta</span>
+                    <input
+                      onChange={(event) => onChangeInfraction(index, 'label', event.target.value)}
+                      placeholder="Ej. El estudiante llega tarde al colegio sin justificación"
+                      value={item.label}
+                    />
+                  </label>
+                  <label>
+                    <span>Descripción (opcional)</span>
+                    <input
+                      onChange={(event) => onChangeInfraction(index, 'description', event.target.value)}
+                      placeholder="Detalle breve de cuándo aplica"
+                      value={item.description}
+                    />
+                  </label>
+                </article>
+              ))}
+            </section>
           ))}
         </div>
 
@@ -204,8 +235,8 @@ export default function RectoriaCoexistencePolicyPanel({
             </button>
           </div>
           <p className="campus-panel__meta">
-            Los docentes verán estas faltas al registrar una observación de convivencia. Padres y alumnos verán el
-            puntaje acumulado y cada descuento aplicado.
+            Los docentes verán estas faltas al registrar una observación de convivencia. El descuento se aplica
+            sobre el puntaje inicial de 100.
           </p>
         </footer>
         {notice ? <p className="rectoria-coexistence-policy__notice">{notice}</p> : null}

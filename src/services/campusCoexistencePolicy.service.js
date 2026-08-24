@@ -1,5 +1,10 @@
 const CampusCoexistencePolicy = require('../models/campusCoexistencePolicy.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
+const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
+const {
+  buildMillenniumDisciplineInfractions,
+  looksLikeGenericCoexistenceDefaults,
+} = require('../data/millenniumDisciplineChart');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -25,14 +30,44 @@ function clampPercent(value, fallback = 0) {
 }
 
 function serializeInfraction(item = {}, index = 0) {
+  const code = normalizeText(item.code).toUpperCase();
   return {
-    key: normalizeText(item.key) || slugifyInfractionKey(item.label, `infraccion_${index + 1}`),
+    key: normalizeText(item.key) || slugifyInfractionKey(code || item.label, `infraccion_${index + 1}`),
+    code,
+    categoryKey: normalizeText(item.categoryKey).toUpperCase(),
+    categoryLabel: normalizeText(item.categoryLabel),
     label: normalizeText(item.label),
     deductionPercent: clampPercent(item.deductionPercent, 0),
+    severityPercent: clampPercent(item.severityPercent, 0),
     description: normalizeText(item.description),
     active: item.active !== false,
     order: Number(item.order ?? (index + 1) * 10),
   };
+}
+
+function getDefaultInfractionsForSchool(schoolId) {
+  if (isMillenniumSchoolId(schoolId)) {
+    return buildMillenniumDisciplineInfractions();
+  }
+
+  return [
+    {
+      key: 'llegada_tarde',
+      label: 'Llegada tarde',
+      deductionPercent: 5,
+      description: 'Inasistencia puntual a clase o actividad.',
+      active: true,
+      order: 10,
+    },
+    {
+      key: 'copia_examen',
+      label: 'Copia de examen',
+      deductionPercent: 25,
+      description: 'Fraude académico en evaluación.',
+      active: true,
+      order: 20,
+    },
+  ];
 }
 
 function serializeCoexistencePolicy(policy) {
@@ -40,7 +75,7 @@ function serializeCoexistencePolicy(policy) {
   const infractions = (Array.isArray(policy?.infractions) ? policy.infractions : [])
     .map(serializeInfraction)
     .filter((item) => item.label)
-    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, 'es'));
+    .sort((left, right) => left.order - right.order || left.code.localeCompare(right.code, 'es') || left.label.localeCompare(right.label, 'es'));
 
   return {
     id: policy?._id ? String(policy._id) : '',
@@ -58,30 +93,23 @@ async function getOrCreateCoexistencePolicy(schoolId) {
   const normalizedSchoolId = normalizeText(schoolId);
   let policy = await CampusCoexistencePolicy.findOne({ schoolId: normalizedSchoolId }).lean();
   if (policy) {
+    if (
+      isMillenniumSchoolId(normalizedSchoolId)
+      && looksLikeGenericCoexistenceDefaults(policy.infractions)
+    ) {
+      return saveCoexistencePolicy({
+        schoolId: normalizedSchoolId,
+        startingScore: policy.startingScore ?? 100,
+        infractions: buildMillenniumDisciplineInfractions(),
+      });
+    }
     return policy;
   }
 
   policy = await CampusCoexistencePolicy.create({
     schoolId: normalizedSchoolId,
     startingScore: 100,
-    infractions: [
-      {
-        key: 'llegada_tarde',
-        label: 'Llegada tarde',
-        deductionPercent: 5,
-        description: 'Inasistencia puntual a clase o actividad.',
-        active: true,
-        order: 10,
-      },
-      {
-        key: 'copia_examen',
-        label: 'Copia de examen',
-        deductionPercent: 25,
-        description: 'Fraude académico en evaluación.',
-        active: true,
-        order: 20,
-      },
-    ],
+    infractions: getDefaultInfractionsForSchool(normalizedSchoolId),
   });
 
   return policy.toObject ? policy.toObject() : policy;
@@ -98,7 +126,7 @@ function normalizeInfractionsInput(rawInfractions = []) {
       return;
     }
 
-    let key = slugifyInfractionKey(item?.key || label, `infraccion_${index + 1}`);
+    let key = slugifyInfractionKey(item?.key || item?.code || label, `infraccion_${index + 1}`);
     let uniqueKey = key;
     let suffix = 2;
     while (usedKeys.has(uniqueKey)) {
@@ -107,11 +135,16 @@ function normalizeInfractionsInput(rawInfractions = []) {
     }
     usedKeys.add(uniqueKey);
 
+    const code = normalizeText(item?.code || uniqueKey).toUpperCase().slice(0, 12);
     normalized.push({
       key: uniqueKey,
-      label: label.slice(0, 120),
+      code,
+      categoryKey: normalizeText(item?.categoryKey).toUpperCase().slice(0, 12),
+      categoryLabel: normalizeText(item?.categoryLabel).slice(0, 180),
+      label: label.slice(0, 280),
       deductionPercent: clampPercent(item?.deductionPercent, 0),
-      description: normalizeText(item?.description).slice(0, 400),
+      severityPercent: clampPercent(item?.severityPercent, 0),
+      description: normalizeText(item?.description).slice(0, 600),
       active: item?.active !== false,
       order: Number(item?.order ?? (index + 1) * 10),
     });

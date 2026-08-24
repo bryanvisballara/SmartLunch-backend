@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { LOGIN_PATH } from '../../lib/authNavigation';
 import { getSchoolDisplayName } from '../../lib/schools';
 import { isTeacherSectionEnabled } from '../../lib/staffFeatures';
+import { formatCoexistenceInfractionOption, groupCoexistenceInfractions } from '../../lib/coexistenceInfractions';
 import colibriLogo from '../../assets/colibrisinfondo.png';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
@@ -3474,6 +3475,11 @@ function TeacherCampusHome({ forcePreview = false }) {
       ? teacherCoexistencePolicyQuery.data.policy.infractions.filter((item) => item.active !== false && item.label)
       : []),
     [teacherCoexistencePolicyQuery.data?.policy?.infractions]
+  );
+
+  const teacherCoexistenceInfractionGroups = useMemo(
+    () => groupCoexistenceInfractions(teacherCoexistenceInfractions),
+    [teacherCoexistenceInfractions]
   );
 
   const updateGradingSchemeMutation = useMutation({
@@ -10943,15 +10949,27 @@ function TeacherCampusHome({ forcePreview = false }) {
                               ? 'Cargando faltas...'
                               : (teacherCoexistenceInfractions.length ? 'Seleccionar falta' : 'Sin faltas configuradas aún')}
                           </option>
-                          {teacherCoexistenceInfractions.map((item) => (
-                            <option key={item.key} value={item.key}>
-                              {item.label} (−{item.deductionPercent}%)
-                            </option>
+                          {teacherCoexistenceInfractionGroups.map((group) => (
+                            group.key === '_other' && teacherCoexistenceInfractionGroups.length === 1 ? (
+                              group.items.map(({ item }) => (
+                                <option key={item.key} value={item.key}>
+                                  {formatCoexistenceInfractionOption(item)}
+                                </option>
+                              ))
+                            ) : (
+                              <optgroup key={group.key} label={group.label}>
+                                {group.items.map(({ item }) => (
+                                  <option key={item.key} value={item.key}>
+                                    {formatCoexistenceInfractionOption(item)}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )
                           ))}
                         </select>
                       </div>
                       <small className="campus-panel__meta">
-                        El descuento se aplica sobre el 100% de disciplina definido por Rectoría.
+                        El descuento se aplica sobre el puntaje inicial de disciplina (100).
                       </small>
                     </label>
                   ) : null}
