@@ -47,7 +47,7 @@ function InventoryRequestPage({ mode }) {
   useEffect(() => {
     const load = async () => {
       try {
-        const storesRes = await getStores();
+        const storesRes = await getStores(mode === 'transfer' ? { for: 'transfer' } : undefined);
         const storesData = storesRes.data || [];
         setStores(storesData);
 
@@ -60,7 +60,7 @@ function InventoryRequestPage({ mode }) {
           assignedStoreFromList ||
           user?.assignedStore ||
           currentStore ||
-          storesData[0] ||
+          (user?.role === 'vendor' ? null : storesData[0]) ||
           null;
 
         if (nextStore && String(currentStore?._id || '') !== String(nextStore?._id || '')) {
@@ -547,6 +547,9 @@ function InventoryRequestPage({ mode }) {
                 </option>
               ))}
             </select>
+            {targetStores.length === 0 ? (
+              <small>No hay otras tiendas activas en el colegio para hacer el traslado.</small>
+            ) : null}
           </label>
         ) : null}
 

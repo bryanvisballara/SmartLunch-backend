@@ -9,6 +9,8 @@ const InventoryRequest = require('../models/inventoryRequest.model');
 const InventoryMovement = require('../models/inventoryMovement.model');
 const Supplier = require('../models/supplier.model');
 const FixedCost = require('../models/fixedCost.model');
+const Store = require('../models/store.model');
+const User = require('../models/user.model');
 const { queueApprovalPendingNotificationForAdmins } = require('../services/notification.service');
 
 const router = express.Router();
@@ -335,6 +337,32 @@ router.post('/request', roleMiddleware('vendor', 'admin'), async (req, res) => {
 
     if (type === 'transfer' && !targetStoreId) {
       return res.status(400).json({ message: 'targetStoreId is required for transfer requests' });
+    }
+
+    if (role === 'vendor') {
+      const vendor = await User.findById(userId).select('assignedStoreId');
+      const assignedStoreId = String(vendor?.assignedStoreId || '');
+      if (!assignedStoreId) {
+        return res.status(400).json({ message: 'Este vendedor no tiene una tienda asignada.' });
+      }
+      if (String(storeId) !== assignedStoreId) {
+        return res.status(403).json({ message: 'Solo puedes solicitar inventario desde tu tienda asignada.' });
+      }
+      if (type === 'transfer' && String(targetStoreId) === assignedStoreId) {
+        return res.status(400).json({ message: 'La tienda destino debe ser distinta a la de origen.' });
+      }
+    }
+
+    if (type === 'transfer') {
+      const destinationStore = await Store.findOne({
+        _id: targetStoreId,
+        schoolId,
+        deletedAt: null,
+        status: 'active',
+      }).select('_id').lean();
+      if (!destinationStore) {
+        return res.status(400).json({ message: 'La tienda destino no es válida.' });
+      }
     }
 
     const payloadItems = Array.isArray(items) && items.length > 0

@@ -14,8 +14,10 @@ router.get('/', async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
     const filter = { schoolId, deletedAt: null, status: 'active' };
+    const purpose = String(req.query.for || req.query.purpose || '').trim().toLowerCase();
+    const allowAllStoresForTransfer = role === 'vendor' && purpose === 'transfer';
 
-    if (role === 'vendor') {
+    if (role === 'vendor' && !allowAllStoresForTransfer) {
       const user = await User.findById(userId).select('assignedStoreId');
       if (!user?.assignedStoreId) {
         return res.status(200).json([]);
