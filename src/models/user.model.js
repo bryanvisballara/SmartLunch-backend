@@ -14,6 +14,7 @@ const userSchema = new mongoose.Schema(
     campusPhotoThumbUrl: { type: String, trim: true, default: '' },
     assignedStoreId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', default: null },
     passwordHash: { type: String, required: true },
+    accessPassword: { type: String, trim: true, default: '', select: false },
     role: { type: String, enum: ['parent', 'student', 'admin', 'rectoria', 'direccion', 'super_admin', 'vendor', 'merienda_operator', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'], required: true },
     linkedStudentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null, index: true },
     coordinationScope: { type: String, trim: true, default: '' },

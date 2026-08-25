@@ -38,6 +38,13 @@ export const FAMILY_COMMUNICATION_NAV_GROUP = {
   ],
 };
 
+export const TEAM_DIRECTORY_NAV = [
+  { key: 'students_accounts', label: 'Alumnos' },
+  { key: 'parents_accounts', label: 'Acudientes' },
+];
+
+export const TEAM_DIRECTORY_KEYS = TEAM_DIRECTORY_NAV.map((item) => item.key);
+
 export const COORDINATION_PORTAL_NAV = [
   { type: 'item', key: 'overview', label: 'Tablero de nivel' },
   FAMILY_COMMUNICATION_NAV_GROUP,
@@ -47,6 +54,7 @@ export const COORDINATION_PORTAL_NAV = [
     key: 'institutional_config',
     label: 'Configuración institucional',
     items: [
+      { key: 'team', label: 'Cuerpo institucional' },
       { key: 'students', label: 'Gestión académica' },
     ],
   },
@@ -66,7 +74,7 @@ export const RECTORIA_PORTAL_NAV = [
     key: 'institutional_config',
     label: 'Configuración institucional',
     items: [
-      { key: 'team', label: 'Cuerpo académico' },
+      { key: 'team', label: 'Cuerpo institucional' },
       { key: 'students', label: 'Gestión académica' },
       { key: 'fees', label: 'Costos' },
     ],

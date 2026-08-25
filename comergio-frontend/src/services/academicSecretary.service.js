@@ -114,6 +114,11 @@ export const saveAcademicManagementTeachingAvailability = (data) => api.put('/ac
 export const saveAcademicManagementSubjectLoadTemplates = (data) => api.put('/academic-secretary/academic-management/subject-load-templates', data);
 export const saveAcademicManagementScheduleLoad = (gradeKey, data) => api.put(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/load`, data);
 export const saveAcademicManagementWeeklySchedule = (gradeKey, data) => api.put(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/weekly`, data);
+export const getInstitutionalDirectory = () => api.get('/academic-secretary/institutional-directory');
+export const updateInstitutionalDirectoryStudent = (studentId, data) => api.patch(`/academic-secretary/institutional-directory/students/${studentId}`, data);
+export const deleteInstitutionalDirectoryStudent = (studentId) => api.delete(`/academic-secretary/institutional-directory/students/${studentId}`);
+export const updateInstitutionalDirectoryParent = (parentId, data) => api.patch(`/academic-secretary/institutional-directory/parents/${parentId}`, data);
+export const deleteInstitutionalDirectoryParent = (parentId) => api.delete(`/academic-secretary/institutional-directory/parents/${parentId}`);
 export const generateAcademicManagementWeeklySchedule = (gradeKey, data) => api.post(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/generate`, data);
 export const generateAcademicManagementGioAiSchedule = (gradeKey, data) => api.post(`/academic-secretary/academic-management/schedules/${encodeURIComponent(gradeKey)}/gio-ai/generate`, data);
 export const assignAcademicManagementStudentCourse = (studentId, data) => api.patch(`/academic-secretary/academic-management/students/${studentId}/course`, data);

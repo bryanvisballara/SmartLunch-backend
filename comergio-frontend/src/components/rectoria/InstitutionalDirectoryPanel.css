@@ -1,0 +1,153 @@
+.rectoria-directory-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.rectoria-directory-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rectoria-directory-panel__head h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.rectoria-directory-panel__head p {
+  margin: 0.3rem 0 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.rectoria-directory-panel__head strong {
+  min-width: 2.4rem;
+  height: 2.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ecfeff;
+  color: #0f766e;
+  font-size: 0.92rem;
+}
+
+.rectoria-directory-search {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 28rem;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.rectoria-directory-search input,
+.rectoria-directory-modal input,
+.rectoria-directory-modal select {
+  width: 100%;
+}
+
+.rectoria-directory-error,
+.rectoria-directory-empty {
+  margin: 0;
+  color: #64748b;
+}
+
+.rectoria-directory-error {
+  color: #b91c1c;
+}
+
+.rectoria-directory-table-wrap {
+  overflow-x: auto;
+}
+
+.rectoria-directory-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+}
+
+.rectoria-directory-table th,
+.rectoria-directory-table td {
+  padding: 0.85rem 0.75rem;
+  border-bottom: 1px solid #e8eef5;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rectoria-directory-table th {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.rectoria-directory-table td strong {
+  color: #0f172a;
+}
+
+.rectoria-directory-table code {
+  font-size: 0.86rem;
+  color: #0f2744;
+}
+
+.rectoria-directory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.rectoria-directory-modal {
+  max-width: 720px;
+}
+
+.rectoria-directory-modal-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rectoria-directory-children {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.rectoria-directory-children strong {
+  color: #0f172a;
+}
+
+.rectoria-directory-children-list {
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem;
+  border: 1px solid #e8eef5;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.rectoria-directory-children-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.rectoria-directory-children-list span {
+  display: grid;
+  gap: 0.1rem;
+  color: #0f172a;
+}
+
+.rectoria-directory-children-list small {
+  color: #64748b;
+}
+
+@media (max-width: 720px) {
+  .rectoria-directory-modal-grid {
+    grid-template-columns: 1fr;
+  }
+}

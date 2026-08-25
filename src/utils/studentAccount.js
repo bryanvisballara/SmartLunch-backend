@@ -51,10 +51,10 @@ async function upsertStudentAccount({ schoolId, student }) {
 
   let user = null;
   if (student.userId) {
-    user = await User.findOne({ _id: student.userId, schoolId, role: 'student' });
+    user = await User.findOne({ _id: student.userId, schoolId, role: 'student' }).select('+accessPassword');
   }
   if (!user) {
-    user = await User.findOne({ schoolId, role: 'student', linkedStudentId: student._id });
+    user = await User.findOne({ schoolId, role: 'student', linkedStudentId: student._id }).select('+accessPassword');
   }
 
   const username = user?.username || await buildStudentUsername({ schoolId, student, excludeUserId: user?._id });
@@ -74,12 +74,21 @@ async function upsertStudentAccount({ schoolId, student }) {
   };
 
   const created = !user;
+  const customAccessPassword = normalizeText(user?.accessPassword);
 
   if (user) {
+    if (customAccessPassword) {
+      delete payload.passwordHash;
+    } else {
+      payload.accessPassword = documentNumber;
+    }
     Object.assign(user, payload);
     await user.save();
   } else {
-    user = await User.create(payload);
+    user = await User.create({
+      ...payload,
+      accessPassword: documentNumber,
+    });
     await Student.findByIdAndUpdate(student._id, { userId: user._id });
   }
 

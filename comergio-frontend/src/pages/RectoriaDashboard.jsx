@@ -24,7 +24,8 @@ import CommunityReportsPanel from '../components/community/CommunityReportsPanel
 import StaffAnnouncementsPanel, { useStaffAnnouncementUnreadCount } from '../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../components/comergio-academy/ComergioAcademyPanel';
 import { isComergioAcademySection } from '../components/comergio-academy/academyNav';
-import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection, COORDINATION_PORTAL_NAV, DIRECCION_PORTAL_NAV, RECTORIA_PORTAL_NAV } from '../components/rectoria/rectoriaPortalNav';
+import { flattenRectoriaNavKeys, RECTORIA_CONTROL_CENTER_KEYS, findRectoriaNavGroupForSection, COORDINATION_PORTAL_NAV, DIRECCION_PORTAL_NAV, RECTORIA_PORTAL_NAV, TEAM_DIRECTORY_KEYS, TEAM_DIRECTORY_NAV } from '../components/rectoria/rectoriaPortalNav';
+import InstitutionalDirectoryPanel from '../components/rectoria/InstitutionalDirectoryPanel';
 import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
 import { filterStaffPortalNav } from '../lib/staffFeatures';
@@ -3295,7 +3296,10 @@ function RectoriaDashboard() {
   const [showTeamPassword, setShowTeamPassword] = useState(false);
   const [expandedTeamMemberId, setExpandedTeamMemberId] = useState('');
   const [editUserModal, setEditUserModal] = useState(createEmptyEditUserModal());
-  const [selectedTeamRole, setSelectedTeamRole] = useState(ROLE_OPTIONS[0]?.value || 'rectoria');
+  const [selectedTeamRole, setSelectedTeamRole] = useState(
+    currentRole === 'coordination' ? 'students_accounts' : (ROLE_OPTIONS[0]?.value || 'rectoria')
+  );
+  const [directoryCounts, setDirectoryCounts] = useState({ students: 0, parents: 0 });
   const [teamCoordinatorSelections, setTeamCoordinatorSelections] = useState({});
   const [expandedCoordinationLevelKey, setExpandedCoordinationLevelKey] = useState('');
   const [teamTeacherAssignment, setTeamTeacherAssignment] = useState(createEmptyTeamTeacherAssignment());
@@ -3845,7 +3849,7 @@ function RectoriaDashboard() {
     ] = requestResults;
 
     const failedSections = [];
-    if (!isCoordinationPortal && usersResult.status === 'rejected') failedSections.push('cuerpo académico');
+    if (!isCoordinationPortal && usersResult.status === 'rejected') failedSections.push('cuerpo institucional');
     if (studentsResult.status === 'rejected') failedSections.push('gestión académica');
     if (!isCoordinationPortal && billingBootstrapResult?.status === 'rejected') failedSections.push('cartera');
     if (isCoordinationPortal && coordinationDashboardResult.status === 'rejected') {
@@ -4651,18 +4655,28 @@ function RectoriaDashboard() {
   }, [feeSettingsDraft.gradeSettings, selectedFeeGradeKey]);
 
   useEffect(() => {
+    if (TEAM_DIRECTORY_KEYS.includes(selectedTeamRole)) {
+      return;
+    }
+
     const availableRoleKeys = visibleRoleOptions.map((option) => option.value);
     if (!availableRoleKeys.length) {
       return;
     }
 
     if (!availableRoleKeys.includes(selectedTeamRole)) {
-      setSelectedTeamRole(availableRoleKeys[0]);
+      setSelectedTeamRole(isCoordinationPortal ? 'students_accounts' : availableRoleKeys[0]);
     }
-  }, [selectedTeamRole, visibleRoleOptions]);
+  }, [isCoordinationPortal, selectedTeamRole, visibleRoleOptions]);
 
   useEffect(() => {
-    if (!selectedTeamRole) return;
+    if (isCoordinationPortal && !TEAM_DIRECTORY_KEYS.includes(selectedTeamRole)) {
+      setSelectedTeamRole('students_accounts');
+    }
+  }, [isCoordinationPortal, selectedTeamRole]);
+
+  useEffect(() => {
+    if (!selectedTeamRole || TEAM_DIRECTORY_KEYS.includes(selectedTeamRole)) return;
     setExpandedTeamMemberId('');
     setUserForm((previous) => {
       if (previous.role === selectedTeamRole) return previous;
@@ -6182,7 +6196,7 @@ function RectoriaDashboard() {
     };
 
     if (!roleToCreate) {
-      setError('Selecciona un rol en el cuerpo académico antes de crear el integrante.');
+      setError('Selecciona un rol en el cuerpo institucional antes de crear el integrante.');
       return;
     }
 
@@ -9422,8 +9436,8 @@ function RectoriaDashboard() {
         onExpandedGroupChange={setExpandedSidebarGroup}
         onSectionChange={setActiveSection}
         teamSubnav={(
-          <div className="rectoria-sidebar-subnav" aria-label="Roles institucionales">
-            {roleSummary.map((group) => (
+          <div className="rectoria-sidebar-subnav" aria-label="Cuerpo institucional">
+            {(isCoordinationPortal ? [] : roleSummary).map((group) => (
               <button
                 key={group.value}
                 className={`rectoria-sidebar-subitem${selectedTeamRole === group.value ? ' is-active' : ''}`}
@@ -9432,6 +9446,17 @@ function RectoriaDashboard() {
               >
                 <span>{group.label}</span>
                 <strong>{group.count}</strong>
+              </button>
+            ))}
+            {TEAM_DIRECTORY_NAV.map((item) => (
+              <button
+                key={item.key}
+                className={`rectoria-sidebar-subitem${selectedTeamRole === item.key ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => setSelectedTeamRole(item.key)}
+              >
+                <span>{item.label}</span>
+                <strong>{item.key === 'students_accounts' ? directoryCounts.students : directoryCounts.parents}</strong>
               </button>
             ))}
           </div>
@@ -10138,6 +10163,17 @@ function RectoriaDashboard() {
 
       {activeSection === 'team' ? (
         <div className="rectoria-stack rectoria-stack--team">
+          {TEAM_DIRECTORY_KEYS.includes(selectedTeamRole) ? (
+            <InstitutionalDirectoryPanel
+              courseOptionsByGrade={courseOptionsByGrade}
+              getCourseLabel={getCourseLabel}
+              getGradeLabel={getGradeLabel}
+              gradeOptions={gradeOptions}
+              kind={selectedTeamRole === 'parents_accounts' ? 'parents' : 'students'}
+              onCountsChange={setDirectoryCounts}
+            />
+          ) : (
+            <>
           <form className="panel rectoria-panel rectoria-form rectoria-team-create-panel" onSubmit={onCreateUser}>
             <div className="rectoria-team-panel-header">
               <span className="rectoria-team-panel-header__icon" aria-hidden="true">
@@ -10253,7 +10289,7 @@ function RectoriaDashboard() {
                 <TeamBodyHeaderIcon />
               </span>
               <div>
-                <h3>Cuerpo académico actual</h3>
+                <h3>Cuerpo institucional actual</h3>
                 <p>Selecciona un rol para ver su equipo, métricas operativas y los flujos de asignación que lo sostienen.</p>
               </div>
             </div>
@@ -11052,6 +11088,8 @@ function RectoriaDashboard() {
               </div>
             ) : null}
           </section>
+            </>
+          )}
         </div>
       ) : null}
 
@@ -14499,11 +14537,11 @@ function RectoriaDashboard() {
       ) : null}
 
       {editUserModal.open ? (
-        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Editar integrante del cuerpo académico">
+        <div className="rectoria-modal-overlay" role="dialog" aria-modal="true" aria-label="Editar integrante del cuerpo institucional">
           <div className="rectoria-modal-card">
             <div className="rectoria-modal-head">
               <div>
-                <span className="rectoria-modal-eyebrow">Cuerpo académico</span>
+                <span className="rectoria-modal-eyebrow">Cuerpo institucional</span>
                 <h3>Editar integrante</h3>
                 <p>Actualiza el nombre visible, el correo de acceso o asigna una nueva contraseña.</p>
               </div>

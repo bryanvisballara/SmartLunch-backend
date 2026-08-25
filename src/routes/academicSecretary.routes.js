@@ -30,7 +30,7 @@ const User = require('../models/user.model');
 const EnrollmentMatriculaProcess = require('../models/enrollmentMatriculaProcess.model');
 const PaymentTransaction = require('../models/paymentTransaction.model');
 const { ensureStudentWallet } = require('../utils/studentWallet');
-const { upsertStudentAccount } = require('../utils/studentAccount');
+const { upsertStudentAccount, ensureStudentCampusMembership, buildStudentUsername } = require('../utils/studentAccount');
 const { queueNotificationsForParents, queueStudentParentNotification } = require('../services/notification.service');
 const Notification = require('../models/notification.model');
 const DeviceToken = require('../models/deviceToken.model');
@@ -125,6 +125,7 @@ router.use((req, res, next) => {
   const isEnrollmentRoute = req.path === '/enrollments' && method === 'POST';
   const isAcademicDatabaseAccessRoute = (req.path === '/database' && method === 'GET')
     || (/^\/database\/[^/]+$/.test(req.path) && method === 'PATCH');
+  const isInstitutionalDirectoryRoute = /^\/institutional-directory(\/|$)/.test(req.path);
   const isBillingAccessRoute = (req.path === '/billing' && method === 'GET')
     || (req.path === '/billing/payments' && method === 'GET')
     || (req.path === '/billing/charges' && method === 'POST')
@@ -159,6 +160,10 @@ router.use((req, res, next) => {
 
   if (isCourseAssignmentRoute) {
     return roleMiddleware(ACADEMIC_COURSE_ASSIGNMENT_ROLES)(req, res, next);
+  }
+
+  if (isInstitutionalDirectoryRoute) {
+    return roleMiddleware([...ACADEMIC_SECRETARY_FULL_ACCESS_ROLES, ...ACADEMIC_COORDINATION_READ_ROLES])(req, res, next);
   }
 
   if (isScheduleWorkspaceRoute) {
@@ -11155,6 +11160,558 @@ router.post('/push-audit/test-push', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+function splitDirectoryPersonName(fullName = '', firstName = '', lastName = '') {
+  const explicitFirst = normalizeText(firstName);
+  const explicitLast = normalizeText(lastName);
+  if (explicitFirst || explicitLast) {
+    return { firstName: explicitFirst, lastName: explicitLast };
+  }
+
+  const parts = normalizeText(fullName).split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) {
+    return { firstName: parts[0] || '', lastName: '' };
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(' '),
+  };
+}
+
+function joinDirectoryPersonName(firstName = '', lastName = '', fallback = '') {
+  const joined = [normalizeText(firstName), normalizeText(lastName)].filter(Boolean).join(' ');
+  return joined || normalizeText(fallback);
+}
+
+function resolveVisibleAccessPassword(user, fallback = '') {
+  return normalizeText(user?.accessPassword) || normalizeText(fallback);
+}
+
+async function assertDirectoryUsernameAvailable(username, excludeUserId = null) {
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  if (!normalizedUsername) {
+    const error = new Error('El usuario es obligatorio.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const existing = await User.findOne({ username: normalizedUsername }).select('_id').lean();
+  if (existing && String(existing._id) !== String(excludeUserId || '')) {
+    const error = new Error('Ese usuario ya está en uso.');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  return normalizedUsername;
+}
+
+async function loadInstitutionalDirectoryScope(req) {
+  const schoolId = req.user.schoolId;
+  const configuration = await ensureAcademicStructureConfiguration(schoolId);
+  const serialized = serializeAcademicStructureConfiguration(configuration);
+  if (String(req.user?.role || '').trim() !== 'coordination') {
+    return { schoolId, serialized, gradeKeys: null };
+  }
+
+  const { gradeKeys } = resolveCoordinationGradeKeys(serialized, req.user?.coordinationScope);
+  return { schoolId, serialized, gradeKeys };
+}
+
+function studentMatchesDirectoryScope(student, serialized, gradeKeys) {
+  if (!gradeKeys) {
+    return true;
+  }
+  if (!gradeKeys.size) {
+    return false;
+  }
+
+  const matchedGrade = findAcademicStructureGradeForStudent(student?.grade, serialized?.grades || []);
+  const gradeKey = normalizeText(matchedGrade?.key || student?.grade);
+  if (gradeKeys.has(gradeKey)) {
+    return true;
+  }
+
+  const normalizedStudentGrade = normalizeAcademicStructureGradeKey(gradeKey);
+  return Array.from(gradeKeys).some((item) => normalizeAcademicStructureGradeKey(item) === normalizedStudentGrade);
+}
+
+async function applyDirectoryStudentPlacement(student, { schoolId, serialized, grade, course, isCoordinationUser, coordinationScope }) {
+  const requestedGradeKey = normalizeAcademicStructureGradeKey(grade);
+  const courseKey = normalizeGradeCourseKey(course);
+  const currentGrade = findAcademicStructureGradeForStudent(student.grade, serialized.grades);
+  const targetGrade = requestedGradeKey
+    ? (serialized.grades || []).find((item) => (
+      normalizeAcademicStructureGradeKey(item?.key) === requestedGradeKey
+      || normalizeAcademicStructureGradeKey(item?.label) === requestedGradeKey
+    ))
+    : currentGrade;
+
+  if (!targetGrade) {
+    const error = new Error(requestedGradeKey
+      ? 'El grado seleccionado todavía no existe en la estructura académica.'
+      : 'El alumno debe tener un grado asignado.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (isCoordinationUser) {
+    const allowedLevelKeys = resolveCoordinationLevelKeys(serialized, coordinationScope);
+    if (!allowedLevelKeys.has(normalizeText(targetGrade.levelKey))) {
+      const error = new Error('No tienes permiso para asignar alumnos fuera de tu nivel de coordinación.');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
+  const targetCourses = resolveGradeCourses(targetGrade);
+  let selectedCourse = courseKey
+    ? targetCourses.find((item) => normalizeGradeCourseKey(item.key) === courseKey)
+    : null;
+
+  if (courseKey && !selectedCourse) {
+    const error = new Error('El curso seleccionado no pertenece al grado destino.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!selectedCourse && (targetCourses.length === 1 || gradeUsesImplicitCourse(targetGrade))) {
+    selectedCourse = targetCourses[0] || null;
+  }
+
+  if (!selectedCourse) {
+    const error = new Error('Debes seleccionar un curso para asignar.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const previousGradeKey = normalizeText(student.grade);
+  const nextGradeKey = normalizeText(targetGrade.key);
+  student.grade = nextGradeKey;
+  student.course = selectedCourse.key;
+  await student.save();
+  await ensureStudentCohortMembership(student, schoolId);
+
+  if (normalizeAcademicStructureGradeKey(previousGradeKey) !== normalizeAcademicStructureGradeKey(nextGradeKey)) {
+    const billingProfile = await StudentBillingProfile.findOne({ schoolId, studentId: student._id });
+    if (billingProfile) {
+      billingProfile.grade = nextGradeKey;
+      await billingProfile.save();
+    }
+  }
+
+  return student;
+}
+
+function serializeDirectoryStudent(student, user) {
+  const names = splitDirectoryPersonName(student?.name, student?.firstName, student?.lastName);
+  return {
+    id: String(student._id),
+    userId: user?._id ? String(user._id) : '',
+    firstName: names.firstName,
+    lastName: names.lastName,
+    fullName: joinDirectoryPersonName(names.firstName, names.lastName, student?.name),
+    grade: normalizeText(student?.grade),
+    course: normalizeText(student?.course),
+    username: normalizeText(user?.username),
+    password: resolveVisibleAccessPassword(user, student?.documentNumber),
+    documentNumber: normalizeText(student?.documentNumber),
+  };
+}
+
+function serializeDirectoryParent(parent, children = []) {
+  const names = splitDirectoryPersonName(parent?.name);
+  return {
+    id: String(parent._id),
+    firstName: names.firstName,
+    lastName: names.lastName,
+    fullName: joinDirectoryPersonName(names.firstName, names.lastName, parent?.name),
+    username: normalizeText(parent?.username),
+    password: resolveVisibleAccessPassword(parent, parent?.documentNumber),
+    children: children.map((child) => ({
+      id: String(child._id),
+      name: joinDirectoryPersonName(child.firstName, child.lastName, child.name),
+      grade: normalizeText(child.grade),
+      course: normalizeText(child.course),
+    })),
+  };
+}
+
+router.get('/institutional-directory', async (req, res) => {
+  try {
+    const { schoolId, serialized, gradeKeys } = await loadInstitutionalDirectoryScope(req);
+    const students = await Student.find({ schoolId, deletedAt: null }).sort({ lastName: 1, firstName: 1, name: 1 }).lean();
+    const scopedStudents = students.filter((student) => studentMatchesDirectoryScope(student, serialized, gradeKeys));
+    const studentIds = scopedStudents.map((student) => student._id);
+    const studentUserIds = scopedStudents.map((student) => student.userId).filter(Boolean);
+
+    const [studentUsers, parentLinks, allParents] = await Promise.all([
+      (studentUserIds.length || studentIds.length)
+        ? User.find({
+          schoolId,
+          deletedAt: null,
+          $or: [
+            ...(studentUserIds.length ? [{ _id: { $in: studentUserIds } }] : []),
+            ...(studentIds.length ? [{ role: 'student', linkedStudentId: { $in: studentIds } }] : []),
+          ],
+        }).select('+accessPassword name username documentNumber linkedStudentId role').lean()
+        : Promise.resolve([]),
+      ParentStudentLink.find({ schoolId, status: 'active' }).select('parentId studentId').lean(),
+      User.find({ schoolId, role: 'parent', deletedAt: null })
+        .select('+accessPassword name username documentNumber')
+        .sort({ name: 1 })
+        .lean(),
+    ]);
+
+    const studentUserByStudentId = new Map();
+    studentUsers.forEach((user) => {
+      const linkedId = String(user.linkedStudentId || '');
+      if (linkedId) {
+        studentUserByStudentId.set(linkedId, user);
+      }
+    });
+    scopedStudents.forEach((student) => {
+      if (student.userId && !studentUserByStudentId.has(String(student._id))) {
+        const matched = studentUsers.find((user) => String(user._id) === String(student.userId));
+        if (matched) {
+          studentUserByStudentId.set(String(student._id), matched);
+        }
+      }
+    });
+
+    const studentById = new Map(scopedStudents.map((student) => [String(student._id), student]));
+    const childrenByParentId = parentLinks.reduce((accumulator, link) => {
+      const parentId = String(link.parentId || '');
+      const student = studentById.get(String(link.studentId || ''));
+      if (!parentId || !student) {
+        return accumulator;
+      }
+      accumulator[parentId] = accumulator[parentId] || [];
+      accumulator[parentId].push(student);
+      return accumulator;
+    }, {});
+
+    const parentIds = [...new Set(parentLinks.map((link) => String(link.parentId || '')).filter(Boolean))];
+    const visibleParents = (gradeKeys
+      ? allParents.filter((parent) => parentIds.includes(String(parent._id)) && (childrenByParentId[String(parent._id)] || []).length > 0)
+      : allParents);
+
+    return res.status(200).json({
+      students: scopedStudents.map((student) => serializeDirectoryStudent(student, studentUserByStudentId.get(String(student._id)))),
+      parents: visibleParents.map((parent) => serializeDirectoryParent(parent, childrenByParentId[String(parent._id)] || [])),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.patch('/institutional-directory/students/:studentId', async (req, res) => {
+  try {
+    const { schoolId, serialized, gradeKeys } = await loadInstitutionalDirectoryScope(req);
+    const studentId = toObjectId(req.params.studentId);
+    if (!studentId) {
+      return res.status(400).json({ message: 'Alumno inválido.' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null });
+    if (!student || !studentMatchesDirectoryScope(student, serialized, gradeKeys)) {
+      return res.status(404).json({ message: 'No se encontró el alumno solicitado.' });
+    }
+
+    const firstName = Object.prototype.hasOwnProperty.call(req.body, 'firstName')
+      ? normalizeText(req.body.firstName)
+      : normalizeText(student.firstName);
+    const lastName = Object.prototype.hasOwnProperty.call(req.body, 'lastName')
+      ? normalizeText(req.body.lastName)
+      : normalizeText(student.lastName);
+    const fullName = joinDirectoryPersonName(firstName, lastName, student.name);
+
+    if (!fullName) {
+      return res.status(400).json({ message: 'El nombre y apellido del alumno son obligatorios.' });
+    }
+
+    student.firstName = firstName || splitDirectoryPersonName(fullName).firstName;
+    student.lastName = lastName || splitDirectoryPersonName(fullName).lastName;
+    student.name = fullName;
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'grade') || Object.prototype.hasOwnProperty.call(req.body, 'course')) {
+      await applyDirectoryStudentPlacement(student, {
+        schoolId,
+        serialized,
+        grade: Object.prototype.hasOwnProperty.call(req.body, 'grade') ? req.body.grade : student.grade,
+        course: Object.prototype.hasOwnProperty.call(req.body, 'course') ? req.body.course : student.course,
+        isCoordinationUser: String(req.user?.role || '').trim() === 'coordination',
+        coordinationScope: req.user?.coordinationScope,
+      });
+    } else {
+      await student.save();
+    }
+
+    let user = null;
+    if (student.userId) {
+      user = await User.findOne({ _id: student.userId, schoolId, role: 'student' }).select('+accessPassword');
+    }
+    if (!user) {
+      user = await User.findOne({ schoolId, role: 'student', linkedStudentId: student._id }).select('+accessPassword');
+    }
+
+    const requestedUsername = Object.prototype.hasOwnProperty.call(req.body, 'username')
+      ? String(req.body.username || '').trim().toLowerCase()
+      : '';
+    const requestedPassword = Object.prototype.hasOwnProperty.call(req.body, 'password')
+      ? String(req.body.password || '')
+      : '';
+
+    if (!user) {
+      const username = requestedUsername || await buildStudentUsername({ schoolId, student });
+      await assertDirectoryUsernameAvailable(username);
+      const password = requestedPassword || normalizeText(student.documentNumber) || generateTemporaryPassword();
+      if (requestedPassword && requestedPassword.length < 6) {
+        return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres.' });
+      }
+      user = await User.create({
+        schoolId,
+        name: fullName,
+        username,
+        email: `${username}@alumnos.local`,
+        documentType: normalizeText(student.documentType) || 'TI',
+        documentNumber: normalizeText(student.documentNumber),
+        role: 'student',
+        linkedStudentId: student._id,
+        status: 'active',
+        deletedAt: null,
+        passwordHash: await bcrypt.hash(password, 10),
+        accessPassword: password,
+      });
+      student.userId = user._id;
+      await student.save();
+      await ensureStudentCampusMembership({ schoolId, userId: user._id });
+    } else {
+      user.name = fullName;
+      user.linkedStudentId = student._id;
+      user.status = 'active';
+      user.deletedAt = null;
+      if (requestedUsername) {
+        user.username = await assertDirectoryUsernameAvailable(requestedUsername, user._id);
+        user.email = `${user.username}@alumnos.local`;
+      }
+      if (requestedPassword) {
+        if (requestedPassword.length < 6) {
+          return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres.' });
+        }
+        user.passwordHash = await bcrypt.hash(requestedPassword, 10);
+        user.accessPassword = requestedPassword;
+      }
+      await user.save();
+      await ensureStudentCampusMembership({ schoolId, userId: user._id });
+      if (!student.userId) {
+        student.userId = user._id;
+        await student.save();
+      }
+    }
+
+    const freshUser = await User.findById(user._id).select('+accessPassword name username documentNumber linkedStudentId').lean();
+    return res.status(200).json({
+      message: 'Alumno actualizado.',
+      item: serializeDirectoryStudent(student.toObject ? student.toObject() : student, freshUser),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.delete('/institutional-directory/students/:studentId', async (req, res) => {
+  try {
+    const { schoolId, serialized, gradeKeys } = await loadInstitutionalDirectoryScope(req);
+    const studentId = toObjectId(req.params.studentId);
+    if (!studentId) {
+      return res.status(400).json({ message: 'Alumno inválido para eliminar.' });
+    }
+
+    const student = await Student.findOne({ _id: studentId, schoolId, deletedAt: null });
+    if (!student || !studentMatchesDirectoryScope(student, serialized, gradeKeys)) {
+      return res.status(404).json({ message: 'No se encontró el alumno solicitado.' });
+    }
+
+    const now = new Date();
+    student.deletedAt = now;
+    student.status = 'inactive';
+    await student.save();
+
+    if (student.userId) {
+      await User.updateOne(
+        { _id: student.userId, schoolId, role: 'student', deletedAt: null },
+        { $set: { deletedAt: now, status: 'inactive' } },
+      );
+    }
+    await User.updateOne(
+      { schoolId, role: 'student', linkedStudentId: student._id, deletedAt: null },
+      { $set: { deletedAt: now, status: 'inactive' } },
+    );
+    await ParentStudentLink.updateMany(
+      { schoolId, studentId: student._id, status: 'active' },
+      { $set: { status: 'inactive' } },
+    );
+
+    return res.status(200).json({
+      message: 'Alumno eliminado.',
+      studentId: String(student._id),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.patch('/institutional-directory/parents/:parentId', async (req, res) => {
+  try {
+    const { schoolId, serialized, gradeKeys } = await loadInstitutionalDirectoryScope(req);
+    const parentId = toObjectId(req.params.parentId);
+    if (!parentId) {
+      return res.status(400).json({ message: 'Acudiente inválido.' });
+    }
+
+    const parent = await User.findOne({ _id: parentId, schoolId, role: 'parent', deletedAt: null }).select('+accessPassword');
+    if (!parent) {
+      return res.status(404).json({ message: 'No se encontró el acudiente solicitado.' });
+    }
+
+    const firstName = Object.prototype.hasOwnProperty.call(req.body, 'firstName')
+      ? normalizeText(req.body.firstName)
+      : splitDirectoryPersonName(parent.name).firstName;
+    const lastName = Object.prototype.hasOwnProperty.call(req.body, 'lastName')
+      ? normalizeText(req.body.lastName)
+      : splitDirectoryPersonName(parent.name).lastName;
+    const fullName = joinDirectoryPersonName(firstName, lastName, parent.name);
+    if (!fullName) {
+      return res.status(400).json({ message: 'El nombre y apellido del acudiente son obligatorios.' });
+    }
+
+    parent.name = fullName;
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'username')) {
+      parent.username = await assertDirectoryUsernameAvailable(String(req.body.username || '').trim().toLowerCase(), parent._id);
+      if (!normalizeText(parent.email) || String(parent.email).endsWith('@acudientes.local')) {
+        parent.email = `${parent.username}@acudientes.local`;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'password')) {
+      const requestedPassword = String(req.body.password || '');
+      if (requestedPassword) {
+        if (requestedPassword.length < 6) {
+          return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres.' });
+        }
+        parent.passwordHash = await bcrypt.hash(requestedPassword, 10);
+        parent.accessPassword = requestedPassword;
+      }
+    }
+
+    await parent.save();
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'studentIds')) {
+      const requestedStudentIds = [...new Set((Array.isArray(req.body.studentIds) ? req.body.studentIds : [])
+        .map((value) => toObjectId(value))
+        .filter(Boolean)
+        .map((value) => String(value)))];
+
+      const requestedStudents = requestedStudentIds.length
+        ? await Student.find({ _id: { $in: requestedStudentIds }, schoolId, deletedAt: null })
+        : [];
+      const allowedStudents = requestedStudents.filter((student) => studentMatchesDirectoryScope(student, serialized, gradeKeys));
+      if (allowedStudents.length !== requestedStudentIds.length) {
+        return res.status(400).json({ message: 'Uno o más alumnos relacionados no son válidos para este portal.' });
+      }
+
+      const allowedIdSet = new Set(allowedStudents.map((student) => String(student._id)));
+      const existingLinks = await ParentStudentLink.find({ schoolId, parentId: parent._id }).select('studentId status').lean();
+
+      await Promise.all(existingLinks.map(async (link) => {
+        const childId = String(link.studentId || '');
+        if (allowedIdSet.has(childId)) {
+          if (link.status !== 'active') {
+            await ParentStudentLink.updateOne({ _id: link._id }, { $set: { status: 'active' } });
+          }
+          return;
+        }
+        if (link.status === 'active') {
+          await ParentStudentLink.updateOne({ _id: link._id }, { $set: { status: 'inactive' } });
+        }
+      }));
+
+      const existingStudentIds = new Set(existingLinks.map((link) => String(link.studentId || '')));
+      await Promise.all(allowedStudents
+        .filter((student) => !existingStudentIds.has(String(student._id)))
+        .map((student) => ParentStudentLink.create({
+          schoolId,
+          parentId: parent._id,
+          studentId: student._id,
+          relationship: 'parent',
+          isPrimaryContact: false,
+          status: 'active',
+        })));
+    }
+
+    const activeLinks = await ParentStudentLink.find({ schoolId, parentId: parent._id, status: 'active' }).select('studentId').lean();
+    const children = await Student.find({
+      _id: { $in: activeLinks.map((link) => link.studentId).filter(Boolean) },
+      schoolId,
+      deletedAt: null,
+    }).lean();
+    const scopedChildren = children.filter((student) => studentMatchesDirectoryScope(student, serialized, gradeKeys));
+    const freshParent = await User.findById(parent._id).select('+accessPassword name username documentNumber').lean();
+
+    return res.status(200).json({
+      message: 'Acudiente actualizado.',
+      item: serializeDirectoryParent(freshParent, scopedChildren),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
+router.delete('/institutional-directory/parents/:parentId', async (req, res) => {
+  try {
+    const { schoolId, serialized, gradeKeys } = await loadInstitutionalDirectoryScope(req);
+    const parentId = toObjectId(req.params.parentId);
+    if (!parentId) {
+      return res.status(400).json({ message: 'Acudiente inválido para eliminar.' });
+    }
+
+    const parent = await User.findOne({ _id: parentId, schoolId, role: 'parent', deletedAt: null });
+    if (!parent) {
+      return res.status(404).json({ message: 'No se encontró el acudiente solicitado.' });
+    }
+
+    const links = await ParentStudentLink.find({ schoolId, parentId: parent._id, status: 'active' }).select('studentId').lean();
+    if (gradeKeys) {
+      const linkedStudents = await Student.find({
+        _id: { $in: links.map((link) => link.studentId).filter(Boolean) },
+        schoolId,
+        deletedAt: null,
+      }).lean();
+      const hasVisibleChild = linkedStudents.some((student) => studentMatchesDirectoryScope(student, serialized, gradeKeys));
+      if (!hasVisibleChild && linkedStudents.length > 0) {
+        return res.status(403).json({ message: 'No puedes eliminar un acudiente fuera de tu nivel de coordinación.' });
+      }
+    }
+
+    const now = new Date();
+    parent.deletedAt = now;
+    parent.status = 'inactive';
+    await parent.save();
+    await ParentStudentLink.updateMany(
+      { schoolId, parentId: parent._id, status: 'active' },
+      { $set: { status: 'inactive' } },
+    );
+
+    return res.status(200).json({
+      message: 'Acudiente eliminado.',
+      parentId: String(parent._id),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
   }
 });
 
