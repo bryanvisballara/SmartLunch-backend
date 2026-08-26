@@ -843,6 +843,15 @@
   font-weight: 750;
 }
 
+.campus-teacher__publications-field .audience-picker {
+  gap: 8px;
+}
+
+.campus-teacher__publications-field .audience-picker__list {
+  max-height: 200px;
+  border-radius: 16px;
+}
+
 .campus-teacher__publications-input-shell {
   position: relative;
   display: grid;

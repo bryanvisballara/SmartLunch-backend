@@ -63,6 +63,8 @@ import {
 import { resolveApiAssetUrl } from '../../lib/api';
 import { isEducationalLevelKey } from '../../lib/feeGradeMatching';
 import { resolveEducationalGradeLabel } from '../../lib/educationalGradeLabels';
+import ClickableOptionPicker from '../../components/audience/ClickableOptionPicker';
+import { addAudienceListValue, removeAudienceListValue } from '../../lib/publicationAudience';
 import { mockTeacherWorkspace } from '../mockCampusContext';
 import '../campus.css';
 
@@ -351,6 +353,7 @@ function createTeacherSocialPublicationDraft() {
   return {
     subjectKey: '',
     courseId: '',
+    audienceValues: [],
     title: '',
     body: '',
     media: [],
@@ -1993,6 +1996,36 @@ function getNativeCourseGradeLabel(course) {
   }
 
   return gradeNumber || normalizeCourseDisplayText(course?.gradeLevel || course?.studentGradeKey || '');
+}
+
+function buildTeacherPublicationAudienceOptions(courses = []) {
+  const groupMap = new Map();
+  const individuals = [];
+
+  (Array.isArray(courses) ? courses : []).forEach((course) => {
+    const groupKey = String(course?.classroomGroupKey || '').trim();
+    const groupLabel = String(course?.classroomGroupLabel || '').trim();
+    if (groupKey && groupLabel) {
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, {
+          value: `classroom_group:${groupKey}`,
+          label: groupLabel,
+          kind: 'classroom_group',
+          courseIds: [],
+        });
+      }
+      groupMap.get(groupKey).courseIds.push(course.id);
+    }
+
+    individuals.push({
+      value: course.id,
+      label: getNativeCourseGradeLabel(course) || String(course?.studentGradeKey || course?.gradeLevel || course?.title || '').trim() || 'Curso',
+      kind: 'course',
+      courseIds: [course.id],
+    });
+  });
+
+  return [...groupMap.values(), ...individuals];
 }
 
 function getCourseGradeLabel(course) {
@@ -5042,7 +5075,11 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => socialPublicationSubjectGroups.find((subject) => subject.key === teacherSocialPublicationDraft.subjectKey) || null,
     [socialPublicationSubjectGroups, teacherSocialPublicationDraft.subjectKey]
   );
-  const socialPublicationCoursesForSubject = selectedSocialPublicationSubject?.courses || [];
+  const socialPublicationCoursesForSubject = selectedSocialPublicationSubject?.courses || EMPTY_TEACHER_LIST;
+  const teacherPublicationAudienceOptions = useMemo(
+    () => buildTeacherPublicationAudienceOptions(socialPublicationCoursesForSubject),
+    [socialPublicationCoursesForSubject]
+  );
   const selectedSocialPublicationCourse = socialPublicationCoursesForSubject.find((course) => course.id === teacherSocialPublicationDraft.courseId)
     || courses.find((course) => course.id === teacherSocialPublicationDraft.courseId)
     || null;
@@ -7303,8 +7340,34 @@ function TeacherCampusHome({ forcePreview = false }) {
     setTeacherSocialPublicationDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
-      ...(field === 'subjectKey' ? { courseId: '' } : {}),
+      ...(field === 'subjectKey' ? { courseId: '', audienceValues: [] } : {}),
     }));
+  };
+
+  const onAddTeacherPublicationAudience = (value) => {
+    setTeacherSocialPublicationDraft((currentDraft) => {
+      const audienceValues = addAudienceListValue(currentDraft.audienceValues, value);
+      const selectedOptions = teacherPublicationAudienceOptions.filter((option) => audienceValues.includes(option.value));
+      const courseIds = [...new Set(selectedOptions.flatMap((option) => option.courseIds || []))];
+      return {
+        ...currentDraft,
+        audienceValues,
+        courseId: courseIds[0] || '',
+      };
+    });
+  };
+
+  const onRemoveTeacherPublicationAudience = (value) => {
+    setTeacherSocialPublicationDraft((currentDraft) => {
+      const audienceValues = removeAudienceListValue(currentDraft.audienceValues, value);
+      const selectedOptions = teacherPublicationAudienceOptions.filter((option) => audienceValues.includes(option.value));
+      const courseIds = [...new Set(selectedOptions.flatMap((option) => option.courseIds || []))];
+      return {
+        ...currentDraft,
+        audienceValues,
+        courseId: courseIds[0] || '',
+      };
+    });
   };
 
   const uploadTeacherSocialMediaFiles = async (files, { fromCamera = false } = {}) => {
@@ -7431,8 +7494,17 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
-    if (!teacherSocialPublicationDraft.courseId || !selectedSocialPublicationCourse) {
-      setNotice({ type: 'error', text: 'Selecciona el curso destinatario.' });
+    const selectedAudienceOptions = teacherPublicationAudienceOptions.filter((option) => (
+      (teacherSocialPublicationDraft.audienceValues || []).includes(option.value)
+    ));
+    const selectedCourses = [...new Set(selectedAudienceOptions.flatMap((option) => option.courseIds || []))]
+      .map((courseId) => socialPublicationCoursesForSubject.find((course) => course.id === courseId)
+        || courses.find((course) => course.id === courseId)
+        || null)
+      .filter(Boolean);
+
+    if (!selectedCourses.length) {
+      setNotice({ type: 'error', text: 'Selecciona al menos un grupo o curso destinatario.' });
       return;
     }
 
@@ -7441,29 +7513,34 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
-    const courseGroupLabel = getCourseGroupLabel(selectedSocialPublicationCourse);
-    const subjectLabel = normalizeSubjectLabel(selectedSocialPublicationCourse.subject)
+    const primaryCourse = selectedCourses[0];
+    const subjectLabel = normalizeSubjectLabel(primaryCourse.subject)
       || selectedSocialPublicationSubject?.label
       || '';
 
     try {
       await createTeacherSocialPublicationMutation.mutateAsync({
-        courseId: teacherSocialPublicationDraft.courseId,
+        courseId: primaryCourse.id,
+        courseIds: selectedCourses.map((course) => course.id),
         title,
         body,
         emailSubject: title,
         audienceType: 'course',
         subject: subjectLabel,
         courseTargets: [
-          courseGroupLabel,
-          selectedSocialPublicationCourse.title,
-          selectedSocialPublicationCourse.studentGradeKey,
-          selectedSocialPublicationCourse.gradeLevel,
-          selectedSocialPublicationCourse.section,
-          `${selectedSocialPublicationCourse.gradeLevel || ''}${selectedSocialPublicationCourse.section || ''}`,
-          `${selectedSocialPublicationCourse.studentGradeKey || ''}${selectedSocialPublicationCourse.section || ''}`,
+          ...selectedAudienceOptions.map((option) => option.value),
+          ...selectedAudienceOptions.map((option) => option.label),
+          ...selectedCourses.flatMap((course) => [
+            getCourseGroupLabel(course),
+            course.title,
+            course.studentGradeKey,
+            course.gradeLevel,
+            course.section,
+            `${course.gradeLevel || ''}${course.section || ''}`,
+            `${course.studentGradeKey || ''}${course.section || ''}`,
+          ]),
         ].filter(Boolean),
-        gradeTargets: [selectedSocialPublicationCourse.studentGradeKey, selectedSocialPublicationCourse.gradeLevel].filter(Boolean),
+        gradeTargets: selectedCourses.flatMap((course) => [course.studentGradeKey, course.gradeLevel]).filter(Boolean),
         media: teacherSocialPublicationDraft.media || [],
         channels: { push: true, email: false },
       });
@@ -12037,29 +12114,23 @@ function TeacherCampusHome({ forcePreview = false }) {
                         </div>
                       </label>
 
-                      <label className="campus-teacher__publications-field">
-                        <span>Curso</span>
-                        <div className="campus-teacher__publications-input-shell">
-                          <svg aria-hidden="true" className="campus-teacher__publications-field-icon" fill="none" viewBox="0 0 24 24">
-                            <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
-                            <circle cx="16.5" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.7" />
-                            <path d="M3.8 18.5a5.2 5.2 0 0 1 10.4 0M13.2 18.5a4.2 4.2 0 0 1 7 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                          </svg>
-                          <select
-                            disabled={!teacherSocialPublicationDraft.subjectKey || socialPublicationCoursesForSubject.length === 0}
-                            value={teacherSocialPublicationDraft.courseId}
-                            onChange={(event) => onTeacherSocialPublicationDraftChange('courseId', event.target.value)}
-                          >
-                            <option value="">
-                              {!teacherSocialPublicationDraft.subjectKey
-                                ? 'Selecciona una asignatura primero'
-                                : (socialPublicationCoursesForSubject.length ? 'Seleccionar curso' : 'Sin cursos')}
-                            </option>
-                            {socialPublicationCoursesForSubject.map((course) => (
-                              <option key={course.id} value={course.id}>{getCourseGroupLabel(course)}</option>
-                            ))}
-                          </select>
-                        </div>
+                      <label className={`campus-teacher__publications-field${teacherSocialPublicationDraft.subjectKey ? ' is-wide' : ''}`}>
+                        <span>Cursos</span>
+                        {!teacherSocialPublicationDraft.subjectKey ? (
+                          <div className="campus-teacher__publications-input-shell">
+                            <select disabled value="">
+                              <option value="">Selecciona una asignatura primero</option>
+                            </select>
+                          </div>
+                        ) : (
+                          <ClickableOptionPicker
+                            emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno."
+                            onAdd={onAddTeacherPublicationAudience}
+                            onRemove={onRemoveTeacherPublicationAudience}
+                            options={teacherPublicationAudienceOptions}
+                            selectedValues={teacherSocialPublicationDraft.audienceValues || []}
+                          />
+                        )}
                       </label>
                     </div>
 

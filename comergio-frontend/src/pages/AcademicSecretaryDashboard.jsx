@@ -28,6 +28,14 @@ import {
   splitContractParagraphs,
   usesOfficialEnrollmentContractTemplate,
 } from '../lib/millenniumEnrollmentContracts';
+import ClickableOptionPicker from '../components/audience/ClickableOptionPicker';
+import {
+  addAudienceListValue,
+  buildPublicationAudienceCourseOptions,
+  compactPublicationCourseTargetLabels,
+  mapTargetsToAudienceOptionValues,
+  removeAudienceListValue,
+} from '../lib/publicationAudience';
 import useAuthStore from '../store/auth.store';
 import { PortalBootSplash } from '../components/PortalBootSplash';
 import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
@@ -2355,25 +2363,45 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const courseOptions = useMemo(() => {
     const optionMap = new Map();
     (bootstrap.courseOptions || []).forEach((course) => {
-      const formatted = formatAcademicCourseTarget(course?.label || course?.value || course?.key);
-      if (formatted?.value) {
-        optionMap.set(formatted.value, formatted);
+      const value = String(course?.value || '').trim();
+      const label = String(course?.label || course?.value || '').trim();
+      if (value && label && !optionMap.has(value)) {
+        optionMap.set(value, {
+          value,
+          label,
+          kind: (course?.kind === 'classroom_group' || course?.source === 'classroom-group' || value.startsWith('classroom_group:'))
+            ? 'classroom_group'
+            : (course?.kind || 'course'),
+          gradeKeys: Array.isArray(course?.gradeKeys) ? course.gradeKeys : [],
+          aliases: Array.isArray(course?.aliases) ? course.aliases : [],
+          source: course?.source || '',
+        });
       }
     });
     (bootstrap.courses || []).forEach((course) => {
       const formatted = formatAcademicCourseTarget(course);
       if (formatted?.value && !optionMap.has(formatted.value)) {
-        optionMap.set(formatted.value, formatted);
+        optionMap.set(formatted.value, { ...formatted, kind: 'course' });
       }
     });
-    return Array.from(optionMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es', { numeric: true }));
+    return Array.from(optionMap.values());
   }, [bootstrap.courseOptions, bootstrap.courses]);
+  const publicationAudienceCourseOptions = useMemo(
+    () => buildPublicationAudienceCourseOptions({
+      classroomGroups: bootstrap.academicStructure?.classroomGroups,
+      courseOptions,
+    }),
+    [bootstrap.academicStructure?.classroomGroups, courseOptions]
+  );
+  const formatRequestedCourseTargets = (courseTargets = [], fallbackCourseTitle = '') => (
+    compactPublicationCourseTargetLabels(courseTargets, publicationAudienceCourseOptions, fallbackCourseTitle)
+  );
   const courseLabelByValue = useMemo(
-    () => courseOptions.reduce((accumulator, course) => {
+    () => publicationAudienceCourseOptions.reduce((accumulator, course) => {
       accumulator[String(course.value || '').trim()] = course.label || course.value;
       return accumulator;
     }, {}),
-    [courseOptions]
+    [publicationAudienceCourseOptions]
   );
   const feedCommunications = useMemo(
     () => (bootstrap.communications || []).filter((item) => item?.channels?.feed !== false),
@@ -2383,15 +2411,6 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     () => (bootstrap.communications || []).filter((item) => item?.channels?.email === true && item?.channels?.feed === false),
     [bootstrap.communications]
   );
-  const formatRequestedCourseTargets = (courseTargets = [], fallbackCourseTitle = '') => {
-    const labels = Array.from(new Set([
-      fallbackCourseTitle,
-      ...(Array.isArray(courseTargets) ? courseTargets : []),
-    ].map((item) => String(item || '').trim()).filter(Boolean)))
-      .map((item) => courseLabelByValue[item] || formatAcademicCourseTarget(item)?.label || item);
-
-    return labels.length > 0 ? labels.join(', ') : 'Sin curso indicado';
-  };
   const pendingRequests = useMemo(() => (bootstrap.communicationRequests || []).filter((request) => request.status === 'pending'), [bootstrap.communicationRequests]);
   const selectedRequest = useMemo(() => pendingRequests.find((request) => request._id === selectedRequestId) || pendingRequests[0] || null, [pendingRequests, selectedRequestId]);
   const availableCostGrades = useMemo(() => {
@@ -2852,8 +2871,13 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
     }
 
     setSelectedRequestId(selectedRequest._id);
-    setApprovalDraft(createApprovalDraft(selectedRequest));
-  }, [selectedRequest]);
+    const draft = createApprovalDraft(selectedRequest);
+    const mappedCourseTargets = mapTargetsToAudienceOptionValues(draft.courseTargets, publicationAudienceCourseOptions);
+    setApprovalDraft({
+      ...draft,
+      courseTargets: mappedCourseTargets.length ? mappedCourseTargets : draft.courseTargets,
+    });
+  }, [publicationAudienceCourseOptions, selectedRequest]);
 
   useEffect(() => {
     if (activeSection === 'marketing') {
@@ -2878,6 +2902,20 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
   const onMultiSelectChange = (event, fieldName, setter) => {
     const values = Array.from(event.target.selectedOptions).map((option) => option.value);
     setter((previous) => ({ ...previous, [fieldName]: values }));
+  };
+
+  const onAddDraftListValue = (setter, fieldName, value) => {
+    setter((previous) => ({
+      ...previous,
+      [fieldName]: addAudienceListValue(previous[fieldName], value),
+    }));
+  };
+
+  const onRemoveDraftListValue = (setter, fieldName, value) => {
+    setter((previous) => ({
+      ...previous,
+      [fieldName]: removeAudienceListValue(previous[fieldName], value),
+    }));
   };
 
   const runAction = async (request, doneMessage, nextSection = '') => {
@@ -5060,12 +5098,14 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     </label>
                   ) : null}
                   {communicationForm.audienceType === 'course' ? (
-                    <label>
-                      Cursos
-                      <select className="academic-secretary__multi-select" multiple value={communicationForm.courseTargets} onChange={(event) => onMultiSelectChange(event, 'courseTargets', setCommunicationForm)}>
-                        {courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}
-                      </select>
-                    </label>
+                    <ClickableOptionPicker
+                      emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno."
+                      label="Cursos"
+                      onAdd={(value) => onAddDraftListValue(setCommunicationForm, 'courseTargets', value)}
+                      onRemove={(value) => onRemoveDraftListValue(setCommunicationForm, 'courseTargets', value)}
+                      options={publicationAudienceCourseOptions}
+                      selectedValues={communicationForm.courseTargets}
+                    />
                   ) : null}
                   {communicationForm.audienceType === 'individual' ? (
                     <>
@@ -5458,12 +5498,14 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                     </label>
                   ) : null}
                   {familyEmailForm.audienceType === 'course' ? (
-                    <label>
-                      Cursos
-                      <select className="academic-secretary__multi-select" multiple value={familyEmailForm.courseTargets} onChange={(event) => onMultiSelectChange(event, 'courseTargets', setFamilyEmailForm)}>
-                        {courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}
-                      </select>
-                    </label>
+                    <ClickableOptionPicker
+                      emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno."
+                      label="Cursos"
+                      onAdd={(value) => onAddDraftListValue(setFamilyEmailForm, 'courseTargets', value)}
+                      onRemove={(value) => onRemoveDraftListValue(setFamilyEmailForm, 'courseTargets', value)}
+                      options={publicationAudienceCourseOptions}
+                      selectedValues={familyEmailForm.courseTargets}
+                    />
                   ) : null}
                   {familyEmailForm.audienceType === 'individual' ? (
                     <>
@@ -6453,7 +6495,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
             <div className="academic-secretary__request-list">{pendingRequests.length === 0 ? <p>No hay solicitudes pendientes.</p> : pendingRequests.map((item) => <button className={`academic-secretary__request-card${selectedRequest?._id === item._id ? ' is-active' : ''}`} key={item._id} onClick={() => setSelectedRequestId(item._id)} type="button"><strong>{item.title}</strong><span>{item.teacherName}{item.publisherLabel ? ` · ${item.publisherLabel}` : ''}</span><span className="academic-secretary__request-grade">Curso: {formatRequestedCourseTargets(item.courseTargets, item.courseTitle)}</span>{item.gradeTargets?.length ? <span className="academic-secretary__request-grade">Grado: {formatGradeLabel(item.gradeTargets[0])}</span> : null}<small>{item.audienceType} · {formatDateTime(item.submittedAt)}</small></button>)}</div>
           </article>
           <article className="academic-secretary__panel">
-            {!selectedRequest ? <p>No hay una solicitud seleccionada.</p> : <div className="academic-secretary__approval-editor"><div className="academic-secretary__approval-meta"><h2>Editar antes de publicar</h2><p>Solicitud de <strong>{selectedRequest.teacherName}</strong>{selectedRequest.publisherLabel ? ` · ${selectedRequest.publisherLabel}` : ''}{selectedRequest.courseTitle ? ` · ${selectedRequest.courseTitle}` : ''}</p><div className="academic-secretary__meta-pills"><span>{approvalDraft.audienceType}</span><span>Curso solicitado: {formatRequestedCourseTargets(selectedRequest.courseTargets, selectedRequest.courseTitle)}</span>{selectedRequest.gradeTargets?.length ? <span>Grado: {formatGradeLabel(selectedRequest.gradeTargets[0])}</span> : null}{approvalDraft.courseTargets?.length ? <span>Curso publicación: {approvalDraft.courseTargets.join(', ')}</span> : null}</div></div><div className="academic-secretary__approval-columns"><div className="academic-secretary__subform"><h4>Original</h4><label>Título<input disabled value={selectedRequest.originalTitle || selectedRequest.title || ''} readOnly /></label><label>Mensaje<textarea disabled readOnly value={selectedRequest.originalBody || selectedRequest.body || ''} /></label><label>Curso solicitado por el docente<input disabled readOnly value={formatRequestedCourseTargets(selectedRequest.courseTargets, selectedRequest.courseTitle)} /></label><div className="academic-secretary__subform academic-secretary__subform--embedded"><h4>Adjuntos del docente</h4><AcademicSecretaryMediaPreview items={selectedRequest.media || []} /></div></div><form className="academic-secretary__subform" onSubmit={(event) => event.preventDefault()}><h4>Versión secretaría</h4><label>Título<input value={approvalDraft.title} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={approvalDraft.body} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="academic-secretary__form-grid"><label>Filtro de audiencia<select value={approvalDraft.audienceType} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: event.target.value === 'grade' ? previous.gradeTargets : [], courseTargets: event.target.value === 'course' ? previous.courseTargets : [], parentTargets: event.target.value === 'individual' ? previous.parentTargets : [], studentTargets: event.target.value === 'individual' ? previous.studentTargets : [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{approvalDraft.audienceType === 'grade' ? <label>Grado a publicar<select value={approvalDraft.gradeTargets?.[0] || ''} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, gradeTargets: event.target.value ? [event.target.value] : [] }))}><option value="">Selecciona grado</option>{gradeCatalog.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}{approvalDraft.audienceType === 'course' ? <label>Curso a publicar<select value={approvalDraft.courseTargets?.[0] || ''} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, courseTargets: event.target.value ? [event.target.value] : [] }))}><option value="">Selecciona curso</option>{courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}</select></label> : null}</div>{approvalDraft.audienceType === 'individual' ? <div className="academic-secretary__form-grid"><label>Acudientes<select className="academic-secretary__multi-select" multiple value={approvalDraft.parentTargets || []} onChange={(event) => onMultiSelectChange(event, 'parentTargets', setApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select className="academic-secretary__multi-select" multiple value={approvalDraft.studentTargets || []} onChange={(event) => onMultiSelectChange(event, 'studentTargets', setApprovalDraft)}>{studentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div className="academic-secretary__subform academic-secretary__subform--embedded"><h4>Adjuntos a publicar</h4><AcademicSecretaryMediaPreview items={approvalDraft.media || []} /></div><label>Notas de revisión<textarea value={approvalDraft.reviewNotes} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="academic-secretary__actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveRequest} type="button">Aprobar y publicar</button><button className="btn btn-outline" disabled={busy} onClick={onRejectRequest} type="button">Rechazar</button></div></form></div></div>}
+            {!selectedRequest ? <p>No hay una solicitud seleccionada.</p> : <div className="academic-secretary__approval-editor"><div className="academic-secretary__approval-meta"><h2>Editar antes de publicar</h2><p>Solicitud de <strong>{selectedRequest.teacherName}</strong>{selectedRequest.publisherLabel ? ` · ${selectedRequest.publisherLabel}` : ''}{selectedRequest.courseTitle ? ` · ${selectedRequest.courseTitle}` : ''}</p><div className="academic-secretary__meta-pills"><span>{approvalDraft.audienceType}</span><span>Curso solicitado: {formatRequestedCourseTargets(selectedRequest.courseTargets, selectedRequest.courseTitle)}</span>{selectedRequest.gradeTargets?.length ? <span>Grado: {formatGradeLabel(selectedRequest.gradeTargets[0])}</span> : null}{approvalDraft.courseTargets?.length ? <span>Curso publicación: {approvalDraft.courseTargets.join(', ')}</span> : null}</div></div><div className="academic-secretary__approval-columns"><div className="academic-secretary__subform"><h4>Original</h4><label>Título<input disabled value={selectedRequest.originalTitle || selectedRequest.title || ''} readOnly /></label><label>Mensaje<textarea disabled readOnly value={selectedRequest.originalBody || selectedRequest.body || ''} /></label><label>Curso solicitado por el docente<input disabled readOnly value={formatRequestedCourseTargets(selectedRequest.courseTargets, selectedRequest.courseTitle)} /></label><div className="academic-secretary__subform academic-secretary__subform--embedded"><h4>Adjuntos del docente</h4><AcademicSecretaryMediaPreview items={selectedRequest.media || []} /></div></div><form className="academic-secretary__subform" onSubmit={(event) => event.preventDefault()}><h4>Versión secretaría</h4><label>Título<input value={approvalDraft.title} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={approvalDraft.body} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="academic-secretary__form-grid"><label>Filtro de audiencia<select value={approvalDraft.audienceType} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: event.target.value === 'grade' ? previous.gradeTargets : [], courseTargets: event.target.value === 'course' ? previous.courseTargets : [], parentTargets: event.target.value === 'individual' ? previous.parentTargets : [], studentTargets: event.target.value === 'individual' ? previous.studentTargets : [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{approvalDraft.audienceType === 'grade' ? <label>Grado a publicar<select value={approvalDraft.gradeTargets?.[0] || ''} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, gradeTargets: event.target.value ? [event.target.value] : [] }))}><option value="">Selecciona grado</option>{gradeCatalog.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}{approvalDraft.audienceType === 'course' ? <ClickableOptionPicker emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno." label="Cursos a publicar" onAdd={(value) => onAddDraftListValue(setApprovalDraft, 'courseTargets', value)} onRemove={(value) => onRemoveDraftListValue(setApprovalDraft, 'courseTargets', value)} options={publicationAudienceCourseOptions} selectedValues={approvalDraft.courseTargets || []} /> : null}</div>{approvalDraft.audienceType === 'individual' ? <div className="academic-secretary__form-grid"><label>Acudientes<select className="academic-secretary__multi-select" multiple value={approvalDraft.parentTargets || []} onChange={(event) => onMultiSelectChange(event, 'parentTargets', setApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select className="academic-secretary__multi-select" multiple value={approvalDraft.studentTargets || []} onChange={(event) => onMultiSelectChange(event, 'studentTargets', setApprovalDraft)}>{studentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div className="academic-secretary__subform academic-secretary__subform--embedded"><h4>Adjuntos a publicar</h4><AcademicSecretaryMediaPreview items={approvalDraft.media || []} /></div><label>Notas de revisión<textarea value={approvalDraft.reviewNotes} onChange={(event) => setApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="academic-secretary__actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveRequest} type="button">Aprobar y publicar</button><button className="btn btn-outline" disabled={busy} onClick={onRejectRequest} type="button">Rechazar</button></div></form></div></div>}
           </article>
         </section>
       ) : null}

@@ -13,6 +13,14 @@ import {
   getPlannerReturnObservationLength,
 } from '../lib/hrPlannerReview';
 import AdmissionsDashboard from './AdmissionsDashboard';
+import ClickableOptionPicker from '../components/audience/ClickableOptionPicker';
+import {
+  addAudienceListValue,
+  buildPublicationAudienceCourseOptions,
+  compactPublicationCourseTargetLabels,
+  mapTargetsToAudienceOptionValues,
+  removeAudienceListValue,
+} from '../lib/publicationAudience';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
 import EnrollmentMatriculaAuthorizationsPanel from '../components/enrollment-matricula/EnrollmentMatriculaAuthorizationsPanel';
 import { PortalBootSplash } from '../components/PortalBootSplash';
@@ -2214,38 +2222,6 @@ function followUpActionLabel(value) {
   return value || 'Seguimiento';
 }
 
-function ClickableOptionPicker({ label, options = [], selectedValues = [], emptyLabel, onAdd, onRemove }) {
-  const selectedSet = new Set((selectedValues || []).map((value) => String(value)));
-  const availableOptions = (options || []).filter((option) => !selectedSet.has(String(option.value)));
-
-  return (
-    <div className="rectoria-selection-group">
-      <div className="rectoria-selection-label">{label}</div>
-      <div className="rectoria-option-list" role="listbox" aria-label={label}>
-        {availableOptions.length === 0 ? (
-          <p className="rectoria-option-list-empty">No hay más opciones disponibles.</p>
-        ) : availableOptions.map((option) => (
-          <button className="rectoria-option-item" key={String(option.value)} onClick={() => onAdd(String(option.value))} type="button">
-            {option.label}
-          </button>
-        ))}
-      </div>
-      <div className="rectoria-selected-list">
-        {(selectedValues || []).length === 0 ? <p className="rectoria-option-list-empty">{emptyLabel}</p> : null}
-        {(selectedValues || []).map((value) => {
-          const option = (options || []).find((item) => String(item.value) === String(value));
-          return (
-            <button className="rectoria-selected-chip" key={String(value)} onClick={() => onRemove(String(value))} type="button">
-              {option?.label || value}
-              <span>x</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function NotificationIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -3588,6 +3564,20 @@ function RectoriaDashboard() {
     setter((previous) => ({ ...previous, [field]: selectedValues }));
   };
 
+  const onAddDraftListValue = (setter, fieldName, value) => {
+    setter((previous) => ({
+      ...previous,
+      [fieldName]: addAudienceListValue(previous[fieldName], value),
+    }));
+  };
+
+  const onRemoveDraftListValue = (setter, fieldName, value) => {
+    setter((previous) => ({
+      ...previous,
+      [fieldName]: removeAudienceListValue(previous[fieldName], value),
+    }));
+  };
+
   const resetCommunicationAuthorDraft = () => {
     setCommunicationAuthorDraft(emptyCommunicationAuthorDraft);
     setEditingCommunicationAuthorId('');
@@ -4261,23 +4251,17 @@ function RectoriaDashboard() {
     return sourceCourses;
   }, [academicStructureDraft.grades, billingBootstrap.courses]);
 
-  const communicationCourseLabelByValue = useMemo(
-    () => courseOptions.reduce((accumulator, course) => {
-      accumulator[String(course.value || '').trim()] = course.label || course.value;
-      return accumulator;
-    }, {}),
-    [courseOptions]
+  const publicationAudienceCourseOptions = useMemo(
+    () => buildPublicationAudienceCourseOptions({
+      classroomGroups: academicStructureDraft.classroomGroups,
+      courseOptions,
+    }),
+    [academicStructureDraft.classroomGroups, courseOptions]
   );
 
-  const formatCommunicationCourseTargets = (courseTargets = [], fallbackCourseTitle = '') => {
-    const labels = Array.from(new Set([
-      fallbackCourseTitle,
-      ...(Array.isArray(courseTargets) ? courseTargets : []),
-    ].map((item) => String(item || '').trim()).filter(Boolean)))
-      .map((item) => communicationCourseLabelByValue[item] || getCourseLabel(item) || item);
-
-    return labels.length > 0 ? labels.join(', ') : 'Sin curso indicado';
-  };
+  const formatCommunicationCourseTargets = (courseTargets = [], fallbackCourseTitle = '') => (
+    compactPublicationCourseTargetLabels(courseTargets, publicationAudienceCourseOptions, fallbackCourseTitle)
+  );
 
   const pendingCommunicationRequests = useMemo(
     () => (billingBootstrap.communicationRequests || []).filter((request) => request.status === 'pending'),
@@ -4302,8 +4286,13 @@ function RectoriaDashboard() {
     }
 
     setSelectedCommunicationRequestId(selectedCommunicationRequest._id);
-    setCommunicationApprovalDraft(createInstitutionalApprovalDraft(selectedCommunicationRequest));
-  }, [selectedCommunicationRequest]);
+    const draft = createInstitutionalApprovalDraft(selectedCommunicationRequest);
+    const mappedCourseTargets = mapTargetsToAudienceOptionValues(draft.courseTargets, publicationAudienceCourseOptions);
+    setCommunicationApprovalDraft({
+      ...draft,
+      courseTargets: mappedCourseTargets.length ? mappedCourseTargets : draft.courseTargets,
+    });
+  }, [publicationAudienceCourseOptions, selectedCommunicationRequest]);
 
   const courseOptionsByGrade = useMemo(
     () => academicStructureDraft.grades.reduce((accumulator, grade) => {
@@ -10083,8 +10072,17 @@ function RectoriaDashboard() {
               <div className="rectoria-communication-form-grid">
                 <label>Audiencia<select value={institutionalCommunicationForm.audienceType} onChange={(event) => setInstitutionalCommunicationForm((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>
                 {institutionalCommunicationForm.audienceType === 'grade' ? <label>Grados<select multiple value={institutionalCommunicationForm.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setInstitutionalCommunicationForm)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}
-                {institutionalCommunicationForm.audienceType === 'course' ? <label>Cursos<select multiple value={institutionalCommunicationForm.courseTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'courseTargets', setInstitutionalCommunicationForm)}>{courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}</select></label> : null}
               </div>
+              {institutionalCommunicationForm.audienceType === 'course' ? (
+                <ClickableOptionPicker
+                  emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno."
+                  label="Cursos"
+                  onAdd={(value) => onAddDraftListValue(setInstitutionalCommunicationForm, 'courseTargets', value)}
+                  onRemove={(value) => onRemoveDraftListValue(setInstitutionalCommunicationForm, 'courseTargets', value)}
+                  options={publicationAudienceCourseOptions}
+                  selectedValues={institutionalCommunicationForm.courseTargets}
+                />
+              ) : null}
               {institutionalCommunicationForm.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={institutionalCommunicationForm.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setInstitutionalCommunicationForm)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={institutionalCommunicationForm.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setInstitutionalCommunicationForm)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}
               <div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} type="submit">Publicar comunicado</button></div>
             </form>
@@ -10107,7 +10105,7 @@ function RectoriaDashboard() {
               <div className="rectoria-approval-list">
                 {pendingCommunicationRequests.length === 0 ? <p className="rectoria-empty-state">No hay solicitudes pendientes.</p> : pendingCommunicationRequests.map((request) => <button className={selectedCommunicationRequest?._id === request._id ? 'is-active' : ''} key={request._id} onClick={() => setSelectedCommunicationRequestId(request._id)} type="button"><strong>{request.title}</strong><span>{request.teacherName || 'Autor'}{request.publisherLabel ? ` · ${request.publisherLabel}` : ''} · {formatDateTime(request.submittedAt || request.createdAt)}</span><span>Curso: {formatCommunicationCourseTargets(request.courseTargets, request.courseTitle)}</span></button>)}
               </div>
-              {!selectedCommunicationRequest ? <p className="rectoria-empty-state">Selecciona una solicitud para revisarla.</p> : <div className="rectoria-approval-editor"><div className="rectoria-communication-original"><h4>Original</h4><label>Título<input disabled readOnly value={selectedCommunicationRequest.originalTitle || selectedCommunicationRequest.title || ''} /></label><label>Mensaje<textarea disabled readOnly value={selectedCommunicationRequest.originalBody || selectedCommunicationRequest.body || ''} /></label><label>Curso solicitado<input disabled readOnly value={formatCommunicationCourseTargets(selectedCommunicationRequest.courseTargets, selectedCommunicationRequest.courseTitle)} /></label><div><h4>Adjuntos</h4><RectoriaCommunicationMediaPreview items={selectedCommunicationRequest.media || []} /></div></div><form className="rectoria-communication-form" onSubmit={(event) => event.preventDefault()}><h4>Versión a publicar</h4><label>Título<input value={communicationApprovalDraft.title} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={communicationApprovalDraft.body} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="rectoria-communication-form-grid"><label>Audiencia<select value={communicationApprovalDraft.audienceType} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{communicationApprovalDraft.audienceType === 'grade' ? <label>Grados<select multiple value={communicationApprovalDraft.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setCommunicationApprovalDraft)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}{communicationApprovalDraft.audienceType === 'course' ? <label>Cursos<select multiple value={communicationApprovalDraft.courseTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'courseTargets', setCommunicationApprovalDraft)}>{courseOptions.map((course) => <option key={course.value} value={course.value}>{course.label}</option>)}</select></label> : null}</div>{communicationApprovalDraft.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={communicationApprovalDraft.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setCommunicationApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={communicationApprovalDraft.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setCommunicationApprovalDraft)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div><h4>Adjuntos a publicar</h4><RectoriaCommunicationMediaPreview items={communicationApprovalDraft.media || []} /></div><label>Notas de revisión<textarea value={communicationApprovalDraft.reviewNotes} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveCommunicationRequest} type="button">Aprobar y publicar</button><button className="btn" disabled={busy} onClick={onRejectCommunicationRequest} type="button">Rechazar</button></div></form></div>}
+              {!selectedCommunicationRequest ? <p className="rectoria-empty-state">Selecciona una solicitud para revisarla.</p> : <div className="rectoria-approval-editor"><div className="rectoria-communication-original"><h4>Original</h4><label>Título<input disabled readOnly value={selectedCommunicationRequest.originalTitle || selectedCommunicationRequest.title || ''} /></label><label>Mensaje<textarea disabled readOnly value={selectedCommunicationRequest.originalBody || selectedCommunicationRequest.body || ''} /></label><label>Curso solicitado<input disabled readOnly value={formatCommunicationCourseTargets(selectedCommunicationRequest.courseTargets, selectedCommunicationRequest.courseTitle)} /></label><div><h4>Adjuntos</h4><RectoriaCommunicationMediaPreview items={selectedCommunicationRequest.media || []} /></div></div><form className="rectoria-communication-form" onSubmit={(event) => event.preventDefault()}><h4>Versión a publicar</h4><label>Título<input value={communicationApprovalDraft.title} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={communicationApprovalDraft.body} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="rectoria-communication-form-grid"><label>Audiencia<select value={communicationApprovalDraft.audienceType} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{communicationApprovalDraft.audienceType === 'grade' ? <label>Grados<select multiple value={communicationApprovalDraft.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setCommunicationApprovalDraft)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}</div>{communicationApprovalDraft.audienceType === 'course' ? <ClickableOptionPicker emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno." label="Cursos" onAdd={(value) => onAddDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} onRemove={(value) => onRemoveDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} options={publicationAudienceCourseOptions} selectedValues={communicationApprovalDraft.courseTargets} /> : null}{communicationApprovalDraft.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={communicationApprovalDraft.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setCommunicationApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={communicationApprovalDraft.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setCommunicationApprovalDraft)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div><h4>Adjuntos a publicar</h4><RectoriaCommunicationMediaPreview items={communicationApprovalDraft.media || []} /></div><label>Notas de revisión<textarea value={communicationApprovalDraft.reviewNotes} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveCommunicationRequest} type="button">Aprobar y publicar</button><button className="btn" disabled={busy} onClick={onRejectCommunicationRequest} type="button">Rechazar</button></div></form></div>}
             </div>
           </section>
         </div>

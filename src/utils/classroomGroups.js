@@ -114,9 +114,100 @@ function removeGradeFromClassroomGroups(groups = [], gradeKey) {
   );
 }
 
+const CLASSROOM_GROUP_TARGET_PREFIX = 'classroom_group:';
+
+function classroomGroupTargetValue(groupKey) {
+  const key = normalizeClassroomGroupText(groupKey);
+  return key ? `${CLASSROOM_GROUP_TARGET_PREFIX}${key}` : '';
+}
+
+function parseClassroomGroupTarget(value) {
+  const text = normalizeClassroomGroupText(value);
+  if (text.startsWith(CLASSROOM_GROUP_TARGET_PREFIX)) {
+    return text.slice(CLASSROOM_GROUP_TARGET_PREFIX.length);
+  }
+  return '';
+}
+
+function findClassroomGroupByTarget(groups = [], target) {
+  const text = normalizeClassroomGroupText(target);
+  if (!text) {
+    return null;
+  }
+
+  const prefixKey = parseClassroomGroupTarget(text);
+  const lowered = text.toLowerCase();
+
+  return (Array.isArray(groups) ? groups : []).find((group) => {
+    const key = normalizeClassroomGroupText(group?.key);
+    const label = normalizeClassroomGroupText(group?.label);
+    return (
+      (prefixKey && key === prefixKey)
+      || key === text
+      || label === text
+      || key.toLowerCase() === lowered
+      || label.toLowerCase() === lowered
+    );
+  }) || null;
+}
+
+function expandCourseTargetsWithClassroomGroups(targets = [], classroomGroups = []) {
+  const groups = serializeClassroomGroups(classroomGroups);
+  const seen = new Set();
+  const expanded = [];
+
+  const push = (value) => {
+    const text = normalizeClassroomGroupText(value);
+    if (!text) {
+      return;
+    }
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    expanded.push(text);
+  };
+
+  (Array.isArray(targets) ? targets : []).forEach((target) => {
+    push(target);
+    const group = findClassroomGroupByTarget(groups, target);
+    if (!group) {
+      return;
+    }
+
+    push(classroomGroupTargetValue(group.key));
+    push(group.key);
+    push(group.label);
+    uniqueClassroomGroupValues(group.gradeKeys).forEach(push);
+  });
+
+  return expanded;
+}
+
+function buildClassroomGroupAudienceOptions(classroomGroups = []) {
+  return serializeClassroomGroups(classroomGroups).map((group) => ({
+    value: classroomGroupTargetValue(group.key),
+    label: group.label,
+    kind: 'classroom_group',
+    gradeKeys: group.gradeKeys,
+    aliases: uniqueClassroomGroupValues([
+      group.key,
+      group.label,
+      classroomGroupTargetValue(group.key),
+    ]),
+  }));
+}
+
 module.exports = {
+  CLASSROOM_GROUP_TARGET_PREFIX,
+  buildClassroomGroupAudienceOptions,
+  classroomGroupTargetValue,
+  expandCourseTargetsWithClassroomGroups,
+  findClassroomGroupByTarget,
   findClassroomGroupGradeConflict,
   gradesShareClassroomGroup,
+  parseClassroomGroupTarget,
   removeGradeFromClassroomGroups,
   resolveClassroomGroupForCourse,
   resolveClassroomGroupForGrade,

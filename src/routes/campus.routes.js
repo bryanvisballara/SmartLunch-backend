@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
-const { resolveClassroomGroupForCourse } = require('../utils/classroomGroups');
+const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, serializeClassroomGroups } = require('../utils/classroomGroups');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -5429,6 +5429,24 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
       return res.status(404).json({ message: 'Assigned course not found' });
     }
 
+    const extraAssignedCourses = [];
+    const extraCourseIds = Array.from(new Set((Array.isArray(req.body.courseIds) ? req.body.courseIds : [])
+      .map((item) => normalizeText(item))
+      .filter((item) => item && item !== courseId && isValidObjectId(item))));
+    for (const extraCourseId of extraCourseIds) {
+      const extraCourse = await resolveTeacherAssignedCourse({
+        schoolId,
+        teacherUserId: userId,
+        courseId: extraCourseId,
+        sync: false,
+      });
+      if (extraCourse) {
+        extraAssignedCourses.push(extraCourse);
+      }
+    }
+
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('classroomGroups').lean();
+    const classroomGroups = serializeClassroomGroups(academicStructure?.classroomGroups);
     const linkedSubject = normalizeText(req.body.subject)
       || normalizeText(linkedCourse.subject)
       || normalizeText(linkedCourse.title);
@@ -5440,7 +5458,16 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
       normalizeText(linkedCourse.section),
       normalizeText(`${linkedCourse.gradeLevel || ''}${linkedCourse.section || ''}`),
       normalizeText(`${linkedCourse.studentGradeKey || ''}${linkedCourse.section || ''}`),
+      ...extraAssignedCourses.flatMap((course) => [
+        normalizeText(course.title),
+        normalizeText(course.studentGradeKey),
+        normalizeText(course.gradeLevel),
+        normalizeText(course.section),
+        normalizeText(`${course.gradeLevel || ''}${course.section || ''}`),
+        normalizeText(`${course.studentGradeKey || ''}${course.section || ''}`),
+      ]),
     ].filter(Boolean)));
+    const expandedCourseTargets = expandCourseTargetsWithClassroomGroups(linkedCourseTargets, classroomGroups);
 
     const request = await AcademicCommunicationRequest.create({
       schoolId,
@@ -5455,8 +5482,13 @@ router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (
       body,
       emailSubject,
       audienceType: audienceType === 'general' ? 'course' : audienceType,
-      gradeTargets: gradeTargets.length ? gradeTargets : (linkedCourse.studentGradeKey ? [normalizeText(linkedCourse.studentGradeKey)] : []),
-      courseTargets: linkedCourseTargets,
+      gradeTargets: gradeTargets.length
+        ? gradeTargets
+        : Array.from(new Set([
+          normalizeText(linkedCourse.studentGradeKey),
+          ...extraAssignedCourses.map((course) => normalizeText(course.studentGradeKey)),
+        ].filter(Boolean))),
+      courseTargets: expandedCourseTargets,
       parentTargets,
       studentTargets,
       media,

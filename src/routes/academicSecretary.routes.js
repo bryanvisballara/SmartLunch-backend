@@ -37,6 +37,8 @@ const DeviceToken = require('../models/deviceToken.model');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const { isMillenniumSchoolId } = require('../utils/millenniumSchool');
 const {
+  buildClassroomGroupAudienceOptions,
+  expandCourseTargetsWithClassroomGroups,
   findClassroomGroupGradeConflict,
   gradesShareClassroomGroup,
   removeGradeFromClassroomGroups,
@@ -1214,6 +1216,7 @@ function filterAcademicStructureForCoordination(serializedAcademicStructure = {}
       levels: [],
       subjects: [],
       grades: [],
+      classroomGroups: [],
       teachingAvailability: [],
       subjectLoadTemplates: [],
       gradeSchedules: [],
@@ -1231,6 +1234,12 @@ function filterAcademicStructureForCoordination(serializedAcademicStructure = {}
       gradeKeys: Array.isArray(subject?.gradeKeys) ? subject.gradeKeys.filter((gradeKey) => gradeKeys.has(normalizeText(gradeKey))) : [],
     })),
     grades: (serializedAcademicStructure.grades || []).filter((grade) => gradeKeys.has(normalizeText(grade?.key))),
+    classroomGroups: (Array.isArray(serializedAcademicStructure.classroomGroups) ? serializedAcademicStructure.classroomGroups : [])
+      .map((group) => ({
+        ...group,
+        gradeKeys: Array.isArray(group?.gradeKeys) ? group.gradeKeys.filter((gradeKey) => gradeKeys.has(normalizeText(gradeKey))) : [],
+      }))
+      .filter((group) => Array.isArray(group.gradeKeys) && group.gradeKeys.length > 0),
     teachingAvailability: (serializedAcademicStructure.teachingAvailability || []).map((item) => ({
       ...item,
       gradeKeys: Array.isArray(item?.gradeKeys) ? item.gradeKeys.filter((gradeKey) => gradeKeys.has(normalizeText(gradeKey))) : [],
@@ -5276,8 +5285,12 @@ async function resolveAudienceMembers({ schoolId, audienceType, gradeTargets, co
     if (normalizedAudienceType === 'course') {
       const academicStructure = await ensureAcademicStructureConfiguration(schoolId);
       const serializedAcademicStructure = serializeAcademicStructureConfiguration(academicStructure);
+      const expandedCourseTargets = expandCourseTargetsWithClassroomGroups(
+        normalizedCourseTargets,
+        serializedAcademicStructure.classroomGroups,
+      );
       const courseResolvers = buildAcademicCourseTargetResolvers(serializedAcademicStructure);
-      const selectedCourseResolvers = normalizedCourseTargets
+      const selectedCourseResolvers = expandedCourseTargets
         .map((target) => courseResolvers.get(target))
         .filter(Boolean);
       const students = await Student.find(studentFilter).select('_id grade course').lean();
@@ -5291,7 +5304,7 @@ async function resolveAudienceMembers({ schoolId, audienceType, gradeTargets, co
             .map(normalizeText)
             .filter(Boolean);
 
-          if (normalizedCourseTargets.includes(studentGrade) || normalizedCourseTargets.includes(normalizedStudentGrade) || normalizedCourseTargets.includes(studentGradeLevel) || normalizedCourseTargets.includes(studentCourse) || studentCourseCandidates.some((candidate) => normalizedCourseTargets.includes(candidate))) {
+          if (expandedCourseTargets.includes(studentGrade) || expandedCourseTargets.includes(normalizedStudentGrade) || expandedCourseTargets.includes(studentGradeLevel) || expandedCourseTargets.includes(studentCourse) || studentCourseCandidates.some((candidate) => expandedCourseTargets.includes(candidate))) {
             return true;
           }
 
@@ -6759,7 +6772,7 @@ router.get('/bootstrap', async (req, res) => {
     const gradeLabelByKey = new Map(visibleAcademicStructure.grades.map((grade) => [normalizeText(grade.key), normalizeText(grade.label || grade.key)]));
     const academicCourseOptions = buildAcademicStructureCourseOptions(visibleAcademicStructure);
     const courseOptionMap = new Map();
-    const addCourseOption = ({ value, label, gradeKey = '', section = '', aliases = [], source = '' }) => {
+    const addCourseOption = ({ value, label, gradeKey = '', section = '', aliases = [], source = '', gradeKeys = [], kind = 'course' }) => {
       const normalizedValue = normalizeText(value);
       if (!normalizedValue || courseOptionMap.has(normalizedValue)) {
         return;
@@ -6775,6 +6788,8 @@ router.get('/bootstrap', async (req, res) => {
         section: normalizeText(section),
         aliases: Array.isArray(aliases) ? aliases.map(normalizeText).filter(Boolean) : [],
         source,
+        kind,
+        gradeKeys: Array.isArray(gradeKeys) ? gradeKeys.map(normalizeText).filter(Boolean) : [],
       });
     };
 
@@ -6832,8 +6847,22 @@ router.get('/bootstrap', async (req, res) => {
         });
       });
     }
-    const courseOptions = Array.from(courseOptionMap.values())
+    const classroomGroupOptions = buildClassroomGroupAudienceOptions(visibleAcademicStructure.classroomGroups);
+    classroomGroupOptions.forEach((group) => addCourseOption({
+      value: group.value,
+      label: group.label,
+      aliases: group.aliases,
+      source: 'classroom-group',
+      kind: 'classroom_group',
+      gradeKeys: group.gradeKeys,
+    }));
+    const groupedCourseOptions = classroomGroupOptions
+      .map((group) => courseOptionMap.get(normalizeText(group.value)))
+      .filter(Boolean);
+    const individualCourseOptions = Array.from(courseOptionMap.values())
+      .filter((course) => course.source !== 'classroom-group')
       .sort((left, right) => left.label.localeCompare(right.label, 'es', { numeric: true }));
+    const courseOptions = [...groupedCourseOptions, ...individualCourseOptions];
     const courseKeys = courseOptions.map((course) => course.value);
     const feeSettings = serializeAcademicFeeConfigurationForStructure(
       await ensureAcademicFeeConfiguration(schoolId, feeSettingGrades),
@@ -11190,7 +11219,15 @@ function resolveVisibleAccessPassword(user, fallback = '') {
   return normalizeText(user?.accessPassword) || normalizeText(fallback);
 }
 
-async function assertDirectoryUsernameAvailable(username, excludeUserId = null) {
+function directoryLoginEmail(username) {
+  const normalized = String(username || '').trim().toLowerCase();
+  if (!normalized) {
+    return '';
+  }
+  return normalized.includes('@') ? normalized : `${normalized}@alumnos.local`;
+}
+
+async function claimDirectoryUsername(username, { excludeUserId = null, studentId = null, schoolId = null } = {}) {
   const normalizedUsername = String(username || '').trim().toLowerCase();
   if (!normalizedUsername) {
     const error = new Error('El usuario es obligatorio.');
@@ -11198,14 +11235,58 @@ async function assertDirectoryUsernameAvailable(username, excludeUserId = null) 
     throw error;
   }
 
-  const existing = await User.findOne({ username: normalizedUsername }).select('_id').lean();
-  if (existing && String(existing._id) !== String(excludeUserId || '')) {
-    const error = new Error('Ese usuario ya está en uso.');
-    error.statusCode = 409;
-    throw error;
+  const existing = await User.findOne({ username: normalizedUsername })
+    .select('_id schoolId role deletedAt email name documentNumber')
+    .lean();
+
+  if (!existing || String(existing._id) === String(excludeUserId || '')) {
+    return normalizedUsername;
   }
 
-  return normalizedUsername;
+  if (existing.deletedAt) {
+    await User.updateOne(
+      { _id: existing._id },
+      { $set: { username: `deleted.${existing._id}@released.local` } },
+    );
+    return normalizedUsername;
+  }
+
+  if (studentId && schoolId && String(existing.role || '') === 'parent') {
+    const linked = await ParentStudentLink.findOne({
+      schoolId,
+      parentId: existing._id,
+      studentId,
+      status: 'active',
+    }).select('_id').lean();
+
+    if (linked) {
+      const parentEmail = normalizeEmail(existing.email);
+      const fallbackBase = (parentEmail && parentEmail !== normalizedUsername)
+        ? parentEmail
+        : buildBaseUsername(existing);
+      const fallbackUsername = await ensureUniqueUsername(fallbackBase);
+      await User.updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            username: fallbackUsername,
+            email: parentEmail || fallbackUsername,
+          },
+        },
+      );
+      return normalizedUsername;
+    }
+  }
+
+  const occupantName = normalizeText(existing.name) || 'otro usuario';
+  const roleLabel = String(existing.role || '') === 'parent'
+    ? 'acudiente'
+    : String(existing.role || '') === 'student'
+      ? 'alumno'
+      : 'usuario institucional';
+  const error = new Error(`Ese usuario ya lo usa el ${roleLabel} ${occupantName}.`);
+  error.statusCode = 409;
+  throw error;
 }
 
 async function loadInstitutionalDirectoryScope(req) {
@@ -11466,7 +11547,7 @@ router.patch('/institutional-directory/students/:studentId', async (req, res) =>
 
     if (!user) {
       const username = requestedUsername || await buildStudentUsername({ schoolId, student });
-      await assertDirectoryUsernameAvailable(username);
+      await claimDirectoryUsername(username, { studentId: student._id, schoolId });
       const password = requestedPassword || normalizeText(student.documentNumber) || generateTemporaryPassword();
       if (requestedPassword && requestedPassword.length < 6) {
         return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres.' });
@@ -11475,7 +11556,7 @@ router.patch('/institutional-directory/students/:studentId', async (req, res) =>
         schoolId,
         name: fullName,
         username,
-        email: `${username}@alumnos.local`,
+        email: directoryLoginEmail(username),
         documentType: normalizeText(student.documentType) || 'TI',
         documentNumber: normalizeText(student.documentNumber),
         role: 'student',
@@ -11494,8 +11575,12 @@ router.patch('/institutional-directory/students/:studentId', async (req, res) =>
       user.status = 'active';
       user.deletedAt = null;
       if (requestedUsername) {
-        user.username = await assertDirectoryUsernameAvailable(requestedUsername, user._id);
-        user.email = `${user.username}@alumnos.local`;
+        user.username = await claimDirectoryUsername(requestedUsername, {
+          excludeUserId: user._id,
+          studentId: student._id,
+          schoolId,
+        });
+        user.email = directoryLoginEmail(user.username);
       }
       if (requestedPassword) {
         if (requestedPassword.length < 6) {
@@ -11591,9 +11676,12 @@ router.patch('/institutional-directory/parents/:parentId', async (req, res) => {
     parent.name = fullName;
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'username')) {
-      parent.username = await assertDirectoryUsernameAvailable(String(req.body.username || '').trim().toLowerCase(), parent._id);
+      parent.username = await claimDirectoryUsername(String(req.body.username || '').trim().toLowerCase(), {
+        excludeUserId: parent._id,
+        schoolId,
+      });
       if (!normalizeText(parent.email) || String(parent.email).endsWith('@acudientes.local')) {
-        parent.email = `${parent.username}@acudientes.local`;
+        parent.email = directoryLoginEmail(parent.username);
       }
     }
 

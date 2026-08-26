@@ -2110,6 +2110,11 @@
   text-decoration: none;
 }
 
+.rectoria-communication-form-grid .audience-picker,
+.rectoria-communication-form .audience-picker {
+  grid-column: 1 / -1;
+}
+
 .rectoria-communication-form-grid,
 .rectoria-approval-layout {
   display: grid;
