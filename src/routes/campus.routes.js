@@ -3909,21 +3909,53 @@ function stripAssignmentFromAcademicPeriods(academicPeriods, assignment) {
   });
 }
 
-async function deleteAssignmentGradeEntries({ schoolId, courseId, assignment }) {
-  if (!assignment || !courseId) {
-    return;
+async function deleteGradeEntriesForPostTitle({ schoolId, courseId, postTitle, assignment = null }) {
+  if (!courseId || !normalizeText(postTitle)) {
+    return 0;
   }
 
-  const storedComponentKey = buildStoredGradeComponentKey(assignment.componentKey, assignment.subcomponentKey);
-  await CampusGradeEntry.deleteMany({
-    schoolId,
-    courseId,
-    academicPeriodKey: assignment.periodKey,
-    $or: [
+  const slug = slugifyComponentKey(postTitle);
+  const or = [];
+  if (slug) {
+    or.push(
+      { subcomponentKey: slug },
+      { componentKey: slug },
+      { componentKey: new RegExp(`(^|::)${escapeRegExp(slug)}$`, 'i') },
+    );
+  }
+
+  if (assignment) {
+    const storedComponentKey = buildStoredGradeComponentKey(assignment.componentKey, assignment.subcomponentKey);
+    const assignmentSlug = slugifyComponentKey(assignment.subcomponentKey || assignment.subcomponentName || '');
+    or.push(
       { componentKey: storedComponentKey },
       { componentKey: assignment.componentKey, subcomponentKey: assignment.subcomponentKey },
-    ],
+      { subcomponentKey: assignment.subcomponentKey },
+    );
+    if (assignment.periodKey) {
+      or.push({
+        academicPeriodKey: assignment.periodKey,
+        componentKey: storedComponentKey,
+      });
+    }
+    if (assignmentSlug && assignmentSlug !== slug) {
+      or.push(
+        { subcomponentKey: assignmentSlug },
+        { componentKey: new RegExp(`(^|::)${escapeRegExp(assignmentSlug)}$`, 'i') },
+      );
+    }
+  }
+
+  if (!or.length) {
+    return 0;
+  }
+
+  const result = await CampusGradeEntry.deleteMany({
+    schoolId,
+    courseId,
+    $or: or,
   });
+  return Number(result.deletedCount || 0);
 }
 
 async function removeGradebookAssignmentForPostFromCourse({ schoolId, course, postTitle }) {
@@ -3933,23 +3965,30 @@ async function removeGradebookAssignmentForPostFromCourse({ schoolId, course, po
 
   const periods = getCourseAcademicPeriods(course);
   const assignment = resolveGradebookAssignmentForPostTitle(postTitle, periods);
-  if (!assignment) {
-    return false;
+  let stripped = false;
+
+  if (assignment) {
+    const nextPeriods = stripAssignmentFromAcademicPeriods(periods, assignment);
+    course.academicPeriods = nextPeriods;
+    course.gradingComponents = nextPeriods[0]?.gradingComponents || [];
+    if (typeof course.save === 'function') {
+      await course.save();
+    } else {
+      await CampusCourse.updateOne(
+        { _id: course._id, schoolId },
+        { $set: { academicPeriods: nextPeriods, gradingComponents: nextPeriods[0]?.gradingComponents || [] } }
+      );
+    }
+    stripped = true;
   }
 
-  const nextPeriods = stripAssignmentFromAcademicPeriods(periods, assignment);
-  course.academicPeriods = nextPeriods;
-  course.gradingComponents = nextPeriods[0]?.gradingComponents || [];
-  if (typeof course.save === 'function') {
-    await course.save();
-  } else {
-    await CampusCourse.updateOne(
-      { _id: course._id, schoolId },
-      { $set: { academicPeriods: nextPeriods, gradingComponents: nextPeriods[0]?.gradingComponents || [] } }
-    );
-  }
-  await deleteAssignmentGradeEntries({ schoolId, courseId: course._id, assignment });
-  return true;
+  const deletedCount = await deleteGradeEntriesForPostTitle({
+    schoolId,
+    courseId: course._id,
+    postTitle,
+    assignment,
+  });
+  return stripped || deletedCount > 0;
 }
 
 async function collectClassroomGroupSiblingCourses({ schoolId, course }) {
@@ -4067,7 +4106,17 @@ async function healArchivedAssignmentGradebook({ schoolId, teacherUserId, academ
       continue;
     }
 
-    const relatedCourseIds = [...new Set(family.posts.map((post) => String(post.courseId || '')).filter(Boolean))];
+    const relatedCourseIds = new Set(family.posts.map((post) => String(post.courseId || '')).filter(Boolean));
+    const seedCourseId = family.posts.map((post) => post.courseId).find(Boolean);
+    if (seedCourseId) {
+      const seedCourse = await CampusCourse.findOne({ _id: seedCourseId, schoolId, teacherUserId });
+      if (seedCourse) {
+        const siblingCourses = await collectClassroomGroupSiblingCourses({ schoolId, course: seedCourse });
+        siblingCourses.forEach((sibling) => {
+          if (sibling?._id) relatedCourseIds.add(String(sibling._id));
+        });
+      }
+    }
     for (const courseId of relatedCourseIds) {
       const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId });
       if (!course) {

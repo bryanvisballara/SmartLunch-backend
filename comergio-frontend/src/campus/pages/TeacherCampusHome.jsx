@@ -7605,6 +7605,7 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     if (!selectedCourses.length) {
       showPublicationError('No se pudo enviar a revisión porque falta seleccionar el grupo o curso destinatario. Elige un grupo de grados o un curso y vuelve a intentar.');
+      teacherPublicationAudienceRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
       return;
     }
 
@@ -12228,7 +12229,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </div>
                         ) : (
                           <ClickableOptionPicker
-                            emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno."
+                            emptyLabel="Todavía no hay un curso agregado. Toca un grupo o curso de la lista para enviarlo a revisión."
                             onAdd={onAddTeacherPublicationAudience}
                             onRemove={onRemoveTeacherPublicationAudience}
                             options={teacherPublicationAudienceOptions}
@@ -12332,11 +12333,19 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <path d="M4 7.5 12 4l8 3.5v2.2c0 4.6-3.3 8.8-8 9.8-4.7-1-8-5.2-8-9.8V7.5Z" stroke="currentColor" strokeWidth="1.7" />
                         </svg>
                         <span>
-                          {[
-                            selectedSocialPublicationSubject?.label || normalizeSubjectLabel(selectedSocialPublicationCourse?.subject),
-                            selectedTeacherPublicationAudienceOptions.map((option) => option.label).join(', ')
-                              || (selectedSocialPublicationCourse ? getCourseGroupLabel(selectedSocialPublicationCourse) : ''),
-                          ].filter(Boolean).join(' · ') || 'Selecciona asignatura y curso para continuar.'}
+                          {(() => {
+                            const subjectLabel = selectedSocialPublicationSubject?.label
+                              || normalizeSubjectLabel(selectedSocialPublicationCourse?.subject);
+                            const audienceLabel = selectedTeacherPublicationAudienceOptions.map((option) => option.label).join(', ')
+                              || (selectedSocialPublicationCourse ? getCourseGroupLabel(selectedSocialPublicationCourse) : '');
+                            if (subjectLabel && audienceLabel) {
+                              return `${subjectLabel} · ${audienceLabel}`;
+                            }
+                            if (subjectLabel) {
+                              return `${subjectLabel} · Falta elegir el curso`;
+                            }
+                            return 'Selecciona asignatura y curso para continuar.';
+                          })()}
                         </span>
                       </div>
                       {teacherSocialPublicationError ? (

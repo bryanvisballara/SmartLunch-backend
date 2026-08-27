@@ -28,7 +28,8 @@ export default function ClickableOptionPicker({ label, options = [], selectedVal
                 onClick={() => onAdd(String(option.value))}
                 type="button"
               >
-                {option.label}
+                <span>{option.label}</span>
+                <em>Toca para agregar</em>
               </button>
             ))}
           </div>
