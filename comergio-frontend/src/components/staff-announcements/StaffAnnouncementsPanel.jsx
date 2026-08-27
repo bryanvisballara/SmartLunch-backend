@@ -52,6 +52,54 @@ function formatSenderRole(role) {
   return ROLE_LABEL_BY_VALUE[key] || key;
 }
 
+function formatPersonName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return 'Docente';
+  const letters = raw.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, '');
+  const isAllCaps = letters.length >= 3 && letters === letters.toUpperCase();
+  if (!isAllCaps) return raw;
+  return raw
+    .toLowerCase()
+    .replace(/(^|[\s'-])([a-záéíóúüñ])/g, (_, sep, letter) => `${sep}${letter.toUpperCase()}`);
+}
+
+function getNameInitials(name) {
+  const parts = formatPersonName(name).split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'D';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+const AVATAR_TONES = ['sky', 'teal', 'violet', 'amber', 'rose', 'indigo'];
+
+function avatarToneFromName(name) {
+  const key = String(name || 'docente');
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash += key.charCodeAt(index) * (index + 3);
+  }
+  return AVATAR_TONES[hash % AVATAR_TONES.length];
+}
+
+function visibleGradeChips(labels = [], limit = 3) {
+  const items = (Array.isArray(labels) ? labels : [])
+    .map((label) => formatPersonName(label))
+    .filter(Boolean);
+  return {
+    shown: items.slice(0, limit),
+    extra: Math.max(0, items.length - limit),
+  };
+}
+
+function SearchIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 16.5 20 20.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 function createEmptyDraft() {
   return {
     title: '',
@@ -206,10 +254,36 @@ export default function StaffAnnouncementsPanel({
       return teacherDirectory;
     }
     return teacherDirectory.filter((teacher) => {
-      const haystack = `${teacher?.name || ''} ${(teacher?.gradeLabels || []).join(' ')}`.toLowerCase();
+      const haystack = `${formatPersonName(teacher?.name)} ${teacher?.name || ''} ${(teacher?.gradeLabels || []).join(' ')}`.toLowerCase();
       return haystack.includes(query);
     });
   }, [teacherDirectory, teacherSearch]);
+
+  const groupedTeacherDirectory = useMemo(() => {
+    if (!filteredTeacherDirectory.length) {
+      return [];
+    }
+    if (!teacherLevels.length) {
+      return [{ key: 'all', label: '', teachers: filteredTeacherDirectory }];
+    }
+    const assigned = new Set();
+    const groups = [];
+    teacherLevels.forEach((level) => {
+      const teachers = filteredTeacherDirectory.filter((teacher) => {
+        if (assigned.has(teacher.id)) return false;
+        return (teacher.levelKeys || []).includes(level.key);
+      });
+      teachers.forEach((teacher) => assigned.add(teacher.id));
+      if (teachers.length) {
+        groups.push({ key: level.key, label: level.label, teachers });
+      }
+    });
+    const others = filteredTeacherDirectory.filter((teacher) => !assigned.has(teacher.id));
+    if (others.length) {
+      groups.push({ key: 'otros', label: 'Otros docentes', teachers: others });
+    }
+    return groups;
+  }, [filteredTeacherDirectory, teacherLevels]);
 
   const senderOptions = useMemo(() => {
     const labels = new Map();
@@ -465,11 +539,18 @@ export default function StaffAnnouncementsPanel({
               <div className="staff-announcements-teachers">
                 <div className="staff-announcements-teachers__intro">
                   <div>
-                    <strong>Docentes</strong>
+                    <div className="staff-announcements-teachers__title-row">
+                      <strong>Audiencia de docentes</strong>
+                      <span className={`staff-announcements-teachers__count${teacherAudienceIsAll ? ' is-all' : ''}`}>
+                        {teacherAudienceIsAll
+                          ? 'Todos los docentes'
+                          : `${selectedTeacherIdSet.size} seleccionado${selectedTeacherIdSet.size === 1 ? '' : 's'}`}
+                      </span>
+                    </div>
                     <p>
                       {teacherAudienceIsAll
-                        ? 'El comunicado llegará a todos los docentes. Elige un nivel o docentes específicos para acotar el envío.'
-                        : `${selectedTeacherIdSet.size} docente${selectedTeacherIdSet.size === 1 ? '' : 's'} seleccionado${selectedTeacherIdSet.size === 1 ? '' : 's'}.`}
+                        ? 'El comunicado llegará a todo el cuerpo docente. Acota por nivel o elige personas.'
+                        : 'Solo recibirán el mensaje los docentes marcados abajo.'}
                     </p>
                   </div>
                   <button onClick={selectAllTeachers} type="button">Todos los docentes</button>
@@ -477,23 +558,27 @@ export default function StaffAnnouncementsPanel({
 
                 {teacherLevels.length ? (
                   <div className="staff-announcements-teachers__block">
-                    <h5>Nivel educativo</h5>
-                    <p>Al elegir un nivel se seleccionan los docentes que cubren materias en sus grados y cursos.</p>
-                    <div className="staff-announcements-teachers__levels">
+                    <h5>Por nivel</h5>
+                    <div className="staff-announcements-teachers__levels" role="group" aria-label="Niveles educativos">
                       {teacherLevels.map((level) => {
                         const checked = selectedTeacherLevelSet.has(level.key)
                           && (level.teacherUserIds || []).every((teacherId) => selectedTeacherIdSet.has(teacherId));
                         const mixed = !checked && (level.teacherUserIds || []).some((teacherId) => selectedTeacherIdSet.has(teacherId));
                         return (
-                          <label className={mixed ? 'is-mixed' : ''} key={level.key}>
+                          <label
+                            className={`staff-announcements-level-chip${checked ? ' is-selected' : ''}${mixed ? ' is-mixed' : ''}`}
+                            key={level.key}
+                          >
                             <input
                               checked={checked}
                               onChange={() => toggleTeacherLevel(level)}
                               type="checkbox"
                             />
-                            <span className="staff-announcements-roles__check" aria-hidden="true">✓</span>
-                            <span>
-                              {level.label}
+                            <span className="staff-announcements-level-chip__mark" aria-hidden="true">
+                              {checked ? '✓' : mixed ? '–' : ''}
+                            </span>
+                            <span className="staff-announcements-level-chip__copy">
+                              <strong>{level.label}</strong>
                               <small>{level.teacherCount || 0} docente{(level.teacherCount || 0) === 1 ? '' : 's'}</small>
                             </span>
                           </label>
@@ -504,37 +589,81 @@ export default function StaffAnnouncementsPanel({
                 ) : null}
 
                 <div className="staff-announcements-teachers__block">
-                  <h5>Docentes uno a uno</h5>
-                  <input
-                    className="staff-announcements-teachers__search"
-                    onChange={(event) => setTeacherSearch(event.target.value)}
-                    placeholder="Buscar docente por nombre"
-                    type="search"
-                    value={teacherSearch}
-                  />
+                  <div className="staff-announcements-teachers__list-head">
+                    <h5>Directorio</h5>
+                    <span>
+                      {filteredTeacherDirectory.length} de {teacherDirectory.length}
+                    </span>
+                  </div>
+                  <div className="staff-announcements-teachers__search-wrap">
+                    <SearchIcon />
+                    <input
+                      aria-label="Buscar docente por nombre"
+                      onChange={(event) => setTeacherSearch(event.target.value)}
+                      placeholder="Buscar por nombre o grado"
+                      type="search"
+                      value={teacherSearch}
+                    />
+                    {teacherSearch ? (
+                      <button onClick={() => setTeacherSearch('')} type="button">
+                        Limpiar
+                      </button>
+                    ) : null}
+                  </div>
                   {!teacherDirectory.length ? (
                     <p className="staff-announcements-teachers__empty">No hay docentes activos para seleccionar.</p>
+                  ) : filteredTeacherDirectory.length === 0 ? (
+                    <p className="staff-announcements-teachers__empty">Ningún docente coincide con la búsqueda.</p>
                   ) : (
-                    <div className="staff-announcements-teachers__list">
-                      {filteredTeacherDirectory.length === 0 ? (
-                        <p className="staff-announcements-teachers__empty">Ningún docente coincide con la búsqueda.</p>
-                      ) : filteredTeacherDirectory.map((teacher) => {
-                        const checked = selectedTeacherIdSet.has(teacher.id);
-                        return (
-                          <label key={teacher.id}>
-                            <input
-                              checked={checked}
-                              onChange={() => toggleTeacher(teacher.id)}
-                              type="checkbox"
-                            />
-                            <span className="staff-announcements-roles__check" aria-hidden="true">✓</span>
-                            <span>
-                              {teacher.name}
-                              {teacher.gradeLabels?.length ? <small>{teacher.gradeLabels.join(' · ')}</small> : null}
-                            </span>
-                          </label>
-                        );
-                      })}
+                    <div className="staff-announcements-teachers__directory">
+                      {groupedTeacherDirectory.map((group) => (
+                        <section className="staff-announcements-teachers__group" key={group.key}>
+                          {group.label ? (
+                            <header className="staff-announcements-teachers__group-head">
+                              <h6>{group.label}</h6>
+                              <span>{group.teachers.length}</span>
+                            </header>
+                          ) : null}
+                          <div className="staff-announcements-teachers__list">
+                            {group.teachers.map((teacher) => {
+                              const checked = selectedTeacherIdSet.has(teacher.id);
+                              const chips = visibleGradeChips(teacher.gradeLabels);
+                              return (
+                                <label
+                                  className={`staff-announcements-teacher${checked ? ' is-selected' : ''}`}
+                                  key={teacher.id}
+                                  title={teacher.gradeLabels?.length ? teacher.gradeLabels.join(' · ') : undefined}
+                                >
+                                  <input
+                                    checked={checked}
+                                    onChange={() => toggleTeacher(teacher.id)}
+                                    type="checkbox"
+                                  />
+                                  <span
+                                    className={`staff-announcements-teacher__avatar is-${avatarToneFromName(teacher.name)}`}
+                                    aria-hidden="true"
+                                  >
+                                    {checked ? '✓' : getNameInitials(teacher.name)}
+                                  </span>
+                                  <span className="staff-announcements-teacher__body">
+                                    <strong>{formatPersonName(teacher.name)}</strong>
+                                    {chips.shown.length ? (
+                                      <span className="staff-announcements-teacher__grades">
+                                        {chips.shown.map((grade) => (
+                                          <em key={grade}>{grade}</em>
+                                        ))}
+                                        {chips.extra ? <em className="is-more">+{chips.extra}</em> : null}
+                                      </span>
+                                    ) : (
+                                      <span className="staff-announcements-teacher__hint">Sin grados asignados</span>
+                                    )}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))}
                     </div>
                   )}
                 </div>

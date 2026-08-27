@@ -1834,10 +1834,12 @@ function buildTeacherManagementOverview(courses, posts, workspace, options = {})
       description: post.body || 'Actividad pendiente de revisión o calificación.',
     }));
 
-  const pendingGradingItems = pendingGradingItemsFromMetrics.length > 0
-    ? pendingGradingItemsFromMetrics
-    : pendingGradingItemsFromPosts;
-  const resolvedPendingGradingCount = pendingGradingItems.length > 0
+  const hasMetricsPendingItems = Array.isArray(options.pendingGradingItems);
+  const pendingGradingItems = mergePendingGradingItemsForClassroomGroups(
+    hasMetricsPendingItems ? pendingGradingItemsFromMetrics : pendingGradingItemsFromPosts,
+    normalizedCourses
+  );
+  const resolvedPendingGradingCount = hasMetricsPendingItems || pendingGradingItems.length > 0
     ? pendingGradingItems.length
     : pendingGradingCount;
 
@@ -2115,11 +2117,13 @@ function mergeClassroomGroupPosts(posts = []) {
   (Array.isArray(posts) ? posts : []).forEach((post) => {
     const key = `${normalizeCourseDisplayKey(post?.type)}::${normalizeCourseDisplayKey(post?.title)}`;
     const current = groups.get(key);
+    const isArchived = String(post?.status || '').toLowerCase() === 'archived';
     if (!current) {
       groups.set(key, {
         ...post,
         siblingPostIds: [String(post?.id || '')].filter(Boolean),
         siblingCourseIds: [String(post?.courseId || '')].filter(Boolean),
+        hasArchivedSibling: isArchived,
       });
       return;
     }
@@ -2132,6 +2136,45 @@ function mergeClassroomGroupPosts(posts = []) {
     if (courseId && !current.siblingCourseIds.includes(courseId)) {
       current.siblingCourseIds.push(courseId);
     }
+    if (isArchived) {
+      current.hasArchivedSibling = true;
+    } else if (String(current.status || '').toLowerCase() === 'archived') {
+      groups.set(key, {
+        ...post,
+        siblingPostIds: current.siblingPostIds,
+        siblingCourseIds: current.siblingCourseIds,
+        hasArchivedSibling: true,
+      });
+    }
+  });
+
+  return Array.from(groups.values()).filter((post) => (
+    String(post?.status || '').toLowerCase() !== 'archived' && !post.hasArchivedSibling
+  ));
+}
+
+function mergePendingGradingItemsForClassroomGroups(items = [], courses = []) {
+  const courseById = new Map((Array.isArray(courses) ? courses : []).map((course) => [String(course.id), course]));
+  const groups = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const course = courseById.get(String(item?.courseId || ''));
+    const groupKey = String(course?.classroomGroupKey || item?.classroomGroupKey || '').trim();
+    const key = groupKey
+      ? `${normalizeCourseDisplayKey(item?.typeLabel || item?.type)}::${normalizeCourseDisplayKey(item?.title)}::${normalizeCourseDisplayKey(groupKey)}`
+      : String(item?.id || '');
+    if (!key) {
+      return;
+    }
+    const courseTitle = groupKey
+      ? ([normalizeCourseDisplayText(course?.subject), normalizeCourseDisplayText(course?.classroomGroupLabel)].filter(Boolean).join(' · ') || item.courseTitle)
+      : item.courseTitle;
+    const current = groups.get(key);
+    if (!current) {
+      groups.set(key, { ...item, courseTitle });
+      return;
+    }
+    groups.set(key, { ...current, courseTitle: current.courseTitle || courseTitle });
   });
 
   return Array.from(groups.values());
@@ -2409,6 +2452,12 @@ function buildCourseGradeGroupStats(group, workspace) {
   const evaluatedStudentEntries = stats.flatMap((currentStats) => Array.isArray(currentStats.evaluatedStudents) ? currentStats.evaluatedStudents : []);
   const { studentsWithScore, atRiskStudents } = aggregateUniqueStudentScores(evaluatedStudentEntries, gradingScale);
   const totalPending = stats.reduce((total, currentStats) => total + Number(currentStats.pendingGradingCount || 0), 0);
+  const uniquePendingKeys = new Set();
+  stats.forEach((currentStats) => {
+    (Array.isArray(currentStats.pendingAssignmentKeys) ? currentStats.pendingAssignmentKeys : []).forEach((key) => {
+      if (key) uniquePendingKeys.add(String(key));
+    });
+  });
   const averageScore = studentsWithScore.length > 0
     ? Number((studentsWithScore.reduce((total, student) => total + Number(student.finalScore || 0), 0) / studentsWithScore.length).toFixed(1))
     : null;
@@ -2417,7 +2466,8 @@ function buildCourseGradeGroupStats(group, workspace) {
     studentCount: studentIds.size > 0 ? studentIds.size : fallbackTotalStudents,
     averageScore,
     atRiskCount: atRiskStudents.length,
-    pendingGradingCount: totalPending,
+    pendingGradingCount: uniquePendingKeys.size > 0 ? uniquePendingKeys.size : totalPending,
+    pendingAssignmentKeys: Array.from(uniquePendingKeys),
     courseCount: group?.courses?.length || 0,
   };
 }
@@ -2462,6 +2512,7 @@ function buildCourseCardStats(course, workspace) {
       atRiskCount: Number(course.stats.atRiskCount || 0),
       atRiskStudents: Array.isArray(course.stats.atRiskStudents) ? course.stats.atRiskStudents : [],
       pendingGradingCount: Number(course.stats.pendingGradingCount || 0),
+      pendingAssignmentKeys: Array.isArray(course.stats.pendingAssignmentKeys) ? course.stats.pendingAssignmentKeys : [],
     };
   }
 
@@ -2498,6 +2549,9 @@ function buildCourseCardStats(course, workspace) {
     }).length,
     pendingGradingCount: pendingGradingPosts.length,
     pendingGradingPostIds: pendingGradingPosts.map((post) => post.id).filter(Boolean),
+    pendingAssignmentKeys: pendingGradingPosts
+      .map((post) => `${normalizeCourseDisplayKey(post.type)}::${normalizeCourseDisplayKey(post.title)}`)
+      .filter((key) => key !== '::'),
   };
 }
 
@@ -4489,13 +4543,14 @@ function TeacherCampusHome({ forcePreview = false }) {
   );
   const dashboardCoursePerformance = useMemo(() => {
     const maxScore = Number(gradingScale?.maxScore || 100);
-    return academicCourses
-      .map((course) => {
-        const stats = buildCourseCardStats(course, previewEnabled ? previewWorkspace : null);
+    return buildCourseGradeGroups(academicCourses)
+      .map((group) => {
+        const stats = buildCourseGradeGroupStats(group, previewEnabled ? previewWorkspace : null);
         const performanceLevel = resolveTeacherPerformanceLevel(stats.averageScore, gradingScale);
+        const firstCourse = group.courses[0] || null;
         return {
-          id: course.id,
-          label: getCourseOptionLabel(course) || getCourseDisplayTitle(course),
+          id: firstCourse?.id || group.key,
+          label: group.title || getCourseOptionLabel(firstCourse) || getCourseDisplayTitle(firstCourse),
           averageScore: stats.averageScore,
           maxScore,
           tone: getCoursePerformanceTone(stats.averageScore, maxScore),
@@ -6615,16 +6670,24 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     try {
       if (previewEnabled) {
+        const archivedIds = new Set([
+          String(post.id || ''),
+          ...(Array.isArray(post.siblingPostIds) ? post.siblingPostIds : []),
+        ].filter(Boolean));
         setPreviewWorkspace((currentWorkspace) => ({
           ...currentWorkspace,
           recentPosts: currentWorkspace.recentPosts.map((item) => (
-            item.id === post.id
+            archivedIds.has(String(item.id))
               ? { ...item, status: 'archived', updatedAt: new Date().toISOString() }
               : item
           )),
         }));
       } else {
-        await updatePostMutation.mutateAsync({ postId: post.id, payload: { status: 'archived' } });
+        const postIds = [...new Set([
+          String(post.id || ''),
+          ...(Array.isArray(post.siblingPostIds) ? post.siblingPostIds : []),
+        ].filter(Boolean))];
+        await Promise.all(postIds.map((postId) => updatePostMutation.mutateAsync({ postId, payload: { status: 'archived' } })));
       }
 
       if (editingPostId === post.id) {
