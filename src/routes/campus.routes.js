@@ -6515,10 +6515,11 @@ router.get('/coordination/courses', requireCampusCoordinationAccess, async (req,
     const coordinationGradeKeys = isAcademicCoordination
       ? await resolveCampusCoordinationGradeKeys(schoolId, req.user.coordinationScope)
       : null;
-    const [courses, posts, gradingContext] = await Promise.all([
+    const [courses, posts, gradingContext, academicStructure] = await Promise.all([
       CampusCourse.find({ schoolId, status: 'active' }).sort({ updatedAt: -1, createdAt: -1 }).lean(),
       CampusPost.find({ schoolId }).select('courseId type status').lean(),
       loadCampusGradingContext(schoolId),
+      AcademicStructure.findOne({ schoolId }).select('classroomGroups').lean(),
     ]);
     const visibleCourses = coordinationGradeKeys instanceof Set
       ? courses.filter((course) => coordinationGradeKeys.has(normalizeCampusGradeKey(course.studentGradeKey || course.gradeLevel)))

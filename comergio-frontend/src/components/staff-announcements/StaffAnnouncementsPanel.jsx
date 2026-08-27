@@ -112,6 +112,7 @@ export default function StaffAnnouncementsPanel({
   const [selectedSentId, setSelectedSentId] = useState('');
   const [activeTab, setActiveTab] = useState('inbox');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [senderFilter, setSenderFilter] = useState('all');
   const [teacherSearch, setTeacherSearch] = useState('');
 
   const canManage = mode === 'manage' || mode === 'sender';
