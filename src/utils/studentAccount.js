@@ -75,9 +75,10 @@ async function upsertStudentAccount({ schoolId, student }) {
 
   const created = !user;
   const customAccessPassword = normalizeText(user?.accessPassword);
+  const keepCustomPassword = Boolean(customAccessPassword) && customAccessPassword !== documentNumber;
 
   if (user) {
-    if (customAccessPassword) {
+    if (keepCustomPassword) {
       delete payload.passwordHash;
     } else {
       payload.accessPassword = documentNumber;

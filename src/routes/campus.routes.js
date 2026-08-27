@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
-const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, serializeClassroomGroups } = require('../utils/classroomGroups');
+const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, expandGradeKeysWithClassroomGroups, buildClassroomGroupGradeMongoOr, serializeClassroomGroups } = require('../utils/classroomGroups');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -2006,12 +2006,17 @@ function normalizeAcademicContentPayload(rawContent, course) {
   });
 }
 
-function buildAcademicContentGradeScopeQuery({ schoolId, course }) {
+function buildAcademicContentGradeScopeQuery({ schoolId, course, classroomGroups = [] }) {
   const subject = normalizeText(course?.subject);
   const gradeLevel = normalizeText(course?.gradeLevel);
   const studentGradeKey = normalizeText(course?.studentGradeKey);
+  const sharedGradeKeys = expandGradeKeysWithClassroomGroups(
+    [studentGradeKey, gradeLevel].filter(Boolean),
+    classroomGroups,
+  );
+  const gradeMatchOr = buildClassroomGroupGradeMongoOr(sharedGradeKeys);
 
-  if (!schoolId || !subject || (!gradeLevel && !studentGradeKey)) {
+  if (!schoolId || !subject || gradeMatchOr.length === 0) {
     return null;
   }
 
@@ -2019,7 +2024,7 @@ function buildAcademicContentGradeScopeQuery({ schoolId, course }) {
     schoolId,
     subject,
     status: 'active',
-    ...(gradeLevel ? { gradeLevel } : { studentGradeKey }),
+    $or: gradeMatchOr,
   };
 }
 
@@ -4738,15 +4743,46 @@ router.patch('/teacher/courses/:id/academic-content', requireCampusTeacherAccess
     course.academicContent = academicContent;
     await course.save();
 
-    const gradeScopeQuery = buildAcademicContentGradeScopeQuery({ schoolId, course });
-    if (gradeScopeQuery) {
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).select('classroomGroups').lean();
+    const classroomGroup = resolveClassroomGroupForCourse(academicStructure?.classroomGroups, course);
+    const siblingCourses = await CampusCourse.find({
+      schoolId,
+      teacherUserId: course.teacherUserId,
+      status: 'active',
+      _id: { $ne: course._id },
+      subject: new RegExp(`^${String(course.subject || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    }).select('_id studentGradeKey gradeLevel sourceCourseKey classroomGroupKey classroomGroupLabel').lean();
+
+    const siblingIds = classroomGroup
+      ? siblingCourses
+        .filter((sibling) => {
+          const siblingGroup = resolveClassroomGroupForCourse(academicStructure?.classroomGroups, sibling);
+          return Boolean(siblingGroup && siblingGroup.key === classroomGroup.key);
+        })
+        .map((sibling) => sibling._id)
+      : [];
+
+    if (siblingIds.length) {
       await CampusCourse.updateMany(
-        {
-          ...gradeScopeQuery,
-          _id: { $ne: course._id },
-        },
+        { _id: { $in: siblingIds } },
         { $set: { academicContent } }
       );
+    } else if (!classroomGroup) {
+      const gradeScopeQuery = buildAcademicContentGradeScopeQuery({
+        schoolId,
+        course,
+        classroomGroups: academicStructure?.classroomGroups,
+      });
+      if (gradeScopeQuery) {
+        await CampusCourse.updateMany(
+          {
+            ...gradeScopeQuery,
+            teacherUserId: course.teacherUserId,
+            _id: { $ne: course._id },
+          },
+          { $set: { academicContent } }
+        );
+      }
     }
 
     const gradingContext = await loadCampusGradingContext(schoolId);

@@ -58,23 +58,154 @@ function resolveClassroomGroupForGrade(groups = [], gradeKey) {
   )) || null;
 }
 
+function escapeClassroomGroupRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function classroomGroupGradeKeyCandidates(gradeKey) {
+  const text = normalizeClassroomGroupText(gradeKey);
+  if (!text) {
+    return [];
+  }
+
+  const withoutTrailingSection = text.replace(/[:\s.-]*[a-z]$/i, '').trim();
+  return uniqueClassroomGroupValues([
+    text,
+    withoutTrailingSection,
+    text.replace(/\s+/g, ''),
+  ]);
+}
+
+function gradeKeyMatchesClassroomGroupKey(gradeKey, groupGradeKey) {
+  const candidate = normalizeClassroomGroupText(gradeKey);
+  const groupKey = normalizeClassroomGroupText(groupGradeKey);
+  if (!candidate || !groupKey) {
+    return false;
+  }
+  if (candidate.toLowerCase() === groupKey.toLowerCase()) {
+    return true;
+  }
+  if (candidate.toLowerCase().startsWith(`${groupKey.toLowerCase()}:`)) {
+    return true;
+  }
+  return new RegExp(`^${escapeClassroomGroupRegex(groupKey)}(?:\\s*[:.\\-]?\\s*[A-Za-z])?$`, 'i').test(candidate);
+}
+
+function buildClassroomGroupGradeMongoOr(gradeKeys = []) {
+  const or = [];
+  uniqueClassroomGroupValues(gradeKeys).forEach((key) => {
+    or.push({ studentGradeKey: key });
+    or.push({ gradeLevel: key });
+    const withSection = new RegExp(`^${escapeClassroomGroupRegex(key)}(?:\\s*[:.\\-]?\\s*[A-Za-z])?$`, 'i');
+    or.push({ studentGradeKey: withSection });
+    or.push({ gradeLevel: withSection });
+  });
+  return or;
+}
+
+function collectSharedClassroomGradeKeys(groups = [], gradeKey) {
+  const serialized = serializeClassroomGroups(groups);
+  const candidates = classroomGroupGradeKeyCandidates(gradeKey);
+  for (const candidate of candidates) {
+    const group = resolveClassroomGroupForGrade(serialized, candidate);
+    if (group) {
+      return uniqueClassroomGroupValues(group.gradeKeys);
+    }
+  }
+
+  const matched = serialized.find((group) => (
+    uniqueClassroomGroupValues(group.gradeKeys).some((key) => gradeKeyMatchesClassroomGroupKey(gradeKey, key))
+  ));
+  return matched ? uniqueClassroomGroupValues(matched.gradeKeys) : [];
+}
+
+function expandGradeKeysWithClassroomGroups(gradeKeys = [], classroomGroups = []) {
+  const groups = serializeClassroomGroups(classroomGroups);
+  const seen = new Set();
+  const expanded = [];
+
+  const push = (value) => {
+    const text = normalizeClassroomGroupText(value);
+    if (!text) {
+      return;
+    }
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    expanded.push(text);
+  };
+
+  (Array.isArray(gradeKeys) ? gradeKeys : []).forEach((gradeKey) => {
+    push(gradeKey);
+    collectSharedClassroomGradeKeys(groups, gradeKey).forEach(push);
+  });
+
+  return expanded;
+}
+
+function courseHasAcademicContentTopics(course = {}) {
+  return (Array.isArray(course?.academicContent) ? course.academicContent : [])
+    .some((period) => Array.isArray(period?.topics) && period.topics.length > 0);
+}
+
+function dedupeAcademicContentCoursesBySubject(courses = [], preferredGradeKeys = []) {
+  const preferred = new Set(
+    (Array.isArray(preferredGradeKeys) ? preferredGradeKeys : [])
+      .map((value) => normalizeClassroomGroupText(value).toLowerCase())
+      .filter(Boolean)
+  );
+  const bySubject = new Map();
+
+  (Array.isArray(courses) ? courses : []).forEach((course) => {
+    if (!courseHasAcademicContentTopics(course)) {
+      return;
+    }
+    const subjectKey = normalizeClassroomGroupText(course?.subject || course?._id).toLowerCase() || String(course?._id || '');
+    const existing = bySubject.get(subjectKey);
+    if (!existing) {
+      bySubject.set(subjectKey, course);
+      return;
+    }
+
+    const courseGrade = normalizeClassroomGroupText(course?.studentGradeKey || course?.gradeLevel).toLowerCase();
+    const existingGrade = normalizeClassroomGroupText(existing?.studentGradeKey || existing?.gradeLevel).toLowerCase();
+    const courseIsPreferred = preferred.has(courseGrade);
+    const existingIsPreferred = preferred.has(existingGrade);
+    if (courseIsPreferred && !existingIsPreferred) {
+      bySubject.set(subjectKey, course);
+    }
+  });
+
+  return Array.from(bySubject.values());
+}
+
 function resolveClassroomGroupForCourse(groups = [], course = {}) {
-  const candidates = [
+  const serialized = serializeClassroomGroups(groups);
+  const candidates = uniqueClassroomGroupValues([
+    course?.classroomGroupKey,
+    course?.classroomGroupLabel,
     course?.studentGradeKey,
     course?.gradeLevel,
     course?.sourceCourseKey,
-  ].map(normalizeClassroomGroupText).filter(Boolean);
+  ]);
 
   for (const candidate of candidates) {
-    const exact = resolveClassroomGroupForGrade(groups, candidate);
-    if (exact) {
-      return exact;
+    const byTarget = findClassroomGroupByTarget(serialized, candidate);
+    if (byTarget) {
+      return byTarget;
     }
 
-    const prefixMatch = (Array.isArray(groups) ? groups : []).find((group) => (
-      uniqueClassroomGroupValues(group?.gradeKeys).some((gradeKey) => (
-        candidate === gradeKey || candidate.startsWith(`${gradeKey}:`)
-      ))
+    for (const variant of classroomGroupGradeKeyCandidates(candidate)) {
+      const exact = resolveClassroomGroupForGrade(serialized, variant);
+      if (exact) {
+        return exact;
+      }
+    }
+
+    const prefixMatch = serialized.find((group) => (
+      uniqueClassroomGroupValues(group?.gradeKeys).some((gradeKey) => gradeKeyMatchesClassroomGroupKey(candidate, gradeKey))
     ));
     if (prefixMatch) {
       return prefixMatch;
@@ -202,10 +333,17 @@ function buildClassroomGroupAudienceOptions(classroomGroups = []) {
 module.exports = {
   CLASSROOM_GROUP_TARGET_PREFIX,
   buildClassroomGroupAudienceOptions,
+  buildClassroomGroupGradeMongoOr,
+  classroomGroupGradeKeyCandidates,
   classroomGroupTargetValue,
+  collectSharedClassroomGradeKeys,
+  courseHasAcademicContentTopics,
+  dedupeAcademicContentCoursesBySubject,
   expandCourseTargetsWithClassroomGroups,
+  expandGradeKeysWithClassroomGroups,
   findClassroomGroupByTarget,
   findClassroomGroupGradeConflict,
+  gradeKeyMatchesClassroomGroupKey,
   gradesShareClassroomGroup,
   parseClassroomGroupTarget,
   removeGradeFromClassroomGroups,

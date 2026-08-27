@@ -482,6 +482,145 @@
   background: #2563eb;
 }
 
+.staff-announcements-teachers {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.95rem;
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.staff-announcements-teachers__intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.staff-announcements-teachers__intro strong {
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.staff-announcements-teachers__intro p {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.staff-announcements-teachers__intro button {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0.25rem 0.15rem;
+  color: #2563eb;
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.staff-announcements-teachers__block h5 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.staff-announcements-teachers__block > p {
+  margin: 0.25rem 0 0.7rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.staff-announcements-teachers__levels,
+.staff-announcements-teachers__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.staff-announcements-teachers__levels label,
+.staff-announcements-teachers__list label {
+  display: flex;
+  align-items: flex-start;
+  position: relative;
+  gap: 0.6rem;
+  min-height: 46px;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  cursor: pointer;
+}
+
+.staff-announcements-teachers__levels label:hover,
+.staff-announcements-teachers__list label:hover {
+  border-color: #93c5fd;
+  background: #fff;
+}
+
+.staff-announcements-teachers__levels label:has(input:checked),
+.staff-announcements-teachers__list label:has(input:checked) {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.staff-announcements-teachers__levels label.is-mixed {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.staff-announcements-teachers__levels input:checked + .staff-announcements-roles__check,
+.staff-announcements-teachers__list input:checked + .staff-announcements-roles__check {
+  border-color: #2563eb;
+  color: #fff;
+  background: #2563eb;
+}
+
+.staff-announcements-teachers__levels label.is-mixed .staff-announcements-roles__check {
+  border-color: #2563eb;
+  background: linear-gradient(180deg, #2563eb 50%, #fff 50%);
+  color: transparent;
+}
+
+.staff-announcements-teachers__levels span,
+.staff-announcements-teachers__list span {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.staff-announcements-teachers__levels small,
+.staff-announcements-teachers__list small {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.staff-announcements-teachers__search {
+  width: 100%;
+  margin: 0.55rem 0 0.7rem;
+  border: 1px solid #cfd8e6;
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  background: #fbfdff;
+}
+
+.staff-announcements-teachers__empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
 .staff-announcements-compose__footer {
   display: flex;
   align-items: center;
@@ -732,7 +871,12 @@
     margin-left: 1rem;
   }
 
-  .staff-announcements-roles__grid {
+  .staff-announcements-teachers__intro {
+    flex-direction: column;
+  }
+
+  .staff-announcements-teachers__levels,
+  .staff-announcements-teachers__list {
     grid-template-columns: 1fr;
   }
 

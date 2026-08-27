@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const { getFeeGradeAliases, findGradeFeeSetting } = require('../utils/feeGradeMatching');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
+const { expandGradeKeysWithClassroomGroups, dedupeAcademicContentCoursesBySubject, buildClassroomGroupGradeMongoOr } = require('../utils/classroomGroups');
 const { campusAudienceAppliesToStudent } = require('../utils/campusPostAudience');
 const {
   isMillenniumSchoolId,
@@ -3919,7 +3920,13 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleMatchers: selectedStudentCourseTitleMatchers,
     } = buildParentStudentAcademicMatchValues(selectedStudent || {});
 
-    const [day, week, month, recentTopups, recentOrders, academicContentCourses, academicGradeCourses, academicGradeEntryRefs, academicStructure] = await Promise.all([
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).lean();
+    const contentGradeValues = expandGradeKeysWithClassroomGroups(
+      selectedStudentGradeValues,
+      academicStructure?.classroomGroups,
+    );
+
+    const [day, week, month, recentTopups, recentOrders, academicContentCourses, academicGradeCourses, academicGradeEntryRefs] = await Promise.all([
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfToday() }),
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfCurrentWeek() }),
       sumOrdersForRange({ schoolId, studentObjectId: selectedStudentObjectId, fromDate: startOfCurrentMonth() }),
@@ -3951,13 +3958,8 @@ router.get('/portal/overview', async (req, res) => {
         ? CampusCourse.find({
           schoolId,
           status: 'active',
-          studentGradeKey: { $in: selectedStudentGradeValues },
-          ...(selectedStudentCourseValues.length ? {
-            $or: [
-              { section: { $in: selectedStudentCourseValues } },
-              ...selectedStudentCourseTitleMatchers.map((matcher) => ({ title: matcher })),
-            ],
-          } : {}),
+          'academicContent.topics.0': { $exists: true },
+          $or: buildClassroomGroupGradeMongoOr(contentGradeValues.length ? contentGradeValues : selectedStudentGradeValues),
         })
           .select('title subject gradeLevel section studentGradeKey academicContent classSessions')
           .sort({ title: 1 })
@@ -3976,7 +3978,6 @@ router.get('/portal/overview', async (req, res) => {
       CampusGradeEntry.find({ schoolId, studentId: selectedStudentObjectId })
         .select('courseId')
         .lean(),
-      AcademicStructure.findOne({ schoolId }).lean(),
     ]);
 
     const academicGradeCourseIds = new Set((Array.isArray(academicGradeCourses) ? academicGradeCourses : []).map((course) => String(course._id)));
@@ -4136,7 +4137,7 @@ router.get('/portal/overview', async (req, res) => {
           : 0,
         storeName: order.storeId?.name || 'Tienda',
       })),
-      academicContent: academicContentCourses.map((course) => ({
+      academicContent: dedupeAcademicContentCoursesBySubject(academicContentCourses, selectedStudentGradeValues).map((course) => ({
         courseId: String(course._id),
         title: String(course.title || '').trim(),
         subject: String(course.subject || '').trim(),

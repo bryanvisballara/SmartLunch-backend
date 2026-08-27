@@ -26,6 +26,13 @@ const staffAnnouncementSchema = new mongoose.Schema(
       type: [{ type: String, enum: STAFF_ANNOUNCEMENT_TARGET_ROLES }],
       default: () => [...STAFF_ANNOUNCEMENT_TARGET_ROLES],
     },
+    targetTeacherUserIds: { type: [String], default: [] },
+    targetTeacherLevelKeys: { type: [String], default: [] },
+    teacherAudienceMode: {
+      type: String,
+      enum: ['none', 'all', 'subset'],
+      default: 'all',
+    },
     sourceType: {
       type: String,
       enum: ['manual', 'hr_planner_cycle'],

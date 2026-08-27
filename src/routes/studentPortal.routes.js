@@ -29,6 +29,7 @@ const Wallet = require('../models/wallet.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { normalizeStudentFeatures } = require('../utils/studentFeatures');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
+const { expandGradeKeysWithClassroomGroups, dedupeAcademicContentCoursesBySubject, buildClassroomGroupGradeMongoOr } = require('../utils/classroomGroups');
 const { campusAudienceAppliesToStudent } = require('../utils/campusPostAudience');
 const { runWithSchoolContext } = require('../config/db');
 const {
@@ -180,7 +181,13 @@ router.get('/portal/overview', async (req, res) => {
       courseTitleValues,
     } = H.buildParentStudentAcademicMatchValues(student);
 
-    const [academicGradeCourses, academicGradeEntryRefs, academicStructure, psychologyCases, coexistenceObservations, wallet, academicContentCourses] = await Promise.all([
+    const academicStructure = await AcademicStructure.findOne({ schoolId }).lean();
+    const contentGradeValues = expandGradeKeysWithClassroomGroups(
+      gradeValues,
+      academicStructure?.classroomGroups,
+    );
+
+    const [academicGradeCourses, academicGradeEntryRefs, psychologyCases, coexistenceObservations, wallet, academicContentCourses] = await Promise.all([
       gradeValues.length
         ? CampusCourse.find({
           schoolId,
@@ -194,7 +201,6 @@ router.get('/portal/overview', async (req, res) => {
       CampusGradeEntry.find({ schoolId, studentId: studentObjectId })
         .select('courseId')
         .lean(),
-      AcademicStructure.findOne({ schoolId }).lean(),
       PsychologyCase.find({
         schoolId,
         studentId: student._id,
@@ -213,12 +219,12 @@ router.get('/portal/overview', async (req, res) => {
         .limit(100)
         .lean(),
       Wallet.findOne({ schoolId, studentId: student._id }).lean(),
-      gradeValues.length
+      (contentGradeValues.length || gradeValues.length)
         ? CampusCourse.find({
           schoolId,
           status: 'active',
-          studentGradeKey: { $in: gradeValues },
           'academicContent.topics.0': { $exists: true },
+          $or: buildClassroomGroupGradeMongoOr(contentGradeValues.length ? contentGradeValues : gradeValues),
         })
           .select('title subject gradeLevel section studentGradeKey academicContent')
           .sort({ title: 1, subject: 1 })
@@ -292,7 +298,7 @@ router.get('/portal/overview', async (req, res) => {
       })
       : [];
 
-    const academicContent = (academicContentCourses || []).map((course) => ({
+    const academicContent = dedupeAcademicContentCoursesBySubject(academicContentCourses || [], gradeValues).map((course) => ({
       courseId: String(course._id),
       title: String(course.title || '').trim(),
       subject: String(course.subject || '').trim(),

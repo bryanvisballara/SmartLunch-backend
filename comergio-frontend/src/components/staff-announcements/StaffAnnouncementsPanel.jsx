@@ -57,6 +57,8 @@ function createEmptyDraft() {
     title: '',
     body: '',
     targetRoles: [],
+    teacherLevelKeys: [],
+    teacherUserIds: [],
   };
 }
 
@@ -110,7 +112,7 @@ export default function StaffAnnouncementsPanel({
   const [selectedSentId, setSelectedSentId] = useState('');
   const [activeTab, setActiveTab] = useState('inbox');
   const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const [senderFilter, setSenderFilter] = useState('all');
+  const [teacherSearch, setTeacherSearch] = useState('');
 
   const canManage = mode === 'manage' || mode === 'sender';
   const showInbox = mode === 'inbox' || mode === 'manage';
@@ -171,6 +173,7 @@ export default function StaffAnnouncementsPanel({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff-announcements'] });
       setComposeDraft(createEmptyDraft());
+      setTeacherSearch('');
       setNotice({ type: 'success', text: 'Comunicado enviado al equipo seleccionado.' });
     },
     onError: (error) => {
@@ -181,9 +184,31 @@ export default function StaffAnnouncementsPanel({
   const inboxItems = inboxQuery.data?.data?.announcements || inboxQuery.data?.announcements || [];
   const sentItems = sentQuery.data?.data?.announcements || sentQuery.data?.announcements || [];
   const targetRoleOptions = metaQuery.data?.data?.targetRoles || metaQuery.data?.targetRoles || DEFAULT_TARGET_ROLE_OPTIONS;
+  const teacherLevels = metaQuery.data?.data?.teacherLevels || metaQuery.data?.teacherLevels || [];
+  const teacherDirectory = metaQuery.data?.data?.teachers || metaQuery.data?.teachers || [];
   const recipients = recipientsQuery.data?.data?.recipients || recipientsQuery.data?.recipients || [];
   const recipientSummary = recipientsQuery.data?.data?.summary || recipientsQuery.data?.summary || null;
   const selectedRoleCount = (composeDraft.targetRoles || []).length;
+  const teachersRoleSelected = (composeDraft.targetRoles || []).includes('teacher');
+  const selectedTeacherIdSet = useMemo(
+    () => new Set(composeDraft.teacherUserIds || []),
+    [composeDraft.teacherUserIds]
+  );
+  const selectedTeacherLevelSet = useMemo(
+    () => new Set(composeDraft.teacherLevelKeys || []),
+    [composeDraft.teacherLevelKeys]
+  );
+  const teacherAudienceIsAll = teachersRoleSelected && !selectedTeacherIdSet.size && !selectedTeacherLevelSet.size;
+  const filteredTeacherDirectory = useMemo(() => {
+    const query = String(teacherSearch || '').trim().toLowerCase();
+    if (!query) {
+      return teacherDirectory;
+    }
+    return teacherDirectory.filter((teacher) => {
+      const haystack = `${teacher?.name || ''} ${(teacher?.gradeLabels || []).join(' ')}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [teacherDirectory, teacherSearch]);
 
   const senderOptions = useMemo(() => {
     const labels = new Map();
@@ -242,8 +267,19 @@ export default function StaffAnnouncementsPanel({
   const toggleTargetRole = (role) => {
     setComposeDraft((current) => {
       const selected = new Set(current.targetRoles || []);
-      if (selected.has(role)) selected.delete(role);
-      else selected.add(role);
+      if (selected.has(role)) {
+        selected.delete(role);
+        if (role === 'teacher') {
+          return {
+            ...current,
+            targetRoles: Array.from(selected),
+            teacherLevelKeys: [],
+            teacherUserIds: [],
+          };
+        }
+      } else {
+        selected.add(role);
+      }
       return { ...current, targetRoles: Array.from(selected) };
     });
   };
@@ -252,11 +288,88 @@ export default function StaffAnnouncementsPanel({
     setComposeDraft((current) => ({
       ...current,
       targetRoles: targetRoleOptions.map((option) => option.value || option),
+      teacherLevelKeys: [],
+      teacherUserIds: [],
     }));
   };
 
   const clearTargetRoles = () => {
-    setComposeDraft((current) => ({ ...current, targetRoles: [] }));
+    setComposeDraft((current) => ({
+      ...current,
+      targetRoles: [],
+      teacherLevelKeys: [],
+      teacherUserIds: [],
+    }));
+  };
+
+  const toggleTeacherLevel = (level) => {
+    setComposeDraft((current) => {
+      const selectedLevels = new Set(current.teacherLevelKeys || []);
+      const selectedTeachers = new Set(current.teacherUserIds || []);
+      const levelIds = Array.isArray(level?.teacherUserIds) ? level.teacherUserIds : [];
+      const wasSelected = selectedLevels.has(level.key);
+
+      if (wasSelected) {
+        selectedLevels.delete(level.key);
+        const remainingLevelTeacherIds = new Set(
+          teacherLevels
+            .filter((item) => item.key !== level.key && selectedLevels.has(item.key))
+            .flatMap((item) => item.teacherUserIds || [])
+        );
+        levelIds.forEach((teacherId) => {
+          if (!remainingLevelTeacherIds.has(teacherId)) {
+            selectedTeachers.delete(teacherId);
+          }
+        });
+      } else {
+        selectedLevels.add(level.key);
+        levelIds.forEach((teacherId) => selectedTeachers.add(teacherId));
+      }
+
+      const roles = new Set(current.targetRoles || []);
+      roles.add('teacher');
+      return {
+        ...current,
+        targetRoles: Array.from(roles),
+        teacherLevelKeys: Array.from(selectedLevels),
+        teacherUserIds: Array.from(selectedTeachers),
+      };
+    });
+  };
+
+  const toggleTeacher = (teacherId) => {
+    setComposeDraft((current) => {
+      const selectedTeachers = new Set(current.teacherUserIds || []);
+      if (selectedTeachers.has(teacherId)) {
+        selectedTeachers.delete(teacherId);
+      } else {
+        selectedTeachers.add(teacherId);
+      }
+      const selectedLevels = (current.teacherLevelKeys || []).filter((levelKey) => {
+        const level = teacherLevels.find((item) => item.key === levelKey);
+        if (!level) {
+          return false;
+        }
+        return (level.teacherUserIds || []).every((id) => selectedTeachers.has(id));
+      });
+      const roles = new Set(current.targetRoles || []);
+      roles.add('teacher');
+      return {
+        ...current,
+        targetRoles: Array.from(roles),
+        teacherLevelKeys: selectedLevels,
+        teacherUserIds: Array.from(selectedTeachers),
+      };
+    });
+  };
+
+  const selectAllTeachers = () => {
+    setComposeDraft((current) => ({
+      ...current,
+      targetRoles: Array.from(new Set([...(current.targetRoles || []), 'teacher'])),
+      teacherLevelKeys: [],
+      teacherUserIds: [],
+    }));
   };
 
   const onCreateAnnouncement = (event) => {
@@ -273,6 +386,8 @@ export default function StaffAnnouncementsPanel({
       title: composeDraft.title.trim(),
       body: composeDraft.body.trim(),
       targetRoles: composeDraft.targetRoles,
+      targetTeacherUserIds: teachersRoleSelected && !teacherAudienceIsAll ? composeDraft.teacherUserIds : [],
+      targetTeacherLevelKeys: teachersRoleSelected && !teacherAudienceIsAll ? composeDraft.teacherLevelKeys : [],
     });
   };
 
@@ -345,6 +460,85 @@ export default function StaffAnnouncementsPanel({
                 );
               })}
             </div>
+            {teachersRoleSelected ? (
+              <div className="staff-announcements-teachers">
+                <div className="staff-announcements-teachers__intro">
+                  <div>
+                    <strong>Docentes</strong>
+                    <p>
+                      {teacherAudienceIsAll
+                        ? 'El comunicado llegará a todos los docentes. Elige un nivel o docentes específicos para acotar el envío.'
+                        : `${selectedTeacherIdSet.size} docente${selectedTeacherIdSet.size === 1 ? '' : 's'} seleccionado${selectedTeacherIdSet.size === 1 ? '' : 's'}.`}
+                    </p>
+                  </div>
+                  <button onClick={selectAllTeachers} type="button">Todos los docentes</button>
+                </div>
+
+                {teacherLevels.length ? (
+                  <div className="staff-announcements-teachers__block">
+                    <h5>Nivel educativo</h5>
+                    <p>Al elegir un nivel se seleccionan los docentes que cubren materias en sus grados y cursos.</p>
+                    <div className="staff-announcements-teachers__levels">
+                      {teacherLevels.map((level) => {
+                        const checked = selectedTeacherLevelSet.has(level.key)
+                          && (level.teacherUserIds || []).every((teacherId) => selectedTeacherIdSet.has(teacherId));
+                        const mixed = !checked && (level.teacherUserIds || []).some((teacherId) => selectedTeacherIdSet.has(teacherId));
+                        return (
+                          <label className={mixed ? 'is-mixed' : ''} key={level.key}>
+                            <input
+                              checked={checked}
+                              onChange={() => toggleTeacherLevel(level)}
+                              type="checkbox"
+                            />
+                            <span className="staff-announcements-roles__check" aria-hidden="true">✓</span>
+                            <span>
+                              {level.label}
+                              <small>{level.teacherCount || 0} docente{(level.teacherCount || 0) === 1 ? '' : 's'}</small>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="staff-announcements-teachers__block">
+                  <h5>Docentes uno a uno</h5>
+                  <input
+                    className="staff-announcements-teachers__search"
+                    onChange={(event) => setTeacherSearch(event.target.value)}
+                    placeholder="Buscar docente por nombre"
+                    type="search"
+                    value={teacherSearch}
+                  />
+                  {!teacherDirectory.length ? (
+                    <p className="staff-announcements-teachers__empty">No hay docentes activos para seleccionar.</p>
+                  ) : (
+                    <div className="staff-announcements-teachers__list">
+                      {filteredTeacherDirectory.length === 0 ? (
+                        <p className="staff-announcements-teachers__empty">Ningún docente coincide con la búsqueda.</p>
+                      ) : filteredTeacherDirectory.map((teacher) => {
+                        const checked = selectedTeacherIdSet.has(teacher.id);
+                        return (
+                          <label key={teacher.id}>
+                            <input
+                              checked={checked}
+                              onChange={() => toggleTeacher(teacher.id)}
+                              type="checkbox"
+                            />
+                            <span className="staff-announcements-roles__check" aria-hidden="true">✓</span>
+                            <span>
+                              {teacher.name}
+                              {teacher.gradeLabels?.length ? <small>{teacher.gradeLabels.join(' · ')}</small> : null}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </fieldset>
           <footer className="staff-announcements-compose__footer">
             <span>Los destinatarios deberán confirmar la lectura.</span>

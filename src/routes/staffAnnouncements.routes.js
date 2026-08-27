@@ -10,6 +10,9 @@ const {
   STAFF_ANNOUNCEMENT_TARGET_ROLES,
   serializeAnnouncement,
   normalizeTargetRoles,
+  normalizeIdList,
+  normalizeLevelKeys,
+  buildTeacherAudienceDirectory,
   publishStaffAnnouncement,
 } = require('../services/staffAnnouncement.service');
 
@@ -46,12 +49,20 @@ function roleLabel(role) {
 }
 
 router.get('/meta', roleMiddleware(senderRoles), async (req, res) => {
-  return res.status(200).json({
-    targetRoles: STAFF_ANNOUNCEMENT_TARGET_ROLES.map((role) => ({
-      value: role,
-      label: roleLabel(role),
-    })),
-  });
+  try {
+    const { schoolId } = req.user;
+    const teacherAudience = await buildTeacherAudienceDirectory(schoolId);
+    return res.status(200).json({
+      targetRoles: STAFF_ANNOUNCEMENT_TARGET_ROLES.map((role) => ({
+        value: role,
+        label: roleLabel(role),
+      })),
+      teacherLevels: teacherAudience.levels,
+      teachers: teacherAudience.teachers,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar los destinatarios docentes.' });
+  }
 });
 
 router.get('/unread-count', roleMiddleware(inboxRoles), async (req, res) => {
@@ -276,7 +287,9 @@ router.post('/', roleMiddleware(senderRoles), async (req, res) => {
   try {
     const { schoolId, userId, role } = req.user;
     const targetRoles = normalizeTargetRoles(req.body.targetRoles, []);
-    if (!targetRoles.length) {
+    const targetTeacherUserIds = normalizeIdList(req.body.targetTeacherUserIds);
+    const targetTeacherLevelKeys = normalizeLevelKeys(req.body.targetTeacherLevelKeys);
+    if (!targetRoles.length && !targetTeacherUserIds.length && !targetTeacherLevelKeys.length) {
       return res.status(400).json({ message: 'Selecciona al menos un destinatario.' });
     }
 
@@ -289,6 +302,8 @@ router.post('/', roleMiddleware(senderRoles), async (req, res) => {
       title: req.body.title,
       body: req.body.body,
       targetRoles,
+      targetTeacherUserIds,
+      targetTeacherLevelKeys,
       sourceType: 'manual',
     });
 

@@ -1049,6 +1049,19 @@
   flex-wrap: wrap;
 }
 
+.campus-teacher__publications-inline-error {
+  flex: 1 1 100%;
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.campus-teacher__publications-field.is-invalid .audience-picker__list,
+.campus-teacher__publications-field.is-invalid .campus-teacher__publications-input-shell {
+  border-color: #dc2626;
+}
+
 .campus-teacher__publications-summary {
   display: inline-flex;
   align-items: center;
@@ -1331,6 +1344,20 @@
   .campus-teacher__publications-layout,
   .campus-teacher__publications-fields {
     grid-template-columns: 1fr;
+  }
+
+  .campus-teacher__publications-card {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5.75rem);
+  }
+
+  .campus-teacher__publications-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .campus-teacher__publications-submit {
+    width: 100%;
+    justify-content: center;
   }
 }
 
@@ -12971,7 +12998,7 @@ button.campus-teacher__nav-item-toggle {
   border: 1px solid #dadce0;
   border-radius: 8px;
   background: #ffffff;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .campus-teacher__classwork-empty {
@@ -13137,6 +13164,15 @@ button.campus-teacher__nav-item-toggle {
 
 .campus-teacher__classwork-item:first-child {
   border-top: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.campus-teacher__classwork-item:last-child {
+  border-radius: 0 0 8px 8px;
+}
+
+.campus-teacher__classwork-item:only-child {
+  border-radius: 8px;
 }
 
 .campus-teacher__classwork-item-copy {
@@ -13206,15 +13242,16 @@ button.campus-teacher__nav-item-toggle {
 
 .campus-teacher__classwork-item-dropdown {
   position: absolute;
-  top: calc(100% + 0.25rem);
+  bottom: calc(100% + 0.35rem);
+  top: auto;
   right: 0;
-  z-index: 10;
-  min-width: 140px;
+  z-index: 100;
+  min-width: 148px;
   padding: 0.35rem;
   border: 1px solid #dadce0;
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 8px 24px rgba(60, 64, 67, 0.18);
+  box-shadow: 0 -8px 24px rgba(60, 64, 67, 0.18);
 }
 
 .campus-teacher__classwork-item-dropdown button {

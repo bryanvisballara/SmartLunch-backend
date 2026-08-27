@@ -2003,12 +2003,15 @@ function buildTeacherPublicationAudienceOptions(courses = []) {
   const individuals = [];
 
   (Array.isArray(courses) ? courses : []).forEach((course) => {
-    const groupKey = String(course?.classroomGroupKey || '').trim();
     const groupLabel = String(course?.classroomGroupLabel || '').trim();
+    const groupKey = String(course?.classroomGroupKey || '').trim()
+      || (groupLabel ? `classroom_group:${groupLabel}` : '');
     if (groupKey && groupLabel) {
       if (!groupMap.has(groupKey)) {
         groupMap.set(groupKey, {
-          value: `classroom_group:${groupKey}`,
+          value: String(course?.classroomGroupKey || '').trim()
+            ? `classroom_group:${String(course.classroomGroupKey).trim()}`
+            : `classroom_group:${groupLabel}`,
           label: groupLabel,
           kind: 'classroom_group',
           courseIds: [],
@@ -3489,6 +3492,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [teacherPlannerConfirmOpen, setTeacherPlannerConfirmOpen] = useState(false);
   const [editingTeacherPlannerRequestId, setEditingTeacherPlannerRequestId] = useState('');
   const [teacherSocialPublicationDraft, setTeacherSocialPublicationDraft] = useState(createTeacherSocialPublicationDraft);
+  const [teacherSocialPublicationError, setTeacherSocialPublicationError] = useState('');
   const [teacherSocialMediaUploading, setTeacherSocialMediaUploading] = useState(false);
   const [teacherSocialMediaDragActive, setTeacherSocialMediaDragActive] = useState(false);
   const [teacherDisciplineDraft, setTeacherDisciplineDraft] = useState(createTeacherDisciplineObservationDraft);
@@ -3522,6 +3526,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const classworkCreateMenuRef = useRef(null);
   const disciplineStudentComboboxRef = useRef(null);
   const teacherSocialMediaInputRef = useRef(null);
+  const teacherPublicationAudienceRef = useRef(null);
   const classworkUploadInputRef = useRef(null);
   const classworkUploadAppendRef = useRef(true);
   const materialFilesRef = useRef([]);
@@ -5080,6 +5085,18 @@ function TeacherCampusHome({ forcePreview = false }) {
     () => buildTeacherPublicationAudienceOptions(socialPublicationCoursesForSubject),
     [socialPublicationCoursesForSubject]
   );
+  const selectedTeacherPublicationAudienceOptions = useMemo(
+    () => teacherPublicationAudienceOptions.filter((option) => (
+      (teacherSocialPublicationDraft.audienceValues || []).includes(option.value)
+    )),
+    [teacherPublicationAudienceOptions, teacherSocialPublicationDraft.audienceValues]
+  );
+  const selectedTeacherPublicationCourseIds = useMemo(
+    () => [...new Set(selectedTeacherPublicationAudienceOptions.flatMap((option) => option.courseIds || []))],
+    [selectedTeacherPublicationAudienceOptions]
+  );
+  const hasSelectedPublicationAudience = selectedTeacherPublicationCourseIds.length > 0;
+
   const selectedSocialPublicationCourse = socialPublicationCoursesForSubject.find((course) => course.id === teacherSocialPublicationDraft.courseId)
     || courses.find((course) => course.id === teacherSocialPublicationDraft.courseId)
     || null;
@@ -6985,10 +7002,21 @@ function TeacherCampusHome({ forcePreview = false }) {
           },
         }));
       } else {
-        await updateAcademicContentMutation.mutateAsync({ courseId: selectedCourse.id, payload: { academicContent } });
+        const targetCourses = isClassroomGroupAllScope && workspaceTargetCourses.length
+          ? workspaceTargetCourses
+          : [selectedCourse];
+        await Promise.all(targetCourses
+          .map((course) => String(course?.id || '').trim())
+          .filter(Boolean)
+          .map((courseId) => updateAcademicContentMutation.mutateAsync({ courseId, payload: { academicContent } })));
       }
 
-      setNotice({ type: 'success', text: 'Contenido académico del grado sincronizado correctamente.' });
+      setNotice({
+        type: 'success',
+        text: isClassroomGroupAllScope
+          ? 'Contenido académico sincronizado para todos los grados del grupo.'
+          : 'Contenido académico del grado sincronizado correctamente.',
+      });
     } catch (error) {
       setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar el contenido académico.' });
     }
@@ -7337,6 +7365,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onTeacherSocialPublicationDraftChange = (field, value) => {
+    setTeacherSocialPublicationError('');
     setTeacherSocialPublicationDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
@@ -7345,6 +7374,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onAddTeacherPublicationAudience = (value) => {
+    setTeacherSocialPublicationError('');
     setTeacherSocialPublicationDraft((currentDraft) => {
       const audienceValues = addAudienceListValue(currentDraft.audienceValues, value);
       const selectedOptions = teacherPublicationAudienceOptions.filter((option) => audienceValues.includes(option.value));
@@ -7358,6 +7388,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   };
 
   const onRemoveTeacherPublicationAudience = (value) => {
+    setTeacherSocialPublicationError('');
     setTeacherSocialPublicationDraft((currentDraft) => {
       const audienceValues = removeAudienceListValue(currentDraft.audienceValues, value);
       const selectedOptions = teacherPublicationAudienceOptions.filter((option) => audienceValues.includes(option.value));
@@ -7488,9 +7519,15 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     const title = String(teacherSocialPublicationDraft.title || '').trim();
     const body = String(teacherSocialPublicationDraft.body || '').trim();
+    const media = Array.isArray(teacherSocialPublicationDraft.media) ? teacherSocialPublicationDraft.media : [];
+
+    const showPublicationError = (text) => {
+      setTeacherSocialPublicationError(text);
+      setNotice({ type: 'error', text });
+    };
 
     if (!teacherSocialPublicationDraft.subjectKey) {
-      setNotice({ type: 'error', text: 'Selecciona la asignatura.' });
+      showPublicationError('No se pudo enviar a revisión porque falta seleccionar la asignatura.');
       return;
     }
 
@@ -7504,12 +7541,12 @@ function TeacherCampusHome({ forcePreview = false }) {
       .filter(Boolean);
 
     if (!selectedCourses.length) {
-      setNotice({ type: 'error', text: 'Selecciona al menos un grupo o curso destinatario.' });
+      showPublicationError('No se pudo enviar a revisión porque falta seleccionar el grupo o curso destinatario. Elige un grupo de grados o un curso y vuelve a intentar.');
       return;
     }
 
     if (!title || !body) {
-      setNotice({ type: 'error', text: 'Escribe un título y una descripción para enviar la publicación.' });
+      showPublicationError('No se pudo enviar a revisión porque falta el título o la descripción.');
       return;
     }
 
@@ -7519,6 +7556,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       || '';
 
     try {
+      setTeacherSocialPublicationError('');
       await createTeacherSocialPublicationMutation.mutateAsync({
         courseId: primaryCourse.id,
         courseIds: selectedCourses.map((course) => course.id),
@@ -7541,13 +7579,13 @@ function TeacherCampusHome({ forcePreview = false }) {
           ]),
         ].filter(Boolean),
         gradeTargets: selectedCourses.flatMap((course) => [course.studentGradeKey, course.gradeLevel]).filter(Boolean),
-        media: teacherSocialPublicationDraft.media || [],
+        media,
         channels: { push: true, email: false },
       });
       setTeacherSocialPublicationDraft(createTeacherSocialPublicationDraft());
       setNotice({ type: 'success', text: 'Publicación enviada a Secretaría Académica para revisión.' });
     } catch (error) {
-      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo enviar la publicación.' });
+      showPublicationError(error?.response?.data?.message || error?.message || 'No se pudo enviar la publicación.');
     }
   };
 
@@ -12114,7 +12152,10 @@ function TeacherCampusHome({ forcePreview = false }) {
                         </div>
                       </label>
 
-                      <label className={`campus-teacher__publications-field${teacherSocialPublicationDraft.subjectKey ? ' is-wide' : ''}`}>
+                      <div
+                        className={`campus-teacher__publications-field${teacherSocialPublicationDraft.subjectKey ? ' is-wide' : ''}${teacherSocialPublicationError && !hasSelectedPublicationAudience ? ' is-invalid' : ''}`}
+                        ref={teacherPublicationAudienceRef}
+                      >
                         <span>Cursos</span>
                         {!teacherSocialPublicationDraft.subjectKey ? (
                           <div className="campus-teacher__publications-input-shell">
@@ -12131,7 +12172,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                             selectedValues={teacherSocialPublicationDraft.audienceValues || []}
                           />
                         )}
-                      </label>
+                      </div>
                     </div>
 
                     <label className="campus-teacher__publications-field is-wide">
@@ -12230,13 +12271,19 @@ function TeacherCampusHome({ forcePreview = false }) {
                         <span>
                           {[
                             selectedSocialPublicationSubject?.label || normalizeSubjectLabel(selectedSocialPublicationCourse?.subject),
-                            selectedSocialPublicationCourse ? getCourseGroupLabel(selectedSocialPublicationCourse) : '',
+                            selectedTeacherPublicationAudienceOptions.map((option) => option.label).join(', ')
+                              || (selectedSocialPublicationCourse ? getCourseGroupLabel(selectedSocialPublicationCourse) : ''),
                           ].filter(Boolean).join(' · ') || 'Selecciona asignatura y curso para continuar.'}
                         </span>
                       </div>
+                      {teacherSocialPublicationError ? (
+                        <p className="campus-teacher__publications-inline-error">
+                          {teacherSocialPublicationError}
+                        </p>
+                      ) : null}
                       <button
                         className="campus-teacher__action-btn campus-teacher__publications-submit"
-                        disabled={isBusy || !teacherSocialPublicationDraft.subjectKey || !teacherSocialPublicationDraft.courseId}
+                        disabled={isBusy}
                         type="submit"
                       >
                         <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
