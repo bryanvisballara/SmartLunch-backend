@@ -1122,26 +1122,52 @@ router.get('/admin-home', async (req, res) => {
     const fixedCostsInRange = fixedCostsOnly.filter((item) => isWithinAccountingRange(resolveCostDate(item)));
     const variableCostsInRange = variableCostsOnly.filter((item) => isWithinAccountingRange(resolveCostDate(item)));
 
+    const accountingClosureFilter = {
+      schoolId,
+      date: { $gte: accountingFrom.dayKey, $lte: accountingTo.dayKey },
+    };
+    if (storeFilter) {
+      accountingClosureFilter.storeId = storeFilter;
+    }
+    const accountingClosures = await DailyClosure.find(accountingClosureFilter)
+      .select('date storeId totalCashSaved systemDataphone systemTransfer systemQr')
+      .lean();
+    const cashSavedTotal = (accountingClosures || []).reduce((sum, row) => sum + Number(row.totalCashSaved || 0), 0);
+    const closureDataphoneTotal = (accountingClosures || []).reduce((sum, row) => sum + Number(row.systemDataphone || 0), 0);
+    const closureTransferQrTotal = (accountingClosures || []).reduce(
+      (sum, row) => sum + Number(row.systemTransfer || 0) + Number(row.systemQr || 0),
+      0
+    );
+
     const weeklyAccountingMap = new Map();
+    const emptyMoneyTotals = () => ({
+      salesCashTotal: 0,
+      salesQrTotal: 0,
+      salesDataphoneTotal: 0,
+      qrFeesTotal: 0,
+      dataphoneFeesTotal: 0,
+      paymentFeesTotal: 0,
+      fixedTotal: 0,
+      variableTotal: 0,
+      paidFixedTotal: 0,
+      unpaidFixedTotal: 0,
+      paidVariableTotal: 0,
+      unpaidVariableTotal: 0,
+      salesTotal: 0,
+      topupsTotal: 0,
+      totalIncomeTotal: 0,
+      totalIncomeNetTotal: 0,
+      totalCostsTotal: 0,
+      unpaidCostsTotal: 0,
+      paidCostsTotal: 0,
+      utilityTotal: 0,
+    });
 
     const ensureWeeklyRow = (weekKey) => {
       if (!weeklyAccountingMap.has(weekKey)) {
         weeklyAccountingMap.set(weekKey, {
           weekKey,
-          salesCashTotal: 0,
-          salesQrTotal: 0,
-          salesDataphoneTotal: 0,
-          qrFeesTotal: 0,
-          dataphoneFeesTotal: 0,
-          paymentFeesTotal: 0,
-          fixedTotal: 0,
-          variableTotal: 0,
-          salesTotal: 0,
-          topupsTotal: 0,
-          totalIncomeTotal: 0,
-          totalIncomeNetTotal: 0,
-          totalCostsTotal: 0,
-          utilityTotal: 0,
+          ...emptyMoneyTotals(),
           dailyBreakdown: {},
         });
       }
@@ -1153,20 +1179,7 @@ router.get('/admin-home', async (req, res) => {
       if (!weeklyRow.dailyBreakdown[dayKey]) {
         weeklyRow.dailyBreakdown[dayKey] = {
           dayKey,
-          salesCashTotal: 0,
-          salesQrTotal: 0,
-          salesDataphoneTotal: 0,
-          qrFeesTotal: 0,
-          dataphoneFeesTotal: 0,
-          paymentFeesTotal: 0,
-          fixedTotal: 0,
-          variableTotal: 0,
-          topupsTotal: 0,
-          salesTotal: 0,
-          totalIncomeTotal: 0,
-          totalIncomeNetTotal: 0,
-          totalCostsTotal: 0,
-          utilityTotal: 0,
+          ...emptyMoneyTotals(),
         };
       }
 
@@ -1188,10 +1201,16 @@ router.get('/admin-home', async (req, res) => {
       const row = ensureWeeklyRow(weekKey);
       const dayKey = getBogotaDayKey(parsedDate);
       const amount = Number(item?.amount || 0);
+      const paid = Boolean(item?.paid || item?.paidAt);
+      const paidField = field === 'fixedTotal'
+        ? (paid ? 'paidFixedTotal' : 'unpaidFixedTotal')
+        : (paid ? 'paidVariableTotal' : 'unpaidVariableTotal');
 
       row[field] += amount;
+      row[paidField] += amount;
       const dailyRow = ensureDailyRow(row, dayKey);
       dailyRow[field] += amount;
+      dailyRow[paidField] += amount;
     };
 
     for (const item of fixedCostsInRange) {
@@ -1202,39 +1221,37 @@ router.get('/admin-home', async (req, res) => {
       addWeeklyCost(item, 'variableTotal');
     }
 
-    for (const sale of accountingSalesRaw || []) {
-      const parsedDate = sale?.createdAt ? new Date(sale.createdAt) : null;
-      if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    for (const closure of accountingClosures || []) {
+      const dayKey = String(closure?.date || '').trim();
+      const parsedDay = parseDayKey(dayKey);
+      if (!parsedDay) {
+        continue;
+      }
+      if (parsedDay.start.getTime() < accountingRangeStart.getTime() || parsedDay.start.getTime() >= accountingRangeEnd.getTime()) {
         continue;
       }
 
-      const weekKey = getBogotaWeekKey(parsedDate);
+      const weekKey = getBogotaWeekKey(parsedDay.start);
       const row = ensureWeeklyRow(weekKey);
-      const dayKey = getBogotaDayKey(parsedDate);
       const dailyRow = ensureDailyRow(row, dayKey);
-      const paymentMethod = String(sale?.paymentMethod || '').toLowerCase();
-      const amount = Number(sale?.total || 0);
-      let paymentFee = 0;
+      const cashSaved = Number(closure.totalCashSaved || 0);
+      const qrTransfer = Number(closure.systemQr || 0) + Number(closure.systemTransfer || 0);
+      const dataphone = Number(closure.systemDataphone || 0);
+      const qrFee = calculateQrFee(qrTransfer);
+      const dataphoneFee = calculateDataphoneFee(dataphone);
 
-      if (paymentMethod === 'cash') {
-        row.salesCashTotal += amount;
-        dailyRow.salesCashTotal += amount;
-      } else if (paymentMethod === 'qr') {
-        row.salesQrTotal += amount;
-        dailyRow.salesQrTotal += amount;
-        paymentFee = calculateQrFee(amount);
-        row.qrFeesTotal += paymentFee;
-        dailyRow.qrFeesTotal += paymentFee;
-      } else if (paymentMethod === 'dataphone') {
-        row.salesDataphoneTotal += amount;
-        dailyRow.salesDataphoneTotal += amount;
-        paymentFee = calculateDataphoneFee(amount);
-        row.dataphoneFeesTotal += paymentFee;
-        dailyRow.dataphoneFeesTotal += paymentFee;
-      }
-
-      row.paymentFeesTotal += paymentFee;
-      dailyRow.paymentFeesTotal += paymentFee;
+      row.salesCashTotal += cashSaved;
+      dailyRow.salesCashTotal += cashSaved;
+      row.salesQrTotal += qrTransfer;
+      dailyRow.salesQrTotal += qrTransfer;
+      row.salesDataphoneTotal += dataphone;
+      dailyRow.salesDataphoneTotal += dataphone;
+      row.qrFeesTotal += qrFee;
+      dailyRow.qrFeesTotal += qrFee;
+      row.dataphoneFeesTotal += dataphoneFee;
+      dailyRow.dataphoneFeesTotal += dataphoneFee;
+      row.paymentFeesTotal += qrFee + dataphoneFee;
+      dailyRow.paymentFeesTotal += qrFee + dataphoneFee;
     }
 
     for (const topup of topupsRaw || []) {
@@ -1265,6 +1282,8 @@ router.get('/admin-home', async (req, res) => {
             const paymentFeesTotal = Number(dayRow.paymentFeesTotal || 0);
             const totalIncomeNetTotal = totalIncomeTotal - paymentFeesTotal;
             const totalCostsTotal = Number(dayRow.fixedTotal || 0) + Number(dayRow.variableTotal || 0);
+            const unpaidCostsTotal = Number(dayRow.unpaidFixedTotal || 0) + Number(dayRow.unpaidVariableTotal || 0);
+            const paidCostsTotal = Number(dayRow.paidFixedTotal || 0) + Number(dayRow.paidVariableTotal || 0);
 
             return {
               ...dayRow,
@@ -1272,7 +1291,10 @@ router.get('/admin-home', async (req, res) => {
               totalIncomeTotal,
               totalIncomeNetTotal,
               totalCostsTotal,
+              unpaidCostsTotal,
+              paidCostsTotal,
               utilityTotal: totalIncomeNetTotal - totalCostsTotal,
+              cashRemainingTotal: totalIncomeNetTotal - paidCostsTotal,
             };
           })
           .sort((a, b) => String(a.dayKey || '').localeCompare(String(b.dayKey || '')));
@@ -1285,14 +1307,21 @@ router.get('/admin-home', async (req, res) => {
         const paymentFeesTotal = Number(row.paymentFeesTotal || 0);
         const totalIncomeNetTotal = totalIncomeTotal - paymentFeesTotal;
 
+        const totalCostsTotal = Number(row.fixedTotal || 0) + Number(row.variableTotal || 0);
+        const unpaidCostsTotal = Number(row.unpaidFixedTotal || 0) + Number(row.unpaidVariableTotal || 0);
+        const paidCostsTotal = Number(row.paidFixedTotal || 0) + Number(row.paidVariableTotal || 0);
+
         return {
           ...row,
           dailyBreakdown,
           salesTotal,
           totalIncomeTotal,
           totalIncomeNetTotal,
-          totalCostsTotal: Number(row.fixedTotal || 0) + Number(row.variableTotal || 0),
-          utilityTotal: totalIncomeNetTotal - (Number(row.fixedTotal || 0) + Number(row.variableTotal || 0)),
+          totalCostsTotal,
+          unpaidCostsTotal,
+          paidCostsTotal,
+          utilityTotal: totalIncomeNetTotal - totalCostsTotal,
+          cashRemainingTotal: totalIncomeNetTotal - paidCostsTotal,
         };
       })
       .sort((a, b) => String(b.weekKey || '').localeCompare(String(a.weekKey || '')));
@@ -1321,25 +1350,19 @@ router.get('/admin-home', async (req, res) => {
     }, 0);
     const topupsAccountingTotal = (topupsRaw || []).reduce((sum, topup) => sum + Number(topup?.amount || 0), 0);
     const utilityTheoreticalMonth = Number(utilityAccounting || 0) - totalFixedCosts;
-
-    const accountingClosureFilter = {
-      schoolId,
-      date: { $gte: accountingFrom.dayKey, $lte: accountingTo.dayKey },
-    };
-    if (storeFilter) {
-      accountingClosureFilter.storeId = storeFilter;
-    }
-    const accountingClosures = await DailyClosure.find(accountingClosureFilter)
-      .select('date storeId totalCashSaved systemDataphone systemTransfer systemQr')
-      .lean();
-    const cashSavedTotal = (accountingClosures || []).reduce((sum, row) => sum + Number(row.totalCashSaved || 0), 0);
-    const closureDataphoneTotal = (accountingClosures || []).reduce((sum, row) => sum + Number(row.systemDataphone || 0), 0);
-    const closureTransferQrTotal = (accountingClosures || []).reduce(
-      (sum, row) => sum + Number(row.systemTransfer || 0) + Number(row.systemQr || 0),
-      0
-    );
+    const paidFixedCosts = fixedCostsInRange.reduce((sum, item) => (
+      Boolean(item?.paid || item?.paidAt) ? sum + Number(item.amount || 0) : sum
+    ), 0);
+    const paidVariableCosts = variableCostsInRange.reduce((sum, item) => (
+      Boolean(item?.paid || item?.paidAt) ? sum + Number(item.amount || 0) : sum
+    ), 0);
+    const unpaidFixedCosts = totalFixedCosts - paidFixedCosts;
+    const unpaidVariableCosts = totalVariableCosts - paidVariableCosts;
+    const unpaidCostsTotal = unpaidFixedCosts + unpaidVariableCosts;
+    const paidCostsTotal = paidFixedCosts + paidVariableCosts;
     const realMoneyInTotal = cashSavedTotal + closureDataphoneTotal + closureTransferQrTotal + topupsAccountingTotal;
     const utilityNetMonth = realMoneyInTotal - totalFixedCosts - totalVariableCosts;
+    const cashRemainingMonth = realMoneyInTotal - paidCostsTotal;
     const aiRecommendations = buildAiRecommendations({
       topStudents: topStudentsRaw,
       lowStockProducts,
@@ -1392,6 +1415,14 @@ router.get('/admin-home', async (req, res) => {
       variableCosts: variableCostsInRange,
       totalFixedCosts,
       totalVariableCosts,
+      paidFixedCosts,
+      paidVariableCosts,
+      unpaidFixedCosts,
+      unpaidVariableCosts,
+      paidCostsTotal,
+      unpaidCostsTotal,
+      cashRemainingMonth,
+      cashRemaining: cashRemainingMonth,
       utilityNetMonth,
       utilityNet: utilityNetMonth,
       accountingFeeSettings,

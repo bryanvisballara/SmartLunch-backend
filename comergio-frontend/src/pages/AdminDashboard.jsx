@@ -781,6 +781,10 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
         salesDataphoneTotal: Number(item?.salesDataphoneTotal || 0),
         paymentFeesTotal: Number(item?.paymentFeesTotal || 0),
         topupsTotal: Number(item?.topupsTotal || 0),
+        unpaidFixedTotal: Number(item?.unpaidFixedTotal || 0),
+        unpaidVariableTotal: Number(item?.unpaidVariableTotal || 0),
+        unpaidCostsTotal: Number(item?.unpaidCostsTotal || 0)
+          || (Number(item?.unpaidFixedTotal || 0) + Number(item?.unpaidVariableTotal || 0)),
         fixedTotal: Number(item?.fixedTotal || 0),
         variableTotal: Number(item?.variableTotal || 0),
       },
@@ -797,6 +801,7 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
       salesDataphoneTotal: 0,
       paymentFeesTotal: 0,
       topupsTotal: 0,
+      unpaidCostsTotal: 0,
       fixedTotal: 0,
       variableTotal: 0,
     };
@@ -809,6 +814,7 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
     const paymentFeesTotal = Number(dayValues.paymentFeesTotal || 0);
     const totalIncomeNetTotal = totalIncomeTotal - paymentFeesTotal;
     const totalCostsTotal = Number(dayValues.fixedTotal || 0) + Number(dayValues.variableTotal || 0);
+    const unpaidCostsTotal = Number(dayValues.unpaidCostsTotal || 0);
     const dayDateLabel = dayDate.toLocaleDateString('es-CO', { timeZone: 'America/Bogota' });
 
     return {
@@ -821,6 +827,7 @@ const buildAccountingWeekDayRows = (weekKey, dailyBreakdown) => {
       paymentFeesTotal,
       totalIncomeTotal,
       totalIncomeNetTotal,
+      unpaidCostsTotal,
       fixedTotal: Number(dayValues.fixedTotal || 0),
       variableTotal: Number(dayValues.variableTotal || 0),
       totalCostsTotal,
@@ -1609,8 +1616,10 @@ function AdminDashboard() {
           const totalIncomeTotal = salesTotal + topupsTotal;
           const paymentFeesTotal = Number(row?.paymentFeesTotal || 0);
           const totalIncomeNetTotal = Number(row?.totalIncomeNetTotal || (totalIncomeTotal - paymentFeesTotal));
+          const unpaidCostsTotal = Number(row?.unpaidCostsTotal || 0)
+            || (Number(row?.unpaidFixedTotal || 0) + Number(row?.unpaidVariableTotal || 0));
           const totalCostsTotal = fixedTotal + variableTotal;
-          const utilityTotal = totalIncomeNetTotal - totalCostsTotal;
+          const utilityTotal = Number(row?.utilityTotal || (totalIncomeNetTotal - totalCostsTotal));
           const rawDailyBreakdown = Array.isArray(row?.dailyBreakdown)
             ? row.dailyBreakdown
             : Object.values(row?.dailyBreakdown || {});
@@ -1624,6 +1633,8 @@ function AdminDashboard() {
               topupsTotal: Number(dayRow?.topupsTotal || 0),
               fixedTotal: Number(dayRow?.fixedTotal || 0),
               variableTotal: Number(dayRow?.variableTotal || 0),
+              unpaidCostsTotal: Number(dayRow?.unpaidCostsTotal || 0)
+                || (Number(dayRow?.unpaidFixedTotal || 0) + Number(dayRow?.unpaidVariableTotal || 0)),
             }))
             .filter((dayRow) => dayRow.dayKey)
             .sort((a, b) => String(a.dayKey).localeCompare(String(b.dayKey)));
@@ -1639,6 +1650,7 @@ function AdminDashboard() {
             paymentFeesTotal,
             fixedTotal,
             variableTotal,
+            unpaidCostsTotal,
             totalCostsTotal,
             utilityTotal,
             dailyBreakdown,
@@ -6072,8 +6084,24 @@ function AdminDashboard() {
                   value: homeData?.utilityTheoretical ?? homeData?.utilityTheoreticalMonth ?? homeData?.utilityAccounting,
                   hint: '(Ventas − costo de productos) − costos fijos',
                 },
-                { tone: 'sky', icon: 'pie', label: 'Costos fijos', value: homeData?.totalFixedCosts },
-                { tone: 'rose', icon: 'trend', label: 'Costos variables', value: homeData?.totalVariableCosts },
+                {
+                  tone: 'sky',
+                  icon: 'pie',
+                  label: 'Costos fijos',
+                  value: homeData?.totalFixedCosts,
+                  hint: homeData?.unpaidFixedCosts
+                    ? `Incluye ${formatCurrency(homeData.unpaidFixedCosts)} aún no pagados`
+                    : undefined,
+                },
+                {
+                  tone: 'rose',
+                  icon: 'trend',
+                  label: 'Costos variables',
+                  value: homeData?.totalVariableCosts,
+                  hint: homeData?.unpaidVariableCosts
+                    ? `Incluye ${formatCurrency(homeData.unpaidVariableCosts)} aún no pagados`
+                    : undefined,
+                },
                 {
                   tone: 'teal',
                   icon: 'qr',
@@ -6100,7 +6128,14 @@ function AdminDashboard() {
                   icon: 'swap',
                   label: 'Ingresos - egresos',
                   value: homeData?.utilityNet ?? homeData?.utilityNetMonth,
-                  hint: 'Efectivo guardado (cierres de cafeterías) + datáfono + transferencia/QR + recargas − costos fijos − costos variables',
+                  hint: 'Cierres (efectivo guardado + datáfono + QR/transferencia) + recargas − todos los costos, pagados o no',
+                },
+                {
+                  tone: 'green',
+                  icon: 'wallet',
+                  label: 'Sobrante sin pagar pendientes',
+                  value: homeData?.cashRemaining ?? homeData?.cashRemainingMonth,
+                  hint: 'Lo mismo menos solo costos ya marcados como pagados. No incluye gastos personales ni el 15% de bolsillo',
                 },
               ].map((metric) => (
                 <div className={`admin-accounting__kpi tone-${metric.tone}`} key={metric.label}>
@@ -6511,7 +6546,7 @@ function AdminDashboard() {
             <header className="admin-accounting__panel-head">
               <div>
                 <h4>Consolidado semanal</h4>
-                <p>Ventas, costos y utilidades por semana del rango filtrado.</p>
+                <p>Efectivo guardado, QR/transferencia y datáfono salen de los cierres diarios, no de las ventas del POS.</p>
               </div>
               <span className="admin-accounting__panel-badge tone-blue" aria-hidden="true">
                 <AccountingIcon name="calendar" />
@@ -6525,13 +6560,14 @@ function AdminDashboard() {
                   <thead>
                     <tr>
                       <th>Semana</th>
-                      <th>Ventas efectivo</th>
-                      <th>Ventas QR</th>
-                      <th>Ventas datáfono</th>
+                      <th>Efectivo guardado</th>
+                      <th>QR / transferencia</th>
+                      <th>Datáfono</th>
                       <th>Recargas semana</th>
                       <th>Total ingresos netos semana</th>
                       <th>Costos fijos</th>
                       <th>Costos variables</th>
+                      <th>Por pagar</th>
                       <th>Total costos semana</th>
                       <th>Utilidades semana</th>
                     </tr>
@@ -6576,24 +6612,26 @@ function AdminDashboard() {
                             <td>{formatCurrency(row.totalIncomeNetTotal)}</td>
                             <td>{formatCurrency(row.fixedTotal)}</td>
                             <td>{formatCurrency(row.variableTotal)}</td>
+                            <td>{formatCurrency(row.unpaidCostsTotal)}</td>
                             <td>{formatCurrency(row.totalCostsTotal)}</td>
                             <td>{formatCurrency(row.utilityTotal)}</td>
                           </tr>,
                           isExpanded ? (
                             <tr className="admin-accounting-week-detail-row" key={`${row.weekKey}-detail`}>
-                              <td colSpan={10}>
+                              <td colSpan={11}>
                                 <div className="approval-history-scroll approval-history-table-scroll admin-accounting-week-detail-wrap">
                                   <table className="simple-table">
                                     <thead>
                                       <tr>
                                         <th>Día</th>
-                                        <th>Ventas efectivo</th>
-                                        <th>Ventas QR</th>
-                                        <th>Ventas datáfono</th>
+                                        <th>Efectivo guardado</th>
+                                        <th>QR / transferencia</th>
+                                        <th>Datáfono</th>
                                         <th>Recargas del día</th>
                                         <th>Total ingresos netos del día</th>
                                         <th>Costos fijos</th>
                                         <th>Costos variables</th>
+                                        <th>Por pagar</th>
                                         <th>Total costos día</th>
                                       </tr>
                                     </thead>
@@ -6624,6 +6662,7 @@ function AdminDashboard() {
                                               {formatCurrency(dayRow.variableTotal)}
                                             </button>
                                           </td>
+                                          <td>{formatCurrency(dayRow.unpaidCostsTotal)}</td>
                                           <td>{formatCurrency(dayRow.totalCostsTotal)}</td>
                                         </tr>
                                       ))}
