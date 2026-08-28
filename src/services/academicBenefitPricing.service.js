@@ -68,6 +68,22 @@ function getApplicableMonthlyBenefitRule(benefitRules = [], referenceDate = new 
   )) || null;
 }
 
+function resolveAcademicMonthlyPricingDate({
+  status = '',
+  paidAt = null,
+  now = new Date(),
+} = {}) {
+  if (String(status || '').toLowerCase() === 'paid') {
+    const paidReference = paidAt instanceof Date ? paidAt : (paidAt ? new Date(paidAt) : null);
+    if (paidReference && !Number.isNaN(paidReference.getTime())) {
+      return paidReference;
+    }
+  }
+
+  const safeNow = now instanceof Date ? now : new Date(now || Date.now());
+  return Number.isNaN(safeNow.getTime()) ? new Date() : safeNow;
+}
+
 function resolveAcademicEnrollmentBenefitDiscountAmount(amount, benefitRule = null, grade = '') {
   const safeAmount = Math.max(0, Math.round(Number(amount || 0)));
   if (!benefitRule || safeAmount <= 0) {
@@ -161,5 +177,6 @@ module.exports = {
   getApplicableMonthlyBenefitRule,
   getFixedBenefitAmountForGrade,
   resolveAcademicEnrollmentBenefitDiscountAmount,
+  resolveAcademicMonthlyPricingDate,
   resolveParentAnnualTuitionPricing,
 };

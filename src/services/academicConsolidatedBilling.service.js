@@ -745,8 +745,7 @@ async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate 
       continue;
     }
 
-    const dueDate = parseAcademicCalendarDate(charge.dueDate) || referenceDate;
-    const pricing = resolveMonthlyTuitionAmount(profile, dueDate);
+    const pricing = resolveMonthlyTuitionAmount(profile, referenceDate);
     if (pricing.amount <= 0) {
       continue;
     }
@@ -887,8 +886,7 @@ async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, refere
     const repriced = recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, { schoolId });
     pricingAmount = Math.max(0, Number(repriced.amount || 0));
   } else if (String(charge?.category || '') === 'monthly_tuition' && billingProfile) {
-    const dueDate = parseAcademicCalendarDate(charge.dueDate) || referenceDate;
-    const pricing = resolveMonthlyTuitionAmount(billingProfile, dueDate);
+    const pricing = resolveMonthlyTuitionAmount(billingProfile, referenceDate);
     pricingAmount = Math.max(0, Number(pricing.amount || charge?.amount || 0));
   } else if (String(charge?.category || '') === 'annual_tuition') {
     if (charge?.amountLocked) {
@@ -950,7 +948,7 @@ async function completeAcademicChargeGatewayPayment(paymentRecord, providerPaylo
   const { outstandingAmount } = await resolveOutstandingAcademicChargeAmount({
     schoolId: charge.schoolId,
     charge,
-    referenceDate: parseAcademicCalendarDate(charge.dueDate) || new Date(),
+    referenceDate: new Date(),
     session,
   });
 
@@ -988,7 +986,7 @@ async function completeAcademicChargeGatewayPayment(paymentRecord, providerPaylo
   const { pricingAmount, previousPaidAmount } = await resolveOutstandingAcademicChargeAmount({
     schoolId: charge.schoolId,
     charge,
-    referenceDate: parseAcademicCalendarDate(charge.dueDate) || chargePayment.paidAt || new Date(),
+    referenceDate: chargePayment.paidAt || new Date(),
     session,
   });
   const totalPaidAmount = previousPaidAmount >= paidAmount ? previousPaidAmount : previousPaidAmount + paidAmount;

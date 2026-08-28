@@ -1289,6 +1289,7 @@ const {
   getApplicableMonthlyBenefitRule,
   getFixedBenefitAmountForGrade,
   resolveAcademicEnrollmentBenefitDiscountAmount,
+  resolveAcademicMonthlyPricingDate,
   resolveParentAnnualTuitionPricing,
 } = require('../services/academicBenefitPricing.service');
 
@@ -1752,7 +1753,8 @@ function getAcademicChargeSortWeight(charge = {}) {
   const category = String(charge.category || '').toLowerCase();
   if (category === 'annual_tuition') return 0;
   if (category === 'enrollment_bonus') return 1;
-  if (category === 'monthly_tuition') return 2;
+  if (category === 'additional') return 2;
+  if (category === 'monthly_tuition') return 3;
   return 3;
 }
 
@@ -1895,9 +1897,17 @@ function buildParentAcademicPricingGuide(profile = {}, feeConfiguration = {}) {
 }
 
 function serializeIndividualChargeForParent(charge = {}, billingProfile = null, paymentTotalsByChargeId = new Map(), referenceDate = new Date(), feeConfiguration = null) {
-  const pricingDate = String(charge.status || '').toLowerCase() === 'paid' && charge.paidAt
-    ? new Date(charge.paidAt)
-    : (charge.dueDate ? new Date(charge.dueDate) : referenceDate);
+  const category = String(charge.category || '').toLowerCase();
+  const isLiveMonthlyPrice = category === 'monthly_tuition' || category === 'monthly_statement';
+  const pricingDate = isLiveMonthlyPrice
+    ? resolveAcademicMonthlyPricingDate({
+      status: charge.status,
+      paidAt: charge.paidAt,
+      now: referenceDate,
+    })
+    : (String(charge.status || '').toLowerCase() === 'paid' && charge.paidAt
+      ? new Date(charge.paidAt)
+      : referenceDate);
   const pricing = resolveAcademicChargeAmounts(charge, billingProfile, pricingDate, feeConfiguration);
   const pricingAmount = Math.max(0, Number(pricing.effectiveAmount || 0));
   const rawPaidAmount = Number(paymentTotalsByChargeId.get(String(charge._id)) || 0) || Number(charge.paidAmount || 0);
@@ -5178,7 +5188,7 @@ router.get('/portal/academic-billing', async (req, res) => {
       AcademicCharge.find({
         schoolId,
         studentId: { $in: linkedStudentIds },
-        category: { $in: ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'] },
+        category: { $in: ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'additional'] },
         status: { $ne: 'cancelled' },
       })
         .populate('studentId', 'name grade course')
@@ -5462,7 +5472,11 @@ router.post('/portal/academic-billing/charges/:chargeId/pay', async (req, res) =
       : null;
     const feeConfiguration = await AcademicFeeConfiguration.findOne({ schoolId }).lean();
     const pricingDate = ['monthly_tuition', 'monthly_statement'].includes(String(charge.category || ''))
-      ? (charge.dueDate ? new Date(charge.dueDate) : new Date())
+      ? resolveAcademicMonthlyPricingDate({
+        status: charge.status,
+        paidAt: charge.paidAt,
+        now: new Date(),
+      })
       : new Date();
     const pricing = resolveAcademicChargeAmounts(charge, billingProfile, pricingDate, feeConfiguration);
     const previousPayments = await AcademicChargePayment.find({ schoolId, chargeId: charge._id }).select('amount').lean();

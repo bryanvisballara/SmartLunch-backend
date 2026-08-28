@@ -4406,26 +4406,9 @@ function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date())
   return getApplicableMonthlyBenefitRule(benefitRules, referenceDate);
 }
 
-function resolveAcademicMonthlyPricingDate({
-  status = '',
-  paidAt = null,
-  dueDate = null,
-  hasPayments = false,
-  now = new Date(),
-} = {}) {
-  if (String(status || '').toLowerCase() === 'paid' || hasPayments) {
-    const paidReference = paidAt instanceof Date ? paidAt : (paidAt ? new Date(paidAt) : null);
-    if (paidReference && !Number.isNaN(paidReference.getTime())) {
-      return paidReference;
-    }
-  }
-
-  const dueReference = dueDate instanceof Date ? dueDate : (dueDate ? new Date(dueDate) : null);
-  if (dueReference && !Number.isNaN(dueReference.getTime())) {
-    return dueReference;
-  }
-
-  return now;
+function resolveAcademicMonthlyPricingDate(params = {}) {
+  const { resolveAcademicMonthlyPricingDate: resolveSharedMonthlyPricingDate } = require('../services/academicBenefitPricing.service');
+  return resolveSharedMonthlyPricingDate(params);
 }
 
 function getAcademicPaymentPlanBenefitDueDay(billingProfile = {}) {
@@ -6177,15 +6160,9 @@ async function getAcademicChargeOutstandingAmount(charge, referenceDate = new Da
   };
 }
 
-function resolveAcademicChargePaymentReferenceDate(charge, paidAt = new Date()) {
-  const parsedPaidAt = paidAt instanceof Date ? paidAt : new Date(paidAt);
-  const safePaidAt = Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt;
-  const dueDate = new Date(charge?.dueDate || safePaidAt);
-  if (String(charge?.category || '') === 'monthly_tuition' && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() >= safePaidAt.getTime()) {
-    return dueDate;
-  }
-
-  return safePaidAt;
+function resolveAcademicChargePaymentReferenceDate(_charge, paidAt = new Date()) {
+  const parsedPaidAt = paidAt instanceof Date ? paidAt : (paidAt ? new Date(paidAt) : new Date());
+  return Number.isNaN(parsedPaidAt.getTime()) ? new Date() : parsedPaidAt;
 }
 
 function normalizeAcademicManualPaymentMethod(value) {

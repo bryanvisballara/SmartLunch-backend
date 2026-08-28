@@ -514,7 +514,7 @@ function buildParentFinanceConceptsFromCharges(charges = []) {
   }
 
   const individualCharges = pendingCharges.filter((charge) => (
-    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'].includes(String(charge.category || ''))
+    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'additional'].includes(String(charge.category || ''))
   ));
   if (individualCharges.length > 0) {
     return individualCharges.map(buildParentFinanceConceptFromCharge);
@@ -545,7 +545,7 @@ function resolveParentPayableCharge(charges = []) {
     (charge) => ['pending', 'overdue'].includes(String(charge.status || '').toLowerCase()),
   );
   const individualCharge = pendingCharges.find((charge) => (
-    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'].includes(String(charge.category || ''))
+    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'additional'].includes(String(charge.category || ''))
   ));
   if (individualCharge) {
     return individualCharge;
@@ -574,10 +574,10 @@ function buildParentFinancePlanCharges(charges = []) {
     if (status === 'cancelled') {
       return false;
     }
-    return ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'monthly_statement'].includes(category);
+    return ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'monthly_statement', 'additional'].includes(category);
   });
   const individualCharges = sorted.filter((charge) => (
-    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus'].includes(String(charge.category || '').toLowerCase())
+    ['annual_tuition', 'monthly_tuition', 'enrollment_bonus', 'additional'].includes(String(charge.category || '').toLowerCase())
   ));
   return individualCharges.length
     ? individualCharges
