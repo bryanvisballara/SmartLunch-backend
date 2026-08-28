@@ -761,8 +761,8 @@ body.admissions-route-active {
 html.staff-portal-chrome-route-active,
 body.staff-portal-chrome-route-active,
 body.staff-portal-chrome-route-active #root {
-  width: 100vw;
-  max-width: none;
+  width: 100%;
+  max-width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   margin: 0;

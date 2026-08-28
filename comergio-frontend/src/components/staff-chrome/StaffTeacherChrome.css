@@ -44,7 +44,11 @@
   height: 100dvh;
   max-height: 100vh;
   max-height: 100dvh;
-  padding: 1rem 0.85rem;
+  padding:
+    calc(1rem + env(safe-area-inset-top, 0px))
+    0.85rem
+    calc(1rem + env(safe-area-inset-bottom, 0px))
+    0.85rem;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -260,8 +264,12 @@ button.staff-teacher-chrome__nav-item,
   align-items: center;
   justify-content: flex-start;
   gap: 0.85rem;
-  min-height: 72px;
-  padding: 0.7rem 1.25rem;
+  min-height: calc(72px + env(safe-area-inset-top, 0px));
+  padding:
+    calc(0.7rem + env(safe-area-inset-top, 0px))
+    max(1.25rem, env(safe-area-inset-right, 0px))
+    0.7rem
+    max(1.25rem, env(safe-area-inset-left, 0px));
   border-bottom: 1px solid #e8edf5;
   background: #ffffff;
 }
@@ -506,11 +514,11 @@ button.staff-teacher-chrome__nav-item,
 }
 
 @media (max-width: 900px) {
-  .staff-teacher-chrome__frame {
+  .staff-teacher-chrome__frame:not(.staff-portal-shell--mobile-nav) {
     grid-template-columns: 1fr;
   }
 
-  .staff-teacher-chrome__rail {
+  .staff-teacher-chrome__frame:not(.staff-portal-shell--mobile-nav) .staff-teacher-chrome__rail {
     position: static;
     height: auto;
     max-height: none;
@@ -525,7 +533,7 @@ button.staff-teacher-chrome__nav-item,
   display: none;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1024px) {
   .staff-portal-shell--mobile-nav.staff-teacher-chrome__frame {
     grid-template-columns: 1fr;
   }

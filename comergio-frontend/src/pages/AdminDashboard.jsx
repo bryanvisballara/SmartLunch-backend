@@ -221,8 +221,11 @@ const HISTORY_PAYMENT_METHOD_OPTIONS = [
   { value: 'cash', label: 'Efectivo' },
   { value: 'qr', label: 'QR' },
   { value: 'dataphone', label: 'Datáfono' },
+  { value: 'transfer', label: 'Transferencia' },
   { value: 'bold', label: 'Bold' },
   { value: 'epayco', label: 'ePayco' },
+  { value: 'daviplata', label: 'DaviPlata' },
+  { value: 'bancolombia', label: 'Bancolombia' },
   { value: 'system', label: 'Sistema' },
   { value: 'school_billing', label: 'Cuenta de cobro colegio' },
 ];
@@ -6097,7 +6100,7 @@ function AdminDashboard() {
                   icon: 'swap',
                   label: 'Ingresos - egresos',
                   value: homeData?.utilityNet ?? homeData?.utilityNetMonth,
-                  hint: 'Ventas (efectivo + QR + datáfono) + recargas - costos fijos - variables',
+                  hint: 'Efectivo guardado (cierres de cafeterías) + datáfono + transferencia/QR + recargas − costos fijos − costos variables',
                 },
               ].map((metric) => (
                 <div className={`admin-accounting__kpi tone-${metric.tone}`} key={metric.label}>

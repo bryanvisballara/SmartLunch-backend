@@ -94,6 +94,8 @@ export default function RectoriaPortalSidebar({
   staffAnnouncementsUnreadCount = 0,
   onSectionChange,
   onExpandedGroupChange,
+  onClose,
+  showCloseButton = false,
   teamSubnav = null,
   admissionsSubnav = null,
   academicManagementSubnav = null,
@@ -170,6 +172,7 @@ export default function RectoriaPortalSidebar({
     }
     if (!itemHasNestedSubnav(groupKey, sectionKey)) {
       setExpandedNestedSection('');
+      onClose?.();
     }
   };
 
@@ -191,6 +194,7 @@ export default function RectoriaPortalSidebar({
 
     onSectionChange(itemKey);
     setExpandedNestedSection('');
+    onClose?.();
   };
 
   const handleGroupToggle = (groupKey, items = []) => {
@@ -212,6 +216,7 @@ export default function RectoriaPortalSidebar({
     <aside
       className="rectoria-rail staff-teacher-chrome__rail"
       aria-label={isCoordinationPortal ? 'Navegación de coordinación' : (isDireccionPortal ? 'Navegación de dirección' : 'Navegación de rectoría')}
+      id="staff-portal-nav"
     >
       <div className="staff-teacher-chrome__rail-brand">
         <div className="staff-teacher-chrome__rail-brand-copy">
@@ -221,6 +226,16 @@ export default function RectoriaPortalSidebar({
             <span>Conectamos tu colegio</span>
           </div>
         </div>
+        {showCloseButton ? (
+          <button
+            aria-label="Cerrar menú"
+            className="staff-portal-shell__nav-close"
+            onClick={() => onClose?.()}
+            type="button"
+          >
+            ×
+          </button>
+        ) : null}
       </div>
       <nav className="rectoria-rail__nav staff-teacher-chrome__rail-nav">
         {nav.map((entry) => {
@@ -256,7 +271,10 @@ export default function RectoriaPortalSidebar({
                   informa: badgeCounts.academyInforma,
                 }}
                 key={entry.key}
-                onSelect={(sectionKey) => onSectionChange(sectionKey)}
+                onSelect={(sectionKey) => {
+                  onSectionChange(sectionKey);
+                  onClose?.();
+                }}
               />
             );
           }

@@ -3208,6 +3208,7 @@ function RectoriaDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeSection, setActiveSection] = useState('overview');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [expandedSidebarGroup, setExpandedSidebarGroup] = useState('');
   const [activeAcademicManagementSection, setActiveAcademicManagementSection] = useState('grades_courses');
   const isAcademicScheduleViewActive = (activeSection === 'students' && activeAcademicManagementSection === 'schedule')
@@ -3398,6 +3399,25 @@ function RectoriaDashboard() {
     !selectedCommunicationAuthor.isDefault
     || communicationAuthors.some((author) => String(author._id) !== String(selectedCommunicationAuthor._id))
   );
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      return undefined;
+    }
+
+    const onEscape = (event) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', onEscape);
+    document.body.classList.add('staff-portal-mobile-nav-open');
+    return () => {
+      document.removeEventListener('keydown', onEscape);
+      document.body.classList.remove('staff-portal-mobile-nav-open');
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     if (activeSection === 'communications') {
@@ -9381,7 +9401,15 @@ function RectoriaDashboard() {
   }
 
   return (
-    <section className="rectoria-shell staff-teacher-chrome__frame">
+    <section className={`rectoria-shell staff-teacher-chrome__frame staff-portal-shell staff-portal-shell--mobile-nav${mobileNavOpen ? ' is-nav-open' : ''}`}>
+      <button
+        aria-hidden={!mobileNavOpen}
+        aria-label="Cerrar menú"
+        className={`staff-portal-shell__nav-backdrop${mobileNavOpen ? ' is-visible' : ''}`}
+        onClick={() => setMobileNavOpen(false)}
+        tabIndex={mobileNavOpen ? 0 : -1}
+        type="button"
+      />
       <RectoriaPortalSidebar
         activeSection={activeSection}
         admissionsSubnav={(
@@ -9391,7 +9419,10 @@ function RectoriaDashboard() {
                 key={option.key}
                 className={`rectoria-sidebar-subitem${activeAdmissionsView === option.key ? ' is-active' : ''}`}
                 type="button"
-                onClick={() => setActiveAdmissionsView(option.key)}
+                onClick={() => {
+                  setActiveAdmissionsView(option.key);
+                  setMobileNavOpen(false);
+                }}
               >
                 <span>{option.label}</span>
               </button>
@@ -9405,7 +9436,10 @@ function RectoriaDashboard() {
                 key={option.key}
                 className={`rectoria-sidebar-subitem${activeAcademicManagementSection === option.key ? ' is-active' : ''}`}
                 type="button"
-                onClick={() => setActiveAcademicManagementSection(option.key)}
+                onClick={() => {
+                  setActiveAcademicManagementSection(option.key);
+                  setMobileNavOpen(false);
+                }}
               >
                 <span>{option.label}</span>
               </button>
@@ -9416,8 +9450,10 @@ function RectoriaDashboard() {
         isCoordinationPortal={isCoordinationPortal}
         isDireccionPortal={isDireccionPortal}
         matriculaAuthorizationPendingCount={isDireccionPortal ? 0 : matriculaAuthorizationPendingCount}
+        onClose={() => setMobileNavOpen(false)}
         portalLabel={institutionalHeaderConfig.portalKicker}
         schoolName={schoolName}
+        showCloseButton
         studentsMissingPlacementCount={studentsMissingPlacementCount}
         communityReportsPendingCount={communityReportsPendingCount}
         publicationApprovalsPendingCount={pendingCommunicationRequests.length}
@@ -9431,7 +9467,10 @@ function RectoriaDashboard() {
                 key={group.value}
                 className={`rectoria-sidebar-subitem${selectedTeamRole === group.value ? ' is-active' : ''}`}
                 type="button"
-                onClick={() => setSelectedTeamRole(group.value)}
+                onClick={() => {
+                  setSelectedTeamRole(group.value);
+                  setMobileNavOpen(false);
+                }}
               >
                 <span>{group.label}</span>
                 <strong>{group.count}</strong>
@@ -9442,7 +9481,10 @@ function RectoriaDashboard() {
                 key={item.key}
                 className={`rectoria-sidebar-subitem${selectedTeamRole === item.key ? ' is-active' : ''}`}
                 type="button"
-                onClick={() => setSelectedTeamRole(item.key)}
+                onClick={() => {
+                  setSelectedTeamRole(item.key);
+                  setMobileNavOpen(false);
+                }}
               >
                 <span>{item.label}</span>
                 <strong>{item.key === 'students_accounts' ? directoryCounts.students : directoryCounts.parents}</strong>
@@ -9456,6 +9498,7 @@ function RectoriaDashboard() {
         <InstitutionalPortalHeader
           enableNotifications
           helperText={institutionalHeaderConfig.helperText}
+          navOpen={mobileNavOpen}
           onNotificationNavigate={(sectionKey) => {
             if (sectionKey === 'communications' || sectionKey === 'approvals') {
               setActiveSection(sectionKey === 'approvals' ? 'publication_approvals' : 'family_feed');
@@ -9466,9 +9509,11 @@ function RectoriaDashboard() {
             }
           }}
           onRefresh={() => loadPortal({ silent: true })}
+          onToggleNav={() => setMobileNavOpen((current) => !current)}
           portalKicker={institutionalHeaderConfig.portalKicker}
           refreshDisabled={refreshing || backgroundLoading || busy}
           refreshLabel={institutionalRefreshLabel}
+          showNavToggle
           userName={institutionalUserName}
         />
 

@@ -12,6 +12,7 @@ const WalletTransaction = require('../models/walletTransaction.model');
 const Category = require('../models/category.model');
 const Supplier = require('../models/supplier.model');
 const AccountingFeeSetting = require('../models/accountingFeeSetting.model');
+const DailyClosure = require('../models/dailyClosure.model');
 const User = require('../models/user.model');
 
 const router = express.Router();
@@ -1320,7 +1321,25 @@ router.get('/admin-home', async (req, res) => {
     }, 0);
     const topupsAccountingTotal = (topupsRaw || []).reduce((sum, topup) => sum + Number(topup?.amount || 0), 0);
     const utilityTheoreticalMonth = Number(utilityAccounting || 0) - totalFixedCosts;
-    const utilityNetMonth = salesCashQrDataphoneTotal + topupsAccountingTotal - totalFixedCosts - totalVariableCosts;
+
+    const accountingClosureFilter = {
+      schoolId,
+      date: { $gte: accountingFrom.dayKey, $lte: accountingTo.dayKey },
+    };
+    if (storeFilter) {
+      accountingClosureFilter.storeId = storeFilter;
+    }
+    const accountingClosures = await DailyClosure.find(accountingClosureFilter)
+      .select('date storeId totalCashSaved systemDataphone systemTransfer systemQr')
+      .lean();
+    const cashSavedTotal = (accountingClosures || []).reduce((sum, row) => sum + Number(row.totalCashSaved || 0), 0);
+    const closureDataphoneTotal = (accountingClosures || []).reduce((sum, row) => sum + Number(row.systemDataphone || 0), 0);
+    const closureTransferQrTotal = (accountingClosures || []).reduce(
+      (sum, row) => sum + Number(row.systemTransfer || 0) + Number(row.systemQr || 0),
+      0
+    );
+    const realMoneyInTotal = cashSavedTotal + closureDataphoneTotal + closureTransferQrTotal + topupsAccountingTotal;
+    const utilityNetMonth = realMoneyInTotal - totalFixedCosts - totalVariableCosts;
     const aiRecommendations = buildAiRecommendations({
       topStudents: topStudentsRaw,
       lowStockProducts,
@@ -1348,6 +1367,10 @@ router.get('/admin-home', async (req, res) => {
       salesNet: salesMonthNetTotal,
       salesCashQrDataphone: salesCashQrDataphoneTotal,
       topupsAccounting: topupsAccountingTotal,
+      cashSavedTotal,
+      closureDataphoneTotal,
+      closureTransferQrTotal,
+      realMoneyInTotal,
       paymentFeesMonthTotal,
       paymentFeesTotal: paymentFeesMonthTotal,
       utilityToday,
