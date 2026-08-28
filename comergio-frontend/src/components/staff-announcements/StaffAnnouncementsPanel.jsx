@@ -52,6 +52,16 @@ function formatSenderRole(role) {
   return ROLE_LABEL_BY_VALUE[key] || key;
 }
 
+function formatSentAudience(item = {}) {
+  const roles = (Array.isArray(item.targetRoles) ? item.targetRoles : [])
+    .map((role) => ROLE_LABEL_BY_VALUE[role] || role)
+    .filter(Boolean);
+  if (roles.length) {
+    return roles.join(', ');
+  }
+  return 'Equipo seleccionado';
+}
+
 function formatPersonName(name) {
   const raw = String(name || '').trim();
   if (!raw) return 'Docente';
@@ -237,6 +247,10 @@ export default function StaffAnnouncementsPanel({
   const teacherDirectory = metaQuery.data?.data?.teachers || metaQuery.data?.teachers || [];
   const recipients = recipientsQuery.data?.data?.recipients || recipientsQuery.data?.recipients || [];
   const recipientSummary = recipientsQuery.data?.data?.summary || recipientsQuery.data?.summary || null;
+  const selectedSentItem = sentItems.find((item) => item.id === selectedSentId)
+    || recipientsQuery.data?.data?.announcement
+    || recipientsQuery.data?.announcement
+    || null;
   const selectedRoleCount = (composeDraft.targetRoles || []).length;
   const teachersRoleSelected = (composeDraft.targetRoles || []).includes('teacher');
   const selectedTeacherIdSet = useMemo(
@@ -826,14 +840,20 @@ export default function StaffAnnouncementsPanel({
       ) : null}
 
       {canManage ? (
-        <div className="staff-announcements-sent">
-          <h3>Enviados y confirmaciones</h3>
+        <div className={`staff-announcements-sent${selectedSentId ? ' is-reading' : ''}`}>
+          <div className="staff-announcements-sent__head">
+            <div>
+              <h3>Bandeja de enviados</h3>
+              <p>Revisa el contenido que ya enviaste y quién lo confirmó como leído.</p>
+            </div>
+          </div>
           {sentQuery.isLoading ? <p className="staff-announcements-empty">Cargando enviados...</p> : null}
           {!sentQuery.isLoading && sentItems.length === 0 ? (
             <p className="staff-announcements-empty">Aún no has enviado comunicados internos al equipo.</p>
           ) : null}
+          {sentItems.length ? (
           <div className="staff-announcements-sent__layout">
-            <div className="staff-announcements-sent__list">
+            <div className="staff-announcements-sent__list" role="listbox" aria-label="Comunicados enviados">
               {sentItems.map((item) => (
                 <button
                   className={`staff-announcements-sent-item${selectedSentId === item.id ? ' is-active' : ''}`}
@@ -850,31 +870,62 @@ export default function StaffAnnouncementsPanel({
             </div>
             <div className="staff-announcements-sent__detail">
               {!selectedSentId ? (
-                <p className="staff-announcements-empty">Selecciona un comunicado interno para ver quién lo leyó.</p>
-              ) : recipientsQuery.isLoading ? (
-                <p className="staff-announcements-empty">Cargando confirmaciones...</p>
+                <p className="staff-announcements-empty">Selecciona un enviado para ver el mensaje y las confirmaciones de lectura.</p>
+              ) : recipientsQuery.isLoading && !selectedSentItem ? (
+                <p className="staff-announcements-empty">Cargando comunicado...</p>
               ) : (
                 <>
-                  <div className="staff-announcements-summary">
-                    <span>Total {recipientSummary?.total || recipients.length}</span>
-                    <span>Leídos {recipientSummary?.read || recipients.filter((entry) => entry.isRead).length}</span>
-                    <span>Pendientes {recipientSummary?.unread || recipients.filter((entry) => !entry.isRead).length}</span>
-                  </div>
-                  <div className="staff-announcements-recipients">
-                    {recipients.map((entry) => (
-                      <div className={`staff-announcements-recipient${entry.isRead ? ' is-read' : ''}`} key={entry.id}>
-                        <div>
-                          <strong>{entry.name}</strong>
-                          <small>{entry.roleLabel || entry.role}</small>
-                        </div>
-                        <span>{entry.isRead ? `Leído · ${formatAnnouncementDate(entry.readAt)}` : 'Sin confirmar'}</span>
+                  <div className="staff-announcements-sent__message">
+                    <div className="staff-announcements-sent__message-head">
+                      <div>
+                        <span className="staff-announcements-sent__kicker">Enviado</span>
+                        <h4>{selectedSentItem?.title || 'Comunicado interno'}</h4>
+                        <small>
+                          {formatAnnouncementDate(selectedSentItem?.publishedAt)}
+                          {selectedSentItem?.senderName ? ` · ${selectedSentItem.senderName}` : ''}
+                        </small>
+                        <small>Para: {formatSentAudience(selectedSentItem)}</small>
                       </div>
-                    ))}
+                      <button
+                        className="staff-announcements-btn staff-announcements-btn--ghost"
+                        onClick={() => setSelectedSentId('')}
+                        type="button"
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+                    <p className="staff-announcements-sent__body">
+                      {String(selectedSentItem?.body || '').trim() || 'Este comunicado no tiene contenido.'}
+                    </p>
+                  </div>
+                  <div className="staff-announcements-sent__reads">
+                    <h5>Confirmaciones de lectura</h5>
+                    <div className="staff-announcements-summary">
+                      <span>Total {recipientSummary?.total || recipients.length}</span>
+                      <span>Leídos {recipientSummary?.read || recipients.filter((entry) => entry.isRead).length}</span>
+                      <span>Pendientes {recipientSummary?.unread || recipients.filter((entry) => !entry.isRead).length}</span>
+                    </div>
+                    {recipientsQuery.isLoading ? (
+                      <p className="staff-announcements-empty">Cargando confirmaciones...</p>
+                    ) : (
+                      <div className="staff-announcements-recipients">
+                        {recipients.map((entry) => (
+                          <div className={`staff-announcements-recipient${entry.isRead ? ' is-read' : ''}`} key={entry.id}>
+                            <div>
+                              <strong>{entry.name}</strong>
+                              <small>{entry.roleLabel || entry.role}</small>
+                            </div>
+                            <span>{entry.isRead ? `Leído · ${formatAnnouncementDate(entry.readAt)}` : 'Sin confirmar'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
             </div>
           </div>
+          ) : null}
         </div>
       ) : null}
     </section>

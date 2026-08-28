@@ -1154,7 +1154,7 @@ function SuperAdminPortal() {
               <div className="sa-panel__head">
                 <div>
                   <h2>Comergio Informa</h2>
-                  <p>Noticias con título, texto e imagen generados con OpenAI para previsualizar antes de publicar.</p>
+                  <p>Desde el 29 de agosto se publican solas: 2 por semana (lunes y jueves, 7:00 a.m.). Aquí puedes revisar o publicar a mano si hace falta.</p>
                 </div>
               </div>
               <InformaDraftsPanel />

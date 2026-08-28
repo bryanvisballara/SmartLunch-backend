@@ -48,6 +48,10 @@ const AUTO_AUTHOR = {
   photoUrl: INFORMA_PUBLIC_AUTHOR_PHOTO,
 };
 
+const AUTO_PUBLISH_START_DATE = String(process.env.INFORMA_AUTO_PUBLISH_START || '2026-08-29').trim();
+const WEEKLY_PUBLISH_LIMIT = Math.max(1, Number(process.env.INFORMA_AUTO_WEEKLY_LIMIT || 2) || 2);
+const WEEKLY_SLOT_WEEKDAYS = [1, 4];
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -88,6 +92,14 @@ function buildGoogleNewsRssUrl(query) {
   return `https://news.google.com/rss/search?${params.toString()}`;
 }
 
+function weekdayFromDateKey(dateKey) {
+  const [year, month, day] = String(dateKey || '').split('-').map(Number);
+  if (!year || !month || !day) {
+    return 0;
+  }
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
 function getBogotaParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota',
@@ -99,17 +111,65 @@ function getBogotaParts(date = new Date()) {
     hour12: false,
   });
   const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  const dateKey = `${parts.year}-${parts.month}-${parts.day}`;
   return {
-    dateKey: `${parts.year}-${parts.month}-${parts.day}`,
+    dateKey,
     hour: Number(parts.hour),
     minute: Number(parts.minute),
+    weekday: weekdayFromDateKey(dateKey),
   };
 }
 
+function addDaysToDateKey(dateKey, days) {
+  const [year, month, day] = String(dateKey || '').split('-').map(Number);
+  if (!year || !month || !day) {
+    return '';
+  }
+  const next = new Date(Date.UTC(year, month - 1, day + Number(days || 0)));
+  return next.toISOString().slice(0, 10);
+}
+
+function getBogotaWeekStartKey(date = new Date()) {
+  const { dateKey, weekday } = getBogotaParts(date);
+  const daysFromMonday = (weekday + 6) % 7;
+  return addDaysToDateKey(dateKey, -daysFromMonday);
+}
+
+function bogotaDateToUtc(dateKey, hour = 0, minute = 0) {
+  return new Date(`${dateKey}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00-05:00`);
+}
+
+function isAutoPublishMode(date = new Date()) {
+  const { dateKey } = getBogotaParts(date);
+  return Boolean(AUTO_PUBLISH_START_DATE) && dateKey >= AUTO_PUBLISH_START_DATE;
+}
+
+function isWeeklyAutoSlotDay(parts) {
+  if (WEEKLY_SLOT_WEEKDAYS.includes(parts.weekday)) {
+    return true;
+  }
+  return parts.dateKey === AUTO_PUBLISH_START_DATE;
+}
+
 function resolveSlotKey(date = new Date()) {
-  const { dateKey, hour, minute } = getBogotaParts(date);
-  if (hour === 7 && minute <= 14) return `${dateKey}-07`;
-  if (hour === 12 && minute <= 14) return `${dateKey}-12`;
+  const parts = getBogotaParts(date);
+  const { dateKey, hour, minute } = parts;
+  if (hour !== 7 && hour !== 12) {
+    return '';
+  }
+  if (minute > 14) {
+    return '';
+  }
+
+  if (!isAutoPublishMode(date)) {
+    if (hour === 7) return `${dateKey}-07`;
+    if (hour === 12) return `${dateKey}-12`;
+    return '';
+  }
+
+  if (hour === 7 && isWeeklyAutoSlotDay(parts)) {
+    return `${dateKey}-07`;
+  }
   return '';
 }
 
@@ -652,11 +712,7 @@ async function listDrafts({ limit = 30 } = {}) {
   return drafts.map(serializeAdminDraft);
 }
 
-async function publishDraft({ schoolId, userId, role, postId }) {
-  if (!canPublishInforma(role)) {
-    throw new Error('Solo Gerencia Comergio puede publicar borradores de Comergio Informa.');
-  }
-
+async function publishDraftById(postId, { schoolId, userId } = {}) {
   const publishedAt = new Date();
   const postDoc = await runInControlDb(async () => {
     const draft = await InformaPost.findOne({ _id: postId, informaEntity: 'post', status: 'draft' });
@@ -687,7 +743,54 @@ async function publishDraft({ schoolId, userId, role, postId }) {
     });
   });
 
-  return serializePostForViewer(postDoc, schoolId, userId, role);
+  return serializePostForViewer(postDoc, schoolId || AUTO_AUTHOR.schoolId, userId || AUTO_AUTHOR.userId, 'super_admin');
+}
+
+async function publishDraft({ schoolId, userId, role, postId }) {
+  if (!canPublishInforma(role)) {
+    throw new Error('Solo Gerencia Comergio puede publicar borradores de Comergio Informa.');
+  }
+
+  return publishDraftById(postId, { schoolId, userId });
+}
+
+async function countAutoPublishedThisWeek(date = new Date()) {
+  const weekStartKey = getBogotaWeekStartKey(date);
+  const weekEndKey = addDaysToDateKey(weekStartKey, 7);
+  if (!weekStartKey || !weekEndKey) {
+    return 0;
+  }
+
+  return runInControlDb(() => InformaPost.countDocuments({
+    informaEntity: 'post',
+    status: 'published',
+    'auto.enabled': true,
+    publishedAt: {
+      $gte: bogotaDateToUtc(weekStartKey),
+      $lt: bogotaDateToUtc(weekEndKey),
+    },
+  }));
+}
+
+async function claimOldestDraftForSlot(slotKey) {
+  return runInControlDb(async () => {
+    const draft = await InformaPost.findOne({
+      informaEntity: 'post',
+      status: 'draft',
+    }).sort({ createdAt: 1 });
+    if (!draft) {
+      return null;
+    }
+    draft.auto = {
+      ...(draft.auto?.toObject?.() || draft.auto || {}),
+      enabled: true,
+      slotKey,
+      generatedAt: draft.auto?.generatedAt || draft.createdAt || new Date(),
+      model: draft.auto?.model || '',
+    };
+    await draft.save();
+    return draft;
+  });
 }
 
 async function discardDraft({ role, postId }) {
@@ -710,7 +813,12 @@ async function discardDraft({ role, postId }) {
 async function runScheduledInformaDraftJob(now = new Date()) {
   const slotKey = resolveSlotKey(now);
   if (!slotKey) {
-    return { ran: false, reason: 'Fuera de ventana horaria (07:00 o 12:00 America/Bogota).' };
+    return {
+      ran: false,
+      reason: isAutoPublishMode(now)
+        ? 'Fuera de ventana (lunes y jueves 07:00 America/Bogota, 2 por semana).'
+        : 'Fuera de ventana horaria (07:00 o 12:00 America/Bogota).',
+    };
   }
 
   const existing = await runInControlDb(() => InformaPost.findOne({
@@ -722,12 +830,56 @@ async function runScheduledInformaDraftJob(now = new Date()) {
     return { ran: false, reason: 'Slot ya procesado.', slotKey };
   }
 
+  const autoPublish = isAutoPublishMode(now);
+  if (autoPublish) {
+    const weeklyCount = await countAutoPublishedThisWeek(now);
+    if (weeklyCount >= WEEKLY_PUBLISH_LIMIT) {
+      return {
+        ran: false,
+        reason: `Tope semanal alcanzado (${WEEKLY_PUBLISH_LIMIT} publicaciones).`,
+        slotKey,
+        weeklyCount,
+      };
+    }
+
+    const reusedDraft = await claimOldestDraftForSlot(slotKey);
+    if (reusedDraft) {
+      const published = await publishDraftById(reusedDraft._id);
+      return {
+        ran: true,
+        published: true,
+        reusedDraft: true,
+        slotKey,
+        draft: serializeAdminDraft({ ...reusedDraft.toObject(), status: 'published', publishedAt: new Date() }),
+        post: published,
+      };
+    }
+  }
+
   const result = await generateInformaDraft({ slotKey, force: false });
-  return { ran: true, slotKey, ...result };
+  if (result?.skipped) {
+    return { ran: false, slotKey, ...result };
+  }
+
+  if (autoPublish && result?.draft?.id) {
+    const published = await publishDraftById(result.draft.id);
+    return {
+      ran: true,
+      published: true,
+      reusedDraft: false,
+      slotKey,
+      ...result,
+      post: published,
+    };
+  }
+
+  return { ran: true, published: false, slotKey, ...result };
 }
 
 module.exports = {
   INFORMA_TOPICS,
+  AUTO_PUBLISH_START_DATE,
+  WEEKLY_PUBLISH_LIMIT,
   resolveSlotKey,
   getBogotaParts,
   generateInformaDraft,

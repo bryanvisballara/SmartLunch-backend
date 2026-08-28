@@ -2,7 +2,22 @@ import './ClickableOptionPicker.css';
 
 export default function ClickableOptionPicker({ label, options = [], selectedValues = [], emptyLabel, onAdd, onRemove }) {
   const selectedSet = new Set((selectedValues || []).map((value) => String(value)));
-  const availableOptions = (options || []).filter((option) => !selectedSet.has(String(option.value)));
+  const selectedOptions = (options || []).filter((option) => selectedSet.has(String(option.value)));
+  const coveredCourseIds = new Set(
+    selectedOptions
+      .filter((option) => option.kind === 'classroom_group')
+      .flatMap((option) => (Array.isArray(option.courseIds) ? option.courseIds : []).map(String))
+  );
+  const availableOptions = (options || []).filter((option) => {
+    if (selectedSet.has(String(option.value))) {
+      return false;
+    }
+    const courseIds = (Array.isArray(option.courseIds) ? option.courseIds : []).map(String);
+    if (option.kind === 'course' && courseIds.length > 0 && courseIds.every((courseId) => coveredCourseIds.has(courseId))) {
+      return false;
+    }
+    return true;
+  });
   const groupOptions = availableOptions.filter((option) => option.kind === 'classroom_group');
   const otherOptions = availableOptions.filter((option) => option.kind !== 'classroom_group');
   const sections = groupOptions.length > 0

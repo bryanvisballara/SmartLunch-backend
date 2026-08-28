@@ -1016,16 +1016,37 @@
   color: #0f2744;
 }
 
-.staff-announcements-sent__layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.1fr);
-  gap: 0.9rem;
+.staff-announcements-sent__head p {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-size: 0.88rem;
 }
 
-.staff-announcements-sent__list,
-.staff-announcements-recipients {
+.staff-announcements-sent__layout {
   display: grid;
-  gap: 0.55rem;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  min-height: 28rem;
+  max-height: min(70vh, 640px);
+  overflow: hidden;
+  border: 1px solid #e5e9f0;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.staff-announcements-sent.is-reading .staff-announcements-sent__layout {
+  grid-template-columns: 188px minmax(0, 1fr);
+}
+
+.staff-announcements-sent__list {
+  display: grid;
+  align-content: start;
+  gap: 0.2rem;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.45rem;
+  border-right: 1px solid #e5e9f0;
+  background: #f8fafc;
 }
 
 .staff-announcements-sent-item,
@@ -1039,13 +1060,83 @@
 }
 
 .staff-announcements-sent-item {
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
   cursor: pointer;
   font: inherit;
 }
 
+.staff-announcements-sent-item strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #0f2744;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 .staff-announcements-sent-item.is-active {
-  border-color: #60a5fa;
+  border-color: transparent;
   background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.staff-announcements-sent__detail {
+  display: grid;
+  align-content: start;
+  gap: 1.1rem;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.1rem 1.2rem 1.3rem;
+}
+
+.staff-announcements-sent__message-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.staff-announcements-sent__message-head h4 {
+  margin: 0.15rem 0 0.35rem;
+  color: #0f172a;
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
+.staff-announcements-sent__message-head .staff-announcements-btn {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.staff-announcements-sent__kicker {
+  display: inline-flex;
+  color: #2563eb;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.staff-announcements-sent__body {
+  margin: 0.85rem 0 0;
+  color: #1e293b;
+  font-size: 0.98rem;
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.staff-announcements-sent__reads h5 {
+  margin: 0 0 0.65rem;
+  color: #0f2744;
+  font-size: 0.92rem;
 }
 
 .staff-announcements-summary {
@@ -1062,6 +1153,11 @@
   padding: 0.25rem 0.65rem;
   font-size: 0.82rem;
   font-weight: 600;
+}
+
+.staff-announcements-recipients {
+  display: grid;
+  gap: 0.45rem;
 }
 
 .staff-announcements-recipient {
@@ -1100,6 +1196,21 @@
 
   .staff-announcements-sent__layout {
     grid-template-columns: 1fr;
+    max-height: none;
+  }
+
+  .staff-announcements-sent.is-reading .staff-announcements-sent__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .staff-announcements-sent.is-reading .staff-announcements-sent__list {
+    display: none;
+  }
+
+  .staff-announcements-sent__list {
+    max-height: 14rem;
+    border-right: 0;
+    border-bottom: 1px solid #e5e9f0;
   }
 }
 
@@ -1117,6 +1228,10 @@
 
   .staff-announcements-btn {
     width: 100%;
+  }
+
+  .staff-announcements-sent__message-head .staff-announcements-btn {
+    width: auto;
   }
 
   .staff-announcements-teachers__list {

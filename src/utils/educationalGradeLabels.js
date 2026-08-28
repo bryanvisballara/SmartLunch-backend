@@ -19,6 +19,11 @@ function formatEducationalGradeLabel(value) {
     return kinderMatch[1] ? `Kinder ${kinderMatch[1]}` : 'Kinder';
   }
 
+  const kNumberMatch = normalized.match(/^k\s*(\d{1,2})$/);
+  if (kNumberMatch) {
+    return `Kinder ${kNumberMatch[1]}`;
+  }
+
   if (normalized === 'maternal') {
     return 'Maternal';
   }
@@ -46,7 +51,7 @@ function formatEducationalGradeLabel(value) {
   }
 
   if (normalized === 'infants' || normalized === 'infant') {
-    return 'Infant';
+    return 'Infants';
   }
 
   if (normalized === 'k grade' || normalized === 'kgrade' || normalized === 'k-grade') {

@@ -56,6 +56,8 @@ export function getFeeGradeAliases(value) {
 
   const kinderMatch = normalized.match(/^kinder[\s_-]*(\d{1,2})?$/i);
   if (kinderMatch) addEducationalLevelAliases(aliases, 'kinder', kinderMatch[1] || '');
+  const kNumberMatch = normalized.match(/^k[\s_-]*(\d{1,2})$/i);
+  if (kNumberMatch) addEducationalLevelAliases(aliases, 'kinder', kNumberMatch[1]);
 
   if (/^maternal$/i.test(normalized)) aliases.add('maternal');
   if (/^prep$/i.test(normalized)) aliases.add('prep');

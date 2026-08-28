@@ -108,11 +108,10 @@ export default function InformaDraftsPanel() {
     <section className="informa-drafts">
       <div className="informa-drafts__head">
         <div>
-          <span className="informa-drafts__kicker">Cola de revisión</span>
-          <h4>Previsualización de publicaciones</h4>
+          <span className="informa-drafts__kicker">Publicación automática</span>
+          <h4>Cola de Comergio Informa</h4>
           <p>
-            Genera una noticia con foto realista y título encima (estilo Instagram), lista para previsualizar.
-            Al generar, se archivan los borradores anteriores.
+            Desde el 29 de agosto se publican solas, 2 por semana: la primera el sábado 29 a las 7:00 a.m. y luego lunes y jueves a las 7:00 a.m. (hora Colombia). Si hay borradores, salen esos primero.
           </p>
         </div>
         <div className="informa-drafts__head-actions">
@@ -143,7 +142,7 @@ export default function InformaDraftsPanel() {
       {!loading && !generating && drafts.length === 0 ? (
         <div className="informa-drafts__empty">
           <p>No hay borradores pendientes.</p>
-          <span>Pulsa “Limpiar y generar” para crear una previsualización con imagen OpenAI.</span>
+          <span>El feed se alimenta solo dos veces por semana. Usa “Limpiar y generar” solo si quieres una previsualización extra.</span>
         </div>
       ) : null}
 

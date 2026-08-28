@@ -1829,6 +1829,10 @@
   gap: 18px;
 }
 
+.rectoria-communications-panel .family-feed {
+  padding-bottom: 8px;
+}
+
 .rectoria-panel-kicker {
   display: inline-flex;
   margin-bottom: 6px;
@@ -1843,6 +1847,8 @@
 .rectoria-engagement-list {
   display: grid;
   gap: 12px;
+  margin-top: 14px;
+  padding-right: 4px;
 }
 
 .rectoria-communication-card,
@@ -2183,18 +2189,44 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 16px max(16px, env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
   background: rgba(15, 23, 42, 0.48);
   backdrop-filter: blur(4px);
 }
 
 .rectoria-modal-card {
+  display: flex;
+  flex-direction: column;
   width: min(100%, 720px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
   padding: 24px;
+}
+
+.rectoria-modal-head,
+.rectoria-gio-schedule-hero {
+  position: sticky;
+  top: -24px;
+  z-index: 4;
+  flex: 0 0 auto;
+  margin: -24px -24px 0;
+  padding: 24px 24px 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.rectoria-gio-schedule-hero {
+  top: 0;
+  margin: 0;
 }
 
 .rectoria-modal-card--success {
@@ -2236,10 +2268,15 @@
 }
 
 .rectoria-modal-close {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.45rem 0.85rem;
   border: 0;
-  background: transparent;
-  color: #475569;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #0f172a;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .rectoria-modal-form {
@@ -7005,9 +7042,12 @@ button.rectoria-team-assignment-card.is-active {
 
 .rectoria-gio-schedule-modal {
   width: min(620px, calc(100vw - 2rem));
-  max-height: min(760px, calc(100vh - 2rem));
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
   padding: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid #ddd6fe;
   border-radius: 20px;
 }
@@ -7858,7 +7898,6 @@ button.rectoria-team-assignment-card.is-active {
   .rectoria-team-level-actions,
   .rectoria-billing-intro,
   .rectoria-fee-actions,
-  .rectoria-modal-head,
   .rectoria-modal-actions,
   .rectoria-bucket-head,
   .rectoria-bucket-entry,

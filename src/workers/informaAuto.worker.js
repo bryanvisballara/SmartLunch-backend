@@ -15,7 +15,8 @@ async function runInformaAutoCycle() {
   try {
     const result = await runScheduledInformaDraftJob(new Date());
     if (result?.ran) {
-      console.info(`[INFORMA_AUTO] draft generated slot=${result.slotKey} id=${result.draft?.id || 'n/a'}`);
+      const action = result.published ? 'published' : 'draft generated';
+      console.info(`[INFORMA_AUTO] ${action} slot=${result.slotKey} id=${result.draft?.id || result.post?.id || 'n/a'}`);
     }
   } catch (error) {
     const bogota = getBogotaParts(new Date());
@@ -35,7 +36,7 @@ function startInformaAutoWorker() {
     return;
   }
 
-  console.info('[INFORMA_AUTO] worker started (07:00 and 12:00 America/Bogota, 1 draft each)');
+  console.info('[INFORMA_AUTO] worker started (from 2026-08-29: auto-publish Mon/Thu 07:00 America/Bogota, max 2/week)');
   runInformaAutoCycle();
   intervalRef = setInterval(runInformaAutoCycle, POLL_INTERVAL_MS);
   if (typeof intervalRef.unref === 'function') {

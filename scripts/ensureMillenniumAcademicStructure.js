@@ -20,6 +20,7 @@ const DEFAULT_LEVELS = [
 
 const DEFAULT_GRADE_LEVELS = {
   maternal: 'preescolar',
+  infants: 'preescolar',
   kinder_1: 'preescolar',
   kinder_2: 'preescolar',
   kinder_3: 'preescolar',
@@ -41,7 +42,8 @@ const DEFAULT_GRADE_LEVELS = {
 
 const DEFAULT_GRADE_LABELS = {
   maternal: 'Maternal',
-  kinder_1: 'Kinder 1',
+  infants: 'Infants',
+  kinder_1: 'Kinder 2',
   kinder_2: 'Kinder 2',
   kinder_3: 'Kinder 3',
   kinder_4: 'Kinder 4',

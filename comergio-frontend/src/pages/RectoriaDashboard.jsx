@@ -14,6 +14,7 @@ import {
 } from '../lib/hrPlannerReview';
 import AdmissionsDashboard from './AdmissionsDashboard';
 import ClickableOptionPicker from '../components/audience/ClickableOptionPicker';
+import FamilyFeed from '../components/family-feed/FamilyFeed';
 import {
   addAudienceListValue,
   buildPublicationAudienceCourseOptions,
@@ -261,16 +262,20 @@ function formatFamilyFeedOrigin(item = {}) {
   return 'Institucional';
 }
 
-function formatFamilyFeedAudience(item = {}) {
+function formatFamilyFeedAudience(item = {}, formatCourseTargets) {
   const type = String(item.audienceType || 'general').trim();
   if (type === 'general') return 'Todo el colegio';
   if (type === 'grade') {
-    const grades = Array.isArray(item.gradeTargets) ? item.gradeTargets.filter(Boolean) : [];
-    return grades.length ? `Grado · ${grades.join(', ')}` : 'Por grado';
+    const grades = [...new Set((Array.isArray(item.gradeTargets) ? item.gradeTargets : [])
+      .map((grade) => formatEducationalGradeLabel(grade) || '')
+      .filter(Boolean))];
+    return grades.length ? grades.join(', ') : 'Por grado';
   }
   if (type === 'course' || type === 'course_students') {
-    const courses = Array.isArray(item.courseTargets) ? item.courseTargets.filter(Boolean) : [];
-    return courses.length ? `Curso · ${courses.join(', ')}` : 'Por curso';
+    if (typeof formatCourseTargets === 'function') {
+      return formatCourseTargets(item.courseTargets, item.courseTitle);
+    }
+    return 'Por curso';
   }
   if (type === 'individual') return 'Individual';
   return type || 'Audiencia';
@@ -10148,7 +10153,7 @@ function RectoriaDashboard() {
             </div>
             <div className="rectoria-approval-layout">
               <div className="rectoria-approval-list">
-                {pendingCommunicationRequests.length === 0 ? <p className="rectoria-empty-state">No hay solicitudes pendientes.</p> : pendingCommunicationRequests.map((request) => <button className={selectedCommunicationRequest?._id === request._id ? 'is-active' : ''} key={request._id} onClick={() => setSelectedCommunicationRequestId(request._id)} type="button"><strong>{request.title}</strong><span>{request.teacherName || 'Autor'}{request.publisherLabel ? ` · ${request.publisherLabel}` : ''} · {formatDateTime(request.submittedAt || request.createdAt)}</span><span>Curso: {formatCommunicationCourseTargets(request.courseTargets, request.courseTitle)}</span></button>)}
+                {pendingCommunicationRequests.length === 0 ? <p className="rectoria-empty-state">No hay solicitudes pendientes.</p> : pendingCommunicationRequests.map((request) => <button className={selectedCommunicationRequest?._id === request._id ? 'is-active' : ''} key={request._id} onClick={() => setSelectedCommunicationRequestId(request._id)} type="button"><strong>{request.title}</strong><span>{request.teacherName || 'Autor'}{request.publisherLabel ? ` · ${request.publisherLabel}` : ''} · {formatDateTime(request.submittedAt || request.createdAt)}</span><span>{formatCommunicationCourseTargets(request.courseTargets, request.courseTitle)}</span></button>)}
               </div>
               {!selectedCommunicationRequest ? <p className="rectoria-empty-state">Selecciona una solicitud para revisarla.</p> : <div className="rectoria-approval-editor"><div className="rectoria-communication-original"><h4>Original</h4><label>Título<input disabled readOnly value={selectedCommunicationRequest.originalTitle || selectedCommunicationRequest.title || ''} /></label><label>Mensaje<textarea disabled readOnly value={selectedCommunicationRequest.originalBody || selectedCommunicationRequest.body || ''} /></label><label>Curso solicitado<input disabled readOnly value={formatCommunicationCourseTargets(selectedCommunicationRequest.courseTargets, selectedCommunicationRequest.courseTitle)} /></label><div><h4>Adjuntos</h4><RectoriaCommunicationMediaPreview items={selectedCommunicationRequest.media || []} /></div></div><form className="rectoria-communication-form" onSubmit={(event) => event.preventDefault()}><h4>Versión a publicar</h4><label>Título<input value={communicationApprovalDraft.title} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={communicationApprovalDraft.body} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="rectoria-communication-form-grid"><label>Audiencia<select value={communicationApprovalDraft.audienceType} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{communicationApprovalDraft.audienceType === 'grade' ? <label>Grados<select multiple value={communicationApprovalDraft.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setCommunicationApprovalDraft)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}</div>{communicationApprovalDraft.audienceType === 'course' ? <ClickableOptionPicker emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno." label="Cursos" onAdd={(value) => onAddDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} onRemove={(value) => onRemoveDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} options={publicationAudienceCourseOptions} selectedValues={communicationApprovalDraft.courseTargets} /> : null}{communicationApprovalDraft.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={communicationApprovalDraft.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setCommunicationApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={communicationApprovalDraft.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setCommunicationApprovalDraft)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div><h4>Adjuntos a publicar</h4><RectoriaCommunicationMediaPreview items={communicationApprovalDraft.media || []} /></div><label>Notas de revisión<textarea value={communicationApprovalDraft.reviewNotes} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveCommunicationRequest} type="button">Aprobar y publicar</button><button className="btn" disabled={busy} onClick={onRejectCommunicationRequest} type="button">Rechazar</button></div></form></div>}
             </div>
@@ -10167,39 +10172,19 @@ function RectoriaDashboard() {
               </div>
               <strong className="rectoria-communication-count">{familyFeedCommunications.length} publicaciones</strong>
             </div>
-            <div className="rectoria-communications-list">
-              {familyFeedCommunications.length === 0 ? <p className="rectoria-empty-state">Aún no hay publicaciones en el feed de familias.</p> : familyFeedCommunications.map((item) => (
-                <article className="rectoria-communication-card" key={item._id}>
-                  <div>
-                    <span>{item.authorName || 'Institucional'} · {formatFamilyFeedOrigin(item)} · {formatFamilyFeedAudience(item)} · {formatDateTime(item.sentAt || item.createdAt)}</span>
-                    <h4>{item.title}</h4>
-                    <p>{item.body}</p>
-                  </div>
-                  {(item.media || []).length ? (
-                    <div className="rectoria-family-feed-media">
-                      {(item.media || []).slice(0, 4).map((mediaItem, index) => {
-                        const previewSrc = resolveApiAssetUrl(mediaItem.thumbUrl || mediaItem.src);
-                        return (
-                          <a
-                            className="rectoria-family-feed-media-thumb"
-                            href={mediaItem.src || '#'}
-                            key={`${item._id}-media-${index}`}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            {mediaItem.kind === 'video' ? <span>Video</span> : <img alt={mediaItem.alt || `Adjunto ${index + 1}`} src={previewSrc} />}
-                          </a>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                  <div className="rectoria-communication-actions">
-                    <button onClick={() => setCommunicationEngagementModal({ open: true, type: 'likes', item })} type="button">{item.likesCount || item.likes?.length || 0} likes</button>
-                    <button onClick={() => setCommunicationEngagementModal({ open: true, type: 'comments', item })} type="button">{item.commentsCount || item.comments?.length || 0} comentarios</button>
-                  </div>
-                </article>
-              ))}
-            </div>
+            <FamilyFeed
+              emptyLabel="Aún no hay publicaciones en el feed de familias."
+              getSubtitle={(item) => (
+                [
+                  formatDateTime(item.sentAt || item.createdAt),
+                  formatFamilyFeedOrigin(item),
+                  formatFamilyFeedAudience(item, formatCommunicationCourseTargets),
+                ].filter(Boolean).join(' · ')
+              )}
+              items={familyFeedCommunications}
+              onOpenComments={(item) => setCommunicationEngagementModal({ open: true, type: 'comments', item })}
+              onOpenLikes={(item) => setCommunicationEngagementModal({ open: true, type: 'likes', item })}
+            />
           </section>
         </div>
       ) : null}

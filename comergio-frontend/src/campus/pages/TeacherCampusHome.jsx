@@ -7629,20 +7629,10 @@ function TeacherCampusHome({ forcePreview = false }) {
         emailSubject: title,
         audienceType: 'course',
         subject: subjectLabel,
-        courseTargets: [
-          ...selectedAudienceOptions.map((option) => option.value),
-          ...selectedAudienceOptions.map((option) => option.label),
-          ...selectedCourses.flatMap((course) => [
-            getCourseGroupLabel(course),
-            course.title,
-            course.studentGradeKey,
-            course.gradeLevel,
-            course.section,
-            `${course.gradeLevel || ''}${course.section || ''}`,
-            `${course.studentGradeKey || ''}${course.section || ''}`,
-          ]),
-        ].filter(Boolean),
-        gradeTargets: selectedCourses.flatMap((course) => [course.studentGradeKey, course.gradeLevel]).filter(Boolean),
+        courseTargets: [...new Set(selectedAudienceOptions.map((option) => option.value).filter(Boolean))],
+        gradeTargets: [...new Set(selectedCourses
+          .map((course) => String(course.studentGradeKey || course.gradeLevel || '').trim())
+          .filter(Boolean))],
         media,
         channels: { push: true, email: false },
       });

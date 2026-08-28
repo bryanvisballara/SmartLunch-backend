@@ -1,3 +1,5 @@
+import { formatEducationalGradeLabel, isRawInternalGradeToken } from './educationalGradeLabels';
+
 export const CLASSROOM_GROUP_TARGET_PREFIX = 'classroom_group:';
 
 export function classroomGroupTargetValue(groupKey) {
@@ -134,78 +136,310 @@ export function mapTargetsToAudienceOptionValues(targets = [], options = []) {
   return mapped;
 }
 
-export function compactPublicationCourseTargetLabels(targets = [], options = [], fallbackTitle = '') {
-  const optionList = Array.isArray(options) ? options : [];
-  const optionByValue = new Map(optionList.map((option) => [normalizeAudienceText(option.value), option]));
-  const optionByLabel = new Map(optionList.map((option) => [normalizeAudienceText(option.label).toLowerCase(), option]));
-  const selectedGroupGradeKeys = new Set();
-  const labels = [];
-  const seen = new Set();
+function labelDedupeKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_-]+/g, ' ')
+    .trim();
+}
 
+function normalizeGradeKey(value) {
+  return labelDedupeKey(value).replace(/\s+/g, '_');
+}
+
+function isMongoObjectIdToken(value) {
+  return /^[a-f0-9]{24}$/i.test(String(value || '').trim());
+}
+
+function looksMashedAudienceToken(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return true;
+  }
+  const compact = text.replace(/[\s_-]+/g, '').toLowerCase();
+  if (/^(kinder\d)\1/.test(compact) || /^(infants|kinder|toddlers|toodlers|maternal)\1$/.test(compact)) {
+    return true;
+  }
+  return /[a-z][A-Z]/.test(text) && !/\s/.test(text) && text.length > 6;
+}
+
+function catalogHasKinder2(options = []) {
+  return (Array.isArray(options) ? options : []).some((option) => {
+    const keys = Array.isArray(option?.gradeKeys) ? option.gradeKeys : [];
+    if (keys.some((key) => /^(kinder_?2|k2)$/i.test(normalizeGradeKey(key)))) {
+      return true;
+    }
+    return /kinder\s*2|\bk2\b/i.test(String(option?.label || ''));
+  });
+}
+
+function catalogHasDistinctKinder1(options = []) {
+  return (Array.isArray(options) ? options : []).some((option) => {
+    const keys = Array.isArray(option?.gradeKeys) ? option.gradeKeys : [];
+    const hasK1 = keys.some((key) => /^(kinder_?1|k1)$/i.test(normalizeGradeKey(key)));
+    const label = String(option?.label || '');
+    return (hasK1 && /kinder\s*1/i.test(label)) || /^kinder\s*1$/i.test(label.trim());
+  });
+}
+
+function remapLegacyKinderLabel(label, options = [], rawValue = '') {
+  if (label !== 'Kinder 1') {
+    return label;
+  }
+  if (catalogHasDistinctKinder1(options)) {
+    return 'Kinder 1';
+  }
+  if (catalogHasKinder2(options)) {
+    return 'Kinder 2';
+  }
+  if (/^(kinder[_-]?1|k1)$/i.test(String(rawValue || '').trim())) {
+    return '';
+  }
+  return 'Kinder 1';
+}
+
+function expandLegacyKinderKeys(value, options = []) {
+  const key = normalizeGradeKey(value);
+  if (!key) {
+    return [];
+  }
+  const aliasLegacyKinder = !catalogHasDistinctKinder1(options) && catalogHasKinder2(options);
+  if ((key === 'kinder_1' || key === 'k1') && aliasLegacyKinder) {
+    return ['kinder_1', 'kinder_2', 'k1', 'k2'];
+  }
+  if ((key === 'kinder_2' || key === 'k2') && aliasLegacyKinder) {
+    return ['kinder_2', 'kinder_1', 'k2', 'k1'];
+  }
+  return [key];
+}
+
+function humanizeAudienceToken(value, options = []) {
+  return remapLegacyKinderLabel(formatEducationalGradeLabel(value), options, value) || '';
+}
+
+function expandAudienceTokens(value) {
+  const text = normalizeAudienceText(value);
+  if (!text || isMongoObjectIdToken(text) || looksMashedAudienceToken(text)) {
+    return [];
+  }
+  if (text.includes(' · ')) {
+    return text.split(' · ').map((part) => normalizeAudienceText(part)).filter(Boolean);
+  }
+  return [text];
+}
+
+function indexAudienceOptions(options = []) {
+  const optionList = Array.isArray(options) ? options : [];
+  const byValue = new Map();
+  const byAlias = new Map();
+
+  const addAlias = (alias, option) => {
+    const key = normalizeAudienceText(alias).toLowerCase();
+    if (key && !byAlias.has(key)) {
+      byAlias.set(key, option);
+    }
+  };
+
+  optionList.filter((option) => option?.kind === 'classroom_group').forEach((option) => {
+    const value = normalizeAudienceText(option.value);
+    if (value) {
+      byValue.set(value, option);
+    }
+    addAlias(value, option);
+    addAlias(option.label, option);
+    (Array.isArray(option.aliases) ? option.aliases : []).forEach((alias) => addAlias(alias, option));
+    (Array.isArray(option.gradeKeys) ? option.gradeKeys : []).forEach((gradeKey) => addAlias(gradeKey, option));
+    if (value.startsWith(CLASSROOM_GROUP_TARGET_PREFIX)) {
+      addAlias(value.slice(CLASSROOM_GROUP_TARGET_PREFIX.length), option);
+    }
+  });
+
+  optionList.forEach((option) => {
+    const value = normalizeAudienceText(option.value);
+    if (!value) {
+      return;
+    }
+    if (!byValue.has(value)) {
+      byValue.set(value, option);
+    }
+    addAlias(value, option);
+    addAlias(option.label, option);
+    (Array.isArray(option.aliases) ? option.aliases : []).forEach((alias) => addAlias(alias, option));
+    if (option.kind === 'course') {
+      (Array.isArray(option.gradeKeys) ? option.gradeKeys : []).forEach((gradeKey) => addAlias(gradeKey, option));
+    }
+  });
+
+  return { optionList, byValue, byAlias };
+}
+
+function matchTargetToGroup(target, group, options = []) {
+  const aliases = new Set(
+    [group?.value, group?.label, ...(Array.isArray(group?.aliases) ? group.aliases : [])]
+      .map((item) => normalizeAudienceText(item).toLowerCase())
+      .filter(Boolean)
+  );
+  const lowered = target.toLowerCase();
+  if (aliases.has(lowered)) {
+    return 'group';
+  }
+  const groupValue = normalizeAudienceText(group?.value);
+  if (groupValue.startsWith(CLASSROOM_GROUP_TARGET_PREFIX)
+    && lowered === groupValue.slice(CLASSROOM_GROUP_TARGET_PREFIX.length).toLowerCase()) {
+    return 'group';
+  }
+
+  const targetKeys = new Set(expandLegacyKinderKeys(target, options));
+  const formattedTarget = labelDedupeKey(humanizeAudienceToken(target, options));
+  const memberKeys = Array.isArray(group?.gradeKeys) ? group.gradeKeys : [];
+  for (const gradeKey of memberKeys) {
+    if (expandLegacyKinderKeys(gradeKey, options).some((key) => targetKeys.has(key))) {
+      return 'member';
+    }
+    const formattedMember = labelDedupeKey(humanizeAudienceToken(gradeKey, options) || gradeKey);
+    if (formattedTarget && formattedMember && formattedTarget === formattedMember) {
+      return 'member';
+    }
+  }
+  return null;
+}
+
+export function compactPublicationCourseTargetLabels(targets = [], options = [], fallbackTitle = '') {
+  const { optionList, byValue, byAlias } = indexAudienceOptions(options);
+  const groups = optionList.filter((option) => option?.kind === 'classroom_group');
+  const tokens = [];
+  const seenTokens = new Set();
+
+  [fallbackTitle, ...(Array.isArray(targets) ? targets : [])].forEach((raw) => {
+    expandAudienceTokens(raw).forEach((token) => {
+      const key = token.toLowerCase();
+      if (seenTokens.has(key)) {
+        return;
+      }
+      seenTokens.add(key);
+      tokens.push(token);
+    });
+  });
+
+  const resolveOption = (target) => byValue.get(target) || byAlias.get(target.toLowerCase()) || null;
+
+  const matchedGroups = new Map();
+  const matchedCourses = new Map();
+  const leftovers = [];
+
+  tokens.forEach((target) => {
+    const option = resolveOption(target);
+    if (option?.kind === 'classroom_group') {
+      matchedGroups.set(option.value, option);
+      return;
+    }
+    if (option?.kind === 'course') {
+      matchedCourses.set(option.value, option);
+      return;
+    }
+    leftovers.push(target);
+  });
+
+  groups.forEach((group) => {
+    if (matchedGroups.has(group.value)) {
+      return;
+    }
+    const memberHits = new Set();
+    let hasGroupToken = false;
+    tokens.forEach((target) => {
+      const match = matchTargetToGroup(target, group, optionList);
+      if (match === 'group') {
+        hasGroupToken = true;
+      }
+      if (match === 'member') {
+        memberHits.add(normalizeGradeKey(humanizeAudienceToken(target, optionList) || target));
+      }
+    });
+    if (hasGroupToken || memberHits.size >= 2) {
+      matchedGroups.set(group.value, group);
+    }
+  });
+
+  const coveredGradeKeys = new Set();
+  const coveredLabelKeys = new Set();
+  matchedGroups.forEach((group) => {
+    coveredLabelKeys.add(labelDedupeKey(group.label));
+    (Array.isArray(group.gradeKeys) ? group.gradeKeys : []).forEach((gradeKey) => {
+      expandLegacyKinderKeys(gradeKey, optionList).forEach((key) => coveredGradeKeys.add(key));
+      const formatted = humanizeAudienceToken(gradeKey, optionList);
+      if (formatted) {
+        coveredLabelKeys.add(labelDedupeKey(formatted));
+      }
+    });
+  });
+
+  const labels = [];
+  const seenLabels = new Set();
   const pushLabel = (label) => {
     const text = normalizeAudienceText(label);
-    if (!text) {
+    if (!text || isMongoObjectIdToken(text) || looksMashedAudienceToken(text)) {
       return;
     }
-    const key = text.toLowerCase();
-    if (seen.has(key)) {
+    const key = labelDedupeKey(text);
+    if (!key || seenLabels.has(key)) {
       return;
     }
-    seen.add(key);
+    seenLabels.add(key);
     labels.push(text);
   };
 
-  const allTargets = [fallbackTitle, ...(Array.isArray(targets) ? targets : [])]
-    .map((item) => normalizeAudienceText(item))
-    .filter(Boolean);
+  matchedGroups.forEach((group) => pushLabel(group.label));
 
-  allTargets.forEach((target) => {
-    const option = optionByValue.get(target)
-      || optionByLabel.get(target.toLowerCase())
-      || (target.startsWith(CLASSROOM_GROUP_TARGET_PREFIX)
-        ? optionByValue.get(target)
-        : null);
-    if (option?.kind === 'classroom_group') {
-      (Array.isArray(option.gradeKeys) ? option.gradeKeys : []).forEach((gradeKey) => {
-        selectedGroupGradeKeys.add(normalizeAudienceText(gradeKey).toLowerCase());
-      });
-      pushLabel(option.label);
+  matchedCourses.forEach((course) => {
+    const courseKeys = (Array.isArray(course.gradeKeys) ? course.gradeKeys : [])
+      .flatMap((gradeKey) => expandLegacyKinderKeys(gradeKey, optionList));
+    if (courseKeys.some((key) => coveredGradeKeys.has(key))) {
+      return;
     }
+    const courseLabel = normalizeAudienceText(course.label);
+    if ([...matchedGroups.values()].some((group) => courseLabel.toLowerCase().includes(String(group.label || '').toLowerCase()))) {
+      return;
+    }
+    if (coveredLabelKeys.has(labelDedupeKey(courseLabel))) {
+      return;
+    }
+    pushLabel(courseLabel);
   });
 
-  allTargets.forEach((target) => {
-    if (target.startsWith(CLASSROOM_GROUP_TARGET_PREFIX)) {
-      const option = optionByValue.get(target);
-      if (option) {
-        pushLabel(option.label);
-      }
+  leftovers.forEach((target) => {
+    if (target.startsWith(CLASSROOM_GROUP_TARGET_PREFIX) || (target.includes(':') && isRawInternalGradeToken(target))) {
       return;
     }
-
-    const option = optionByValue.get(target) || optionByLabel.get(target.toLowerCase());
-    if (option?.kind === 'classroom_group') {
-      pushLabel(option.label);
+    if (coveredGradeKeys.has(normalizeGradeKey(target)) || expandLegacyKinderKeys(target, optionList).some((key) => coveredGradeKeys.has(key))) {
       return;
     }
-
-    const candidate = option?.label || target;
-    if (selectedGroupGradeKeys.has(normalizeAudienceText(candidate).toLowerCase())
-      || selectedGroupGradeKeys.has(normalizeAudienceText(option?.value).toLowerCase())
-      || selectedGroupGradeKeys.has(target.toLowerCase())) {
+    const human = humanizeAudienceToken(target, optionList);
+    if (human && coveredLabelKeys.has(labelDedupeKey(human))) {
       return;
     }
-
-    if (option) {
-      pushLabel(option.label);
+    if (human) {
+      pushLabel(human);
       return;
     }
-
-    if (/^[a-z0-9:_-]+$/i.test(target) && target.includes(':') && !target.startsWith(CLASSROOM_GROUP_TARGET_PREFIX)) {
+    if (labels.length > 0 || isRawInternalGradeToken(target) || /^[a-z0-9:_-]+$/i.test(target)) {
       return;
     }
-
-    pushLabel(candidate);
+    pushLabel(target);
   });
+
+  if (!labels.length && fallbackTitle) {
+    const fallbackParts = expandAudienceTokens(fallbackTitle);
+    const lastPart = fallbackParts[fallbackParts.length - 1] || '';
+    const option = resolveOption(lastPart);
+    if (option?.label) {
+      pushLabel(option.label);
+    } else {
+      pushLabel(humanizeAudienceToken(lastPart, optionList) || lastPart);
+    }
+  }
 
   return labels.length > 0 ? labels.join(', ') : 'Sin curso indicado';
 }
