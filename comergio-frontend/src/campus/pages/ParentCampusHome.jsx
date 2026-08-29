@@ -40,6 +40,7 @@ import {
 import { launchWompiWebCheckout } from '../../components/WompiPaymentButton';
 import GoogleSchoolRouteMap from '../../components/routes/GoogleSchoolRouteMap';
 import StudentAssignmentsPanel from '../components/StudentAssignmentsPanel';
+import ParentSubjectExplorer from '../components/ParentSubjectExplorer';
 import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import { getParentNursingRecords } from '../../services/nursing.service';
 import { getParentPsychologyRecords } from '../../services/psychology.service';
@@ -1338,6 +1339,9 @@ function buildParentChildFromOverview(child = {}, overview = {}) {
     academicGradingScale: selectedOverviewChildId === childId ? overview.academicGradingScale || null : null,
     academicUpcomingAssignments: selectedOverviewChildId === childId && Array.isArray(overview.academicUpcomingAssignments)
       ? overview.academicUpcomingAssignments
+      : [],
+    subjectReviews: selectedOverviewChildId === childId && Array.isArray(overview.subjectReviews)
+      ? overview.subjectReviews
       : [],
     includeClassAttendance: selectedOverviewChildId === childId
       ? overview.includeClassAttendance !== false
@@ -5452,66 +5456,22 @@ function ParentAcademicContent({
 
   if (effectiveActiveView === 'academic-content') {
     const academicContentCourses = Array.isArray(selectedChild?.academicContent) ? selectedChild.academicContent : [];
+    const scheduleEvents = Object.entries(weeklyClassSchedule?.eventsByDay || {}).flatMap(([day, events]) => (
+      (Array.isArray(events) ? events : []).map((event) => ({ ...event, day }))
+    ));
     return (
       <section className="campus-parent-mobile__academic-page">
-        <section className="campus-parent-mobile__academic-section">
-          <h3>Contenido académico</h3>
-          <p className="campus-parent-mobile__section-lead">
-            Temas del periodo y material de apoyo de tus docentes. Úsalo para estudiar o recuperar una clase.
-          </p>
-          {academicContentCourses.length === 0 ? (
-            <p className="campus-parent-mobile__empty-copy">Aún no hay contenido académico publicado en tus materias.</p>
-          ) : (
-            <div className="campus-parent-mobile__content-course-stack">
-              {academicContentCourses.map((course) => (
-                <article className="campus-parent-mobile__content-course" key={course.courseId || course.title}>
-                  <header className="campus-parent-mobile__content-course-head">
-                    <strong>{course.subject || course.title || 'Materia'}</strong>
-                    {course.title && course.subject && course.title !== course.subject ? (
-                      <span>{course.title}</span>
-                    ) : null}
-                  </header>
-                  <div className="campus-parent-mobile__content-period-stack">
-                    {(course.periods || []).map((period, periodIndex) => (
-                      <div className="campus-parent-mobile__content-period" key={period.periodKey || `period-${periodIndex}`}>
-                        <h4>{period.periodName || `Periodo ${periodIndex + 1}`}</h4>
-                        <div className="campus-parent-mobile__card-stack">
-                          {(period.topics || []).map((topic, topicIndex) => (
-                            <article
-                              className={`campus-parent-mobile__content-topic${topic.completed ? ' is-completed' : ''}`}
-                              key={topic.key || `${course.courseId}-topic-${topicIndex}`}
-                            >
-                              <div className="campus-parent-mobile__content-topic-top">
-                                <strong>{topic.title}</strong>
-                                {topic.completed ? <span className="campus-parent-mobile__content-topic-badge">Impartido</span> : null}
-                              </div>
-                              {topic.description ? <p>{topic.description}</p> : null}
-                              {(topic.materials || []).length > 0 ? (
-                                <ul className="campus-parent-mobile__content-materials">
-                                  {(topic.materials || []).map((material, materialIndex) => {
-                                    const href = resolveApiAssetUrl(material.url);
-                                    const label = String(material.title || material.fileName || material.url || 'Material').trim() || 'Material';
-                                    return (
-                                      <li key={`${href}-${materialIndex}`}>
-                                        <a href={href} rel="noreferrer" target="_blank">{label}</a>
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              ) : (
-                                <p className="campus-parent-mobile__empty-copy">Sin material de apoyo todavía.</p>
-                              )}
-                            </article>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+        <ParentSubjectExplorer
+          calendarItems={academicCalendarItems}
+          contentCourses={academicContentCourses}
+          gradebook={academicWorkspace.gradebook || []}
+          scheduleEvents={scheduleEvents}
+          studentId={selectedChild?.id || ''}
+          studentName={selectedChild?.name || ''}
+          studentPortalMode={studentPortalMode}
+          subjectReviews={selectedChild?.subjectReviews || []}
+          upcomingAssignments={upcomingAssignments}
+        />
       </section>
     );
   }
@@ -8805,6 +8765,15 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                     setFocusedAssignmentId('');
                     setActiveAcademicView(item.id);
                     setShowAcademicMenu(false);
+                    if (usesRoutedSections) {
+                      const academicTarget = buildParentSectionNavigateTarget(normalizedRouteBase, 'academic');
+                      const nextSearch = new URLSearchParams(location.search);
+                      if (useQuerySectionRouting) {
+                        nextSearch.set('section', 'academic');
+                      }
+                      nextSearch.set('academicView', item.id);
+                      navigate(`${academicTarget.split('?')[0]}?${nextSearch.toString()}`);
+                    }
                   }}
                   type="button"
                 >

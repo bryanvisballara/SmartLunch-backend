@@ -48,6 +48,7 @@ const PsychologyCase = require('../models/psychologyCase.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
 const { buildStudentCoexistenceScore } = require('../services/campusCoexistencePolicy.service');
+const { listStudentSubjectReviews } = require('../services/studentSubjectReview.service');
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
 const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
 const {
@@ -3971,7 +3972,7 @@ router.get('/portal/overview', async (req, res) => {
           'academicContent.topics.0': { $exists: true },
           $or: buildClassroomGroupGradeMongoOr(contentGradeValues.length ? contentGradeValues : selectedStudentGradeValues),
         })
-          .select('title subject gradeLevel section studentGradeKey academicContent classSessions')
+          .select('title subject gradeLevel section studentGradeKey teacherUserId academicContent classSessions')
           .sort({ title: 1 })
           .lean()
         : Promise.resolve([]),
@@ -4084,6 +4085,16 @@ router.get('/portal/overview', async (req, res) => {
       ? []
       : (academicStructureScheduleCourses.length ? academicStructureScheduleCourses : fallbackScheduleCourses);
 
+    const contentTeacherIds = Array.from(new Set(
+      (academicContentCourses || [])
+        .map((course) => normalizeText(course.teacherUserId))
+        .filter((teacherId) => mongoose.Types.ObjectId.isValid(teacherId)),
+    ));
+    const contentTeachers = contentTeacherIds.length
+      ? await User.find({ _id: { $in: contentTeacherIds } }).select('name username').lean()
+      : [];
+    const contentTeacherById = new Map(contentTeachers.map((user) => [String(user._id), normalizeText(user.name || user.username)]));
+
     return res.status(200).json({
       parent: {
         _id: String(parentUserId),
@@ -4151,6 +4162,7 @@ router.get('/portal/overview', async (req, res) => {
         courseId: String(course._id),
         title: String(course.title || '').trim(),
         subject: String(course.subject || '').trim(),
+        teacher: contentTeacherById.get(normalizeText(course.teacherUserId)) || '',
         gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
         section: String(course.section || '').trim(),
         periods: Array.isArray(course.academicContent) ? course.academicContent.map((period) => ({
@@ -4195,6 +4207,10 @@ router.get('/portal/overview', async (req, res) => {
       },
       includeClassAttendance,
       parentAppFeatures,
+      subjectReviews: await listStudentSubjectReviews({
+        schoolId,
+        studentId: selectedStudentObjectId,
+      }),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -7326,6 +7342,24 @@ router.post('/portal/meriendas/waitlist', roleMiddleware('parent'), async (req, 
     return res.status(200).json({ message: 'Agregado a la lista de espera correctamente.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/children/:studentId/subject-reviews', roleMiddleware('parent', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.params.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const reviews = await listStudentSubjectReviews({
+      schoolId,
+      studentId: access.selectedStudentId,
+    });
+    return res.status(200).json({ reviews });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron consultar las revisiones de asignaturas.' });
   }
 });
 

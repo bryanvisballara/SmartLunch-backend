@@ -1,5 +1,6 @@
 require('./user.model');
 require('./student.model');
+require('./studentSubjectReview.model');
 require('./parentStudentLink.model');
 require('./wallet.model');
 require('./walletTransaction.model');

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { itemMatchesSubject } from '../lib/subjectExplorer';
 import {
   getStudentAssignments,
   getStudentAssignmentDetail,
@@ -131,11 +132,13 @@ function AssignmentDetailIllustration() {
 }
 
 export default function StudentAssignmentsPanel({
+  embedded = false,
   initialAssignmentId = '',
   onClearInitialAssignment = null,
   readOnly = false,
   studentId = '',
   studentName = '',
+  subjectFilter = null,
 }) {
   const fileInputRef = useRef(null);
   const assignmentsListRef = useRef(null);
@@ -229,12 +232,14 @@ export default function StudentAssignmentsPanel({
   }, [readOnly, selectedId, studentId]);
 
   const sortedAssignments = useMemo(() => {
-    return [...assignments].sort((left, right) => {
-      const leftTime = new Date(left.date || left.dueAt || left.scheduledClassDate || 0).getTime();
-      const rightTime = new Date(right.date || right.dueAt || right.scheduledClassDate || 0).getTime();
-      return leftTime - rightTime;
-    });
-  }, [assignments]);
+    return [...assignments]
+      .filter((item) => !subjectFilter || itemMatchesSubject(item, subjectFilter))
+      .sort((left, right) => {
+        const leftTime = new Date(left.date || left.dueAt || left.scheduledClassDate || 0).getTime();
+        const rightTime = new Date(right.date || right.dueAt || right.scheduledClassDate || 0).getTime();
+        return leftTime - rightTime;
+      });
+  }, [assignments, subjectFilter]);
 
   const assignmentCounts = useMemo(() => ({
     all: sortedAssignments.length,
@@ -515,7 +520,7 @@ export default function StudentAssignmentsPanel({
   }
 
   return (
-    <section className="student-assignments-panel">
+    <section className={`student-assignments-panel${embedded ? ' is-embedded' : ''}`}>
       <header className="student-assignments-panel__head">
         <div className="student-assignments-panel__head-copy">
           <span className="student-assignments-panel__eyebrow">Aula virtual</span>

@@ -14,3 +14,4 @@ export const submitStudentAssignment = (assignmentId, formData) => api.post(
 export const getColibriGameLeaderboard = () => api.get('/student/portal/colibri-game/leaderboard');
 export const submitColibriGameScore = (score) => api.post('/student/portal/colibri-game/scores', { score });
 export const getStudentFlyLockStatus = () => api.get('/student/portal/fly-lock').then((response) => response.data);
+export const markStudentSubjectSeen = (data) => api.post('/student/portal/subject-reviews/seen', data).then((response) => response.data);

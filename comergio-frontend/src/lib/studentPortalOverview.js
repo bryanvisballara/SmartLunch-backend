@@ -58,6 +58,7 @@ export function mapStudentPortalOverviewToParentOverview(data = {}, user = {}) {
       transport: true,
       ...(data?.parentAppFeatures || {}),
     },
+    subjectReviews: Array.isArray(data?.subjectReviews) ? data.subjectReviews : [],
     flyLock: data?.flyLock || {
       flyLocked: false,
       reason: '',

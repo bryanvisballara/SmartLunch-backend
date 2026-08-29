@@ -38,6 +38,7 @@ const {
   processStoredCampusMaterialFiles,
 } = require('../utils/campusMaterialUpload');
 const { isCloudinaryEnabled } = require('../utils/imageUpload');
+const { listStudentSubjectReviews, markStudentSubjectSeen } = require('../services/studentSubjectReview.service');
 const parentRoutes = require('./parent.routes');
 
 const router = express.Router();
@@ -226,7 +227,7 @@ router.get('/portal/overview', async (req, res) => {
           'academicContent.topics.0': { $exists: true },
           $or: buildClassroomGroupGradeMongoOr(contentGradeValues.length ? contentGradeValues : gradeValues),
         })
-          .select('title subject gradeLevel section studentGradeKey academicContent')
+          .select('title subject gradeLevel section studentGradeKey teacherUserId academicContent')
           .sort({ title: 1, subject: 1 })
           .lean()
         : Promise.resolve([]),
@@ -298,10 +299,21 @@ router.get('/portal/overview', async (req, res) => {
       })
       : [];
 
+    const contentTeacherIds = Array.from(new Set(
+      (academicContentCourses || [])
+        .map((course) => String(course.teacherUserId || '').trim())
+        .filter((teacherId) => mongoose.Types.ObjectId.isValid(teacherId)),
+    ));
+    const contentTeachers = contentTeacherIds.length
+      ? await User.find({ _id: { $in: contentTeacherIds } }).select('name').lean()
+      : [];
+    const contentTeacherById = new Map(contentTeachers.map((user) => [String(user._id), H.normalizeText(user.name)]));
+
     const academicContent = dedupeAcademicContentCoursesBySubject(academicContentCourses || [], gradeValues).map((course) => ({
       courseId: String(course._id),
       title: String(course.title || '').trim(),
       subject: String(course.subject || '').trim(),
+      teacher: contentTeacherById.get(String(course.teacherUserId || '')) || '',
       gradeKey: String(course.studentGradeKey || course.gradeLevel || '').trim(),
       section: String(course.section || '').trim(),
       periods: Array.isArray(course.academicContent) ? course.academicContent.map((period) => ({
@@ -330,6 +342,7 @@ router.get('/portal/overview', async (req, res) => {
     const flyLockStatus = await resolveStudentFlyLockStatus({ schoolId, student });
     const coexistenceScore = await buildStudentCoexistenceScore({ schoolId, studentId: student._id });
     const parentAppFeatures = await loadStudentPortalFeatures(schoolId, { flyLocked: flyLockStatus.flyLocked });
+    const subjectReviews = await listStudentSubjectReviews({ schoolId, studentId: student._id });
 
     return res.status(200).json({
       student: {
@@ -343,6 +356,7 @@ router.get('/portal/overview', async (req, res) => {
       },
       parentAppFeatures,
       flyLock: flyLockStatus,
+      subjectReviews,
       psychologyCases: psychologyCases.map(serializeStudentPsychologyCase),
       coexistenceObservations: coexistenceObservations.map(serializeStudentCoexistenceObservation),
       coexistenceScore,
@@ -360,6 +374,48 @@ router.get('/portal/overview', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/subject-reviews', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const student = await resolveStudentDocumentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    const reviews = await listStudentSubjectReviews({ schoolId, studentId: student._id });
+    return res.status(200).json({ reviews });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron consultar las revisiones de asignaturas.' });
+  }
+});
+
+router.post('/portal/subject-reviews/seen', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const student = await resolveStudentDocumentForPortal(req);
+
+    if (!student) {
+      return res.status(404).json({ message: 'No se encontró el perfil del alumno vinculado a esta cuenta.' });
+    }
+
+    const review = await markStudentSubjectSeen({
+      schoolId,
+      studentId: student._id,
+      subjectKey: req.body?.subjectKey,
+      itemKeys: req.body?.itemKeys,
+    });
+
+    if (!review) {
+      return res.status(400).json({ message: 'subjectKey is required' });
+    }
+
+    return res.status(200).json({ review });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo marcar la asignatura como revisada.' });
   }
 });
 
