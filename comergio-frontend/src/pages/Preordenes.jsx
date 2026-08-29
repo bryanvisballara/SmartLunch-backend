@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cancelPreorder, fulfillPreorder, getPreordenesOrders, subscribePreordenesOrders } from '../services/orders.service';
 import { getStores } from '../services/stores.service';
 import useAuthStore from '../store/auth.store';
@@ -34,6 +34,31 @@ function waitMinutes(createdAt) {
   return Math.max(0, Math.floor((Date.now() - started) / 60000));
 }
 
+function normalizeSearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function orderMatchesStudentQuery(order, queryText) {
+  if (!queryText) {
+    return true;
+  }
+
+  const haystack = normalizeSearchText([
+    formatOrderCustomerName(order),
+    order?.studentId?.schoolCode,
+    order?.studentId?.grade,
+    order?.studentId?.course,
+    formatOrderTicketNumber(order?._id),
+    String(order?._id || '').slice(-8),
+  ].filter(Boolean).join(' '));
+
+  return haystack.includes(queryText);
+}
+
 function sortPendingTickets(orders = []) {
   return [...orders].sort((left, right) => {
     const leftTime = new Date(left?.createdAt || 0).getTime();
@@ -56,6 +81,7 @@ function Preordenes() {
   const [live, setLive] = useState(false);
   const [newTicketIds, setNewTicketIds] = useState(() => new Set());
   const [expandedDoneIds, setExpandedDoneIds] = useState(() => new Set());
+  const [studentQuery, setStudentQuery] = useState('');
   const currentStoreRef = useRef(currentStore);
   const pendingIdsRef = useRef(new Set());
   const highlightTimersRef = useRef(new Map());
@@ -288,6 +314,16 @@ function Preordenes() {
     }
   };
 
+  const queryText = normalizeSearchText(studentQuery);
+  const visiblePending = useMemo(
+    () => pending.filter((order) => orderMatchesStudentQuery(order, queryText)),
+    [pending, queryText]
+  );
+  const visibleFulfilled = useMemo(
+    () => fulfilledToday.filter((order) => orderMatchesStudentQuery(order, queryText)),
+    [fulfilledToday, queryText]
+  );
+
   const toggleDoneInfo = (orderId) => {
     const id = String(orderId || '');
     if (!id) {
@@ -323,14 +359,38 @@ function Preordenes() {
         <p className="comandera-banner">
           El alumno se acerca y dice que tiene una preorden. Revisa el pedido, entrégalo y pulsa Entregado / Cobrar.
         </p>
+        <div className="comandera-search">
+          <input
+            aria-label="Buscar niño"
+            autoComplete="off"
+            autoCorrect="off"
+            onChange={(event) => setStudentQuery(event.target.value)}
+            placeholder="Buscar niño por nombre, código o grado"
+            spellCheck={false}
+            type="search"
+            value={studentQuery}
+          />
+          {studentQuery ? (
+            <button
+              className="comandera-search-clear"
+              onClick={() => setStudentQuery('')}
+              type="button"
+            >
+              Limpiar
+            </button>
+          ) : null}
+        </div>
         <DismissibleNotice text={message} type="info" onClose={() => setMessage('')} />
       </section>
 
       <section className="comandera-queue">
         {loading && pending.length === 0 ? <p>Cargando preórdenes...</p> : null}
         {!loading && pending.length === 0 ? <p className="comandera-empty">No hay preórdenes pendientes en esta tienda.</p> : null}
+        {!loading && pending.length > 0 && visiblePending.length === 0 ? (
+          <p className="comandera-empty">Ningún niño coincide con «{studentQuery.trim()}».</p>
+        ) : null}
 
-        {pending.map((order) => {
+        {visiblePending.map((order) => {
           const minutes = waitMinutes(order.createdAt);
           const customerName = formatOrderCustomerName(order);
           const ticketId = String(order._id);
@@ -388,11 +448,11 @@ function Preordenes() {
         })}
       </section>
 
-      {fulfilledToday.length > 0 ? (
+      {visibleFulfilled.length > 0 ? (
         <section className="panel comandera-done-panel">
-          <h3>Entregadas hoy</h3>
+          <h3>Entregadas hoy{queryText ? ` · ${visibleFulfilled.length}` : ''}</h3>
           <ul className="comandera-done-list">
-            {fulfilledToday.map((order) => {
+            {visibleFulfilled.map((order) => {
               const doneId = String(order._id);
               const isOpen = expandedDoneIds.has(doneId);
               return (
