@@ -24,7 +24,27 @@ function subscribeComanderaChange(schoolId, storeId, listener) {
   return () => hub.off(key, listener);
 }
 
+function preorderChannelKey(schoolId, storeId) {
+  return `preorder:${channelKey(schoolId, storeId)}`;
+}
+
+function publishPreorderChange(schoolId, storeId) {
+  const key = preorderChannelKey(schoolId, storeId);
+  if (!schoolId || !storeId) {
+    return;
+  }
+  hub.emit(key);
+}
+
+function subscribePreorderChange(schoolId, storeId, listener) {
+  const key = preorderChannelKey(schoolId, storeId);
+  hub.on(key, listener);
+  return () => hub.off(key, listener);
+}
+
 module.exports = {
   publishComanderaChange,
   subscribeComanderaChange,
+  publishPreorderChange,
+  subscribePreorderChange,
 };

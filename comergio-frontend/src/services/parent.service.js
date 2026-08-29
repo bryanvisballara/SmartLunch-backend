@@ -26,6 +26,13 @@ export const payParentAcademicCharge = (chargeId, data = {}) => api.post(`/paren
 export const createWompiAcademicChargeCheckout = (chargeId) => api.post('/payments/wompi/academic-charge-checkout', { chargeId });
 export const getWompiAcademicChargePaymentStatus = (params) => api.get('/payments/wompi/academic-charge-status', { params });
 export const getParentPortalCategories = () => api.get('/parent/portal/categories');
+export const getParentPreorderCatalog = (params = {}) => api.get('/parent/portal/preorders/catalog', { params });
+export const createParentPreorder = (data) => api.post('/parent/portal/preorders', data);
+export const updateParentPreorder = (preorderId, data) => api.patch(`/parent/portal/preorders/${preorderId}`, data);
+export const deleteParentPreorder = (preorderId, params = {}) =>
+  api.delete(`/parent/portal/preorders/${preorderId}`, { params });
+export const updateParentPortalStudentCafeteriaLevel = (studentId, data) =>
+  api.patch(`/parent/portal/students/${studentId}/cafeteria-level`, data);
 export const getParentPortalOrdersHistory = (params = {}) => api.get('/parent/portal/orders-history', { params });
 export const getParentCardPaymentMethods = (params = {}) => api.get('/parent/portal/payment-methods/cards', { params });
 export const getParentMeriendasPortal = (params = {}) => api.get('/parent/portal/meriendas', { params });

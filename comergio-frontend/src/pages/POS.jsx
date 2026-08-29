@@ -510,10 +510,10 @@ function POS() {
     const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
 
-    getOrders({ studentId: studentItem._id, from, to })
+    getOrders({ studentId: studentItem._id, from, to, includePendingPreorders: true })
       .then((response) => {
         const total = (response.data || [])
-          .filter((order) => order.status === 'completed')
+          .filter((order) => order.status === 'completed' || order.preorderStatus === 'pending')
           .reduce((sum, order) => sum + Number(order.total || 0), 0);
         setSpentToday(total);
       })

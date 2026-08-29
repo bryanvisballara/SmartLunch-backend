@@ -10508,8 +10508,9 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
 .campus-parent-mobile__community-report-fab {
   position: fixed;
   left: 1rem;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 5.35rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--preorder-sheet-lift, 5.35rem));
   z-index: 88;
+  transition: bottom 0.2s ease;
   display: inline-grid;
   place-items: center;
   width: 3.35rem;

@@ -217,6 +217,7 @@ function Navbar() {
           <div className="nav-links nav-vendor-links">
             <Link to="/pos">POS</Link>
             <Link to="/comandera">Comandera</Link>
+            <Link to="/preordenes">Preórdenes</Link>
             <Link to="/daily-closure">Cierre Diario</Link>
             <Link to="/topups">Recargas</Link>
             <Link to="/inventory/in">Ingresos</Link>

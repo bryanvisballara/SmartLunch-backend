@@ -4,15 +4,38 @@ export const createOrder = (data) => api.post('/orders', data);
 export const getOrders = (params = {}) => api.get('/orders', { params });
 export const getComanderaOrders = (params = {}) => api.get('/orders/comandera', { params });
 export const dispatchOrder = (id) => api.post(`/orders/${id}/dispatch`);
+export const getPreordenesOrders = (params = {}) => api.get('/orders/preordenes', { params });
+export const fulfillPreorder = (id) => api.post(`/orders/${id}/preorden/fulfill`);
+export const cancelPreorder = (id) => api.post(`/orders/${id}/preorden/cancel`);
 
 export async function subscribeComanderaOrders({ storeId, onSnapshot, signal } = {}) {
+  return subscribeOrderQueue({
+    path: '/orders/comandera/stream',
+    storeId,
+    onSnapshot,
+    signal,
+    errorLabel: 'comandera',
+  });
+}
+
+export async function subscribePreordenesOrders({ storeId, onSnapshot, signal } = {}) {
+  return subscribeOrderQueue({
+    path: '/orders/preordenes/stream',
+    storeId,
+    onSnapshot,
+    signal,
+    errorLabel: 'preórdenes',
+  });
+}
+
+async function subscribeOrderQueue({ path, storeId, onSnapshot, signal, errorLabel } = {}) {
   const token = localStorage.getItem('token');
   const params = new URLSearchParams();
   if (storeId) {
     params.set('storeId', storeId);
   }
 
-  const response = await fetch(`${getApiBaseUrl()}/orders/comandera/stream?${params.toString()}`, {
+  const response = await fetch(`${getApiBaseUrl()}${path}?${params.toString()}`, {
     headers: {
       Authorization: token ? `Bearer ${token}` : '',
       Accept: 'text/event-stream',
@@ -22,7 +45,7 @@ export async function subscribeComanderaOrders({ storeId, onSnapshot, signal } =
 
   if (!response.ok || !response.body) {
     const message = await response.text().catch(() => '');
-    throw new Error(message || `No se pudo abrir la comandera en vivo (${response.status || 0})`);
+    throw new Error(message || `No se pudo abrir ${errorLabel || 'la cola'} en vivo (${response.status || 0})`);
   }
 
   const reader = response.body.getReader();

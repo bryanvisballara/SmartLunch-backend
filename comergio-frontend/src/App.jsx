@@ -27,6 +27,7 @@ import AdmissionsDashboard from './pages/AdmissionsDashboard';
 import RectoriaDashboard from './pages/RectoriaDashboard';
 import DailyClosure from './pages/DailyClosure';
 import Comandera from './pages/Comandera';
+import Preordenes from './pages/Preordenes';
 import InventoryRequestPage from './pages/InventoryRequestPage';
 import CancelSale from './pages/CancelSale';
 import Topups from './pages/Topups';
@@ -212,6 +213,7 @@ function App() {
     '/meriendas/operator',
     '/pos',
     '/comandera',
+    '/preordenes',
   ].includes(normalizedPathname) || normalizedPathname.startsWith('/student');
   const isStaffPortalChromeRoute =
     isAdmissionsRoute
@@ -562,6 +564,18 @@ function App() {
               </RequireRole>
             )}
             path="/comandera"
+          />
+          <Route
+            element={(
+              <RequireRole
+                allowedRoles={['admin', 'vendor']}
+                isAuthenticated={isAuthenticated}
+                userRole={userRole}
+              >
+                <Preordenes />
+              </RequireRole>
+            )}
+            path="/preordenes"
           />
           <Route
             element={(

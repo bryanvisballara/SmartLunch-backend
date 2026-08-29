@@ -49,6 +49,7 @@ import { ComergioBrandTitle } from '../components/ComergioBrandTitle';
 import { ColibriBootSplash } from '../components/ColibriBootSplash';
 import ParentNotificationCenter from '../components/parent/ParentNotificationCenter';
 import { isBerckleySchool } from '../lib/schools';
+import ParentPreordersPanel from './ParentPreordersPanel';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -508,6 +509,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
 
   const normalizedBasePath = useMemo(() => normalizeParentBasePath(basePath), [basePath]);
   const menuPath = useMemo(() => buildParentPath(normalizedBasePath, '/menu'), [normalizedBasePath]);
+  const preordersPath = useMemo(() => buildParentPath(normalizedBasePath, '/preordenes'), [normalizedBasePath]);
   const topupsPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas'), [normalizedBasePath]);
   const topupMethodsPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos'), [normalizedBasePath]);
   const topupDaviPlataPath = useMemo(() => buildParentPath(normalizedBasePath, '/recargas/metodos/daviplata'), [normalizedBasePath]);
@@ -527,6 +529,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
   const meriendasDayPattern = useMemo(() => new RegExp(`^${escapedBasePath}\\/meriendas\\/dia\\/\\d+$`), [escapedBasePath]);
 
   const isMenuRoute = location.pathname === menuPath || location.pathname.startsWith(`${menuPath}/`);
+  const isPreordersRoute = location.pathname === preordersPath || location.pathname.startsWith(`${preordersPath}/`);
   const isTopupsPage = location.pathname === topupsPath;
   const isTopupMethodsPage = location.pathname === topupMethodsPath;
   const isTopupDaviPlataPage = location.pathname === topupDaviPlataPath;
@@ -561,6 +564,14 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
   }, [location.pathname, menuPath]);
   const isMenuPage = isMenuRoute && !menuCategoryId;
   const isMenuProductsPage = Boolean(menuCategoryId);
+  const preorderCategoryId = useMemo(() => {
+    const prefix = `${preordersPath}/`;
+    if (!location.pathname.startsWith(prefix)) {
+      return '';
+    }
+    return decodeURIComponent(location.pathname.slice(prefix.length));
+  }, [location.pathname, preordersPath]);
+  const isPreordersPage = isPreordersRoute;
 
   const selectedStudent = overview?.selectedStudent || null;
   const selectedStudentFirstName = String(selectedStudent?.name || 'tu hijo').trim().split(/\s+/)[0] || 'tu hijo';
@@ -1701,6 +1712,11 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
       return;
     }
 
+    if (label === 'Preordenes') {
+      navigate(preordersPath);
+      return;
+    }
+
     if (label === 'Recargas') {
       navigate(topupsPath);
       return;
@@ -1740,6 +1756,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
   const menuItems = [
     { key: 'Inicio', label: 'Inicio', icon: 'home' },
     { key: 'Menu - bloquear products', label: 'Menú - bloquear productos', icon: 'food-menu' },
+    { key: 'Preordenes', label: 'Preórdenes', icon: 'preorder' },
     { key: 'Recargas', label: 'Recargas', icon: 'wallet' },
     { key: 'Historial de órdenes', label: 'Historial de órdenes', icon: 'ticket' },
     { key: 'Limitar consumo', label: 'Limitar consumo', icon: 'limit' },
@@ -1794,6 +1811,14 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
 
         if (hasGrade) {
           nextStudent.grade = nextGrade;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updatedStudent, 'cafeteriaLevel')) {
+          nextStudent.cafeteriaLevel = updatedStudent.cafeteriaLevel || '';
+        }
+
+        if (Object.prototype.hasOwnProperty.call(updatedStudent, 'cafeteriaLevelConfirmedAt')) {
+          nextStudent.cafeteriaLevelConfirmedAt = updatedStudent.cafeteriaLevelConfirmedAt || null;
         }
 
         if (hasImageUrl) {
@@ -2798,6 +2823,13 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
         </svg>
       );
     }
+    if (icon === 'preorder') {
+      return (
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M7 3h10l1 4H6l1-4Zm-2 6h14l-1.2 11.1A2 2 0 0 1 15.8 22H8.2a2 2 0 0 1-2-1.9L5 9Zm5 2v8h2v-8h-2Zm4 0v8h2v-8h-2Z" fill="currentColor"/>
+        </svg>
+      );
+    }
     if (icon === 'ticket') {
       return (
         <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3046,6 +3078,16 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           <div className={walletReturnNotice?.type === 'error' ? 'parent-error' : walletReturnNotice?.type === 'success' ? 'parent-success' : 'parent-topup-fee-note'}>
             {walletReturnNotice.message}
           </div>
+        ) : null}
+
+        {!loading && !error && isPreordersPage ? (
+          <ParentPreordersPanel
+            categoriesPath={preordersPath}
+            categoryId={preorderCategoryId}
+            onStudentUpdated={mergeStudentData}
+            student={selectedStudent}
+            studentId={selectedStudentId}
+          />
         ) : null}
 
         {!loading && !error && isMenuPage ? (
@@ -4313,7 +4355,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && !isMenuRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupEpaycoPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
+        {!loading && !error && !isMenuRoute && !isPreordersRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupEpaycoPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
           <>
             <section className="parent-balance-hero" id="parent-balance-section">
               <p className="meta">Saldo actual</p>

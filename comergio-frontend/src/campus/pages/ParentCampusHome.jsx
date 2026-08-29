@@ -2942,6 +2942,7 @@ function ParentTransportSection({ hasAssignedRoute, transport }) {
 const cafeteriaMenuItems = [
   { id: 'cafeteria-overview', title: 'Inicio', icon: 'home' },
   { id: 'cafeteria-menu', title: 'Menú - bloquear productos', icon: 'food-menu' },
+  { id: 'cafeteria-preorders', title: 'Preórdenes', icon: 'preorder' },
   { id: 'cafeteria-topups', title: 'Recargas', icon: 'wallet' },
   { id: 'cafeteria-history', title: 'Historial de órdenes', icon: 'ticket' },
   { id: 'cafeteria-limit', title: 'Limitar consumo', icon: 'limit' },
@@ -2970,6 +2971,14 @@ function CafeteriaMenuIcon({ icon }) {
     return (
       <svg viewBox="0 0 24 24">
         <path d="M4 4h2v7a1 1 0 0 0 2 0V4h2v7a3 3 0 0 1-2 2.82V20H6v-6.18A3 3 0 0 1 4 11V4Zm10 0a4 4 0 0 1 4 4v12h-2v-5h-4v5h-2V8a4 4 0 0 1 4-4Zm0 2a2 2 0 0 0-2 2v5h4V8a2 2 0 0 0-2-2Z" fill="currentColor"/>
+      </svg>
+    );
+  }
+
+  if (icon === 'preorder') {
+    return (
+      <svg viewBox="0 0 24 24">
+        <path d="M7 3h10l1 4H6l1-4Zm-2 6h14l-1.2 11.1A2 2 0 0 1 15.8 22H8.2a2 2 0 0 1-2-1.9L5 9Zm5 2v8h2v-8h-2Zm4 0v8h2v-8h-2Z" fill="currentColor"/>
       </svg>
     );
   }
@@ -3240,6 +3249,16 @@ function ParentCafeteriaContent({
                 ))}
               </div>
             </section>
+          </section>
+        ) : null}
+
+        {activeView === 'cafeteria-preorders' ? (
+          <section className="parent-menu-page">
+            <h2>Preórdenes</h2>
+            <p className="parent-menu-caption">
+              Evita la fila del break. El alumno se acerca, dice que tiene una preorden y el vendedor la entrega y cobra.
+            </p>
+            <p className="empty">Abre el portal de cafetería para preordenar productos en stock.</p>
           </section>
         ) : null}
 

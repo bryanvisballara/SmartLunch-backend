@@ -67,6 +67,8 @@ const studentSchema = new mongoose.Schema(
     imageUrl: { type: String, trim: true, default: '' },
     thumbUrl: { type: String, trim: true, default: '' },
     dailyLimit: { type: Number, default: 0 },
+    cafeteriaLevel: { type: String, enum: ['primaria', 'secundaria', ''], default: '' },
+    cafeteriaLevelConfirmedAt: { type: Date, default: null },
     blockedProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
     blockedCategories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }],
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },

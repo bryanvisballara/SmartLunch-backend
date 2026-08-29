@@ -32,6 +32,14 @@ const MeriendaWaitlist = require('../models/meriendaWaitlist.model');
 const User = require('../models/user.model');
 const Category = require('../models/category.model');
 const Product = require('../models/product.model');
+const Store = require('../models/store.model');
+const {
+  CAFETERIA_GRADE_OPTIONS,
+  cafeteriaLevelLabel,
+  pickCafeteriaStore,
+  resolveCafeteriaLevel,
+} = require('../utils/preorderStore');
+const { sumStudentDailySpend } = require('../utils/studentCafeteriaSpend');
 const ParentPaymentMethod = require('../models/parentPaymentMethod.model');
 const AcademicCharge = require('../models/academicCharge.model');
 const AcademicChargePayment = require('../models/academicChargePayment.model');
@@ -65,6 +73,7 @@ const {
   processAndStoreUploadedImage,
 } = require('../utils/imageUpload');
 const { queueNotificationsForParents } = require('../services/notification.service');
+const { publishPreorderChange } = require('../utils/comanderaHub');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
 const {
   serializeStudentMedicalProfile,
@@ -924,6 +933,80 @@ async function assertPortalStudentIdAccess(req, studentId) {
 function startOfToday() {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function endOfToday() {
+  const start = startOfToday();
+  return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
+}
+
+async function buildStudentBlockedProductChecker(schoolId, student) {
+  const blockedIds = (Array.isArray(student?.blockedProducts) ? student.blockedProducts : [])
+    .map((item) => String(item?._id || item || ''))
+    .filter(Boolean);
+  const blockedCategoryIds = new Set(
+    (Array.isArray(student?.blockedCategories) ? student.blockedCategories : [])
+      .map((item) => String(item?._id || item || ''))
+      .filter(Boolean)
+  );
+
+  const blockedProducts = blockedIds.length
+    ? await Product.find({ schoolId, _id: { $in: blockedIds } }).select('_id sharedProductId').lean()
+    : [];
+  const blockedSharedIds = new Set(
+    blockedProducts.map((product) => String(product.sharedProductId || '').trim()).filter(Boolean)
+  );
+  const blockedIdSet = new Set(blockedIds);
+
+  return (product) => {
+    if (!product) {
+      return false;
+    }
+    if (blockedIdSet.has(String(product._id))) {
+      return true;
+    }
+    const sharedId = String(product.sharedProductId || '').trim();
+    if (sharedId && blockedSharedIds.has(sharedId)) {
+      return true;
+    }
+    const categoryId = String(product.categoryId?._id || product.categoryId || '');
+    return Boolean(categoryId && blockedCategoryIds.has(categoryId));
+  };
+}
+
+async function resolveStudentCafeteriaStore(schoolId, student) {
+  const level = resolveCafeteriaLevel({
+    grade: student?.grade || student?.course || '',
+    cafeteriaLevel: student?.cafeteriaLevel || '',
+  });
+  const stores = await Store.find({ schoolId, deletedAt: null }).select('_id name status').lean();
+  const store = pickCafeteriaStore(stores, level);
+  return {
+    level,
+    levelLabel: cafeteriaLevelLabel(level),
+    store,
+    confirmed: Boolean(student?.cafeteriaLevelConfirmedAt),
+    gradeLabel: String(student?.grade || student?.course || '').trim(),
+  };
+}
+
+function serializePreorder(order) {
+  return {
+    _id: order._id,
+    storeName: order.storeId?.name || '',
+    storeId: order.storeId?._id || order.storeId || null,
+    total: Number(order.total || 0),
+    items: Array.isArray(order.items) ? order.items : [],
+    itemsCount: Array.isArray(order.items)
+      ? order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+      : 0,
+    status: order.status,
+    orderType: order.orderType || 'preorder',
+    preorderStatus: order.preorderStatus || '',
+    paymentStatus: order.paymentStatus || 'pending',
+    createdAt: order.createdAt,
+    fulfilledAt: order.fulfilledAt || null,
+  };
 }
 
 function startOfCurrentWeek() {
@@ -3869,6 +3952,8 @@ router.get('/portal/overview', async (req, res) => {
         cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
         ...serializeStudentPhotoFields(student),
         dailyLimit: Number(student.dailyLimit || 0),
+        cafeteriaLevel: student.cafeteriaLevel || '',
+        cafeteriaLevelConfirmedAt: student.cafeteriaLevelConfirmedAt || null,
         blockedProductsCount: Array.isArray(student.blockedProducts) ? student.blockedProducts.length : 0,
         blockedCategoriesCount: Array.isArray(student.blockedCategories) ? student.blockedCategories.length : 0,
         blockedProducts: Array.isArray(student.blockedProducts)
@@ -5586,6 +5671,690 @@ router.get('/portal/categories', async (req, res) => {
     return res.status(200).json(normalizedCategories);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/portal/preorders/catalog', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.query.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      deletedAt: null,
+    }).lean();
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const cafeteria = await resolveStudentCafeteriaStore(schoolId, student);
+    if (!cafeteria.store) {
+      return res.status(409).json({
+        message: 'No se encontró la tienda de cafetería para el curso del alumno. Confirma el curso (1-5 primaria, 6-11 secundaria).',
+        cafeteria: {
+          level: cafeteria.level,
+          levelLabel: cafeteria.levelLabel,
+          store: null,
+          confirmed: cafeteria.confirmed,
+          gradeLabel: cafeteria.gradeLabel,
+          gradeOptions: CAFETERIA_GRADE_OPTIONS,
+        },
+      });
+    }
+
+    const categoryId = String(req.query.categoryId || '').trim();
+    const isProductBlocked = await buildStudentBlockedProductChecker(schoolId, student);
+    const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).select('balance').lean();
+    const spentToday = await sumStudentDailySpend(Order, {
+      schoolId,
+      studentId: student._id,
+      from: startOfToday(),
+      to: endOfToday(),
+    });
+    const dailyLimit = Number(student.dailyLimit || 0);
+    const remainingToday = dailyLimit > 0 ? Math.max(0, dailyLimit - spentToday) : null;
+
+    const productFilter = {
+      schoolId,
+      storeId: cafeteria.store._id,
+      status: 'active',
+      deletedAt: null,
+    };
+    if (categoryId) {
+      productFilter.categoryId = categoryId;
+    }
+
+    const pendingPreordersPromise = Order.find({
+      schoolId,
+      studentId: student._id,
+      orderType: 'preorder',
+      preorderStatus: 'pending',
+    })
+      .populate('storeId', 'name')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const [products, pendingPreorders, categoryIds] = await Promise.all([
+      categoryId
+        ? Product.find(productFilter)
+          .select('_id name price stock imageUrl thumbUrl shortDescription categoryId sharedProductId')
+          .sort({ name: 1 })
+          .lean()
+        : Promise.resolve([]),
+      pendingPreordersPromise,
+      categoryId
+        ? Promise.resolve([])
+        : Product.distinct('categoryId', productFilter),
+    ]);
+
+    const categories = categoryId
+      ? []
+      : await Category.find({
+        schoolId,
+        _id: { $in: categoryIds },
+        deletedAt: null,
+        status: 'active',
+      })
+        .select('_id name imageUrl thumbUrl')
+        .sort({ name: 1 })
+        .lean();
+
+    const pendingProductIds = [...new Set(
+      pendingPreorders.flatMap((order) => (
+        Array.isArray(order.items) ? order.items.map((item) => String(item.productId || '')).filter(Boolean) : []
+      ))
+    )];
+    const pendingStockProducts = pendingProductIds.length
+      ? await Product.find({ schoolId, _id: { $in: pendingProductIds } }).select('_id stock').lean()
+      : [];
+    const productStockById = new Map([
+      ...products.map((product) => [String(product._id), Number(product.stock || 0)]),
+      ...pendingStockProducts.map((product) => [String(product._id), Number(product.stock || 0)]),
+    ]);
+
+    return res.status(200).json({
+      student: {
+        _id: student._id,
+        name: student.name,
+        grade: student.grade || '',
+        course: student.course || '',
+        dailyLimit,
+        cafeteriaLevel: student.cafeteriaLevel || '',
+        cafeteriaLevelConfirmedAt: student.cafeteriaLevelConfirmedAt || null,
+      },
+      cafeteria: {
+        level: cafeteria.level,
+        levelLabel: cafeteria.levelLabel,
+        store: {
+          _id: cafeteria.store._id,
+          name: cafeteria.store.name,
+        },
+        confirmed: cafeteria.confirmed,
+        gradeLabel: cafeteria.gradeLabel,
+        gradeOptions: CAFETERIA_GRADE_OPTIONS,
+      },
+      walletBalance: Number(wallet?.balance || 0),
+      spentToday,
+      remainingToday,
+      dailyLimitReached: dailyLimit > 0 && remainingToday <= 0,
+      categories: categories.map((category) => ({
+        _id: category._id,
+        name: category.name || 'Sin nombre',
+        imageUrl: normalizeStoredImageUrl(category.imageUrl),
+        thumbUrl: normalizeStoredImageUrl(category.thumbUrl) || deriveThumbUrlFromImageUrl(category.imageUrl),
+      })),
+      products: products.map((product) => {
+        const stock = Number(product.stock || 0);
+        const blocked = isProductBlocked(product);
+        return {
+          _id: product._id,
+          name: product.name || 'Sin nombre',
+          price: Number(product.price || 0),
+          stock,
+          shortDescription: product.shortDescription || '',
+          imageUrl: normalizeStoredImageUrl(product.imageUrl),
+          thumbUrl: normalizeStoredImageUrl(product.thumbUrl) || deriveThumbUrlFromImageUrl(product.imageUrl),
+          categoryId: product.categoryId,
+          blocked,
+          inStock: stock > 0,
+          available: stock > 0 && !blocked,
+        };
+      }),
+      pendingPreorders: pendingPreorders.map((order) => {
+        const serialized = serializePreorder(order);
+        return {
+          ...serialized,
+          items: (serialized.items || []).map((item) => {
+            const productId = String(item.productId || '');
+            const reserved = Number(item.quantity || 0);
+            return {
+              ...item,
+              productId,
+              availableStock: reserved + Number(productStockById.get(productId) || 0),
+            };
+          }),
+        };
+      }),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.patch('/portal/students/:studentId/cafeteria-level', async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.params.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const gradeValue = String(req.body?.grade || '').trim();
+    const requestedLevel = String(req.body?.cafeteriaLevel || '').trim().toLowerCase();
+    const shouldConfirm = req.body?.confirm !== false;
+
+    if (gradeValue && gradeValue.length > 40) {
+      return res.status(400).json({ message: 'El curso no puede superar 40 caracteres.' });
+    }
+
+    if (requestedLevel && requestedLevel !== 'primaria' && requestedLevel !== 'secundaria') {
+      return res.status(400).json({ message: 'cafeteriaLevel must be primaria or secundaria' });
+    }
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      deletedAt: null,
+    });
+
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    if (gradeValue) {
+      student.grade = gradeValue;
+    }
+
+    const nextLevel = resolveCafeteriaLevel({
+      grade: student.grade || student.course || '',
+      cafeteriaLevel: requestedLevel || student.cafeteriaLevel || '',
+    });
+    student.cafeteriaLevel = nextLevel;
+    if (shouldConfirm) {
+      student.cafeteriaLevelConfirmedAt = new Date();
+    }
+
+    await student.save();
+    await ensureStudentCohortMembership(student, schoolId);
+
+    const cafeteria = await resolveStudentCafeteriaStore(schoolId, student);
+
+    return res.status(200).json({
+      student: {
+        _id: student._id,
+        grade: student.grade || '',
+        course: student.course || '',
+        cafeteriaLevel: student.cafeteriaLevel || '',
+        cafeteriaLevelConfirmedAt: student.cafeteriaLevelConfirmedAt || null,
+        cohortHistory: Array.isArray(student.cohortHistory) ? student.cohortHistory : [],
+      },
+      cafeteria: {
+        level: cafeteria.level,
+        levelLabel: cafeteria.levelLabel,
+        store: cafeteria.store
+          ? { _id: cafeteria.store._id, name: cafeteria.store.name }
+          : null,
+        confirmed: cafeteria.confirmed,
+        gradeLabel: cafeteria.gradeLabel,
+        gradeOptions: CAFETERIA_GRADE_OPTIONS,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/portal/preorders', async (req, res) => {
+  let session;
+  try {
+    const { schoolId, userId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.body?.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length === 0) {
+      return res.status(400).json({ message: 'items are required' });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      status: 'active',
+      deletedAt: null,
+    }).session(session);
+
+    if (!student) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const cafeteria = await resolveStudentCafeteriaStore(schoolId, student);
+    if (!cafeteria.store) {
+      await session.abortTransaction();
+      return res.status(409).json({
+        message: 'No se encontró la tienda de cafetería para el curso del alumno.',
+      });
+    }
+
+    const storeId = cafeteria.store._id;
+    const isProductBlocked = await buildStudentBlockedProductChecker(schoolId, student);
+    const productIds = items.map((item) => item.productId);
+    const products = await Product.find({
+      _id: { $in: productIds },
+      schoolId,
+      storeId,
+      status: 'active',
+      deletedAt: null,
+    }).session(session);
+
+    if (products.length !== productIds.length) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Uno o más productos no pertenecen a la tienda del alumno.' });
+    }
+
+    let total = 0;
+    const orderItems = [];
+
+    for (const item of items) {
+      const product = products.find((candidate) => String(candidate._id) === String(item.productId));
+      if (!product) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Producto inválido: ${item.productId}` });
+      }
+
+      if (isProductBlocked(product)) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Producto bloqueado: ${product.name}` });
+      }
+
+      const quantity = Number(item.quantity || 0);
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Cantidad inválida para ${product.name}` });
+      }
+
+      if (Number(product.stock || 0) < quantity) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Sin stock suficiente de ${product.name}` });
+      }
+
+      const subtotal = quantity * Number(product.price || 0);
+      total += subtotal;
+      orderItems.push({
+        productId: product._id,
+        nameSnapshot: product.name,
+        unitPriceSnapshot: Number(product.price || 0),
+        quantity,
+        subtotal,
+      });
+    }
+
+    const spentToday = await sumStudentDailySpend(Order, {
+      schoolId,
+      studentId: student._id,
+      from: startOfToday(),
+      to: endOfToday(),
+      session,
+    });
+
+    if (student.dailyLimit > 0 && spentToday + total > student.dailyLimit) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Se alcanzó el límite diario de consumo.' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).session(session);
+    if (!wallet) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    if (Number(wallet.balance || 0) < total) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Saldo insuficiente. El cobro se hará al entregar, pero debe haber saldo ahora.' });
+    }
+
+    for (const item of orderItems) {
+      const reserved = await Product.findOneAndUpdate(
+        {
+          _id: item.productId,
+          schoolId,
+          storeId,
+          status: 'active',
+          deletedAt: null,
+          stock: { $gte: item.quantity },
+        },
+        { $inc: { stock: -item.quantity } },
+        { session, new: true }
+      );
+
+      if (!reserved) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Sin stock suficiente de ${item.nameSnapshot}` });
+      }
+    }
+
+    const [order] = await Order.create(
+      [
+        {
+          schoolId,
+          studentId: student._id,
+          guestSale: false,
+          storeId,
+          vendorId: null,
+          orderType: 'preorder',
+          preorderStatus: 'pending',
+          paymentStatus: 'pending',
+          preorderPlacedBy: userId,
+          paymentMethod: 'system',
+          items: orderItems,
+          total,
+          status: 'pending',
+          dispatchStatus: 'not_required',
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    publishPreorderChange(schoolId, storeId);
+
+    const populated = await Order.findById(order._id).populate('storeId', 'name').lean();
+    return res.status(201).json({
+      message: 'Preorden creada. Se cobrará cuando el vendedor entregue el pedido.',
+      order: serializePreorder(populated || order),
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
+router.patch('/portal/preorders/:preorderId', async (req, res) => {
+  let session;
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.body?.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const preorderId = toObjectId(req.params.preorderId);
+    if (!preorderId) {
+      return res.status(400).json({ message: 'Invalid preorder id' });
+    }
+
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length === 0) {
+      return res.status(400).json({ message: 'Deja al menos un producto o cancela la preorden.' });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const order = await Order.findOne({
+      _id: preorderId,
+      schoolId,
+      studentId: access.selectedStudentId,
+      orderType: 'preorder',
+    }).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Preorden no encontrada' });
+    }
+
+    if (order.preorderStatus !== 'pending' || order.status === 'cancelled') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Esta preorden ya no se puede editar' });
+    }
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      status: 'active',
+      deletedAt: null,
+    }).session(session);
+
+    if (!student) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    const storeId = order.storeId;
+    const isProductBlocked = await buildStudentBlockedProductChecker(schoolId, student);
+    const productIds = items.map((item) => item.productId);
+    const products = await Product.find({
+      _id: { $in: productIds },
+      schoolId,
+      storeId,
+      status: 'active',
+      deletedAt: null,
+    }).session(session);
+
+    if (products.length !== productIds.length) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Uno o más productos no pertenecen a la tienda del alumno.' });
+    }
+
+    const previousQtyByProduct = new Map(
+      (order.items || []).map((item) => [String(item.productId), Number(item.quantity || 0)])
+    );
+
+    let total = 0;
+    const orderItems = [];
+
+    for (const item of items) {
+      const product = products.find((candidate) => String(candidate._id) === String(item.productId));
+      if (!product) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Producto inválido: ${item.productId}` });
+      }
+
+      if (isProductBlocked(product)) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Producto bloqueado: ${product.name}` });
+      }
+
+      const quantity = Number(item.quantity || 0);
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Cantidad inválida para ${product.name}` });
+      }
+
+      const alreadyReserved = previousQtyByProduct.get(String(product._id)) || 0;
+      if (Number(product.stock || 0) + alreadyReserved < quantity) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Sin stock suficiente de ${product.name}` });
+      }
+
+      const subtotal = quantity * Number(product.price || 0);
+      total += subtotal;
+      orderItems.push({
+        productId: product._id,
+        nameSnapshot: product.name,
+        unitPriceSnapshot: Number(product.price || 0),
+        quantity,
+        subtotal,
+      });
+    }
+
+    const spentToday = await sumStudentDailySpend(Order, {
+      schoolId,
+      studentId: student._id,
+      from: startOfToday(),
+      to: endOfToday(),
+      session,
+    });
+    const spentWithoutThis = Math.max(0, spentToday - Number(order.total || 0));
+
+    if (student.dailyLimit > 0 && spentWithoutThis + total > student.dailyLimit) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Se alcanzó el límite diario de consumo.' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: student._id }).session(session);
+    if (!wallet) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    if (Number(wallet.balance || 0) < total) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Saldo insuficiente. El cobro se hará al entregar, pero debe haber saldo ahora.' });
+    }
+
+    const nextQtyByProduct = new Map(
+      orderItems.map((item) => [String(item.productId), Number(item.quantity || 0)])
+    );
+    const allProductIds = new Set([...previousQtyByProduct.keys(), ...nextQtyByProduct.keys()]);
+
+    for (const productId of allProductIds) {
+      const previousQty = previousQtyByProduct.get(productId) || 0;
+      const nextQty = nextQtyByProduct.get(productId) || 0;
+      const delta = nextQty - previousQty;
+      if (delta === 0) {
+        continue;
+      }
+
+      if (delta > 0) {
+        const reserved = await Product.findOneAndUpdate(
+          {
+            _id: productId,
+            schoolId,
+            storeId,
+            status: 'active',
+            deletedAt: null,
+            stock: { $gte: delta },
+          },
+          { $inc: { stock: -delta } },
+          { session, new: true }
+        );
+        if (!reserved) {
+          await session.abortTransaction();
+          return res.status(400).json({ message: 'Sin stock suficiente para actualizar la preorden.' });
+        }
+      } else {
+        await Product.updateOne(
+          { _id: productId, schoolId, storeId },
+          { $inc: { stock: Math.abs(delta) } },
+          { session }
+        );
+      }
+    }
+
+    order.items = orderItems;
+    order.total = total;
+    await order.save({ session });
+
+    await session.commitTransaction();
+    publishPreorderChange(schoolId, storeId);
+
+    const populated = await Order.findById(order._id).populate('storeId', 'name').lean();
+    return res.status(200).json({
+      message: 'Preorden actualizada. Sigue sin cobrarse hasta la entrega.',
+      order: serializePreorder(populated || order),
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
+router.delete('/portal/preorders/:preorderId', async (req, res) => {
+  let session;
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.body?.studentId || req.query.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const preorderId = toObjectId(req.params.preorderId);
+    if (!preorderId) {
+      return res.status(400).json({ message: 'Invalid preorder id' });
+    }
+
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const order = await Order.findOne({
+      _id: preorderId,
+      schoolId,
+      studentId: access.selectedStudentId,
+      orderType: 'preorder',
+    }).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Preorden no encontrada' });
+    }
+
+    if (order.preorderStatus !== 'pending') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Esta preorden ya no se puede eliminar' });
+    }
+
+    for (const item of order.items || []) {
+      await Product.updateOne(
+        { _id: item.productId, schoolId, storeId: order.storeId },
+        { $inc: { stock: item.quantity } },
+        { session }
+      );
+    }
+
+    order.status = 'cancelled';
+    order.preorderStatus = 'cancelled';
+    await order.save({ session });
+
+    await session.commitTransaction();
+    publishPreorderChange(schoolId, order.storeId);
+
+    return res.status(200).json({
+      message: 'Preorden eliminada. No se cobró nada.',
+      order: serializePreorder(order),
+    });
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
   }
 });
 

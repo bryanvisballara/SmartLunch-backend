@@ -26,7 +26,8 @@ const {
 } = require('../utils/schoolBillingStatementDocument');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
 const { runWithSchoolContext } = require('../config/db');
-const { publishComanderaChange, subscribeComanderaChange } = require('../utils/comanderaHub');
+const { publishComanderaChange, subscribeComanderaChange, publishPreorderChange, subscribePreorderChange } = require('../utils/comanderaHub');
+const { sumStudentDailySpend } = require('../utils/studentCafeteriaSpend');
 
 const PAYMENT_METHOD_FILTER_ALIASES = {
   cash: ['cash'],
@@ -816,19 +817,13 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
     let totalSpentToday = 0;
     if (student) {
       const now = new Date();
-      const dailySpent = await Order.aggregate([
-        {
-          $match: {
-            schoolId,
-            studentId: student._id,
-            status: 'completed',
-            createdAt: { $gte: startOfDay(now), $lt: endOfDay(now) },
-          },
-        },
-        { $group: { _id: null, total: { $sum: '$total' } } },
-      ]).session(session);
-
-      totalSpentToday = dailySpent[0]?.total || 0;
+      totalSpentToday = await sumStudentDailySpend(Order, {
+        schoolId,
+        studentId: student._id,
+        from: startOfDay(now),
+        to: endOfDay(now),
+        session,
+      });
     }
 
     let total = 0;
@@ -918,6 +913,8 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
           items: orderItems,
           total,
           status: 'completed',
+          orderType: 'pos',
+          paymentStatus: 'paid',
           dispatchStatus: store.comanderaEnabled ? 'pending' : 'not_required',
         },
       ],
@@ -1013,6 +1010,7 @@ router.get('/', async (req, res) => {
       to,
       status,
       includeCancelled,
+      includePendingPreorders,
       paymentMethod,
     } = req.query;
 
@@ -1023,6 +1021,15 @@ router.get('/', async (req, res) => {
       filter.status = status;
     } else if (String(includeCancelled).toLowerCase() !== 'true') {
       filter.status = 'completed';
+    }
+
+    if (String(includePendingPreorders).toLowerCase() === 'true') {
+      const statusFilter = filter.status;
+      delete filter.status;
+      filter.$or = [
+        statusFilter ? { status: statusFilter } : { status: { $ne: 'cancelled' } },
+        { orderType: 'preorder', preorderStatus: 'pending' },
+      ];
     }
 
     if (studentId) {
@@ -1147,6 +1154,173 @@ router.get('/comandera/stream', roleMiddleware('vendor', 'admin'), async (req, r
       sendSnapshot({ force: true }).catch(() => {});
     };
     const unsubscribe = subscribeComanderaChange(schoolId, storeId, onChange);
+    const poll = setInterval(() => {
+      sendSnapshot().catch(() => {});
+    }, 2000);
+    const heartbeat = setInterval(() => {
+      if (closed) {
+        return;
+      }
+      res.write(': ping\n\n');
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
+    }, 15000);
+
+    const close = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      clearInterval(poll);
+      clearInterval(heartbeat);
+      unsubscribe();
+      res.end();
+    };
+
+    req.on('close', close);
+    req.on('aborted', close);
+  } catch (error) {
+    if (!res.headersSent) {
+      return res.status(500).json({ message: error.message });
+    }
+    res.end();
+  }
+});
+
+function populatePreorderOrder(query) {
+  return query
+    .populate('studentId', 'name schoolCode grade course cafeteriaLevel')
+    .populate('preorderPlacedBy', 'name username role')
+    .populate('fulfilledBy', 'name username')
+    .populate('vendorId', 'name username');
+}
+
+function preorderSnapshotFingerprint(payload) {
+  const pendingIds = (payload?.pending || []).map((order) => String(order._id)).join(',');
+  const fulfilledIds = (payload?.fulfilledToday || []).map((order) => String(order._id)).join(',');
+  return `${pendingIds}|${fulfilledIds}`;
+}
+
+async function loadPreorderSnapshot(schoolId, storeId) {
+  const storeObjectId = toStoreObjectId(storeId);
+  if (!storeObjectId) {
+    return null;
+  }
+
+  const store = await Store.findOne({ _id: storeObjectId, schoolId, deletedAt: null }).select('_id name').lean();
+  if (!store) {
+    return null;
+  }
+
+  const [pending, fulfilledToday] = await Promise.all([
+    populatePreorderOrder(
+      Order.find({
+        schoolId,
+        storeId: storeObjectId,
+        orderType: 'preorder',
+        preorderStatus: 'pending',
+      })
+    )
+      .sort({ createdAt: 1, _id: 1 })
+      .limit(150)
+      .lean(),
+    populatePreorderOrder(
+      Order.find({
+        schoolId,
+        storeId: storeObjectId,
+        orderType: 'preorder',
+        preorderStatus: 'fulfilled',
+        fulfilledAt: { $gte: startOfBogotaDay() },
+      })
+    )
+      .sort({ fulfilledAt: -1 })
+      .limit(40)
+      .lean(),
+  ]);
+
+  return {
+    store: {
+      _id: store._id,
+      name: store.name,
+    },
+    pending: sortComanderaPending(pending),
+    fulfilledToday,
+  };
+}
+
+router.get('/preordenes', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const storeId = await resolveComanderaStoreId(req);
+    if (!storeId) {
+      return res.status(400).json({ message: 'storeId is required' });
+    }
+
+    const snapshot = await loadPreorderSnapshot(schoolId, storeId);
+    if (!snapshot) {
+      return res.status(404).json({ message: 'Store not found' });
+    }
+
+    return res.status(200).json(snapshot);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/preordenes/stream', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  const { schoolId } = req.user;
+  let storeId;
+  try {
+    storeId = await resolveComanderaStoreId(req);
+    if (!storeId) {
+      return res.status(400).json({ message: 'storeId is required' });
+    }
+
+    const initial = await loadPreorderSnapshot(schoolId, storeId);
+    if (!initial) {
+      return res.status(404).json({ message: 'Store not found' });
+    }
+
+    req.socket?.setTimeout?.(0);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    let lastFingerprint = '';
+    let closed = false;
+
+    const sendSnapshot = async ({ force = false } = {}) => {
+      if (closed) {
+        return;
+      }
+      const snapshot = await runWithSchoolContext(schoolId, () => loadPreorderSnapshot(schoolId, storeId));
+      if (!snapshot || closed) {
+        return;
+      }
+      const fingerprint = preorderSnapshotFingerprint(snapshot);
+      if (!force && fingerprint === lastFingerprint) {
+        return;
+      }
+      lastFingerprint = fingerprint;
+      res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`);
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
+    };
+
+    lastFingerprint = preorderSnapshotFingerprint(initial);
+    res.write(`event: snapshot\ndata: ${JSON.stringify(initial)}\n\n`);
+    if (typeof res.flush === 'function') {
+      res.flush();
+    }
+
+    const onChange = () => {
+      sendSnapshot({ force: true }).catch(() => {});
+    };
+    const unsubscribe = subscribePreorderChange(schoolId, storeId, onChange);
     const poll = setInterval(() => {
       sendSnapshot().catch(() => {});
     }, 2000);
@@ -1629,6 +1803,194 @@ router.post('/cancel-requests/:id/reject', roleMiddleware('admin'), async (req, 
   }
 });
 
+router.post('/:id/preorden/fulfill', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  let session;
+  try {
+    const { schoolId, role, userId } = req.user;
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const order = await Order.findOne({
+      _id: req.params.id,
+      schoolId,
+      orderType: 'preorder',
+    }).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Preorden no encontrada' });
+    }
+
+    if (role === 'vendor') {
+      const assignedStoreId = await resolveComanderaStoreId(req);
+      if (!assignedStoreId || String(order.storeId) !== assignedStoreId) {
+        await session.abortTransaction();
+        return res.status(403).json({ message: 'Solo puedes cobrar preórdenes de tu tienda asignada' });
+      }
+    }
+
+    if (order.preorderStatus === 'fulfilled' && order.paymentStatus === 'paid') {
+      await session.abortTransaction();
+      const populated = await populatePreorderOrder(Order.findById(order._id)).lean();
+      return res.status(200).json(populated);
+    }
+
+    if (order.preorderStatus !== 'pending' || order.status === 'cancelled') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Esta preorden ya no está pendiente' });
+    }
+
+    const wallet = await Wallet.findOne({ schoolId, studentId: order.studentId }).session(session);
+    if (!wallet) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Wallet not found' });
+    }
+
+    if (Number(wallet.balance || 0) < Number(order.total || 0)) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Saldo insuficiente para cobrar esta preorden' });
+    }
+
+    const student = await Student.findOne({ _id: order.studentId, schoolId, deletedAt: null }).session(session);
+    const currentLevel = wallet.lowBalanceAlertLevel || 'none';
+    const nextBalance = Number(wallet.balance) - Number(order.total);
+    const lowBalanceTransition = resolveLowBalanceAlertTransition({
+      currentLevel,
+      nextBalance,
+    });
+
+    wallet.balance = nextBalance;
+    wallet.lowBalanceAlertLevel = lowBalanceTransition?.nextLevel || wallet.lowBalanceAlertLevel || 'none';
+    await wallet.save({ session });
+
+    await WalletTransaction.create(
+      [
+        {
+          schoolId,
+          studentId: order.studentId,
+          walletId: wallet._id,
+          type: 'purchase',
+          amount: -Math.abs(order.total),
+          method: 'system',
+          orderId: order._id,
+          createdBy: userId,
+          notes: 'Cobro de preorden al entregar',
+        },
+      ],
+      { session }
+    );
+
+    order.status = 'completed';
+    order.preorderStatus = 'fulfilled';
+    order.paymentStatus = 'paid';
+    order.vendorId = userId;
+    order.fulfilledAt = new Date();
+    order.fulfilledBy = userId;
+    await order.save({ session });
+
+    await session.commitTransaction();
+    publishPreorderChange(schoolId, order.storeId);
+
+    if (student) {
+      setImmediate(async () => {
+        try {
+          await queueOrderCreatedNotifications({ schoolId, student, order });
+        } catch (notificationError) {
+          console.error(`[PREORDER_NOTIFICATION_FAILED] orderId=${order._id} error=${notificationError.message}`);
+        }
+      });
+
+      if (lowBalanceTransition?.shouldNotify && lowBalanceTransition.threshold) {
+        setImmediate(async () => {
+          try {
+            await queueLowBalanceAlertNotification({
+              schoolId,
+              student,
+              balance: wallet.balance,
+              threshold: lowBalanceTransition.threshold,
+            });
+          } catch (balanceNotificationError) {
+            console.error(`[PREORDER_LOW_BALANCE_FAILED] orderId=${order._id} error=${balanceNotificationError.message}`);
+          }
+        });
+      }
+    }
+
+    const populated = await populatePreorderOrder(Order.findById(order._id)).lean();
+    return res.status(200).json(populated);
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
+router.post('/:id/preorden/cancel', roleMiddleware('vendor', 'admin'), async (req, res) => {
+  let session;
+  try {
+    const { schoolId, role, userId } = req.user;
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    const order = await Order.findOne({
+      _id: req.params.id,
+      schoolId,
+      orderType: 'preorder',
+    }).session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: 'Preorden no encontrada' });
+    }
+
+    if (role === 'vendor') {
+      const assignedStoreId = await resolveComanderaStoreId(req);
+      if (!assignedStoreId || String(order.storeId) !== assignedStoreId) {
+        await session.abortTransaction();
+        return res.status(403).json({ message: 'Solo puedes cancelar preórdenes de tu tienda asignada' });
+      }
+    }
+
+    if (order.preorderStatus !== 'pending') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Solo se pueden cancelar preórdenes pendientes' });
+    }
+
+    for (const item of order.items) {
+      await Product.updateOne(
+        { _id: item.productId, schoolId, storeId: order.storeId },
+        { $inc: { stock: item.quantity } },
+        { session }
+      );
+    }
+
+    order.status = 'cancelled';
+    order.preorderStatus = 'cancelled';
+    order.vendorId = order.vendorId || userId;
+    await order.save({ session });
+
+    await session.commitTransaction();
+    publishPreorderChange(schoolId, order.storeId);
+
+    const populated = await populatePreorderOrder(Order.findById(order._id)).lean();
+    return res.status(200).json(populated);
+  } catch (error) {
+    if (session && session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    return res.status(500).json({ message: error.message });
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+});
+
 router.post('/:id/dispatch', roleMiddleware('vendor', 'admin'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
@@ -1681,19 +2043,25 @@ router.post('/:id/cancel', roleMiddleware('admin'), async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    if (order.status !== 'completed') {
+    const isPendingPreorder = order.orderType === 'preorder' && order.preorderStatus === 'pending';
+    if (order.status !== 'completed' && !isPendingPreorder) {
       await session.abortTransaction();
       return res.status(400).json({ message: 'Order is already cancelled' });
     }
 
+    const wasCharged = order.paymentStatus === 'paid' && order.paymentMethod === 'system';
+
     order.status = 'cancelled';
+    if (isPendingPreorder) {
+      order.preorderStatus = 'cancelled';
+    }
     await order.save({ session });
 
     for (const item of order.items) {
       await Product.updateOne({ _id: item.productId, schoolId, storeId: order.storeId }, { $inc: { stock: item.quantity } }, { session });
     }
 
-    if (order.paymentMethod === 'system') {
+    if (wasCharged) {
       const wallet = await Wallet.findOne({ schoolId, studentId: order.studentId }).session(session);
       if (!wallet) {
         await session.abortTransaction();
@@ -1743,10 +2111,14 @@ router.post('/:id/cancel', roleMiddleware('admin'), async (req, res) => {
       publishComanderaChange(schoolId, order.storeId);
     }
 
+    if (order.orderType === 'preorder') {
+      publishPreorderChange(schoolId, order.storeId);
+    }
+
     return res.status(200).json({
       message: 'Order cancelled successfully',
       orderId: order._id,
-      refunded: order.paymentMethod === 'system',
+      refunded: wasCharged,
     });
   } catch (error) {
     if (session && session.inTransaction()) {
