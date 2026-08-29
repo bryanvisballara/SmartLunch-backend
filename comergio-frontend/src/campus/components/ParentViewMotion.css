@@ -1,0 +1,241 @@
+.parent-view-motion {
+  width: 100%;
+  min-width: 0;
+}
+
+.parent-view-motion--rise {
+  animation: parent-view-rise 0.46s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--slide-left {
+  animation: parent-view-slide-left 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--slide-right {
+  animation: parent-view-slide-right 0.44s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--slide-up {
+  animation: parent-view-slide-up 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--fade-scale {
+  animation: parent-view-fade-scale 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--soft-rise {
+  animation: parent-view-soft-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--pop {
+  animation: parent-view-pop 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+.parent-view-motion--fade-blur {
+  animation: parent-view-fade-blur 0.4s ease both;
+}
+
+.parent-view-motion--flip-soft {
+  transform-origin: 50% 0;
+  animation: parent-view-flip-soft 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--stagger > article,
+.parent-view-motion--stagger > section,
+.parent-view-motion--stagger > .campus-parent-mobile__feed > article,
+.parent-view-motion--stagger .campus-parent-mobile__nursing-status-grid > article,
+.parent-view-motion--stagger .campus-parent-mobile__nursing-record-card,
+.parent-view-motion--stagger .campus-parent-mobile__care-empty-card,
+.parent-view-motion--stagger .campus-parent-mobile__academic-section,
+.parent-view-motion--stagger .parent-category-card,
+.parent-view-motion--stagger .parent-history-list > article,
+.parent-view-motion--stagger .parent-list > article,
+.parent-view-motion--stagger .parent-topups-balance-card,
+.parent-view-motion--stagger .campus-parent-mobile__transport-status-grid > article,
+.parent-view-motion--stagger .campus-parent-mobile__transport-hero,
+.parent-view-motion--stagger .campus-parent-mobile__transport-map-card,
+.parent-view-motion--stagger .campus-parent-mobile__finance-group {
+  animation: parent-view-stagger-rise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.parent-view-motion--stagger > article:nth-child(1),
+.parent-view-motion--stagger > section:nth-child(1),
+.parent-view-motion--stagger .campus-parent-mobile__nursing-record-card:nth-child(1),
+.parent-view-motion--stagger .parent-category-card:nth-child(1) {
+  animation-delay: 0.04s;
+}
+
+.parent-view-motion--stagger > article:nth-child(2),
+.parent-view-motion--stagger > section:nth-child(2),
+.parent-view-motion--stagger .campus-parent-mobile__nursing-record-card:nth-child(2),
+.parent-view-motion--stagger .parent-category-card:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.parent-view-motion--stagger > article:nth-child(3),
+.parent-view-motion--stagger > section:nth-child(3),
+.parent-view-motion--stagger .campus-parent-mobile__nursing-record-card:nth-child(3),
+.parent-view-motion--stagger .parent-category-card:nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+.parent-view-motion--stagger > article:nth-child(4),
+.parent-view-motion--stagger > section:nth-child(4),
+.parent-view-motion--stagger .campus-parent-mobile__nursing-record-card:nth-child(4),
+.parent-view-motion--stagger .parent-category-card:nth-child(4) {
+  animation-delay: 0.22s;
+}
+
+.parent-view-motion--stagger > article:nth-child(n + 5),
+.parent-view-motion--stagger > section:nth-child(n + 5),
+.parent-view-motion--stagger .campus-parent-mobile__nursing-record-card:nth-child(n + 5),
+.parent-view-motion--stagger .parent-category-card:nth-child(n + 5) {
+  animation-delay: 0.28s;
+}
+
+@keyframes parent-view-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-fade-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-soft-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-fade-blur {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+  }
+
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+@keyframes parent-view-flip-soft {
+  from {
+    opacity: 0;
+    transform: perspective(720px) rotateX(7deg) translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes parent-view-stagger-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .parent-view-motion,
+  .parent-view-motion--stagger > article,
+  .parent-view-motion--stagger > section,
+  .parent-view-motion--stagger .campus-parent-mobile__feed > article,
+  .parent-view-motion--stagger .campus-parent-mobile__nursing-status-grid > article,
+  .parent-view-motion--stagger .campus-parent-mobile__nursing-record-card,
+  .parent-view-motion--stagger .campus-parent-mobile__care-empty-card,
+  .parent-view-motion--stagger .campus-parent-mobile__academic-section,
+  .parent-view-motion--stagger .parent-category-card,
+  .parent-view-motion--stagger .parent-history-list > article,
+  .parent-view-motion--stagger .parent-list > article,
+  .parent-view-motion--stagger .parent-topups-balance-card {
+    animation: parent-view-fade-only 0.16s ease both;
+  }
+}
+
+@keyframes parent-view-fade-only {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}

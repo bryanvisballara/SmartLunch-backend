@@ -5,6 +5,7 @@ import { AppLauncher } from '@capacitor/app-launcher';
 import { Browser } from '@capacitor/browser';
 import { useLocation, useNavigate } from 'react-router-dom';
 import ParentPullToRefreshIndicator from '../components/ParentPullToRefreshIndicator';
+import { ParentViewMotion } from '../campus/components/ParentViewMotion';
 import BoldPaymentButton from '../components/BoldPaymentButton';
 import { useParentPullToRefresh } from '../hooks/useParentPullToRefresh';
 import useAuthStore from '../store/auth.store';
@@ -572,6 +573,28 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
     return decodeURIComponent(location.pathname.slice(prefix.length));
   }, [location.pathname, preordersPath]);
   const isPreordersPage = isPreordersRoute;
+  const cafeteriaMotionKey = (
+    isPreordersPage ? `cafeteria-preorders:${preorderCategoryId || 'list'}`
+    : isMenuProductsPage ? `cafeteria-menu-products:${menuCategoryId}`
+    : isMenuPage ? 'cafeteria-menu'
+    : isHistoryPage ? 'cafeteria-history'
+    : isLimitPage ? 'cafeteria-limit'
+    : isGioIaPage ? 'cafeteria-gio'
+    : isMeriendasDayPage ? `cafeteria-meriendas-day:${location.pathname}`
+    : isMeriendasPage ? 'cafeteria-meriendas'
+    : isAddCardPage ? 'cafeteria-add-card'
+    : isAutoTopupPage ? 'cafeteria-auto-topup'
+    : isTopupDaviPlataPage ? 'cafeteria-daviplata'
+    : isTopupEpaycoPage ? 'cafeteria-epayco'
+    : isTopupNequiPage ? 'cafeteria-nequi'
+    : isTopupPsePage ? 'cafeteria-pse'
+    : isTopupBancolombiaPage ? 'cafeteria-bancolombia'
+    : isTopupBrebPage ? 'cafeteria-breb'
+    : isTopupMethodsPage ? 'cafeteria-methods'
+    : isTopupsPage ? 'cafeteria-topups'
+    : isBoldResultPage ? 'cafeteria-bold'
+    : 'cafeteria-home'
+  );
 
   const selectedStudent = overview?.selectedStudent || null;
   const selectedStudentFirstName = String(selectedStudent?.name || 'tu hijo').trim().split(/\s+/)[0] || 'tu hijo';
@@ -3080,7 +3103,9 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </div>
         ) : null}
 
-        {!loading && !error && isPreordersPage ? (
+        {!loading && !error ? (
+        <ParentViewMotion viewKey={cafeteriaMotionKey}>
+        {isPreordersPage ? (
           <ParentPreordersPanel
             categoriesPath={preordersPath}
             categoryId={preorderCategoryId}
@@ -3090,7 +3115,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           />
         ) : null}
 
-        {!loading && !error && isMenuPage ? (
+        {isMenuPage ? (
           <section className="parent-menu-page" id="parent-menu-page">
             <h2>Categorías</h2>
             <p className="parent-menu-caption">Bloquea categorías completas o entra para bloquear productos puntuales.</p>
@@ -3147,7 +3172,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isMenuProductsPage ? (
+        {isMenuProductsPage ? (
           <section className="parent-menu-products-page">
             <div className="parent-menu-products-head">
               <button
@@ -3208,7 +3233,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isHistoryPage ? (
+        {isHistoryPage ? (
           <section className="parent-history-page">
             <h2>Historial de órdenes</h2>
             <p className="parent-history-student">
@@ -3285,7 +3310,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupsPage ? (
+        {isTopupsPage ? (
           <section className="parent-topups-page" id="parent-topups-section">
             <h2>Billetera</h2>
             <p className="parent-topups-subtitle">Gestiona y monitorea las recargas del alumno seleccionado.</p>
@@ -3347,7 +3372,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isMeriendasPage ? (
+        {isMeriendasPage ? (
           <section className="parent-meriendas-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(normalizedBasePath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3607,7 +3632,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isMeriendasDayPage ? (
+        {isMeriendasDayPage ? (
           <section className="parent-meriendas-day-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(meriendasPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3676,7 +3701,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupDaviPlataPage ? (
+        {isTopupDaviPlataPage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3756,7 +3781,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupEpaycoPage ? (
+        {isTopupEpaycoPage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3818,7 +3843,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupNequiPage ? (
+        {isTopupNequiPage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3880,7 +3905,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupPsePage ? (
+        {isTopupPsePage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -3958,7 +3983,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupBancolombiaPage ? (
+        {isTopupBancolombiaPage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -4016,7 +4041,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isTopupBrebPage ? (
+        {isTopupBrebPage ? (
           <section className="parent-topup-davi-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupMethodsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -4070,7 +4095,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isAddCardPage ? (
+        {isAddCardPage ? (
           <section className="parent-add-card-page">
             <button className="parent-topup-back-btn" onClick={() => navigate(topupsPath)} type="button">
               <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -4263,7 +4288,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isLimitPage ? (
+        {isLimitPage ? (
           <section className="parent-limit-page" id="student-control">
             <h2>Limitar consumo diario</h2>
             <p className="parent-limit-student">
@@ -4308,7 +4333,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && isGioIaPage ? (
+        {isGioIaPage ? (
           <section className="parent-gio-page">
             <h2>GIO - IA</h2>
             <p className="parent-gio-subtitle">
@@ -4355,7 +4380,7 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
           </section>
         ) : null}
 
-        {!loading && !error && !isMenuRoute && !isPreordersRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupEpaycoPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
+        {!isMenuRoute && !isPreordersRoute && !isTopupsPage && !isTopupMethodsPage && !isTopupDaviPlataPage && !isTopupEpaycoPage && !isTopupNequiPage && !isTopupPsePage && !isTopupBancolombiaPage && !isTopupBrebPage && !isAddCardPage && !isAutoTopupPage && !isMeriendasPage && !isMeriendasDayPage && !isHistoryPage && !isLimitPage && !isGioIaPage ? (
           <>
             <section className="parent-balance-hero" id="parent-balance-section">
               <p className="meta">Saldo actual</p>
@@ -4512,6 +4537,8 @@ function ParentPortal({ basePath = '/parent', embedded = false, initialStudentId
               </div>
             </section>
           </>
+        ) : null}
+        </ParentViewMotion>
         ) : null}
       </main>
 

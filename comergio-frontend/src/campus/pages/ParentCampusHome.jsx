@@ -21,6 +21,7 @@ import { useFloatingBottomNavSize } from '../../hooks/useFloatingBottomNavSize';
 import { useStudentGamesAvailable } from '../../hooks/useStudentGamesAvailable';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
+import { ParentViewMotion } from '../components/ParentViewMotion';
 import {
   createCommunityPublication,
   createParentAcademicFeedComment,
@@ -3176,6 +3177,7 @@ function ParentCafeteriaContent({
       </section>
 
       <main className="parent-mobile-content">
+        <ParentViewMotion viewKey={activeView || 'cafeteria-overview'}>
         {activeView === 'cafeteria-menu' ? (
           <section className="parent-menu-page" id="parent-menu-page">
             <h2>Categorías</h2>
@@ -3358,6 +3360,7 @@ function ParentCafeteriaContent({
             </section>
           </>
         ) : null}
+        </ParentViewMotion>
       </main>
     </div>
   );
@@ -7568,6 +7571,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   };
 
   const financeHeroCard = activeSection === 'finance' ? (
+    <ParentViewMotion stagger={false} variant="slide-right" viewKey={`finance-hero:${selectedChildId}`}>
     <article className="campus-parent-mobile__hero-card is-finance">
       <div className="campus-parent-mobile__hero-card-head">
         <span className="campus-parent-mobile__eyebrow">
@@ -7626,6 +7630,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         </button>
       ) : null}
     </article>
+    </ParentViewMotion>
   ) : null;
 
   const selectedChildNursingRecords = useMemo(() => {
@@ -8329,10 +8334,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const isStackedPortalSection = isCareSection || activeSection === 'transport';
 
   const parentTransportSectionContent = activeSection === 'transport' ? (
-    <ParentTransportSection hasAssignedRoute={hasAssignedTransportRoute} transport={selectedChildTransport} />
+    <ParentViewMotion variant="slide-up" viewKey={`transport:${selectedChildId}`}>
+      <ParentTransportSection hasAssignedRoute={hasAssignedTransportRoute} transport={selectedChildTransport} />
+    </ParentViewMotion>
   ) : null;
 
   const parentCareSectionContent = isCareSection ? (
+    <ParentViewMotion viewKey={`${activeSection}:${selectedChildId}`}>
     <>
       {activeSection === 'nursing' ? (
         <section className="campus-parent-mobile__nursing-page">
@@ -8597,6 +8605,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         </section>
       ) : null}
     </>
+    </ParentViewMotion>
   ) : null;
 
   const parentSectionChrome = !shouldUsePortalHeader ? (
@@ -8815,7 +8824,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         style={{ transform: activeSection === 'games' || !canUseCampusPullRefresh ? undefined : `translateY(${pullRefreshContentOffset}px)` }}
       >
         {activeSection === 'home' ? (
-          <>
+          <ParentViewMotion variant="rise" viewKey={`home:${selectedChildId}`}>
             {studentPortalMode && studentFlyLocked ? (
               <div className="campus-parent-mobile__fly-lock-banner" role="status">
                 <strong>FLY pausado</strong>
@@ -8898,11 +8907,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 />
               )}
             </section>
-          </>
+          </ParentViewMotion>
         ) : null}
 
         {activeSection === 'finance' ? (
-          <>
+          <ParentViewMotion variant="slide-right" viewKey={`finance:${selectedChildId}`}>
             {academicPaymentMessage ? <p className="campus-parent-mobile__empty-note">{academicPaymentMessage}</p> : null}
             {academicLoading ? <p className="campus-parent-mobile__empty-note">Actualizando cartera académica...</p> : null}
             <ParentFinancePaymentHistory
@@ -8920,11 +8929,11 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               isLoading={academicLoading}
               pricingGuide={selectedPricingGuide}
             />
-          </>
+          </ParentViewMotion>
         ) : null}
 
         {activeSection === 'academic' ? (
-          <>
+          <ParentViewMotion viewKey={`${activeAcademicView || 'academic-performance'}:${selectedChildId}`}>
             <ParentAcademicContent
               academicSchedule={resolvedAcademicSchedule}
               activeView={activeAcademicView}
@@ -8945,11 +8954,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               selectedChild={selectedChild}
               studentPortalMode={studentPortalMode}
             />
-          </>
+          </ParentViewMotion>
         ) : null}
 
         {activeSection === 'cafeteria' ? (
-          embedPortal && cafeteriaBasePath ? (
+          <ParentViewMotion stagger={false} variant="fade-blur" viewKey={`cafeteria-section:${selectedChildId}`}>
+          {embedPortal && cafeteriaBasePath ? (
             <ParentPortal
               basePath={cafeteriaBasePath}
               embedded
@@ -8981,11 +8991,14 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               showUserMenu={showUserMenu}
               userMenuRef={userMenuRef}
             />
-          )
+          )}
+          </ParentViewMotion>
         ) : null}
 
         {activeSection === 'games' && studentGamesAvailable && !studentFlyLocked ? (
-          <ColibriFlappyGame playerName={selectedChild?.name || user?.name || ''} />
+          <ParentViewMotion stagger={false} variant="pop" viewKey="games">
+            <ColibriFlappyGame playerName={selectedChild?.name || user?.name || ''} />
+          </ParentViewMotion>
         ) : null}
       </div>
       ) : null}
