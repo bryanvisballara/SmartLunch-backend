@@ -5,7 +5,7 @@ const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
 const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, expandGradeKeysWithClassroomGroups, buildClassroomGroupGradeMongoOr, serializeClassroomGroups } = require('../utils/classroomGroups');
-const { getFeeGradeAliases } = require('../utils/feeGradeMatching');
+const { getFeeGradeAliases, isEducationalLevelKey, isNumericGradeKey } = require('../utils/feeGradeMatching');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -408,25 +408,56 @@ function buildFieldMatchConditions(field, values) {
   });
 }
 
+function courseGradeIsEducationalLevel(course) {
+  return [course?.studentGradeKey, course?.gradeLevel]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .some((value) => (
+      isEducationalLevelKey(value)
+      || /(kinder|prejardin|jardin|maternal|transicion|\bprep\b|toddlers|infants|nursery)/i.test(value)
+    ));
+}
+
 function getCourseGradeAliases(course) {
   const aliases = new Set();
   addNormalizedAlias(aliases, course?.studentGradeKey);
   addNormalizedAlias(aliases, course?.gradeLevel);
-  addNormalizedAlias(aliases, course?.classroomGroupLabel);
 
   const gradeKeyParts = normalizeText(course?.studentGradeKey).split(':').map((part) => part.trim()).filter(Boolean);
   if (gradeKeyParts.length > 1) {
-    addNormalizedAlias(aliases, gradeKeyParts[gradeKeyParts.length - 1]);
+    const lastPart = gradeKeyParts[gradeKeyParts.length - 1];
+    if (lastPart && !/^[a-z]$/i.test(lastPart)) {
+      addNormalizedAlias(aliases, lastPart);
+    }
   }
 
-  const numericGrade = normalizeText(course?.studentGradeKey || course?.gradeLevel).match(/(\d{1,2})/);
-  if (numericGrade) {
-    addNormalizedAlias(aliases, numericGrade[1]);
+  const educational = courseGradeIsEducationalLevel(course);
+  if (!educational) {
+    const numericSource = normalizeText(course?.studentGradeKey || course?.gradeLevel).replace(/\s+/g, '');
+    if (isNumericGradeKey(numericSource) || /^\d{1,2}[a-z]$/i.test(numericSource)) {
+      const numericGrade = numericSource.match(/^(\d{1,2})/i);
+      if (numericGrade) {
+        addNormalizedAlias(aliases, numericGrade[1]);
+      }
+    }
   }
 
   Array.from(aliases).forEach((alias) => {
-    getFeeGradeAliases(alias).forEach((feeAlias) => addNormalizedAlias(aliases, feeAlias));
+    getFeeGradeAliases(alias).forEach((feeAlias) => {
+      if (educational && isNumericGradeKey(feeAlias)) {
+        return;
+      }
+      addNormalizedAlias(aliases, feeAlias);
+    });
   });
+
+  if (educational) {
+    Array.from(aliases).forEach((alias) => {
+      if (isNumericGradeKey(alias)) {
+        aliases.delete(alias);
+      }
+    });
+  }
 
   return Array.from(aliases);
 }
@@ -476,10 +507,6 @@ function getCourseSectionAliases(course, gradeAliases = getCourseGradeAliases(co
     if (sectionOrdinal) {
       addNormalizedAlias(aliases, `${gradeAlias}:${sectionOrdinal}`);
     }
-  });
-
-  Array.from(aliases).forEach((alias) => {
-    getFeeGradeAliases(alias).forEach((feeAlias) => addNormalizedAlias(aliases, feeAlias));
   });
 
   return Array.from(aliases);
