@@ -1460,7 +1460,7 @@ function getTeacherLinkGradeKind(grade = {}, levelLabel = '') {
 
 function getTeacherLinkGradeDisplay(grade = {}, kind = 'other') {
   const label = String(grade.label || grade.key || '').trim();
-  if (kind === 'prep') return 'Prep.';
+  if (kind === 'prep') return 'Transición';
   if (kind === 'number') {
     const match = label.match(/(\d{1,2})/);
     return match ? match[1] : label;
@@ -4371,9 +4371,12 @@ function RectoriaDashboard() {
   const getGradeLabel = (gradeKey) => {
     const rawKey = String(gradeKey || '').trim();
     const normalizedKey = normalizeAcademicGradeKey(rawKey);
+    const resolvedStructureKey = resolveStructureGradeKeyForStudent(rawKey, academicStructureDraft.grades)
+      || resolveStructureGradeKeyForStudent(normalizedKey, academicStructureDraft.grades);
     const keyCandidates = Array.from(new Set([
       rawKey,
       normalizedKey,
+      resolvedStructureKey,
       normalizeEducationalLevelKey(rawKey),
       rawKey.replace(/_/g, ' '),
     ].filter(Boolean)));
@@ -11491,7 +11494,7 @@ function RectoriaDashboard() {
                             <th><PlannerColActivityIcon /> Actividad</th>
                             <th><PlannerColMaterialsIcon /> Materiales</th>
                             <th><PlannerColPurposeIcon /> Para qué lo necesitan</th>
-                            <th><PlannerColCourseIcon /> Curso / materia</th>
+                            <th><PlannerColCourseIcon /> Grados / evento</th>
                             {isReturning ? <th>Anotación</th> : null}
                           </tr>
                         </thead>
@@ -15103,22 +15106,20 @@ function RectoriaDashboard() {
               {courseStudentsModal.error ? <p className="rectoria-modal-error">{courseStudentsModal.error}</p> : null}
               {selectedCourseStudents.length === 0 ? <p className="rectoria-role-empty">Este curso no tiene alumnos asignados.</p> : selectedCourseStudents.map((student) => {
                 const studentId = String(student._id);
-                const currentGradeKey = resolveStructureGradeKeyForStudent(student.grade, academicStructureDraft.grades)
-                  || normalizeAcademicGradeKey(student.grade)
-                  || String(courseStudentsModal.gradeKey || '');
+                const storedGradeKey = String(student.grade || '').trim();
                 const moveDraft = courseStudentMoveDrafts[studentId] || { grade: '', course: '' };
                 const destinationCourses = courseOptionsByGrade[moveDraft.grade] || [];
                 const showCourseSelect = destinationCourses.length > 1;
                 const resolvedDestinationCourse = moveDraft.course || (destinationCourses.length === 1 ? destinationCourses[0].value : '');
-                const currentCourseKey = String(courseStudentsModal.courseKey || '').trim();
+                const storedCourseKey = String(student.course || '').trim();
                 const isUnchanged = Boolean(moveDraft.grade)
-                  && String(moveDraft.grade) === String(currentGradeKey)
-                  && (!resolvedDestinationCourse || String(resolvedDestinationCourse) === currentCourseKey);
+                  && storedGradeKey === String(moveDraft.grade)
+                  && (!resolvedDestinationCourse || storedCourseKey === String(resolvedDestinationCourse));
                 return (
                 <article className="rectoria-course-student-row" key={student._id}>
                   <div>
                     <strong>{student.name || 'Alumno'}</strong>
-                    <p>{student.grade ? getGradeLabel(normalizeAcademicGradeKey(student.grade)) : 'Sin grado'}</p>
+                    <p>{student.grade ? getGradeLabel(student.grade) : 'Sin grado'}</p>
                   </div>
                   <div className="rectoria-course-student-move">
                     <label>

@@ -48,10 +48,15 @@ export function getPlannerRequestReviewRows(request) {
       const materials = buildActivityMaterials(activity);
       const purpose = String(activity.purpose || activity.description || request.purpose || '').trim();
       const activityTitle = String(activity.title || '').trim();
-      const context = [activity.subject, activity.grade, activity.courseLabel]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-        .join(' · ');
+      const context = activity.isEvent
+        ? 'Evento institucional'
+        : (
+          [activity.grade, ...(Array.isArray(activity.grades) ? activity.grades : []), activity.courseLabel]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+            .filter((value, index, list) => list.indexOf(value) === index)
+            .join(' · ')
+        );
 
       return {
         key: String(activity.id || `activity-${activityIndex}`),

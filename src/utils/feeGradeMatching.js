@@ -63,7 +63,10 @@ function getFeeGradeAliases(value) {
     aliases.add('maternal');
     aliases.add('infants');
   }
-  if (/^prep$/i.test(normalized)) aliases.add('prep');
+  if (/^prep$/i.test(normalized)) {
+    aliases.add('prep');
+    aliases.add('transicion');
+  }
   if (/^infants$/i.test(normalized)) {
     aliases.add('infants');
     aliases.add('maternal');

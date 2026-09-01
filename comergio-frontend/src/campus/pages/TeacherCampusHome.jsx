@@ -302,9 +302,8 @@ const TEACHER_COMMON_MATERIALS = [
 
 function createTeacherResourceRequestDraft() {
   return {
-    subjectKey: '',
-    gradeKey: '',
-    courseId: '',
+    gradeKeys: [],
+    courseIds: [],
     materialKey: '',
     customMaterialName: '',
     quantity: '1',
@@ -313,6 +312,7 @@ function createTeacherResourceRequestDraft() {
     purpose: '',
     activityDate: '',
     noMaterialsNeeded: false,
+    isEvent: false,
   };
 }
 
@@ -5191,15 +5191,11 @@ function TeacherCampusHome({ forcePreview = false }) {
     )).length,
     [teacherPlannerCycles, teacherResourceRequests]
   );
-  const teacherPlannerSubjectOptions = useMemo(() => groupCoursesBySubject(academicCourses), [academicCourses]);
-  const selectedTeacherPlannerSubject = useMemo(
-    () => teacherPlannerSubjectOptions.find((subject) => subject.key === teacherResourceRequestDraft.subjectKey) || null,
-    [teacherPlannerSubjectOptions, teacherResourceRequestDraft.subjectKey]
-  );
   const teacherPlannerGradeOptions = useMemo(() => {
     const gradeMap = new Map();
-    (selectedTeacherPlannerSubject?.courses || []).forEach((course) => {
-      const gradeLabel = getCourseGradeLabel(course) || getCourseGroupLabel(course) || 'Sin grado';
+    academicCourses.forEach((course) => {
+      const rawLabel = getCourseGradeLabel(course) || getCourseGroupLabel(course) || 'Sin grado';
+      const gradeLabel = resolveEducationalGradeLabel(course) || rawLabel;
       const gradeKey = slugifyComponentKey(gradeLabel) || gradeLabel;
       if (!gradeMap.has(gradeKey)) {
         gradeMap.set(gradeKey, { key: gradeKey, label: gradeLabel, courses: [] });
@@ -5207,20 +5203,32 @@ function TeacherCampusHome({ forcePreview = false }) {
       gradeMap.get(gradeKey).courses.push(course);
     });
     return Array.from(gradeMap.values()).sort((left, right) => left.label.localeCompare(right.label, 'es'));
-  }, [selectedTeacherPlannerSubject]);
-  const selectedTeacherPlannerGrade = useMemo(
-    () => teacherPlannerGradeOptions.find((grade) => grade.key === teacherResourceRequestDraft.gradeKey) || null,
-    [teacherPlannerGradeOptions, teacherResourceRequestDraft.gradeKey]
+  }, [academicCourses]);
+  const selectedTeacherPlannerGrades = useMemo(
+    () => teacherPlannerGradeOptions.filter((grade) => (teacherResourceRequestDraft.gradeKeys || []).includes(grade.key)),
+    [teacherPlannerGradeOptions, teacherResourceRequestDraft.gradeKeys]
   );
   const teacherPlannerCourseOptions = useMemo(
-    () => (selectedTeacherPlannerGrade?.courses || []).slice().sort((left, right) => (
-      getCourseDisplayTitle(left).localeCompare(getCourseDisplayTitle(right), 'es')
-    )),
-    [selectedTeacherPlannerGrade]
+    () => selectedTeacherPlannerGrades
+      .flatMap((grade) => grade.courses || [])
+      .filter((course, index, list) => list.findIndex((item) => item.id === course.id) === index)
+      .sort((left, right) => (
+        getCourseDisplayTitle(left).localeCompare(getCourseDisplayTitle(right), 'es')
+      )),
+    [selectedTeacherPlannerGrades]
   );
-  const selectedTeacherPlannerCourse = useMemo(
-    () => teacherPlannerCourseOptions.find((course) => course.id === teacherResourceRequestDraft.courseId) || null,
-    [teacherPlannerCourseOptions, teacherResourceRequestDraft.courseId]
+  const selectedTeacherPlannerCourses = useMemo(
+    () => {
+      const selectedIds = new Set(teacherResourceRequestDraft.courseIds || []);
+      if (!selectedIds.size && teacherPlannerCourseOptions.length === 1) {
+        return teacherPlannerCourseOptions;
+      }
+      if (!selectedIds.size) {
+        return teacherPlannerCourseOptions;
+      }
+      return teacherPlannerCourseOptions.filter((course) => selectedIds.has(course.id));
+    },
+    [teacherPlannerCourseOptions, teacherResourceRequestDraft.courseIds]
   );
   const teacherPlannerMaterialOptions = useMemo(() => {
     const catalogNames = teacherResourceItems.map((item) => String(item.name || '').trim()).filter(Boolean);
@@ -7088,17 +7096,58 @@ function TeacherCampusHome({ forcePreview = false }) {
   const onTeacherResourceDraftChange = (field, value) => {
     setTeacherResourceRequestDraft((currentDraft) => {
       const nextDraft = { ...currentDraft, [field]: value };
-      if (field === 'subjectKey') {
-        nextDraft.gradeKey = '';
-        nextDraft.courseId = '';
-      }
-      if (field === 'gradeKey') {
-        nextDraft.courseId = '';
+      if (field === 'isEvent' && value) {
+        nextDraft.gradeKeys = [];
+        nextDraft.courseIds = [];
       }
       if (field === 'materialKey' && value !== '__other__') {
         nextDraft.customMaterialName = '';
       }
       return nextDraft;
+    });
+  };
+
+  const onToggleTeacherPlannerGrade = (gradeKey) => {
+    const nextKey = String(gradeKey || '').trim();
+    if (!nextKey) return;
+    setTeacherResourceRequestDraft((currentDraft) => {
+      const selected = new Set(currentDraft.gradeKeys || []);
+      if (selected.has(nextKey)) {
+        selected.delete(nextKey);
+      } else {
+        selected.add(nextKey);
+      }
+      const nextGradeKeys = Array.from(selected);
+      const allowedCourseIds = new Set(
+        teacherPlannerGradeOptions
+          .filter((grade) => nextGradeKeys.includes(grade.key))
+          .flatMap((grade) => (grade.courses || []).map((course) => course.id))
+      );
+      return {
+        ...currentDraft,
+        gradeKeys: nextGradeKeys,
+        courseIds: (currentDraft.courseIds || []).filter((courseId) => allowedCourseIds.has(courseId)),
+      };
+    });
+  };
+
+  const onToggleAllTeacherPlannerGrades = () => {
+    const allKeys = teacherPlannerGradeOptions.map((grade) => grade.key);
+    setTeacherResourceRequestDraft((currentDraft) => {
+      const selected = currentDraft.gradeKeys || [];
+      const allSelected = allKeys.length > 0 && allKeys.every((key) => selected.includes(key));
+      const nextGradeKeys = allSelected ? [] : allKeys;
+      const allowedCourseIds = new Set(
+        teacherPlannerGradeOptions
+          .filter((grade) => nextGradeKeys.includes(grade.key))
+          .flatMap((grade) => (grade.courses || []).map((course) => course.id))
+      );
+      return {
+        ...currentDraft,
+        isEvent: false,
+        gradeKeys: nextGradeKeys,
+        courseIds: (currentDraft.courseIds || []).filter((courseId) => allowedCourseIds.has(courseId)),
+      };
     });
   };
 
@@ -7128,9 +7177,9 @@ function TeacherCampusHome({ forcePreview = false }) {
     setTeacherResourceRequestDraft((currentDraft) => ({
       ...currentDraft,
       noMaterialsNeeded: Boolean(request.noMaterialsNeeded),
-      subjectKey: '',
-      gradeKey: '',
-      courseId: '',
+      isEvent: false,
+      gradeKeys: [],
+      courseIds: [],
       materialKey: '',
       customMaterialName: '',
       quantity: '1',
@@ -7156,7 +7205,11 @@ function TeacherCampusHome({ forcePreview = false }) {
         purpose: activity.purpose || activity.description || '',
         subject: activity.subject || '',
         grade: activity.grade || '',
+        grades: Array.isArray(activity.grades) && activity.grades.length
+          ? activity.grades
+          : String(activity.grade || '').split(' · ').map((value) => value.trim()).filter(Boolean),
         courseLabel: activity.courseLabel || '',
+        isEvent: Boolean(activity.isEvent),
         materials,
         materialName: materials[0]?.materialName || '',
         quantity: materials[0]?.quantity || 1,
@@ -7176,7 +7229,9 @@ function TeacherCampusHome({ forcePreview = false }) {
         purpose: request.purpose || '',
         subject: '',
         grade: '',
+        grades: [],
         courseLabel: request.requestedForArea || '',
+        isEvent: false,
         materials: request.items.map((item) => ({
           materialName: item.item?.name || item.customName || 'Material',
           quantity: Math.max(1, Number(item.quantity || 1)),
@@ -7260,11 +7315,12 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
-    const subjectLabel = selectedTeacherPlannerSubject?.label || '';
-    const gradeLabel = selectedTeacherPlannerGrade?.label || '';
-    const courseLabel = selectedTeacherPlannerCourse
-      ? (getCourseGroupLabel(selectedTeacherPlannerCourse) || getCourseDisplayTitle(selectedTeacherPlannerCourse))
-      : '';
+    const isEvent = Boolean(teacherResourceRequestDraft.isEvent);
+    const gradeLabels = selectedTeacherPlannerGrades.map((grade) => grade.label).filter(Boolean);
+    const courseLabels = selectedTeacherPlannerCourses
+      .map((course) => getCourseGroupLabel(course) || getCourseDisplayTitle(course))
+      .filter(Boolean);
+    const uniqueCourseLabels = Array.from(new Set(courseLabels));
     const title = String(teacherResourceRequestDraft.activityTitle || '').trim();
     const purpose = String(teacherResourceRequestDraft.purpose || '').trim();
     const date = String(teacherResourceRequestDraft.activityDate || '').trim();
@@ -7287,8 +7343,8 @@ function TeacherCampusHome({ forcePreview = false }) {
       quantity: Math.max(1, Number(item.quantity || 1)),
     })).filter((item) => item.materialName);
 
-    if (!subjectLabel || !gradeLabel || !courseLabel) {
-      setNotice({ type: 'error', text: 'Selecciona asignatura, grado y curso.' });
+    if (!isEvent && !gradeLabels.length) {
+      setNotice({ type: 'error', text: 'Selecciona al menos un grado, o marca Evento si es una actividad institucional.' });
       return;
     }
     if (!normalizedMaterials.length) {
@@ -7315,9 +7371,11 @@ function TeacherCampusHome({ forcePreview = false }) {
         date,
         title,
         purpose,
-        subject: subjectLabel,
-        grade: gradeLabel,
-        courseLabel,
+        subject: '',
+        grade: isEvent ? 'Todos los grados' : gradeLabels.join(' · '),
+        grades: isEvent ? [] : gradeLabels,
+        courseLabel: isEvent ? 'Evento institucional' : uniqueCourseLabels.join(' · '),
+        isEvent,
         materials: normalizedMaterials,
         materialName: normalizedMaterials[0].materialName,
         quantity: normalizedMaterials[0].quantity,
@@ -7352,9 +7410,11 @@ function TeacherCampusHome({ forcePreview = false }) {
           title: activity.title,
           description: activity.purpose,
           purpose: activity.purpose,
-          subject: activity.subject,
-          grade: activity.grade,
+          subject: activity.subject || '',
+          grade: activity.grade || '',
+          grades: Array.isArray(activity.grades) ? activity.grades : [],
           courseLabel: activity.courseLabel,
+          isEvent: Boolean(activity.isEvent),
           materials,
           materialName: materials[0]?.materialName || '',
           quantity: materials[0]?.quantity || 1,
@@ -7363,9 +7423,16 @@ function TeacherCampusHome({ forcePreview = false }) {
 
     const areaParts = Array.from(new Set(
       teacherResourcePlannerActivities
-        .map((activity) => [activity.subject, activity.grade, activity.courseLabel].filter(Boolean).join(' · '))
+        .map((activity) => (
+          activity.isEvent
+            ? 'Evento institucional'
+            : [activity.grade, activity.courseLabel].filter(Boolean).join(' · ')
+        ))
         .filter(Boolean)
     ));
+    if (noMaterialsNeeded && teacherResourceRequestDraft.isEvent) {
+      areaParts.push('Evento institucional');
+    }
 
     const flattenedItems = plannerActivities.flatMap((activity) => (
       (activity.materials || []).map((material) => ({
@@ -12623,9 +12690,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <table className="campus-teacher__recursos-table">
                             <thead>
                               <tr>
-                                <th>Asignatura</th>
-                                <th>Grado</th>
-                                <th>Curso</th>
+                                <th>Grados</th>
                                 <th>Materiales</th>
                                 <th>Actividad</th>
                                 <th>Fecha</th>
@@ -12635,9 +12700,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                               {(selectedTeacherPlannerRequest.plannerActivities || []).length ? (
                                 selectedTeacherPlannerRequest.plannerActivities.map((activity) => (
                                   <tr key={activity.id || `${activity.title}-${activity.date}`}>
-                                    <td>{activity.subject || '—'}</td>
-                                    <td>{activity.grade || '—'}</td>
-                                    <td>{activity.courseLabel || '—'}</td>
+                                    <td>{activity.isEvent ? 'Evento institucional' : (Array.isArray(activity.grades) && activity.grades.length ? activity.grades.join(' · ') : (activity.grade || '—'))}</td>
                                     <td>{formatTeacherPlannerMaterialsLabel(activity)}</td>
                                     <td>
                                       <strong>{activity.title || '—'}</strong>
@@ -12648,7 +12711,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 ))
                               ) : (
                                 <tr>
-                                  <td colSpan={6}>
+                                  <td colSpan={4}>
                                     {(selectedTeacherPlannerRequest.items || []).map((entry) => `${entry.item?.name || entry.customName || 'Material'} x${entry.quantity}`).join(' · ') || 'Sin detalle de actividades.'}
                                   </td>
                                 </tr>
@@ -12665,8 +12728,17 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <div className="campus-teacher__recursos-card-head">
                             <div>
                               <h3>Solicitar recursos para el periodo</h3>
-                              <p>Completa los datos de cada actividad y agrégala a la lista antes de enviar.</p>
+                              <p>Indica los grados y los materiales. No hace falta asignar asignatura: eso ya va en la planeación.</p>
                             </div>
+                            <div className="campus-teacher__recursos-check-stack">
+                            <label className="campus-teacher__recursos-check">
+                              <input
+                                checked={Boolean(teacherResourceRequestDraft.isEvent)}
+                                onChange={(event) => onTeacherResourceDraftChange('isEvent', event.target.checked)}
+                                type="checkbox"
+                              />
+                              <span>Evento institucional (sin grado ni asignatura)</span>
+                            </label>
                             <label className="campus-teacher__recursos-check">
                               <input
                                 checked={Boolean(teacherResourceRequestDraft.noMaterialsNeeded)}
@@ -12689,72 +12761,48 @@ function TeacherCampusHome({ forcePreview = false }) {
                               />
                               <span>No necesito material para este periodo</span>
                             </label>
+                            </div>
                           </div>
 
                           {!teacherResourceRequestDraft.noMaterialsNeeded ? (
                             <>
                               <div className="campus-teacher__recursos-fields">
-                                <label className="campus-teacher__recursos-field">
-                                  <span>Asignatura</span>
-                                  <div className="campus-teacher__recursos-input-shell">
-                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
-                                      <path d="M5 5.5h6.5A2.5 2.5 0 0 1 14 8v11.5H7A2 2 0 0 1 5 17.5V5.5Z" stroke="currentColor" strokeWidth="1.7" />
-                                      <path d="M14 8h5a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-5V8Z" stroke="currentColor" strokeWidth="1.7" />
-                                    </svg>
-                                    <select
-                                      value={teacherResourceRequestDraft.subjectKey}
-                                      onChange={(event) => onTeacherResourceDraftChange('subjectKey', event.target.value)}
-                                    >
-                                      <option value="">Seleccionar asignatura</option>
-                                      {teacherPlannerSubjectOptions.map((subject) => (
-                                        <option key={subject.key} value={subject.key}>{subject.label}</option>
-                                      ))}
-                                    </select>
+                                {!teacherResourceRequestDraft.isEvent ? (
+                                  <div className="campus-teacher__recursos-field is-wide">
+                                    <span>Grados</span>
+                                    <div className="campus-teacher__recursos-chip-row">
+                                      {teacherPlannerGradeOptions.map((grade) => {
+                                        const isSelected = (teacherResourceRequestDraft.gradeKeys || []).includes(grade.key);
+                                        return (
+                                          <button
+                                            className={`campus-teacher__recursos-chip${isSelected ? ' is-active' : ''}`}
+                                            key={grade.key}
+                                            onClick={() => onToggleTeacherPlannerGrade(grade.key)}
+                                            type="button"
+                                          >
+                                            {grade.label}
+                                          </button>
+                                        );
+                                      })}
+                                      {teacherPlannerGradeOptions.length > 1 ? (
+                                        <button
+                                          className="campus-teacher__recursos-chip is-ghost"
+                                          onClick={onToggleAllTeacherPlannerGrades}
+                                          type="button"
+                                        >
+                                          {(teacherResourceRequestDraft.gradeKeys || []).length === teacherPlannerGradeOptions.length
+                                            ? 'Quitar todos'
+                                            : 'Seleccionar todos'}
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                    <p className="campus-panel__meta">Puedes marcar varios grados y enviar un solo planner.</p>
                                   </div>
-                                </label>
-
-                                <label className="campus-teacher__recursos-field">
-                                  <span>Grado</span>
-                                  <div className="campus-teacher__recursos-input-shell">
-                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
-                                      <path d="M3 10.5 12 6l9 4.5-9 4.5-9-4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
-                                      <path d="M7 13.2v3.3c0 .8 2.2 2 5 2s5-1.2 5-2v-3.3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                                    </svg>
-                                    <select
-                                      disabled={!teacherResourceRequestDraft.subjectKey}
-                                      value={teacherResourceRequestDraft.gradeKey}
-                                      onChange={(event) => onTeacherResourceDraftChange('gradeKey', event.target.value)}
-                                    >
-                                      <option value="">Seleccionar grado</option>
-                                      {teacherPlannerGradeOptions.map((grade) => (
-                                        <option key={grade.key} value={grade.key}>{grade.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </label>
-
-                                <label className="campus-teacher__recursos-field">
-                                  <span>Curso</span>
-                                  <div className="campus-teacher__recursos-input-shell">
-                                    <svg aria-hidden="true" className="campus-teacher__recursos-field-icon" fill="none" viewBox="0 0 24 24">
-                                      <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
-                                      <circle cx="16.5" cy="9" r="2.4" stroke="currentColor" strokeWidth="1.7" />
-                                      <path d="M3.8 18.5a5.2 5.2 0 0 1 10.4 0M13.2 18.5a4.2 4.2 0 0 1 7 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                                    </svg>
-                                    <select
-                                      disabled={!teacherResourceRequestDraft.gradeKey}
-                                      value={teacherResourceRequestDraft.courseId}
-                                      onChange={(event) => onTeacherResourceDraftChange('courseId', event.target.value)}
-                                    >
-                                      <option value="">Seleccionar curso</option>
-                                      {teacherPlannerCourseOptions.map((course) => (
-                                        <option key={course.id} value={course.id}>
-                                          {getCourseGroupLabel(course) || getCourseDisplayTitle(course)}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </label>
+                                ) : (
+                                  <p className="campus-panel__meta campus-teacher__recursos-event-note">
+                                    Evento marcado: esta solicitud aplica a todo el colegio, sin asignatura ni grado.
+                                  </p>
+                                )}
 
                                 <label className="campus-teacher__recursos-field">
                                   <span>Material</span>
@@ -12922,9 +12970,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                               <table className="campus-teacher__recursos-table">
                                 <thead>
                                   <tr>
-                                    <th>Asignatura</th>
-                                    <th>Grado</th>
-                                    <th>Curso</th>
+                                    <th>Grados</th>
                                     <th>Materiales</th>
                                     <th>Actividad</th>
                                     <th>Fecha</th>
@@ -12934,13 +12980,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 <tbody>
                                   {teacherResourcePlannerActivities.length === 0 ? (
                                     <tr>
-                                      <td colSpan={7}>Aún no has agregado actividades para este planner.</td>
+                                      <td colSpan={5}>Aún no has agregado actividades para este planner.</td>
                                     </tr>
                                   ) : teacherResourcePlannerActivities.map((activity) => (
                                     <tr key={activity.key}>
-                                      <td>{activity.subject}</td>
-                                      <td>{activity.grade}</td>
-                                      <td>{activity.courseLabel}</td>
+                                      <td>{activity.isEvent ? 'Evento institucional' : (Array.isArray(activity.grades) && activity.grades.length ? activity.grades.join(' · ') : (activity.grade || '—'))}</td>
                                       <td>{formatTeacherPlannerMaterialsLabel(activity)}</td>
                                       <td>
                                         <strong>{activity.title}</strong>

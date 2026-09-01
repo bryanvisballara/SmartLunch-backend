@@ -29,7 +29,7 @@ function formatEducationalGradeLabel(value) {
   }
 
   if (normalized === 'prep') {
-    return 'Prep';
+    return 'Transición';
   }
 
   if (normalized.startsWith('prejardin')) {

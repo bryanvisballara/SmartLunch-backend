@@ -663,7 +663,7 @@ function CoordinationCampusHome() {
                           <th>Actividad</th>
                           <th>Materiales</th>
                           <th>Para que lo necesitan</th>
-                          <th>Curso / materia</th>
+                          <th>Grados / evento</th>
                           {isReturning ? <th>Anotacion</th> : null}
                         </tr>
                       </thead>

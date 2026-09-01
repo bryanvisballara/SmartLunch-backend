@@ -384,13 +384,20 @@ function normalizePlannerActivities(value) {
       const dateValue = normalizeText(entry?.date);
       const parsedDate = dateValue ? new Date(dateValue) : null;
       const materials = normalizePlannerActivityMaterials(entry);
+      const grades = Array.from(new Set(
+        (Array.isArray(entry?.grades) ? entry.grades : [entry?.grade])
+          .map((value) => normalizeText(value))
+          .filter(Boolean)
+      ));
       return {
         date: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
         title: normalizeText(entry?.title),
         description: normalizeText(entry?.description),
         subject: normalizeText(entry?.subject),
-        grade: normalizeText(entry?.grade),
+        grade: grades.join(' · ') || normalizeText(entry?.grade),
+        grades,
         courseLabel: normalizeText(entry?.courseLabel || entry?.course),
+        isEvent: Boolean(entry?.isEvent),
         materials,
         materialName: materials[0]?.materialName || '',
         quantity: materials[0]?.quantity || 0,
@@ -495,7 +502,9 @@ function serializeRequest(request) {
           description: normalizeText(activity.description),
           subject: normalizeText(activity.subject),
           grade: normalizeText(activity.grade),
+          grades: Array.isArray(activity.grades) ? activity.grades.map((value) => normalizeText(value)).filter(Boolean) : [],
           courseLabel: normalizeText(activity.courseLabel),
+          isEvent: Boolean(activity.isEvent),
           materials,
           materialName: materials[0]?.materialName || normalizeText(activity.materialName),
           quantity: materials[0]?.quantity || Number(activity.quantity || 0),

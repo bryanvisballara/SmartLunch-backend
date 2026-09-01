@@ -60,7 +60,10 @@ export function getFeeGradeAliases(value) {
   if (kNumberMatch) addEducationalLevelAliases(aliases, 'kinder', kNumberMatch[1]);
 
   if (/^maternal$/i.test(normalized)) aliases.add('maternal');
-  if (/^prep$/i.test(normalized)) aliases.add('prep');
+  if (/^prep$/i.test(normalized)) {
+    aliases.add('prep');
+    aliases.add('transicion');
+  }
   if (/^infants$/i.test(normalized)) {
     aliases.add('infants');
     aliases.add('maternal');

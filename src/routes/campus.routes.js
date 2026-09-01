@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
-const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, expandGradeKeysWithClassroomGroups, buildClassroomGroupGradeMongoOr, serializeClassroomGroups } = require('../utils/classroomGroups');
+const { getFeeGradeAliases } = require('../utils/feeGradeMatching');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -380,6 +380,11 @@ function addNormalizedAlias(target, value) {
 
   target.add(normalized);
   target.add(normalized.replace(/\s+/g, ''));
+  const stripped = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (stripped && stripped !== normalized) {
+    target.add(stripped);
+    target.add(stripped.replace(/\s+/g, ''));
+  }
 }
 
 function buildExactFlexibleRegExp(value) {
@@ -406,6 +411,7 @@ function getCourseGradeAliases(course) {
   const aliases = new Set();
   addNormalizedAlias(aliases, course?.studentGradeKey);
   addNormalizedAlias(aliases, course?.gradeLevel);
+  addNormalizedAlias(aliases, course?.classroomGroupLabel);
 
   const gradeKeyParts = normalizeText(course?.studentGradeKey).split(':').map((part) => part.trim()).filter(Boolean);
   if (gradeKeyParts.length > 1) {
@@ -416,6 +422,10 @@ function getCourseGradeAliases(course) {
   if (numericGrade) {
     addNormalizedAlias(aliases, numericGrade[1]);
   }
+
+  Array.from(aliases).forEach((alias) => {
+    getFeeGradeAliases(alias).forEach((feeAlias) => addNormalizedAlias(aliases, feeAlias));
+  });
 
   return Array.from(aliases);
 }
@@ -467,7 +477,28 @@ function getCourseSectionAliases(course, gradeAliases = getCourseGradeAliases(co
     }
   });
 
+  Array.from(aliases).forEach((alias) => {
+    getFeeGradeAliases(alias).forEach((feeAlias) => addNormalizedAlias(aliases, feeAlias));
+  });
+
   return Array.from(aliases);
+}
+
+function courseSectionIsOnlyGradeName(course) {
+  const gradeSet = new Set(
+    getCourseGradeAliases(course)
+      .map((value) => normalizeCourseMembershipValue(value))
+      .filter(Boolean)
+  );
+  const sectionKey = normalizeCourseMembershipValue(course?.section);
+  if (!sectionKey) {
+    return true;
+  }
+  if (gradeSet.has(sectionKey)) {
+    return true;
+  }
+  const sourceKey = normalizeCourseMembershipValue(course?.sourceCourseKey);
+  return Boolean(sourceKey && gradeSet.has(sourceKey));
 }
 
 function buildTeacherCourseRosterQuery({ schoolId, course }) {
@@ -484,7 +515,7 @@ function buildTeacherCourseRosterQuery({ schoolId, course }) {
     andConditions.push({ $or: gradeConditions });
   }
 
-  if (sectionConditions.length > 0) {
+  if (sectionConditions.length > 0 && !courseSectionIsOnlyGradeName(course)) {
     andConditions.push({ $or: sectionConditions });
   }
 
@@ -509,7 +540,11 @@ function studentBelongsToCourse(student, course) {
     return false;
   }
 
-  return sectionAliases.length === 0 || sectionAliases.includes(studentCourse);
+  if (courseSectionIsOnlyGradeName(course) || sectionAliases.length === 0) {
+    return true;
+  }
+
+  return sectionAliases.includes(studentCourse);
 }
 
 function normalizeTeacherCourseIdentity(value) {

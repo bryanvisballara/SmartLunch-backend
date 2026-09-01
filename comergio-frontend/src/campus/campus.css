@@ -1715,8 +1715,42 @@
 
 .campus-teacher__recursos-fields {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(7rem, 0.4fr);
   gap: 0.75rem;
+}
+
+.campus-teacher__recursos-check-stack {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
+
+.campus-teacher__recursos-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.campus-teacher__recursos-chip {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.campus-teacher__recursos-chip.is-ghost {
+  border-style: dashed;
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.campus-teacher__recursos-event-note {
+  grid-column: 1 / -1;
 }
 
 .campus-teacher__recursos-field {
@@ -1727,6 +1761,7 @@
 
 .campus-teacher__recursos-field.is-wide {
   gap: 0.4rem;
+  grid-column: 1 / -1;
 }
 
 .campus-teacher__recursos-field.is-qty {
