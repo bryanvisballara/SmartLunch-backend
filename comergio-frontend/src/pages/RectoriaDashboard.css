@@ -2056,6 +2056,25 @@
   resize: vertical;
 }
 
+.rectoria-communication-media-editor {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: #f8fbff;
+}
+
+.rectoria-communication-media-editor h4 {
+  margin: 0;
+}
+
+.rectoria-communication-media-editor p {
+  margin: 0.35rem 0 0;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
 .rectoria-communication-media-strip {
   display: grid;
   gap: 10px;
@@ -2070,6 +2089,45 @@
   border-radius: 14px;
   padding: 9px;
   background: #fff;
+}
+
+.rectoria-communication-media-card.is-editable {
+  grid-template-columns: 28px 74px minmax(0, 1fr) auto auto;
+}
+
+.rectoria-communication-media-card.is-dragging {
+  opacity: 0.55;
+}
+
+.rectoria-communication-media-card.has-error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.rectoria-communication-media-order,
+.rectoria-communication-media-drag {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.rectoria-communication-media-copy small {
+  color: #2563eb;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.rectoria-communication-media-card.has-error .rectoria-communication-media-copy small {
+  color: #b91c1c;
+}
+
+.rectoria-communication-media-remove {
+  border: 0;
+  background: transparent;
+  color: #b91c1c;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .rectoria-communication-media-thumb {

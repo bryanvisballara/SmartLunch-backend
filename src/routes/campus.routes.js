@@ -5,7 +5,12 @@ const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
 const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, expandGradeKeysWithClassroomGroups, buildClassroomGroupGradeMongoOr, serializeClassroomGroups } = require('../utils/classroomGroups');
-const { getFeeGradeAliases, isEducationalLevelKey, isNumericGradeKey } = require('../utils/feeGradeMatching');
+const {
+  describeGradeIdentity,
+  getFeeGradeAliases,
+  isBareNumericVsNamedGradeConflict,
+  isNumericGradeKey,
+} = require('../utils/feeGradeMatching');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
 const CampusAttendanceSession = require('../models/campusAttendanceSession.model');
@@ -408,14 +413,9 @@ function buildFieldMatchConditions(field, values) {
   });
 }
 
-function courseGradeIsEducationalLevel(course) {
-  return [course?.studentGradeKey, course?.gradeLevel]
-    .map((value) => normalizeText(value))
-    .filter(Boolean)
-    .some((value) => (
-      isEducationalLevelKey(value)
-      || /(kinder|prejardin|jardin|maternal|transicion|\bprep\b|toddlers|infants|nursery)/i.test(value)
-    ));
+function courseAllowsBareNumericAliases(course) {
+  const identity = describeGradeIdentity(course?.studentGradeKey) || describeGradeIdentity(course?.gradeLevel);
+  return identity?.family === 'numeric';
 }
 
 function getCourseGradeAliases(course) {
@@ -431,27 +431,25 @@ function getCourseGradeAliases(course) {
     }
   }
 
-  const educational = courseGradeIsEducationalLevel(course);
-  if (!educational) {
+  const allowBareNumeric = courseAllowsBareNumericAliases(course);
+  if (allowBareNumeric) {
     const numericSource = normalizeText(course?.studentGradeKey || course?.gradeLevel).replace(/\s+/g, '');
-    if (isNumericGradeKey(numericSource) || /^\d{1,2}[a-z]$/i.test(numericSource)) {
-      const numericGrade = numericSource.match(/^(\d{1,2})/i);
-      if (numericGrade) {
-        addNormalizedAlias(aliases, numericGrade[1]);
-      }
+    const numericGrade = numericSource.match(/^(\d{1,2})/i);
+    if (numericGrade) {
+      addNormalizedAlias(aliases, numericGrade[1]);
     }
   }
 
   Array.from(aliases).forEach((alias) => {
     getFeeGradeAliases(alias).forEach((feeAlias) => {
-      if (educational && isNumericGradeKey(feeAlias)) {
+      if (!allowBareNumeric && isNumericGradeKey(feeAlias)) {
         return;
       }
       addNormalizedAlias(aliases, feeAlias);
     });
   });
 
-  if (educational) {
+  if (!allowBareNumeric) {
     Array.from(aliases).forEach((alias) => {
       if (isNumericGradeKey(alias)) {
         aliases.delete(alias);
@@ -559,6 +557,10 @@ function normalizeCourseMembershipValue(value) {
 }
 
 function studentBelongsToCourse(student, course) {
+  if (isBareNumericVsNamedGradeConflict(student?.grade, course?.studentGradeKey || course?.gradeLevel)) {
+    return false;
+  }
+
   const gradeAliases = getCourseGradeAliases(course).map(normalizeCourseMembershipValue).filter(Boolean);
   const sectionAliases = getCourseSectionAliases(course).map(normalizeCourseMembershipValue).filter(Boolean);
   const studentGrade = normalizeCourseMembershipValue(student?.grade);

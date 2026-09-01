@@ -14,6 +14,67 @@ export function isEducationalLevelKey(value) {
     || /^(maternal|prep|infants|toddlers|nursery)$/i.test(normalized);
 }
 
+function compactGradeIdentity(value) {
+  return normalizeFeeGradeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+function describeGradeIdentity(value) {
+  const compact = compactGradeIdentity(value);
+  if (!compact) {
+    return null;
+  }
+  const token = compact.split(':').filter(Boolean).pop() || compact;
+  if (/^\d{1,2}$/.test(token)) {
+    return { family: 'numeric', number: token };
+  }
+  const sectioned = token.match(/^(\d{1,2})[a-z]$/);
+  if (sectioned) {
+    return { family: 'numeric', number: sectioned[1] };
+  }
+  const prefixed = token.match(/^([a-z]+)(\d{1,2})$/);
+  if (prefixed) {
+    return { family: prefixed[1], number: prefixed[2] };
+  }
+  return { family: token, number: '' };
+}
+
+function namedGradeFamiliesAreAliases(leftFamily, rightFamily) {
+  const families = new Set([leftFamily, rightFamily]);
+  return (families.has('prep') && families.has('transicion'))
+    || (families.has('maternal') && families.has('infants'));
+}
+
+export function isBareNumericVsNamedGradeConflict(leftGrade, rightGrade) {
+  const left = describeGradeIdentity(leftGrade);
+  const right = describeGradeIdentity(rightGrade);
+  if (!left || !right) {
+    return false;
+  }
+  if (left.family === 'numeric' && right.family !== 'numeric') {
+    return true;
+  }
+  if (right.family === 'numeric' && left.family !== 'numeric') {
+    return true;
+  }
+  if (
+    left.family !== 'numeric'
+    && right.family !== 'numeric'
+    && left.family !== right.family
+    && !namedGradeFamiliesAreAliases(left.family, right.family)
+  ) {
+    return Boolean(left.number && right.number && left.number === right.number);
+  }
+  return false;
+}
+
+function gradeAllowsBareNumericAliases(value) {
+  return describeGradeIdentity(value)?.family === 'numeric';
+}
+
 function addEducationalLevelAliases(aliases, levelName, number = '') {
   const level = normalizeFeeGradeText(levelName).toLowerCase();
   if (!level) return;
@@ -92,7 +153,11 @@ export function getFeeGradeAliases(value) {
     aliases.add(degreeMatch[1]);
   }
 
-  return [...aliases].filter(Boolean);
+  const aliasesList = [...aliases].filter(Boolean);
+  if (!gradeAllowsBareNumericAliases(normalized)) {
+    return aliasesList.filter((alias) => !isNumericGradeKey(alias));
+  }
+  return aliasesList;
 }
 
 export function hasFeeSettingAmounts(setting) {
@@ -158,6 +223,9 @@ export function findMatchingFeeSetting(gradeSettings, grade) {
 export function studentMatchesGradeKey(studentGrade = '', gradeKey = '') {
   const normalizedStudentGrade = normalizeFeeGradeText(studentGrade).toLowerCase();
   const normalizedGradeKey = normalizeFeeGradeText(gradeKey).toLowerCase();
+  if (isBareNumericVsNamedGradeConflict(normalizedStudentGrade, normalizedGradeKey)) {
+    return false;
+  }
   if (normalizedStudentGrade && normalizedGradeKey && normalizedStudentGrade === normalizedGradeKey) {
     return true;
   }

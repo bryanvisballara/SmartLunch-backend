@@ -99,6 +99,7 @@ import {
   updateAcademicManagementGradeName,
   updateAcademicManagementSubjectGrades,
   uploadAcademicSecretaryCommunicationImage,
+  uploadAcademicSecretaryCommunicationMedia,
 } from '../services/academicSecretary.service';
 import AcademicAssignmentsPanel from '../components/AcademicAssignmentsPanel';
 import CoordinationLevelDashboard from '../components/CoordinationLevelDashboard';
@@ -182,12 +183,43 @@ const emptyInstitutionalCommunicationForm = {
   title: '',
   body: '',
   authorId: '',
+  videoUrl: '',
   audienceType: 'general',
   gradeTargets: [],
   courseTargets: [],
   parentTargets: [],
   studentTargets: [],
+  media: [],
 };
+
+function createInstitutionalCommunicationMediaId(kind = 'media') {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${kind}-${crypto.randomUUID()}`;
+  }
+  return `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function stripInstitutionalCommunicationMedia(mediaItems = []) {
+  return (Array.isArray(mediaItems) ? mediaItems : [])
+    .filter((item) => item && !item.uploading && !item.uploadError)
+    .map(({ localId, previewSrc, uploading, uploadError, fileName, ...item }) => item);
+}
+
+function revokeInstitutionalCommunicationPreviewUrl(item) {
+  if (item?.previewSrc && String(item.previewSrc).startsWith('blob:')) {
+    URL.revokeObjectURL(item.previewSrc);
+  }
+}
+
+function moveInstitutionalMediaItem(items, fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length) {
+    return items;
+  }
+  const nextItems = [...items];
+  const [movedItem] = nextItems.splice(fromIndex, 1);
+  nextItems.splice(toIndex, 0, movedItem);
+  return nextItems;
+}
 
 const emptyCommunicationAuthorDraft = {
   name: '',
@@ -207,6 +239,7 @@ function createInstitutionalApprovalDraft(request = null) {
     parentTargets: Array.isArray(request?.parentTargets) ? request.parentTargets.map(String) : [],
     studentTargets: Array.isArray(request?.studentTargets) ? request.studentTargets.map(String) : [],
     media: Array.isArray(request?.media) ? request.media : [],
+    videoUrl: Array.isArray(request?.media) ? (request.media.find((item) => item?.kind === 'video')?.src || '') : '',
     reviewNotes: '',
   };
 }
@@ -293,15 +326,87 @@ function RectoriaCommunicationMediaPreview({ items = [] }) {
           <div className="rectoria-communication-media-thumb">
             {item.kind === 'video'
               ? <span>Video</span>
-              : <img alt={item.alt || `Adjunto ${index + 1}`} src={item.thumbUrl || item.src} />}
+              : <img alt={item.alt || `Adjunto ${index + 1}`} src={resolveApiAssetUrl(item.thumbUrl || item.src)} />}
           </div>
           <div className="rectoria-communication-media-copy">
             <strong>{item.kind === 'video' ? 'Video del docente' : `Adjunto ${index + 1}`}</strong>
             <span>{item.src || 'Sin URL'}</span>
           </div>
-          <a href={item.src || '#'} rel="noreferrer" target="_blank">Abrir</a>
+          <a href={resolveApiAssetUrl(item.src) || '#'} rel="noreferrer" target="_blank">Abrir</a>
         </article>
       ))}
+    </div>
+  );
+}
+
+function RectoriaCommunicationMediaEditor({
+  media = [],
+  videoUrl = '',
+  uploading = false,
+  draggingId = '',
+  disabled = false,
+  onFilesSelected,
+  onVideoUrlChange,
+  onRemove,
+  onDragStart,
+  onDrop,
+  onDragEnd,
+}) {
+  return (
+    <div className="rectoria-communication-media-editor">
+      <div>
+        <h4>Contenido visual del comunicado</h4>
+        <p>Sube imágenes para un carrusel, un video o pega una URL pública. Esto es lo que verán las familias en el feed, no la foto del autor.</p>
+      </div>
+      <div className="rectoria-communication-form-grid">
+        <label>
+          Imágenes o video
+          <input accept="image/*,video/*" disabled={disabled || uploading} multiple onChange={onFilesSelected} type="file" />
+        </label>
+        <label>
+          URL de video público
+          <input
+            disabled={disabled}
+            onChange={(event) => onVideoUrlChange(event.target.value)}
+            placeholder="https://..."
+            value={videoUrl}
+          />
+        </label>
+      </div>
+      <div className="rectoria-communication-media-strip">
+        {media.length === 0 ? (
+          <p className="rectoria-communication-media-empty">Este comunicado aún no tiene imagen, carrusel ni video.</p>
+        ) : media.map((item, index) => {
+          const mediaId = item.localId || `${item.kind}-${item.src}-${index}`;
+          const previewSrc = resolveApiAssetUrl(item.previewSrc || item.thumbUrl || item.src);
+          return (
+            <article
+              className={`rectoria-communication-media-card is-editable${draggingId === mediaId ? ' is-dragging' : ''}${item.uploadError ? ' has-error' : ''}`}
+              draggable={media.length > 1 && !disabled}
+              key={mediaId}
+              onDragEnd={onDragEnd}
+              onDragOver={(event) => event.preventDefault()}
+              onDragStart={(event) => onDragStart(event, item, index)}
+              onDrop={(event) => onDrop(event, index)}
+            >
+              <span className="rectoria-communication-media-order">{index + 1}</span>
+              <div className="rectoria-communication-media-thumb">
+                {item.kind === 'video'
+                  ? <span>Video</span>
+                  : <img alt={item.alt || `Imagen ${index + 1}`} src={previewSrc} />}
+              </div>
+              <div className="rectoria-communication-media-copy">
+                <strong>{item.kind === 'video' ? 'Video' : `Imagen ${index + 1}`}</strong>
+                <span>{item.kind === 'video' ? (item.src || 'Video') : (item.fileName || 'Carrusel para familias')}</span>
+                {item.uploading ? <small>Subiendo archivo...</small> : null}
+                {item.uploadError ? <small>No se pudo subir. Quita este archivo e inténtalo de nuevo.</small> : null}
+              </div>
+              {media.length > 1 ? <span className="rectoria-communication-media-drag" aria-hidden="true">Arrastrar</span> : null}
+              <button className="rectoria-communication-media-remove" disabled={disabled} onClick={() => onRemove(index)} type="button">Quitar</button>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -3294,6 +3399,9 @@ function RectoriaDashboard() {
   const [editingCommunicationAuthorId, setEditingCommunicationAuthorId] = useState('');
   const [selectedCommunicationRequestId, setSelectedCommunicationRequestId] = useState('');
   const [communicationApprovalDraft, setCommunicationApprovalDraft] = useState(createInstitutionalApprovalDraft(null));
+  const [uploadingCommunicationMedia, setUploadingCommunicationMedia] = useState(false);
+  const [draggingCommunicationMediaId, setDraggingCommunicationMediaId] = useState('');
+  const communicationPreviewUrlsRef = useRef(new Set());
   const [createdUserModal, setCreatedUserModal] = useState({ open: false, name: '', role: '', username: '' });
   const [updatedUserModal, setUpdatedUserModal] = useState({
     open: false,
@@ -3423,6 +3531,11 @@ function RectoriaDashboard() {
       document.body.classList.remove('staff-portal-mobile-nav-open');
     };
   }, [mobileNavOpen]);
+
+  useEffect(() => () => {
+    communicationPreviewUrlsRef.current.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
+    communicationPreviewUrlsRef.current.clear();
+  }, []);
 
   useEffect(() => {
     if (activeSection === 'communications') {
@@ -3642,6 +3755,175 @@ function RectoriaDashboard() {
     }
   };
 
+  const releaseInstitutionalCommunicationPreview = (item) => {
+    if (item?.previewSrc && communicationPreviewUrlsRef.current.has(item.previewSrc)) {
+      revokeInstitutionalCommunicationPreviewUrl(item);
+      communicationPreviewUrlsRef.current.delete(item.previewSrc);
+    }
+  };
+
+  const applyInstitutionalVideoUrl = (setter, videoUrl, title = '') => {
+    setter((previous) => {
+      const currentMedia = (previous.media || []).filter((item) => item?.kind !== 'video');
+      const trimmedUrl = String(videoUrl || '').trim();
+      return {
+        ...previous,
+        videoUrl,
+        media: trimmedUrl
+          ? [...currentMedia, {
+            kind: 'video',
+            src: trimmedUrl,
+            thumbUrl: '',
+            alt: title || previous.title || 'Video del comunicado',
+            localId: (previous.media || []).find((item) => item.kind === 'video')?.localId || createInstitutionalCommunicationMediaId('video'),
+          }]
+          : currentMedia,
+      };
+    });
+  };
+
+  const onInstitutionalCommunicationFilesSelected = async (event, setter, title = '') => {
+    const selectedFiles = Array.from(event.target.files || []).filter((file) => {
+      const fileType = String(file.type || '').toLowerCase();
+      return fileType.startsWith('image/') || fileType.startsWith('video/');
+    });
+    if (!selectedFiles.length) {
+      return;
+    }
+
+    const currentCount = setter === setCommunicationApprovalDraft
+      ? (communicationApprovalDraft.media || []).length
+      : (institutionalCommunicationForm.media || []).length;
+    const availableSlots = Math.max(0, 8 - currentCount);
+    const filesToUpload = selectedFiles.slice(0, availableSlots);
+    if (!filesToUpload.length) {
+      setError('El carrusel permite hasta 8 archivos. Quita uno antes de agregar más.');
+      event.target.value = '';
+      return;
+    }
+
+    const previewItems = filesToUpload.map((file, index) => {
+      const previewSrc = URL.createObjectURL(file);
+      const isVideo = String(file.type || '').toLowerCase().startsWith('video/');
+      communicationPreviewUrlsRef.current.add(previewSrc);
+      return {
+        kind: isVideo ? 'video' : 'image',
+        src: previewSrc,
+        thumbUrl: isVideo ? '' : previewSrc,
+        previewSrc,
+        localId: createInstitutionalCommunicationMediaId(isVideo ? 'video' : 'image'),
+        alt: title || file.name || `${isVideo ? 'Video' : 'Imagen'} ${index + 1}`,
+        fileName: file.name,
+        uploading: true,
+      };
+    });
+
+    setter((previous) => ({
+      ...previous,
+      media: [...(previous.media || []), ...previewItems].slice(0, 8),
+    }));
+
+    setBusy(true);
+    setUploadingCommunicationMedia(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      for (const [index, file] of filesToUpload.entries()) {
+        const previewItem = previewItems[index];
+        const isVideo = String(file.type || '').toLowerCase().startsWith('video/');
+        const response = isVideo
+          ? await uploadAcademicSecretaryCommunicationMedia(file, {
+            preferredName: `${title || 'comunicado'}-${index + 1}`,
+          })
+          : await uploadAcademicSecretaryCommunicationImage(file, {
+            preferredName: `${title || 'comunicado'}-${index + 1}`,
+          });
+        const payload = response?.data || {};
+        const mediaKind = payload.kind === 'video' ? 'video' : 'image';
+        const mediaUrl = payload.url || payload.imageUrl || payload.videoUrl || '';
+        const thumbUrl = payload.thumbUrl || (mediaKind === 'image' ? mediaUrl : '');
+        const storage = String(payload.storage || '').trim().toLowerCase();
+        if (!mediaUrl) {
+          throw new Error('No se recibió URL pública para uno de los archivos.');
+        }
+        if (import.meta.env.PROD && storage !== 'cloudinary' && !/res\.cloudinary\.com\//i.test(mediaUrl)) {
+          throw new Error('No se pudo procesar el archivo. Quita el archivo e inténtalo de nuevo.');
+        }
+
+        releaseInstitutionalCommunicationPreview(previewItem);
+        setter((previous) => ({
+          ...previous,
+          media: (previous.media || []).map((item) => (
+            item.localId === previewItem.localId
+              ? {
+                ...item,
+                kind: mediaKind,
+                src: mediaUrl,
+                thumbUrl,
+                previewSrc: '',
+                alt: title || file.name || 'Comunicado institucional',
+                uploading: false,
+              }
+              : item
+          )),
+        }));
+      }
+      setSuccess('Contenido visual agregado al comunicado.');
+    } catch (requestError) {
+      setter((previous) => ({
+        ...previous,
+        media: (previous.media || []).map((item) => (
+          previewItems.some((previewItem) => previewItem.localId === item.localId && item.uploading)
+            ? { ...item, uploading: false, uploadError: true }
+            : item
+        )),
+      }));
+      setError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir el contenido visual.');
+    } finally {
+      setBusy(false);
+      setUploadingCommunicationMedia(false);
+      event.target.value = '';
+    }
+  };
+
+  const onRemoveInstitutionalCommunicationMedia = (setter, mediaIndex) => {
+    setter((previous) => ({
+      ...previous,
+      media: (previous.media || []).filter((item, index) => {
+        if (index === mediaIndex) {
+          releaseInstitutionalCommunicationPreview(item);
+          return false;
+        }
+        return true;
+      }),
+      videoUrl: (previous.media || [])[mediaIndex]?.kind === 'video' ? '' : previous.videoUrl,
+    }));
+  };
+
+  const onInstitutionalCommunicationMediaDragStart = (event, item, index) => {
+    const mediaId = item.localId || `${item.kind}-${item.src}-${index}`;
+    setDraggingCommunicationMediaId(mediaId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', mediaId);
+  };
+
+  const onInstitutionalCommunicationMediaDrop = (event, setter, targetIndex) => {
+    event.preventDefault();
+    const sourceMediaId = event.dataTransfer.getData('text/plain') || draggingCommunicationMediaId;
+    if (!sourceMediaId) return;
+
+    setter((previous) => {
+      const currentMedia = previous.media || [];
+      const sourceIndex = currentMedia.findIndex((item, index) => (item.localId || `${item.kind}-${item.src}-${index}`) === sourceMediaId);
+      return {
+        ...previous,
+        media: moveInstitutionalMediaItem(currentMedia, sourceIndex, targetIndex),
+      };
+    });
+    setDraggingCommunicationMediaId('');
+  };
+
   const onEditCommunicationAuthor = (author) => {
     if (!author?._id) return;
     setEditingCommunicationAuthorId(String(author._id));
@@ -3722,6 +4004,7 @@ function RectoriaDashboard() {
     courseTargets: draft.audienceType === 'course' ? draft.courseTargets : [],
     parentTargets: draft.audienceType === 'individual' ? draft.parentTargets : [],
     studentTargets: draft.audienceType === 'individual' ? draft.studentTargets : [],
+    media: stripInstitutionalCommunicationMedia(draft.media),
     emailSubject: draft.title,
     schoolName,
     authorId: selectedAuthor?._id || '',
@@ -10122,6 +10405,19 @@ function RectoriaDashboard() {
                 </div>
                 {communicationAuthorDraft.error ? <p className="rectoria-form-error">{communicationAuthorDraft.error}</p> : null}
               </div>
+              <RectoriaCommunicationMediaEditor
+                disabled={busy}
+                draggingId={draggingCommunicationMediaId}
+                media={institutionalCommunicationForm.media || []}
+                onDragEnd={() => setDraggingCommunicationMediaId('')}
+                onDragStart={onInstitutionalCommunicationMediaDragStart}
+                onDrop={(event, index) => onInstitutionalCommunicationMediaDrop(event, setInstitutionalCommunicationForm, index)}
+                onFilesSelected={(event) => onInstitutionalCommunicationFilesSelected(event, setInstitutionalCommunicationForm, institutionalCommunicationForm.title)}
+                onRemove={(index) => onRemoveInstitutionalCommunicationMedia(setInstitutionalCommunicationForm, index)}
+                onVideoUrlChange={(value) => applyInstitutionalVideoUrl(setInstitutionalCommunicationForm, value, institutionalCommunicationForm.title)}
+                uploading={uploadingCommunicationMedia}
+                videoUrl={institutionalCommunicationForm.videoUrl || ''}
+              />
               <div className="rectoria-communication-form-grid">
                 <label>Audiencia<select value={institutionalCommunicationForm.audienceType} onChange={(event) => setInstitutionalCommunicationForm((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>
                 {institutionalCommunicationForm.audienceType === 'grade' ? <label>Grados<select multiple value={institutionalCommunicationForm.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setInstitutionalCommunicationForm)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}
@@ -10137,7 +10433,7 @@ function RectoriaDashboard() {
                 />
               ) : null}
               {institutionalCommunicationForm.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={institutionalCommunicationForm.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setInstitutionalCommunicationForm)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={institutionalCommunicationForm.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setInstitutionalCommunicationForm)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}
-              <div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} type="submit">Publicar comunicado</button></div>
+              <div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy || uploadingCommunicationMedia || (institutionalCommunicationForm.media || []).some((item) => item.uploading)} type="submit">Publicar comunicado</button></div>
             </form>
           </section>
         </div>
@@ -10158,7 +10454,7 @@ function RectoriaDashboard() {
               <div className="rectoria-approval-list">
                 {pendingCommunicationRequests.length === 0 ? <p className="rectoria-empty-state">No hay solicitudes pendientes.</p> : pendingCommunicationRequests.map((request) => <button className={selectedCommunicationRequest?._id === request._id ? 'is-active' : ''} key={request._id} onClick={() => setSelectedCommunicationRequestId(request._id)} type="button"><strong>{request.title}</strong><span>{request.teacherName || 'Autor'}{request.publisherLabel ? ` · ${request.publisherLabel}` : ''} · {formatDateTime(request.submittedAt || request.createdAt)}</span><span>{formatCommunicationCourseTargets(request.courseTargets, request.courseTitle)}</span></button>)}
               </div>
-              {!selectedCommunicationRequest ? <p className="rectoria-empty-state">Selecciona una solicitud para revisarla.</p> : <div className="rectoria-approval-editor"><div className="rectoria-communication-original"><h4>Original</h4><label>Título<input disabled readOnly value={selectedCommunicationRequest.originalTitle || selectedCommunicationRequest.title || ''} /></label><label>Mensaje<textarea disabled readOnly value={selectedCommunicationRequest.originalBody || selectedCommunicationRequest.body || ''} /></label><label>Curso solicitado<input disabled readOnly value={formatCommunicationCourseTargets(selectedCommunicationRequest.courseTargets, selectedCommunicationRequest.courseTitle)} /></label><div><h4>Adjuntos</h4><RectoriaCommunicationMediaPreview items={selectedCommunicationRequest.media || []} /></div></div><form className="rectoria-communication-form" onSubmit={(event) => event.preventDefault()}><h4>Versión a publicar</h4><label>Título<input value={communicationApprovalDraft.title} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={communicationApprovalDraft.body} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="rectoria-communication-form-grid"><label>Audiencia<select value={communicationApprovalDraft.audienceType} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{communicationApprovalDraft.audienceType === 'grade' ? <label>Grados<select multiple value={communicationApprovalDraft.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setCommunicationApprovalDraft)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}</div>{communicationApprovalDraft.audienceType === 'course' ? <ClickableOptionPicker emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno." label="Cursos" onAdd={(value) => onAddDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} onRemove={(value) => onRemoveDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} options={publicationAudienceCourseOptions} selectedValues={communicationApprovalDraft.courseTargets} /> : null}{communicationApprovalDraft.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={communicationApprovalDraft.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setCommunicationApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={communicationApprovalDraft.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setCommunicationApprovalDraft)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<div><h4>Adjuntos a publicar</h4><RectoriaCommunicationMediaPreview items={communicationApprovalDraft.media || []} /></div><label>Notas de revisión<textarea value={communicationApprovalDraft.reviewNotes} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveCommunicationRequest} type="button">Aprobar y publicar</button><button className="btn" disabled={busy} onClick={onRejectCommunicationRequest} type="button">Rechazar</button></div></form></div>}
+              {!selectedCommunicationRequest ? <p className="rectoria-empty-state">Selecciona una solicitud para revisarla.</p> : <div className="rectoria-approval-editor"><div className="rectoria-communication-original"><h4>Original</h4><label>Título<input disabled readOnly value={selectedCommunicationRequest.originalTitle || selectedCommunicationRequest.title || ''} /></label><label>Mensaje<textarea disabled readOnly value={selectedCommunicationRequest.originalBody || selectedCommunicationRequest.body || ''} /></label><label>Curso solicitado<input disabled readOnly value={formatCommunicationCourseTargets(selectedCommunicationRequest.courseTargets, selectedCommunicationRequest.courseTitle)} /></label><div><h4>Adjuntos</h4><RectoriaCommunicationMediaPreview items={selectedCommunicationRequest.media || []} /></div></div><form className="rectoria-communication-form" onSubmit={(event) => event.preventDefault()}><h4>Versión a publicar</h4><label>Título<input value={communicationApprovalDraft.title} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, title: event.target.value }))} /></label><label>Mensaje<textarea value={communicationApprovalDraft.body} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, body: event.target.value }))} /></label><div className="rectoria-communication-form-grid"><label>Audiencia<select value={communicationApprovalDraft.audienceType} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, audienceType: event.target.value, gradeTargets: [], courseTargets: [], parentTargets: [], studentTargets: [] }))}><option value="general">General</option><option value="grade">Por grado</option><option value="course">Por curso</option><option value="individual">Individual</option></select></label>{communicationApprovalDraft.audienceType === 'grade' ? <label>Grados<select multiple value={communicationApprovalDraft.gradeTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'gradeTargets', setCommunicationApprovalDraft)}>{gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label> : null}</div>{communicationApprovalDraft.audienceType === 'course' ? <ClickableOptionPicker emptyLabel="Haz clic para agregar grupos o cursos. Puedes elegir más de uno." label="Cursos" onAdd={(value) => onAddDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} onRemove={(value) => onRemoveDraftListValue(setCommunicationApprovalDraft, 'courseTargets', value)} options={publicationAudienceCourseOptions} selectedValues={communicationApprovalDraft.courseTargets} /> : null}{communicationApprovalDraft.audienceType === 'individual' ? <div className="rectoria-communication-form-grid"><label>Acudientes<select multiple value={communicationApprovalDraft.parentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'parentTargets', setCommunicationApprovalDraft)}>{parentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label>Alumnos<select multiple value={communicationApprovalDraft.studentTargets} onChange={(event) => onInstitutionalCommunicationMultiSelect(event, 'studentTargets', setCommunicationApprovalDraft)}>{billingStudentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div> : null}<RectoriaCommunicationMediaEditor disabled={busy} draggingId={draggingCommunicationMediaId} media={communicationApprovalDraft.media || []} onDragEnd={() => setDraggingCommunicationMediaId('')} onDragStart={onInstitutionalCommunicationMediaDragStart} onDrop={(event, index) => onInstitutionalCommunicationMediaDrop(event, setCommunicationApprovalDraft, index)} onFilesSelected={(event) => onInstitutionalCommunicationFilesSelected(event, setCommunicationApprovalDraft, communicationApprovalDraft.title)} onRemove={(index) => onRemoveInstitutionalCommunicationMedia(setCommunicationApprovalDraft, index)} onVideoUrlChange={(value) => applyInstitutionalVideoUrl(setCommunicationApprovalDraft, value, communicationApprovalDraft.title)} uploading={uploadingCommunicationMedia} videoUrl={communicationApprovalDraft.videoUrl || ''} /><label>Notas de revisión<textarea value={communicationApprovalDraft.reviewNotes} onChange={(event) => setCommunicationApprovalDraft((previous) => ({ ...previous, reviewNotes: event.target.value }))} /></label><div className="rectoria-communication-actions"><button className="btn btn-primary" disabled={busy} onClick={onApproveCommunicationRequest} type="button">Aprobar y publicar</button><button className="btn" disabled={busy} onClick={onRejectCommunicationRequest} type="button">Rechazar</button></div></form></div>}
             </div>
           </section>
         </div>
