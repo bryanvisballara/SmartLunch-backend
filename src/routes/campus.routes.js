@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/authMiddleware');
 const { runWithSchoolContext } = require('../config/db');
 const AcademicStructure = require('../models/academicStructure.model');
+const { resolveClassroomGroupForCourse, expandCourseTargetsWithClassroomGroups, expandGradeKeysWithClassroomGroups, buildClassroomGroupGradeMongoOr, serializeClassroomGroups } = require('../utils/classroomGroups');
 const { getFeeGradeAliases } = require('../utils/feeGradeMatching');
 const AcademicCommunication = require('../models/academicCommunication.model');
 const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
