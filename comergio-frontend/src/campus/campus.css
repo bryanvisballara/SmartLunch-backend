@@ -11103,9 +11103,11 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
-  min-height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 100dvh;
   padding: 1rem 0.85rem 1rem;
-  overflow: visible;
+  overflow: hidden;
   border-right: 1px solid #e5eaf2;
   background:
     linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, rgba(255, 255, 255, 0) 18%),
@@ -11232,7 +11234,9 @@ button.campus-parent-mobile__schedule-cell:focus-visible {
   flex: 1 1 auto;
   align-content: start;
   min-height: 0;
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .campus-teacher__rail-group {
@@ -11384,8 +11388,10 @@ button.campus-teacher__nav-item-toggle {
 }
 
 .campus-teacher__rail-school {
-  margin-top: auto;
+  margin-top: 0;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
   padding: 0.85rem;
   border: 1px solid rgba(15, 118, 110, 0.14);
   border-radius: 16px;
@@ -18158,10 +18164,18 @@ button.campus-teacher__home-kpi-card:focus-visible {
 
   .campus-teacher__rail {
     position: static;
+    height: auto;
+    max-height: none;
     min-height: auto;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid #dadce0;
     padding: 0.75rem 0.55rem 0.85rem;
+  }
+
+  .campus-teacher__rail-nav {
+    flex: none;
+    overflow: visible;
   }
 
   .campus-teacher__rail-footer {
