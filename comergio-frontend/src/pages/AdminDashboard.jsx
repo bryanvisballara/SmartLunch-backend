@@ -702,8 +702,6 @@ const currentMonthIso = () => {
   return `${now.getFullYear()}-${month}`;
 };
 
-const currentDateIso = () => new Date().toISOString().slice(0, 10);
-
 const BOGOTA_UTC_OFFSET_MS = -5 * 60 * 60 * 1000;
 
 const getBogotaDayKeyFromValue = (value) => {
@@ -715,6 +713,8 @@ const getBogotaDayKeyFromValue = (value) => {
   const shifted = new Date(parsed.getTime() + BOGOTA_UTC_OFFSET_MS);
   return shifted.toISOString().slice(0, 10);
 };
+
+const currentDateIso = () => getBogotaDayKeyFromValue(new Date()) || new Date().toISOString().slice(0, 10);
 
 const parseWeekKeyDateSafe = (weekKey) => {
   const normalized = String(weekKey || '').trim();
@@ -4012,14 +4012,44 @@ function AdminDashboard() {
     );
   };
 
-  const reloadAccountingCosts = async () => {
+  const expandAccountingRangeToDate = (dayKey) => {
+    const normalized = String(dayKey || '').trim();
+    const isDayKey = /^\d{4}-\d{2}-\d{2}$/.test(normalized);
+    let nextFrom = accountingDateFrom;
+    let nextTo = accountingDateTo;
+
+    if (isDayKey) {
+      if (!nextFrom || normalized < nextFrom) {
+        nextFrom = normalized;
+      }
+      if (!nextTo || normalized > nextTo) {
+        nextTo = normalized;
+      }
+    }
+
+    if (nextFrom !== accountingDateFrom) {
+      setAccountingDateFrom(nextFrom);
+      if (nextFrom) {
+        setAccountingMonthFilter(String(nextFrom).slice(0, 7));
+      }
+    }
+    if (nextTo !== accountingDateTo) {
+      setAccountingDateTo(nextTo);
+    }
+
+    return { from: nextFrom, to: nextTo };
+  };
+
+  const reloadAccountingCosts = async (rangeOverride = {}) => {
+    const from = rangeOverride.from || accountingDateFrom;
+    const to = rangeOverride.to || accountingDateTo;
     await loadHomepage(
       homeStoreId,
-      accountingMonthFilter,
+      String(from || accountingMonthFilter).slice(0, 7),
       homeDateFrom,
       homeDateTo,
-      accountingDateFrom,
-      accountingDateTo,
+      from,
+      to,
     );
   };
 
@@ -4070,8 +4100,9 @@ function AdminDashboard() {
       () => (isEditing ? updateAdminFixedCost(editingCostId, payload) : createAdminFixedCost(payload)),
       isEditing ? 'Costo fijo actualizado.' : 'Costo fijo guardado.',
       async () => {
+        const range = expandAccountingRangeToDate(payload.weekStart);
         resetFixedCostForm();
-        await reloadAccountingCosts();
+        await reloadAccountingCosts(range);
       }
     );
   };
@@ -4107,8 +4138,9 @@ function AdminDashboard() {
       () => (isEditing ? updateAdminFixedCost(editingCostId, payload) : createAdminFixedCost(payload)),
       isEditing ? 'Costo variable actualizado.' : 'Costo variable guardado.',
       async () => {
+        const range = expandAccountingRangeToDate(payload.weekStart);
         resetVariableCostForm();
-        await reloadAccountingCosts();
+        await reloadAccountingCosts(range);
       }
     );
   };
@@ -6338,7 +6370,7 @@ function AdminDashboard() {
                 </div>
               </div>
               {(homeData?.fixedCosts || []).length === 0 ? (
-                <p className="admin-accounting__empty">No hay costos fijos en el rango seleccionado.</p>
+                <p className="admin-accounting__empty">No hay costos fijos entre {accountingDateFrom || 'el inicio'} y {accountingDateTo || 'hoy'}.</p>
               ) : filteredFixedCosts.length === 0 ? (
                 <p className="admin-accounting__empty">No hay costos fijos con esos filtros.</p>
               ) : (
@@ -6504,7 +6536,7 @@ function AdminDashboard() {
                 </div>
               </div>
               {(homeData?.variableCosts || []).length === 0 ? (
-                <p className="admin-accounting__empty">No hay costos variables en el rango seleccionado.</p>
+                <p className="admin-accounting__empty">No hay costos variables entre {accountingDateFrom || 'el inicio'} y {accountingDateTo || 'hoy'}.</p>
               ) : filteredVariableCosts.length === 0 ? (
                 <p className="admin-accounting__empty">No hay costos variables con esos filtros.</p>
               ) : (
