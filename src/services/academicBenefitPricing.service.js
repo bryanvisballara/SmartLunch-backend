@@ -2,6 +2,7 @@ const { findGradeFeeSetting, getFeeGradeAliases } = require('../utils/feeGradeMa
 const {
   formatAcademicCalendarDateLongEs,
   getAcademicBenefitDayOfMonth,
+  getAcademicYearMonthKey,
   isAcademicCalendarDateWithinRange,
   normalizeAcademicDueDateForBogota,
 } = require('../utils/academicCalendarDates');
@@ -65,7 +66,36 @@ function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], referen
   }) || null;
 }
 
-function getApplicableMonthlyBenefitRule(benefitRules = [], referenceDate = new Date()) {
+function resolveAcademicChargePeriodMonthKey(charge = {}) {
+  const fromMonthKey = String(charge?.monthKey || '').trim();
+  if (/^\d{4}-\d{2}$/.test(fromMonthKey)) {
+    return fromMonthKey;
+  }
+  return getAcademicYearMonthKey(charge?.dueDate || charge?.periodMonthKey || '');
+}
+
+function isAcademicMonthlyChargePastItsMonth(chargeOrMonthKey = null, referenceDate = new Date()) {
+  if (!chargeOrMonthKey) {
+    return false;
+  }
+
+  const periodKey = typeof chargeOrMonthKey === 'string'
+    ? getAcademicYearMonthKey(chargeOrMonthKey)
+    : resolveAcademicChargePeriodMonthKey(chargeOrMonthKey);
+  const referenceKey = getAcademicYearMonthKey(referenceDate, { live: true });
+  if (!periodKey || !referenceKey) {
+    return false;
+  }
+
+  return referenceKey > periodKey;
+}
+
+function getApplicableMonthlyBenefitRule(benefitRules = [], referenceDate = new Date(), options = {}) {
+  const chargeOrMonthKey = options.charge || options.periodMonthKey || null;
+  if (isAcademicMonthlyChargePastItsMonth(chargeOrMonthKey, referenceDate)) {
+    return null;
+  }
+
   const currentDay = getAcademicBenefitDayOfMonth(referenceDate);
   return (Array.isArray(benefitRules) ? benefitRules : []).find((rule) => (
     currentDay >= Number(rule?.startDay || 0) && currentDay <= Number(rule?.endDay || 0)
@@ -180,6 +210,8 @@ module.exports = {
   getApplicableEnrollmentBenefitRule,
   getApplicableMonthlyBenefitRule,
   getFixedBenefitAmountForGrade,
+  isAcademicMonthlyChargePastItsMonth,
+  resolveAcademicChargePeriodMonthKey,
   resolveAcademicEnrollmentBenefitDiscountAmount,
   resolveAcademicMonthlyPricingDate,
   resolveParentAnnualTuitionPricing,

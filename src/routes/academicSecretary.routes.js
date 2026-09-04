@@ -4054,8 +4054,8 @@ function normalizeAcademicSchoolYearLevelSettings(levelSettings = []) {
     };
   }
 
-  function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = new Date()) {
-    const benefitRule = getApplicableBenefitRule(billingProfile?.benefitRules || [], referenceDate);
+  function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = new Date(), charge = null) {
+    const benefitRule = getApplicableBenefitRule(billingProfile?.benefitRules || [], referenceDate, charge);
     const isFixedBenefit = normalizeText(benefitRule?.discountType) === 'fixed';
     const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
     const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, billingProfile?.grade) : 0;
@@ -4064,7 +4064,7 @@ function normalizeAcademicSchoolYearLevelSettings(levelSettings = []) {
     return {
       discountPercent: baseDiscountPercent,
       fixedDiscountAmount,
-      benefitLabel: normalizeText(benefitRule?.label) || '',
+      benefitLabel: normalizeText(benefitRule?.label) || 'Precio regular',
       benefitWindowLabel: getAcademicBenefitWindowLabel(benefitRule),
       additionalDiscount,
     };
@@ -4482,9 +4482,9 @@ async function ensureAcademicFeeConfiguration(schoolId, grades = []) {
   return configuration;
 }
 
-function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date()) {
+function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date(), charge = null) {
   const { getApplicableMonthlyBenefitRule } = require('../services/academicBenefitPricing.service');
-  return getApplicableMonthlyBenefitRule(benefitRules, referenceDate);
+  return getApplicableMonthlyBenefitRule(benefitRules, referenceDate, { charge });
 }
 
 function resolveAcademicMonthlyPricingDate(params = {}) {
@@ -4693,7 +4693,7 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
   }
 
   const discountConfig = charge?.category === 'monthly_tuition'
-    ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
+    ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate, charge)
     : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '', additionalDiscount: normalizeAdditionalPensionDiscount() };
   const discountPercent = discountConfig.discountPercent;
   const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(discountConfig.fixedDiscountAmount || 0)));

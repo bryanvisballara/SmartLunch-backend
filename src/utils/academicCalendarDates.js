@@ -101,6 +101,22 @@ function getAcademicBenefitDayOfMonth(referenceDate = new Date(), timeZone = ACA
   return Number(parts.find((part) => part.type === 'day')?.value || new Date(referenceDate).getDate());
 }
 
+function getAcademicYearMonthKey(value, { live = false } = {}) {
+  const asMonthKey = String(value || '').trim();
+  if (/^\d{4}-\d{2}$/.test(asMonthKey)) {
+    return asMonthKey;
+  }
+
+  const parts = live
+    ? getLiveAcademicCalendarParts(value)
+    : (getStoredAcademicCalendarParts(value) || getLiveAcademicCalendarParts(value));
+  if (!parts?.year || !parts?.month) {
+    return '';
+  }
+
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}`;
+}
+
 function formatAcademicCalendarDateEs(value, { month = 'short' } = {}) {
   const parsed = parseAcademicCalendarDate(value);
   if (!parsed) {
@@ -134,6 +150,7 @@ module.exports = {
   formatAcademicCalendarDateLongEs,
   getAcademicBenefitDayOfMonth,
   getAcademicCalendarDayKey,
+  getAcademicYearMonthKey,
   isAcademicCalendarDateWithinRange,
   normalizeAcademicDueDateForBogota,
   parseAcademicCalendarDate,

@@ -168,11 +168,11 @@ function normalizeAdditionalDiscountPercent(value) {
   return Math.min(100, Math.max(0, parsed));
 }
 
-function resolveMonthlyTuitionAmount(profile = {}, dueDate = new Date()) {
+function resolveMonthlyTuitionAmount(profile = {}, dueDate = new Date(), options = {}) {
   const baseAmount = Math.max(0, Number(profile.monthlyTuitionAmount || 0));
   if (baseAmount <= 0) return { amount: 0, originalAmount: 0, label: '' };
 
-  const benefitRule = getApplicableMonthlyBenefitRule(profile.benefitRules || [], dueDate);
+  const benefitRule = getApplicableMonthlyBenefitRule(profile.benefitRules || [], dueDate, options);
   const isFixedBenefit = normalizeText(benefitRule?.discountType) === 'fixed';
   const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
   const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, profile.grade) : 0;
@@ -266,7 +266,9 @@ function buildConsolidatedMonthlyStatement(
     totalOriginalAmount += bonusInstallmentAmount;
   }
 
-  const pensionPricing = resolveMonthlyTuitionAmount(profile, referenceDate);
+  const pensionPricing = resolveMonthlyTuitionAmount(profile, referenceDate, {
+    periodMonthKey: buildMonthKey(monthDate),
+  });
   if (pensionPricing.amount > 0) {
     breakdownItems.push({
       key: 'monthly_tuition',
@@ -490,7 +492,7 @@ function recalculateConsolidatedStatementPricing(
       };
     }
 
-    const pensionPricing = resolveMonthlyTuitionAmount(billingProfile, referenceDate);
+    const pensionPricing = resolveMonthlyTuitionAmount(billingProfile, referenceDate, { charge });
     return {
       ...item,
       label: item.label || `Pensión ${formatAcademicMonthLabel(referenceDate)}`,
@@ -721,7 +723,7 @@ async function refreshPendingIndividualTuitionCharges({ schoolId, referenceDate 
       continue;
     }
 
-    const pricing = resolveMonthlyTuitionAmount(profile, referenceDate);
+    const pricing = resolveMonthlyTuitionAmount(profile, referenceDate, { charge });
     if (pricing.amount <= 0) {
       continue;
     }
@@ -862,7 +864,7 @@ async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, refere
     const repriced = recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, { schoolId });
     pricingAmount = Math.max(0, Number(repriced.amount || 0));
   } else if (String(charge?.category || '') === 'monthly_tuition' && billingProfile) {
-    const pricing = resolveMonthlyTuitionAmount(billingProfile, referenceDate);
+    const pricing = resolveMonthlyTuitionAmount(billingProfile, referenceDate, { charge });
     pricingAmount = Math.max(0, Number(pricing.amount || charge?.amount || 0));
   } else if (String(charge?.category || '') === 'annual_tuition') {
     if (charge?.amountLocked) {

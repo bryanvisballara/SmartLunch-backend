@@ -1387,8 +1387,8 @@ function normalizeAcademicAdditionalDiscountPercent(value) {
   return Math.min(100, Math.max(0, parsed));
 }
 
-function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = new Date()) {
-  const benefitRule = getApplicableMonthlyBenefitRule(billingProfile?.benefitRules || [], referenceDate);
+function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = new Date(), charge = null) {
+  const benefitRule = getApplicableMonthlyBenefitRule(billingProfile?.benefitRules || [], referenceDate, { charge });
   const isFixedBenefit = String(benefitRule?.discountType || '').trim().toLowerCase() === 'fixed';
   const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
   const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, billingProfile?.grade) : 0;
@@ -1476,7 +1476,7 @@ function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = ne
   }
 
   const monthlyDiscountConfig = String(charge?.category || '') === 'monthly_tuition'
-    ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate)
+    ? resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate, charge)
     : { discountPercent: 0, fixedDiscountAmount: 0, benefitLabel: '', additionalDiscount: normalizeAdditionalPensionDiscount() };
   const discountPercent = monthlyDiscountConfig.discountPercent;
   const fixedDiscountAmount = Math.min(baseAmount, Math.max(0, Number(monthlyDiscountConfig.fixedDiscountAmount || 0)));
@@ -1740,9 +1740,15 @@ async function ensureParentAcademicMonthlyCharges({
       }
 
       const pricing = resolveAcademicChargeAmounts(
-        { category: 'monthly_tuition', amount: Number(profile.monthlyTuitionAmount || 0), originalAmount: Number(profile.monthlyTuitionAmount || 0) },
+        {
+          category: 'monthly_tuition',
+          amount: Number(profile.monthlyTuitionAmount || 0),
+          originalAmount: Number(profile.monthlyTuitionAmount || 0),
+          monthKey,
+          dueDate,
+        },
         profile,
-        dueDate,
+        new Date(),
         feeConfiguration,
       );
       if (pricing.effectiveAmount <= 0) {
