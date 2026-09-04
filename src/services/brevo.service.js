@@ -209,6 +209,13 @@ async function sendPasswordResetCodeEmail({ toEmail, toName, code }) {
   });
 }
 
+function getCommunicationsSender() {
+  return {
+    senderEmail: String(process.env.COMMUNICATIONS_SENDER_EMAIL || 'comunicados@comergio.com').trim(),
+    senderName: String(process.env.COMMUNICATIONS_SENDER_NAME || 'Comunicados Comergio').trim(),
+  };
+}
+
 async function sendAcademicCommunicationEmail({ toEmail, toName, schoolName, title, body, authorName }) {
   const subject = `${schoolName || 'Comergio'} | ${title}`;
   const htmlContent = buildAcademicEmailShell({
@@ -228,6 +235,7 @@ async function sendAcademicCommunicationEmail({ toEmail, toName, schoolName, tit
     subject,
     htmlContent,
     textContent: `${schoolName || 'Comergio'}\n\n${title}\n\n${body}`,
+    ...getCommunicationsSender(),
   });
 }
 
