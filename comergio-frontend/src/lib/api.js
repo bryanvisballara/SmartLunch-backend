@@ -38,10 +38,49 @@ export function getApiBaseUrl() {
   return String(apiBaseUrl || '').replace(/\/+$/, '');
 }
 
+const CLOUDINARY_DOCUMENT_EXTENSION = /\.(pdf|zip|docx?|xlsx?|pptx?|txt)(?:[?#]|$)/i;
+
+function resolveCampusDocumentProxyUrl(rawUrl) {
+  const url = String(rawUrl || '').trim();
+  if (!url) {
+    return '';
+  }
+
+  if (/\/campus\/materials\/file(?:\?|$)/i.test(url)) {
+    if (/^https?:\/\//i.test(url)) {
+      return url;
+    }
+    return `${getApiBaseUrl()}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
+
+  if (!/^https?:\/\/res\.cloudinary\.com\//i.test(url)) {
+    return '';
+  }
+
+  const isVideo = /\/video\/upload\//i.test(url);
+  const isImage = /\/image\/upload\//i.test(url);
+  const isDocument = CLOUDINARY_DOCUMENT_EXTENSION.test(url) || /\/raw\/upload\//i.test(url);
+  if ((isImage || isVideo) && !CLOUDINARY_DOCUMENT_EXTENSION.test(url)) {
+    return '';
+  }
+  if (!isDocument && !isImage && !isVideo) {
+    return '';
+  }
+
+  const fileName = decodeURIComponent(url.split('/').pop() || 'archivo').split('?')[0] || 'archivo';
+  const params = new URLSearchParams({ u: url, n: fileName });
+  return `${getApiBaseUrl()}/campus/materials/file?${params.toString()}`;
+}
+
 export function resolveApiAssetUrl(value) {
   const rawUrl = String(value || '').trim();
   if (!rawUrl) {
     return '';
+  }
+
+  const proxiedDocumentUrl = resolveCampusDocumentProxyUrl(rawUrl);
+  if (proxiedDocumentUrl) {
+    return proxiedDocumentUrl;
   }
 
   if (/^(?:https?:|blob:|data:)/i.test(rawUrl)) {

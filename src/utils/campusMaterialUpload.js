@@ -135,6 +135,16 @@ function resolveUploadMimeType(file) {
   if (kind === 'pdf') {
     return 'application/pdf';
   }
+
+  const fileName = String(file?.originalname || '').toLowerCase();
+  if (fileName.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (fileName.endsWith('.doc')) return 'application/msword';
+  if (fileName.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (fileName.endsWith('.xls')) return 'application/vnd.ms-excel';
+  if (fileName.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (fileName.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+  if (fileName.endsWith('.zip')) return 'application/zip';
+  if (fileName.endsWith('.txt')) return 'text/plain';
   return rawMime;
 }
 

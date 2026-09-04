@@ -86,6 +86,7 @@ const {
   migrateCloudinaryImageDocumentToRaw,
   loadCampusDocumentBuffer,
   serializeCampusAttachment,
+  unwrapCampusDocumentDeliveryUrl,
 } = require('../utils/cloudinaryDocumentDelivery');
 
 async function sanitizeCampusAttachmentsForDelivery(attachments = []) {
@@ -111,6 +112,27 @@ function isValidPublicMediaUrl(url) {
 }
 
 const router = express.Router();
+
+router.get('/materials/file', async (req, res) => {
+  try {
+    const storedUrl = unwrapCampusDocumentDeliveryUrl(req.query.u);
+    const requestedName = String(req.query.n || '').trim();
+    const document = await loadCampusDocumentBuffer(storedUrl, {
+      fileName: requestedName || 'archivo',
+    });
+    const isInlinePreview = /^(application\/pdf|image\/|video\/|audio\/|text\/plain)/i.test(document.mimeType || '');
+    res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `${isInlinePreview ? 'inline' : 'attachment'}; filename="${document.fileName}"`,
+    );
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return res.send(document.buffer);
+  } catch (error) {
+    return res.status(404).json({ message: error.message || 'No se pudo abrir el archivo.' });
+  }
+});
+
 const uploadTeacherProfilePhoto = uploadImageMiddleware.single('image');
 const disciplineObservationRecipients = ['coordination', 'direccion', 'psychology', 'rectoria'];
 const disciplineObservationDestinations = ['wellbeing', 'coexistence'];
@@ -2000,7 +2022,7 @@ function normalizeAcademicContentMaterials(materials = []) {
         sourceType,
         kind: normalizeText(item?.kind) || (sourceType === 'link' ? 'link' : 'file'),
         title: normalizeText(item?.title || item?.fileName || url).slice(0, 160),
-        url,
+        url: unwrapCampusDocumentDeliveryUrl(url),
         fileName: normalizeText(item?.fileName),
         mimeType: normalizeText(item?.mimeType),
         sizeBytes: Math.max(0, Number(item?.sizeBytes || 0)),
@@ -2170,7 +2192,17 @@ function serializeCourse(course, options = {}) {
         }))
         : [],
     })),
-      academicContent,
+      academicContent: academicContent.map((period) => ({
+        ...period,
+        topics: Array.isArray(period.topics)
+          ? period.topics.map((topic) => ({
+            ...topic,
+            materials: Array.isArray(topic.materials)
+              ? topic.materials.map((material) => serializeCampusAttachment(material))
+              : [],
+          }))
+          : [],
+      })),
     gradingComponents: Array.isArray(academicPeriods[0]?.gradingComponents)
       ? academicPeriods[0].gradingComponents.map((component) => ({
         key: normalizeText(component.key),
@@ -4709,24 +4741,6 @@ async function buildTeacherOverviewFull({ schoolId, userId, name, username }) {
   };
 }
 
-router.get('/materials/file', async (req, res) => {
-  try {
-    const storedUrl = String(req.query.u || '').trim();
-    const requestedName = String(req.query.n || '').trim();
-    const document = await loadCampusDocumentBuffer(storedUrl, {
-      kind: 'pdf',
-      mimeType: 'application/pdf',
-      fileName: requestedName || 'documento.pdf',
-    });
-    res.setHeader('Content-Type', document.mimeType || 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${document.fileName}"`);
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    return res.send(document.buffer);
-  } catch (error) {
-    return res.status(404).json({ message: error.message || 'No se pudo abrir el archivo.' });
-  }
-});
-
 router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => {
   try {
     const { schoolId, userId, name, username } = req.user;
@@ -5312,7 +5326,7 @@ router.post('/teacher/courses/:id/academic-content/media', requireCampusTeacherA
       requireCloudinary: isCloudinaryEnabled(),
     });
 
-    return res.status(201).json({ materials });
+    return res.status(201).json({ materials: materials.map((material) => serializeCampusAttachment(material)) });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo subir el material de apoyo.' });
   }
