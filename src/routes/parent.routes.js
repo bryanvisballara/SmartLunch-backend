@@ -95,6 +95,7 @@ const {
   resolveUploadMimeType,
 } = require('../utils/campusMaterialUpload');
 const { isCloudinaryEnabled } = require('../utils/imageUpload');
+const { serializeCampusAttachment } = require('../utils/cloudinaryDocumentDelivery');
 
 const router = express.Router();
 const uploadParentStudentPhoto = uploadImageMiddleware.single('image');
@@ -2373,14 +2374,7 @@ function serializeParentAcademicCalendarPost(post = {}) {
     scheduledClassDate: post.scheduledClassDate || null,
     scheduledClassSession: post.scheduledClassSession || null,
     publishedAt: post.publishedAt || null,
-    attachments: Array.isArray(post.attachments) ? post.attachments.map((attachment) => ({
-      sourceType: normalizeText(attachment.sourceType) || 'file',
-      kind: normalizeText(attachment.kind) || 'file',
-      title: normalizeText(attachment.title),
-      url: normalizeText(attachment.url),
-      fileName: normalizeText(attachment.fileName),
-      mimeType: normalizeText(attachment.mimeType),
-    })) : [],
+    attachments: Array.isArray(post.attachments) ? post.attachments.map((attachment) => serializeCampusAttachment(attachment)) : [],
     allowStudentSubmission: Boolean(post.allowStudentSubmission),
     source: 'campus_post',
   };
@@ -2396,17 +2390,7 @@ function serializeParentStudentSubmission(submission) {
     note: normalizeText(submission.note),
     status: normalizeText(submission.status) || 'submitted',
     submittedAt: submission.submittedAt || submission.updatedAt || submission.createdAt || null,
-    attachments: Array.isArray(submission.attachments) ? submission.attachments.map((attachment) => ({
-      sourceType: normalizeText(attachment.sourceType) || 'file',
-      kind: normalizeText(attachment.kind) || 'file',
-      title: normalizeText(attachment.title),
-      url: normalizeText(attachment.url),
-      fileName: normalizeText(attachment.fileName),
-      mimeType: normalizeText(attachment.mimeType),
-      sizeBytes: Number(attachment.sizeBytes || 0),
-      extension: normalizeText(attachment.extension),
-      storage: normalizeText(attachment.storage),
-    })) : [],
+    attachments: Array.isArray(submission.attachments) ? submission.attachments.map((attachment) => serializeCampusAttachment(attachment)) : [],
   };
 }
 

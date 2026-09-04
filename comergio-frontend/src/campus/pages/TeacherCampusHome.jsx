@@ -1339,8 +1339,7 @@ function buildMaterialLinksFromPost(post) {
   const linkAttachments = (post?.attachments || [])
     .filter((attachment) => {
       const sourceType = String(attachment?.sourceType || '').toLowerCase();
-      const url = String(attachment?.url || '').trim();
-      return sourceType === 'link' || /^https?:\/\//i.test(url);
+      return sourceType === 'link';
     })
     .map((attachment) => ({
       title: String(attachment?.title || attachment?.fileName || 'Enlace').trim(),

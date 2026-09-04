@@ -172,15 +172,29 @@ async function normalizeCampusImageFile(file) {
   };
 }
 
-function uploadBufferToCloudinary(buffer, { publicId, extension }) {
+function resolveCloudinaryResourceType(kind) {
+  const normalizedKind = String(kind || '').trim().toLowerCase();
+  if (normalizedKind === 'image') {
+    return 'image';
+  }
+  if (normalizedKind === 'video') {
+    return 'video';
+  }
+  return 'raw';
+}
+
+function uploadBufferToCloudinary(buffer, { publicId, extension, kind }) {
+  const resourceType = resolveCloudinaryResourceType(kind);
+  const safePublicId = String(publicId || 'campus-file').replace(/\.[a-z0-9]{2,8}$/i, '');
+
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
-        resource_type: 'auto',
+        resource_type: resourceType,
         folder: CLOUDINARY_FOLDER,
-        public_id: publicId,
+        public_id: safePublicId,
         overwrite: true,
-        format: extension || undefined,
+        ...(resourceType === 'raw' ? {} : { format: extension || undefined }),
       },
       (error, result) => {
         if (error) {
@@ -326,7 +340,11 @@ async function processStoredCampusMaterialFiles(files, {
     }
 
     if (isCloudinaryEnabled()) {
-      const uploadResult = await uploadBufferToCloudinary(outputBuffer, { publicId: filenameBase, extension: originalExtension });
+      const uploadResult = await uploadBufferToCloudinary(outputBuffer, {
+        publicId: filenameBase,
+        extension: originalExtension,
+        kind: materialKind,
+      });
       processedFiles.push({
         sourceType: 'file',
         kind: materialKind,

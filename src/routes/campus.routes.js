@@ -81,6 +81,29 @@ const {
   processAndStoreUploadedImage,
   uploadImageMiddleware,
 } = require('../utils/imageUpload');
+const {
+  isRestrictedCloudinaryDocumentUrl,
+  migrateCloudinaryImageDocumentToRaw,
+  loadCampusDocumentBuffer,
+  serializeCampusAttachment,
+} = require('../utils/cloudinaryDocumentDelivery');
+
+async function sanitizeCampusAttachmentsForDelivery(attachments = []) {
+  const nextAttachments = [];
+  for (const attachment of attachments) {
+    const plain = attachment && typeof attachment.toObject === 'function' ? attachment.toObject() : { ...attachment };
+    const url = String(plain?.url || '').trim();
+    if (!url || !isRestrictedCloudinaryDocumentUrl(url, plain)) {
+      nextAttachments.push(plain);
+      continue;
+    }
+    nextAttachments.push({
+      ...plain,
+      url: await migrateCloudinaryImageDocumentToRaw(url, plain),
+    });
+  }
+  return nextAttachments;
+}
 
 function isValidPublicMediaUrl(url) {
   const normalized = String(url || '').trim();
@@ -1437,17 +1460,7 @@ function serializeTeacherCalendarPost(post = {}) {
     publishedAt: post.publishedAt || null,
     status: normalizeText(post.status) || 'published',
     attachments: Array.isArray(post.attachments)
-      ? post.attachments.map((attachment) => ({
-        sourceType: normalizeText(attachment.sourceType) || 'file',
-        kind: normalizeText(attachment.kind) || 'file',
-        title: normalizeText(attachment.title),
-        url: normalizeText(attachment.url),
-        fileName: normalizeText(attachment.fileName),
-        mimeType: normalizeText(attachment.mimeType),
-        sizeBytes: Number(attachment.sizeBytes || 0),
-        extension: normalizeText(attachment.extension),
-        storage: normalizeText(attachment.storage),
-      }))
+      ? post.attachments.map((attachment) => serializeCampusAttachment(attachment))
       : [],
   };
 }
@@ -2898,17 +2911,7 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
 }
 
 function serializeTeacherSubmissionAttachment(attachment = {}) {
-  return {
-    sourceType: normalizeText(attachment.sourceType) || 'file',
-    kind: normalizeText(attachment.kind) || 'file',
-    title: normalizeText(attachment.title),
-    url: normalizeText(attachment.url),
-    fileName: normalizeText(attachment.fileName),
-    mimeType: normalizeText(attachment.mimeType),
-    sizeBytes: Number(attachment.sizeBytes || 0),
-    extension: normalizeText(attachment.extension),
-    storage: normalizeText(attachment.storage),
-  };
+  return serializeCampusAttachment(attachment);
 }
 
 function serializeTeacherStudentSubmission(submission = null) {
@@ -2948,17 +2951,7 @@ function serializePost(post) {
       }
       : null,
     attachments: Array.isArray(post.attachments)
-      ? post.attachments.map((attachment) => ({
-        sourceType: normalizeText(attachment.sourceType) || 'file',
-        kind: normalizeText(attachment.kind) || 'file',
-        title: normalizeText(attachment.title),
-        url: normalizeText(attachment.url),
-        fileName: normalizeText(attachment.fileName),
-        mimeType: normalizeText(attachment.mimeType),
-        sizeBytes: Number(attachment.sizeBytes || 0),
-        extension: normalizeText(attachment.extension),
-        storage: normalizeText(attachment.storage),
-      }))
+      ? post.attachments.map((attachment) => serializeCampusAttachment(attachment))
       : [],
     allowStudentSubmission: Boolean(post.allowStudentSubmission),
     targetType: audience.targetType,
@@ -4716,6 +4709,24 @@ async function buildTeacherOverviewFull({ schoolId, userId, name, username }) {
   };
 }
 
+router.get('/materials/file', async (req, res) => {
+  try {
+    const storedUrl = String(req.query.u || '').trim();
+    const requestedName = String(req.query.n || '').trim();
+    const document = await loadCampusDocumentBuffer(storedUrl, {
+      kind: 'pdf',
+      mimeType: 'application/pdf',
+      fileName: requestedName || 'documento.pdf',
+    });
+    res.setHeader('Content-Type', document.mimeType || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${document.fileName}"`);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return res.send(document.buffer);
+  } catch (error) {
+    return res.status(404).json({ message: error.message || 'No se pudo abrir el archivo.' });
+  }
+});
+
 router.get('/teacher/overview', requireCampusTeacherAccess, async (req, res) => {
   try {
     const { schoolId, userId, name, username } = req.user;
@@ -5546,7 +5557,7 @@ router.post('/teacher/posts', requireCampusTeacherAccess, uploadCampusMaterialsM
       createdByUserId: userId,
       requireCloudinary: isCloudinaryEnabled(),
     });
-    const attachments = [...linksResult.links, ...uploadedAttachments];
+    const attachments = await sanitizeCampusAttachmentsForDelivery([...linksResult.links, ...uploadedAttachments]);
     const gradebookAssignmentResult = buildPostGradebookAssignmentUpdate(
       req.body.gradebookAssignment,
       course,
@@ -6891,7 +6902,11 @@ router.patch('/teacher/posts/:id', requireCampusTeacherAccess, (req, res) => {
             createdByUserId: userId,
             requireCloudinary: isCloudinaryEnabled(),
           });
-          post.attachments = [...nextLinkAttachments, ...existingFileAttachments, ...uploadedAttachments];
+          post.attachments = await sanitizeCampusAttachmentsForDelivery([
+            ...nextLinkAttachments,
+            ...existingFileAttachments,
+            ...uploadedAttachments,
+          ]);
         }
 
         await post.save();

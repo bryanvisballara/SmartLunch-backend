@@ -31,6 +31,7 @@ const { normalizeStudentFeatures } = require('../utils/studentFeatures');
 const { resolveStudentDisplayGrade } = require('../utils/studentDisplayGrade');
 const { expandGradeKeysWithClassroomGroups, dedupeAcademicContentCoursesBySubject, buildClassroomGroupGradeMongoOr } = require('../utils/classroomGroups');
 const { campusAudienceAppliesToStudent } = require('../utils/campusPostAudience');
+const { serializeCampusAttachment } = require('../utils/cloudinaryDocumentDelivery');
 const { runWithSchoolContext } = require('../config/db');
 const {
   MAX_CAMPUS_MATERIAL_FILES,
@@ -327,14 +328,7 @@ router.get('/portal/overview', async (req, res) => {
           description: String(topic.description || '').trim(),
           completed: Boolean(topic.completed),
           completedAt: topic.completedAt || null,
-          materials: Array.isArray(topic.materials) ? topic.materials.map((material) => ({
-            sourceType: String(material.sourceType || 'file').trim(),
-            kind: String(material.kind || 'file').trim(),
-            title: String(material.title || material.fileName || '').trim(),
-            url: String(material.url || '').trim(),
-            fileName: String(material.fileName || '').trim(),
-            mimeType: String(material.mimeType || '').trim(),
-          })).filter((material) => material.url) : [],
+          materials: Array.isArray(topic.materials) ? topic.materials.map((material) => serializeCampusAttachment(material)).filter((material) => material.url) : [],
         })).filter((topic) => topic.title) : [],
       })) : [],
     })).filter((course) => course.periods.some((period) => period.topics.length > 0));
@@ -749,17 +743,7 @@ function serializeStudentSubmission(submission = null) {
     status: normalizeStudentPortalText(submission.status) || 'submitted',
     submittedAt: submission.submittedAt || submission.createdAt || null,
     attachments: Array.isArray(submission.attachments)
-      ? submission.attachments.map((attachment) => ({
-        sourceType: normalizeStudentPortalText(attachment.sourceType) || 'file',
-        kind: normalizeStudentPortalText(attachment.kind) || 'file',
-        title: normalizeStudentPortalText(attachment.title),
-        url: normalizeStudentPortalText(attachment.url),
-        fileName: normalizeStudentPortalText(attachment.fileName),
-        mimeType: normalizeStudentPortalText(attachment.mimeType),
-        sizeBytes: Number(attachment.sizeBytes || 0),
-        extension: normalizeStudentPortalText(attachment.extension),
-        storage: normalizeStudentPortalText(attachment.storage),
-      }))
+      ? submission.attachments.map((attachment) => serializeCampusAttachment(attachment))
       : [],
   };
 }
