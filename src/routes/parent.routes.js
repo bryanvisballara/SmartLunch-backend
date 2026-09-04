@@ -1396,7 +1396,7 @@ function resolveAcademicMonthlyDiscountConfig(billingProfile, referenceDate = ne
   return {
     discountPercent: baseDiscountPercent,
     fixedDiscountAmount,
-    benefitLabel: String(benefitRule?.label || '').trim(),
+    benefitLabel: String(benefitRule?.label || 'Precio regular').trim(),
     additionalDiscount: normalizeAdditionalPensionDiscount(billingProfile),
   };
 }
@@ -1975,7 +1975,7 @@ function buildParentAcademicPricingGuide(profile = {}, feeConfiguration = {}) {
     },
     monthlyTuition: {
       fullAmount: monthlyFullAmount,
-      fullLabel: 'Pensión ordinaria (precio full)',
+      fullLabel: 'Precio regular',
       benefits: monthlyBenefits,
     },
   };

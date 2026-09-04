@@ -183,7 +183,7 @@ function resolveMonthlyTuitionAmount(profile = {}, dueDate = new Date()) {
     : amountAfterFixed;
   const effectiveAmount = applyMonthlyTuitionAdditionalDiscount(amountAfterRectoriaPercent, profile);
   const additionalDiscount = normalizeAdditionalPensionDiscount(profile);
-  const labels = [normalizeText(benefitRule?.label), additionalDiscount.label].filter(Boolean);
+  const labels = [normalizeText(benefitRule?.label) || 'Precio regular', additionalDiscount.label].filter(Boolean);
 
   return {
     amount: effectiveAmount,

@@ -67,22 +67,9 @@ function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], referen
 
 function getApplicableMonthlyBenefitRule(benefitRules = [], referenceDate = new Date()) {
   const currentDay = getAcademicBenefitDayOfMonth(referenceDate);
-  const rules = Array.isArray(benefitRules) ? benefitRules : [];
-  const matching = rules.find((rule) => (
+  return (Array.isArray(benefitRules) ? benefitRules : []).find((rule) => (
     currentDay >= Number(rule?.startDay || 0) && currentDay <= Number(rule?.endDay || 0)
-  ));
-  if (matching) {
-    return matching;
-  }
-
-  const lastRule = [...rules]
-    .filter((rule) => Number(rule?.endDay || 0) > 0)
-    .sort((left, right) => Number(right.endDay || 0) - Number(left.endDay || 0))[0];
-  if (lastRule && currentDay > Number(lastRule.endDay || 0)) {
-    return lastRule;
-  }
-
-  return null;
+  )) || null;
 }
 
 function resolveAcademicMonthlyPricingDate({
