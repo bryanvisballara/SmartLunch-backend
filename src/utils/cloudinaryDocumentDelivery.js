@@ -123,7 +123,7 @@ function unwrapCampusDocumentDeliveryUrl(rawUrl = '') {
   }
 
   try {
-    const parsed = new URL(url, 'https://smartlunch-backend-3uqr.onrender.com');
+    const parsed = new URL(url, 'https://api.comergio.com');
     if (parsed.pathname.replace(/\/+$/, '').endsWith('/campus/materials/file')) {
       const original = String(parsed.searchParams.get('u') || '').trim();
       if (original) {
@@ -139,10 +139,9 @@ function unwrapCampusDocumentDeliveryUrl(rawUrl = '') {
 
 function getCampusDocumentApiBaseUrl() {
   return String(
-    process.env.BACKEND_PUBLIC_URL
-    || process.env.PUBLIC_BACKEND_URL
-    || process.env.API_PUBLIC_URL
-    || 'https://smartlunch-backend-3uqr.onrender.com'
+    process.env.API_PUBLIC_URL
+    || process.env.CAMPUS_DOCUMENT_PUBLIC_URL
+    || 'https://api.comergio.com'
   ).trim().replace(/\/+$/, '');
 }
 

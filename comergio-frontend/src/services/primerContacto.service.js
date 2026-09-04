@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim();
 const fallbackApiUrl = import.meta.env.PROD
-  ? 'https://smartlunch-backend-3uqr.onrender.com'
+  ? 'https://api.comergio.com'
   : 'http://localhost:4000';
 const apiBaseUrl = configuredApiUrl || fallbackApiUrl;
 

@@ -3,7 +3,7 @@ import useAuthStore from '../store/auth.store';
 
 const configuredApiUrl = String(import.meta.env.VITE_API_URL || '').trim();
 const fallbackApiUrl = import.meta.env.PROD
-  ? 'https://smartlunch-backend-3uqr.onrender.com'
+  ? 'https://api.comergio.com'
   : 'http://localhost:4000';
 const apiBaseUrl = configuredApiUrl || fallbackApiUrl;
 const configuredTimeout = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15000);
@@ -48,7 +48,7 @@ function resolveCampusDocumentProxyUrl(rawUrl) {
 
   if (/\/campus\/materials\/file(?:\?|$)/i.test(url)) {
     if (/^https?:\/\//i.test(url)) {
-      return url;
+      return url.replace('https://smartlunch-backend-3uqr.onrender.com', getApiBaseUrl());
     }
     return `${getApiBaseUrl()}${url.startsWith('/') ? '' : '/'}${url}`;
   }

@@ -113,7 +113,7 @@ function getPublicBackendBaseUrl(req) {
   const forwardedHost = normalizeText(req.get('x-forwarded-host')).split(',')[0];
   const requestHost = forwardedHost || normalizeText(req.get('host'));
   if (!requestHost || /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(requestHost)) {
-    return 'https://smartlunch-backend-3uqr.onrender.com';
+    return 'https://api.comergio.com';
   }
 
   const forwardedProto = normalizeText(req.get('x-forwarded-proto')).split(',')[0];

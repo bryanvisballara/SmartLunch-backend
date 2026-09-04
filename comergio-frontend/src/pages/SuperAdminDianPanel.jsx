@@ -232,7 +232,7 @@ export default function SuperAdminDianPanel({ selectedSchool, selectedDraft }) {
   const downloadXml = async (invoiceId, documentNumber) => {
     try {
       const apiBaseUrl = String(import.meta.env.VITE_API_URL || '').trim()
-        || (import.meta.env.PROD ? 'https://smartlunch-backend-3uqr.onrender.com' : 'http://localhost:4000');
+        || (import.meta.env.PROD ? 'https://api.comergio.com' : 'http://localhost:4000');
       const response = await fetch(`${apiBaseUrl}/super-admin/dian/invoices/${encodeURIComponent(invoiceId)}/xml`, {
         headers: {
           Authorization: `Bearer ${token}`,
