@@ -22,6 +22,7 @@ const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.mod
 const AcademicStructure = require('../models/academicStructure.model');
 const SchoolCreationSnapshot = require('../models/schoolCreationSnapshot.model');
 const CampusCourse = require('../models/campusCourse.model');
+const CampusGradeEntry = require('../models/campusGradeEntry.model');
 const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
@@ -2147,8 +2148,11 @@ function normalizeAcademicSubjectLoadTemplates(subjectLoadTemplates, { allowedSu
       }
 
       const linkedGradeKeys = subjectGradeMap.get(subjectKey) || new Set();
-      if (linkedGradeKeys.size > 0 && gradeKeys.some((gradeKey) => !linkedGradeKeys.has(gradeKey))) {
-        return { invalid: true, message: 'La carga compartida solo puede asignarse a grados donde la asignatura ya está enlazada.' };
+      const nextGradeKeys = linkedGradeKeys.size > 0
+        ? gradeKeys.filter((gradeKey) => linkedGradeKeys.has(gradeKey))
+        : gradeKeys;
+      if (nextGradeKeys.length === 0) {
+        return null;
       }
 
       return {
@@ -2156,7 +2160,7 @@ function normalizeAcademicSubjectLoadTemplates(subjectLoadTemplates, { allowedSu
         subjectKey,
         teacherUserId: teacherUserId || null,
         weeklyHours: Math.round(weeklyHours),
-        gradeKeys,
+        gradeKeys: nextGradeKeys,
         order: Number(item?.order || (index + 1) * 10),
       };
     })
@@ -2225,8 +2229,11 @@ function normalizeAcademicTeachingAvailability(teachingAvailability, { allowedSu
       }
 
       const linkedGradeKeys = subjectGradeMap.get(subjectKey) || new Set();
-      if (linkedGradeKeys.size > 0 && gradeKeys.some((gradeKey) => !linkedGradeKeys.has(gradeKey))) {
-        return { invalid: true, message: 'La disponibilidad docente solo puede aplicarse a grados donde la asignatura ya está enlazada.' };
+      const nextGradeKeys = linkedGradeKeys.size > 0
+        ? gradeKeys.filter((gradeKey) => linkedGradeKeys.has(gradeKey))
+        : gradeKeys;
+      if (nextGradeKeys.length === 0) {
+        return null;
       }
 
       if (windows.length === 0) {
@@ -2249,7 +2256,7 @@ function normalizeAcademicTeachingAvailability(teachingAvailability, { allowedSu
         key: normalizeText(item?.key) || `teaching_availability_${index + 1}`,
         subjectKey,
         teacherUserId,
-        gradeKeys,
+        gradeKeys: nextGradeKeys,
         windows: windows.sort((left, right) => Number(left.weekday || 0) - Number(right.weekday || 0) || compareAcademicLabels(left.startTime, right.startTime)),
         order: Number(item?.order || (index + 1) * 10),
       };
@@ -2306,6 +2313,18 @@ function syncAcademicGradeSchedulesFromTemplates(configuration, { gradeKeys = []
       ? gradeSchedule.weeklySchedule
       : allowedSlots;
 
+    const allowedTeacherIdsBySubject = new Map();
+    nextSubjectLoads.forEach((load) => {
+      const subjectKey = slugifyAcademicStructureKey(load?.subjectKey);
+      const teacherUserId = String(load?.teacherUserId || '').trim();
+      if (!subjectKey || !teacherUserId) {
+        return;
+      }
+      const teacherIds = allowedTeacherIdsBySubject.get(subjectKey) || new Set();
+      teacherIds.add(teacherUserId);
+      allowedTeacherIdsBySubject.set(subjectKey, teacherIds);
+    });
+
     gradeSchedule.subjectLoads = nextSubjectLoads;
     gradeSchedule.weeklySchedule = existingEntries.map((entry) => {
       if (normalizeText(entry?.entryType || 'class') === 'break') {
@@ -2322,16 +2341,78 @@ function syncAcademicGradeSchedulesFromTemplates(configuration, { gradeKeys = []
         };
       }
 
-      const existingTeacherIds = collectAcademicScheduleTeacherIds(entry);
+      const allowedTeacherIds = allowedTeacherIdsBySubject.get(subjectKey) || new Set();
+      const existingTeacherIds = collectAcademicScheduleTeacherIds(entry).filter((teacherUserId) => allowedTeacherIds.has(teacherUserId));
+      const fallbackTeacherId = String(loadMap.get(subjectKey)?.teacherUserId || '').trim();
       return {
         ...entry,
         subjectKey,
         ...buildAcademicScheduleTeacherFields(existingTeacherIds.length
           ? existingTeacherIds
-          : [loadMap.get(subjectKey)?.teacherUserId]),
+          : (fallbackTeacherId && allowedTeacherIds.has(fallbackTeacherId) ? [fallbackTeacherId] : [])),
       };
     });
   });
+}
+
+function collectTeacherSubjectKeysFromTemplates(subjectLoadTemplates = []) {
+  const subjectKeysByTeacher = new Map();
+  (Array.isArray(subjectLoadTemplates) ? subjectLoadTemplates : []).forEach((template) => {
+    const teacherUserId = String(template?.teacherUserId || '').trim();
+    const subjectKey = slugifyAcademicStructureKey(template?.subjectKey);
+    if (!teacherUserId || !subjectKey) {
+      return;
+    }
+    const subjectKeys = subjectKeysByTeacher.get(teacherUserId) || new Set();
+    subjectKeys.add(subjectKey);
+    subjectKeysByTeacher.set(teacherUserId, subjectKeys);
+  });
+  return subjectKeysByTeacher;
+}
+
+async function archiveTeacherCampusCoursesForSubjects({ schoolId, teacherUserId, subjectKeys = [] }) {
+  const normalizedTeacherUserId = String(teacherUserId || '').trim();
+  const normalizedSubjectKeys = new Set(
+    (Array.isArray(subjectKeys) ? subjectKeys : []).map((subjectKey) => slugifyAcademicStructureKey(subjectKey)).filter(Boolean),
+  );
+  if (!schoolId || !normalizedTeacherUserId || normalizedSubjectKeys.size === 0) {
+    return;
+  }
+
+  const courses = await CampusCourse.find({
+    schoolId,
+    teacherUserId: normalizedTeacherUserId,
+    status: 'active',
+  }).select('_id subject subjectKey courseType').lean();
+
+  const matchingIds = courses
+    .filter((course) => {
+      if (normalizeText(course?.courseType) === 'guidance_routine') {
+        return false;
+      }
+      const subjectKey = slugifyAcademicStructureKey(course?.subjectKey || course?.subject);
+      return subjectKey && normalizedSubjectKeys.has(subjectKey);
+    })
+    .map((course) => course._id);
+
+  if (matchingIds.length === 0) {
+    return;
+  }
+
+  const gradedIds = await CampusGradeEntry.distinct('courseId', {
+    schoolId,
+    courseId: { $in: matchingIds },
+  });
+  const gradedIdSet = new Set(gradedIds.map((id) => String(id)));
+  const orphanIds = matchingIds.filter((id) => !gradedIdSet.has(String(id)));
+  if (orphanIds.length === 0) {
+    return;
+  }
+
+  await CampusCourse.updateMany(
+    { _id: { $in: orphanIds }, schoolId, teacherUserId: normalizedTeacherUserId, status: 'active' },
+    { $set: { status: 'archived' } },
+  );
 }
 
 function resolveAcademicTeachingAvailabilityWindows(teachingAvailability, { teacherUserId = '', subjectKey = '', gradeKey = '' } = {}) {
@@ -4562,15 +4643,8 @@ function getAcademicBenefitWindowLabel(rule = null) {
 }
 
 function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
-  const amountsByGrade = normalizeBenefitFixedAmountsByGrade(rule.fixedAmountsByGrade || {});
-  const aliases = getFeeGradeAliases(grade);
-  for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(amountsByGrade, alias)) {
-      return Math.max(0, Number(amountsByGrade[alias] || 0));
-    }
-  }
-
-  return 0;
+  const { getFixedBenefitAmountForGrade: resolveFixedBenefitAmountForGrade } = require('../services/academicBenefitPricing.service');
+  return resolveFixedBenefitAmountForGrade(rule, grade);
 }
 
 function resolveAcademicChargeAmounts(charge, billingProfile, referenceDate = new Date(), feeConfiguration = null) {
@@ -8050,10 +8124,39 @@ router.put('/academic-management/subject-load-templates', async (req, res) => {
       return res.status(400).json({ message: normalizedTemplates.message });
     }
 
+    const previousSubjectKeysByTeacher = collectTeacherSubjectKeysFromTemplates(configuration.subjectLoadTemplates);
     configuration.subjectLoadTemplates = normalizedTemplates.subjectLoadTemplates;
+    const nextSubjectKeysByTeacher = collectTeacherSubjectKeysFromTemplates(configuration.subjectLoadTemplates);
     syncAcademicGradeSchedulesFromTemplates(configuration);
     applyAcademicScheduleBreaksToConfiguration(configuration);
     await configuration.save();
+
+    const subjectLabelByKey = new Map(serialized.subjects.map((subject) => [subject.key, subject.label || subject.key]));
+    const affectedTeacherIds = new Set([
+      ...previousSubjectKeysByTeacher.keys(),
+      ...nextSubjectKeysByTeacher.keys(),
+    ]);
+
+    await Promise.all(Array.from(affectedTeacherIds).map(async (teacherUserId) => {
+      const previousKeys = previousSubjectKeysByTeacher.get(teacherUserId) || new Set();
+      const nextKeys = nextSubjectKeysByTeacher.get(teacherUserId) || new Set();
+      const removedSubjectKeys = Array.from(previousKeys).filter((subjectKey) => !nextKeys.has(subjectKey));
+      const assignedSubjects = Array.from(nextKeys)
+        .map((subjectKey) => subjectLabelByKey.get(subjectKey) || subjectKey)
+        .filter(Boolean);
+
+      await Promise.all([
+        archiveTeacherCampusCoursesForSubjects({
+          schoolId,
+          teacherUserId,
+          subjectKeys: removedSubjectKeys,
+        }),
+        User.updateOne(
+          { _id: teacherUserId, schoolId, role: 'teacher' },
+          { $set: { assignedSubjects } },
+        ),
+      ]);
+    }));
 
     return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });
   } catch (error) {

@@ -25,10 +25,14 @@ function normalizeBenefitFixedAmountsByGrade(rawAmounts = {}) {
 
 function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
   const amountsByGrade = normalizeBenefitFixedAmountsByGrade(rule?.fixedAmountsByGrade || {});
-  const aliases = getFeeGradeAliases(grade);
-  for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(amountsByGrade, alias)) {
-      return Math.max(0, Number(amountsByGrade[alias] || 0));
+  const gradeAliases = new Set(getFeeGradeAliases(grade));
+
+  for (const [key, amount] of Object.entries(amountsByGrade)) {
+    if (gradeAliases.has(key)) {
+      return Math.max(0, Number(amount || 0));
+    }
+    if (getFeeGradeAliases(key).some((alias) => gradeAliases.has(alias))) {
+      return Math.max(0, Number(amount || 0));
     }
   }
 
@@ -63,9 +67,22 @@ function getApplicableEnrollmentBenefitRule(enrollmentBenefitRules = [], referen
 
 function getApplicableMonthlyBenefitRule(benefitRules = [], referenceDate = new Date()) {
   const currentDay = getAcademicBenefitDayOfMonth(referenceDate);
-  return (Array.isArray(benefitRules) ? benefitRules : []).find((rule) => (
+  const rules = Array.isArray(benefitRules) ? benefitRules : [];
+  const matching = rules.find((rule) => (
     currentDay >= Number(rule?.startDay || 0) && currentDay <= Number(rule?.endDay || 0)
-  )) || null;
+  ));
+  if (matching) {
+    return matching;
+  }
+
+  const lastRule = [...rules]
+    .filter((rule) => Number(rule?.endDay || 0) > 0)
+    .sort((left, right) => Number(right.endDay || 0) - Number(left.endDay || 0))[0];
+  if (lastRule && currentDay > Number(lastRule.endDay || 0)) {
+    return lastRule;
+  }
+
+  return null;
 }
 
 function resolveAcademicMonthlyPricingDate({

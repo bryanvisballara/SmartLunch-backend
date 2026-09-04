@@ -5,9 +5,11 @@ const Student = require('../models/student.model');
 const User = require('../models/user.model');
 const { queueNotificationsForParents } = require('./notification.service');
 const { buildParentPushUrl } = require('../utils/parentPushTargets');
-const { findGradeFeeSetting, getFeeGradeAliases, resolveSchoolYearLevelSetting } = require('../utils/feeGradeMatching');
+const { findGradeFeeSetting, resolveSchoolYearLevelSetting } = require('../utils/feeGradeMatching');
 const {
   resolveParentAnnualTuitionPricing,
+  getApplicableMonthlyBenefitRule,
+  getFixedBenefitAmountForGrade,
 } = require('./academicBenefitPricing.service');
 const AcademicFeeConfiguration = require('../models/academicFeeConfiguration.model');
 const {
@@ -166,37 +168,11 @@ function normalizeAdditionalDiscountPercent(value) {
   return Math.min(100, Math.max(0, parsed));
 }
 
-function getColombiaCalendarDay(referenceDate = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Bogota',
-    day: 'numeric',
-  }).formatToParts(referenceDate);
-  return Number(parts.find((part) => part.type === 'day')?.value || new Date(referenceDate).getDate());
-}
-
-function getApplicableBenefitRule(benefitRules = [], referenceDate = new Date()) {
-  const currentDay = getColombiaCalendarDay(referenceDate);
-  return (benefitRules || []).find((rule) => currentDay >= Number(rule.startDay || 0) && currentDay <= Number(rule.endDay || 0)) || null;
-}
-
-function getFixedBenefitAmountForGrade(rule = {}, grade = '') {
-  const amountsByGrade = rule?.fixedAmountsByGrade instanceof Map
-    ? Object.fromEntries(rule.fixedAmountsByGrade.entries())
-    : (rule?.fixedAmountsByGrade || {});
-  const aliases = getFeeGradeAliases(grade);
-  for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(amountsByGrade, alias)) {
-      return Math.max(0, Number(amountsByGrade[alias] || 0));
-    }
-  }
-  return 0;
-}
-
 function resolveMonthlyTuitionAmount(profile = {}, dueDate = new Date()) {
   const baseAmount = Math.max(0, Number(profile.monthlyTuitionAmount || 0));
   if (baseAmount <= 0) return { amount: 0, originalAmount: 0, label: '' };
 
-  const benefitRule = getApplicableBenefitRule(profile.benefitRules || [], dueDate);
+  const benefitRule = getApplicableMonthlyBenefitRule(profile.benefitRules || [], dueDate);
   const isFixedBenefit = normalizeText(benefitRule?.discountType) === 'fixed';
   const baseDiscountPercent = isFixedBenefit ? 0 : Math.min(100, Math.max(0, Number(benefitRule?.discountPercent || 0)));
   const fixedDiscountAmount = isFixedBenefit ? getFixedBenefitAmountForGrade(benefitRule, profile.grade) : 0;

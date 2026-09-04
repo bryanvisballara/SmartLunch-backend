@@ -18,6 +18,7 @@ function compactGradeIdentity(value) {
   return normalizeText(value)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[°ºª]/g, '')
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
 }
