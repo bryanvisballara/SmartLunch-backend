@@ -27,7 +27,10 @@ function formatColibriShortPlayerName(fullName) {
 function formatColibriLeaderboardLabel(playerName, schoolName) {
   const shortName = formatColibriShortPlayerName(playerName);
   const label = normalizeText(schoolName);
-  return label ? `${shortName} - ${label}` : shortName;
+  if (!label || shortName.toLowerCase() === label.toLowerCase()) {
+    return shortName || label;
+  }
+  return `${shortName} - ${label}`;
 }
 
 function serializeColibriLeaderboardEntry(entry, rank) {

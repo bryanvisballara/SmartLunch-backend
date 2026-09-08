@@ -13,6 +13,7 @@ import useAuthStore from '../../store/auth.store';
 import { createHrSupplyRequest, getHrPlannerCycles, getHrSupplyItems, getHrSupplyRequests, updateHrSupplyRequest } from '../../services/hr.service';
 import StaffAnnouncementsPanel, { StaffAnnouncementsUnreadBadge, useStaffAnnouncementUnreadCount } from '../../components/staff-announcements/StaffAnnouncementsPanel';
 import ComergioAcademyPanel from '../../components/comergio-academy/ComergioAcademyPanel';
+import ArenaTeacherPanel from '../../components/games/ArenaTeacherPanel';
 import {
   COMERGIO_ACADEMY_CHILDREN,
   COMERGIO_ACADEMY_PARENT,
@@ -90,6 +91,7 @@ const teacherNavGroups = [
       'social_publications',
       'resource_requests',
       'staff_announcements',
+      'juegos',
     ],
   },
   {
@@ -182,6 +184,15 @@ function TeacherSectionIcon({ icon }) {
           <path d="M3 20h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
         </svg>
       );
+    case 'games':
+      return (
+        <svg {...common}>
+          <path d="M6.5 12h11" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+          <path d="M9 9.5v5M6.5 12H4.8a3.3 3.3 0 0 0-1.1 6.4h16.6a3.3 3.3 0 0 0-1.1-6.4H17.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" />
+          <circle cx="16.2" cy="10.4" r="0.9" fill="currentColor" />
+          <circle cx="18.2" cy="12.6" r="0.9" fill="currentColor" />
+        </svg>
+      );
     case 'family':
       return (
         <svg {...common}>
@@ -253,6 +264,7 @@ const teacherSectionOptions = [
   { key: 'school_coexistence', label: 'Convivencia escolar', icon: 'coexistence', description: 'Registrar observaciones de comportamiento para seguimiento institucional.' },
   { key: 'family_feed', label: 'Feed de familias', icon: 'family', description: 'Consulta las publicaciones y comunicados visibles para las familias.' },
   { key: 'social_publications', label: 'Publicaciones', icon: 'publications', description: 'Enviar fotos, videos y relatos a revisión de Secretaría Académica.' },
+  { key: 'juegos', label: 'Juegos', icon: 'games', description: 'FLY, Comergio Arena y Trivia para jugar con el curso.' },
   { key: 'resource_requests', label: 'Solicitud de recursos', icon: 'resources', description: 'Solicitar materiales institucionales a Recursos y gestion de compras.' },
   { key: 'staff_announcements', label: 'Comunicados internos', icon: 'announcements', description: 'Envía y recibe mensajes internos entre el equipo del colegio.' },
   {
@@ -8910,7 +8922,7 @@ function TeacherCampusHome({ forcePreview = false }) {
 
           <div className="campus-teacher__workspace">
             <section className="campus-teacher__course-deck campus-teacher__panel-surface">
-              <div className="campus-teacher__section-head" hidden={activeTeacherSection === 'conecta' || activeTeacherSection === 'dashboard' || activeTeacherSection === 'schedule' || activeTeacherSection === 'courses' || activeTeacherSection === 'academic_management' || isAttendanceLikeSection || activeTeacherSection === 'school_coexistence'}>
+              <div className="campus-teacher__section-head" hidden={activeTeacherSection === 'conecta' || activeTeacherSection === 'dashboard' || activeTeacherSection === 'schedule' || activeTeacherSection === 'courses' || activeTeacherSection === 'academic_management' || isAttendanceLikeSection || activeTeacherSection === 'school_coexistence' || activeTeacherSection === 'juegos'}>
                 <div>
                   <span className="campus-panel__kicker">{activeSectionLabel}</span>
                   <h2>{activeSectionDescription}</h2>
@@ -13246,6 +13258,18 @@ function TeacherCampusHome({ forcePreview = false }) {
               </article>
             ) : null}
 
+            {activeTeacherSection === 'juegos' ? (
+              <article className="campus-teacher__embedded-panel">
+                <ArenaTeacherPanel
+                  onOpenFlyLock={() => {
+                    setShowSelectedCourseWorkspace(false);
+                    setActiveTeacherSection('academic_management');
+                    setShowTeacherSidebar(false);
+                  }}
+                />
+              </article>
+            ) : null}
+
             {activeTeacherSection === 'dashboard' ? (
               <article className="campus-teacher__home-panel campus-teacher__embedded-panel">
                 <header className="campus-teacher__home-hero">
@@ -13261,6 +13285,18 @@ function TeacherCampusHome({ forcePreview = false }) {
                     <span>{todayWelcomeLabel}</span>
                   </div>
                 </header>
+
+                <button
+                  className="campus-teacher__home-games-launch"
+                  onClick={() => setActiveTeacherSection('juegos')}
+                  type="button"
+                >
+                  <span>
+                    <strong>Juegos · Comergio Arena</strong>
+                    <small>Crea un quiz, guarda el código y júgalo en clase con tus alumnos.</small>
+                  </span>
+                  <em>Abrir</em>
+                </button>
 
                 <div className={`campus-teacher__home-kpi-grid${isOverviewMetricsLoading ? ' is-loading' : ''}`}>
                   {isOverviewMetricsLoading ? Array.from({ length: 6 }, (_, index) => (

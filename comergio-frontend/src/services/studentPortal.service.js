@@ -15,3 +15,9 @@ export const getColibriGameLeaderboard = () => api.get('/student/portal/colibri-
 export const submitColibriGameScore = (score) => api.post('/student/portal/colibri-game/scores', { score });
 export const getStudentFlyLockStatus = () => api.get('/student/portal/fly-lock').then((response) => response.data);
 export const markStudentSubjectSeen = (data) => api.post('/student/portal/subject-reviews/seen', data).then((response) => response.data);
+export const joinArenaSession = (pin) => api.post('/arena/student/join', { pin }).then((response) => response.data);
+export const getStudentArenaSession = (sessionId) => api.get(`/arena/student/sessions/${sessionId}`).then((response) => response.data);
+export const submitStudentArenaAnswer = (sessionId, payload) => api.post(
+  `/arena/student/sessions/${sessionId}/answer`,
+  payload
+).then((response) => response.data);

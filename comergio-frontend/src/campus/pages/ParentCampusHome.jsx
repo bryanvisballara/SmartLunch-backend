@@ -68,7 +68,7 @@ import {
 import { isMillenniumSchool, shouldHideParentEnrollmentPaymentAmount } from '../../lib/millenniumEnrollmentContracts';
 import { getStudentPortalOverview, getStudentAcademicCalendar, getStudentAcademicAttendance, getStudentFlyLockStatus } from '../../services/studentPortal.service';
 import { mapStudentPortalOverviewToParentOverview } from '../../lib/studentPortalOverview';
-import ColibriFlappyGame from '../../components/games/ColibriFlappyGame';
+import StudentGamesPanel from '../../components/games/StudentGamesPanel';
 import colibriGameCover from '../../assets/colibrisinfondo.png';
 
 const MATRICULA_GATE_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 días
@@ -1168,6 +1168,9 @@ function buildParentSectionLabelFromCourseToken(grade, courseToken) {
   }
 
   if (/^\d+$/.test(normalizedToken)) {
+    if (normalizedToken === normalizedGrade) {
+      return normalizedGrade;
+    }
     const index = Number(normalizedToken);
     if (index >= 1 && index <= 26) {
       return `${normalizedGrade}${String.fromCharCode(64 + index)}`;
@@ -4658,7 +4661,7 @@ function ParentAcademicContent({
     setParentAcademicAttendance((current) => ({ ...current, isLoading: true, error: '' }));
 
     const attendanceRequest = studentPortalMode
-      ? getStudentAcademicAttendance({ attendanceType: 'subject_class' })
+      ? getStudentAcademicAttendance()
       : getParentAcademicAttendance({ studentId: selectedChild.id });
 
     attendanceRequest
@@ -4687,19 +4690,27 @@ function ParentAcademicContent({
   }, [effectiveActiveView, selectedChild?.id, selectedChild?.isRealParentChild, refreshKey, studentPortalMode]);
 
   useEffect(() => {
-    if (!guidanceRoutineLog.isOpen || !selectedChild?.isRealParentChild || !selectedChild?.id || studentPortalMode) {
+    if (!guidanceRoutineLog.isOpen || !selectedChild?.isRealParentChild || !selectedChild?.id) {
       return undefined;
     }
 
     let isMounted = true;
     setGuidanceRoutineLog((current) => ({ ...current, isLoading: true, error: '' }));
 
-    getParentAcademicAttendance({
-      studentId: selectedChild.id,
-      attendanceType: 'guidance_routine',
-      page: guidanceRoutineLog.page,
-      limit: PARENT_GUIDANCE_ROUTINE_PAGE_SIZE,
-    })
+    const guidanceRequest = studentPortalMode
+      ? getStudentAcademicAttendance({
+          attendanceType: 'guidance_routine',
+          page: guidanceRoutineLog.page,
+          limit: PARENT_GUIDANCE_ROUTINE_PAGE_SIZE,
+        })
+      : getParentAcademicAttendance({
+          studentId: selectedChild.id,
+          attendanceType: 'guidance_routine',
+          page: guidanceRoutineLog.page,
+          limit: PARENT_GUIDANCE_ROUTINE_PAGE_SIZE,
+        });
+
+    guidanceRequest
       .then((response) => {
         if (!isMounted) {
           return;
@@ -4737,7 +4748,7 @@ function ParentAcademicContent({
     return () => {
       isMounted = false;
     };
-  }, [guidanceRoutineLog.isOpen, guidanceRoutineLog.page, selectedChild?.id, selectedChild?.isRealParentChild]);
+  }, [guidanceRoutineLog.isOpen, guidanceRoutineLog.page, selectedChild?.id, selectedChild?.isRealParentChild, studentPortalMode]);
 
   const academicCalendarItems = useMemo(() => {
     if (!selectedChild?.isRealParentChild) {
@@ -6396,9 +6407,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
 
     return {
       ...parentAppFeatures,
-      games: Boolean(parentAppFeatures.games) && studentGamesAvailable && !studentFlyLocked,
+      games: Boolean(parentAppFeatures.games) && studentGamesAvailable,
     };
-  }, [parentAppFeatures, studentPortalMode, studentGamesAvailable, studentFlyLocked]);
+  }, [parentAppFeatures, studentPortalMode, studentGamesAvailable]);
   const activeSection = useMemo(() => {
     if (!usesRoutedSections) {
       return localActiveSection;
@@ -8144,16 +8155,6 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [activeSection, studentPortalMode]);
 
   useEffect(() => {
-    if (!studentPortalMode || !studentFlyLocked) {
-      return;
-    }
-
-    if (activeSection === 'games') {
-      setFeedActionMessage(studentFlyLock.reason || 'FLY está pausado durante la clase.');
-    }
-  }, [activeSection, studentFlyLocked, studentFlyLock.reason, studentPortalMode]);
-
-  useEffect(() => {
     if (!usesRoutedSections) {
       return;
     }
@@ -8834,7 +8835,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 </span>
               </div>
             ) : null}
-            {studentPortalMode && studentGamesAvailable && !studentFlyLocked ? (
+            {studentPortalMode && studentGamesAvailable ? (
               <button
                 className="campus-parent-mobile__game-promo"
                 onClick={() => onSelectSection('games')}
@@ -8842,10 +8843,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               >
                 <img alt="" className="campus-parent-mobile__game-promo-image" src={colibriGameCover} />
                 <span className="campus-parent-mobile__game-promo-copy">
-                  <strong>Fly</strong>
-                  <small>Vuela sin límites y alcanza la cima.</small>
+                  <strong>Juegos</strong>
+                  <small>FLY, Arena y Trivia en un solo lugar.</small>
                 </span>
-                <span className="campus-parent-mobile__game-promo-cta">Jugar</span>
+                <span className="campus-parent-mobile__game-promo-cta">Abrir</span>
               </button>
             ) : null}
             <section className="campus-parent-mobile__feed">
@@ -8995,9 +8996,13 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
           </ParentViewMotion>
         ) : null}
 
-        {activeSection === 'games' && studentGamesAvailable && !studentFlyLocked ? (
+        {activeSection === 'games' && studentGamesAvailable ? (
           <ParentViewMotion stagger={false} variant="pop" viewKey="games">
-            <ColibriFlappyGame playerName={selectedChild?.name || user?.name || ''} />
+            <StudentGamesPanel
+              flyLockReason={studentFlyLock.reason || ''}
+              flyLocked={studentFlyLocked}
+              playerName={selectedChild?.name || user?.name || ''}
+            />
           </ParentViewMotion>
         ) : null}
       </div>

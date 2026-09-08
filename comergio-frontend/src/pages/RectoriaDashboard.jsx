@@ -6150,7 +6150,7 @@ function RectoriaDashboard() {
       return accumulator;
     };
 
-    const summaryByTeacherId = teamTeacherAssignmentRows.reduce((accumulator, assignment) => {
+    return teamTeacherAssignmentRows.reduce((accumulator, assignment) => {
       const teacherUserId = String(assignment.teacherUserId || '').trim();
       if (!teacherUserId) {
         return accumulator;
@@ -6164,50 +6164,7 @@ function RectoriaDashboard() {
         gradeLabels: assignment.gradeLabels,
       });
     }, {});
-
-    (Array.isArray(academicStructureDraft.gradeSchedules) ? academicStructureDraft.gradeSchedules : []).forEach((gradeSchedule) => {
-      const gradeKey = String(gradeSchedule.gradeKey || '').trim();
-      if (!gradeKey) {
-        return;
-      }
-
-      const courseKey = String(gradeSchedule.courseKey || '').trim();
-      const courseLabels = courseKey
-        ? [`${getGradeLabel(gradeKey)} · ${getCourseLabel(courseKey)}`]
-        : (courseOptionsByGrade[gradeKey] || []).map((course) => `${getGradeLabel(gradeKey)} · ${course.label}`);
-      const fallbackGradeLabels = [getGradeLabel(gradeKey)].filter(Boolean);
-      const scheduleAssignments = new Map();
-
-      (Array.isArray(gradeSchedule.subjectLoads) ? gradeSchedule.subjectLoads : []).forEach((load) => {
-        const teacherUserId = String(load.teacherUserId || '').trim();
-        const subjectKey = String(load.subjectKey || '').trim();
-        if (teacherUserId && subjectKey) {
-          scheduleAssignments.set(`${teacherUserId}::${subjectKey}`, { teacherUserId, subjectKey });
-        }
-      });
-
-      (Array.isArray(gradeSchedule.weeklySchedule) ? gradeSchedule.weeklySchedule : []).forEach((entry) => {
-        const subjectKey = String(entry.subjectKey || '').trim();
-        if (String(entry.entryType || 'class') === 'break' || !subjectKey) {
-          return;
-        }
-        collectAcademicScheduleTeacherIds(entry).forEach((teacherUserId) => {
-          scheduleAssignments.set(`${teacherUserId}::${subjectKey}`, { teacherUserId, subjectKey });
-        });
-      });
-
-      scheduleAssignments.forEach((assignment) => {
-        appendTeacherAssignment(summaryByTeacherId, {
-          ...assignment,
-          subjectLabel: subjectLabelByKey.get(assignment.subjectKey) || assignment.subjectKey,
-          courseLabels,
-          gradeLabels: fallbackGradeLabels,
-        });
-      });
-    });
-
-    return summaryByTeacherId;
-  }, [academicStructureDraft.gradeSchedules, courseOptionsByGrade, getCourseLabel, getGradeLabel, subjectOptionsForSchedule, teamTeacherAssignmentRows]);
+  }, [subjectOptionsForSchedule, teamTeacherAssignmentRows]);
 
   const selectedTeamTeacherSummary = useMemo(() => {
     const teacherUserId = String(teamTeacherAssignment.teacherUserId || '').trim();
@@ -6831,13 +6788,9 @@ function RectoriaDashboard() {
       });
     }
 
-    const assignmentKeysToReplace = new Set(
-      assignmentsToSave.map((assignment) => `${assignment.teacherUserId}::${assignment.subjectKey}`),
-    );
-
     const nextTemplates = normalizeAcademicSubjectLoadTemplates([
       ...academicSubjectLoadTemplates.filter((item) => (
-        !assignmentKeysToReplace.has(`${String(item.teacherUserId || '').trim()}::${String(item.subjectKey || '').trim()}`)
+        String(item.teacherUserId || '').trim() !== normalizedTeacherUserId
       )),
       ...assignmentsToSave,
     ]);
@@ -10662,12 +10615,9 @@ function RectoriaDashboard() {
                     const teacherSubjectLabels = teacherSummary ? Array.from(teacherSummary.subjects.values()) : [];
                     const teacherCourseLabels = teacherSummary ? Array.from(teacherSummary.courses.values()) : [];
                     const teacherBaseSubjectLabels = Array.isArray(item.assignedSubjects) ? item.assignedSubjects.filter(Boolean) : [];
-                    const teacherDisplaySubjectLabels = Array.from(new Map(
-                      [...teacherBaseSubjectLabels, ...teacherSubjectLabels]
-                        .map((subjectLabel) => String(subjectLabel || '').trim())
-                        .filter(Boolean)
-                        .map((subjectLabel) => [subjectLabel.toLowerCase(), subjectLabel])
-                    ).values());
+                    const teacherDisplaySubjectLabels = (teacherSubjectLabels.length ? teacherSubjectLabels : teacherBaseSubjectLabels)
+                      .map((subjectLabel) => String(subjectLabel || '').trim())
+                      .filter(Boolean);
                     const teacherHeadroomCourseLabels = item.role === 'teacher' ? (headroomCourseLabelsByTeacherId[memberId] || []) : [];
                     const displayName = item.name || item.username || 'Usuario';
                     const hasExpandableDetails = item.role === 'teacher'
@@ -13428,18 +13378,18 @@ function RectoriaDashboard() {
                           </label>
                           <div className="rectoria-schedule-toolbar-actions">
                             <button
-                              aria-pressed={Boolean(selectedGradeSchedule.hiddenFromFamilies)}
-                              className={`rectoria-schedule-visibility-toggle${selectedGradeSchedule.hiddenFromFamilies ? ' is-on' : ''}`}
+                              aria-pressed={!selectedGradeSchedule.hiddenFromFamilies}
+                              className={`rectoria-schedule-visibility-toggle${!selectedGradeSchedule.hiddenFromFamilies ? ' is-on' : ''}`}
                               disabled={!selectedScheduleCourseKey || busy}
                               onClick={() => onToggleScheduleHiddenFromFamilies(!selectedGradeSchedule.hiddenFromFamilies)}
-                              title="Úsalo mientras ensayas el horario. Actívalo para ocultarlo a alumnos y padres."
+                              title="Actívalo para mostrar el horario a alumnos y acudientes."
                               type="button"
                             >
                               <span aria-hidden="true" className="rectoria-schedule-visibility-switch">
                                 <span className="rectoria-schedule-visibility-knob" />
                               </span>
                               <span className="rectoria-schedule-visibility-copy">
-                                {selectedGradeSchedule.hiddenFromFamilies ? 'Oculto a familias' : 'Visible a familias'}
+                                Visible a familias
                               </span>
                             </button>
                             <button

@@ -4024,6 +4024,44 @@ body.login-boot-active main.container {
   color: #0f172a;
 }
 
+.admin-database-kpis {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0.85rem 0 1.15rem;
+}
+
+.admin-database-kpi {
+  display: grid;
+  gap: 0.3rem;
+  min-height: 5.4rem;
+  padding: 0.95rem 1.05rem;
+  border: 1px solid #e4e9f1;
+  border-radius: 1.05rem;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+}
+
+.admin-database-kpi span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-database-kpi strong {
+  color: #0f172a;
+  font-size: 1.55rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+@media (max-width: 900px) {
+  .admin-database-kpis {
+    grid-template-columns: 1fr;
+  }
+}
+
 .admin-big-number {
   margin: 0;
   font-size: 1.8rem;

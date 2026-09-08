@@ -70,4 +70,7 @@ require('./enrollmentMatriculaProcess.model');
 require('./enrollmentMatriculaPurgeRequest.model');
 require('./academicChargeAdjustmentRequest.model');
 require('./colibriGameScore.model');
+require('./arenaQuiz.model');
+require('./arenaSession.model');
+require('./arenaPlayer.model');
 require('./communityReport.model');

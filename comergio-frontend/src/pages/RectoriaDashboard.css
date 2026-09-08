@@ -7031,13 +7031,13 @@ button.rectoria-team-assignment-card.is-active {
 }
 
 .rectoria-schedule-visibility-toggle.is-on {
-  border-color: #f0c56d;
-  background: #fffbeb;
-  color: #92400e;
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
 }
 
 .rectoria-schedule-visibility-toggle.is-on .rectoria-schedule-visibility-switch {
-  background: #d97706;
+  background: #16a34a;
 }
 
 .rectoria-schedule-visibility-toggle.is-on .rectoria-schedule-visibility-knob {

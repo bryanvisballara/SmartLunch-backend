@@ -263,3 +263,49 @@ export function runCampusSchoolRouteStopAction(stopId, action, extra = {}) {
 export function resetCampusSchoolRouteDay() {
   return api.post('/campus/school-route/reset-day').then((response) => response.data);
 }
+
+export function listArenaQuizzes() {
+  return api.get('/arena/teacher/quizzes').then((response) => response.data);
+}
+
+export function getArenaQuiz(quizId) {
+  return api.get(`/arena/teacher/quizzes/${quizId}`).then((response) => response.data);
+}
+
+export function createArenaQuiz(payload) {
+  return api.post('/arena/teacher/quizzes', payload).then((response) => response.data);
+}
+
+export function updateArenaQuiz(quizId, payload) {
+  return api.put(`/arena/teacher/quizzes/${quizId}`, payload).then((response) => response.data);
+}
+
+export function deleteArenaQuiz(quizId) {
+  return api.delete(`/arena/teacher/quizzes/${quizId}`).then((response) => response.data);
+}
+
+export function playArenaQuiz(quizId) {
+  return api.post(`/arena/teacher/quizzes/${quizId}/play`).then((response) => response.data);
+}
+
+export function getActiveArenaHostSession() {
+  return api.get('/arena/teacher/sessions/active').then((response) => response.data);
+}
+
+export function getArenaHostSession(sessionId) {
+  return api.get(`/arena/teacher/sessions/${sessionId}`).then((response) => response.data);
+}
+
+export function advanceArenaHostSession(sessionId, action) {
+  return api.post(`/arena/teacher/sessions/${sessionId}/advance`, action ? { action } : {}).then((response) => response.data);
+}
+
+export function endArenaHostSession(sessionId) {
+  return api.post(`/arena/teacher/sessions/${sessionId}/end`).then((response) => response.data);
+}
+
+export function uploadArenaQuestionImage(file) {
+  const formData = new FormData();
+  formData.append('files', file);
+  return api.post('/arena/teacher/media', formData, { timeout: 120000 }).then((response) => response.data);
+}

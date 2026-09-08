@@ -8235,6 +8235,22 @@ function AdminDashboard() {
       {activeModule === 'edit' || activeModule === 'modify' ? (
         <section className="panel admin-section">
           <h3>{activeModule === 'edit' ? 'Base de datos' : 'Modificaciones'}</h3>
+          {activeModule === 'edit' ? (
+            <div className="admin-database-kpis" aria-label="Totales de la base de datos">
+              <article className="admin-database-kpi">
+                <span>Estudiantes</span>
+                <strong>{students.length.toLocaleString('es-CO')}</strong>
+              </article>
+              <article className="admin-database-kpi">
+                <span>Acudientes</span>
+                <strong>{parentUsers.length.toLocaleString('es-CO')}</strong>
+              </article>
+              <article className="admin-database-kpi">
+                <span>Productos</span>
+                <strong>{products.length.toLocaleString('es-CO')}</strong>
+              </article>
+            </div>
+          ) : null}
           <div className="row gap">
             <label>
               Tipo de registro

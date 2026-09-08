@@ -566,6 +566,7 @@ router.get('/portal/academic-attendance', async (req, res) => {
     }
 
     const studentId = student._id;
+    const studentPayload = { _id: student._id, name: student.name, grade: student.grade, course: student.course };
     const statusLabels = {
       present: 'Presente',
       late: 'Llegada tarde',
@@ -602,6 +603,26 @@ router.get('/portal/academic-attendance', async (req, res) => {
       };
     };
 
+    const buildAttendanceSummary = (items = []) => {
+      const grouped = (Array.isArray(items) ? items : []).reduce((accumulator, item) => {
+        accumulator[item.status] = Number(accumulator[item.status] || 0) + 1;
+        return accumulator;
+      }, { present: 0, late: 0, absent: 0, excused: 0 });
+      const totalItems = Number(items.length || 0);
+
+      return {
+        total: totalItems,
+        present: grouped.present || 0,
+        late: grouped.late || 0,
+        absent: grouped.absent || 0,
+        excused: grouped.excused || 0,
+        unexcusedAbsences: grouped.absent || 0,
+        excusedAbsences: grouped.excused || 0,
+        lateCount: grouped.late || 0,
+        attendanceRate: totalItems > 0 ? `${Math.round((Number(grouped.present || 0) / totalItems) * 100)}%` : 'Sin datos',
+      };
+    };
+
     const requestedAttendanceType = H.normalizeText(req.query.attendanceType);
     if (requestedAttendanceType === 'guidance_routine') {
       const requestedPage = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
@@ -617,34 +638,72 @@ router.get('/portal/academic-attendance', async (req, res) => {
         .lean();
 
       return res.status(200).json({
-        student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
+        student: studentPayload,
         attendanceType: 'guidance_routine',
-        page,
-        totalPages,
-        totalRecords,
         records: sessions.map(serializeAttendanceRecord),
+        pagination: {
+          page,
+          pageSize,
+          totalRecords,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
       });
     }
 
-    const requestedPage = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(10, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
-    const query = { schoolId, attendanceType: 'subject_class', 'records.studentId': studentId };
-    const totalRecords = await CampusAttendanceSession.countDocuments(query);
-    const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
-    const page = Math.min(requestedPage, totalPages);
-    const sessions = await CampusAttendanceSession.find(query)
+    const sessions = await CampusAttendanceSession.find({
+      schoolId,
+      'records.studentId': studentId,
+    })
       .sort({ date: -1, updatedAt: -1 })
-      .skip((page - 1) * pageSize)
-      .limit(pageSize)
+      .limit(60)
       .lean();
 
+    const records = sessions.map(serializeAttendanceRecord);
+    const guidanceRoutineRecords = records.filter((record) => record.attendanceType === 'guidance_routine');
+    const subjectClassRecords = records.filter((record) => record.attendanceType === 'subject_class');
+    const subjectGroupsMap = new Map();
+
+    subjectClassRecords.forEach((record) => {
+      const groupKey = H.normalizeText(record.subject) || H.normalizeText(record.courseTitle) || 'clase';
+      const existingGroup = subjectGroupsMap.get(groupKey) || {
+        key: groupKey,
+        subject: H.normalizeText(record.subject),
+        courseTitle: H.normalizeText(record.courseTitle),
+        records: [],
+      };
+
+      existingGroup.records.push(record);
+      if (!existingGroup.subject && record.subject) {
+        existingGroup.subject = H.normalizeText(record.subject);
+      }
+      if (!existingGroup.courseTitle && record.courseTitle) {
+        existingGroup.courseTitle = H.normalizeText(record.courseTitle);
+      }
+      subjectGroupsMap.set(groupKey, existingGroup);
+    });
+
+    const subjectGroups = Array.from(subjectGroupsMap.values())
+      .map((group) => ({
+        ...group,
+        summary: buildAttendanceSummary(group.records),
+      }))
+      .sort((left, right) => String(left.subject || left.courseTitle || '').localeCompare(String(right.subject || right.courseTitle || ''), 'es', { sensitivity: 'base' }));
+
     return res.status(200).json({
-      student: { _id: student._id, name: student.name, grade: student.grade, course: student.course },
-      attendanceType: 'subject_class',
-      page,
-      totalPages,
-      totalRecords,
-      records: sessions.map(serializeAttendanceRecord),
+      student: studentPayload,
+      summary: buildAttendanceSummary(records),
+      records,
+      guidanceRoutine: {
+        summary: buildAttendanceSummary(guidanceRoutineRecords),
+        records: [],
+      },
+      classAttendance: {
+        summary: buildAttendanceSummary(subjectClassRecords),
+        records: subjectClassRecords,
+        subjects: subjectGroups,
+      },
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

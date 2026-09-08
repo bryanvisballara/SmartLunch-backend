@@ -58,6 +58,9 @@ function buildSectionLabelFromCourseToken(grade, courseToken) {
   }
 
   if (/^\d+$/.test(normalizedToken)) {
+    if (normalizedToken === normalizedGrade) {
+      return normalizedGrade;
+    }
     const index = Number(normalizedToken);
     if (index >= 1 && index <= 26) {
       return `${normalizedGrade}${String.fromCharCode(64 + index)}`;

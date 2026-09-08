@@ -14301,6 +14301,50 @@ button.campus-teacher__nav-item-toggle {
   height: 1.05rem;
 }
 
+.campus-teacher__home-games-launch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: 0.95rem 1.15rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 1.1rem;
+  background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-teacher__home-games-launch strong {
+  display: block;
+  color: #0f2744;
+  font-size: 0.98rem;
+}
+
+.campus-teacher__home-games-launch small {
+  display: block;
+  margin-top: 0.2rem;
+  color: #5b6f86;
+  font-size: 0.82rem;
+}
+
+.campus-teacher__home-games-launch em {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: #0f2744;
+  color: #fff;
+  font-style: normal;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.campus-teacher__home-games-launch:hover {
+  border-color: #b7c9dc;
+}
+
 .campus-teacher__home-kpi-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
