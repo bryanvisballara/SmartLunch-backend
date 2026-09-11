@@ -47,6 +47,7 @@ import { getParentNursingRecords } from '../../services/nursing.service';
 import { getParentPsychologyRecords } from '../../services/psychology.service';
 import { getSchoolDisplayName } from '../../lib/schools';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { resolveFeedVideoPosterUrl, resolvePlayableFeedVideoUrl } from '../../lib/feedMedia';
 import { formatEducationalGradeLabel, isRawInternalGradeToken } from '../../lib/educationalGradeLabels';
 import { readParentNotificationLaunchParams } from '../../lib/parentNotificationNavigation';
 import {
@@ -3452,8 +3453,10 @@ function getAnnouncementMediaItems(announcement) {
         ...item,
         id: item.id || `${kind}-${rawSrc}`,
         kind,
-        src: kind === 'image' ? resolveIosCompatibleImageUrl(rawSrc) : resolveApiAssetUrl(rawSrc),
-        thumbUrl: kind === 'image' ? resolveIosCompatibleImageUrl(item.thumbUrl || rawSrc) : resolveApiAssetUrl(item.thumbUrl || ''),
+        src: kind === 'image' ? resolveIosCompatibleImageUrl(rawSrc) : resolvePlayableFeedVideoUrl(rawSrc),
+        thumbUrl: kind === 'image'
+          ? resolveIosCompatibleImageUrl(item.thumbUrl || rawSrc)
+          : resolveFeedVideoPosterUrl(item.thumbUrl || rawSrc),
       };
     })
     .filter((item) => item && item.src);

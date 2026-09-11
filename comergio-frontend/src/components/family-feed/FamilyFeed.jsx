@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { resolveFeedVideoPosterUrl, resolvePlayableFeedVideoUrl } from '../../lib/feedMedia';
 import './FamilyFeed.css';
 
 function FeedHeartIcon() {
@@ -42,8 +43,10 @@ function getMediaItems(item = {}) {
       return {
         id: mediaItem.id || `${item._id || 'media'}-${index}`,
         kind: mediaItem.kind === 'video' ? 'video' : 'image',
-        src,
-        thumbUrl: resolveApiAssetUrl(mediaItem.thumbUrl || ''),
+        src: mediaItem.kind === 'video' ? resolvePlayableFeedVideoUrl(src) : src,
+        thumbUrl: mediaItem.kind === 'video'
+          ? resolveFeedVideoPosterUrl(mediaItem.thumbUrl || src)
+          : resolveApiAssetUrl(mediaItem.thumbUrl || ''),
         alt: mediaItem.alt || item.title || 'Publicación',
       };
     })

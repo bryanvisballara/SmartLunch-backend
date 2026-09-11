@@ -88,6 +88,12 @@ const {
   serializeCampusAttachment,
   unwrapCampusDocumentDeliveryUrl,
 } = require('../utils/cloudinaryDocumentDelivery');
+const {
+  createFeedMediaUploadSignature,
+  isOwnedCloudinaryMediaUrl,
+  buildCloudinaryVideoPosterUrl,
+  describeCampusMediaUploadError,
+} = require('../utils/cloudinaryFeedUpload');
 
 async function sanitizeCampusAttachmentsForDelivery(attachments = []) {
   const nextAttachments = [];
@@ -5827,7 +5833,50 @@ router.post('/teacher/family-feed/:communicationId/comments/:commentId/like', re
   }
 });
 
-router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES), async (req, res) => {
+function serializeTeacherFeedMediaItem({ kind, url, thumbUrl, title }) {
+  const mediaKind = String(kind || '').trim().toLowerCase() === 'video' ? 'video' : 'image';
+  return {
+    kind: mediaKind,
+    src: url,
+    thumbUrl: mediaKind === 'video'
+      ? (thumbUrl || buildCloudinaryVideoPosterUrl(url))
+      : (thumbUrl || url),
+    alt: normalizeText(title) || 'Publicación docente',
+  };
+}
+
+async function registerRemoteTeacherFeedMedia(req, res) {
+  const remoteMedia = Array.isArray(req.body?.remoteMedia) ? req.body.remoteMedia : [];
+  if (!remoteMedia.length) {
+    return res.status(400).json({ message: 'No se recibio ningun archivo.' });
+  }
+
+  const media = [];
+  for (const item of remoteMedia) {
+    const kind = normalizeText(item?.kind).toLowerCase() === 'video' ? 'video' : 'image';
+    const url = normalizeText(item?.url || item?.src);
+    const thumbUrl = normalizeText(item?.thumbUrl);
+
+    if (!isOwnedCloudinaryMediaUrl(url, kind)) {
+      return res.status(400).json({ message: 'El archivo subido no es valido. Intenta de nuevo.' });
+    }
+
+    media.push(serializeTeacherFeedMediaItem({
+      kind,
+      url,
+      thumbUrl,
+      title: item?.title || item?.alt || '',
+    }));
+  }
+
+  if (!media.length) {
+    return res.status(400).json({ message: 'Solo se pueden subir fotos o videos para publicaciones.' });
+  }
+
+  return res.status(201).json({ media });
+}
+
+async function processTeacherFeedMediaFiles(req, res) {
   try {
     const incomingFiles = Array.isArray(req.files) ? req.files : [];
 
@@ -5874,7 +5923,7 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
         uploadedFiles.push({
           kind: 'video',
           url: saved.url,
-          thumbUrl: '',
+          thumbUrl: buildCloudinaryVideoPosterUrl(saved.url),
           title: String(file.originalname || '').trim(),
         });
         continue;
@@ -5905,12 +5954,7 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
 
     const media = uploadedFiles
       .filter((file) => ['image', 'video'].includes(file.kind))
-      .map((file) => ({
-        kind: file.kind === 'video' ? 'video' : 'image',
-        src: file.url,
-        thumbUrl: file.kind === 'image' ? file.url : '',
-        alt: normalizeText(file.title) || 'Publicación docente',
-      }));
+      .map((file) => serializeTeacherFeedMediaItem(file));
 
     if (!media.length) {
       return res.status(400).json({ message: 'Solo se pueden subir fotos o videos para publicaciones.' });
@@ -5918,8 +5962,43 @@ router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, u
 
     return res.status(201).json({ media });
   } catch (error) {
-    return res.status(400).json({ message: error.message || 'No se pudieron subir los archivos.' });
+    return res.status(400).json({ message: describeCampusMediaUploadError(error) });
   }
+}
+
+router.post('/teacher/parent-feed-requests/media-signature', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const kind = normalizeText(req.body?.kind).toLowerCase() === 'image' ? 'image' : 'video';
+    return res.status(200).json(createFeedMediaUploadSignature({
+      kind,
+      fileName: normalizeText(req.body?.fileName),
+    }));
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      enabled: false,
+      message: describeCampusMediaUploadError(error),
+    });
+  }
+});
+
+router.post('/teacher/parent-feed-requests/media', requireCampusTeacherAccess, (req, res) => {
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    return registerRemoteTeacherFeedMedia(req, res).catch((error) => (
+      res.status(400).json({ message: describeCampusMediaUploadError(error) })
+    ));
+  }
+
+  return uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES)(req, res, (uploadError) => {
+    if (uploadError) {
+      const statusCode = uploadError?.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(statusCode).json({
+        message: describeCampusMediaUploadError(uploadError),
+      });
+    }
+
+    return processTeacherFeedMediaFiles(req, res);
+  });
 });
 
 router.post('/teacher/parent-feed-requests', requireCampusTeacherAccess, async (req, res) => {

@@ -62,6 +62,7 @@ import {
   updateCampusTeacherPost,
 } from '../services/campus.service';
 import { resolveApiAssetUrl } from '../../lib/api';
+import { formatFileSizeMb, MAX_TEACHER_FEED_MEDIA_BYTES, MAX_TEACHER_FEED_MEDIA_FILES, resolvePlayableFeedVideoUrl } from '../../lib/feedMedia';
 import { isEducationalLevelKey } from '../../lib/feeGradeMatching';
 import { resolveEducationalGradeLabel } from '../../lib/educationalGradeLabels';
 import ClickableOptionPicker from '../../components/audience/ClickableOptionPicker';
@@ -477,7 +478,7 @@ function normalizeTeacherPublicationHistoryMedia(item, index) {
   return {
     id: String(item?._id || item?.id || `${kind || 'media'}-${index + 1}`),
     kind: kind === 'video' ? 'video' : 'image',
-    src: resolveApiAssetUrl(rawUrl),
+    src: kind === 'video' ? resolvePlayableFeedVideoUrl(rawUrl) : resolveApiAssetUrl(rawUrl),
     thumbUrl: resolveApiAssetUrl(rawThumbUrl),
     alt: String(item?.title || `Adjunto ${index + 1}`).trim() || `Adjunto ${index + 1}`,
   };
@@ -3559,6 +3560,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [teacherSocialPublicationDraft, setTeacherSocialPublicationDraft] = useState(createTeacherSocialPublicationDraft);
   const [teacherSocialPublicationError, setTeacherSocialPublicationError] = useState('');
   const [teacherSocialMediaUploading, setTeacherSocialMediaUploading] = useState(false);
+  const [teacherSocialMediaUploadProgress, setTeacherSocialMediaUploadProgress] = useState(0);
   const [teacherSocialMediaDragActive, setTeacherSocialMediaDragActive] = useState(false);
   const [teacherDisciplineDraft, setTeacherDisciplineDraft] = useState(createTeacherDisciplineObservationDraft);
   const [disciplineStudentSearch, setDisciplineStudentSearch] = useState('');
@@ -7582,22 +7584,34 @@ function TeacherCampusHome({ forcePreview = false }) {
       throw new Error(message);
     }
 
-    if ((teacherSocialPublicationDraft.media || []).length + selectedFiles.length > 8) {
-      const message = 'Puedes adjuntar hasta 8 fotos o videos por publicación.';
+    if ((teacherSocialPublicationDraft.media || []).length + selectedFiles.length > MAX_TEACHER_FEED_MEDIA_FILES) {
+      const message = `Puedes adjuntar hasta ${MAX_TEACHER_FEED_MEDIA_FILES} fotos o videos por publicación.`;
+      setNotice({ type: 'error', text: message });
+      throw new Error(message);
+    }
+
+    const oversizedFile = selectedFiles.find((file) => Number(file.size || 0) > MAX_TEACHER_FEED_MEDIA_BYTES);
+    if (oversizedFile) {
+      const message = `El archivo "${oversizedFile.name}" pesa ${formatFileSizeMb(oversizedFile.size)} MB. El máximo permitido es ${Math.round(MAX_TEACHER_FEED_MEDIA_BYTES / (1024 * 1024))} MB.`;
       setNotice({ type: 'error', text: message });
       throw new Error(message);
     }
 
     setTeacherSocialMediaUploading(true);
+    setTeacherSocialMediaUploadProgress(0);
     try {
       const uploadedMedia = [];
       for (let startIndex = 0; startIndex < selectedFiles.length; startIndex += 6) {
-        const response = await uploadCampusTeacherParentFeedMedia(selectedFiles.slice(startIndex, startIndex + 6));
+        const response = await uploadCampusTeacherParentFeedMedia(selectedFiles.slice(startIndex, startIndex + 6), {
+          onProgress: (ratio) => {
+            setTeacherSocialMediaUploadProgress(Math.max(0, Math.min(100, Math.round(Number(ratio || 0) * 100))));
+          },
+        });
         uploadedMedia.push(...(response.media || []));
       }
       setTeacherSocialPublicationDraft((currentDraft) => ({
         ...currentDraft,
-        media: [...(currentDraft.media || []), ...uploadedMedia].slice(0, 8),
+        media: [...(currentDraft.media || []), ...uploadedMedia].slice(0, MAX_TEACHER_FEED_MEDIA_FILES),
       }));
       if (fromCamera) {
         setActiveTeacherSection('social_publications');
@@ -7620,6 +7634,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       throw new Error(message);
     } finally {
       setTeacherSocialMediaUploading(false);
+      setTeacherSocialMediaUploadProgress(0);
     }
   };
 
@@ -7637,7 +7652,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const onTeacherSocialMediaDrop = async (event) => {
     event.preventDefault();
     setTeacherSocialMediaDragActive(false);
-    if (teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= 8) {
+    if (teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= MAX_TEACHER_FEED_MEDIA_FILES) {
       return;
     }
 
@@ -12339,7 +12354,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                       <span>Fotos o videos</span>
                       <button
                         className={`campus-teacher__publications-dropzone${teacherSocialMediaDragActive ? ' is-dragging' : ''}${teacherSocialMediaUploading ? ' is-uploading' : ''}`}
-                        disabled={teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= 8}
+                        disabled={teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= MAX_TEACHER_FEED_MEDIA_FILES}
                         onClick={() => teacherSocialMediaInputRef.current?.click()}
                         onDragEnter={(event) => {
                           event.preventDefault();
@@ -12361,12 +12376,16 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <path d="M5 16.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
                           </svg>
                         </span>
-                        <strong>{teacherSocialMediaUploading ? 'Subiendo archivos...' : 'Arrastra archivos aquí o selecciona'}</strong>
-                        <span>JPG, PNG, MP4 hasta 100 MB c/u · Máximo 8 archivos</span>
+                        <strong>
+                          {teacherSocialMediaUploading
+                            ? `Subiendo archivo${teacherSocialMediaUploadProgress ? `… ${teacherSocialMediaUploadProgress}%` : '…'}`
+                            : 'Arrastra archivos aquí o selecciona'}
+                        </strong>
+                        <span>JPG, PNG, MP4 o MOV hasta 100 MB c/u · Máximo {MAX_TEACHER_FEED_MEDIA_FILES} archivos</span>
                       </button>
                       <input
                         accept="image/*,video/*"
-                        disabled={teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= 8}
+                        disabled={teacherSocialMediaUploading || (teacherSocialPublicationDraft.media || []).length >= MAX_TEACHER_FEED_MEDIA_FILES}
                         hidden
                         multiple
                         onChange={onTeacherSocialMediaSelected}
@@ -12380,7 +12399,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <article className="campus-teacher__publications-media-card" key={`${item.kind}-${item.src}-${index}`}>
                               <div className="campus-teacher__publications-media-preview">
                                 {item.kind === 'video'
-                                  ? <video controls src={item.src} />
+                                  ? <video controls playsInline src={resolvePlayableFeedVideoUrl(item.src)} />
                                   : <img alt={item.alt || `Adjunto ${index + 1}`} src={item.thumbUrl || item.src} />}
                               </div>
                               <button onClick={() => onRemoveTeacherSocialMedia(index)} type="button">Quitar</button>
@@ -12562,7 +12581,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   return (
                                     <div className="campus-teacher__publications-history-media-card" key={`${request._id}-${mediaItem.id}-${index}`}>
                                       {mediaItem.kind === 'video'
-                                        ? <video controls preload="metadata" src={mediaItem.src} />
+                                        ? <video controls playsInline preload="metadata" src={mediaItem.src} />
                                         : <img alt={mediaItem.alt} loading="lazy" src={mediaItem.thumbUrl || mediaItem.src} />}
                                     </div>
                                   );
@@ -13134,7 +13153,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <div className={`campus-teacher__family-feed-media${publication.media.length > 1 ? ' is-grid' : ''}`}>
                             {publication.media.map((mediaItem, mediaIndex) => (
                               mediaItem.kind === 'video' ? (
-                                <video controls key={mediaItem.id || `${publicationId}-video-${mediaIndex}`} preload="metadata" src={resolveApiAssetUrl(mediaItem.src)} />
+                                <video controls key={mediaItem.id || `${publicationId}-video-${mediaIndex}`} playsInline preload="metadata" src={resolvePlayableFeedVideoUrl(mediaItem.src)} />
                               ) : (
                                 <img
                                   alt={mediaItem.alt || publication.title || 'Publicación para familias'}

@@ -196,16 +196,23 @@ function resolveCloudinaryResourceType(kind) {
 function uploadBufferToCloudinary(buffer, { publicId, extension, kind }) {
   const resourceType = resolveCloudinaryResourceType(kind);
   const safePublicId = String(publicId || 'campus-file').replace(/\.[a-z0-9]{2,8}$/i, '');
+  const uploadOptions = {
+    resource_type: resourceType,
+    folder: CLOUDINARY_FOLDER,
+    public_id: safePublicId,
+    overwrite: true,
+  };
+
+  if (resourceType === 'video') {
+    // Keep feed videos playable on Android / iOS WebViews.
+    uploadOptions.format = 'mp4';
+  } else if (resourceType !== 'raw') {
+    uploadOptions.format = extension || undefined;
+  }
 
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      {
-        resource_type: resourceType,
-        folder: CLOUDINARY_FOLDER,
-        public_id: safePublicId,
-        overwrite: true,
-        ...(resourceType === 'raw' ? {} : { format: extension || undefined }),
-      },
+      uploadOptions,
       (error, result) => {
         if (error) {
           return reject(error);

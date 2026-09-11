@@ -44,6 +44,7 @@ import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getEnrollmentMatriculaPurgeRequestsMine } from '../services/enrollmentMatricula.service';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
+import { resolvePlayableFeedVideoUrl } from '../lib/feedMedia';
 import {
   approveAcademicSecretaryCommunicationRequest,
   archiveAcademicCalendarAssignment,
@@ -1491,7 +1492,7 @@ function AcademicSecretaryMediaPreview({ items = [] }) {
         <article className="academic-secretary__media-card academic-secretary__media-card--visual-only" key={`${item.kind || 'image'}-${item.src || 'media'}-${index}`}>
           <div className="academic-secretary__media-thumb">
             {item.kind === 'video'
-              ? <div className="academic-secretary__media-video">Video</div>
+              ? <video controls playsInline preload="metadata" src={resolvePlayableFeedVideoUrl(item.src)} />
               : <img alt={item.alt || `Imagen ${index + 1} del docente`} src={item.thumbUrl || item.src} />}
           </div>
         </article>

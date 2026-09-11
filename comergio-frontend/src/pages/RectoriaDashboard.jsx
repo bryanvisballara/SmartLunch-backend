@@ -41,6 +41,7 @@ import { filterStaffPortalNav } from '../lib/staffFeatures';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
+import { resolvePlayableFeedVideoUrl } from '../lib/feedMedia';
 import { getEnrollmentMatriculaPurgeRequestSummary } from '../services/enrollmentMatricula.service';
 import { getCommunityReports } from '../services/communityReport.service';
 import {
@@ -332,7 +333,7 @@ function RectoriaCommunicationMediaPreview({ items = [] }) {
             <strong>{item.kind === 'video' ? 'Video del docente' : `Adjunto ${index + 1}`}</strong>
             <span>{item.src || 'Sin URL'}</span>
           </div>
-          <a href={resolveApiAssetUrl(item.src) || '#'} rel="noreferrer" target="_blank">Abrir</a>
+          <a href={(item.kind === 'video' ? resolvePlayableFeedVideoUrl(item.src) : resolveApiAssetUrl(item.src)) || '#'} rel="noreferrer" target="_blank">Abrir</a>
         </article>
       ))}
     </div>
