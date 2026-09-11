@@ -74,14 +74,18 @@ function resolveAcademicChargePeriodMonthKey(charge = {}) {
   return getAcademicYearMonthKey(charge?.dueDate || charge?.periodMonthKey || '');
 }
 
-function isAcademicMonthlyChargePastItsMonth(chargeOrMonthKey = null, referenceDate = new Date()) {
+function resolveAcademicPeriodMonthKey(chargeOrMonthKey = null) {
   if (!chargeOrMonthKey) {
-    return false;
+    return '';
   }
 
-  const periodKey = typeof chargeOrMonthKey === 'string'
+  return typeof chargeOrMonthKey === 'string'
     ? getAcademicYearMonthKey(chargeOrMonthKey)
     : resolveAcademicChargePeriodMonthKey(chargeOrMonthKey);
+}
+
+function isAcademicMonthlyChargePastItsMonth(chargeOrMonthKey = null, referenceDate = new Date()) {
+  const periodKey = resolveAcademicPeriodMonthKey(chargeOrMonthKey);
   const referenceKey = getAcademicYearMonthKey(referenceDate, { live: true });
   if (!periodKey || !referenceKey) {
     return false;
@@ -90,10 +94,30 @@ function isAcademicMonthlyChargePastItsMonth(chargeOrMonthKey = null, referenceD
   return referenceKey > periodKey;
 }
 
+function isAcademicMonthlyChargeInTheFuture(chargeOrMonthKey = null, referenceDate = new Date()) {
+  const periodKey = resolveAcademicPeriodMonthKey(chargeOrMonthKey);
+  const referenceKey = getAcademicYearMonthKey(referenceDate, { live: true });
+  if (!periodKey || !referenceKey) {
+    return false;
+  }
+
+  return periodKey > referenceKey;
+}
+
+function getAdvancePaymentMonthlyBenefitRule(benefitRules = []) {
+  return (Array.isArray(benefitRules) ? benefitRules : [])
+    .filter((rule) => Number(rule?.startDay || 0) > 0 && Number(rule?.endDay || 0) > 0)
+    .sort((left, right) => Number(left.startDay || 0) - Number(right.startDay || 0))[0] || null;
+}
+
 function getApplicableMonthlyBenefitRule(benefitRules = [], referenceDate = new Date(), options = {}) {
   const chargeOrMonthKey = options.charge || options.periodMonthKey || null;
   if (isAcademicMonthlyChargePastItsMonth(chargeOrMonthKey, referenceDate)) {
     return null;
+  }
+
+  if (isAcademicMonthlyChargeInTheFuture(chargeOrMonthKey, referenceDate)) {
+    return getAdvancePaymentMonthlyBenefitRule(benefitRules);
   }
 
   const currentDay = getAcademicBenefitDayOfMonth(referenceDate);
@@ -210,6 +234,7 @@ module.exports = {
   getApplicableEnrollmentBenefitRule,
   getApplicableMonthlyBenefitRule,
   getFixedBenefitAmountForGrade,
+  isAcademicMonthlyChargeInTheFuture,
   isAcademicMonthlyChargePastItsMonth,
   resolveAcademicChargePeriodMonthKey,
   resolveAcademicEnrollmentBenefitDiscountAmount,

@@ -5021,7 +5021,13 @@ function buildAcademicStudentPaymentPlan({
       const pricing = existingCharge?.amountLocked
         ? resolveAcademicChargeAmounts(existingCharge, effectiveBillingProfile, pricingDate)
         : resolveAcademicChargeAmounts(
-          existingCharge || { category: 'monthly_tuition', amount: monthlyBaseAmount, originalAmount: monthlyBaseAmount },
+          existingCharge || {
+            category: 'monthly_tuition',
+            amount: monthlyBaseAmount,
+            originalAmount: monthlyBaseAmount,
+            monthKey,
+            dueDate,
+          },
           effectiveBillingProfile,
           pricingDate,
         );
