@@ -3691,8 +3691,8 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
       setError('Selecciona un cobro del plan de pagos para ajustar el valor.');
       return;
     }
-    if (!chargeAdjustmentModal.row?.existingChargeId) {
-      setError('Este periodo aún no tiene cobro creado. Registra un pago o agrega un cobro primero.');
+    if (!chargeAdjustmentModal.row?.existingChargeId && !selectedBillingAccount?.studentId) {
+      setError('Selecciona un alumno para ajustar el valor.');
       return;
     }
     if (chargeAdjustmentProposedAmount <= 0) {
@@ -3713,7 +3713,34 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
 
     await runAction(async () => {
       const row = chargeAdjustmentModal.row;
-      const response = await updateAcademicSecretaryChargeAmount(row.existingChargeId, {
+      const rowCategory = row.category === 'annual_tuition' ? 'annual_tuition' : 'monthly_tuition';
+      let chargeId = String(row.existingChargeId || '').trim();
+
+      if (!chargeId) {
+        const chargeResponse = await createAcademicSecretaryCharge({
+          concept: row.concept || (rowCategory === 'annual_tuition'
+            ? `Matrícula anual ${selectedBillingAccount.paymentPlan?.academicYear || ''}`.trim()
+            : `Pensión ${row.monthLabel || ''}`.trim()),
+          description: row.benefitDescription || row.benefitWindowLabel || '',
+          amount: chargeAdjustmentCurrentAmount || chargeAdjustmentProposedAmount,
+          originalAmount: Number(row.baseAmount || chargeAdjustmentCurrentAmount || chargeAdjustmentProposedAmount),
+          dueDate: row.dueDate,
+          audienceType: 'individual',
+          category: rowCategory,
+          monthKey: rowCategory === 'monthly_tuition' ? (row.monthKey || row.key || '') : '',
+          studentTargets: [selectedBillingAccount.studentId],
+          parentTargets: selectedBillingAccount.parentId ? [selectedBillingAccount.parentId] : [],
+          suppressNotice: true,
+          schoolName,
+        });
+        chargeId = String(chargeResponse?.data?.charges?.[0]?._id || chargeResponse?.data?.charges?.[0]?.id || '').trim();
+      }
+
+      if (!chargeId) {
+        throw new Error('No se pudo preparar este cobro para ajustar el valor.');
+      }
+
+      const response = await updateAcademicSecretaryChargeAmount(chargeId, {
         amount: chargeAdjustmentProposedAmount,
         paidAmount: chargeAdjustmentPaidAmount,
         notes: chargeAdjustmentDraft.notes,
@@ -4670,7 +4697,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                         ) : null}
                                         <button
                                           className="academic-secretary__billing-plan-action academic-secretary__billing-plan-action--secondary"
-                                          disabled={busy || !row.existingChargeId}
+                                          disabled={busy}
                                           onClick={() => openChargeAdjustmentModal(row)}
                                           type="button"
                                         >
@@ -4695,7 +4722,7 @@ function AcademicSecretaryDashboard({ portalMode = '', initialSection = 'overvie
                                           <button className="academic-secretary__billing-plan-action academic-secretary__billing-plan-action--secondary" disabled={busy} onClick={() => openBillingPaymentDetailModal(row)} type="button">Ver abonos</button>
                                         ) : null}
                                         <button className="academic-secretary__billing-plan-action" disabled={busy || (activeSection === 'enrollments' && billingEnrollmentSubview === 'paid') || Number(row.amount || row.chargeAmount || 0) <= 0} onClick={() => openBillingPaymentModal(row)} type="button">Registrar pago</button>
-                                        <button className="academic-secretary__billing-plan-action academic-secretary__billing-plan-action--secondary" disabled={busy || !row.existingChargeId} onClick={() => openChargeAdjustmentModal(row)} type="button">Editar valor</button>
+                                        <button className="academic-secretary__billing-plan-action academic-secretary__billing-plan-action--secondary" disabled={busy} onClick={() => openChargeAdjustmentModal(row)} type="button">Editar valor</button>
                                         {renderBillingPaymentDeletionAction(
                                           resolveAnnulableBillingPaymentFromRow(row),
                                           {
