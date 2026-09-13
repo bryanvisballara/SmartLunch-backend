@@ -38,10 +38,30 @@ export function normalizeOptions(response) {
     id: String(option?.id || option?._id || option?.value || ''),
     label: option?.name || option?.label || option?.title || '',
     subjectId: String(option?.subjectId || option?.subjectKey || ''),
+    subjectIds: Array.isArray(option?.subjectIds)
+      ? option.subjectIds.map((item) => String(item)).filter(Boolean)
+      : [],
   });
+  const seen = new Set();
+  const grades = [];
+  normalizeCollection(response, 'grades').map(mapOption).filter((item) => item.id && item.label).forEach((grade) => {
+    if (seen.has(grade.id)) {
+      const existing = grades.find((item) => item.id === grade.id);
+      grade.subjectIds.forEach((subjectId) => {
+        if (existing && !existing.subjectIds.includes(subjectId)) {
+          existing.subjectIds.push(subjectId);
+        }
+      });
+      return;
+    }
+    seen.add(grade.id);
+    grades.push(grade);
+  });
+  grades.sort((left, right) => String(left.label).localeCompare(right.label, 'es', { numeric: true, sensitivity: 'base' }));
   return {
     subjects: normalizeCollection(response, 'subjects').map(mapOption).filter((item) => item.id && item.label),
-    grades: normalizeCollection(response, 'grades').map(mapOption).filter((item) => item.id && item.label),
+    grades,
+    assignments: Array.isArray(response?.assignments) ? response.assignments : [],
   };
 }
 
@@ -73,6 +93,7 @@ export function teacherDraftFrom(question, options = {}) {
     correctAnswerIndex: correctIndexFrom(question),
     subjectId: options.subjects?.some((item) => String(item.id) === incomingSubjectId) ? incomingSubjectId : '',
     gradeId: options.grades?.some((item) => String(item.id) === incomingGradeId) ? incomingGradeId : '',
+    courseId: question?.courseId || '',
     status: question?.status === 'published' ? 'published' : 'draft',
   };
 }
@@ -119,6 +140,17 @@ export function validateTriviaDraft(draft, { teacher = false } = {}) {
     errors.push('Selecciona una asignatura y un grado asignados.');
   }
   return errors;
+}
+
+export function resolveTeacherCourseId(assignments = [], subjectId = '', gradeKey = '', fallbackCourseId = '') {
+  const matchesSubjectAndGrade = assignments.find((assignment) => (
+    assignment.subjectId === subjectId && assignment.gradeKey === gradeKey
+  ));
+  if (matchesSubjectAndGrade?.courseId) {
+    return matchesSubjectAndGrade.courseId;
+  }
+  const matchesGrade = assignments.find((assignment) => assignment.gradeKey === gradeKey);
+  return matchesGrade?.courseId || fallbackCourseId || '';
 }
 
 export function triviaPayloadFrom(draft, extra = {}) {

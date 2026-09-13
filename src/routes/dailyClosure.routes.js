@@ -233,16 +233,32 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
 router.get('/', roleMiddleware('admin', 'vendor'), async (req, res) => {
   try {
     const { schoolId, role, userId } = req.user;
-    const { storeId, date, vendorId } = req.query;
+    const { storeId, date, from, to, vendorId } = req.query;
 
     const filter = { schoolId };
+    const normalizeDateKey = (value) => {
+      const key = String(value || '').trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : '';
+    };
 
     if (storeId) {
       filter.storeId = storeId;
     }
 
-    if (date) {
-      filter.date = date;
+    const exactDate = normalizeDateKey(date);
+    const fromDate = normalizeDateKey(from);
+    const toDate = normalizeDateKey(to);
+
+    if (exactDate) {
+      filter.date = exactDate;
+    } else if (fromDate || toDate) {
+      filter.date = {};
+      if (fromDate) {
+        filter.date.$gte = fromDate;
+      }
+      if (toDate) {
+        filter.date.$lte = toDate;
+      }
     }
 
     if (role === 'vendor') {
@@ -257,7 +273,7 @@ router.get('/', roleMiddleware('admin', 'vendor'), async (req, res) => {
       .populate('storeId', 'name')
       .populate('vendorId', 'name username')
       .sort({ date: -1, createdAt: -1 })
-      .limit(200);
+      .limit(fromDate || toDate ? 1000 : 200);
 
     return res.status(200).json(closures);
   } catch (error) {

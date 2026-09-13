@@ -28,6 +28,7 @@ const invitationFields = {
   subjectKey: { type: String, trim: true, default: '' },
   gradeKey: { type: String, trim: true, default: '' },
   ageBand: { type: String, enum: ['', '6-8', '9-11', '12-14', '15-17'], default: '', index: true },
+  rouletteCategories: { type: [String], default: [] },
   invited: { type: [invitedPlayerSchema], required: true },
   status: {
     type: String,

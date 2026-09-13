@@ -1,8 +1,36 @@
+import { useEffect, useRef } from 'react';
+import { playTriviaCorrectSound, playTriviaWrongOrTimeoutSound } from './triviaHomeAudio';
+
 export default function TriviaResult({
   onContinue,
   result,
   waiting = false,
 }) {
+  const playedKeyRef = useRef('');
+
+  useEffect(() => {
+    if (!result) {
+      return undefined;
+    }
+    const key = [
+      result.correct ? 'ok' : 'no',
+      result.correctAnswerText || '',
+      result.streak || 0,
+      result.stationsAdvanced || 0,
+      result.matchEnded ? 'end' : 'go',
+    ].join('|');
+    if (playedKeyRef.current === key) {
+      return undefined;
+    }
+    playedKeyRef.current = key;
+    if (result.correct) {
+      playTriviaCorrectSound();
+    } else {
+      playTriviaWrongOrTimeoutSound();
+    }
+    return undefined;
+  }, [result]);
+
   if (!result) {
     return null;
   }
@@ -64,7 +92,7 @@ export default function TriviaResult({
         {!correct
           ? 'El turno pasa al siguiente. Cuando te toque, empiezas la racha de 0.'
           : advanced
-            ? 'Sigues tú. Empiezas 0/3 para la siguiente estación. Gira la ruleta otra vez.'
+            ? 'Sigues tú. Primero verás cómo avanza tu ficha y después giras otra vez.'
             : `Necesitas ${streakNeeded} seguidas. Llevas ${streak}. Gira la ruleta otra vez.`}
       </p>
 
@@ -73,9 +101,11 @@ export default function TriviaResult({
           ? 'Esperando a los demás…'
           : result.matchEnded
             ? 'Ver resultados'
-            : keepsTurn
-              ? 'Gira otra vez'
-              : 'Volver al mapa'}
+            : advanced
+              ? 'Ver el avance'
+              : keepsTurn
+                ? 'Gira otra vez'
+                : 'Volver al mapa'}
       </button>
     </section>
   );

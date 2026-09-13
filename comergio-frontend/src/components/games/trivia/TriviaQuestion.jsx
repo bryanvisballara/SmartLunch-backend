@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { playTriviaQuestionEntrance, stopTriviaQuestionEntrance } from './triviaHomeAudio';
 
 const LETTERS = ['A', 'B', 'C', 'D'];
 const CATEGORY_ICONS = {
@@ -29,6 +30,16 @@ export default function TriviaQuestion({
   const timePercent = Math.min(100, (seconds / totalSeconds) * 100);
 
   useEffect(() => {
+    if (!question?.id) {
+      return undefined;
+    }
+    playTriviaQuestionEntrance();
+    return () => {
+      stopTriviaQuestionEntrance();
+    };
+  }, [question?.id]);
+
+  useEffect(() => {
     if (disabled || submitting || seconds <= 0) {
       return undefined;
     }
@@ -41,6 +52,7 @@ export default function TriviaQuestion({
   useEffect(() => {
     if (seconds === 0 && !timeUpSent.current && !submitting) {
       timeUpSent.current = true;
+      stopTriviaQuestionEntrance();
       onTimeUp?.();
     }
   }, [onTimeUp, seconds, submitting]);
@@ -52,6 +64,7 @@ export default function TriviaQuestion({
   const submit = (event) => {
     event.preventDefault();
     if (selectedAnswerId && !disabled && !submitting) {
+      stopTriviaQuestionEntrance();
       onSubmitAnswer?.(selectedAnswerId);
     }
   };

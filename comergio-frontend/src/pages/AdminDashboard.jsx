@@ -956,7 +956,7 @@ function AdminDashboard() {
   const [showSalesStudentOptions, setShowSalesStudentOptions] = useState(false);
   const [salesPage, setSalesPage] = useState(1);
   const [topupHistory, setTopupHistory] = useState([]);
-  const [closureFilters, setClosureFilters] = useState({ storeId: '', date: '' });
+  const [closureFilters, setClosureFilters] = useState({ storeId: '', from: '', to: '' });
   const [homeStoreId, setHomeStoreId] = useState('');
   const [homeDateFrom, setHomeDateFrom] = useState(() => getBogotaDayKeyFromValue(new Date()) || currentDateIso());
   const [homeDateTo, setHomeDateTo] = useState(() => getBogotaDayKeyFromValue(new Date()) || currentDateIso());
@@ -1409,6 +1409,10 @@ function AdminDashboard() {
       setEditEntity('product');
     }
   }, [activeModule, editEntity]);
+
+  useEffect(() => {
+    setEditTablePage(1);
+  }, [editEntity, editSearchQuery, editProductStoreFilter, activeModule]);
 
   const editTableTotalPages = useMemo(() => {
     return Math.max(1, Math.ceil((filteredEditEntityItems.length || 0) / 20));
@@ -2723,7 +2727,7 @@ function AdminDashboard() {
       const secondaryLoads = await Promise.allSettled([
         loadApprovals(),
         loadOrders(),
-        loadClosures({ storeId: '', date: closureFilters.date }),
+        loadClosures({ storeId: '', from: '', to: '' }),
         loadHomepage(homeStoreId),
         loadMeriendasData(),
         loadMeriendasOperationsMonth(meriendasMonth),
@@ -3109,8 +3113,11 @@ function AdminDashboard() {
     if (filters.storeId) {
       params.storeId = filters.storeId;
     }
-    if (filters.date) {
-      params.date = filters.date;
+    if (filters.from) {
+      params.from = filters.from;
+    }
+    if (filters.to) {
+      params.to = filters.to;
     }
 
     const response = await getDailyClosures(params);
@@ -4325,7 +4332,116 @@ function AdminDashboard() {
 
   const onApplyClosureFilters = (event) => {
     event.preventDefault();
+    if (closureFilters.from && closureFilters.to && closureFilters.from > closureFilters.to) {
+      setError('La fecha inicial no puede ser posterior a la fecha final.');
+      return;
+    }
     runAction(() => loadClosures(closureFilters), 'Cierres filtrados.');
+  };
+
+  const getClosureExportPayload = () => {
+    const headers = [
+      'Fecha',
+      'Tienda',
+      'Vendedor',
+      'Ingresos efectivo',
+      'Ingresos datáfono',
+      'Ingresos transferencia (QR)',
+      'Ingresos sistema',
+      'Total ingresos',
+      'Total efectivo sistema',
+      'Total efectivo real',
+      'Base inicial',
+      'Base final',
+      'Total efectivo guardado',
+      'Déficit',
+    ];
+
+    const rows = closures.map((closure) => {
+      const transferenciaQr = Number(closure.systemTransfer || 0) + Number(closure.systemQr || 0);
+      return [
+        closure.date || '',
+        closure.storeId?.name || 'N/A',
+        closure.vendorId?.name || 'N/A',
+        formatCurrency(closure.systemCash),
+        formatCurrency(closure.systemDataphone),
+        formatCurrency(transferenciaQr),
+        formatCurrency(closure.systemWallet),
+        formatCurrency(closure.totalSales),
+        formatCurrency(closure.cashAccordingSystem),
+        formatCurrency(closure.countedCash),
+        formatCurrency(closure.baseInitial),
+        formatCurrency(closure.baseFinal),
+        formatCurrency(closure.totalCashSaved),
+        formatCurrency(closure.cashDifference),
+      ];
+    });
+
+    return {
+      title: 'Cierre diario',
+      headers,
+      rows,
+      fileBaseName: 'cierre-diario',
+    };
+  };
+
+  const onExportClosuresExcel = () => {
+    const payload = getClosureExportPayload();
+    if (!payload.rows.length) {
+      setError('No hay cierres para exportar con los filtros actuales.');
+      return;
+    }
+
+    downloadExcelWorkbook(payload.title, payload.headers, payload.rows, payload.fileBaseName);
+  };
+
+  const onExportClosuresPdf = () => {
+    const payload = getClosureExportPayload();
+    if (!payload.rows.length) {
+      setError('No hay cierres para exportar con los filtros actuales.');
+      return;
+    }
+
+    const headHtml = `<tr>${payload.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`;
+    const rowsHtml = payload.rows
+      .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
+      .join('');
+
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Reporte de ${escapeHtml(payload.title)}</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 20px; }
+      h2 { margin: 0 0 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { border: 1px solid #ccc; padding: 6px; text-align: left; vertical-align: top; }
+      th { background: #f5f5f5; }
+    </style>
+  </head>
+  <body>
+    <h2>Reporte de ${escapeHtml(payload.title)}</h2>
+    <table>
+      <thead>
+        ${headHtml}
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </body>
+</html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setError('No se pudo abrir la ventana para generar PDF.');
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   const onApplyNotificationAuditFilters = (event) => {
@@ -8827,23 +8943,23 @@ function AdminDashboard() {
             </table>
 
             {filteredEditEntityItems.length === 0 ? <p>No hay registros para el tipo seleccionado.</p> : null}
+          </div>
 
-            <div className="row space-between">
-              <button className="btn" type="button" onClick={() => setEditTablePage((prev) => Math.max(1, prev - 1))} disabled={editTablePage <= 1}>
-                Anterior
-              </button>
-              <p>
-                Pagina {editTablePage} de {editTableTotalPages}
-              </p>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => setEditTablePage((prev) => Math.min(editTableTotalPages, prev + 1))}
-                disabled={editTablePage >= editTableTotalPages}
-              >
-                Siguiente
-              </button>
-            </div>
+          <div className="row space-between admin-db-pagination">
+            <button className="btn" type="button" onClick={() => setEditTablePage((prev) => Math.max(1, prev - 1))} disabled={editTablePage <= 1}>
+              Anterior
+            </button>
+            <p>
+              Pagina {editTablePage} de {editTableTotalPages}
+            </p>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => setEditTablePage((prev) => Math.min(editTableTotalPages, prev + 1))}
+              disabled={editTablePage >= editTableTotalPages}
+            >
+              Siguiente
+            </button>
           </div>
         </section>
       ) : null}
@@ -10401,10 +10517,20 @@ function AdminDashboard() {
               </select>
             </label>
             <label>
-              Fecha (opcional)
-              <input type="date" value={closureFilters.date} onChange={(event) => setClosureFilters((prev) => ({ ...prev, date: event.target.value }))} />
+              Desde
+              <input type="date" value={closureFilters.from} onChange={(event) => setClosureFilters((prev) => ({ ...prev, from: event.target.value }))} />
+            </label>
+            <label>
+              Hasta
+              <input type="date" value={closureFilters.to} onChange={(event) => setClosureFilters((prev) => ({ ...prev, to: event.target.value }))} />
             </label>
             <button className="btn btn-primary" type="submit">Ver cierres</button>
+            <button className="btn" onClick={onExportClosuresExcel} type="button">
+              Descargar Excel
+            </button>
+            <button className="btn" onClick={onExportClosuresPdf} type="button">
+              Descargar PDF
+            </button>
           </form>
 
           {closures.length === 0 ? <p>No hay cierres para los filtros seleccionados.</p> : null}

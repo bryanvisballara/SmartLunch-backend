@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import categoriesArt from '../../../assets/trivia/categories-icons.png';
+import { playTriviaCategorySelectedSound, playTriviaSpinSound } from './triviaHomeAudio';
 
 const SWIPE_DISTANCE = 28;
 const SWIPE_FLICK_DISTANCE = 16;
@@ -86,7 +87,9 @@ export default function TriviaSubjectWheel({
   const wheelRef = useRef(null);
   const gestureRef = useRef(null);
   const swipeTriggeredRef = useRef(false);
+  const wasRevealCompleteRef = useRef(false);
   const [dragAngle, setDragAngle] = useState(0);
+  const [localSpinning, setLocalSpinning] = useState(false);
   const items = normalizeSubjects(mode, subjects);
   const segmentSize = items.length ? 360 / items.length : 360;
   const gradient = items.length
@@ -100,8 +103,32 @@ export default function TriviaSubjectWheel({
     : -1;
   const selectedCenter = selectedIndex >= 0 ? selectedIndex * segmentSize + segmentSize / 2 : 0;
   const stopRotation = 1800 + ((360 - selectedCenter) % 360);
-  const wheelMotion = spinning || (selected && !revealComplete);
-  const canSwipe = !disabled && !spinning && !revealComplete;
+  const activeSpinning = spinning || localSpinning;
+  const waitingForCategory = activeSpinning && !selected;
+  const landingSpin = activeSpinning && Boolean(selected);
+  const canSwipe = !disabled && !activeSpinning && !revealComplete;
+
+  useEffect(() => {
+    if (!spinning) {
+      setLocalSpinning(false);
+    }
+  }, [spinning]);
+
+  useEffect(() => {
+    if (revealComplete && selectedSubjectId && !wasRevealCompleteRef.current) {
+      playTriviaCategorySelectedSound();
+    }
+    wasRevealCompleteRef.current = Boolean(revealComplete && selectedSubjectId);
+  }, [revealComplete, selectedSubjectId]);
+
+  const triggerSpin = () => {
+    if (disabled || activeSpinning || revealComplete) {
+      return;
+    }
+    setLocalSpinning(true);
+    playTriviaSpinSound();
+    onSpin?.();
+  };
 
   const endGesture = (event) => {
     const gesture = gestureRef.current;
@@ -116,14 +143,14 @@ export default function TriviaSubjectWheel({
     setDragAngle(0);
     if (swiped && canSwipe) {
       swipeTriggeredRef.current = true;
-      onSpin?.();
+      triggerSpin();
     }
   };
 
   return (
     <section className="trivia-screen trivia-wheel-screen">
       {onBack ? (
-        <button className="trivia-wheel__back" disabled={spinning} onClick={onBack} type="button">
+        <button className="trivia-wheel__back" disabled={activeSpinning} onClick={onBack} type="button">
           <span aria-hidden="true">←</span> Volver a juegos
         </button>
       ) : null}
@@ -144,7 +171,7 @@ export default function TriviaSubjectWheel({
       {items.length ? (
         <>
           <div
-            className={`trivia-wheel${items.length > 8 ? ' is-crowded' : ''}${wheelMotion ? ' is-spinning' : ''}${revealComplete ? ' is-landed' : ''}${dragAngle ? ' is-dragging' : ''}`}
+            className={`trivia-wheel${items.length > 8 ? ' is-crowded' : ''}${waitingForCategory ? ' is-spinning-wait' : ''}${landingSpin ? ' is-spinning' : ''}${revealComplete ? ' is-landed' : ''}${dragAngle ? ' is-dragging' : ''}`}
             onPointerCancel={endGesture}
             onPointerDown={(event) => {
               if (!canSwipe || event.button) {
@@ -211,17 +238,17 @@ export default function TriviaSubjectWheel({
             <button
               aria-label="Girar la ruleta"
               className="trivia-wheel__hub"
-              disabled={disabled || spinning}
+              disabled={disabled || activeSpinning}
               onClick={() => {
                 if (swipeTriggeredRef.current) {
                   swipeTriggeredRef.current = false;
                   return;
                 }
-                onSpin?.();
+                triggerSpin();
               }}
               type="button"
             >
-              <strong>{spinning ? '…' : 'GIRAR'}</strong>
+              <strong>{activeSpinning ? '…' : 'GIRAR'}</strong>
               <span aria-hidden="true">⟳</span>
             </button>
           </div>
@@ -242,7 +269,7 @@ export default function TriviaSubjectWheel({
             ) : (
               <>
                 <span className="trivia-wheel__tip-icon" aria-hidden="true">🎮</span>
-                <p>{spinning ? 'La ruleta está eligiendo…' : <>Presiona <strong>GIRAR</strong> o desliza la ruleta.</>}</p>
+                <p>{activeSpinning ? 'La ruleta está eligiendo…' : <>Presiona <strong>GIRAR</strong> o desliza la ruleta.</>}</p>
               </>
             )}
           </div>

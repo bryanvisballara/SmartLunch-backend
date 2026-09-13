@@ -72,6 +72,30 @@ const unavailable = _test.selectRouletteQuestion({
 });
 assert.strictEqual(unavailable, null, 'roulette does not select a category without questions');
 
+const recycled = _test.selectRouletteQuestion({
+  questions,
+  categories: ['Ciencia'],
+  usedQuestionIds: ['q-science-used', 'q-science-fresh'],
+  scope: 'global',
+  randomInt: deterministicFirst,
+});
+assert.ok(recycled, 'roulette recycles the category when every question was already used');
+assert.strictEqual(recycled.category, 'Ciencia', 'recycled spin stays in an available category');
+
+const challengePool = [
+  { _id: 'easy-art', category: 'Arte', difficulty: 'easy' },
+  { _id: 'medium-art', category: 'Arte', difficulty: 'medium' },
+  { _id: 'hard-art', category: 'Arte', difficulty: 'hard' },
+];
+const skipsEasy = _test.selectRouletteQuestion({
+  questions: challengePool,
+  categories: ['Arte'],
+  usedQuestionIds: [],
+  scope: 'global',
+  randomInt: deterministicFirst,
+});
+assert.notStrictEqual(String(skipsEasy.question._id), 'easy-art', 'global roulette skips obvious easy questions');
+
 const teamParticipants = _test.buildParticipants([
   { schoolId: 'school', studentId: 'one', userId: 'u1', displayName: 'One' },
   { schoolId: 'school', studentId: 'two', userId: 'u2', displayName: 'Two' },
@@ -121,6 +145,17 @@ assert.strictEqual(
   Object.hasOwn(serialized.question, 'correctAnswer'),
   false,
   'active question does not expose the correct answer'
+);
+
+assert.deepStrictEqual(
+  _test.filterSelectedCategories(['Historia', 'Ciencia', 'Arte'], ['Ciencia', 'Historia', 'Ciencia', 'Ingles']),
+  ['Ciencia', 'Historia'],
+  'institutional roulette keeps only the subjects the student picked'
+);
+assert.deepStrictEqual(
+  _test.filterSelectedCategories(['Historia', 'Ciencia'], []),
+  ['Historia', 'Ciencia'],
+  'an empty selection keeps every published subject as fallback'
 );
 
 console.log('Trivia roulette checks passed.');

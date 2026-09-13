@@ -2,6 +2,7 @@ const REQUIRED_METHODS = [
   'getStudentTriviaState',
   'saveTriviaProfile',
   'createTriviaMatch',
+  'listTriviaSubjects',
   'respondToTriviaInvite',
   'updateTriviaLobby',
   'startTriviaMatch',

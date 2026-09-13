@@ -675,6 +675,11 @@
   background: #04101f;
 }
 
+.arena-host--live.is-reveal,
+.arena-host--live.is-projected {
+  overflow: auto;
+}
+
 .arena-live__scene {
   pointer-events: none;
   position: absolute;
@@ -798,6 +803,82 @@
   background: #04101f;
 }
 
+.arena-intro {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.2rem;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(80, 150, 220, 0.28), transparent 42%),
+    linear-gradient(180deg, rgba(4, 16, 31, 0.88) 0%, rgba(4, 16, 31, 0.96) 100%);
+}
+
+.arena-intro__preview {
+  display: grid;
+  justify-items: center;
+  gap: 0.85rem;
+  width: min(52rem, 100%);
+  text-align: center;
+  color: #f8fbff;
+}
+
+.arena-intro__hero {
+  width: min(100%, 44rem);
+  height: auto;
+  border-radius: 1.1rem;
+  background: #fff;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
+
+.arena-intro__logo {
+  width: min(16rem, 70%);
+  height: auto;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
+}
+
+.arena-intro__preview p {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #f3c453;
+}
+
+.arena-intro__preview strong {
+  font-size: clamp(1.3rem, 3vw, 2rem);
+  letter-spacing: -0.03em;
+}
+
+.arena-intro__count {
+  font-size: clamp(7rem, 24vw, 13rem);
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: -0.06em;
+  color: #f3c453;
+  text-shadow:
+    0 0 28px rgba(243, 196, 83, 0.55),
+    0 12px 28px rgba(0, 0, 0, 0.35);
+  animation: arena-intro-pop 0.45s ease;
+}
+
+@keyframes arena-intro-pop {
+  0% {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 .arena-host--lobby:fullscreen,
 .arena-host--lobby:-webkit-full-screen,
 .arena-host--live:fullscreen,
@@ -816,9 +897,16 @@
   z-index: 80;
 }
 
-.arena-host--live:fullscreen .arena-answer-board__box strong,
-.arena-host--live:-webkit-full-screen .arena-answer-board__box strong {
-  font-size: clamp(2.4rem, 7vw, 4.6rem);
+.arena-host--live:fullscreen .arena-reveal,
+.arena-host--live:-webkit-full-screen .arena-reveal,
+.arena-host.is-projected .arena-reveal {
+  width: min(92vw, 64rem);
+}
+
+.arena-host--live:fullscreen .arena-answer-board__choice,
+.arena-host--live:-webkit-full-screen .arena-answer-board__choice,
+.arena-host.is-projected .arena-answer-board__choice {
+  font-size: clamp(1.35rem, 3.1vw, 2.2rem);
 }
 
 .arena-host--lobby:fullscreen .arena-lobby__pin,
@@ -1360,7 +1448,7 @@
   display: grid;
   gap: 1.35rem;
   justify-items: center;
-  width: min(100%, 40rem);
+  width: min(100%, 52rem);
   padding: 0.2rem 0 0.4rem;
 }
 
@@ -1390,38 +1478,30 @@
 }
 
 .arena-answer-board__box {
-  position: relative;
   display: grid;
-  gap: 0.45rem;
-  overflow: hidden;
-  min-height: 7.2rem;
-  padding: 1.6rem 1.4rem;
-  border: 3px solid #f3c453;
-  border-radius: 1.45rem;
-  background:
-    radial-gradient(circle at 50% 0%, rgba(255, 236, 160, 0.28), transparent 46%),
-    linear-gradient(180deg, #d4af37 0%, #9a7414 100%);
-  color: #1a1203;
-  box-shadow:
-    0 0 0 6px rgba(243, 196, 83, 0.16),
-    0 18px 40px rgba(0, 0, 0, 0.35);
+  gap: 0.7rem;
+  width: 100%;
   animation: arena-answer-pop 0.45s cubic-bezier(0.2, 1.2, 0.4, 1);
 }
 
-.arena-answer-board__burst {
-  pointer-events: none;
-  position: absolute;
-  inset: -20%;
-  background:
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.22), transparent 36%);
-}
-
-.arena-answer-board__box strong {
-  position: relative;
-  font-size: clamp(1.8rem, 5vw, 3rem);
-  line-height: 1.05;
-  letter-spacing: -0.04em;
-  text-transform: uppercase;
+.arena-answer-board__choice {
+  display: block;
+  width: 100%;
+  min-height: 4.8rem;
+  padding: 1.15rem 1.25rem;
+  border-radius: 1.15rem;
+  background: #1368ce;
+  color: #fff;
+  font-size: clamp(1.15rem, 2.5vw, 1.7rem);
+  font-weight: 800;
+  line-height: 1.28;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: pre-wrap;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
 }
 
 @keyframes arena-answer-pop {

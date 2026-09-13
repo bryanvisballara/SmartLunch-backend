@@ -1,3 +1,4 @@
+export { default as TriviaAdvanceContinue } from './TriviaAdvanceContinue';
 export { default as TriviaBoard } from './TriviaBoard';
 export { default as TriviaHome } from './TriviaHome';
 export { default as TriviaInviteLobby } from './TriviaInviteLobby';
@@ -6,5 +7,6 @@ export { default as TriviaOnboarding } from './TriviaOnboarding';
 export { default as TriviaQuestion } from './TriviaQuestion';
 export { default as TriviaResult } from './TriviaResult';
 export { default as TriviaStudentPanel } from './TriviaStudentPanel';
+export { default as TriviaSubjectPicker } from './TriviaSubjectPicker';
 export { default as TriviaSubjectWheel } from './TriviaSubjectWheel';
 export { createTriviaClient, TRIVIA_API_METHODS } from './triviaClient';

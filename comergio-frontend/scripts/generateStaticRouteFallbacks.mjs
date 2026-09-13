@@ -52,6 +52,7 @@ const ROUTE_FALLBACKS = [
   'campus/study',
   'parent',
   'student',
+  'student/juegos',
   'parent/finance',
   'parent/academic',
   'parent/cafeteria',

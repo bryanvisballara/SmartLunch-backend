@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import TriviaAdvanceContinue from './TriviaAdvanceContinue';
 import TriviaBoard from './TriviaBoard';
 import TriviaHome from './TriviaHome';
 import TriviaInviteLobby from './TriviaInviteLobby';
@@ -6,7 +7,9 @@ import TriviaMatchSummary from './TriviaMatchSummary';
 import TriviaOnboarding from './TriviaOnboarding';
 import TriviaQuestion from './TriviaQuestion';
 import TriviaResult from './TriviaResult';
+import TriviaSubjectPicker from './TriviaSubjectPicker';
 import TriviaSubjectWheel from './TriviaSubjectWheel';
+import { playTriviaHomeTheme, stopAllTriviaAudio, stopTriviaHomeTheme, stopTriviaPodiumSound, stopTriviaQuestionEntrance } from './triviaHomeAudio';
 import { createTriviaClient } from './triviaClient';
 import './trivia.css';
 
@@ -83,6 +86,9 @@ export default function TriviaStudentPanel({
   const [spinRevealComplete, setSpinRevealComplete] = useState(false);
   const [loading, setLoading] = useState(autoLoad && !Object.keys(initialState || {}).length);
   const [error, setError] = useState('');
+  const [boardAdvance, setBoardAdvance] = useState(null);
+  const [availableSubjects, setAvailableSubjects] = useState([]);
+  const [selectedSubjectKeys, setSelectedSubjectKeys] = useState([]);
   const initialLoadStarted = useRef(false);
 
   const applyResponse = useCallback((response) => {
@@ -140,6 +146,10 @@ export default function TriviaStudentPanel({
     };
   }, [autoLoad, initialState, refresh]);
 
+  useEffect(() => () => {
+    stopAllTriviaAudio();
+  }, []);
+
   const currentMatch = snapshot.currentMatch
     || snapshot.match
     || (snapshot.activeMatches || []).find((match) => match.id === matchId)
@@ -154,6 +164,29 @@ export default function TriviaStudentPanel({
       && !['onboarding', 'summary'].includes(screen)
     )
   );
+
+  useEffect(() => {
+    const keepHomeTheme = screen === 'home'
+      || screen === 'subjects'
+      || screen === 'lobby'
+      || screen === 'onboarding'
+      || screen === 'board';
+    if (keepHomeTheme) {
+      stopTriviaQuestionEntrance();
+      stopTriviaPodiumSound();
+      // Keep the same home theme across mode pick → subjects/lobby → board.
+      playTriviaHomeTheme();
+      return undefined;
+    }
+    stopTriviaHomeTheme();
+    if (screen !== 'question') {
+      stopTriviaQuestionEntrance();
+    }
+    if (screen !== 'summary') {
+      stopTriviaPodiumSound();
+    }
+    return undefined;
+  }, [screen]);
 
   useEffect(() => {
     if (!shouldPoll) {
@@ -209,7 +242,30 @@ export default function TriviaStudentPanel({
     setViewOverride('onboarding');
   };
 
+  const openSubjectPicker = async () => {
+    setError('');
+    setLoading(true);
+    setViewOverride('subjects');
+    playTriviaHomeTheme();
+    try {
+      const response = await client.listTriviaSubjects({ mode: 'institutional' });
+      const subjects = response.subjects || [];
+      setAvailableSubjects(subjects);
+      setSelectedSubjectKeys((current) => (
+        current.length ? current.filter((key) => subjects.some((subject) => subject.key === key)) : []
+      ));
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const createMatch = async (mode, extra = {}) => {
+    if (mode === 'institutional' && !(extra.rouletteCategories || []).length) {
+      await openSubjectPicker();
+      return;
+    }
     setGameMode('1v1');
     setCandidateIds([]);
     setSearch('');
@@ -320,6 +376,9 @@ export default function TriviaStudentPanel({
     }
     setError('');
     setViewOverride('wheel');
+    setSelectedSubjectId('');
+    setSpinRevealComplete(false);
+    setSpinning(true);
     if (alreadySpun(currentMatch)) {
       await playWheelReveal(currentMatch);
       return;
@@ -342,13 +401,14 @@ export default function TriviaStudentPanel({
           await playWheelReveal(refreshed.currentMatch || refreshed.match || currentMatch);
           return;
         } catch (refreshError) {
+          setSpinning(false);
           setError(errorMessage(refreshError));
           return;
         }
       }
+      setSpinning(false);
       setError(errorMessage(requestError));
     } finally {
-      setSpinning(false);
       setLoading(false);
     }
   };
@@ -369,7 +429,10 @@ export default function TriviaStudentPanel({
   };
 
   const goHome = () => {
+    stopTriviaQuestionEntrance();
+    stopTriviaPodiumSound();
     setMatchId('');
+    setBoardAdvance(null);
     setViewOverride('home');
     refresh({ id: '' });
   };
@@ -383,7 +446,26 @@ export default function TriviaStudentPanel({
 
   let content = null;
 
-  if (screen === 'onboarding') {
+  if (screen === 'subjects') {
+    content = (
+      <TriviaSubjectPicker
+        error={error}
+        loading={loading}
+        onBack={() => {
+          setViewOverride('home');
+          setError('');
+        }}
+        onContinue={(keys) => createMatch('institutional', { rouletteCategories: keys })}
+        onToggle={(key) => {
+          setSelectedSubjectKeys((current) => (
+            current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+          ));
+        }}
+        selectedKeys={selectedSubjectKeys}
+        subjects={availableSubjects}
+      />
+    );
+  } else if (screen === 'onboarding') {
     content = (
       <TriviaOnboarding
         ageRange={ageRange}
@@ -426,18 +508,38 @@ export default function TriviaStudentPanel({
         onChangeAgeRange={currentMatch?.invitationSent ? undefined : () => openAgeEditor('lobby')}
         onSearchChange={setSearch}
         onReportCandidate={reportCandidate}
+        onChangeSubjects={currentMatch?.invitationSent || currentMatch?.mode !== 'institutional'
+          ? undefined
+          : openSubjectPicker}
         onStart={startMatch}
         onToggleCandidate={toggleCandidate}
         search={search}
         selectedCandidateIds={candidateIds}
+        selectedSubjects={
+          availableSubjects.filter((subject) => selectedSubjectKeys.includes(subject.key)).length
+            ? availableSubjects.filter((subject) => selectedSubjectKeys.includes(subject.key))
+            : currentMatch?.subjects
+        }
       />
     );
   } else if (screen === 'board') {
     content = (
       <TriviaBoard
+        advanceFrom={boardAdvance?.from}
+        advanceTo={boardAdvance?.to}
         match={currentMatch}
+        onAdvanceComplete={() => {
+          const nextView = boardAdvance?.next || 'wheel';
+          if (nextView === 'summary') {
+            setBoardAdvance(null);
+            setViewOverride('summary');
+            return;
+          }
+          setViewOverride('advance');
+        }}
         onContinue={() => {
           setError('');
+          setBoardAdvance(null);
           setViewOverride('wheel');
           if (alreadySpun(currentMatch)) {
             playWheelReveal(currentMatch);
@@ -448,6 +550,19 @@ export default function TriviaStudentPanel({
         }}
         onExit={goHome}
         waiting={!currentMatch?.isYourTurn}
+      />
+    );
+  } else if (screen === 'advance') {
+    content = (
+      <TriviaAdvanceContinue
+        from={boardAdvance?.from ?? Math.max(0, Number(currentMatch?.you?.station || 1) - 1)}
+        onContinue={() => {
+          setBoardAdvance(null);
+          setSelectedSubjectId('');
+          setSpinRevealComplete(false);
+          setViewOverride('wheel');
+        }}
+        to={boardAdvance?.to ?? Number(currentMatch?.you?.station || 0)}
       />
     );
   } else if (screen === 'wheel') {
@@ -474,6 +589,8 @@ export default function TriviaStudentPanel({
         error={error}
         key={question?.id}
         onBack={() => {
+          stopTriviaQuestionEntrance();
+          stopTriviaPodiumSound();
           setMatchId('');
           setViewOverride('home');
           refresh({ id: '' });
@@ -491,6 +608,18 @@ export default function TriviaStudentPanel({
     content = (
       <TriviaResult
         onContinue={() => {
+          const advanced = Number(result?.stationsAdvanced || 0) > 0;
+          const from = Math.max(0, Number(result?.positionBefore ?? ((currentMatch?.you?.station || 1) - 1)));
+          const to = Math.max(from, Number(result?.positionAfter ?? (currentMatch?.you?.station || from)));
+          if (advanced) {
+            setBoardAdvance({
+              from,
+              to,
+              next: result?.matchEnded || currentMatch?.phase === 'completed' ? 'summary' : 'wheel',
+            });
+            setViewOverride('board');
+            return;
+          }
           if (result?.matchEnded || currentMatch?.phase === 'completed') {
             setViewOverride('summary');
             return;
@@ -512,11 +641,16 @@ export default function TriviaStudentPanel({
     content = (
       <TriviaMatchSummary
         onBackHome={() => {
+          stopTriviaQuestionEntrance();
+          stopTriviaPodiumSound();
           setMatchId('');
           setViewOverride('home');
           refresh({ id: '' });
         }}
-        onRematch={() => createMatch(summary?.mode || currentMatch?.mode || 'global', { rematchOf: currentMatchId })}
+        onRematch={() => createMatch(summary?.mode || currentMatch?.mode || 'global', {
+          rematchOf: currentMatchId,
+          rouletteCategories: (currentMatch?.subjects || []).map((subject) => subject.id || subject.name).filter(Boolean),
+        })}
         summary={summary}
       />
     );

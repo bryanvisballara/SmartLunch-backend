@@ -752,7 +752,7 @@ function HumanResourcesPortal() {
     } catch (error) {
       setMessage(error?.response?.data?.message || 'No se pudo cambiar de área.');
     } finally {
-      setBackgroundLoading(false);
+        setBackgroundLoading(false);
     }
   };
 
@@ -1120,14 +1120,14 @@ function HumanResourcesPortal() {
           {request.requestType === 'purchase' ? 'Registrar recepción de compra' : 'Registrar entrega'}
         </button>
       )}
-    </div>
+            </div>
   );
 
   const renderRequestFormFields = () => (
-    <form className="hr-portal__form" onSubmit={onCreateRequest}>
+          <form className="hr-portal__form" onSubmit={onCreateRequest}>
       {!isTeacher ? (
         <>
-          <label>
+              <label>
             Tipo de solicitud
             <select
               value={requestForm.requestType}
@@ -1141,22 +1141,22 @@ function HumanResourcesPortal() {
               {requestTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
-          </label>
-          <label>
+                </select>
+              </label>
+            <label>
             Categoría de necesidad
             <select value={requestForm.needCategory} onChange={(event) => setRequestForm((current) => ({ ...current, needCategory: event.target.value }))}>
               {categoryOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
-          </label>
-          <label>
-            Prioridad
-            <select value={requestForm.priority} onChange={(event) => setRequestForm((current) => ({ ...current, priority: event.target.value }))}>
-              {priorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
+            </label>
+            <label>
+              Prioridad
+              <select value={requestForm.priority} onChange={(event) => setRequestForm((current) => ({ ...current, priority: event.target.value }))}>
+                {priorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
           <label>
             Destino / zona
             <input
@@ -1198,7 +1198,7 @@ function HumanResourcesPortal() {
         </>
       )}
 
-      <label className="hr-portal__field-wide">
+            <label className="hr-portal__field-wide">
         Motivo / justificación
         <textarea
           value={requestForm.purpose}
@@ -1207,7 +1207,7 @@ function HumanResourcesPortal() {
             ? 'Actividad, clase, proyecto o motivo'
             : 'Ej: reponer jabón y bolsas para limpieza, cementar filtración del patio, comprar tornillos para mantenimiento...'}
         />
-      </label>
+            </label>
 
       <div className="hr-portal__details">
         <p className="hr-portal__details-title">Productos o materiales</p>
@@ -1252,9 +1252,9 @@ function HumanResourcesPortal() {
             >
               {[selectedRequestItem?.unit, ...unitOptions].filter(Boolean).filter((value, index, list) => list.indexOf(value) === index).map((unit) => (
                 <option key={unit} value={unit}>{unit}</option>
-              ))}
-            </select>
-          </label>
+                  ))}
+                </select>
+              </label>
           {allowsCustomItems && !selectedRequestItem ? (
             <label className="hr-portal__picker-cost">
               <span>Costo unitario</span>
@@ -1266,13 +1266,13 @@ function HumanResourcesPortal() {
                 onChange={(event) => setRequestForm((current) => ({ ...current, unitCost: event.target.value }))}
                 placeholder="0"
               />
-            </label>
+              </label>
           ) : null}
           <button className="hr-portal__add-item" type="button" onClick={onAddRequestItem}>
             <IconPlus />
             Agregar
           </button>
-        </div>
+            </div>
         {allowsCustomItems ? (
           <label className="hr-portal__field-wide">
             Nota del producto (opcional)
@@ -1286,16 +1286,16 @@ function HumanResourcesPortal() {
 
         {requestItems.length > 0 ? (
           <>
-            <div className="hr-portal__chips">
-              {requestItems.map((entry) => (
+              <div className="hr-portal__chips">
+                {requestItems.map((entry) => (
                 <button key={entry.key} type="button" onClick={() => setRequestItems((current) => current.filter((item) => item.key !== entry.key))}>
-                  {entry.name} x{entry.quantity} {entry.unit}
+                    {entry.name} x{entry.quantity} {entry.unit}
                   {Number(entry.unitCost) > 0 ? ` · ${formatCop(entry.unitCost)}` : ''}
                   {entry.notes ? ` · ${entry.notes}` : ''}
                   {entry.itemId ? '' : ' · compra'}
-                </button>
-              ))}
-            </div>
+                  </button>
+                ))}
+              </div>
             <p className="hr-portal__request-total">
               Total estimado: <strong>{formatCop(requestEstimatedTotal)}</strong>
               {activeArea ? ` · Disponible área: ${formatCop(areaAvailable)}` : ''}
@@ -1315,7 +1315,7 @@ function HumanResourcesPortal() {
           {submitting ? 'Guardando...' : 'Enviar solicitud'}
         </button>
       </div>
-    </form>
+          </form>
   );
 
   const renderModal = () => {
@@ -1337,7 +1337,7 @@ function HumanResourcesPortal() {
             <button className="hr-portal__modal-close" type="button" aria-label="Cerrar" onClick={closeModal}>
               <IconClose />
             </button>
-          </div>
+            </div>
 
           {activeModal === 'create-item' ? (
             <form className="hr-portal__form" onSubmit={onCreateItem}>
@@ -1428,7 +1428,7 @@ function HumanResourcesPortal() {
                   <IconStockIn />
                   {submitting ? 'Guardando...' : 'Agregar inventario'}
                 </button>
-              </div>
+                  </div>
             </form>
           ) : null}
 
@@ -1461,14 +1461,14 @@ function HumanResourcesPortal() {
                     approvedPendingDeliveries.map((request) => (
                       <article key={request.id} className="hr-portal__history-card">
                         <div className="hr-portal__history-main">
-                          <div>
+                  <div>
                             <span className="hr-portal__kind-badge is-request">{statusLabels[request.status]}</span>
                             <h3>{requestTypeLabels[request.requestType] || 'Solicitud'}</h3>
                             <p>{getRequestItemsLabel(request)}</p>
                             <p className="hr-portal__request-context">
                               {[request.requestedForPerson, request.requestedForArea, request.requestedBy?.name].filter(Boolean).join(' · ')}
                             </p>
-                          </div>
+                  </div>
                           <div className="hr-portal__request-meta">
                             <span>{formatDate(request.createdAt)}</span>
                           </div>
@@ -1480,7 +1480,7 @@ function HumanResourcesPortal() {
                             </button>
                           </div>
                         ) : null}
-                      </article>
+                </article>
                     ))
                   )}
                 </div>
@@ -1568,8 +1568,8 @@ function HumanResourcesPortal() {
                   <p className="hr-portal__area-empty">
                     No se cargaron las áreas. Pulsa Actualizar. Si el backend estaba reiniciando tras el upgrade a M10, espera unos segundos e inténtalo de nuevo.
                   </p>
-                </div>
-              </section>
+            </div>
+          </section>
             ) : null}
 
             {isManager && purchaseAreas.length > 0 ? (
@@ -1624,10 +1624,10 @@ function HumanResourcesPortal() {
 
             {isManager && showPlannerDispatchPanel ? (
               <section className="hr-portal__panel hr-portal__planners">
-                <div className="hr-portal__panel-heading">
+        <div className="hr-portal__panel-heading">
                   <div className="hr-portal__panel-heading-main">
                     <span className="hr-portal__panel-icon is-green" aria-hidden="true"><IconClipboard /></span>
-                    <div>
+          <div>
                       <h2>Pendientes de despacho</h2>
                       <p>
                         Materiales consolidados desde Rectoría / coordinación para entregar desde inventario.
@@ -1635,9 +1635,9 @@ function HumanResourcesPortal() {
                           ? ` ${pendingPlannerConsolidates.length} pendiente(s).`
                           : ' No hay despachos pendientes.'}
                       </p>
-                    </div>
+          </div>
                   </div>
-                </div>
+        </div>
 
                 {plannerConsolidates.length === 0 ? (
                   <p className="hr-portal__empty">
@@ -1651,11 +1651,11 @@ function HumanResourcesPortal() {
                       return (
                         <article key={request.id} className={`hr-portal__planner-card${pending ? ' is-pending' : ''}`}>
                           <div className="hr-portal__planner-card-head">
-                            <div>
+                <div>
                               <div className="hr-portal__history-badges">
                                 <span className="hr-portal__kind-badge is-request">Consolidado</span>
-                                <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
-                              </div>
+                  <span className="hr-portal__badge">{statusLabels[request.status] || request.status}</span>
+                </div>
                               <h3>
                                 {request.plannerCycle?.title
                                   || request.requestedForArea
@@ -1669,7 +1669,7 @@ function HumanResourcesPortal() {
                                 ].filter(Boolean).join(' · ')}
                               </p>
                               {request.purpose ? <p className="hr-portal__request-purpose">{request.purpose}</p> : null}
-                            </div>
+                </div>
                             {canAcceptPurchasing && pending ? (
                               <button
                                 type="button"
@@ -1681,7 +1681,7 @@ function HumanResourcesPortal() {
                                 Confirmar despacho
                               </button>
                             ) : null}
-                          </div>
+              </div>
 
                           {materialRows.length === 0 ? (
                             <p className="hr-portal__empty">Este consolidado no tiene materiales.</p>
@@ -1816,7 +1816,7 @@ function HumanResourcesPortal() {
                     <div>
                       <h2>Inventario {activeArea ? `· ${activeArea.name}` : 'institucional'}</h2>
                       <p>Catálogo completo, stock y costo unitario de esta área.</p>
-                    </div>
+              </div>
                   </div>
                 </div>
 
@@ -1860,8 +1860,8 @@ function HumanResourcesPortal() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                )}
+                </div>
+              )}
               </section>
             ) : null}
 
@@ -1959,13 +1959,13 @@ function HumanResourcesPortal() {
                     </table>
                   </div>
                 )}
-              </div>
-            </section>
+        </div>
+      </section>
 
             {renderModal()}
-          </>
-        ) : null}
-      </div>
+      </>
+      ) : null}
+    </div>
     </StaffPortalShell>
   );
 }

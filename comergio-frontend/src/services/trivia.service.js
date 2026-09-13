@@ -25,11 +25,45 @@ function editorQuestion(question = {}) {
     })),
     correctAnswerIndex: Math.max(0, options.findIndex((option) => option.key === correctKey)),
     subjectId: question.subjectKey || question.subjectId || '',
-    gradeId: question.courseId || question.gradeId || '',
+    gradeId: question.gradeKey || question.gradeId || '',
     category: question.category || question.subjectLabel || question.subjectKey || '',
     ageBand: question.ageBand || question.gradeKey || '',
     status: question.status === 'active' ? 'published' : question.status === 'archived' ? 'draft' : question.status,
   };
+}
+
+function compareGradeLabels(left, right) {
+  return String(left || '').localeCompare(String(right || ''), 'es', { numeric: true, sensitivity: 'base' });
+}
+
+function uniqueTeacherGrades(assignments = []) {
+  const grades = [];
+  const seen = new Set();
+  assignments.forEach((assignment) => {
+    const gradeKey = String(assignment.gradeKey || assignment.gradeLabel || assignment.grade || assignment.studentGradeKey || '').trim();
+    if (!gradeKey) {
+      return;
+    }
+    const subjectId = String(assignment.subjectKey || assignment.subjectId || assignment.subject || '');
+    const existing = grades.find((grade) => grade.id === gradeKey);
+    if (existing) {
+      if (subjectId && !existing.subjectIds.includes(subjectId)) {
+        existing.subjectIds.push(subjectId);
+      }
+      return;
+    }
+    if (seen.has(gradeKey)) {
+      return;
+    }
+    seen.add(gradeKey);
+    grades.push({
+      id: gradeKey,
+      label: assignment.gradeLabel || assignment.grade || assignment.studentGradeKey || gradeKey,
+      subjectId: '',
+      subjectIds: subjectId ? [subjectId] : [],
+    });
+  });
+  return grades.sort((left, right) => compareGradeLabels(left.label, right.label));
 }
 
 function questionPayload(payload = {}, extra = {}) {
@@ -66,19 +100,26 @@ export const triviaTeacherApi = {
         subjects.push({ id: subjectId, label: assignment.subjectLabel || assignment.subject || assignment.title || subjectId });
       }
     });
+    const mappedAssignments = assignments.map((assignment) => ({
+      courseId: String(assignment.courseId || assignment.id || assignment._id || ''),
+      subjectId: String(assignment.subjectKey || assignment.subjectId || assignment.subject || ''),
+      gradeKey: String(assignment.gradeKey || assignment.gradeLabel || assignment.grade || assignment.studentGradeKey || '').trim(),
+      gradeLabel: assignment.gradeLabel || assignment.grade || assignment.studentGradeKey || '',
+      subjectKey: assignment.subjectKey || assignment.subjectId || assignment.subject || '',
+      subjectLabel: assignment.subjectLabel || assignment.subject || assignment.title || '',
+      studentGradeKey: assignment.studentGradeKey || assignment.gradeKey || '',
+      grade: assignment.gradeLabel || assignment.grade || '',
+    }));
     return {
       subjects,
-      grades: assignments.map((assignment) => ({
-        id: String(assignment.courseId || assignment.id || assignment._id),
-        label: assignment.gradeLabel || assignment.grade || assignment.studentGradeKey || 'Grado',
-        subjectId: String(assignment.subjectKey || assignment.subjectId || assignment.subject || ''),
-      })),
+      grades: uniqueTeacherGrades(mappedAssignments),
+      assignments: mappedAssignments,
     };
   },
   async listTeacherTriviaQuestions(params = {}) {
     const response = data(await api.get('/trivia/teacher/questions', {
       params: {
-        courseId: params.gradeId || undefined,
+        gradeKey: params.gradeId || undefined,
         subjectKey: params.subjectId || undefined,
         status: params.status || undefined,
       },
@@ -87,12 +128,12 @@ export const triviaTeacherApi = {
   },
   async createTeacherTriviaQuestion(payload) {
     return data(await api.post('/trivia/teacher/questions', questionPayload(payload, {
-      courseId: payload.gradeId,
+      courseId: payload.courseId || payload.gradeId,
     })));
   },
   async updateTeacherTriviaQuestion(questionId, payload) {
     return data(await api.put(`/trivia/teacher/questions/${questionId}`, questionPayload(payload, {
-      courseId: payload.gradeId,
+      courseId: payload.courseId || payload.gradeId,
     })));
   },
   async publishTeacherTriviaQuestion(questionId, question) {
@@ -100,7 +141,7 @@ export const triviaTeacherApi = {
       ...question,
       status: 'published',
     }, {
-      courseId: question.gradeId || question.courseId,
+      courseId: question.courseId,
     })));
   },
   async deleteTeacherTriviaQuestion(questionId) {
@@ -426,14 +467,25 @@ export function createStudentTriviaApi() {
         profile: currentProfile,
       };
     },
-    async createTriviaMatch({ mode, gameMode = '1v1' }) {
+    async listTriviaSubjects({ mode = 'institutional' } = {}) {
+      const response = data(await api.get('/trivia/student/subjects', {
+        params: { scope: mode },
+      }));
+      return {
+        subjects: (response.subjects || []).map((subject) => ({
+          key: subject.key || subject.id || subject.subjectKey,
+          label: subject.label || subject.name || subject.subjectLabel || subject.key,
+        })).filter((subject) => subject.key),
+      };
+    },
+    async createTriviaMatch({ mode, gameMode = '1v1', rouletteCategories = [] } = {}) {
       lastScope = mode;
       const response = data(await api.get('/trivia/student/eligible', {
         params: { scope: mode, limit: 100 },
       }));
       const candidates = (response.candidates || response.profiles || []).map(normalizeCandidate);
       candidateMap = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-      draft = { scope: mode, gameMode, invitedStudentIds: [] };
+      draft = { scope: mode, gameMode, invitedStudentIds: [], rouletteCategories };
       return {
         candidates,
         currentMatch: {
@@ -452,6 +504,8 @@ export function createStudentTriviaApi() {
             ready: true,
           }],
           invitedStudentIds: [],
+          rouletteCategories,
+          subjects: rouletteCategories.map((key) => ({ id: key, name: key })),
         },
       };
     },
@@ -474,6 +528,7 @@ export function createStudentTriviaApi() {
         scope: draft.scope,
         mode: draft.gameMode === '3' ? 'ffa3' : draft.gameMode === '4' ? 'ffa4' : draft.gameMode,
         invitees,
+        rouletteCategories: draft.rouletteCategories || [],
       }));
       const selectedCandidates = (draft.invitedStudentIds || [])
         .map((id) => candidateMap.get(id))
@@ -505,6 +560,8 @@ export function createStudentTriviaApi() {
             })),
           ],
           invitedStudentIds: [...(draft.invitedStudentIds || [])],
+          rouletteCategories: draft.rouletteCategories || [],
+          subjects: (draft.rouletteCategories || []).map((key) => ({ id: key, name: key })),
         },
       };
       draft = { ...draft, invitationSent: true, pendingState };

@@ -7,6 +7,7 @@ import {
   getOptionLabel,
   normalizeCollection,
   normalizeOptions,
+  resolveTeacherCourseId,
   teacherDraftFrom,
   triviaPayloadFrom,
   validateTriviaDraft,
@@ -87,7 +88,15 @@ export default function TriviaTeacherPanel({ api }) {
     drafts: questions.filter((question) => question.status !== 'published').length,
   }), [questions]);
   const draftGrades = useMemo(() => (
-    options.grades.filter((grade) => !grade.subjectId || grade.subjectId === draft?.subjectId)
+    options.grades.filter((grade) => {
+      if (grade.subjectId && grade.subjectId === draft?.subjectId) {
+        return true;
+      }
+      if (Array.isArray(grade.subjectIds) && grade.subjectIds.length) {
+        return grade.subjectIds.includes(draft?.subjectId);
+      }
+      return !grade.subjectId;
+    })
   ), [draft?.subjectId, options.grades]);
 
   const openNew = () => {
@@ -127,6 +136,7 @@ export default function TriviaTeacherPanel({ api }) {
       const payload = triviaPayloadFrom(draft, {
         subjectId: draft.subjectId,
         gradeId: draft.gradeId,
+        courseId: resolveTeacherCourseId(options.assignments, draft.subjectId, draft.gradeId, draft.courseId),
         status: draft.status,
       });
       if (draft.id) await method(draft.id, payload);
@@ -322,7 +332,11 @@ export default function TriviaTeacherPanel({ api }) {
                 <select
                   onChange={(event) => {
                     const subjectId = event.target.value;
-                    const firstGrade = options.grades.find((grade) => !grade.subjectId || grade.subjectId === subjectId);
+                    const firstGrade = options.grades.find((grade) => (
+                      grade.subjectIds?.includes(subjectId)
+                      || !grade.subjectId
+                      || grade.subjectId === subjectId
+                    ));
                     setDraft((current) => ({
                       ...current,
                       subjectId,

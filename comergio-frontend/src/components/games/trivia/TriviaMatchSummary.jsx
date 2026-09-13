@@ -1,3 +1,6 @@
+import { useEffect } from 'react';
+import { playTriviaPodiumSound, stopTriviaPodiumSound } from './triviaHomeAudio';
+
 function initials(name) {
   return String(name || '?')
     .trim()
@@ -13,6 +16,16 @@ export default function TriviaMatchSummary({
   onRematch,
   summary,
 }) {
+  useEffect(() => {
+    if (!summary) {
+      return undefined;
+    }
+    playTriviaPodiumSound();
+    return () => {
+      stopTriviaPodiumSound();
+    };
+  }, [summary]);
+
   if (!summary) {
     return null;
   }

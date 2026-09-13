@@ -1,4 +1,4 @@
-import { getArenaCorrectAnswers } from './arenaDraft';
+import { getArenaChoiceColor, getArenaCorrectAnswers } from './arenaDraft';
 import './arena.css';
 
 function playerInitials(name) {
@@ -38,14 +38,17 @@ export default function ArenaReveal({
         <p className="arena-answer-board__kicker">¡Respuesta correcta!</p>
         {question?.prompt ? <p className="arena-answer-board__prompt">{question.prompt}</p> : null}
         <div className="arena-answer-board__box">
-          <span className="arena-answer-board__burst" aria-hidden="true" />
           {answers.length ? answers.map((answer) => (
-            <strong key={answer.key}>
+            <strong
+              key={answer.key}
+              className="arena-answer-board__choice"
+              style={{ background: getArenaChoiceColor(question, answer.key) }}
+            >
               {answer.order ? `${answer.order}. ` : ''}
               {answer.text}
             </strong>
           )) : (
-            <strong>La respuesta se revelará en un momento.</strong>
+            <strong className="arena-answer-board__choice">La respuesta se revelará en un momento.</strong>
           )}
         </div>
       </div>

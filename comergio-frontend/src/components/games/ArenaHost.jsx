@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ARENA_CHOICE_COLORS, copyArenaPin, formatArenaPin, getArenaRemainingMs } from './arenaDraft';
+import { ARENA_GAME_START_MS, ARENA_TIME_UP_MS, getArenaHostAudio } from './arenaHostAudio';
 import { resolveApiAssetUrl } from '../../lib/api';
 import ArenaDiscuss from './ArenaDiscuss';
 import ArenaResults from './ArenaResults';
 import ArenaReveal from './ArenaReveal';
+import arenaHero from '../../assets/comergio-arena-hero.jpg';
 import arenaLogo from '../../assets/comergio-arena-logo.png';
 import './arena.css';
 
@@ -91,8 +93,18 @@ export default function ArenaHost({
   const [nowTick, setNowTick] = useState(0);
   const [copied, setCopied] = useState(false);
   const [projected, setProjected] = useState(false);
+  const [introPhase, setIntroPhase] = useState('');
+  const [countdownValue, setCountdownValue] = useState(3);
   const stageRef = useRef(null);
   const autoRevealKeyRef = useRef('');
+  const introTimersRef = useRef([]);
+  const onAdvanceRef = useRef(onAdvance);
+  const hostAudioRef = useRef(null);
+  if (!hostAudioRef.current) {
+    hostAudioRef.current = getArenaHostAudio();
+  }
+  const hostAudio = hostAudioRef.current;
+  onAdvanceRef.current = onAdvance;
   const question = session?.question || null;
   const isLast = Number(session?.currentIndex || 0) >= Number(session?.totalQuestions || 1) - 1;
   const remaining = useMemo(() => {
@@ -109,6 +121,44 @@ export default function ArenaHost({
     const timerId = window.setInterval(() => setNowTick((value) => value + 1), 250);
     return () => window.clearInterval(timerId);
   }, [session?.status, session?.questionStartedAt]);
+
+  useEffect(() => {
+    hostAudio.preload();
+    return () => {
+      introTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+      introTimersRef.current = [];
+      hostAudio.stopAll();
+    };
+  }, [hostAudio]);
+
+  useEffect(() => {
+    if (introPhase) {
+      return;
+    }
+    if (session?.status === 'lobby') {
+      hostAudio.playQuestionLoop();
+      return;
+    }
+    if (session?.status === 'question') {
+      hostAudio.playQuestionStart();
+      return;
+    }
+    if (session?.status === 'discuss' || session?.status === 'reveal' || session?.status === 'leaderboard') {
+      hostAudio.playSocializeLoop();
+      return;
+    }
+    if (session?.status === 'ended') {
+      hostAudio.playPodium();
+      return;
+    }
+    hostAudio.stopAll();
+  }, [hostAudio, introPhase, session?.currentIndex, session?.questionStartedAt, session?.status]);
+
+  useEffect(() => {
+    if (introPhase && session?.status && session.status !== 'lobby') {
+      setIntroPhase('');
+    }
+  }, [introPhase, session?.status]);
 
   useEffect(() => {
     const syncProjected = () => {
@@ -133,18 +183,22 @@ export default function ArenaHost({
   useEffect(() => {
     if (session?.status !== 'question') {
       autoRevealKeyRef.current = false;
-      return;
+      return undefined;
     }
     if (remaining > 0) {
       autoRevealKeyRef.current = true;
-      return;
+      return undefined;
     }
-    if (!autoRevealKeyRef.current || advancing || !onAdvance) {
-      return;
+    if (!autoRevealKeyRef.current || advancing || !onAdvanceRef.current) {
+      return undefined;
     }
     autoRevealKeyRef.current = false;
-    onAdvance('discuss');
-  }, [advancing, onAdvance, remaining, session?.status]);
+    hostAudio.playTimeUp();
+    const timeoutId = window.setTimeout(() => {
+      onAdvanceRef.current?.('discuss');
+    }, ARENA_TIME_UP_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [advancing, hostAudio, remaining, session?.status]);
 
   if (!session) {
     return null;
@@ -156,6 +210,44 @@ export default function ArenaHost({
   const copyPin = async () => {
     const ok = await copyArenaPin(session.pin);
     setCopied(ok);
+  };
+
+  const clearIntroTimers = () => {
+    introTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    introTimersRef.current = [];
+  };
+
+  const beginGameIntro = () => {
+    if (introPhase || advancing) {
+      return;
+    }
+    hostAudio.unlock();
+    hostAudio.playGameStart();
+    setIntroPhase('preview');
+    setCountdownValue(3);
+    clearIntroTimers();
+    introTimersRef.current.push(window.setTimeout(() => {
+      setIntroPhase('countdown');
+      setCountdownValue(3);
+    }, ARENA_GAME_START_MS));
+    introTimersRef.current.push(window.setTimeout(() => setCountdownValue(2), ARENA_GAME_START_MS + 1000));
+    introTimersRef.current.push(window.setTimeout(() => setCountdownValue(1), ARENA_GAME_START_MS + 2000));
+    introTimersRef.current.push(window.setTimeout(() => {
+      setIntroPhase('launching');
+      onAdvanceRef.current?.();
+    }, ARENA_GAME_START_MS + 3000));
+  };
+
+  const handleAdvance = (action) => {
+    hostAudio.unlock();
+    if (session.status === 'lobby') {
+      beginGameIntro();
+      return;
+    }
+    if (session.status === 'discuss') {
+      hostAudio.playRevealAnswer();
+    }
+    onAdvance?.(action);
   };
 
   const toggleProject = async () => {
@@ -206,9 +298,9 @@ export default function ArenaHost({
         </button>
       ) : null}
       {session.status !== 'ended' ? (
-        <button className="arena-btn-secondary" disabled={advancing} onClick={() => onAdvance()} type="button">
+        <button className="arena-btn-secondary" disabled={advancing || Boolean(introPhase)} onClick={() => handleAdvance()} type="button">
           <IconPlay />
-          {advancing ? '...' : advanceLabel(session.status, isLast)}
+          {advancing || introPhase ? 'Preparando...' : advanceLabel(session.status, isLast)}
         </button>
       ) : null}
       <button className="arena-btn-ghost" disabled={ending} onClick={onEnd} type="button">
@@ -228,8 +320,33 @@ export default function ArenaHost({
     const slots = Array.from({ length: LOBBY_SLOT_COUNT }, (_, index) => visiblePlayers[index] || null);
 
     return (
-      <section className={`arena-host arena-host--lobby${projected ? ' is-projected' : ''}`} ref={stageRef}>
+      <section
+        className={`arena-host arena-host--lobby${projected ? ' is-projected' : ''}${introPhase ? ' is-intro' : ''}`}
+        onPointerDown={() => {
+          hostAudio.unlock();
+          if (!introPhase) {
+            hostAudio.playQuestionLoop();
+          }
+        }}
+        ref={stageRef}
+      >
         {hostActions}
+        {introPhase ? (
+          <div className="arena-intro" aria-live="polite">
+            {introPhase === 'preview' ? (
+              <div className="arena-intro__preview">
+                <img alt="Comergio Arena" className="arena-intro__hero" src={arenaHero} />
+                <img alt="" className="arena-intro__logo" src={arenaLogo} />
+                <p>La competencia está por empezar</p>
+                <strong>{session.quizTitle || 'Comergio Arena'}</strong>
+              </div>
+            ) : (
+              <div className="arena-intro__count" key={introPhase === 'launching' ? 'go' : countdownValue}>
+                {introPhase === 'launching' ? 1 : countdownValue}
+              </div>
+            )}
+          </div>
+        ) : null}
         <div className="arena-lobby">
           <div className="arena-lobby__scene" aria-hidden="true">
             <span className="arena-lobby__crowd" />
@@ -290,7 +407,7 @@ export default function ArenaHost({
   }
 
   return (
-    <section className={`arena-host arena-host--live${session.status === 'discuss' ? ' is-discuss' : ''}${session.status === 'reveal' || session.status === 'leaderboard' ? ' is-reveal' : ''}${session.status === 'ended' ? ' is-ended' : ''}${projected ? ' is-projected' : ''}`} ref={stageRef}>
+    <section className={`arena-host arena-host--live${session.status === 'discuss' ? ' is-discuss' : ''}${session.status === 'reveal' || session.status === 'leaderboard' ? ' is-reveal' : ''}${session.status === 'ended' ? ' is-ended' : ''}${projected ? ' is-projected' : ''}`} onPointerDown={() => hostAudio.unlock()} ref={stageRef}>
       {hostActions}
       <div className="arena-live__scene" aria-hidden="true">
         <span className="arena-live__glow arena-live__glow--gold" />

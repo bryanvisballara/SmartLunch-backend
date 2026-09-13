@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
 import mapArt from '../../../assets/trivia/map.jpg';
+import { playTriviaHomeTheme } from './triviaHomeAudio';
 
 function formatTurnDeadline(value) {
   if (!value) {
@@ -8,7 +10,12 @@ function formatTurnDeadline(value) {
   if (Number.isNaN(date.getTime())) {
     return '';
   }
-  return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
+  const remainingMs = date.getTime() - Date.now();
+  if (remainingMs <= 0) {
+    return 'Venció';
+  }
+  const days = Math.max(1, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
+  return days === 1 ? 'Falta 1 día' : `Faltan ${days} días`;
 }
 
 const STATIONS = [
@@ -79,7 +86,10 @@ function decorateTokens(players) {
 }
 
 export default function TriviaBoard({
+  advanceFrom,
+  advanceTo,
   match,
+  onAdvanceComplete,
   onContinue,
   onExit,
   waiting = false,
@@ -90,34 +100,87 @@ export default function TriviaBoard({
   }));
   const currentPlayer = players.find((player) => player.isYou) || match?.you;
   const currentStation = Math.max(0, Math.min(10, Number(currentPlayer?.station || 0)));
+  const fromStation = Math.max(0, Math.min(10, Number(advanceFrom)));
+  const toStation = Math.max(0, Math.min(10, Number(advanceTo)));
+  const traveling = Number.isInteger(advanceFrom) && Number.isInteger(advanceTo) && toStation > fromStation;
+  const origin = STATIONS[fromStation] || STATIONS[0];
+  const destination = STATIONS[toStation] || STATIONS[10];
+  const traveler = traveling
+    ? tokens.find((player) => player.isYou) || tokens.find((player) => player.id === currentPlayer?.id)
+    : null;
+  const visibleTokens = traveler
+    ? tokens.filter((player) => player !== traveler)
+    : tokens;
+  const visualStation = traveling ? fromStation : currentStation;
   const streak = Math.max(0, Number(currentPlayer?.streak || 0));
   const streakNeeded = Math.max(1, Number(match?.advanceStreakNeeded || 3));
   const expiresLabel = formatTurnDeadline(match?.turnExpiresAt);
+  const [travelerMoving, setTravelerMoving] = useState(false);
+  const advanceCompleteRef = useRef(onAdvanceComplete);
+  advanceCompleteRef.current = onAdvanceComplete;
+
+  useEffect(() => {
+    if (!traveling) {
+      setTravelerMoving(false);
+      return undefined;
+    }
+    const prefersReduced = typeof window !== 'undefined'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const startId = window.setTimeout(() => setTravelerMoving(true), prefersReduced ? 0 : 180);
+    const doneId = window.setTimeout(() => advanceCompleteRef.current?.(), prefersReduced ? 200 : 1850);
+    return () => {
+      window.clearTimeout(startId);
+      window.clearTimeout(doneId);
+    };
+  }, [fromStation, toStation, traveling]);
+
+  useEffect(() => {
+    playTriviaHomeTheme();
+  }, []);
 
   return (
-    <section className="trivia-screen trivia-board-screen">
+    <section
+      className="trivia-screen trivia-board-screen"
+      onPointerDown={() => playTriviaHomeTheme()}
+    >
       <header className="trivia-page-head trivia-page-head--overlay">
         <button className="trivia-icon-btn" onClick={onExit} type="button" aria-label="Volver al inicio">←</button>
         <div>
           <span className="trivia-kicker">{match?.mode === 'institutional' ? 'Institucional' : 'Global'} · {match?.gameMode || '1v1'}</span>
           <h1>La ruta del conocimiento</h1>
         </div>
-        <span className="trivia-status-pill">{expiresLabel ? `Vence ${expiresLabel}` : `Ronda ${match?.round || 1}`}</span>
+        <span className="trivia-status-pill">{expiresLabel || `Ronda ${match?.round || 1}`}</span>
       </header>
 
       <div className="trivia-board" aria-label="Mapa de 10 estaciones">
         <img alt="" src={mapArt} />
         <div className="trivia-board__shade" aria-hidden="true" />
+        {traveler ? (
+          <b
+            aria-hidden="true"
+            className={`trivia-board__traveler${travelerMoving ? ' is-moving' : ''}${traveler.isYou ? ' is-you' : ''}`}
+            style={{
+              '--player-color': traveler.color,
+              '--from-x': `${origin.x}%`,
+              '--from-y': `${origin.y}%`,
+              '--to-x': `${destination.x}%`,
+              '--to-y': `${destination.y}%`,
+            }}
+          >
+            {traveler.token}
+          </b>
+        ) : null}
         {STATIONS.map((station) => {
-          const stationPlayers = tokens.filter(
+          const stationPlayers = visibleTokens.filter(
             (player) => Math.max(0, Math.min(10, Number(player.station || 0))) === station.id
           );
-          const passed = station.id < currentStation;
-          const current = station.id === currentStation;
+          const passed = station.id < visualStation;
+          const current = station.id === visualStation;
+          const arriving = traveling && station.id === toStation;
           return (
             <div
               aria-label={`Estación ${station.id}${current ? ', tu posición actual' : ''}`}
-              className={`trivia-station${passed ? ' is-passed' : ''}${current ? ' is-current' : ''}${station.id === 10 ? ' is-finish' : ''}`}
+              className={`trivia-station${passed ? ' is-passed' : ''}${current ? ' is-current' : ''}${arriving ? ' is-arriving' : ''}${station.id === 10 ? ' is-finish' : ''}`}
               key={station.id}
               style={{ '--station-x': `${station.x}%`, '--station-y': `${station.y}%` }}
             >
@@ -152,10 +215,10 @@ export default function TriviaBoard({
         </div>
       </div>
 
-      <div className="trivia-board__action">
+      <div className={`trivia-board__action${traveling ? ' is-advancing' : ''}`}>
         <div className="trivia-board__station">
-          <span>Estación actual</span>
-          <strong>{currentStation} <small>/ 10</small></strong>
+          <span>{traveling ? 'Avanzando' : 'Estación actual'}</span>
+          <strong>{traveling ? `${fromStation} → ${toStation}` : currentStation} {traveling ? null : <small>/ 10</small>}</strong>
           <ol aria-hidden="true">
             {Array.from({ length: 10 }, (_, index) => (
               <li className={index < currentStation ? 'is-done' : index === currentStation ? 'is-current' : ''} key={index} />
@@ -171,12 +234,13 @@ export default function TriviaBoard({
             </ol>
           </div>
         </div>
-        <button className="trivia-board__spin" disabled={waiting} onClick={onContinue} type="button">
+        <button className="trivia-board__spin" disabled={waiting || traveling} onClick={onContinue} type="button">
           <i className="trivia-board__roulette" aria-hidden="true" />
-          <strong>{waiting ? 'Esperando rivales…' : 'Gira la ruleta'}</strong>
+          <strong>{traveling ? 'Avanzando…' : waiting ? 'Esperando rivales…' : 'Gira la ruleta'}</strong>
           <b aria-hidden="true">→</b>
         </button>
-        {!waiting ? <em>{streak}/{streakNeeded} seguidas para avanzar</em> : null}
+        {!waiting && !traveling ? <em>{streak}/{streakNeeded} seguidas para avanzar</em> : null}
+        {traveling ? <em>¡Una estación más cerca del trofeo!</em> : null}
       </div>
     </section>
   );

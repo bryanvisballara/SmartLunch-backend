@@ -229,3 +229,9 @@ export function getArenaCorrectAnswers(question) {
 export const ARENA_TIMER_OPTIONS = [5, 10, 20, 30, 60, 90, 120, 180, 240];
 export const ARENA_POINT_OPTIONS = [0, 1000, 2000];
 export const ARENA_CHOICE_COLORS = ['#e21b3c', '#1368ce', '#d89e00', '#26890c'];
+
+export function getArenaChoiceColor(question, answerKey) {
+  const answers = Array.isArray(question?.answers) ? question.answers : [];
+  const index = answers.findIndex((item) => String(item.key) === String(answerKey));
+  return ARENA_CHOICE_COLORS[(index >= 0 ? index : 0) % ARENA_CHOICE_COLORS.length];
+}

@@ -182,6 +182,17 @@ router.get('/student/candidates', requireStudent, async (req, res) => {
   }
 });
 
+router.get('/student/subjects', requireStudent, async (req, res) => {
+  try {
+    return res.json(await triviaService.listStudentRouletteOptions({
+      ...studentContext(req),
+      scope: req.query?.scope,
+    }));
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
 router.get('/student/eligible', requireStudent, async (req, res) => {
   try {
     const candidates = await triviaService.listEligibleCandidates({
@@ -227,6 +238,7 @@ router.post('/student/invitations', requireStudent, async (req, res) => {
       invitees: req.body?.invitees,
       subjectKey: req.body?.subjectKey,
       gradeKey: req.body?.gradeKey,
+      rouletteCategories: req.body?.rouletteCategories,
     });
     return res.status(201).json({ invitation });
   } catch (error) {

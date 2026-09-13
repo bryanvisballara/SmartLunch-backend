@@ -8171,6 +8171,9 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   }, [usesRoutedSections, location.pathname, location.search, location.hash, navigate, normalizedRouteBase]);
 
   useEffect(() => {
+    if (parentOverviewLoading) {
+      return;
+    }
     if (isParentSectionEnabled(activeSection, portalAppFeatures)) {
       return;
     }
@@ -8184,7 +8187,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     }
 
     setLocalActiveSection(fallbackSection);
-  }, [activeSection, navigate, normalizedRouteBase, portalAppFeatures, usesRoutedSections]);
+  }, [activeSection, navigate, normalizedRouteBase, parentOverviewLoading, portalAppFeatures, usesRoutedSections]);
 
   useEffect(() => {
     if (!showUserMenu || typeof document === 'undefined') {

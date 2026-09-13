@@ -5,6 +5,7 @@ import ColibriFlappyGame from './ColibriFlappyGame';
 import ArenaPlay from './ArenaPlay';
 import GamesHub from './GamesHub';
 import TriviaStudentPanel from './trivia/TriviaStudentPanel';
+import { stopAllTriviaAudio } from './trivia/triviaHomeAudio';
 import { formatArenaPin } from './arenaDraft';
 import arenaCover from '../../assets/comergio-arena.jpg';
 import './arena.css';
@@ -30,6 +31,15 @@ export default function StudentGamesPanel({
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
   const triviaApi = useMemo(() => createStudentTriviaApi(), []);
+
+  const leaveTrivia = () => {
+    stopAllTriviaAudio();
+    setView('hub');
+  };
+
+  useEffect(() => () => {
+    stopAllTriviaAudio();
+  }, []);
 
   useEffect(() => {
     if (view !== 'arena' || !session?.sessionId || session.status === 'ended') {
@@ -126,7 +136,7 @@ export default function StudentGamesPanel({
   if (view === 'trivia') {
     return (
       <div className="arena-join arena-join--trivia">
-        <button className="games-back" onClick={() => setView('hub')} type="button">Volver a juegos</button>
+        <button className="games-back" onClick={leaveTrivia} type="button">Volver a juegos</button>
         <TriviaStudentPanel api={triviaApi} initialState={initialTriviaState} playerName={playerName} />
       </div>
     );

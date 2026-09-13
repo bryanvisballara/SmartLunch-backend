@@ -646,6 +646,15 @@ function resolveStartingTurnIndex(participants, startingIdentity) {
   return index >= 0 ? index : 0;
 }
 
+function filterSelectedCategories(available = [], selected = []) {
+  const allowed = new Set((available || []).map((item) => normalizeText(item)).filter(Boolean));
+  const requested = [...new Set((selected || []).map((item) => normalizeText(item)).filter(Boolean))];
+  if (!requested.length) {
+    return [...allowed];
+  }
+  return requested.filter((item) => allowed.has(item));
+}
+
 async function createMatchInScope({
   scope,
   schoolId,
@@ -656,16 +665,20 @@ async function createMatchInScope({
   gradeKey = '',
   ageBand = '',
   startingIdentity = null,
+  selectedCategories = [],
 }) {
   const { Match } = modelsForScope(scope);
   const participants = buildParticipants(identities, mode);
   const teamCount = mode === '2v2' ? 2 : identities.length;
-  const rouletteCategories = await resolveRouletteCategories({
+  const availableCategories = await resolveRouletteCategories({
     scope,
     schoolId,
     gradeKey,
     ageBand,
   });
+  const rouletteCategories = scope === 'institutional'
+    ? filterSelectedCategories(availableCategories, selectedCategories)
+    : availableCategories;
   if (!rouletteCategories.length) {
     throw new TriviaError('No hay categorías con preguntas publicadas para esta partida.', 409);
   }
@@ -1152,11 +1165,52 @@ async function safeNotify(participant, title, body, payload) {
   }
 }
 
+async function listStudentRouletteOptions({ scope: rawScope, ...context }) {
+  const scope = normalizeScope(rawScope);
+  const identity = await requireStudent(context);
+  if (scope === 'global') {
+    return {
+      subjects: GLOBAL_CATEGORIES.map((category) => ({ key: category, label: category })),
+    };
+  }
+  if (!identity.gradeKey) {
+    throw new TriviaError('Tu perfil de alumno no tiene un grado asignado.', 409);
+  }
+  const courses = await CampusCourse.find({
+    schoolId: identity.schoolId,
+    status: 'active',
+    courseType: 'subject',
+    $or: [
+      { studentGradeKey: identity.gradeKey },
+      { gradeLevel: identity.gradeKey },
+    ],
+  }).select('subject title').lean();
+  const available = await resolveRouletteCategories({
+    scope: 'institutional',
+    schoolId: identity.schoolId,
+    gradeKey: identity.gradeKey,
+  });
+  const labels = new Map();
+  courses.forEach((course) => {
+    const key = normalizeText(course.subject || course.title);
+    if (key && !labels.has(key)) {
+      labels.set(key, normalizeText(course.title || course.subject) || key);
+    }
+  });
+  return {
+    subjects: available.map((key) => ({
+      key,
+      label: labels.get(key) || key,
+    })),
+  };
+}
+
 async function createInvitation({
   scope: rawScope,
   mode: rawMode,
   invitees = [],
   subjectKey = '',
+  rouletteCategories: selectedCategories = [],
   ...context
 }) {
   const scope = normalizeScope(rawScope);
@@ -1273,6 +1327,25 @@ async function createInvitation({
     await requireGlobalProfilesCanInteract([profile, ...invitedProfiles]);
   }
 
+  let rouletteCategories = [];
+  if (scope === 'institutional') {
+    const availableCategories = await resolveRouletteCategories({
+      scope,
+      schoolId: creator.schoolId,
+      gradeKey: creator.gradeKey,
+    });
+    rouletteCategories = filterSelectedCategories(availableCategories, selectedCategories);
+    if (!availableCategories.length) {
+      throw new TriviaError('No hay categorías con preguntas publicadas para esta partida.', 409);
+    }
+    if (Array.isArray(selectedCategories) && selectedCategories.length && !rouletteCategories.length) {
+      throw new TriviaError('Elige al menos una materia con preguntas publicadas.', 400);
+    }
+    if (!rouletteCategories.length) {
+      rouletteCategories = availableCategories;
+    }
+  }
+
   const { Invitation } = modelsForScope(scope);
   let invitation;
   let invitationCreated = false;
@@ -1290,6 +1363,7 @@ async function createInvitation({
       subjectKey: normalizeText(subjectKey),
       gradeKey: scope === 'institutional' ? normalizeText(creator.gradeKey) : '',
       ageBand: scope === 'global' ? creator.ageBand : '',
+      rouletteCategories,
       invited: invitedIdentities.map((item) => ({
         ...item,
         status: 'pending',
@@ -1337,6 +1411,7 @@ function serializeInvitation(invitation, viewer = null) {
     subjectKey: invitation.subjectKey || '',
     gradeKey: invitation.gradeKey || '',
     ageBand: invitation.ageBand || '',
+    rouletteCategories: invitation.rouletteCategories || [],
     createdBy: {
       schoolId: invitation.schoolId,
       studentId: invitation.createdByStudentId,
@@ -1500,6 +1575,7 @@ async function respondInvitation({ scope: rawScope, invitationId, accept, ...con
         subjectKey: invitation.subjectKey,
         gradeKey: invitation.gradeKey,
         ageBand: invitation.ageBand,
+        selectedCategories: invitation.rouletteCategories || [],
         startingIdentity: identity,
       });
       invitation.status = 'accepted';
@@ -1699,6 +1775,11 @@ function questionAgeBand(question) {
   return AGE_BANDS.includes(value) ? value : '';
 }
 
+function questionDifficulty(question) {
+  const value = normalizeText(question?.difficulty);
+  return ['easy', 'medium', 'hard'].includes(value) ? value : '';
+}
+
 function selectRouletteQuestion({
   questions,
   categories,
@@ -1708,22 +1789,42 @@ function selectRouletteQuestion({
 }) {
   const used = new Set(usedQuestionIds.map(String));
   const allowed = new Set(categories);
-  const eligible = (questions || []).filter((question) => (
-    !used.has(String(question._id || question.id))
-    && allowed.has(questionCategory(question, scope))
+  const inCategory = (question) => allowed.has(questionCategory(question, scope));
+  const unused = (questions || []).filter((question) => (
+    !used.has(String(question._id || question.id)) && inCategory(question)
   ));
-  const eligibleCategories = categories.filter((category) => (
-    eligible.some((question) => questionCategory(question, scope) === category)
-  ));
-  if (!eligibleCategories.length) {
-    return null;
-  }
-  const category = eligibleCategories[randomInt(0, eligibleCategories.length)];
-  const categoryQuestions = eligible.filter((question) => questionCategory(question, scope) === category);
-  return {
-    category,
-    question: categoryQuestions[randomInt(0, categoryQuestions.length)],
+  const recycle = (questions || []).filter(inCategory);
+  const withoutEasy = (pool) => {
+    if (scope !== 'global') {
+      return pool;
+    }
+    const challenging = pool.filter((question) => questionDifficulty(question) !== 'easy');
+    return challenging.length ? challenging : pool;
   };
+  const pickFrom = (pool, preferredDifficulty) => {
+    const eligibleCategories = categories.filter((category) => (
+      pool.some((question) => questionCategory(question, scope) === category)
+    ));
+    if (!eligibleCategories.length) {
+      return null;
+    }
+    const category = eligibleCategories[randomInt(0, eligibleCategories.length)];
+    const categoryQuestions = pool.filter((question) => questionCategory(question, scope) === category);
+    const preferred = preferredDifficulty
+      ? categoryQuestions.filter((question) => questionDifficulty(question) === preferredDifficulty)
+      : [];
+    const finalPool = preferred.length ? preferred : categoryQuestions;
+    return {
+      category,
+      question: finalPool[randomInt(0, finalPool.length)],
+    };
+  };
+  const targetDifficulty = scope === 'global' && unused.some((question) => questionDifficulty(question))
+    ? (randomInt(0, 4) === 0 ? 'hard' : 'medium')
+    : '';
+  return pickFrom(withoutEasy(unused), targetDifficulty)
+    || pickFrom(withoutEasy(recycle), targetDifficulty)
+    || pickFrom(withoutEasy(recycle), '');
 }
 
 function calculatePosition(positionBefore, correct) {
@@ -1800,6 +1901,7 @@ async function chooseQuestion({ scope, schoolId, match }) {
   };
   if (scope === 'global') {
     query.moderationStatus = 'approved';
+    query.difficulty = { $in: ['medium', 'hard'] };
     query.$and = [
       { $or: [{ category: { $in: GLOBAL_CATEGORIES } }, { subjectKey: { $in: GLOBAL_CATEGORIES } }] },
       { $or: [{ ageBand: match.ageBand }, { gradeKey: match.ageBand }] },
@@ -1809,7 +1911,12 @@ async function chooseQuestion({ scope, schoolId, match }) {
     query.gradeKey = match.gradeKey;
     query.subjectKey = { $in: match.rouletteCategories || [] };
   }
-  const questions = await Question.find(query).select('+correctAnswer').limit(500).lean();
+  let questions = await Question.find(query).select('+correctAnswer').limit(2500).lean();
+  if (scope === 'global' && !questions.length) {
+    const fallbackQuery = { ...query };
+    delete fallbackQuery.difficulty;
+    questions = await Question.find(fallbackQuery).select('+correctAnswer').limit(2500).lean();
+  }
   const selection = selectRouletteQuestion({
     questions,
     categories: match.rouletteCategories || [],
@@ -2329,6 +2436,7 @@ module.exports = {
   getCandidateStatus,
   listEligibleCandidates,
   cancelCandidate,
+  listStudentRouletteOptions,
   createInvitation,
   listInvitations,
   respondInvitation,
@@ -2355,5 +2463,6 @@ module.exports = {
     resolveAgeBand,
     serializeMatch,
     selectRouletteQuestion,
+    filterSelectedCategories,
   },
 };

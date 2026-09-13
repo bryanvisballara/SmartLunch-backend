@@ -10,10 +10,13 @@ import {
   playArenaQuiz,
   updateArenaQuiz,
 } from '../../campus/services/campus.service';
+import { triviaTeacherApi } from '../../services/trivia.service';
 import { createArenaDraft, copyArenaPin, formatArenaPin, formatArenaSavedAt } from './arenaDraft';
+import { getArenaHostAudio } from './arenaHostAudio';
 import ArenaEditor from './ArenaEditor';
 import ArenaHost from './ArenaHost';
 import GamesHub from './GamesHub';
+import TriviaTeacherPanel from './trivia/TriviaTeacherPanel';
 import arenaColibri from '../../assets/arena-colibri.png';
 import arenaLogo from '../../assets/comergio-arena-logo.png';
 import './arena.css';
@@ -146,6 +149,7 @@ export default function ArenaTeacherPanel({ onOpenFlyLock }) {
 
   const playMutation = useMutation({
     mutationFn: async (incomingDraft) => {
+      getArenaHostAudio().playQuestionLoop();
       const source = incomingDraft || draft;
       let quizId = source.id;
       if (!quizId) {
@@ -272,6 +276,7 @@ export default function ArenaTeacherPanel({ onOpenFlyLock }) {
         shareBlocked={shareBlocked}
         sharePin={draft.activePin || ''}
         onOpenLobby={draft.activeSessionId ? () => {
+          getArenaHostAudio().playQuestionLoop();
           setSessionId(draft.activeSessionId);
           setView('host');
         } : undefined}
@@ -419,7 +424,21 @@ export default function ArenaTeacherPanel({ onOpenFlyLock }) {
     );
   }
 
+  if (view === 'trivia') {
+    return (
+      <section className="arena-library">
+        <button className="games-back" onClick={() => setView('hub')} type="button">Volver a juegos</button>
+        <TriviaTeacherPanel api={triviaTeacherApi} />
+      </section>
+    );
+  }
+
   return (
-    <GamesHub onOpenArena={() => setView('library')} onOpenFly={onOpenFlyLock} variant="teacher" />
+    <GamesHub
+      onOpenArena={() => setView('library')}
+      onOpenFly={onOpenFlyLock}
+      onOpenTrivia={() => setView('trivia')}
+      variant="teacher"
+    />
   );
 }

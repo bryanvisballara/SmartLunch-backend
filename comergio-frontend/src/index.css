@@ -3194,6 +3194,14 @@ body.login-boot-active main.container {
   min-width: 1380px;
 }
 
+.admin-db-pagination {
+  position: relative;
+  z-index: 2;
+  margin-top: 0.85rem;
+  padding-right: 8.75rem;
+  padding-bottom: 0.35rem;
+}
+
 .admin-products-table th,
 .admin-products-table td {
   vertical-align: top;

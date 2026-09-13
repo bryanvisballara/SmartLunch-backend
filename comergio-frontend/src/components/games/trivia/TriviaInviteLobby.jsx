@@ -34,8 +34,10 @@ export default function TriviaInviteLobby({
   onSearchChange,
   onStart,
   onToggleCandidate,
+  onChangeSubjects,
   search = '',
   selectedCandidateIds = [],
+  selectedSubjects = [],
 }) {
   const selectedMode = GAME_MODES.find((mode) => mode.id === gameMode) || GAME_MODES[0];
   const hostCount = match?.host ? 1 : 0;
@@ -57,7 +59,7 @@ export default function TriviaInviteLobby({
         </div>
         <div className="trivia-lobby__heading">
           <div>
-            <span className="trivia-kicker">{match?.mode === 'institutional' ? 'Modo institucional' : 'Modo global'}</span>
+            <span className="trivia-kicker">{match?.mode === 'institutional' ? 'Estudia de manera divertida' : 'Modo global'}</span>
             <h1>Arma tu partida</h1>
             <p>
               {invitationSent
@@ -86,6 +88,31 @@ export default function TriviaInviteLobby({
         </div>
         <span className="trivia-lobby__route" aria-hidden="true">· · · 🏁</span>
       </div>
+
+      {match?.mode === 'institutional' ? (
+        <div className="trivia-panel trivia-lobby__panel trivia-lobby__subjects">
+          <div className="trivia-lobby__panel-title">
+            <span aria-hidden="true">📘</span>
+            <div>
+              <h2>Materias de la ruleta</h2>
+              <p>Solo girarán las materias que elegiste para estudiar.</p>
+            </div>
+          </div>
+          <div className="trivia-subjects__pills">
+            {(selectedSubjects || []).map((subject) => (
+              <span key={subject.id || subject.key || subject.name}>
+                {subject.name || subject.label || subject.key}
+              </span>
+            ))}
+            {!selectedSubjects?.length ? <span>Todas las materias con preguntas</span> : null}
+          </div>
+          {onChangeSubjects ? (
+            <button className="trivia-lobby__age" onClick={onChangeSubjects} type="button">
+              Cambiar materias
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="trivia-panel trivia-lobby__panel trivia-lobby__format">
         <div className="trivia-lobby__panel-title">
