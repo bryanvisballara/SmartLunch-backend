@@ -4,6 +4,7 @@ const app = require('./app');
 const { connectDB } = require('./config/db');
 const { startAutoDebitWorker } = require('./workers/autoDebit.worker');
 const { startInformaAutoWorker } = require('./workers/informaAuto.worker');
+const { startTriviaTurnExpiryWorker } = require('./workers/triviaTurnExpiry.worker');
 const { ensureBootstrapData: ensureWwtecnoBootstrap } = require('./routes/wwtecno.routes');
 
 const PORT = process.env.PORT || 4000;
@@ -24,6 +25,7 @@ async function startServer() {
       console.log(`Server running on port ${PORT}`);
       startAutoDebitWorker();
       startInformaAutoWorker();
+      startTriviaTurnExpiryWorker();
     });
   } catch (error) {
     console.error('Failed to start server:', error.message);

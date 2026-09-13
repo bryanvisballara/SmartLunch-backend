@@ -31,7 +31,7 @@ const GAMES = [
     name: 'Comergio Trivia',
     slogan: 'Agrega preguntas para la trivia.',
     studentSlogan: 'Completa el mapa antes que tu contrincante.',
-    status: 'soon',
+    status: 'live',
   },
   {
     key: 'math-rush',
@@ -53,6 +53,7 @@ export default function GamesHub({
   flyLockReason = '',
   onOpenFly,
   onOpenArena,
+  onOpenTrivia,
 }) {
   const isTeacher = variant === 'teacher';
 
@@ -60,7 +61,13 @@ export default function GamesHub({
     const isSoon = game.status === 'soon';
     const isFlyLocked = game.key === 'fly' && flyLocked && !isTeacher;
     const disabled = isSoon || isFlyLocked;
-    const action = game.key === 'fly' ? onOpenFly : game.key === 'arena' ? onOpenArena : undefined;
+    const action = game.key === 'fly'
+      ? onOpenFly
+      : game.key === 'arena'
+        ? onOpenArena
+        : game.key === 'trivia'
+          ? onOpenTrivia
+          : undefined;
     const cta = isSoon
       ? 'Próximamente'
       : isFlyLocked
@@ -69,8 +76,12 @@ export default function GamesHub({
           ? 'Ir al bloqueo'
           : isTeacher && game.key === 'arena'
             ? 'Abrir Arena'
+            : isTeacher && game.key === 'trivia'
+              ? 'Gestionar Trivia'
             : game.key === 'arena'
               ? 'Entrar'
+              : game.key === 'trivia'
+                ? 'Competir'
               : 'Jugar';
 
     const body = (
@@ -119,12 +130,12 @@ export default function GamesHub({
         <header className="games-hub__hero">
           <p className="games-hub__kicker">Juegos Comergio</p>
           <h2>Elige cómo jugar con tu curso</h2>
-          <p>FLY se bloquea desde la clase. Arena es el quiz en vivo con código para tus alumnos.</p>
+          <p>FLY se bloquea desde la clase. Arena es el quiz en vivo y Trivia convierte tus materias en una competencia por turnos.</p>
         </header>
       ) : (
         <header className="games-hub__head">
           <h2>Juegos</h2>
-          <p>Elige un juego o únete a Comergio Arena con el código de tu docente.</p>
+          <p>Elige un juego, únete a Comergio Arena o reta a otros estudiantes en Comergio Trivia.</p>
           <span className="games-hub__chip">Todos</span>
         </header>
       )}

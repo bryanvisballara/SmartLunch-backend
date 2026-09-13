@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getStudentArenaSession, joinArenaSession } from '../../services/studentPortal.service';
+import { createStudentTriviaApi } from '../../services/trivia.service';
 import ColibriFlappyGame from './ColibriFlappyGame';
 import ArenaPlay from './ArenaPlay';
 import GamesHub from './GamesHub';
+import TriviaStudentPanel from './trivia/TriviaStudentPanel';
 import { formatArenaPin } from './arenaDraft';
 import arenaCover from '../../assets/comergio-arena.jpg';
 import './arena.css';
@@ -12,11 +14,22 @@ export default function StudentGamesPanel({
   flyLocked = false,
   flyLockReason = '',
 }) {
-  const [view, setView] = useState('hub');
+  const initialTriviaState = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    const matchId = params.get('matchId');
+    const scope = params.get('scope') || 'institutional';
+    return matchId
+      ? { currentMatch: { id: `${scope}:${matchId}`, mode: scope, scope } }
+      : null;
+  }, []);
+  const [view, setView] = useState(() => (
+    new URLSearchParams(window.location.search).get('game') === 'trivia' ? 'trivia' : 'hub'
+  ));
   const [pin, setPin] = useState('');
   const [session, setSession] = useState(null);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
+  const triviaApi = useMemo(() => createStudentTriviaApi(), []);
 
   useEffect(() => {
     if (view !== 'arena' || !session?.sessionId || session.status === 'ended') {
@@ -110,6 +123,15 @@ export default function StudentGamesPanel({
     );
   }
 
+  if (view === 'trivia') {
+    return (
+      <div className="arena-join arena-join--trivia">
+        <button className="games-back" onClick={() => setView('hub')} type="button">Volver a juegos</button>
+        <TriviaStudentPanel api={triviaApi} initialState={initialTriviaState} playerName={playerName} />
+      </div>
+    );
+  }
+
   return (
     <GamesHub
       flyLockReason={flyLockReason}
@@ -117,6 +139,10 @@ export default function StudentGamesPanel({
       onOpenArena={() => {
         setError('');
         setView('arena');
+      }}
+      onOpenTrivia={() => {
+        setError('');
+        setView('trivia');
       }}
       onOpenFly={() => {
         if (!flyLocked) {
