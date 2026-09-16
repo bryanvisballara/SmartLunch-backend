@@ -3810,6 +3810,35 @@ function normalizeAssignmentTitleForMatch(value) {
   );
 }
 
+function compactAssignmentMatchKey(value) {
+  return normalizeAssignmentMatchKey(value)
+    .replace(/#/g, ' ')
+    .replace(/ies\b/g, 'y')
+    .replace(/s\b/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
+function assignmentTitleMatchesOption(title, option) {
+  const normalizedTitle = normalizeAssignmentMatchKey(title);
+  const strippedTitle = normalizeAssignmentTitleForMatch(title);
+  const compactTitle = compactAssignmentMatchKey(title);
+  const subcomponentName = normalizeAssignmentMatchKey(option?.subcomponentName);
+  const strippedSubcomponent = normalizeAssignmentTitleForMatch(option?.subcomponentName);
+  const compactSubcomponent = compactAssignmentMatchKey(option?.subcomponentName);
+  const compactLabel = compactAssignmentMatchKey(option?.label);
+
+  if (!normalizedTitle && !compactTitle) {
+    return false;
+  }
+
+  return subcomponentName === normalizedTitle
+    || strippedSubcomponent === strippedTitle
+    || normalizeAssignmentMatchKey(option?.label) === normalizedTitle
+    || (compactTitle && compactSubcomponent && compactTitle === compactSubcomponent)
+    || (compactTitle && compactLabel && compactTitle === compactLabel);
+}
+
 function buildGradebookAssignmentOptions(periods) {
   return (Array.isArray(periods) ? periods : []).flatMap((period) => (
     (period.gradingComponents || []).flatMap((component) => (
@@ -3836,26 +3865,7 @@ function resolveGradebookAssignmentForPostTitle(title, periods) {
     return null;
   }
 
-  const normalizedTitle = normalizeAssignmentMatchKey(title);
-  const strippedTitle = normalizeAssignmentTitleForMatch(title);
-
-  const exactMatch = options.find((option) => {
-    const subcomponentName = normalizeAssignmentMatchKey(option.subcomponentName);
-    const strippedSubcomponent = normalizeAssignmentTitleForMatch(option.subcomponentName);
-    return subcomponentName === normalizedTitle
-      || strippedSubcomponent === strippedTitle
-      || normalizeAssignmentMatchKey(option.label) === normalizedTitle;
-  });
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const partialMatch = options.find((option) => {
-    const subcomponentName = normalizeAssignmentMatchKey(option.subcomponentName);
-    return subcomponentName && (normalizedTitle.includes(subcomponentName) || subcomponentName.includes(strippedTitle));
-  });
-
-  return partialMatch || null;
+  return options.find((option) => assignmentTitleMatchesOption(title, option)) || null;
 }
 
 function applyPostAudiencesToAcademicPeriods(periods, posts) {
@@ -4244,7 +4254,7 @@ function isPostPendingGrading(post, academicPeriods, students) {
 
   const assignment = resolveGradebookAssignmentForPostTitle(post?.title, academicPeriods);
   if (!assignment) {
-    return true;
+    return false;
   }
 
   const { gradedCount, totalCount } = countStudentsGradedForAssignment(roster, assignment);
@@ -4497,7 +4507,6 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
       {
         $match: {
           schoolId,
-          teacherUserId: userId,
           courseId: { $in: courses.map((course) => course._id) },
         },
       },
@@ -4512,7 +4521,6 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
   const allGradeEntries = courses.length > 0
     ? await CampusGradeEntry.find({
       schoolId,
-      teacherUserId: userId,
       courseId: { $in: courses.map((course) => course._id) },
     }).lean()
     : [];
@@ -5445,7 +5453,6 @@ router.post('/teacher/courses/:courseId/students/:studentId/grades', requireCamp
         {
           schoolId,
           courseId: course._id,
-          teacherUserId: userId,
           studentId,
           academicPeriodKey: gradeItem.academicPeriodKey,
           componentKey: gradeItem.storedComponentKey,

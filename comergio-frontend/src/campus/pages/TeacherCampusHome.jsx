@@ -2822,6 +2822,35 @@ function normalizeAssignmentTitleForMatch(value) {
   );
 }
 
+function compactAssignmentMatchKey(value) {
+  return normalizeCourseDisplayKey(value)
+    .replace(/#/g, ' ')
+    .replace(/ies\b/g, 'y')
+    .replace(/s\b/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
+function assignmentTitleMatchesOption(title, option) {
+  const normalizedTitle = normalizeCourseDisplayKey(title);
+  const strippedTitle = normalizeAssignmentTitleForMatch(title);
+  const compactTitle = compactAssignmentMatchKey(title);
+  const subcomponentName = normalizeCourseDisplayKey(option?.subcomponentName);
+  const strippedSubcomponent = normalizeAssignmentTitleForMatch(option?.subcomponentName);
+  const compactSubcomponent = compactAssignmentMatchKey(option?.subcomponentName);
+  const compactLabel = compactAssignmentMatchKey(option?.label);
+
+  if (!normalizedTitle && !compactTitle) {
+    return false;
+  }
+
+  return subcomponentName === normalizedTitle
+    || strippedSubcomponent === strippedTitle
+    || normalizeCourseDisplayKey(option?.label) === normalizedTitle
+    || (compactTitle && compactSubcomponent && compactTitle === compactSubcomponent)
+    || (compactTitle && compactLabel && compactTitle === compactLabel);
+}
+
 function campusAudienceAppliesToStudent(audience, studentId) {
   const targetType = String(audience?.targetType || 'course').trim();
   const ids = Array.isArray(audience?.targetStudentIds)
@@ -2867,26 +2896,8 @@ function resolveGradebookAssignmentKeyForPostTitle(title, assignmentOptions) {
     return '';
   }
 
-  const normalizedTitle = normalizeCourseDisplayKey(title);
-  const strippedTitle = normalizeAssignmentTitleForMatch(title);
-
-  const exactMatch = options.find((option) => {
-    const subcomponentName = normalizeCourseDisplayKey(option.subcomponentName);
-    const strippedSubcomponent = normalizeAssignmentTitleForMatch(option.subcomponentName);
-    return subcomponentName === normalizedTitle
-      || strippedSubcomponent === strippedTitle
-      || normalizeCourseDisplayKey(option.label) === normalizedTitle;
-  });
-  if (exactMatch) {
-    return exactMatch.key;
-  }
-
-  const partialMatch = options.find((option) => {
-    const subcomponentName = normalizeCourseDisplayKey(option.subcomponentName);
-    return subcomponentName && (normalizedTitle.includes(subcomponentName) || subcomponentName.includes(strippedTitle));
-  });
-
-  return partialMatch?.key || '';
+  const match = options.find((option) => assignmentTitleMatchesOption(title, option));
+  return match?.key || '';
 }
 
 function countStudentsGradedForAssignment(students, assignmentKey, assignmentOptions) {
@@ -2934,7 +2945,7 @@ function isPostPendingGrading(post, course, workspace) {
 
   const assignmentKey = resolveGradebookAssignmentKeyForPostTitle(post?.title || '', assignmentOptions);
   if (!assignmentKey) {
-    return true;
+    return false;
   }
 
   const { gradedCount, totalCount } = countStudentsGradedForAssignment(students, assignmentKey, assignmentOptions);
@@ -3109,18 +3120,25 @@ function slugifyComponentKey(value) {
     .slice(0, 40);
 }
 
-function buildStudentDrafts(detail) {
+function buildStudentDrafts(detail, studentsOverride = null) {
   const courseAcademicPeriods = getCourseAcademicPeriods(detail?.course);
+  const students = Array.isArray(studentsOverride) && studentsOverride.length > 0
+    ? studentsOverride
+    : (detail?.students || []);
 
   return Object.fromEntries(
-    (detail?.students || []).map((student) => [
+    students.map((student) => [
       student.studentId,
       Object.fromEntries(
         buildStudentPeriods(student, courseAcademicPeriods)
-          .flatMap((period) => period.scores)
+          .flatMap((period) => (period.scores || []).map((score) => ({
+            ...score,
+            academicPeriodKey: score.academicPeriodKey || period.key || 'period_1',
+          })))
           .flatMap((score) => {
+            const periodKey = score.academicPeriodKey || 'period_1';
             const componentDraftEntry = [
-              buildGradeDraftKey(score.academicPeriodKey || 'period_1', score.componentKey),
+              buildGradeDraftKey(periodKey, score.componentKey),
               {
                 score: score.score === null || score.score === undefined ? '' : String(score.score),
                 feedback: score.feedback || '',
@@ -3128,7 +3146,7 @@ function buildStudentDrafts(detail) {
             ];
 
             const subcomponentDraftEntries = (score.subcomponents || []).map((subcomponent) => [
-              buildGradeDraftKey(score.academicPeriodKey || 'period_1', score.componentKey, subcomponent.subcomponentKey),
+              buildGradeDraftKey(periodKey, score.componentKey, subcomponent.subcomponentKey || subcomponent.key),
               {
                 score: subcomponent.score === null || subcomponent.score === undefined ? '' : String(subcomponent.score),
                 feedback: subcomponent.feedback || '',
@@ -3140,6 +3158,48 @@ function buildStudentDrafts(detail) {
       ),
     ])
   );
+}
+
+function mergeStudentGradeDrafts(incoming, current) {
+  const incomingDrafts = incoming && typeof incoming === 'object' ? incoming : {};
+  const currentDrafts = current && typeof current === 'object' ? current : {};
+  const studentIds = new Set([...Object.keys(incomingDrafts), ...Object.keys(currentDrafts)]);
+  const nextDrafts = {};
+
+  studentIds.forEach((studentId) => {
+    const incomingCells = incomingDrafts[studentId] && typeof incomingDrafts[studentId] === 'object'
+      ? incomingDrafts[studentId]
+      : {};
+    const currentCells = currentDrafts[studentId] && typeof currentDrafts[studentId] === 'object'
+      ? currentDrafts[studentId]
+      : {};
+    const cellKeys = new Set([...Object.keys(incomingCells), ...Object.keys(currentCells)]);
+    nextDrafts[studentId] = {};
+
+    cellKeys.forEach((cellKey) => {
+      const incomingCell = incomingCells[cellKey] || { score: '', feedback: '' };
+      const currentCell = currentCells[cellKey] || { score: '', feedback: '' };
+      const incomingScore = String(incomingCell.score ?? '').trim();
+      const currentScore = String(currentCell.score ?? '').trim();
+      const incomingFeedback = String(incomingCell.feedback ?? '').trim();
+      const currentFeedback = String(currentCell.feedback ?? '').trim();
+
+      if (currentScore) {
+        nextDrafts[studentId][cellKey] = {
+          score: currentCell.score,
+          feedback: currentFeedback || incomingFeedback,
+        };
+        return;
+      }
+
+      nextDrafts[studentId][cellKey] = {
+        score: incomingScore ? incomingCell.score : incomingCell.score ?? '',
+        feedback: incomingFeedback,
+      };
+    });
+  });
+
+  return nextDrafts;
 }
 
 function buildPreviewAttachments(materialLinks, materialFiles) {
@@ -3597,6 +3657,11 @@ function TeacherCampusHome({ forcePreview = false }) {
   const classworkUploadInputRef = useRef(null);
   const classworkUploadAppendRef = useRef(true);
   const materialFilesRef = useRef([]);
+  const lastGradebookCourseIdRef = useRef('');
+  const gradebookAssignmentHydratedCourseRef = useRef('');
+  const skipGradebookPersistRef = useRef(false);
+  const teacherWorkspaceHydratedRef = useRef(false);
+  const skipWorkspacePersistRef = useRef(false);
   const isAttendanceLikeSection = activeTeacherSection === 'attendance' || activeTeacherSection === 'guidance_routine';
 
   const overviewShellQuery = useQuery({
@@ -3927,8 +3992,41 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   const saveGradesMutation = useMutation({
     mutationFn: ({ courseId, studentId, payload }) => saveCampusTeacherStudentGrades(courseId, studentId, payload),
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
+      const courseId = String(variables?.courseId || '');
+      if (courseId && data?.student) {
+        queryClient.setQueryData(['campus', 'teacher', 'course', teacherQueryScope, courseId], (current) => {
+          if (!current) {
+            return current;
+          }
+          const students = Array.isArray(current.students) ? current.students : [];
+          const updatedStudentId = String(data.student.studentId || variables?.studentId || '');
+          const hasStudent = students.some((student) => String(student.studentId) === updatedStudentId);
+          return {
+            ...current,
+            course: data.course || current.course,
+            students: hasStudent
+              ? students.map((student) => (String(student.studentId) === updatedStudentId ? { ...student, ...data.student } : student))
+              : [...students, data.student],
+          };
+        });
+        setStudentDrafts((current) => {
+          const incoming = buildStudentDrafts({ course: data.course, students: [data.student] }, [data.student]);
+          const studentId = String(data.student.studentId || variables?.studentId || '');
+          if (!studentId) {
+            return current;
+          }
+          return {
+            ...current,
+            [studentId]: {
+              ...(current?.[studentId] || {}),
+              ...(incoming[studentId] || {}),
+            },
+          };
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'], refetchType: 'all' });
     },
   });
 
@@ -4326,7 +4424,7 @@ function TeacherCampusHome({ forcePreview = false }) {
     isClassroomGroupAllScope,
     selectedCourse,
     selectedCourseDetail,
-    siblingCourseDetailQueries,
+    siblingCourseDetailQueries.map((query) => `${query.status}:${query.dataUpdatedAt}`).join('|'),
   ]);
   const selectedSubmissionAssignment = useMemo(
     () => assignmentSubmissionRows.find((item) => String(item.id) === String(selectedSubmissionAssignmentId)) || assignmentSubmissionRows[0] || null,
@@ -4890,13 +4988,148 @@ function TeacherCampusHome({ forcePreview = false }) {
     return buildAssignmentComponentOptions(activePeriod ? [activePeriod] : sourcePeriods);
   }, [selectedCourseAcademicPeriods, selectedCourseDraftAcademicPeriods]);
   const gradebookAssignmentOptions = useMemo(
-    () => buildGradebookAssignmentOptions(selectedCourseDraftAcademicPeriods),
-    [selectedCourseDraftAcademicPeriods]
+    () => buildGradebookAssignmentOptions(
+      selectedCourseAcademicPeriods.length > 0 ? selectedCourseAcademicPeriods : selectedCourseDraftAcademicPeriods
+    ),
+    [selectedCourseAcademicPeriods, selectedCourseDraftAcademicPeriods]
   );
   const selectedGradebookAssignment = useMemo(
     () => gradebookAssignmentOptions.find((assignment) => assignment.key === selectedGradebookAssignmentKey) || gradebookAssignmentOptions[0] || null,
     [gradebookAssignmentOptions, selectedGradebookAssignmentKey]
   );
+
+  useEffect(() => {
+    if (!selectedCourseId || gradebookAssignmentOptions.length === 0) {
+      return;
+    }
+
+    const storageKey = `campus-teacher-gradebook:${teacherQueryScope}:${selectedCourseId}`;
+    const assignmentExists = gradebookAssignmentOptions.some((option) => option.key === selectedGradebookAssignmentKey);
+
+    if (gradebookAssignmentHydratedCourseRef.current !== selectedCourseId) {
+      gradebookAssignmentHydratedCourseRef.current = selectedCourseId;
+      skipGradebookPersistRef.current = true;
+      let restoredKey = '';
+      let restoredMode = '';
+      try {
+        const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) || 'null');
+        restoredKey = String(parsed?.assignmentKey || '');
+        restoredMode = String(parsed?.mode || '');
+      } catch {
+        restoredKey = '';
+      }
+
+      if (restoredMode === 'student' || restoredMode === 'assignment') {
+        setGradebookMode(restoredMode);
+      }
+
+      const restoredExists = restoredKey && gradebookAssignmentOptions.some((option) => option.key === restoredKey);
+      setSelectedGradebookAssignmentKey(restoredExists ? restoredKey : gradebookAssignmentOptions[0].key);
+      return;
+    }
+
+    if (!assignmentExists) {
+      setSelectedGradebookAssignmentKey(gradebookAssignmentOptions[0].key);
+    }
+  }, [gradebookAssignmentOptions, selectedCourseId, selectedGradebookAssignmentKey, teacherQueryScope]);
+
+  useEffect(() => {
+    if (!selectedCourseId || !selectedGradebookAssignmentKey) {
+      return;
+    }
+
+    if (skipGradebookPersistRef.current) {
+      skipGradebookPersistRef.current = false;
+      return;
+    }
+
+    if (gradebookAssignmentHydratedCourseRef.current !== selectedCourseId) {
+      return;
+    }
+
+    try {
+      window.sessionStorage.setItem(
+        `campus-teacher-gradebook:${teacherQueryScope}:${selectedCourseId}`,
+        JSON.stringify({
+          mode: gradebookMode,
+          assignmentKey: selectedGradebookAssignmentKey,
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [gradebookMode, selectedCourseId, selectedGradebookAssignmentKey, teacherQueryScope]);
+
+  useEffect(() => {
+    if (teacherWorkspaceHydratedRef.current || !teacherQueryScope || teacherQueryScope === 'anonymous') {
+      return;
+    }
+
+    teacherWorkspaceHydratedRef.current = true;
+    try {
+      const parsed = JSON.parse(window.sessionStorage.getItem(`campus-teacher-workspace:${teacherQueryScope}`) || 'null');
+      if (!parsed || parsed.section !== 'academic_management') {
+        return;
+      }
+      skipWorkspacePersistRef.current = true;
+      skipGradebookPersistRef.current = true;
+      setActiveTeacherSection('academic_management');
+      if (parsed.subjectKey) {
+        setSelectedSubjectKey(String(parsed.subjectKey));
+      }
+      if (parsed.portalGradeKey) {
+        setSelectedPortalGradeKey(String(parsed.portalGradeKey));
+      }
+      if (parsed.courseId) {
+        setSelectedCourseId(String(parsed.courseId));
+      }
+      if (parsed.showWorkspace) {
+        setShowSelectedCourseWorkspace(true);
+      }
+      if (parsed.tab) {
+        setActiveCourseWorkspaceTab(String(parsed.tab));
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [teacherQueryScope]);
+
+  useEffect(() => {
+    if (!teacherQueryScope || teacherQueryScope === 'anonymous' || !teacherWorkspaceHydratedRef.current) {
+      return;
+    }
+
+    if (skipWorkspacePersistRef.current) {
+      skipWorkspacePersistRef.current = false;
+      return;
+    }
+
+    try {
+      const storageKey = `campus-teacher-workspace:${teacherQueryScope}`;
+      if (activeTeacherSection !== 'academic_management') {
+        window.sessionStorage.removeItem(storageKey);
+        return;
+      }
+      window.sessionStorage.setItem(storageKey, JSON.stringify({
+        section: activeTeacherSection,
+        subjectKey: selectedSubjectKey,
+        portalGradeKey: selectedPortalGradeKey,
+        courseId: selectedCourseId,
+        showWorkspace: showSelectedCourseWorkspace,
+        tab: activeCourseWorkspaceTab,
+      }));
+    } catch {
+      // ignore storage errors
+    }
+  }, [
+    activeCourseWorkspaceTab,
+    activeTeacherSection,
+    selectedCourseId,
+    selectedPortalGradeKey,
+    selectedSubjectKey,
+    showSelectedCourseWorkspace,
+    teacherQueryScope,
+  ]);
   const gradingCourseTitle = isClassroomGroupAllScope
     ? (selectedPortalGradeGroup?.title || (selectedCourse ? getCourseOptionLabel(selectedCourse) : 'Curso'))
     : (selectedCourse ? getCourseOptionLabel(selectedCourse) : 'Curso');
@@ -6017,6 +6250,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       setAcademicContentDrafts([]);
       setExpandedAcademicContentTopicKey('');
       setStudentDrafts({});
+      lastGradebookCourseIdRef.current = '';
       return;
     }
 
@@ -6032,9 +6266,17 @@ function TeacherCampusHome({ forcePreview = false }) {
       setAcademicContentDrafts(buildAcademicContentDrafts(selectedCourseDetail.course));
       setAcademicContentTopicInputs({});
       setExpandedAcademicContentTopicKey('');
-      setStudentDrafts(buildStudentDrafts(selectedCourseDetail));
+      const incomingDrafts = buildStudentDrafts(selectedCourseDetail, workspaceStudents);
+      const courseId = String(selectedCourseDetail.course.id || selectedCourseId || '');
+      setStudentDrafts((currentDrafts) => {
+        if (lastGradebookCourseIdRef.current !== courseId) {
+          lastGradebookCourseIdRef.current = courseId;
+          return incomingDrafts;
+        }
+        return mergeStudentGradeDrafts(incomingDrafts, currentDrafts);
+      });
     }
-  }, [selectedCourse, selectedCourseDetail]);
+  }, [selectedCourse, selectedCourseDetail, selectedCourseId, workspaceStudents]);
 
   useEffect(() => {
     if (postDraft.deliveryMode !== 'class') {
