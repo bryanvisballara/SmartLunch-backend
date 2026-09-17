@@ -102,6 +102,36 @@ async function compressImageFileToDataUrl(file, { maxWidth = 1280, quality = 0.7
   });
 }
 
+function isCameraPermissionError(error) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || '').toLowerCase();
+  return name === 'NotAllowedError'
+    || name === 'PermissionDeniedError'
+    || name === 'SecurityError'
+    || message.includes('not allowed by the user agent')
+    || message.includes('permission denied')
+    || message.includes('denied permission')
+    || message.includes('permission dismissed');
+}
+
+function describeCameraError(error) {
+  if (isCameraPermissionError(error)) {
+    return 'No hay permiso de cámara. En el teléfono toca Permitir, o ve a Ajustes y activa la cámara para Comergio. También puedes subir una foto de la galería.';
+  }
+  const name = String(error?.name || '');
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return 'No se encontró una cámara disponible. Usa “Subir archivo” o toma la foto desde la galería.';
+  }
+  if (name === 'NotReadableError' || name === 'AbortError') {
+    return 'La cámara está ocupada por otra app. Ciérrala e inténtalo de nuevo, o sube una foto.';
+  }
+  const message = String(error?.message || '').trim();
+  if (message && !/user agent|current context|permission/i.test(message)) {
+    return message;
+  }
+  return 'No se pudo abrir la cámara en pantalla. Toca “Tomar selfie con la cámara” o sube una foto.';
+}
+
 function withTimeout(promise, ms, message) {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
@@ -211,8 +241,11 @@ async function openCameraStream(facingMode = 'user', preferredDeviceId = '') {
       5000,
       'No se pudo pedir permiso de cámara.',
     );
-  } catch (_error) {
-    // Continue — some devices already granted permission.
+  } catch (permissionError) {
+    if (isCameraPermissionError(permissionError)) {
+      throw permissionError;
+    }
+    // Continue — some devices already granted permission or need a later constraint.
   } finally {
     stopMediaStream(permissionStream);
     permissionStream = null;
@@ -335,6 +368,9 @@ async function openCameraStream(facingMode = 'user', preferredDeviceId = '') {
       return stream;
     } catch (error) {
       lastError = error;
+      if (isCameraPermissionError(error)) {
+        throw error;
+      }
     }
   }
   throw lastError || new Error(
@@ -397,6 +433,8 @@ export default function MatriculaIdentityCapture({
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const fileInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
+  const cameraBlockedRef = useRef(false);
   const startGenerationRef = useRef(0);
   const videoDeviceIdsRef = useRef([]);
   const deviceIndexRef = useRef(0);
@@ -409,7 +447,7 @@ export default function MatriculaIdentityCapture({
   // Manual flip only applies to the current step (selfie / cédula).
   const [facingOverride, setFacingOverride] = useState(null);
   const [preferredDeviceId, setPreferredDeviceId] = useState('');
-  const [cameraState, setCameraState] = useState('idle');
+  const [cameraState, setCameraState] = useState(() => (shouldPreferNativeCamera() ? 'native' : 'idle'));
   const [error, setError] = useState('');
   const [uploadTarget, setUploadTarget] = useState('idFront');
   const [pendingSelfie, setPendingSelfie] = useState('');
@@ -435,6 +473,13 @@ export default function MatriculaIdentityCapture({
     // Defer so state updates before the picker opens (important on Android WebView).
     window.setTimeout(() => {
       fileInputRef.current?.click();
+    }, 40);
+  }, [mode]);
+
+  const openGalleryPicker = useCallback((target = mode) => {
+    setUploadTarget(target === 'selfie' ? 'selfie' : (target === 'idFront' ? 'idFront' : 'idBack'));
+    window.setTimeout(() => {
+      galleryInputRef.current?.click();
     }, 40);
   }, [mode]);
 
@@ -502,8 +547,11 @@ export default function MatriculaIdentityCapture({
     } catch (err) {
       if (startGenerationRef.current !== generation) return;
       stopCamera();
+      if (isCameraPermissionError(err)) {
+        cameraBlockedRef.current = true;
+      }
       setCameraState('native');
-      setError(err?.message || 'Usa la cámara del teléfono para continuar.');
+      setError(describeCameraError(err));
     }
   }, [androidLikeDevice, stopCamera]);
 
@@ -565,6 +613,11 @@ export default function MatriculaIdentityCapture({
   useEffect(() => {
     if (reviewingPhoto || identityComplete) {
       stopCamera();
+      return undefined;
+    }
+
+    if (androidLikeDevice || cameraBlockedRef.current) {
+      setCameraState('native');
       return undefined;
     }
 
@@ -779,7 +832,7 @@ export default function MatriculaIdentityCapture({
     }
     if (mode === 'selfie') {
       return useNativeCapture
-        ? `${signerName}: toca el botón para abrir la cámara del teléfono y tomarte el selfie.`
+        ? `${signerName}: toca “Tomar selfie con la cámara”. Si el teléfono no deja usar la cámara, elige una foto de la galería.`
         : `${signerName}: coloca tu cara dentro del óvalo y tómate un selfie.`;
     }
     if (mode === 'idFront') {
@@ -918,6 +971,13 @@ export default function MatriculaIdentityCapture({
         ref={fileInputRef}
         type="file"
       />
+      <input
+        accept="image/*"
+        hidden
+        onChange={onPickFile}
+        ref={galleryInputRef}
+        type="file"
+      />
 
       {identityComplete ? (
         <div className="matricula-identity__actions">
@@ -967,10 +1027,10 @@ export default function MatriculaIdentityCapture({
           <button
             className="matricula-flow-secondary"
             disabled={saving}
-            onClick={() => openNativeCamera(mode)}
+            onClick={() => openGalleryPicker(mode)}
             type="button"
           >
-            Subir archivo / cámara del teléfono
+            Subir foto de la galería
           </button>
           {mode === 'idBack' ? (
             <button

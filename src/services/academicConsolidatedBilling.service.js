@@ -469,6 +469,18 @@ async function ensureSchoolConsolidatedMonthlyCharges({
   return { processed: profiles.length, created };
 }
 
+function resolveLockedAcademicChargePricing(charge = {}) {
+  const amount = Math.max(0, Number(charge?.amount || 0));
+  const originalAmount = Math.max(0, Number(charge?.originalAmount || charge?.amount || 0));
+  return {
+    amount,
+    originalAmount,
+    breakdownItems: Array.isArray(charge?.breakdownItems) ? charge.breakdownItems : [],
+    benefitLabel: normalizeText(charge?.amountAdjustmentNote) || 'Valor ajustado',
+    hasPensionDiscount: originalAmount > amount,
+  };
+}
+
 function recalculateConsolidatedStatementPricing(
   charge = {},
   billingProfile = {},
@@ -518,7 +530,9 @@ function recalculateConsolidatedStatementPricing(
 
 function serializeConsolidatedChargeForParent(charge = {}, billingProfile = null, paymentTotalsByChargeId = new Map(), referenceDate = new Date(), options = {}) {
   const isPaid = String(charge.status) === 'paid';
-  const repriced = !isPaid && billingProfile
+  const repriced = charge?.amountLocked
+    ? resolveLockedAcademicChargePricing(charge)
+    : (!isPaid && billingProfile
     ? recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, {
       ...options,
       schoolId: charge.schoolId || options.schoolId,
@@ -535,7 +549,7 @@ function serializeConsolidatedChargeForParent(charge = {}, billingProfile = null
       ),
       benefitLabel: '',
       hasPensionDiscount: false,
-    };
+    });
 
   // Keep paid statements stable, but still hide matrícula lines already billed separately.
   if (isPaid && shouldOmitAnnualTuitionFromMonthlyStatement(charge.schoolId || options.schoolId || '')) {
@@ -670,6 +684,9 @@ async function refreshPendingMonthlyStatementCharges({ schoolId, referenceDate =
       if (profile) profileCache.set(profileId, profile);
     }
     if (!profile) continue;
+    if (charge.amountLocked) {
+      continue;
+    }
 
     const shouldOmit = omitAnnualTuition || paidAnnualStudentIds.has(String(charge.studentId || ''));
     const repriced = recalculateConsolidatedStatementPricing(charge, profile, referenceDate, {
@@ -860,7 +877,9 @@ async function resolveOutstandingAcademicChargeAmount({ schoolId, charge, refere
   const billingProfile = await profileQuery.lean();
 
   let pricingAmount = Math.max(0, Number(charge?.amount || 0));
-  if (String(charge?.category || '') === 'monthly_statement' && billingProfile) {
+  if (charge?.amountLocked) {
+    pricingAmount = Math.max(0, Number(charge?.amount || 0));
+  } else if (String(charge?.category || '') === 'monthly_statement' && billingProfile) {
     const repriced = recalculateConsolidatedStatementPricing(charge, billingProfile, referenceDate, { schoolId });
     pricingAmount = Math.max(0, Number(repriced.amount || 0));
   } else if (String(charge?.category || '') === 'monthly_tuition' && billingProfile) {
