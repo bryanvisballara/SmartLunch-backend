@@ -1784,14 +1784,20 @@ function selectRouletteQuestion({
   questions,
   categories,
   usedQuestionIds = [],
+  recentQuestionIds = [],
+  lastCategory = '',
   scope,
   randomInt = crypto.randomInt,
 }) {
-  const used = new Set(usedQuestionIds.map(String));
+  const used = new Set([...usedQuestionIds, ...recentQuestionIds].map(String));
+  const recent = new Set(recentQuestionIds.map(String));
   const allowed = new Set(categories);
   const inCategory = (question) => allowed.has(questionCategory(question, scope));
   const unused = (questions || []).filter((question) => (
     !used.has(String(question._id || question.id)) && inCategory(question)
+  ));
+  const recycleFresh = (questions || []).filter((question) => (
+    inCategory(question) && !recent.has(String(question._id || question.id))
   ));
   const recycle = (questions || []).filter(inCategory);
   const withoutEasy = (pool) => {
@@ -1801,10 +1807,16 @@ function selectRouletteQuestion({
     const challenging = pool.filter((question) => questionDifficulty(question) !== 'easy');
     return challenging.length ? challenging : pool;
   };
-  const pickFrom = (pool, preferredDifficulty) => {
-    const eligibleCategories = categories.filter((category) => (
+  const pickFrom = (pool, preferredDifficulty, avoidCategory = '') => {
+    let eligibleCategories = categories.filter((category) => (
       pool.some((question) => questionCategory(question, scope) === category)
     ));
+    if (avoidCategory && eligibleCategories.length > 1) {
+      const withoutLast = eligibleCategories.filter((category) => category !== avoidCategory);
+      if (withoutLast.length) {
+        eligibleCategories = withoutLast;
+      }
+    }
     if (!eligibleCategories.length) {
       return null;
     }
@@ -1822,9 +1834,11 @@ function selectRouletteQuestion({
   const targetDifficulty = scope === 'global' && unused.some((question) => questionDifficulty(question))
     ? (randomInt(0, 4) === 0 ? 'hard' : 'medium')
     : '';
-  return pickFrom(withoutEasy(unused), targetDifficulty)
-    || pickFrom(withoutEasy(recycle), targetDifficulty)
-    || pickFrom(withoutEasy(recycle), '');
+  return pickFrom(withoutEasy(unused), targetDifficulty, lastCategory)
+    || pickFrom(withoutEasy(unused), targetDifficulty)
+    || pickFrom(withoutEasy(recycleFresh), targetDifficulty, lastCategory)
+    || pickFrom(withoutEasy(recycleFresh), '', lastCategory)
+    || pickFrom(withoutEasy(recycle), '', '');
 }
 
 function calculatePosition(positionBefore, correct) {
@@ -1921,6 +1935,10 @@ async function chooseQuestion({ scope, schoolId, match }) {
     questions,
     categories: match.rouletteCategories || [],
     usedQuestionIds: match.usedQuestionIds || [],
+    recentQuestionIds: (match.history || []).map((entry) => String(entry.questionId || '')).filter(Boolean),
+    lastCategory: match.history?.length
+      ? (match.history[match.history.length - 1].category || '')
+      : (match.selectedCategory || ''),
     scope,
   });
   if (!selection) {
@@ -1936,6 +1954,9 @@ function requireCurrentTurn(match, identity, turnToken, version, phase) {
   }
   if (match.phase !== phase) {
     throw new TriviaError(phase === 'await_spin' ? 'El giro ya fue realizado.' : 'No hay una pregunta pendiente.', 409);
+  }
+  if (phase === 'await_answer' && match.activeQuestion) {
+    return;
   }
   if (match.turnToken !== normalizeText(turnToken) || Number(match.version) !== Number(version)) {
     throw new TriviaError('El turno cambió. Actualiza la partida.', 409);
@@ -2076,7 +2097,49 @@ async function sendAnswerNotifications(match, current, {
   await notifyCurrentTurn(match);
 }
 
-async function answer({ scope: rawScope, matchId, turnToken, version, answerKey, ...context }) {
+function resultFromHistoryEntry(match, last) {
+  const current = match.participants?.[match.currentTurnIndex];
+  const keepsTurn = match.status === 'active'
+    && current
+    && current.studentId === last.studentId
+    && Number(current.teamIndex) === Number(last.teamIndex);
+  return {
+    correct: Boolean(last.correct),
+    correctAnswer: last.correct ? last.answerKey : (last.correctAnswer || ''),
+    explanation: last.explanation || '',
+    positionBefore: Number(last.positionBefore || 0),
+    positionAfter: Number(last.positionAfter || 0),
+    streak: Number(last.streak || 0),
+    streakNeeded: ADVANCE_STREAK,
+    stationsAdvanced: Math.max(0, Number(last.positionAfter || 0) - Number(last.positionBefore || 0)),
+    keepsTurn,
+  };
+}
+
+function findAnsweredQuestion(match, identity, questionId) {
+  const asked = normalizeText(questionId);
+  const history = Array.isArray(match?.history) ? match.history : [];
+  if (!asked) {
+    return null;
+  }
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry && entry.studentId === identity.studentId && String(entry.questionId) === asked) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+async function answer({
+  scope: rawScope,
+  matchId,
+  turnToken,
+  version,
+  answerKey,
+  questionId = '',
+  ...context
+}) {
   const scope = normalizeScope(rawScope);
   const identity = await requireStudent(context);
   const { Match } = modelsForScope(scope);
@@ -2089,7 +2152,21 @@ async function answer({ scope: rawScope, matchId, turnToken, version, answerKey,
     await inScope(scope, identity.schoolId, () => loadViewerMatch({ scope, matchId, identity })),
     scope
   );
+  const alreadyAnswered = findAnsweredQuestion(
+    match,
+    identity,
+    questionId || match.activeQuestion?.questionId
+  );
+  if (match.phase !== 'await_answer' && alreadyAnswered) {
+    return {
+      match: serializeMatch(match, identity),
+      result: resultFromHistoryEntry(match, alreadyAnswered),
+    };
+  }
   requireCurrentTurn(match, identity, turnToken, version, 'await_answer');
+  if (!match.activeQuestion) {
+    throw new TriviaError('No hay una pregunta pendiente.', 409);
+  }
 
   const current = match.participants[match.currentTurnIndex];
   const team = match.teams.find((item) => item.index === current.teamIndex);
@@ -2152,14 +2229,24 @@ async function answer({ scope: rawScope, matchId, turnToken, version, answerKey,
       status: 'active',
       phase: 'await_answer',
       currentTurnIndex: match.currentTurnIndex,
-      turnToken: normalizeText(turnToken),
-      version: Number(version),
       'activeQuestion.questionId': match.activeQuestion.questionId,
     },
     { $set: update, $inc: { version: 1 } },
     { new: true }
   ));
   if (!updated) {
+    const latest = await inScope(scope, identity.schoolId, () => loadViewerMatch({ scope, matchId, identity }));
+    const raced = findAnsweredQuestion(
+      latest,
+      identity,
+      questionId || match.activeQuestion?.questionId
+    );
+    if (raced) {
+      return {
+        match: serializeMatch(latest, identity),
+        result: resultFromHistoryEntry(latest, raced),
+      };
+    }
     throw new TriviaError('La respuesta ya fue procesada o el turno cambió.', 409);
   }
 

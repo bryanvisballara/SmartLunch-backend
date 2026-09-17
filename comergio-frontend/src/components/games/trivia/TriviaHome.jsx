@@ -183,7 +183,10 @@ export default function TriviaHome({
                 <button
                   className={`trivia-active-card${yourTurn ? ' is-your-turn' : ' is-rival-turn'}`}
                   key={match.id}
-                  onClick={() => onOpenMatch?.(match.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenMatch?.(match.id);
+                  }}
                   type="button"
                 >
                   <span className={`trivia-active-card__turn${yourTurn ? ' is-you' : ' is-rival'}`}>

@@ -597,6 +597,7 @@ export function createStudentTriviaApi() {
         turnToken: payload.turnToken || match.turnToken,
         version: payload.version ?? match.version,
         answerKey: payload.answerId,
+        questionId: payload.questionId || payload.question?.id || '',
       }));
       const normalized = normalizeMatch(response.match, parsed.scope);
       const correctOption = payload.question?.answers?.find((answer) => answer.id === response.result?.correctAnswer);

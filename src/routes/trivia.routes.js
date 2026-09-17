@@ -309,6 +309,7 @@ router.post('/student/matches/:matchId/answer', requireStudent, async (req, res)
       turnToken: req.body?.turnToken,
       version: req.body?.version,
       answerKey: req.body?.answerKey,
+      questionId: req.body?.questionId,
     });
     return res.json(result);
   } catch (error) {
