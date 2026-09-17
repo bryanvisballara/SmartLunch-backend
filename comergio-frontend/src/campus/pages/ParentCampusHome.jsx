@@ -8850,7 +8850,7 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
                 <img alt="" className="campus-parent-mobile__game-promo-image" src={colibriGameCover} />
                 <span className="campus-parent-mobile__game-promo-copy">
                   <strong>Juegos</strong>
-                  <small>FLY, Arena y Trivia en un solo lugar.</small>
+                  <small>Arena y Trivia en un solo lugar.</small>
                 </span>
                 <span className="campus-parent-mobile__game-promo-cta">Abrir</span>
               </button>

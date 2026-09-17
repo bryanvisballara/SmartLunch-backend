@@ -9,7 +9,7 @@ import TriviaQuestion from './TriviaQuestion';
 import TriviaResult from './TriviaResult';
 import TriviaSubjectPicker from './TriviaSubjectPicker';
 import TriviaSubjectWheel from './TriviaSubjectWheel';
-import { playTriviaHomeTheme, stopAllTriviaAudio, stopTriviaHomeTheme, stopTriviaPodiumSound, stopTriviaQuestionEntrance } from './triviaHomeAudio';
+import { playTriviaHomeTheme, preloadTriviaAudio, stopAllTriviaAudio, stopTriviaHomeTheme, stopTriviaPodiumSound, stopTriviaQuestionEntrance, unlockTriviaAudio } from './triviaHomeAudio';
 import { createTriviaClient } from './triviaClient';
 import './trivia.css';
 
@@ -146,8 +146,12 @@ export default function TriviaStudentPanel({
     };
   }, [autoLoad, initialState, refresh]);
 
-  useEffect(() => () => {
-    stopAllTriviaAudio();
+  useEffect(() => {
+    unlockTriviaAudio();
+    preloadTriviaAudio();
+    return () => {
+      stopAllTriviaAudio();
+    };
   }, []);
 
   const currentMatch = snapshot.currentMatch
@@ -672,7 +676,7 @@ export default function TriviaStudentPanel({
   }
 
   return (
-    <div className="trivia-app">
+    <div className="trivia-app" onPointerDown={unlockTriviaAudio}>
       {loading && screen === 'home' ? <div className="trivia-loading" aria-label="Cargando Trivia" /> : null}
       {content}
       {error && !['onboarding', 'lobby', 'question'].includes(screen) ? (

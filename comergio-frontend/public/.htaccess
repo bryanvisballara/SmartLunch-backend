@@ -7,9 +7,11 @@
   RewriteRule ^(.*)$ https://comergio.com/$1 [R=301,L]
   RewriteRule ^login/?$ / [R=301,L]
 
-  # Keep direct access to index and uploaded assets untouched.
+  # Keep direct access to index, game audio, and uploaded assets untouched.
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_URI} ^/tourvirtualberckley/ [NC]
+  RewriteRule ^ - [L]
+  RewriteCond %{REQUEST_URI} ^/game/ [NC]
   RewriteRule ^ - [L]
   RewriteCond %{REQUEST_URI} ^/assets/ [NC]
   RewriteRule ^ - [L]
@@ -23,6 +25,16 @@
 
   # SPA fallback for routes like /admin, /pos, /parent/menu, etc.
   RewriteRule . /index.html [L]
+</IfModule>
+
+AddType audio/mp4 .m4a
+AddType audio/aac .aac
+AddType audio/mpeg .mp3
+AddType audio/wav .wav
+AddType audio/wave .wav
+
+<IfModule mod_deflate.c>
+  SetEnvIfNoCase Request_URI \.(?:m4a|mp3|wav|aac|ogg)$ no-gzip dont-vary
 </IfModule>
 
 <IfModule mod_expires.c>
@@ -54,5 +66,20 @@
 
   <FilesMatch "\.(js|css)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+
+  <FilesMatch "\.m4a$">
+    Header set Content-Type "audio/mp4"
+    Header unset Content-Encoding
+  </FilesMatch>
+
+  <FilesMatch "\.mp3$">
+    Header set Content-Type "audio/mpeg"
+    Header unset Content-Encoding
+  </FilesMatch>
+
+  <FilesMatch "\.wav$">
+    Header set Content-Type "audio/wav"
+    Header unset Content-Encoding
   </FilesMatch>
 </IfModule>

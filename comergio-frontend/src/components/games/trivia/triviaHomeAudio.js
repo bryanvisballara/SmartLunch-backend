@@ -1,175 +1,251 @@
-const HOME_THEME_SRC = '/game/trivia/intro.m4a';
+const SOUND_DEFS = {
+  intro: { files: ['/game/trivia/intro.m4a', '/game/trivia/intro.wav'], volume: 0.82 },
+  spin: { files: ['/game/trivia/spin.m4a', '/game/trivia/spin.wav'], volume: 0.9 },
+  categorySelected: {
+    files: ['/game/trivia/category-selected.m4a', '/game/trivia/category-selected.wav'],
+    volume: 0.92,
+  },
+  nextQuestion: {
+    files: ['/game/trivia/next-question.m4a', '/game/trivia/next-question.wav'],
+    volume: 0.92,
+  },
+  questionLoop: { files: ['/game/trivia/question-loop.m4a'], volume: 0.72, loop: true },
+  correct: { files: ['/game/trivia/correct.m4a', '/game/trivia/correct.wav'], volume: 0.94 },
+  wrongTimeout: {
+    files: ['/game/trivia/wrong-timeout.m4a', '/game/trivia/wrong-timeout.wav'],
+    volume: 0.94,
+  },
+  podium: { files: ['/game/trivia/podium.m4a', '/game/trivia/podium.wav'], volume: 0.9 },
+};
 
-function themeUrl() {
-  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
-  return `${base}${HOME_THEME_SRC}`;
-}
+const SOUND_KEYS = Object.keys(SOUND_DEFS);
 
-let sharedAudio = null;
+let audioContext = null;
 let unlocked = false;
+const fetching = {};
+const decoding = {};
+const rawBuffers = {};
+const decodedBuffers = {};
+const voices = {};
 
-function getAudio() {
-  if (!sharedAudio) {
-    sharedAudio = new Audio(themeUrl());
-    sharedAudio.preload = 'auto';
-    sharedAudio.loop = false;
-    sharedAudio.volume = 0.82;
+function assetUrl(path) {
+  const normalized = String(path || '').startsWith('/') ? String(path) : `/${path}`;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${normalized}`;
   }
-  return sharedAudio;
+  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
+  return `${base}${normalized}`;
 }
 
-function unlockHomeTheme() {
-  unlocked = true;
-  const audio = getAudio();
-  audio.muted = true;
-  return audio.play()
-    .then(() => {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.muted = false;
-    })
-    .catch(() => {
-      audio.muted = false;
+function getAudioContext() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  if (!audioContext) {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) {
+      return null;
+    }
+    audioContext = new Context();
+  }
+  return audioContext;
+}
+
+function playSilentTick(context) {
+  if (!context) {
+    return;
+  }
+  try {
+    const buffer = context.createBuffer(1, 1, context.sampleRate || 44100);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start(0);
+  } catch {
+    // Unlock still proceeds via resume().
+  }
+}
+
+function fetchSound(key) {
+  if (rawBuffers[key]) {
+    return Promise.resolve(rawBuffers[key]);
+  }
+  if (fetching[key]) {
+    return fetching[key];
+  }
+  fetching[key] = (async () => {
+    for (const file of SOUND_DEFS[key].files) {
+      try {
+        const response = await fetch(assetUrl(file), { cache: 'force-cache' });
+        if (!response.ok) {
+          continue;
+        }
+        rawBuffers[key] = await response.arrayBuffer();
+        return rawBuffers[key];
+      } catch {
+        // Try the next format.
+      }
+    }
+    return null;
+  })();
+  return fetching[key];
+}
+
+function decodeSound(key) {
+  if (decodedBuffers[key]) {
+    return Promise.resolve(decodedBuffers[key]);
+  }
+  if (decoding[key]) {
+    return decoding[key];
+  }
+  decoding[key] = (async () => {
+    const context = getAudioContext();
+    if (!context) {
+      return null;
+    }
+    for (const file of SOUND_DEFS[key].files) {
+      try {
+        const response = await fetch(assetUrl(file), { cache: 'force-cache' });
+        if (!response.ok) {
+          continue;
+        }
+        const raw = await response.arrayBuffer();
+        const decoded = await context.decodeAudioData(raw.slice(0));
+        rawBuffers[key] = raw;
+        decodedBuffers[key] = decoded;
+        return decoded;
+      } catch {
+        // Try the next format.
+      }
+    }
+    return null;
+  })();
+  return decoding[key];
+}
+
+export function preloadTriviaAudio() {
+  SOUND_KEYS.forEach((key) => {
+    void fetchSound(key);
+  });
+  if (unlocked) {
+    SOUND_KEYS.forEach((key) => {
+      void decodeSound(key);
     });
+  }
+}
+
+export function unlockTriviaAudio() {
+  const context = getAudioContext();
+  if (!context) {
+    return Promise.resolve();
+  }
+  unlocked = true;
+  playSilentTick(context);
+  const resumed = context.state === 'running'
+    ? Promise.resolve()
+    : context.resume().catch(() => {});
+  SOUND_KEYS.forEach((key) => {
+    void decodeSound(key);
+  });
+  return resumed;
+}
+
+function stopVoice(key) {
+  const voice = voices[key];
+  if (!voice) {
+    return;
+  }
+  try {
+    voice.source.onended = null;
+    voice.source.stop(0);
+  } catch {
+    // Already stopped.
+  }
+  try {
+    voice.source.disconnect();
+    voice.gain.disconnect();
+  } catch {
+    // Node already disconnected.
+  }
+  delete voices[key];
+}
+
+function isVoicePlaying(key) {
+  return Boolean(voices[key]);
+}
+
+function startVoice(key, when = 0) {
+  const context = getAudioContext();
+  const buffer = decodedBuffers[key];
+  if (!context || !buffer) {
+    return;
+  }
+  stopVoice(key);
+  const gain = context.createGain();
+  gain.gain.value = SOUND_DEFS[key].volume;
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.loop = Boolean(SOUND_DEFS[key].loop);
+  source.connect(gain);
+  gain.connect(context.destination);
+  source.onended = () => {
+    if (voices[key]?.source === source) {
+      delete voices[key];
+    }
+  };
+  source.start(when);
+  voices[key] = { source, gain };
+}
+
+async function playKey(key, { restart = true } = {}) {
+  unlockTriviaAudio();
+  if (!restart && isVoicePlaying(key)) {
+    return;
+  }
+  await decodeSound(key);
+  const context = getAudioContext();
+  if (context?.state === 'suspended') {
+    await context.resume().catch(() => {});
+  }
+  if (!context || !decodedBuffers[key]) {
+    return;
+  }
+  startVoice(key, context.currentTime);
 }
 
 export function playTriviaHomeTheme({ restart = false } = {}) {
-  const audio = getAudio();
-  if (!restart && !audio.paused && !audio.ended) {
-    return Promise.resolve();
-  }
-  if (restart || audio.ended) {
-    audio.currentTime = 0;
-  }
-  const start = () => audio.play().catch(() => {});
-  if (!unlocked) {
-    return unlockHomeTheme().then(start);
-  }
-  return start();
+  return playKey('intro', { restart });
 }
 
 export function stopTriviaHomeTheme() {
-  if (!sharedAudio) {
-    return;
-  }
-  sharedAudio.pause();
-  sharedAudio.currentTime = 0;
-}
-
-const SPIN_SRC = '/game/trivia/spin.m4a';
-
-let spinAudio = null;
-
-function spinUrl() {
-  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
-  return `${base}${SPIN_SRC}`;
-}
-
-function getSpinAudio() {
-  if (!spinAudio) {
-    spinAudio = new Audio(spinUrl());
-    spinAudio.preload = 'auto';
-    spinAudio.loop = false;
-    spinAudio.volume = 0.9;
-  }
-  return spinAudio;
+  stopVoice('intro');
 }
 
 export function playTriviaSpinSound() {
   stopTriviaHomeTheme();
-  const audio = getSpinAudio();
-  audio.currentTime = 0;
-  return audio.play().catch(() => {});
+  return playKey('spin');
 }
 
 export function stopTriviaSpinSound() {
-  if (!spinAudio) {
-    return;
-  }
-  spinAudio.pause();
-  spinAudio.currentTime = 0;
-}
-
-const CATEGORY_SELECTED_SRC = '/game/trivia/category-selected.m4a';
-
-let categorySelectedAudio = null;
-
-function categorySelectedUrl() {
-  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
-  return `${base}${CATEGORY_SELECTED_SRC}`;
-}
-
-function getCategorySelectedAudio() {
-  if (!categorySelectedAudio) {
-    categorySelectedAudio = new Audio(categorySelectedUrl());
-    categorySelectedAudio.preload = 'auto';
-    categorySelectedAudio.loop = false;
-    categorySelectedAudio.volume = 0.92;
-  }
-  return categorySelectedAudio;
+  stopVoice('spin');
 }
 
 export function stopTriviaCategorySelectedSound() {
-  if (!categorySelectedAudio) {
-    return;
-  }
-  categorySelectedAudio.pause();
-  categorySelectedAudio.currentTime = 0;
+  stopVoice('categorySelected');
 }
 
 export function playTriviaCategorySelectedSound() {
   stopTriviaHomeTheme();
   stopTriviaSpinSound();
-  const audio = getCategorySelectedAudio();
-  audio.currentTime = 0;
-  return audio.play().catch(() => {});
-}
-
-const NEXT_QUESTION_SRC = '/game/trivia/next-question.m4a';
-const QUESTION_LOOP_SRC = '/game/trivia/question-loop.m4a';
-
-let nextQuestionAudio = null;
-let questionLoopAudio = null;
-
-function assetUrl(path) {
-  const base = String(import.meta.env.BASE_URL || '/').replace(/\/+$/, '');
-  return `${base}${path}`;
-}
-
-function getNextQuestionAudio() {
-  if (!nextQuestionAudio) {
-    nextQuestionAudio = new Audio(assetUrl(NEXT_QUESTION_SRC));
-    nextQuestionAudio.preload = 'auto';
-    nextQuestionAudio.loop = false;
-    nextQuestionAudio.volume = 0.92;
-  }
-  return nextQuestionAudio;
-}
-
-function getQuestionLoopAudio() {
-  if (!questionLoopAudio) {
-    questionLoopAudio = new Audio(assetUrl(QUESTION_LOOP_SRC));
-    questionLoopAudio.preload = 'auto';
-    questionLoopAudio.loop = true;
-    questionLoopAudio.volume = 0.72;
-  }
-  return questionLoopAudio;
+  return playKey('categorySelected');
 }
 
 export function stopTriviaQuestionLoop() {
-  if (!questionLoopAudio) {
-    return;
-  }
-  questionLoopAudio.pause();
-  questionLoopAudio.currentTime = 0;
+  stopVoice('questionLoop');
 }
 
 export function stopTriviaNextQuestionSound() {
-  if (!nextQuestionAudio) {
-    return;
-  }
-  nextQuestionAudio.pause();
-  nextQuestionAudio.currentTime = 0;
+  stopVoice('nextQuestion');
 }
 
 export function stopTriviaQuestionEntrance() {
@@ -180,75 +256,60 @@ export function stopTriviaQuestionEntrance() {
 export function playTriviaQuestionEntrance() {
   stopTriviaHomeTheme();
   stopTriviaSpinSound();
+  stopTriviaCategorySelectedSound();
   stopTriviaQuestionEntrance();
-  const oneshot = getNextQuestionAudio();
-  oneshot.currentTime = 0;
-  const loop = getQuestionLoopAudio();
-  loop.currentTime = 0;
-  return Promise.all([
-    oneshot.play().catch(() => {}),
-    loop.play().catch(() => {}),
-  ]);
+  unlockTriviaAudio();
+  return Promise.all([decodeSound('nextQuestion'), decodeSound('questionLoop')]).then(async () => {
+    const context = getAudioContext();
+    if (context?.state === 'suspended') {
+      await context.resume().catch(() => {});
+    }
+    if (!context) {
+      return;
+    }
+    const when = context.currentTime;
+    startVoice('nextQuestion', when);
+    startVoice('questionLoop', when);
+  });
 }
-
-function createOneShot(src, volume = 0.92) {
-  let audio = null;
-  return {
-    play() {
-      stopTriviaHomeTheme();
-      stopTriviaQuestionEntrance();
-      if (!audio) {
-        audio = new Audio(assetUrl(src));
-        audio.preload = 'auto';
-        audio.loop = false;
-        audio.volume = volume;
-      }
-      audio.currentTime = 0;
-      return audio.play().catch(() => {});
-    },
-    stop() {
-      if (!audio) {
-        return;
-      }
-      audio.pause();
-      audio.currentTime = 0;
-    },
-  };
-}
-
-const correctSound = createOneShot('/game/trivia/correct.m4a', 0.94);
-const wrongTimeoutSound = createOneShot('/game/trivia/wrong-timeout.m4a', 0.94);
-const podiumSound = createOneShot('/game/trivia/podium.m4a', 0.9);
 
 export function playTriviaCorrectSound() {
-  wrongTimeoutSound.stop();
-  podiumSound.stop();
-  return correctSound.play();
+  stopVoice('wrongTimeout');
+  stopVoice('podium');
+  stopTriviaQuestionEntrance();
+  stopTriviaHomeTheme();
+  return playKey('correct');
 }
 
 export function playTriviaWrongOrTimeoutSound() {
-  correctSound.stop();
-  podiumSound.stop();
-  return wrongTimeoutSound.play();
+  stopVoice('correct');
+  stopVoice('podium');
+  stopTriviaQuestionEntrance();
+  stopTriviaHomeTheme();
+  return playKey('wrongTimeout');
 }
 
 export function playTriviaPodiumSound() {
-  correctSound.stop();
-  wrongTimeoutSound.stop();
+  stopVoice('correct');
+  stopVoice('wrongTimeout');
   stopTriviaSpinSound();
-  return podiumSound.play();
+  stopTriviaQuestionEntrance();
+  stopTriviaHomeTheme();
+  return playKey('podium');
 }
 
 export function stopTriviaPodiumSound() {
-  podiumSound.stop();
+  stopVoice('podium');
 }
 
 export function stopAllTriviaAudio() {
-  stopTriviaHomeTheme();
-  stopTriviaSpinSound();
-  stopTriviaCategorySelectedSound();
-  stopTriviaQuestionEntrance();
-  correctSound.stop();
-  wrongTimeoutSound.stop();
-  podiumSound.stop();
+  SOUND_KEYS.forEach(stopVoice);
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && unlocked && audioContext?.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+  });
 }

@@ -5,7 +5,7 @@ import ColibriFlappyGame from './ColibriFlappyGame';
 import ArenaPlay from './ArenaPlay';
 import GamesHub from './GamesHub';
 import TriviaStudentPanel from './trivia/TriviaStudentPanel';
-import { stopAllTriviaAudio } from './trivia/triviaHomeAudio';
+import { playTriviaHomeTheme, preloadTriviaAudio, stopAllTriviaAudio, unlockTriviaAudio } from './trivia/triviaHomeAudio';
 import { formatArenaPin } from './arenaDraft';
 import arenaCover from '../../assets/comergio-arena.jpg';
 import './arena.css';
@@ -37,8 +37,11 @@ export default function StudentGamesPanel({
     setView('hub');
   };
 
-  useEffect(() => () => {
-    stopAllTriviaAudio();
+  useEffect(() => {
+    preloadTriviaAudio();
+    return () => {
+      stopAllTriviaAudio();
+    };
   }, []);
 
   useEffect(() => {
@@ -151,6 +154,8 @@ export default function StudentGamesPanel({
         setView('arena');
       }}
       onOpenTrivia={() => {
+        unlockTriviaAudio();
+        playTriviaHomeTheme();
         setError('');
         setView('trivia');
       }}

@@ -1,0 +1,21 @@
+<IfModule mod_headers.c>
+  <FilesMatch "\.m4a$">
+    ForceType audio/mp4
+    Header set Content-Type "audio/mp4"
+    Header unset Content-Encoding
+  </FilesMatch>
+  <FilesMatch "\.wav$">
+    ForceType audio/wav
+    Header set Content-Type "audio/wav"
+    Header unset Content-Encoding
+  </FilesMatch>
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType audio/mp4 .m4a
+  AddType audio/wav .wav
+</IfModule>
+
+<IfModule mod_deflate.c>
+  SetEnvIfNoCase Request_URI \.(?:m4a|mp3|wav|aac|ogg)$ no-gzip dont-vary
+</IfModule>
