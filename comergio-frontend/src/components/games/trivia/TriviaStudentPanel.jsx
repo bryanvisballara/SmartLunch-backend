@@ -35,6 +35,28 @@ function alreadySpun(match) {
   return Boolean(match?.question && (match.phase === 'question' || match.phase === 'await_answer'));
 }
 
+function sameMatchId(left, right) {
+  return Boolean(left && right && String(left.rawId || left.id) === String(right.rawId || right.id));
+}
+
+function keepActiveQuestion(existing, incoming) {
+  if (!incoming) {
+    return incoming;
+  }
+  if (!existing?.question || incoming.question || !sameMatchId(existing, incoming)) {
+    return incoming;
+  }
+  if (['completed', 'result', 'summary'].includes(incoming.phase)) {
+    return incoming;
+  }
+  return {
+    ...incoming,
+    question: existing.question,
+    phase: incoming.phase === 'board' ? 'question' : incoming.phase,
+    selectedSubjectId: incoming.selectedSubjectId || existing.selectedSubjectId,
+  };
+}
+
 function isSpinAlreadyDone(error) {
   const message = errorMessage(error);
   return error?.response?.status === 409 && /giro ya fue realizado/i.test(message);
@@ -90,10 +112,25 @@ export default function TriviaStudentPanel({
   const [availableSubjects, setAvailableSubjects] = useState([]);
   const [selectedSubjectKeys, setSelectedSubjectKeys] = useState([]);
   const initialLoadStarted = useRef(false);
+  const requestSeq = useRef(0);
+  const lockedQuestionRef = useRef(null);
 
   const applyResponse = useCallback((response) => {
     const next = unwrap(response);
-    setSnapshot((current) => ({ ...current, ...next }));
+    setSnapshot((current) => {
+      const incoming = next.currentMatch || next.match;
+      const existing = current.currentMatch || current.match;
+      const locked = lockedQuestionRef.current;
+      const preserved = keepActiveQuestion(
+        locked ? { ...existing, question: locked, phase: existing?.phase || 'question' } : existing,
+        incoming
+      );
+      return {
+        ...current,
+        ...next,
+        ...(preserved ? { currentMatch: preserved, match: preserved } : {}),
+      };
+    });
     if (next.profile?.ageRange) {
       setAgeRange(next.profile.ageRange);
     }
@@ -111,19 +148,26 @@ export default function TriviaStudentPanel({
   }, []);
 
   const refresh = useCallback(async ({ id = matchId, quiet = false } = {}) => {
+    const seq = ++requestSeq.current;
     if (!quiet) {
       setLoading(true);
     }
     try {
       const response = await client.getStudentTriviaState(id ? { matchId: id } : {});
+      if (seq !== requestSeq.current) {
+        return;
+      }
       applyResponse(response);
       setError('');
     } catch (requestError) {
+      if (seq !== requestSeq.current) {
+        return;
+      }
       if (!quiet) {
         setError(errorMessage(requestError));
       }
     } finally {
-      if (!quiet) {
+      if (!quiet && seq === requestSeq.current) {
         setLoading(false);
       }
     }
@@ -165,9 +209,20 @@ export default function TriviaStudentPanel({
     || (
       currentMatchId
       && currentMatch?.rawId !== 'new'
-      && !['onboarding', 'summary'].includes(screen)
+      && !['onboarding', 'summary', 'question', 'result'].includes(screen)
     )
   );
+
+  useEffect(() => {
+    const activeQuestion = currentMatch?.question || snapshot.question;
+    if (screen === 'question' && activeQuestion?.id) {
+      lockedQuestionRef.current = activeQuestion;
+      return;
+    }
+    if (['result', 'board', 'home', 'summary', 'lobby'].includes(screen)) {
+      lockedQuestionRef.current = null;
+    }
+  }, [currentMatch?.question, screen, snapshot.question]);
 
   useEffect(() => {
     const keepHomeTheme = screen === 'home'
@@ -203,10 +258,14 @@ export default function TriviaStudentPanel({
   }, [currentMatchId, pollInterval, refresh, screen, shouldPoll]);
 
   const mutate = async (request, { clearOverride = true } = {}) => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError('');
     try {
       const response = await request();
+      if (seq !== requestSeq.current) {
+        return unwrap(response);
+      }
       applyResponse(response);
       if (clearOverride) {
         setViewOverride('');
@@ -378,6 +437,7 @@ export default function TriviaStudentPanel({
     if (spinning) {
       return;
     }
+    requestSeq.current += 1;
     setError('');
     setViewOverride('wheel');
     setSelectedSubjectId('');
@@ -388,6 +448,7 @@ export default function TriviaStudentPanel({
       return;
     }
     setLoading(true);
+    const seq = ++requestSeq.current;
     try {
       const response = await client.chooseTriviaSubject(currentMatchId, {
         match: currentMatch,
@@ -395,7 +456,9 @@ export default function TriviaStudentPanel({
         version: currentMatch.version,
       });
       const next = unwrap(response);
-      applyResponse(response);
+      if (seq === requestSeq.current) {
+        applyResponse(response);
+      }
       await playWheelReveal(next.currentMatch || next.match || currentMatch);
     } catch (requestError) {
       if (isSpinAlreadyDone(requestError)) {
@@ -576,6 +639,10 @@ export default function TriviaStudentPanel({
         mode={currentMatch?.mode}
         onBack={() => setViewOverride('board')}
         onContinue={() => {
+          requestSeq.current += 1;
+          if (currentMatch?.question) {
+            lockedQuestionRef.current = currentMatch.question;
+          }
           setSpinRevealComplete(false);
           setViewOverride('question');
         }}
