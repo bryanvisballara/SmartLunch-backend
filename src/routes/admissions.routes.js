@@ -12,6 +12,12 @@ const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
 const { sendAdmissionAppointmentEmail, sendAdmissionMarketingEmail } = require('../services/brevo.service');
 const {
+  getAgendaSettings,
+  saveAgendaRange,
+  addAgendaBlock,
+  removeAgendaBlock,
+} = require('../services/admissionAgenda.service');
+const {
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
 } = require('../utils/campusMaterialUpload');
@@ -578,6 +584,49 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo cargar admisiones.' });
+  }
+});
+
+router.get('/agenda-settings', async (req, res) => {
+  try {
+    const settings = await getAgendaSettings(req.user.schoolId);
+    return res.status(200).json(settings);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo cargar el horario de la agenda.' });
+  }
+});
+
+router.put('/agenda-settings', async (req, res) => {
+  try {
+    const settings = await saveAgendaRange(req.user.schoolId, {
+      availableFrom: req.body?.availableFrom,
+      availableTo: req.body?.availableTo,
+    });
+    return res.status(200).json(settings);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo guardar el horario de la agenda.' });
+  }
+});
+
+router.post('/agenda-settings/blocks', async (req, res) => {
+  try {
+    const settings = await addAgendaBlock(req.user.schoolId, {
+      scope: req.body?.scope,
+      date: req.body?.date,
+      time: req.body?.time,
+    }, req.user?.name || req.user?.username || '');
+    return res.status(200).json(settings);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo bloquear esa hora.' });
+  }
+});
+
+router.delete('/agenda-settings/blocks/:blockId', async (req, res) => {
+  try {
+    const settings = await removeAgendaBlock(req.user.schoolId, req.params.blockId);
+    return res.status(200).json(settings);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo quitar el bloqueo.' });
   }
 });
 

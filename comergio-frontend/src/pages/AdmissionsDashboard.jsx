@@ -26,8 +26,12 @@ import {
   deleteAdmissionEvent,
   finalizeAdmissionEnrollment,
   getAdmissionApplicant,
+  getAdmissionAgendaSettings,
   getAdmissions,
+  saveAdmissionAgendaSettings,
   setAdmissionStage,
+  unblockAdmissionAgendaSlot,
+  blockAdmissionAgendaSlot,
   transitionAdmissionStage,
   updateAdmissionApplicant,
   updateAdmissionDocument,
@@ -100,6 +104,20 @@ const APPOINTMENT_TYPE_OPTIONS = [
 ];
 
 const CALENDAR_WEEKDAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+function formatAgendaClock(time) {
+  const [hour, minute] = String(time || '').split(':').map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return time || '';
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  return date.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+const AGENDA_TIME_OPTIONS = Array.from({ length: ((20 * 60) - (6 * 60)) / 30 + 1 }, (_, index) => {
+  const totalMinutes = (6 * 60) + (index * 30);
+  const value = `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+  return { value, label: formatAgendaClock(value) };
+});
 
 function toAdmissionUpper(value) {
   return String(value || '').toLocaleUpperCase('es-CO');
@@ -372,6 +390,9 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const [scheduledEvents, setScheduledEvents] = useState([]);
   const [agendaMonthDate, setAgendaMonthDate] = useState(() => new Date());
   const [selectedAgendaDate, setSelectedAgendaDate] = useState(() => getLocalDateKey(new Date()));
+  const [agendaSettings, setAgendaSettings] = useState(null);
+  const [agendaRangeDraft, setAgendaRangeDraft] = useState({ availableFrom: '09:00', availableTo: '16:00' });
+  const [agendaSettingsBusy, setAgendaSettingsBusy] = useState(false);
   const [selectedStageApplicantIds, setSelectedStageApplicantIds] = useState([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [filters, setFilters] = useState({
@@ -412,6 +433,29 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     return accumulator;
   }, {}), [scheduledEvents]);
   const selectedAgendaEvents = eventsByDate[selectedAgendaDate] || [];
+  const agendaBlocks = agendaSettings?.blocks || [];
+  const blockedAgendaDates = useMemo(() => new Set(
+    agendaBlocks.filter((block) => block.scope === 'date' && block.date).map((block) => block.date)
+  ), [agendaBlocks]);
+  const selectedAgendaSlots = useMemo(() => (agendaSettings?.slotTimes || []).map((time) => {
+    const appointments = selectedAgendaEvents.filter((eventItem) => eventItem.appointment?.time === time);
+    const dateBlock = agendaBlocks.find((block) => block.scope === 'date' && block.date === selectedAgendaDate && block.time === time) || null;
+    const weekdayBlock = agendaBlocks.find((block) => block.scope === 'weekday' && block.time === time) || null;
+    return {
+      time,
+      label: formatAgendaClock(time),
+      appointments,
+      dateBlock,
+      weekdayBlock,
+      blocked: Boolean(dateBlock || weekdayBlock),
+    };
+  }), [agendaBlocks, agendaSettings?.slotTimes, selectedAgendaDate, selectedAgendaEvents]);
+  const selectedAgendaIsWeekend = useMemo(() => {
+    const [year, month, day] = String(selectedAgendaDate || '').split('-').map(Number);
+    if (!year || !month || !day) return false;
+    const weekday = new Date(year, month - 1, day).getDay();
+    return weekday === 0 || weekday === 6;
+  }, [selectedAgendaDate]);
 
   const loadAdmissions = useCallback(async (nextFilters = filters, { keepSelection = true } = {}) => {
     setLoading(true);
@@ -925,6 +969,84 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     }
   };
 
+  const applyAgendaSettings = (data) => {
+    setAgendaSettings(data || null);
+    setAgendaRangeDraft({
+      availableFrom: data?.availableFrom || '09:00',
+      availableTo: data?.availableTo || '16:00',
+    });
+  };
+
+  useEffect(() => {
+    if (currentView !== 'agenda') return undefined;
+    let cancelled = false;
+    getAdmissionAgendaSettings()
+      .then((response) => {
+        if (!cancelled) applyAgendaSettings(response.data || {});
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setError(requestError?.response?.data?.message || 'No se pudo cargar el horario de la agenda.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentView]);
+
+  const saveAgendaRange = async (event) => {
+    event.preventDefault();
+    setAgendaSettingsBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await saveAdmissionAgendaSettings(agendaRangeDraft);
+      applyAgendaSettings(response.data || {});
+      setMessage('Horario disponible guardado. Las familias solo verán citas dentro de ese rango.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo guardar el horario.');
+    } finally {
+      setAgendaSettingsBusy(false);
+    }
+  };
+
+  const blockAgendaHour = async (time, scope) => {
+    setAgendaSettingsBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await blockAdmissionAgendaSlot({
+        scope,
+        date: scope === 'date' ? selectedAgendaDate : '',
+        time,
+      });
+      applyAgendaSettings(response.data || {});
+      setMessage(scope === 'weekday'
+        ? 'Esa hora quedó bloqueada todos los días.'
+        : 'Esa hora quedó bloqueada para el día seleccionado.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo bloquear esa hora.');
+    } finally {
+      setAgendaSettingsBusy(false);
+    }
+  };
+
+  const unblockAgendaHour = async (blockId) => {
+    if (!blockId) return;
+    setAgendaSettingsBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await unblockAdmissionAgendaSlot(blockId);
+      applyAgendaSettings(response.data || {});
+      setMessage('Bloqueo eliminado. Esa hora vuelve a estar disponible.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo quitar el bloqueo.');
+    } finally {
+      setAgendaSettingsBusy(false);
+    }
+  };
+
   const userInitial = String(userDisplayName || 'A').trim().charAt(0).toUpperCase() || 'A';
 
   return (
@@ -1338,6 +1460,56 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                   <button className="secondary-button" type="button" onClick={() => moveAgendaMonth(1)} aria-label="Mes siguiente">›</button>
                 </div>
               </div>
+              <form className="admissions-agenda-availability" onSubmit={saveAgendaRange}>
+                <div>
+                  <span>Horario disponible</span>
+                  <p>
+                    {agendaSettings?.usesCustomRange
+                      ? `Las familias pueden agendar de ${agendaSettings.publishedLabel}, en bloques de 30 minutos, de lunes a viernes.`
+                      : `Hoy las familias ven ${agendaSettings?.publishedLabel || '9:00 a. m. – 11:00 a. m. y 2:00 p. m. – 4:00 p. m.'}. Si guardas un solo rango, ese horario reemplaza los dos actuales.`}
+                  </p>
+                  {agendaBlocks.some((block) => block.scope === 'weekday') ? (
+                    <p>
+                      Bloqueadas todos los días: {agendaBlocks.filter((block) => block.scope === 'weekday').map((block) => block.label || formatAgendaClock(block.time)).join(', ')}.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="admissions-agenda-availability-fields">
+                  <label>
+                    <span>Desde</span>
+                    <select
+                      value={agendaRangeDraft.availableFrom}
+                      onChange={(event) => {
+                        const availableFrom = event.target.value;
+                        setAgendaRangeDraft((previous) => ({
+                          availableFrom,
+                          availableTo: previous.availableTo > availableFrom
+                            ? previous.availableTo
+                            : (AGENDA_TIME_OPTIONS.find((option) => option.value > availableFrom)?.value || previous.availableTo),
+                        }));
+                      }}
+                    >
+                      {AGENDA_TIME_OPTIONS.slice(0, -1).map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Hasta</span>
+                    <select
+                      value={agendaRangeDraft.availableTo}
+                      onChange={(event) => setAgendaRangeDraft((previous) => ({ ...previous, availableTo: event.target.value }))}
+                    >
+                      {AGENDA_TIME_OPTIONS.filter((option) => option.value > agendaRangeDraft.availableFrom).map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="primary-button admissions-primary" disabled={agendaSettingsBusy} type="submit">
+                    {agendaSettingsBusy ? 'Guardando...' : 'Guardar horario'}
+                  </button>
+                </div>
+              </form>
               <div className="admissions-calendar-layout">
                 <div className="admissions-calendar-grid" role="grid" aria-label="Calendario de citas">
                   {CALENDAR_WEEKDAYS.map((weekday) => <div className="admissions-calendar-weekday" key={weekday}>{weekday}</div>)}
@@ -1345,10 +1517,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                     const dayEvents = eventsByDate[day.key] || [];
                     const isSelected = selectedAgendaDate === day.key;
                     const isToday = todayDateKey === day.key;
+                    const hasBlock = blockedAgendaDates.has(day.key);
                     return (
-                      <button className={`admissions-calendar-day${day.inCurrentMonth ? '' : ' is-muted'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}`} key={day.key} type="button" onClick={() => selectAgendaDay(day)}>
+                      <button className={`admissions-calendar-day${day.inCurrentMonth ? '' : ' is-muted'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}${hasBlock ? ' has-block' : ''}`} key={day.key} type="button" onClick={() => selectAgendaDay(day)}>
                         <span>{day.dayNumber}</span>
                         <div className="admissions-calendar-day-events">
+                          {hasBlock ? <em>Bloqueo</em> : null}
                           {dayEvents.slice(0, 3).map((eventItem) => (
                             <small key={`${day.key}-${eventItem.applicantId}-${eventItem._id || eventItem.id || eventItem.createdAt}`}>{eventItem.appointment?.time || '--:--'} {eventItem.studentName}</small>
                           ))}
@@ -1374,6 +1548,40 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                         </div>
                       </button>
                     )) : <div className="empty-state">Sin citas agendadas.</div>}
+                  </div>
+                  <div className="admissions-agenda-blocks">
+                    <div className="admissions-calendar-day-heading">
+                      <span>Bloquear horas</span>
+                      <strong>Estas horas no aparecen para las familias</strong>
+                    </div>
+                    {selectedAgendaIsWeekend ? <p>El formulario público solo ofrece lunes a viernes.</p> : null}
+                    <div className="admissions-agenda-slot-list">
+                      {selectedAgendaSlots.length ? selectedAgendaSlots.map((slot) => (
+                        <article className={`admissions-agenda-slot${slot.blocked ? ' is-blocked' : ''}${slot.appointments.length ? ' is-busy' : ''}`} key={slot.time}>
+                          <div className="admissions-agenda-slot-head">
+                            <strong>{slot.label}</strong>
+                            <span>
+                              {slot.weekdayBlock ? 'Bloqueada todos los días' : slot.dateBlock ? 'Bloqueada este día' : slot.appointments.length ? 'Ocupada' : 'Disponible'}
+                            </span>
+                          </div>
+                          {slot.appointments.length ? (
+                            <p>{slot.appointments.map((eventItem) => eventItem.studentName).join(', ')}</p>
+                          ) : null}
+                          <div className="admissions-agenda-slot-actions">
+                            {slot.dateBlock ? (
+                              <button disabled={agendaSettingsBusy} type="button" onClick={() => unblockAgendaHour(slot.dateBlock.id)}>Quitar bloqueo de este día</button>
+                            ) : (
+                              <button disabled={agendaSettingsBusy} type="button" onClick={() => blockAgendaHour(slot.time, 'date')}>Bloquear este día</button>
+                            )}
+                            {slot.weekdayBlock ? (
+                              <button disabled={agendaSettingsBusy} type="button" onClick={() => unblockAgendaHour(slot.weekdayBlock.id)}>Quitar bloqueo diario</button>
+                            ) : (
+                              <button disabled={agendaSettingsBusy} type="button" onClick={() => blockAgendaHour(slot.time, 'weekday')}>Bloquear todos los días</button>
+                            )}
+                          </div>
+                        </article>
+                      )) : <div className="empty-state">{agendaSettings ? 'No hay horas en este rango.' : 'Cargando horarios...'}</div>}
+                    </div>
                   </div>
                 </aside>
               </div>

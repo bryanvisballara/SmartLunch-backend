@@ -1158,6 +1158,140 @@
   gap: 14px;
 }
 
+.admissions-agenda-availability {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.admissions-agenda-availability > div > span,
+.admissions-agenda-availability-fields label span {
+  color: #667085;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admissions-agenda-availability p,
+.admissions-agenda-blocks p {
+  margin: 4px 0 0;
+  color: #475467;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.admissions-agenda-availability-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.admissions-agenda-availability-fields label {
+  display: grid;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.admissions-agenda-availability-fields select {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  font-weight: 700;
+}
+
+.admissions-agenda-blocks {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid #e4e7ec;
+}
+
+.admissions-agenda-slot-list {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.admissions-agenda-slot {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.admissions-agenda-slot.is-blocked {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.admissions-agenda-slot.is-busy strong {
+  color: #111827;
+}
+
+.admissions-agenda-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admissions-agenda-slot-head strong {
+  font-size: 0.92rem;
+}
+
+.admissions-agenda-slot-head span {
+  color: #667085;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-align: right;
+}
+
+.admissions-agenda-slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admissions-agenda-slot-actions button {
+  padding: 6px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #344054;
+  font-size: 0.72rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.admissions-agenda-slot-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.admissions-calendar-day-events em {
+  display: block;
+  width: fit-content;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .admissions-calendar-toolbar {
   display: flex;
   align-items: center;
@@ -1491,7 +1625,8 @@
 
   .admissions-detail-transition-actions,
   .admissions-detail-event-actions,
-  .admissions-calendar-toolbar {
+  .admissions-calendar-toolbar,
+  .admissions-agenda-availability-fields {
     display: grid;
   }
 

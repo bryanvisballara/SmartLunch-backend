@@ -3,11 +3,16 @@ const AcademicStructure = require('../models/academicStructure.model');
 const { runWithSchoolContext } = require('../config/db');
 const { sendAdmissionAppointmentEmail } = require('./brevo.service');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
+const {
+  SLOT_DURATION_MINUTES,
+  resolveWindows,
+  resolveSlotTimes,
+  isSlotBlocked,
+  getAgendaSettings,
+} = require('./admissionAgenda.service');
 
 const BERCKLEY_SCHOOL_ID = 'International Berckley School';
 const WHATSAPP_NUMBER = '573165283537';
-const SLOT_DURATION_MINUTES = 30;
-const SLOT_START_TIMES = ['09:00', '09:30', '10:00', '10:30', '14:00', '14:30', '15:00', '15:30'];
 
 const APPOINTMENT_TYPE_LABELS = {
   virtual: 'Cita virtual',
@@ -247,23 +252,31 @@ function isSlotBusy(busyAppointments, dateKey, time) {
   ));
 }
 
-function buildAvailabilityDays({ fromDate = new Date(), dayCount = 21, busyAppointments = [] } = {}) {
+function buildAvailabilityDays({
+  fromDate = new Date(),
+  dayCount = 21,
+  busyAppointments = [],
+  agendaSettings = null,
+} = {}) {
   const start = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
   const days = [];
+  const slotTimes = resolveSlotTimes(agendaSettings);
 
   for (let offset = 0; offset < dayCount; offset += 1) {
     const date = addDays(start, offset);
     if (!isWeekday(date)) continue;
 
     const dateKey = toDateKey(date);
-    const slots = SLOT_START_TIMES.map((time) => {
-      const available = !isSlotBusy(busyAppointments, dateKey, time);
-      return {
-        time,
-        label: formatTimeLabel(time),
-        available,
-      };
-    });
+    const slots = slotTimes
+      .filter((time) => !isSlotBlocked(agendaSettings, dateKey, time))
+      .map((time) => {
+        const available = !isSlotBusy(busyAppointments, dateKey, time);
+        return {
+          time,
+          label: formatTimeLabel(time),
+          available,
+        };
+      });
 
     days.push({
       date: dateKey,
@@ -287,19 +300,22 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
     const toDate = addDays(safeFrom, dayCount - 1);
     const fromDateKey = toDateKey(safeFrom);
     const toDateKeyValue = toDateKey(toDate);
-    const busyAppointments = await listBusyAppointments(BERCKLEY_SCHOOL_ID, fromDateKey, toDateKeyValue);
-
-    const gradeOptions = await getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID);
+    const [busyAppointments, agendaSettings, gradeOptions] = await Promise.all([
+      listBusyAppointments(BERCKLEY_SCHOOL_ID, fromDateKey, toDateKeyValue),
+      getAgendaSettings(BERCKLEY_SCHOOL_ID),
+      getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID),
+    ]);
 
     return {
       schoolId: BERCKLEY_SCHOOL_ID,
       schoolName: await getSchoolDisplayName(BERCKLEY_SCHOOL_ID) || 'International Berckley School',
       timezone: 'America/Bogota',
       slotDurationMinutes: SLOT_DURATION_MINUTES,
-      windows: [
-        { label: 'Mañana', start: '09:00', end: '11:00' },
-        { label: 'Tarde', start: '14:00', end: '16:00' },
-      ],
+      windows: resolveWindows(agendaSettings).map((window, index) => ({
+        label: agendaSettings.usesCustomRange ? 'Disponible' : (index === 0 ? 'Mañana' : 'Tarde'),
+        start: window.start,
+        end: window.end,
+      })),
       appointmentTypes: [
         { value: 'virtual', label: APPOINTMENT_TYPE_LABELS.virtual },
         { value: 'phone', label: APPOINTMENT_TYPE_LABELS.phone },
@@ -311,12 +327,13 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
         fromDate: safeFrom,
         dayCount,
         busyAppointments,
+        agendaSettings,
       }),
     };
   });
 }
 
-function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
+function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSettings = null) {
   const fullName = normalizeText(body.fullName || body.student?.firstName);
   const birthDate = normalizeText(body.birthDate || body.student?.birthDate);
   const previousSchool = normalizeText(body.previousSchool || body.student?.previousSchool);
@@ -366,8 +383,9 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
     }
   }
 
-  if (!SLOT_START_TIMES.includes(appointmentTime)) {
-    const error = new Error('La hora seleccionada no está disponible. Elige un horario de 9:00–11:00 o 2:00–4:00.');
+  const offeredTimes = resolveSlotTimes(agendaSettings);
+  if (!offeredTimes.includes(appointmentTime) || isSlotBlocked(agendaSettings, appointmentDate, appointmentTime)) {
+    const error = new Error('La hora seleccionada no está disponible. Elige otro horario.');
     error.statusCode = 400;
     throw error;
   }
@@ -407,8 +425,11 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = []) {
 
 async function submitPrimerContacto(body = {}) {
   return runWithSchoolContext(BERCKLEY_SCHOOL_ID, async () => {
-    const gradeOptions = await getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID);
-    const payload = validatePrimerContactoPayload(body, gradeOptions);
+    const [gradeOptions, agendaSettings] = await Promise.all([
+      getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID),
+      getAgendaSettings(BERCKLEY_SCHOOL_ID),
+    ]);
+    const payload = validatePrimerContactoPayload(body, gradeOptions, agendaSettings);
     const gradeLabel = getGradeLabel(payload.grade, gradeOptions);
     const busyAppointments = await listBusyAppointments(
       BERCKLEY_SCHOOL_ID,

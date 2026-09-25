@@ -3,6 +3,10 @@ import api from '../lib/api';
 const basePath = '/academic-secretary/admissions';
 
 export const getAdmissions = (params = {}) => api.get(basePath, { params });
+export const getAdmissionAgendaSettings = () => api.get(`${basePath}/agenda-settings`);
+export const saveAdmissionAgendaSettings = (data) => api.put(`${basePath}/agenda-settings`, data);
+export const blockAdmissionAgendaSlot = (data) => api.post(`${basePath}/agenda-settings/blocks`, data);
+export const unblockAdmissionAgendaSlot = (blockId) => api.delete(`${basePath}/agenda-settings/blocks/${blockId}`);
 export const getAdmissionApplicant = (applicantId) => api.get(`${basePath}/${applicantId}`);
 export const createAdmissionApplicant = (data) => api.post(basePath, data);
 export const updateAdmissionApplicant = (applicantId, data) => api.patch(`${basePath}/${applicantId}`, data);
