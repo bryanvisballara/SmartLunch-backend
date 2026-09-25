@@ -49,7 +49,16 @@ function buildSlotsForWindow(start, end, durationMinutes = SLOT_DURATION_MINUTES
 }
 
 function resolveWindows(settings) {
-  if (settings?.usesCustomRange) {
+  const customWindows = (Array.isArray(settings?.windows) ? settings.windows : [])
+    .map((window) => ({
+      start: String(window?.start || '').trim(),
+      end: String(window?.end || '').trim(),
+    }))
+    .filter((window) => window.start && window.end);
+  if (settings?.usesCustomRange && customWindows.length) {
+    return customWindows;
+  }
+  if (settings?.usesCustomRange && settings.availableFrom && settings.availableTo) {
     return [{ start: settings.availableFrom, end: settings.availableTo }];
   }
   return LEGACY_WINDOWS.map((window) => ({ ...window }));
@@ -96,8 +105,8 @@ function serializeAgendaSettings(settings) {
 
   return {
     usesCustomRange: Boolean(source.usesCustomRange),
-    availableFrom: source.usesCustomRange ? source.availableFrom : '09:00',
-    availableTo: source.usesCustomRange ? source.availableTo : '16:00',
+    availableFrom: windows[0]?.start || '09:00',
+    availableTo: windows[0]?.end || '11:00',
     slotDurationMinutes: SLOT_DURATION_MINUTES,
     windows,
     slotTimes,
@@ -139,17 +148,47 @@ async function getAgendaSettings(schoolId) {
   return serializeAgendaSettings(settings);
 }
 
-async function saveAgendaRange(schoolId, { availableFrom, availableTo } = {}) {
-  const range = assertValidRange(availableFrom, availableTo);
-  const nextSlotTimes = new Set(buildSlotsForWindow(range.availableFrom, range.availableTo));
+function assertValidWindows(windows) {
+  if (!Array.isArray(windows) || !windows.length) {
+    const error = new Error('Agrega al menos un horario.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (windows.length > 6) {
+    const error = new Error('Puedes guardar hasta 6 horarios.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const normalized = windows
+    .map((window) => {
+      const range = assertValidRange(window?.start || window?.availableFrom, window?.end || window?.availableTo);
+      return { start: range.availableFrom, end: range.availableTo };
+    })
+    .sort((left, right) => left.start.localeCompare(right.start));
+  normalized.forEach((window, index) => {
+    const previous = normalized[index - 1];
+    if (previous && window.start < previous.end) {
+      const error = new Error('Los horarios no pueden cruzarse. Déjalos uno después del otro.');
+      error.statusCode = 400;
+      throw error;
+    }
+  });
+  return normalized;
+}
+
+async function saveAgendaWindows(schoolId, windows) {
+  const normalizedWindows = assertValidWindows(windows);
+  const nextSlotTimes = new Set(normalizedWindows.flatMap((window) => buildSlotsForWindow(window.start, window.end)));
   let settings = await findAgendaSettings(schoolId);
   if (!settings) {
     settings = new AdmissionAgendaSettings({ schoolId });
   }
   settings.usesCustomRange = true;
-  settings.availableFrom = range.availableFrom;
-  settings.availableTo = range.availableTo;
+  settings.windows = normalizedWindows;
+  settings.availableFrom = normalizedWindows[0].start;
+  settings.availableTo = normalizedWindows[normalizedWindows.length - 1].end;
   settings.blocks = (settings.blocks || []).filter((block) => nextSlotTimes.has(block.time));
+  settings.markModified('windows');
   settings.markModified('blocks');
   await settings.save();
   return serializeAgendaSettings(settings);
@@ -223,7 +262,7 @@ module.exports = {
   isSlotBlocked,
   serializeAgendaSettings,
   getAgendaSettings,
-  saveAgendaRange,
+  saveAgendaWindows,
   addAgendaBlock,
   removeAgendaBlock,
 };

@@ -1168,7 +1168,7 @@
 }
 
 .admissions-agenda-availability > div > span,
-.admissions-agenda-availability-fields label span {
+.admissions-agenda-window label span {
   color: #667085;
   font-size: 0.72rem;
   font-weight: 900;
@@ -1184,20 +1184,26 @@
   line-height: 1.4;
 }
 
-.admissions-agenda-availability-fields {
+.admissions-agenda-windows {
+  display: grid;
+  gap: 8px;
+}
+
+.admissions-agenda-window,
+.admissions-agenda-window-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: 10px;
 }
 
-.admissions-agenda-availability-fields label {
+.admissions-agenda-window label {
   display: grid;
   gap: 6px;
   min-width: 160px;
 }
 
-.admissions-agenda-availability-fields select {
+.admissions-agenda-window select {
   height: 42px;
   padding: 0 12px;
   border: 1px solid #d0d5dd;
@@ -1206,6 +1212,18 @@
   color: #111827;
   font: inherit;
   font-weight: 700;
+}
+
+.admissions-agenda-window-remove {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #b42318;
+  font-size: 0.75rem;
+  font-weight: 850;
+  cursor: pointer;
 }
 
 .admissions-agenda-blocks {
@@ -1626,7 +1644,8 @@
   .admissions-detail-transition-actions,
   .admissions-detail-event-actions,
   .admissions-calendar-toolbar,
-  .admissions-agenda-availability-fields {
+  .admissions-agenda-window,
+  .admissions-agenda-window-actions {
     display: grid;
   }
 

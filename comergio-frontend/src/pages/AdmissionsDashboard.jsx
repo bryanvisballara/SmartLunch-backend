@@ -104,6 +104,10 @@ const APPOINTMENT_TYPE_OPTIONS = [
 ];
 
 const CALENDAR_WEEKDAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const DEFAULT_AGENDA_WINDOWS = [
+  { start: '09:00', end: '11:00' },
+  { start: '14:00', end: '16:00' },
+];
 
 function formatAgendaClock(time) {
   const [hour, minute] = String(time || '').split(':').map(Number);
@@ -113,11 +117,47 @@ function formatAgendaClock(time) {
   return date.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+function agendaMinutes(time) {
+  const [hour, minute] = String(time || '').split(':').map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return (hour * 60) + minute;
+}
+
+function agendaTimeFromMinutes(totalMinutes) {
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+}
+
 const AGENDA_TIME_OPTIONS = Array.from({ length: ((20 * 60) - (6 * 60)) / 30 + 1 }, (_, index) => {
-  const totalMinutes = (6 * 60) + (index * 30);
-  const value = `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+  const value = agendaTimeFromMinutes((6 * 60) + (index * 30));
   return { value, label: formatAgendaClock(value) };
 });
+
+function buildAgendaSlotTimes(windows = []) {
+  const seen = new Set();
+  const times = [];
+  windows.forEach((window) => {
+    const start = agendaMinutes(window?.start);
+    const end = agendaMinutes(window?.end);
+    if (start === null || end === null || end - start < 30) return;
+    for (let cursor = start; cursor + 30 <= end; cursor += 30) {
+      const time = agendaTimeFromMinutes(cursor);
+      if (seen.has(time)) continue;
+      seen.add(time);
+      times.push(time);
+    }
+  });
+  return times;
+}
+
+function normalizeAgendaWindows(windows) {
+  const nextWindows = (Array.isArray(windows) ? windows : [])
+    .map((window) => ({
+      start: String(window?.start || ''),
+      end: String(window?.end || ''),
+    }))
+    .filter((window) => window.start && window.end && window.end > window.start);
+  return nextWindows.length ? nextWindows : DEFAULT_AGENDA_WINDOWS.map((window) => ({ ...window }));
+}
 
 function toAdmissionUpper(value) {
   return String(value || '').toLocaleUpperCase('es-CO');
@@ -391,8 +431,9 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const [agendaMonthDate, setAgendaMonthDate] = useState(() => new Date());
   const [selectedAgendaDate, setSelectedAgendaDate] = useState(() => getLocalDateKey(new Date()));
   const [agendaSettings, setAgendaSettings] = useState(null);
-  const [agendaRangeDraft, setAgendaRangeDraft] = useState({ availableFrom: '09:00', availableTo: '16:00' });
+  const [agendaWindowsDraft, setAgendaWindowsDraft] = useState(DEFAULT_AGENDA_WINDOWS);
   const [agendaSettingsBusy, setAgendaSettingsBusy] = useState(false);
+  const [agendaLoadError, setAgendaLoadError] = useState('');
   const [selectedStageApplicantIds, setSelectedStageApplicantIds] = useState([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [filters, setFilters] = useState({
@@ -437,7 +478,10 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const blockedAgendaDates = useMemo(() => new Set(
     agendaBlocks.filter((block) => block.scope === 'date' && block.date).map((block) => block.date)
   ), [agendaBlocks]);
-  const selectedAgendaSlots = useMemo(() => (agendaSettings?.slotTimes || []).map((time) => {
+  const agendaSlotTimes = agendaSettings?.slotTimes?.length
+    ? agendaSettings.slotTimes
+    : buildAgendaSlotTimes(DEFAULT_AGENDA_WINDOWS);
+  const selectedAgendaSlots = useMemo(() => agendaSlotTimes.map((time) => {
     const appointments = selectedAgendaEvents.filter((eventItem) => eventItem.appointment?.time === time);
     const dateBlock = agendaBlocks.find((block) => block.scope === 'date' && block.date === selectedAgendaDate && block.time === time) || null;
     const weekdayBlock = agendaBlocks.find((block) => block.scope === 'weekday' && block.time === time) || null;
@@ -449,7 +493,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       weekdayBlock,
       blocked: Boolean(dateBlock || weekdayBlock),
     };
-  }), [agendaBlocks, agendaSettings?.slotTimes, selectedAgendaDate, selectedAgendaEvents]);
+  }), [agendaBlocks, agendaSlotTimes, selectedAgendaDate, selectedAgendaEvents]);
   const selectedAgendaIsWeekend = useMemo(() => {
     const [year, month, day] = String(selectedAgendaDate || '').split('-').map(Number);
     if (!year || !month || !day) return false;
@@ -970,23 +1014,23 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   };
 
   const applyAgendaSettings = (data) => {
-    setAgendaSettings(data || null);
-    setAgendaRangeDraft({
-      availableFrom: data?.availableFrom || '09:00',
-      availableTo: data?.availableTo || '16:00',
-    });
+    const windows = normalizeAgendaWindows(data?.windows);
+    setAgendaSettings({ ...(data || {}), windows, slotTimes: data?.slotTimes?.length ? data.slotTimes : buildAgendaSlotTimes(windows) });
+    setAgendaWindowsDraft(windows);
+    setAgendaLoadError('');
   };
 
   useEffect(() => {
     if (currentView !== 'agenda') return undefined;
     let cancelled = false;
+    setAgendaLoadError('');
     getAdmissionAgendaSettings()
       .then((response) => {
         if (!cancelled) applyAgendaSettings(response.data || {});
       })
       .catch((requestError) => {
         if (!cancelled) {
-          setError(requestError?.response?.data?.message || 'No se pudo cargar el horario de la agenda.');
+          setAgendaLoadError(requestError?.response?.data?.message || 'No se pudo cargar el horario guardado. Se muestran los horarios actuales.');
         }
       });
     return () => {
@@ -994,15 +1038,44 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     };
   }, [currentView]);
 
+  const updateAgendaWindow = (index, field, value) => {
+    setAgendaWindowsDraft((previous) => previous.map((window, windowIndex) => {
+      if (windowIndex !== index) return window;
+      const nextWindow = { ...window, [field]: value };
+      if (field === 'start' && !(nextWindow.end > nextWindow.start)) {
+        const nextEnd = AGENDA_TIME_OPTIONS.find((option) => option.value > value);
+        nextWindow.end = nextEnd?.value || nextWindow.end;
+      }
+      return nextWindow;
+    }));
+  };
+
+  const addAgendaWindow = () => {
+    setAgendaWindowsDraft((previous) => {
+      const lastEnd = previous[previous.length - 1]?.end || '12:00';
+      const start = AGENDA_TIME_OPTIONS.some((option) => option.value === lastEnd) && lastEnd < '20:00'
+        ? lastEnd
+        : '14:00';
+      const end = AGENDA_TIME_OPTIONS.find((option) => agendaMinutes(option.value) >= agendaMinutes(start) + 120)?.value
+        || AGENDA_TIME_OPTIONS.find((option) => option.value > start)?.value;
+      if (!end || previous.length >= 6) return previous;
+      return [...previous, { start, end }];
+    });
+  };
+
+  const removeAgendaWindow = (index) => {
+    setAgendaWindowsDraft((previous) => (previous.length <= 1 ? previous : previous.filter((_, windowIndex) => windowIndex !== index)));
+  };
+
   const saveAgendaRange = async (event) => {
     event.preventDefault();
     setAgendaSettingsBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await saveAdmissionAgendaSettings(agendaRangeDraft);
+      const response = await saveAdmissionAgendaSettings({ windows: agendaWindowsDraft });
       applyAgendaSettings(response.data || {});
-      setMessage('Horario disponible guardado. Las familias solo verán citas dentro de ese rango.');
+      setMessage('Horarios guardados. Las familias solo verán citas dentro de esos bloques.');
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo guardar el horario.');
     } finally {
@@ -1464,9 +1537,8 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                 <div>
                   <span>Horario disponible</span>
                   <p>
-                    {agendaSettings?.usesCustomRange
-                      ? `Las familias pueden agendar de ${agendaSettings.publishedLabel}, en bloques de 30 minutos, de lunes a viernes.`
-                      : `Hoy las familias ven ${agendaSettings?.publishedLabel || '9:00 a. m. – 11:00 a. m. y 2:00 p. m. – 4:00 p. m.'}. Si guardas un solo rango, ese horario reemplaza los dos actuales.`}
+                    Agrega los bloques en los que puedes recibir citas. Por ejemplo, de 8:00 a. m. a 12:00 p. m. y de 2:00 p. m. a 4:00 p. m.
+                    {agendaSettings?.publishedLabel ? ` Hoy las familias ven ${agendaSettings.publishedLabel}.` : ' Hoy las familias ven 9:00 a. m. – 11:00 a. m. y 2:00 p. m. – 4:00 p. m.'}
                   </p>
                   {agendaBlocks.some((block) => block.scope === 'weekday') ? (
                     <p>
@@ -1474,39 +1546,37 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                     </p>
                   ) : null}
                 </div>
-                <div className="admissions-agenda-availability-fields">
-                  <label>
-                    <span>Desde</span>
-                    <select
-                      value={agendaRangeDraft.availableFrom}
-                      onChange={(event) => {
-                        const availableFrom = event.target.value;
-                        setAgendaRangeDraft((previous) => ({
-                          availableFrom,
-                          availableTo: previous.availableTo > availableFrom
-                            ? previous.availableTo
-                            : (AGENDA_TIME_OPTIONS.find((option) => option.value > availableFrom)?.value || previous.availableTo),
-                        }));
-                      }}
-                    >
-                      {AGENDA_TIME_OPTIONS.slice(0, -1).map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Hasta</span>
-                    <select
-                      value={agendaRangeDraft.availableTo}
-                      onChange={(event) => setAgendaRangeDraft((previous) => ({ ...previous, availableTo: event.target.value }))}
-                    >
-                      {AGENDA_TIME_OPTIONS.filter((option) => option.value > agendaRangeDraft.availableFrom).map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="admissions-agenda-windows">
+                  {agendaWindowsDraft.map((window, index) => (
+                    <div className="admissions-agenda-window" key={`agenda-window-${index}`}>
+                      <label>
+                        <span>Desde</span>
+                        <select value={window.start} onChange={(event) => updateAgendaWindow(index, 'start', event.target.value)}>
+                          {AGENDA_TIME_OPTIONS.slice(0, -1).map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Hasta</span>
+                        <select value={window.end} onChange={(event) => updateAgendaWindow(index, 'end', event.target.value)}>
+                          {AGENDA_TIME_OPTIONS.filter((option) => option.value > window.start).map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      {agendaWindowsDraft.length > 1 ? (
+                        <button className="admissions-agenda-window-remove" type="button" onClick={() => removeAgendaWindow(index)}>Quitar</button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                <div className="admissions-agenda-window-actions">
+                  <button className="secondary-button" disabled={agendaSettingsBusy || agendaWindowsDraft.length >= 6} type="button" onClick={addAgendaWindow}>
+                    + Agregar horario
+                  </button>
                   <button className="primary-button admissions-primary" disabled={agendaSettingsBusy} type="submit">
-                    {agendaSettingsBusy ? 'Guardando...' : 'Guardar horario'}
+                    {agendaSettingsBusy ? 'Guardando...' : 'Guardar horarios'}
                   </button>
                 </div>
               </form>
@@ -1554,6 +1624,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                       <span>Bloquear horas</span>
                       <strong>Estas horas no aparecen para las familias</strong>
                     </div>
+                    {agendaLoadError ? <p>{agendaLoadError}</p> : null}
                     {selectedAgendaIsWeekend ? <p>El formulario público solo ofrece lunes a viernes.</p> : null}
                     <div className="admissions-agenda-slot-list">
                       {selectedAgendaSlots.length ? selectedAgendaSlots.map((slot) => (
@@ -1580,7 +1651,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                             )}
                           </div>
                         </article>
-                      )) : <div className="empty-state">{agendaSettings ? 'No hay horas en este rango.' : 'Cargando horarios...'}</div>}
+                      )) : <div className="empty-state">No hay horas en los horarios guardados.</div>}
                     </div>
                   </div>
                 </aside>

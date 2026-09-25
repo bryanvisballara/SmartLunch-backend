@@ -13,7 +13,7 @@ const Student = require('../models/student.model');
 const { sendAdmissionAppointmentEmail, sendAdmissionMarketingEmail } = require('../services/brevo.service');
 const {
   getAgendaSettings,
-  saveAgendaRange,
+  saveAgendaWindows,
   addAgendaBlock,
   removeAgendaBlock,
 } = require('../services/admissionAgenda.service');
@@ -598,10 +598,10 @@ router.get('/agenda-settings', async (req, res) => {
 
 router.put('/agenda-settings', async (req, res) => {
   try {
-    const settings = await saveAgendaRange(req.user.schoolId, {
-      availableFrom: req.body?.availableFrom,
-      availableTo: req.body?.availableTo,
-    });
+    const windows = Array.isArray(req.body?.windows) && req.body.windows.length
+      ? req.body.windows
+      : [{ start: req.body?.availableFrom, end: req.body?.availableTo }];
+    const settings = await saveAgendaWindows(req.user.schoolId, windows);
     return res.status(200).json(settings);
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo guardar el horario de la agenda.' });
