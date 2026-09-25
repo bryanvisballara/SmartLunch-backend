@@ -1,7 +1,7 @@
 const AdmissionApplicant = require('../models/admissionApplicant.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const { runWithSchoolContext } = require('../config/db');
-const { sendAdmissionAppointmentEmail } = require('./brevo.service');
+const { sendAdmissionAppointmentEmail, sendBerckleyAdmissionsOfficeAppointmentEmail } = require('./brevo.service');
 const { getSchoolDisplayName } = require('../utils/schoolDisplayName');
 const {
   SLOT_DURATION_MINUTES,
@@ -519,26 +519,42 @@ async function submitPrimerContacto(body = {}) {
     applicant.status = 'interested';
     await applicant.save();
 
-    try {
-      await sendAdmissionAppointmentEmail({
+    const appointmentNotice = {
+      schoolName,
+      applicantName: payload.fullName,
+      grade: gradeLabel,
+      appointmentTypeLabel: typeLabel,
+      appointmentDateLabel: formatAppointmentDateLabel(payload.appointmentDate),
+      appointmentDate: payload.appointmentDate,
+      appointmentTime: payload.appointmentTime,
+      calendarLocation: locationLabel,
+      durationMinutes: SLOT_DURATION_MINUTES,
+    };
+    const emailResults = await Promise.allSettled([
+      sendAdmissionAppointmentEmail({
+        ...appointmentNotice,
         toEmail: payload.guardianEmail,
         toName: payload.guardianName,
-        schoolName,
-        applicantName: payload.fullName,
-        grade: gradeLabel,
-        appointmentTypeLabel: typeLabel,
-        appointmentDateLabel: formatAppointmentDateLabel(payload.appointmentDate),
-        appointmentDate: payload.appointmentDate,
-        appointmentTime: payload.appointmentTime,
         notes: 'Gracias por dar el primer paso con International Berckley School. Nuestro equipo de Admisiones te acompañará en cada etapa del proceso. Si necesitas reprogramar, responde este correo o escríbenos por WhatsApp.',
-        calendarLocation: locationLabel,
-        durationMinutes: SLOT_DURATION_MINUTES,
         departmentLabel: 'Departamento de Admisiones',
         retentionIntro: 'Estamos muy contentos de conocerte. Esta cita es el comienzo de una experiencia educativa bilingüe, cercana y diseñada para que tu familia se sienta acompañada desde el primer momento.',
-      });
-    } catch (emailError) {
-      console.warn(`[PRIMER_CONTACTO_EMAIL_FAILED] applicantId=${applicant._id} error=${emailError.message}`);
-    }
+      }),
+      sendBerckleyAdmissionsOfficeAppointmentEmail({
+        ...appointmentNotice,
+        schoolId: BERCKLEY_SCHOOL_ID,
+        birthDate: formatAppointmentDateLabel(payload.birthDate),
+        previousSchool: payload.previousSchool,
+        guardianName: payload.guardianName,
+        guardianEmail: payload.guardianEmail,
+        guardianPhone: payload.guardianPhone,
+        source: payload.referenceOrigin || 'Primer contacto',
+      }),
+    ]);
+    emailResults.forEach((result) => {
+      if (result.status === 'rejected') {
+        console.warn(`[PRIMER_CONTACTO_EMAIL_FAILED] applicantId=${applicant._id} error=${result.reason?.message || result.reason}`);
+      }
+    });
 
     const whatsappMessage = buildWhatsAppMessage({ ...payload, grade: gradeLabel });
     return {

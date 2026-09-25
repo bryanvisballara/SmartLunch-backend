@@ -19,7 +19,17 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textContent, senderEmail: requestedSenderEmail = '', senderName: requestedSenderName = '' }) {
+async function sendBrevoEmail({
+  toEmail,
+  toName,
+  subject,
+  htmlContent,
+  textContent,
+  senderEmail: requestedSenderEmail = '',
+  senderName: requestedSenderName = '',
+  replyToEmail = '',
+  replyToName = '',
+}) {
   const apiKey = String(process.env.BREVO_API_KEY || '').trim();
   const senderEmail = String(requestedSenderEmail || process.env.BREVO_SENDER_EMAIL || 'verify@comergio.com').trim();
   const senderName = resolveSenderName(requestedSenderName);
@@ -34,6 +44,29 @@ async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textConte
     return { mocked: true };
   }
 
+  const replyTo = String(replyToEmail || '').trim().toLowerCase();
+  const emailPayload = {
+    sender: {
+      email: senderEmail,
+      name: senderName,
+    },
+    to: [
+      {
+        email: safeEmail,
+        name: toName || safeEmail,
+      },
+    ],
+    subject,
+    htmlContent,
+    textContent,
+  };
+  if (replyTo) {
+    emailPayload.replyTo = {
+      email: replyTo,
+      name: String(replyToName || replyTo).trim(),
+    };
+  }
+
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
@@ -41,21 +74,7 @@ async function sendBrevoEmail({ toEmail, toName, subject, htmlContent, textConte
       'api-key': apiKey,
       Accept: 'application/json',
     },
-    body: JSON.stringify({
-      sender: {
-        email: senderEmail,
-        name: senderName,
-      },
-      to: [
-        {
-          email: safeEmail,
-          name: toName || safeEmail,
-        },
-      ],
-      subject,
-      htmlContent,
-      textContent,
-    }),
+    body: JSON.stringify(emailPayload),
   });
 
   if (!response.ok) {
@@ -416,6 +435,117 @@ async function sendAdmissionAppointmentEmail({
   });
 }
 
+const BERCKLEY_ADMISSIONS_OFFICE_EMAIL = 'admisiones@ibs.edu.co';
+
+function isBerckleySchool(schoolId) {
+  return String(schoolId || '').trim().toLowerCase() === 'international berckley school';
+}
+
+async function sendBerckleyAdmissionsOfficeAppointmentEmail({
+  schoolId,
+  schoolName,
+  applicantName,
+  grade,
+  birthDate = '',
+  previousSchool = '',
+  guardianName = '',
+  guardianEmail = '',
+  guardianPhone = '',
+  appointmentTypeLabel,
+  appointmentDateLabel,
+  appointmentDate,
+  appointmentTime,
+  calendarLocation,
+  notes = '',
+  source = '',
+  durationMinutes = 30,
+  rescheduled = false,
+}) {
+  if (!isBerckleySchool(schoolId)) return { skipped: true };
+
+  const safeSchoolName = schoolName || 'International Berckley School';
+  const safeApplicantName = applicantName || 'Aspirante';
+  const safeAppointmentType = appointmentTypeLabel || 'Cita de admisiones';
+  const safeDateLabel = appointmentDateLabel || appointmentDate || 'Fecha por confirmar';
+  const safeTime = appointmentTime || 'Hora por confirmar';
+  const safeLocation = calendarLocation || safeSchoolName;
+  const headline = rescheduled ? 'Cita reprogramada' : 'Nueva cita agendada';
+  const subject = `${headline} | ${safeApplicantName} · ${safeDateLabel} ${safeTime}`;
+  const detailRows = [
+    ['Aspirante', safeApplicantName],
+    ['Grado', grade || '-'],
+    ['Fecha de nacimiento', birthDate || '-'],
+    ['Colegio de procedencia', previousSchool || '-'],
+    ['Acudiente', guardianName || '-'],
+    ['Correo', guardianEmail || '-'],
+    ['Teléfono', guardianPhone || '-'],
+    ['Tipo de cita', safeAppointmentType],
+    ['Fecha', safeDateLabel],
+    ['Hora', `${safeTime} · ${Number(durationMinutes) || 30} min`],
+    ['Lugar', safeLocation],
+    ['Origen', source || '-'],
+  ];
+  const rowsHtml = detailRows.map(([label, value]) => `
+    <tr>
+      <td style="width:38%;padding:12px 14px;background:#f4fafb;border:1px solid #d5e7eb;border-right:0;border-radius:14px 0 0 14px;color:#5b7380;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.6px;">${escapeHtml(label)}</td>
+      <td style="padding:12px 14px;background:#ffffff;border:1px solid #d5e7eb;border-left:0;border-radius:0 14px 14px 0;color:#0f172a;font-size:15px;font-weight:700;">${escapeHtml(value)}</td>
+    </tr>
+  `).join('');
+  const notesBlock = notes ? `
+    <div style="margin-top:18px;background:#f8fafc;border:1px solid #dbe7ef;border-radius:16px;padding:14px 16px;color:#334155;">
+      <p style="margin:0 0 6px 0;font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#64748b;">Notas</p>
+      <p style="margin:0;font-size:14px;line-height:1.6;">${escapeHtml(notes)}</p>
+    </div>
+  ` : '';
+  const htmlContent = `
+    <div style="margin:0;padding:0;background:#e8f1f3;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#e8f1f3;padding:28px 12px;">
+        <tr>
+          <td align="center">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:650px;background:#ffffff;border-radius:24px;overflow:hidden;">
+              <tr>
+                <td style="background:#103844;padding:28px 30px;color:#ffffff;">
+                  <p style="margin:0 0 8px 0;font-size:12px;letter-spacing:1.6px;text-transform:uppercase;">Admisiones</p>
+                  <h1 style="margin:0;font-size:28px;line-height:1.15;">${escapeHtml(headline)}</h1>
+                  <p style="margin:10px 0 0 0;font-size:15px;line-height:1.5;">${escapeHtml(safeSchoolName)}</p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:28px 30px;color:#102033;">
+                  <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;">Se registró una cita en la agenda de admisiones.</p>
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;border-spacing:0 8px;">
+                    ${rowsHtml}
+                  </table>
+                  ${notesBlock}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `;
+  const textContent = [
+    headline,
+    safeSchoolName,
+    '',
+    ...detailRows.map(([label, value]) => `${label}: ${value}`),
+    notes ? `\nNotas: ${notes}` : '',
+  ].filter(Boolean).join('\n');
+
+  return sendBrevoEmail({
+    toEmail: BERCKLEY_ADMISSIONS_OFFICE_EMAIL,
+    toName: 'Admisiones IBS',
+    subject,
+    senderEmail: process.env.ADMISSIONS_SENDER_EMAIL || 'berckley@comergio.com',
+    senderName: `${safeSchoolName} Admisiones`,
+    replyToEmail: guardianEmail,
+    replyToName: guardianName,
+    htmlContent,
+    textContent,
+  });
+}
+
 async function sendAdmissionMarketingEmail({ toEmail, toName, schoolName, subject, title, body, imageUrl = '', imageAlt = '' }) {
   const safeSchoolName = schoolName || 'Colegio';
   const safeTitle = title || subject || 'Información de admisiones';
@@ -594,6 +724,7 @@ module.exports = {
   sendAcademicCommunicationEmail,
   sendAcademicBillingEmail,
   sendAdmissionAppointmentEmail,
+  sendBerckleyAdmissionsOfficeAppointmentEmail,
   sendAdmissionMarketingEmail,
   sendPsychologyWellbeingAppointmentEmail,
   buildGoogleCalendarLink,

@@ -10,7 +10,7 @@ const AdmissionMarketingAsset = require('../models/admissionMarketingAsset.model
 const AdmissionMarketingCampaign = require('../models/admissionMarketingCampaign.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const Student = require('../models/student.model');
-const { sendAdmissionAppointmentEmail, sendAdmissionMarketingEmail } = require('../services/brevo.service');
+const { sendAdmissionAppointmentEmail, sendAdmissionMarketingEmail, sendBerckleyAdmissionsOfficeAppointmentEmail } = require('../services/brevo.service');
 const {
   getAgendaSettings,
   saveAgendaWindows,
@@ -206,15 +206,18 @@ async function getAdmissionSchoolName(schoolId) {
   return normalizeText(academicStructure?.schoolName) || humanizeSchoolName(schoolId) || 'Colegio';
 }
 
-async function notifyAdmissionAppointment(applicant, eventPayload, schoolId) {
+function formatApplicantBirthDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return normalizeText(value);
+  return date.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+async function notifyAdmissionAppointment(applicant, eventPayload, schoolId, { rescheduled = false } = {}) {
   if (!eventPayload?.appointment?.type) return { skipped: true };
   const toEmail = normalizeEmail(eventPayload.appointment.guardianEmail || applicant.guardian?.email);
-  if (!toEmail) return { skipped: true };
-
   const schoolName = await getAdmissionSchoolName(schoolId);
-  return sendAdmissionAppointmentEmail({
-    toEmail,
-    toName: normalizeText(applicant.guardian?.name) || 'Acudiente',
+  const appointmentDetails = {
     schoolName,
     applicantName: getStudentName(applicant),
     grade: normalizeText(applicant.grade),
@@ -222,14 +225,41 @@ async function notifyAdmissionAppointment(applicant, eventPayload, schoolId) {
     appointmentDateLabel: formatAdmissionAppointmentDateLabel(eventPayload.appointment.date),
     appointmentDate: eventPayload.appointment.date,
     appointmentTime: eventPayload.appointment.time,
-    notes: normalizeText(eventPayload.notes),
     calendarLocation: resolveAdmissionCalendarLocation(
       schoolName,
       eventPayload.appointment.type,
       eventPayload.appointment.locationLabel,
     ),
     durationMinutes: 30,
+  };
+  const notifications = [];
+  if (toEmail) {
+    notifications.push(sendAdmissionAppointmentEmail({
+      ...appointmentDetails,
+      toEmail,
+      toName: normalizeText(applicant.guardian?.name) || 'Acudiente',
+      notes: normalizeText(eventPayload.notes),
+    }));
+  }
+  notifications.push(sendBerckleyAdmissionsOfficeAppointmentEmail({
+    ...appointmentDetails,
+    schoolId,
+    birthDate: formatApplicantBirthDate(applicant.student?.birthDate),
+    previousSchool: normalizeText(applicant.student?.previousSchool),
+    guardianName: normalizeText(applicant.guardian?.name),
+    guardianEmail: toEmail,
+    guardianPhone: normalizeText(applicant.guardian?.phone),
+    notes: normalizeText(eventPayload.notes),
+    source: normalizeText(applicant.source?.referenceOrigin) || 'Portal de admisiones',
+    rescheduled,
+  }));
+  const results = await Promise.allSettled(notifications);
+  results.forEach((result) => {
+    if (result.status === 'rejected') {
+      console.warn(`[ADMISSION_APPOINTMENT_EMAIL_FAILED] applicantId=${applicant._id} error=${result.reason?.message || result.reason}`);
+    }
   });
+  return results;
 }
 
 function normalizeStageKey(value) {
@@ -989,9 +1019,28 @@ router.patch('/:applicantId/events/:eventId', async (req, res) => {
     if (!applicant) return null;
     const eventItem = applicant.admissionEvents.id(req.params.eventId);
     if (!eventItem) return res.status(404).json({ message: 'Evento no encontrado' });
+    const previousAppointment = {
+      type: eventItem.appointment?.type || '',
+      date: eventItem.appointment?.date || '',
+      time: eventItem.appointment?.time || '',
+    };
     const payload = buildEventPayload({ ...eventItem.toObject(), ...req.body }, req);
     Object.assign(eventItem, payload);
     await applicant.save();
+    const nextAppointment = payload.appointment || {};
+    const appointmentChanged = Boolean(nextAppointment.type && nextAppointment.date && nextAppointment.time)
+      && (previousAppointment.type !== nextAppointment.type
+        || previousAppointment.date !== nextAppointment.date
+        || previousAppointment.time !== nextAppointment.time);
+    if (appointmentChanged) {
+      try {
+        await notifyAdmissionAppointment(applicant, payload, req.user.schoolId, {
+          rescheduled: Boolean(previousAppointment.type),
+        });
+      } catch (emailError) {
+        console.warn(`[ADMISSION_APPOINTMENT_EMAIL_FAILED] applicantId=${applicant._id} error=${emailError.message}`);
+      }
+    }
     return res.status(200).json({ applicant: serializeApplicant(applicant), summary: await buildAdmissionSummary(req.user.schoolId) });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo actualizar el evento.' });
