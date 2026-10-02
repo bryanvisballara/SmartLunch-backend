@@ -40,6 +40,16 @@
 .admissions-page textarea::placeholder {
   text-transform: uppercase;
 }
+.admissions-page .academic-secretary__marketing .academic-secretary__form input,
+.admissions-page .academic-secretary__marketing .academic-secretary__form textarea,
+.admissions-page .academic-secretary__marketing .academic-secretary__subform input,
+.admissions-page .academic-secretary__marketing .academic-secretary__subform textarea,
+.admissions-page .academic-secretary__marketing .academic-secretary__form input::placeholder,
+.admissions-page .academic-secretary__marketing .academic-secretary__form textarea::placeholder,
+.admissions-page .academic-secretary__marketing .academic-secretary__subform input::placeholder,
+.admissions-page .academic-secretary__marketing .academic-secretary__subform textarea::placeholder {
+  text-transform: none;
+}
 
 .admissions-stage {
   width: min(100%, 1440px);
