@@ -16,6 +16,9 @@ const {
   saveAgendaWindows,
   addAgendaBlock,
   removeAgendaBlock,
+  setAgendaClosedDate,
+  isSlotBlocked,
+  resolveSlotTimes,
 } = require('../services/admissionAgenda.service');
 const {
   uploadCampusMaterialsMiddleware,
@@ -660,6 +663,15 @@ router.delete('/agenda-settings/blocks/:blockId', async (req, res) => {
   }
 });
 
+router.post('/agenda-settings/closed-dates', async (req, res) => {
+  try {
+    const settings = await setAgendaClosedDate(req.user.schoolId, req.body?.date, Boolean(req.body?.closed));
+    return res.status(200).json(settings);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo bloquear ese día.' });
+  }
+});
+
 router.post('/marketing/uploads/image', uploadAdmissionMarketingImage, async (req, res) => {
   try {
     const [uploadedFile] = Array.isArray(req.files) ? req.files : [];
@@ -1013,6 +1025,38 @@ router.post('/:applicantId/events', async (req, res) => {
   }
 });
 
+async function assertAppointmentSlotOpen(schoolId, date, time, { applicantId, eventId } = {}) {
+  const [year, month, day] = String(date || '').split('-').map(Number);
+  const weekday = new Date(year, month - 1, day).getDay();
+  if (!year || !month || !day || weekday === 0 || weekday === 6) {
+    const error = new Error('Las citas se agendan de lunes a viernes.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const settings = await getAgendaSettings(schoolId);
+  if (!resolveSlotTimes(settings).includes(time) || isSlotBlocked(settings, date, time)) {
+    const error = new Error('Esa hora está bloqueada o fuera del horario disponible.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const applicants = await AdmissionApplicant.find({
+    schoolId,
+    deletedAt: null,
+    'admissionEvents.appointment.date': date,
+    'admissionEvents.appointment.time': time,
+  }).select('admissionEvents').lean();
+  const taken = applicants.some((applicant) => (applicant.admissionEvents || []).some((event) => (
+    !(String(applicant._id) === String(applicantId) && String(event._id) === String(eventId))
+    && event.appointment?.date === date
+    && event.appointment?.time === time
+  )));
+  if (taken) {
+    const error = new Error('Esa hora ya tiene una cita agendada.');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
 router.patch('/:applicantId/events/:eventId', async (req, res) => {
   try {
     const applicant = await findApplicant(req, res);
@@ -1025,13 +1069,21 @@ router.patch('/:applicantId/events/:eventId', async (req, res) => {
       time: eventItem.appointment?.time || '',
     };
     const payload = buildEventPayload({ ...eventItem.toObject(), ...req.body }, req);
-    Object.assign(eventItem, payload);
-    await applicant.save();
     const nextAppointment = payload.appointment || {};
     const appointmentChanged = Boolean(nextAppointment.type && nextAppointment.date && nextAppointment.time)
       && (previousAppointment.type !== nextAppointment.type
         || previousAppointment.date !== nextAppointment.date
         || previousAppointment.time !== nextAppointment.time);
+    const slotMoved = Boolean(nextAppointment.date && nextAppointment.time)
+      && (previousAppointment.date !== nextAppointment.date || previousAppointment.time !== nextAppointment.time);
+    if (slotMoved) {
+      await assertAppointmentSlotOpen(req.user.schoolId, nextAppointment.date, nextAppointment.time, {
+        applicantId: applicant._id,
+        eventId: eventItem._id,
+      });
+    }
+    Object.assign(eventItem, payload);
+    await applicant.save();
     if (appointmentChanged) {
       try {
         await notifyAdmissionAppointment(applicant, payload, req.user.schoolId, {

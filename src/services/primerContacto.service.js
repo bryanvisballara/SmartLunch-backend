@@ -267,16 +267,15 @@ function buildAvailabilityDays({
     if (!isWeekday(date)) continue;
 
     const dateKey = toDateKey(date);
-    const slots = slotTimes
-      .filter((time) => !isSlotBlocked(agendaSettings, dateKey, time))
-      .map((time) => {
-        const available = !isSlotBusy(busyAppointments, dateKey, time);
-        return {
-          time,
-          label: formatTimeLabel(time),
-          available,
-        };
-      });
+    const slots = slotTimes.map((time) => {
+      const blocked = isSlotBlocked(agendaSettings, dateKey, time);
+      const busy = isSlotBusy(busyAppointments, dateKey, time);
+      return {
+        time,
+        label: formatTimeLabel(time),
+        available: !blocked && !busy,
+      };
+    });
 
     days.push({
       date: dateKey,

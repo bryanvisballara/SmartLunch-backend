@@ -801,7 +801,8 @@ export default function PrimerContactoPage() {
                               const day = daysByDate.get(dateKey);
                               const isPast = dateKey < todayKey;
                               const isWeekend = cell.getDay() === 0 || cell.getDay() === 6;
-                              const hasSlots = Boolean(day?.availableCount);
+                              const hasSlots = Boolean(day?.slots?.length);
+                              const hasOpenSlots = Boolean(day?.availableCount);
                               const disabled = isPast || isWeekend || !hasSlots;
                               const isSelected = selectedDate === dateKey || form.appointmentDate === dateKey;
                               return (
@@ -812,11 +813,12 @@ export default function PrimerContactoPage() {
                                     'primer-contacto-calendar__day',
                                     isSelected ? 'is-selected' : '',
                                     dateKey === todayKey ? 'is-today' : '',
-                                    hasSlots ? 'has-slots' : '',
+                                    hasOpenSlots ? 'has-slots' : '',
+                                    hasSlots && !hasOpenSlots ? 'is-closed' : '',
                                   ].filter(Boolean).join(' ')}
                                   disabled={disabled}
                                   onClick={() => selectDate(dateKey)}
-                                  title={hasSlots ? `${day.availableCount} horarios disponibles` : 'Sin horarios'}
+                                  title={hasOpenSlots ? `${day.availableCount} horarios disponibles` : hasSlots ? 'Sin cupos' : 'Sin horarios'}
                                 >
                                   {cell.getDate()}
                                 </button>
@@ -824,7 +826,7 @@ export default function PrimerContactoPage() {
                             })}
                           </div>
                           <p className="primer-contacto-calendar__hint">
-                            Toca un día con punto para ver sus horas.
+                            Toca un día para ver sus horas. Las que digan “No disponible” ya están ocupadas o bloqueadas.
                           </p>
                         </aside>
 
@@ -839,7 +841,7 @@ export default function PrimerContactoPage() {
                             <div className="primer-contacto-empty-day">
                               Primero elige un día en el calendario.
                             </div>
-                          ) : !selectedDay || selectedDay.availableCount === 0 ? (
+                          ) : !selectedDay?.slots?.length ? (
                             <div className="primer-contacto-empty-day">
                               No hay cupos ese día. Elige otra fecha.
                             </div>
@@ -849,11 +851,11 @@ export default function PrimerContactoPage() {
                                 <button
                                   key={`${selectedDay.date}-${slot.time}`}
                                   type="button"
-                                  className={`primer-contacto-slot${form.appointmentDate === selectedDay.date && form.appointmentTime === slot.time ? ' is-selected' : ''}`}
+                                  className={`primer-contacto-slot${form.appointmentDate === selectedDay.date && form.appointmentTime === slot.time ? ' is-selected' : ''}${slot.available ? '' : ' is-unavailable'}`}
                                   disabled={!slot.available}
                                   onClick={() => selectSlot(selectedDay.date, slot.time)}
                                 >
-                                  {slot.label}
+                                  {slot.available ? slot.label : `${slot.label} · No disponible`}
                                 </button>
                               ))}
                             </div>

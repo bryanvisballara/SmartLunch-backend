@@ -77,7 +77,18 @@ function resolveSlotTimes(settings) {
   return times;
 }
 
+function normalizeClosedDates(settings) {
+  return [...new Set((Array.isArray(settings?.closedDates) ? settings.closedDates : [])
+    .map((date) => String(date || '').trim())
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
+}
+
+function isDateClosed(settings, dateKey) {
+  return normalizeClosedDates(settings).includes(String(dateKey || ''));
+}
+
 function isSlotBlocked(settings, dateKey, time) {
+  if (isDateClosed(settings, dateKey)) return true;
   return (Array.isArray(settings?.blocks) ? settings.blocks : []).some((block) => {
     if (String(block?.time || '') !== String(time || '')) return false;
     if (block.scope === 'weekday') return true;
@@ -112,6 +123,7 @@ function serializeAgendaSettings(settings) {
     slotTimes,
     publishedLabel: describeWindows(windows),
     blocks,
+    closedDates: normalizeClosedDates(source),
   };
 }
 
@@ -252,6 +264,26 @@ async function removeAgendaBlock(schoolId, blockId) {
   return serializeAgendaSettings(settings);
 }
 
+async function setAgendaClosedDate(schoolId, date, closed) {
+  const normalizedDate = String(date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    const error = new Error('Elige un día válido para bloquear.');
+    error.statusCode = 400;
+    throw error;
+  }
+  let settings = await findAgendaSettings(schoolId);
+  if (!settings) {
+    settings = new AdmissionAgendaSettings({ schoolId });
+  }
+  const closedDates = new Set(normalizeClosedDates(settings));
+  if (closed) closedDates.add(normalizedDate);
+  else closedDates.delete(normalizedDate);
+  settings.closedDates = [...closedDates].sort();
+  settings.markModified('closedDates');
+  await settings.save();
+  return serializeAgendaSettings(settings);
+}
+
 module.exports = {
   SLOT_DURATION_MINUTES,
   LEGACY_WINDOWS,
@@ -259,10 +291,12 @@ module.exports = {
   formatTimeLabel,
   resolveWindows,
   resolveSlotTimes,
+  isDateClosed,
   isSlotBlocked,
   serializeAgendaSettings,
   getAgendaSettings,
   saveAgendaWindows,
   addAgendaBlock,
   removeAgendaBlock,
+  setAgendaClosedDate,
 };

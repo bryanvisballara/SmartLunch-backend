@@ -1310,6 +1310,74 @@
   font-weight: 900;
 }
 
+.admissions-calendar-day.is-closed {
+  background: #fff7ed;
+}
+
+.admissions-calendar-actions .secondary-button.is-active {
+  background: #9a3412;
+  border-color: #9a3412;
+  color: #fff;
+}
+
+.admissions-agenda-public-link,
+.admissions-agenda-appointment-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.admissions-agenda-public-link span,
+.admissions-agenda-appointment-editor strong {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admissions-agenda-public-link p,
+.admissions-agenda-block-mode {
+  margin: 4px 0 0;
+  color: #475467;
+  font-size: 0.88rem;
+}
+
+.admissions-agenda-public-link a {
+  display: inline-block;
+  margin-top: 6px;
+  color: #1c7c8c;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.admissions-agenda-appointment-editor {
+  display: grid;
+}
+
+.admissions-agenda-appointment-editor label {
+  display: grid;
+  gap: 6px;
+  font-weight: 800;
+}
+
+.admissions-agenda-appointment-editor input,
+.admissions-agenda-appointment-editor select {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+}
+
 .admissions-calendar-toolbar {
   display: flex;
   align-items: center;
@@ -1482,8 +1550,7 @@
 
 .admissions-calendar-event-card {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   padding: 10px;
   border: 1px solid #e4e7ec;
@@ -1491,7 +1558,42 @@
   background: #f8fafc;
   color: #111827;
   text-align: left;
+}
+
+.admissions-calendar-event-open {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
+}
+
+.admissions-calendar-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admissions-calendar-event-actions button {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.admissions-calendar-event-actions button:last-child {
+  color: #9a3412;
 }
 
 .admissions-calendar-event-card:hover {
@@ -1514,6 +1616,12 @@
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.admissions-calendar-event-card .admissions-calendar-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .admissions-calendar-event-card strong,

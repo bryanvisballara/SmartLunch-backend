@@ -19,6 +19,7 @@ const admissionAgendaSettingsSchema = new mongoose.Schema({
   availableTo: { type: String, default: '16:00', trim: true },
   windows: { type: [admissionAgendaWindowSchema], default: [] },
   blocks: { type: [admissionAgendaBlockSchema], default: [] },
+  closedDates: { type: [String], default: [] },
 }, { timestamps: true });
 
 module.exports = registerSchoolScopedModel('AdmissionAgendaSettings', admissionAgendaSettingsSchema);

@@ -7,6 +7,7 @@ export const getAdmissionAgendaSettings = () => api.get(`${basePath}/agenda-sett
 export const saveAdmissionAgendaSettings = (data) => api.put(`${basePath}/agenda-settings`, data);
 export const blockAdmissionAgendaSlot = (data) => api.post(`${basePath}/agenda-settings/blocks`, data);
 export const unblockAdmissionAgendaSlot = (blockId) => api.delete(`${basePath}/agenda-settings/blocks/${blockId}`);
+export const setAdmissionAgendaClosedDate = (date, closed) => api.post(`${basePath}/agenda-settings/closed-dates`, { date, closed });
 export const getAdmissionApplicant = (applicantId) => api.get(`${basePath}/${applicantId}`);
 export const createAdmissionApplicant = (data) => api.post(basePath, data);
 export const updateAdmissionApplicant = (applicantId, data) => api.patch(`${basePath}/${applicantId}`, data);

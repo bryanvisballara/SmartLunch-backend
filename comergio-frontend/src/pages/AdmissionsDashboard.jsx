@@ -32,6 +32,7 @@ import {
   setAdmissionStage,
   unblockAdmissionAgendaSlot,
   blockAdmissionAgendaSlot,
+  setAdmissionAgendaClosedDate,
   transitionAdmissionStage,
   updateAdmissionApplicant,
   updateAdmissionDocument,
@@ -434,6 +435,9 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const [agendaWindowsDraft, setAgendaWindowsDraft] = useState(DEFAULT_AGENDA_WINDOWS);
   const [agendaSettingsBusy, setAgendaSettingsBusy] = useState(false);
   const [agendaLoadError, setAgendaLoadError] = useState('');
+  const [blockingFullDays, setBlockingFullDays] = useState(false);
+  const [agendaLinkCopied, setAgendaLinkCopied] = useState(false);
+  const [agendaAppointmentEditor, setAgendaAppointmentEditor] = useState(null);
   const [selectedStageApplicantIds, setSelectedStageApplicantIds] = useState([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [filters, setFilters] = useState({
@@ -478,9 +482,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const blockedAgendaDates = useMemo(() => new Set(
     agendaBlocks.filter((block) => block.scope === 'date' && block.date).map((block) => block.date)
   ), [agendaBlocks]);
+  const closedAgendaDates = useMemo(() => new Set(agendaSettings?.closedDates || []), [agendaSettings]);
+  const publicAgendaLink = `${window.location.origin}/berckleyprimercontacto`;
   const agendaSlotTimes = agendaSettings?.slotTimes?.length
     ? agendaSettings.slotTimes
     : buildAgendaSlotTimes(DEFAULT_AGENDA_WINDOWS);
+  const selectedAgendaDayClosed = closedAgendaDates.has(selectedAgendaDate);
   const selectedAgendaSlots = useMemo(() => agendaSlotTimes.map((time) => {
     const appointments = selectedAgendaEvents.filter((eventItem) => eventItem.appointment?.time === time);
     const dateBlock = agendaBlocks.find((block) => block.scope === 'date' && block.date === selectedAgendaDate && block.time === time) || null;
@@ -491,9 +498,9 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       appointments,
       dateBlock,
       weekdayBlock,
-      blocked: Boolean(dateBlock || weekdayBlock),
+      blocked: Boolean(dateBlock || weekdayBlock || selectedAgendaDayClosed),
     };
-  }), [agendaBlocks, agendaSlotTimes, selectedAgendaDate, selectedAgendaEvents]);
+  }), [agendaBlocks, agendaSlotTimes, selectedAgendaDate, selectedAgendaDayClosed, selectedAgendaEvents]);
   const selectedAgendaIsWeekend = useMemo(() => {
     const [year, month, day] = String(selectedAgendaDate || '').split('-').map(Number);
     if (!year || !month || !day) return false;
@@ -1011,6 +1018,19 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     if (!day.inCurrentMonth) {
       setAgendaMonthDate(new Date(day.date.getFullYear(), day.date.getMonth(), 1));
     }
+    if (blockingFullDays) {
+      toggleClosedAgendaDate(day.key);
+    }
+  };
+
+  const copyPublicAgendaLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicAgendaLink);
+      setAgendaLinkCopied(true);
+      setMessage('Enlace copiado. Quien lo abra elige día y hora sin ver nombres de otras citas.');
+    } catch (copyError) {
+      setError('No se pudo copiar el enlace. Selecciónalo y cópialo manualmente.');
+    }
   };
 
   const applyAgendaSettings = (data) => {
@@ -1101,6 +1121,90 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
       setError(requestError?.response?.data?.message || 'No se pudo bloquear esa hora.');
     } finally {
       setAgendaSettingsBusy(false);
+    }
+  };
+
+  const toggleClosedAgendaDate = async (dateKey) => {
+    if (!dateKey) return;
+    const willClose = !(agendaSettings?.closedDates || []).includes(dateKey);
+    setAgendaSettingsBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await setAdmissionAgendaClosedDate(dateKey, willClose);
+      applyAgendaSettings(response.data || {});
+      setMessage(willClose
+        ? 'Día bloqueado. Las familias no podrán agendar ese día.'
+        : 'Día abierto. Vuelve a aparecer en el enlace público.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo bloquear ese día.');
+    } finally {
+      setAgendaSettingsBusy(false);
+    }
+  };
+
+  const openAgendaAppointmentEditor = (eventItem, mode) => {
+    setAgendaAppointmentEditor({
+      mode,
+      applicantId: eventItem.applicantId,
+      eventId: eventItem._id || eventItem.id,
+      studentName: eventItem.studentName || '',
+      title: eventItem.title || '',
+      notes: eventItem.notes || '',
+      stageKey: eventItem.stageKey || 'agendamiento',
+      responsible: eventItem.responsible || '',
+      clientVisible: Boolean(eventItem.clientVisible),
+      type: eventItem.appointment?.type || 'in_person',
+      date: eventItem.appointment?.date || selectedAgendaDate,
+      time: eventItem.appointment?.time || agendaSlotTimes[0] || '',
+      guardianEmail: eventItem.appointment?.guardianEmail || '',
+    });
+  };
+
+  const saveAgendaAppointment = async (event) => {
+    event.preventDefault();
+    if (!agendaAppointmentEditor?.applicantId || !agendaAppointmentEditor?.eventId) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await updateAdmissionEvent(agendaAppointmentEditor.applicantId, agendaAppointmentEditor.eventId, {
+        title: agendaAppointmentEditor.title,
+        notes: agendaAppointmentEditor.notes,
+        stageKey: agendaAppointmentEditor.stageKey,
+        responsible: agendaAppointmentEditor.responsible,
+        clientVisible: agendaAppointmentEditor.clientVisible,
+        appointmentType: agendaAppointmentEditor.type,
+        appointmentDate: agendaAppointmentEditor.date,
+        appointmentTime: agendaAppointmentEditor.time,
+        guardianEmail: agendaAppointmentEditor.guardianEmail,
+      });
+      setAgendaAppointmentEditor(null);
+      setMessage(agendaAppointmentEditor.mode === 'move' ? 'Cita rodada. Se avisó a la familia y a admisiones.' : 'Cita actualizada.');
+      await loadAdmissions(filters, { keepSelection: true });
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo actualizar la cita.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeAgendaAppointment = async (eventItem) => {
+    const eventId = eventItem?._id || eventItem?.id;
+    if (!eventItem?.applicantId || !eventId) return;
+    if (!window.confirm(`¿Eliminar la cita de ${eventItem.studentName || 'este aspirante'}?`)) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await deleteAdmissionEvent(eventItem.applicantId, eventId);
+      if (agendaAppointmentEditor?.eventId === eventId) setAgendaAppointmentEditor(null);
+      setMessage('Cita eliminada. Ese horario vuelve a quedar libre.');
+      await loadAdmissions(filters, { keepSelection: true });
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo eliminar la cita.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1528,11 +1632,27 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                   <h2>{agendaMonthLabel}</h2>
                 </div>
                 <div className="admissions-calendar-actions">
+                  <button className={`secondary-button${blockingFullDays ? ' is-active' : ''}`} type="button" onClick={() => setBlockingFullDays((previous) => !previous)}>
+                    {blockingFullDays ? 'Listo, salir de bloqueo' : 'Bloquear días completos'}
+                  </button>
                   <button className="secondary-button" type="button" onClick={() => moveAgendaMonth(-1)} aria-label="Mes anterior">‹</button>
                   <button className="secondary-button" type="button" onClick={goToTodayAgenda}>Hoy</button>
                   <button className="secondary-button" type="button" onClick={() => moveAgendaMonth(1)} aria-label="Mes siguiente">›</button>
                 </div>
               </div>
+              <div className="admissions-agenda-public-link">
+                <div>
+                  <span>Enlace para agendar</span>
+                  <p>Compártelo con un interesado. Elige día y hora. Los días y horas bloqueados, y las citas ya tomadas, salen ocupados sin mostrar nombres.</p>
+                  <a href={publicAgendaLink} target="_blank" rel="noreferrer">{publicAgendaLink}</a>
+                </div>
+                <button className="primary-button admissions-primary" type="button" onClick={copyPublicAgendaLink}>
+                  {agendaLinkCopied ? 'Enlace copiado' : 'Copiar enlace'}
+                </button>
+              </div>
+              {blockingFullDays ? (
+                <p className="admissions-agenda-block-mode">Toca los días del calendario para bloquearlos por completo. Vuelve a tocar un día bloqueado para abrirlo.</p>
+              ) : null}
               <form className="admissions-agenda-availability" onSubmit={saveAgendaRange}>
                 <div>
                   <span>Horario disponible</span>
@@ -1588,11 +1708,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                     const isSelected = selectedAgendaDate === day.key;
                     const isToday = todayDateKey === day.key;
                     const hasBlock = blockedAgendaDates.has(day.key);
+                    const isClosed = closedAgendaDates.has(day.key);
                     return (
-                      <button className={`admissions-calendar-day${day.inCurrentMonth ? '' : ' is-muted'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}${hasBlock ? ' has-block' : ''}`} key={day.key} type="button" onClick={() => selectAgendaDay(day)}>
+                      <button className={`admissions-calendar-day${day.inCurrentMonth ? '' : ' is-muted'}${isSelected ? ' is-selected' : ''}${isToday ? ' is-today' : ''}${hasBlock ? ' has-block' : ''}${isClosed ? ' is-closed' : ''}`} key={day.key} type="button" onClick={() => selectAgendaDay(day)}>
                         <span>{day.dayNumber}</span>
                         <div className="admissions-calendar-day-events">
-                          {hasBlock ? <em>Bloqueo</em> : null}
+                          {isClosed ? <em>Día bloqueado</em> : hasBlock ? <em>Bloqueo</em> : null}
                           {dayEvents.slice(0, 3).map((eventItem) => (
                             <small key={`${day.key}-${eventItem.applicantId}-${eventItem._id || eventItem.id || eventItem.createdAt}`}>{eventItem.appointment?.time || '--:--'} {eventItem.studentName}</small>
                           ))}
@@ -1607,32 +1728,73 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                     <span>{formatCalendarDayLabel(selectedAgendaDate)}</span>
                     <strong>{selectedAgendaEvents.length} cita(s)</strong>
                   </div>
+                  {agendaAppointmentEditor ? (
+                    <form className="admissions-agenda-appointment-editor" onSubmit={saveAgendaAppointment}>
+                      <strong>{agendaAppointmentEditor.mode === 'move' ? 'Rodar cita' : 'Modificar cita'} · {agendaAppointmentEditor.studentName}</strong>
+                      {agendaAppointmentEditor.mode === 'edit' ? (
+                        <label>
+                          <span>Tipo</span>
+                          <select value={agendaAppointmentEditor.type} onChange={(event) => setAgendaAppointmentEditor((previous) => ({ ...previous, type: event.target.value }))}>
+                            {APPOINTMENT_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </label>
+                      ) : null}
+                      <label>
+                        <span>Día</span>
+                        <input type="date" value={agendaAppointmentEditor.date} onChange={(event) => setAgendaAppointmentEditor((previous) => ({ ...previous, date: event.target.value }))} required />
+                      </label>
+                      <label>
+                        <span>Hora</span>
+                        <select value={agendaAppointmentEditor.time} onChange={(event) => setAgendaAppointmentEditor((previous) => ({ ...previous, time: event.target.value }))}>
+                          {agendaSlotTimes.map((time) => <option key={time} value={time}>{formatAgendaClock(time)}</option>)}
+                        </select>
+                      </label>
+                      <div className="admissions-agenda-window-actions">
+                        <button className="primary-button admissions-primary" disabled={busy} type="submit">
+                          {busy ? 'Guardando...' : agendaAppointmentEditor.mode === 'move' ? 'Rodar cita' : 'Guardar cambios'}
+                        </button>
+                        <button className="secondary-button" type="button" onClick={() => setAgendaAppointmentEditor(null)}>Cancelar</button>
+                      </div>
+                    </form>
+                  ) : null}
                   <div className="admissions-calendar-event-list">
                     {selectedAgendaEvents.length ? selectedAgendaEvents.map((eventItem) => (
-                      <button className="admissions-calendar-event-card" key={`${eventItem.applicantId}-${eventItem._id || eventItem.id || eventItem.createdAt}`} type="button" onClick={() => selectApplicant({ id: eventItem.applicantId, studentName: eventItem.studentName, student: {}, guardian: { name: eventItem.guardianName || '' } })}>
-                        <time>{eventItem.appointment?.time || formatAppointmentDateTime(eventItem.appointment)}</time>
-                        <div>
-                          <strong>{eventItem.studentName}</strong>
-                          <span>{eventItem.appointment?.label || getAppointmentTypeLabel(eventItem.appointment?.type)} · {eventItem.grade || 'SIN GRADO'}</span>
-                          <p>{eventItem.guardianName || 'Sin acudiente'} · {eventItem.title}</p>
+                      <article className="admissions-calendar-event-card" key={`${eventItem.applicantId}-${eventItem._id || eventItem.id || eventItem.createdAt}`}>
+                        <button className="admissions-calendar-event-open" type="button" onClick={() => selectApplicant({ id: eventItem.applicantId, studentName: eventItem.studentName, student: {}, guardian: { name: eventItem.guardianName || '' } })}>
+                          <time>{eventItem.appointment?.time || formatAppointmentDateTime(eventItem.appointment)}</time>
+                          <div>
+                            <strong>{eventItem.studentName}</strong>
+                            <span>{eventItem.appointment?.label || getAppointmentTypeLabel(eventItem.appointment?.type)} · {eventItem.grade || 'SIN GRADO'}</span>
+                            <p>{eventItem.guardianName || 'Sin acudiente'} · {eventItem.title}</p>
+                          </div>
+                        </button>
+                        <div className="admissions-calendar-event-actions">
+                          <button type="button" onClick={() => openAgendaAppointmentEditor(eventItem, 'edit')}>Modificar</button>
+                          <button type="button" onClick={() => openAgendaAppointmentEditor(eventItem, 'move')}>Rodar</button>
+                          <button type="button" onClick={() => removeAgendaAppointment(eventItem)}>Eliminar</button>
                         </div>
-                      </button>
+                      </article>
                     )) : <div className="empty-state">Sin citas agendadas.</div>}
                   </div>
                   <div className="admissions-agenda-blocks">
                     <div className="admissions-calendar-day-heading">
                       <span>Bloquear horas</span>
-                      <strong>Estas horas no aparecen para las familias</strong>
+                      <strong>{selectedAgendaDayClosed ? 'Día completo bloqueado' : 'Las familias ven estas horas como ocupadas'}</strong>
                     </div>
                     {agendaLoadError ? <p>{agendaLoadError}</p> : null}
                     {selectedAgendaIsWeekend ? <p>El formulario público solo ofrece lunes a viernes.</p> : null}
+                    {selectedAgendaDayClosed ? (
+                      <button className="secondary-button" disabled={agendaSettingsBusy} type="button" onClick={() => toggleClosedAgendaDate(selectedAgendaDate)}>
+                        Abrir este día
+                      </button>
+                    ) : null}
                     <div className="admissions-agenda-slot-list">
                       {selectedAgendaSlots.length ? selectedAgendaSlots.map((slot) => (
                         <article className={`admissions-agenda-slot${slot.blocked ? ' is-blocked' : ''}${slot.appointments.length ? ' is-busy' : ''}`} key={slot.time}>
                           <div className="admissions-agenda-slot-head">
                             <strong>{slot.label}</strong>
                             <span>
-                              {slot.weekdayBlock ? 'Bloqueada todos los días' : slot.dateBlock ? 'Bloqueada este día' : slot.appointments.length ? 'Ocupada' : 'Disponible'}
+                              {selectedAgendaDayClosed ? 'Día bloqueado' : slot.weekdayBlock ? 'Bloqueada todos los días' : slot.dateBlock ? 'Bloqueada este día' : slot.appointments.length ? 'Ocupada' : 'Disponible'}
                             </span>
                           </div>
                           {slot.appointments.length ? (

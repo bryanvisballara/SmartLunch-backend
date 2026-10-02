@@ -742,10 +742,17 @@
   color: #fff;
 }
 
-.primer-contacto-slot:disabled {
-  opacity: 0.35;
+.primer-contacto-slot:disabled,
+.primer-contacto-slot.is-unavailable {
+  opacity: 1;
   cursor: not-allowed;
-  text-decoration: line-through;
+  text-decoration: none;
+  background: #f2f4f7;
+  color: #667085;
+}
+
+.primer-contacto-calendar__day.is-closed {
+  color: #98a2b3;
 }
 
 .primer-contacto-empty-day {
