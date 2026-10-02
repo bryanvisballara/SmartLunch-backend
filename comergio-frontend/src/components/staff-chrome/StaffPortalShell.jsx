@@ -13,6 +13,7 @@ export default function StaffPortalShell({
   onRefresh,
   refreshDisabled = false,
   refreshLabel = 'Actualizar portal',
+  showRefreshButton = false,
   navLabel = 'Menú',
   navItems = [],
   activeKey = '',
@@ -140,6 +141,7 @@ export default function StaffPortalShell({
           portalKicker={portalLabel}
           refreshDisabled={refreshDisabled}
           refreshLabel={refreshLabel}
+          showRefreshButton={showRefreshButton}
           showNavToggle={enableMobileNav}
           userName={userName}
         />

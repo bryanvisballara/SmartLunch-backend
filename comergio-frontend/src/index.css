@@ -2740,6 +2740,23 @@ body.login-boot-active main.container {
   vertical-align: top;
 }
 
+.school-billing-row-detail.is-cancelled td {
+  color: #64748b;
+}
+
+.admin-school-billing__status.is-cancelled {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
 .school-billing-items-table {
   min-width: 0;
   font-size: 0.82rem;

@@ -35,6 +35,7 @@ export default function InstitutionalPortalHeader({
   onRefresh,
   refreshDisabled = false,
   refreshLabel = 'Actualizar portal',
+  showRefreshButton = false,
   enableNotifications = false,
   onNotificationNavigate = null,
   showNavToggle = false,
@@ -178,6 +179,23 @@ export default function InstitutionalPortalHeader({
       </div>
 
       <div className="staff-teacher-chrome__topbar-actions">
+        {showRefreshButton && onRefresh ? (
+          <button
+            aria-label={refreshLabel}
+            className={`staff-teacher-chrome__topbar-icon-btn staff-teacher-chrome__topbar-refresh${refreshDisabled ? ' is-busy' : ''}`}
+            disabled={refreshDisabled}
+            onClick={onRefreshClick}
+            title={refreshLabel}
+            type="button"
+          >
+            <svg fill="none" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 12a8 8 0 0 1-13.7 5.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+              <path d="M4 12a8 8 0 0 1 13.7-5.6" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+              <path d="M16.2 3.2v4.2h4.1" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+              <path d="M7.8 20.8v-4.2H3.7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+            </svg>
+          </button>
+        ) : null}
         {enableNotifications ? (
           <div className="staff-teacher-chrome__topbar-icon-wrap" ref={notificationsRef}>
             <button

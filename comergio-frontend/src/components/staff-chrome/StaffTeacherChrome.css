@@ -286,15 +286,23 @@ button.staff-teacher-chrome__nav-item,
 }
 
 .institutional-portal-header__helper-inline strong {
+  min-width: 0;
+  overflow: hidden;
   color: #0f2744;
   font-size: 0.92rem;
   font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .institutional-portal-header__helper-inline span {
+  min-width: 0;
+  overflow: hidden;
   color: #64748b;
   font-size: 0.74rem;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .staff-teacher-chrome__topbar-actions {
@@ -420,6 +428,19 @@ button.staff-teacher-chrome__nav-item,
 .staff-teacher-chrome__topbar-icon-btn:hover {
   background: #f8fafc;
   color: #0f766e;
+}
+
+.staff-teacher-chrome__topbar-refresh.is-busy svg {
+  animation: staff-refresh-spin 0.8s linear infinite;
+}
+
+.staff-teacher-chrome__topbar-icon-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@keyframes staff-refresh-spin {
+  to { transform: rotate(360deg); }
 }
 
 .staff-teacher-chrome__topbar-icon-btn svg {

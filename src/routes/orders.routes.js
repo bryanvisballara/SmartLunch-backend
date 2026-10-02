@@ -21,6 +21,7 @@ const {
 } = require('../services/notification.service');
 const {
   buildSchoolBillingStatementHtml,
+  buildSchoolBillingStatementsPrintHtml,
   serializeStatementOrder,
   resolveStatementHeaderParties,
 } = require('../utils/schoolBillingStatementDocument');
@@ -301,6 +302,21 @@ function normalizeSchoolBillingParty(value = '') {
 
 function schoolBillingPartiesMatch(left = '', right = '') {
   return normalizeSchoolBillingParty(left).toLowerCase() === normalizeSchoolBillingParty(right).toLowerCase();
+}
+
+function groupSchoolBillingOrdersByParty(orders = []) {
+  const groups = new Map();
+
+  orders.forEach((order) => {
+    const billingFor = normalizeSchoolBillingParty(order.schoolBillingFor).toLowerCase();
+    const billingResponsible = normalizeSchoolBillingParty(order.schoolBillingResponsible).toLowerCase();
+    const key = `${billingFor}::${billingResponsible}`;
+    const current = groups.get(key) || [];
+    current.push(order);
+    groups.set(key, current);
+  });
+
+  return Array.from(groups.values());
 }
 
 function pickSchoolBillingPartyLabel(orders = [], field) {
@@ -1554,20 +1570,88 @@ router.post('/school-billing/statements', roleMiddleware('admin'), async (req, r
     const userName = String(name || username || 'Administración');
     const orderIds = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
 
-    const orders = await loadSchoolBillingOrdersByIds({ schoolId, orderIds });
-    if (orders.length !== orderIds.length) {
-      return res.status(400).json({ message: 'Una o más órdenes no son válidas para cuenta de cobro colegio.' });
+    const requestedIds = Array.from(new Set(
+      orderIds
+        .map((value) => String(value || '').trim())
+        .filter((value) => mongoose.Types.ObjectId.isValid(value))
+    ));
+    if (!requestedIds.length) {
+      return res.status(400).json({ message: 'Debes seleccionar al menos una orden de cuenta de cobro colegio.' });
     }
 
-    const statement = await createSchoolBillingStatement({
-      schoolId,
-      schoolName,
-      userId,
-      userName,
-      orders,
-    });
+    const orders = await loadSchoolBillingOrdersByIds({ schoolId, orderIds: requestedIds });
+    const foundIds = new Set(orders.map((order) => String(order._id)));
+    const missingIds = requestedIds.filter((orderId) => !foundIds.has(orderId));
+    let skippedCancelledCount = 0;
 
-    return res.status(201).json(statement);
+    if (missingIds.length) {
+      const missingOrders = await Order.find({
+        _id: { $in: missingIds },
+        schoolId,
+        paymentMethod: 'school_billing',
+      }).select('_id status').lean();
+      const missingById = new Map(missingOrders.map((order) => [String(order._id), order]));
+      const unknownIds = missingIds.filter((orderId) => missingById.get(orderId)?.status !== 'cancelled');
+
+      if (unknownIds.length) {
+        return res.status(400).json({ message: 'Una o más órdenes no son válidas para cuenta de cobro colegio.' });
+      }
+
+      skippedCancelledCount = missingIds.length;
+    }
+
+    if (!orders.length) {
+      return res.status(400).json({
+        message: 'Las órdenes seleccionadas están anuladas y no se pueden incluir en una cuenta de cobro.',
+      });
+    }
+
+    const statements = [];
+    for (const group of groupSchoolBillingOrdersByParty(orders)) {
+      statements.push(await createSchoolBillingStatement({
+        schoolId,
+        schoolName,
+        userId,
+        userName,
+        orders: group,
+      }));
+    }
+
+    const documentHtml = statements.length === 1
+      ? statements[0].documentHtml
+      : buildSchoolBillingStatementsPrintHtml(statements.map((statement) => statement.documentHtml));
+    const messageParts = [
+      statements.length === 1
+        ? 'Se generó 1 cuenta de cobro.'
+        : `Se generaron ${statements.length} cuentas de cobro, una por cada dirigido y responsable.`,
+    ];
+    if (skippedCancelledCount) {
+      messageParts.push(
+        skippedCancelledCount === 1
+          ? '1 orden anulada no se incluyó.'
+          : `${skippedCancelledCount} órdenes anuladas no se incluyeron.`
+      );
+    }
+
+    const payload = statements.length === 1 ? statements[0].toObject() : {
+      statements: statements.map((statement) => ({
+        _id: statement._id,
+        statementNumber: statement.statementNumber,
+        billingFor: statement.billingFor,
+        billingResponsible: statement.billingResponsible,
+        orderCount: statement.orderCount,
+        totalAmount: statement.totalAmount,
+        createdAt: statement.createdAt,
+      })),
+    };
+
+    return res.status(201).json({
+      ...payload,
+      documentHtml,
+      statementCount: statements.length,
+      skippedCancelledCount,
+      message: messageParts.join(' '),
+    });
   } catch (error) {
     const statusCode = /seleccionar|incluidas|compartir/i.test(String(error.message || '')) ? 400 : 500;
     return res.status(statusCode).json({ message: error.message });

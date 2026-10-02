@@ -170,6 +170,7 @@ export default function TriviaSubjectWheel({
 
       {items.length ? (
         <>
+          <div className="trivia-wheel-stage">
           <div
             className={`trivia-wheel${items.length > 8 ? ' is-crowded' : ''}${waitingForCategory ? ' is-spinning-wait' : ''}${landingSpin ? ' is-spinning' : ''}${revealComplete ? ' is-landed' : ''}${dragAngle ? ' is-dragging' : ''}`}
             onPointerCancel={endGesture}
@@ -251,6 +252,7 @@ export default function TriviaSubjectWheel({
               <strong>{activeSpinning ? '…' : 'GIRAR'}</strong>
               <span aria-hidden="true">⟳</span>
             </button>
+          </div>
           </div>
 
           <div

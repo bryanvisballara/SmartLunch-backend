@@ -1578,8 +1578,16 @@ function AdminDashboard() {
     [approvalHistoryForActiveModule, selectedApprovalHistoryId]
   );
 
+  const cancelledSchoolBillingOrders = useMemo(
+    () => (schoolBillingOrders || []).filter((order) => String(order.status || '').toLowerCase() === 'cancelled'),
+    [schoolBillingOrders]
+  );
+
   const pendingSchoolBillingOrders = useMemo(
-    () => (schoolBillingOrders || []).filter((order) => String(order.schoolBillingStatus || 'pending') !== 'collected'),
+    () => (schoolBillingOrders || []).filter((order) => (
+      String(order.schoolBillingStatus || 'pending') !== 'collected'
+      && String(order.status || '').toLowerCase() !== 'cancelled'
+    )),
     [schoolBillingOrders]
   );
 
@@ -1589,7 +1597,9 @@ function AdminDashboard() {
   );
 
   const selectableSchoolBillingOrders = useMemo(
-    () => pendingSchoolBillingOrders.filter((order) => !order.schoolBillingStatementId),
+    () => pendingSchoolBillingOrders.filter((order) => (
+      !order.schoolBillingStatementId && String(order.status || '').toLowerCase() !== 'cancelled'
+    )),
     [pendingSchoolBillingOrders]
   );
 
@@ -3022,7 +3032,7 @@ function AdminDashboard() {
         loadSchoolBillingOrders(schoolBillingFilters),
         loadSchoolBillingStatements(),
       ]);
-    }, 'Cuenta de cobro generada y guardada en el historial.');
+    }, 'Cuentas de cobro generadas y guardadas en el historial.');
   };
 
   const onOpenSchoolBillingStatement = (statementId) => {
@@ -5776,6 +5786,7 @@ function AdminDashboard() {
       portalLabel="Admin"
       refreshDisabled={loading}
       refreshLabel={loading ? 'Cargando...' : 'Actualizar portal'}
+      showRefreshButton
       schoolName={getSchoolDisplayName(authUser, 'Colegio')}
       userName={authUser?.name || authUser?.username || 'Admin'}
     >
@@ -7144,7 +7155,7 @@ function AdminDashboard() {
           <div className="card admin-school-billing__card">
             <h4>Generar cuenta de cobro</h4>
             <p className="helper">
-              Selecciona órdenes pendientes con el mismo dirigido a y responsable. El PDF quedará guardado en el historial.
+              Selecciona las órdenes pendientes. Si tienen distinto dirigido o responsable, se genera una cuenta por cada grupo. Las órdenes anuladas no se incluyen.
             </p>
             <div className="admin-school-billing__action-row">
               <button
@@ -7168,6 +7179,56 @@ function AdminDashboard() {
           </div>
 
           {schoolBillingOrders.length === 0 ? <p>No hay cuentas de cobro colegio para los filtros seleccionados.</p> : null}
+
+          {cancelledSchoolBillingOrders.length > 0 ? (
+            <div className="card admin-school-billing__card">
+              <h4>Órdenes anuladas ({cancelledSchoolBillingOrders.length})</h4>
+              <p className="helper">Estas órdenes se anularon y no entran en una cuenta de cobro.</p>
+              <div className="admin-school-billing__table-wrap">
+                <table className="simple-table admin-school-billing__table">
+                  <thead>
+                    <tr>
+                      <th>Orden</th>
+                      <th>Tienda</th>
+                      <th>Vendedor</th>
+                      <th>Alumno</th>
+                      <th>Dirigido a</th>
+                      <th>Responsable</th>
+                      <th>Total</th>
+                      <th>Fecha y hora</th>
+                      <th>Detalle de productos</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cancelledSchoolBillingOrders.map((order) => (
+                      <tr key={`cancelled-${order._id}`} className="school-billing-row-detail is-cancelled">
+                        <td>{order.orderNumber || order._id}</td>
+                        <td>{order.storeId?.name || 'N/A'}</td>
+                        <td>{order.vendorId?.name || order.vendorId?.username || 'N/A'}</td>
+                        <td>{formatOrderCustomerName(order)}</td>
+                        <td>{order.schoolBillingFor || 'N/A'}</td>
+                        <td>{order.schoolBillingResponsible || 'N/A'}</td>
+                        <td>{formatCurrency(order.total)}</td>
+                        <td>{formatDateTime(order.createdAt)}</td>
+                        <td>
+                          <ul className="admin-school-billing__items">
+                            {(order.items || []).map((item, index) => (
+                              <li key={`${order._id}-cancelled-item-${index}`}>
+                                <span>{item.nameSnapshot || 'Producto'}</span>
+                                <small>x{item.quantity} · {formatCurrency(item.subtotal)}</small>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                        <td><span className="admin-school-billing__status is-cancelled">ANULADA</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           {pendingSchoolBillingOrders.length > 0 ? (
             <div className="card admin-school-billing__card">
@@ -7198,11 +7259,15 @@ function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pendingSchoolBillingOrders.map((order) => (
+                    {pendingSchoolBillingOrders.map((order) => {
+                      const isCancelledOrder = String(order.status || '').toLowerCase() === 'cancelled';
+                      return (
                       <tr key={`summary-${order._id}`} className="school-billing-row-detail">
                         <td>
                           {order.schoolBillingStatementId ? (
                             <span className="helper">En historial</span>
+                          ) : isCancelledOrder ? (
+                            <span className="helper">Anulada</span>
                           ) : (
                             <input
                               aria-label={`Seleccionar orden ${order.orderNumber || order._id}`}
@@ -7230,14 +7295,17 @@ function AdminDashboard() {
                             ))}
                           </ul>
                         </td>
-                        <td>PENDIENTE</td>
+                        <td>{isCancelledOrder ? 'ANULADA' : 'PENDIENTE'}</td>
                         <td>
-                          <button className="btn btn-primary" type="button" onClick={() => onMarkSchoolBillingCollected(order._id)}>
-                            Cobrado
-                          </button>
+                          {isCancelledOrder ? null : (
+                            <button className="btn btn-primary" type="button" onClick={() => onMarkSchoolBillingCollected(order._id)}>
+                              Cobrado
+                            </button>
+                          )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
