@@ -2,6 +2,7 @@ import api, { getApiBaseUrl } from '../lib/api';
 
 export const createOrder = (data) => api.post('/orders', data);
 export const getOrders = (params = {}) => api.get('/orders', { params });
+export const getProductSalesSummary = (params = {}) => api.get('/orders/product-sales-summary', { params });
 export const getComanderaOrders = (params = {}) => api.get('/orders/comandera', { params });
 export const dispatchOrder = (id) => api.post(`/orders/${id}/dispatch`);
 export const getPreordenesOrders = (params = {}) => api.get('/orders/preordenes', { params });

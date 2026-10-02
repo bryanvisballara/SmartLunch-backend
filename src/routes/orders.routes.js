@@ -1021,69 +1021,95 @@ router.post('/', roleMiddleware('vendor', 'admin'), async (req, res) => {
   }
 });
 
+function buildAdminSalesHistoryFilter(req) {
+  const { schoolId } = req.user;
+  const {
+    studentId,
+    storeId,
+    from,
+    to,
+    status,
+    includeCancelled,
+    includePendingPreorders,
+    paymentMethod,
+    productId,
+  } = req.query;
+
+  const filter = { schoolId };
+
+  if (status) {
+    filter.status = status;
+  } else if (String(includeCancelled).toLowerCase() !== 'true') {
+    filter.status = 'completed';
+  }
+
+  if (String(includePendingPreorders).toLowerCase() === 'true') {
+    const statusFilter = filter.status;
+    delete filter.status;
+    filter.$or = [
+      statusFilter ? { status: statusFilter } : { status: { $ne: 'cancelled' } },
+      { orderType: 'preorder', preorderStatus: 'pending' },
+    ];
+  }
+
+  if (studentId) {
+    filter.studentId = studentId;
+  }
+
+  if (storeId) {
+    filter.storeId = storeId;
+  }
+
+  if (paymentMethod) {
+    const methodFilter = paymentMethodFilterValue(paymentMethod);
+    if (methodFilter) {
+      filter.paymentMethod = methodFilter;
+    }
+  }
+
+  if (from || to) {
+    filter.createdAt = {};
+    if (from) {
+      const fromDate = resolveDateQueryBoundary(from, 'start');
+      if (!fromDate) {
+        const error = new Error('Invalid from date');
+        error.statusCode = 400;
+        throw error;
+      }
+      filter.createdAt.$gte = fromDate;
+    }
+    if (to) {
+      const toDate = resolveDateQueryBoundary(to, 'end');
+      if (!toDate) {
+        const error = new Error('Invalid to date');
+        error.statusCode = 400;
+        throw error;
+      }
+      filter.createdAt.$lte = toDate;
+    }
+  }
+
+  const normalizedProductId = String(productId || '').trim();
+  if (normalizedProductId) {
+    if (!mongoose.Types.ObjectId.isValid(normalizedProductId)) {
+      const error = new Error('Invalid productId');
+      error.statusCode = 400;
+      throw error;
+    }
+    filter.items = { $elemMatch: { productId: new mongoose.Types.ObjectId(normalizedProductId) } };
+  }
+
+  return filter;
+}
+
 router.get('/', async (req, res) => {
   try {
     const { schoolId, role } = req.user;
-    const {
-      studentId,
-      storeId,
-      from,
-      to,
-      status,
-      includeCancelled,
-      includePendingPreorders,
-      paymentMethod,
-    } = req.query;
-
-    const filter = { schoolId };
-
-    // Default behavior keeps cancelled orders out of operational sales history.
-    if (status) {
-      filter.status = status;
-    } else if (String(includeCancelled).toLowerCase() !== 'true') {
-      filter.status = 'completed';
-    }
-
-    if (String(includePendingPreorders).toLowerCase() === 'true') {
-      const statusFilter = filter.status;
-      delete filter.status;
-      filter.$or = [
-        statusFilter ? { status: statusFilter } : { status: { $ne: 'cancelled' } },
-        { orderType: 'preorder', preorderStatus: 'pending' },
-      ];
-    }
-
-    if (studentId) {
-      filter.studentId = studentId;
-    }
-
-    if (storeId) {
-      filter.storeId = storeId;
-    }
-
-    if (paymentMethod) {
-      const methodFilter = paymentMethodFilterValue(paymentMethod);
-      if (methodFilter) {
-        filter.paymentMethod = methodFilter;
-      }
-    }
-
-    if (from || to) {
-      filter.createdAt = {};
-      if (from) {
-        const fromDate = resolveDateQueryBoundary(from, 'start');
-        if (!fromDate) {
-          return res.status(400).json({ message: 'Invalid from date' });
-        }
-        filter.createdAt.$gte = fromDate;
-      }
-      if (to) {
-        const toDate = resolveDateQueryBoundary(to, 'end');
-        if (!toDate) {
-          return res.status(400).json({ message: 'Invalid to date' });
-        }
-        filter.createdAt.$lte = toDate;
-      }
+    let filter;
+    try {
+      filter = buildAdminSalesHistoryFilter(req);
+    } catch (filterError) {
+      return res.status(filterError.statusCode || 400).json({ message: filterError.message });
     }
 
     if (role === 'parent') {
@@ -1091,15 +1117,80 @@ router.get('/', async (req, res) => {
       filter.studentId = { $in: links.map((link) => link.studentId) };
     }
 
+    const productId = String(req.query.productId || '').trim();
     const orders = await Order.find(filter)
       .populate('studentId', 'name schoolCode')
       .populate('storeId', 'name')
       .populate('vendorId', 'name username')
       .sort({ createdAt: -1 })
-      .limit(300);
+      .limit(productId ? 1000 : 300);
     return res.status(200).json(orders);
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/product-sales-summary', roleMiddleware('admin'), async (req, res) => {
+  try {
+    const productId = String(req.query.productId || '').trim();
+    if (!productId) {
+      return res.status(400).json({ message: 'Selecciona un producto.' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json({ message: 'Producto inválido.' });
+    }
+
+    let filter;
+    try {
+      filter = buildAdminSalesHistoryFilter(req);
+    } catch (filterError) {
+      return res.status(filterError.statusCode || 400).json({ message: filterError.message });
+    }
+
+    const productObjectId = new mongoose.Types.ObjectId(productId);
+    const [product, aggregateRows] = await Promise.all([
+      Product.findOne({ _id: productObjectId, schoolId: req.user.schoolId }).select('name stock storeId').lean(),
+      Order.aggregate([
+        { $match: filter },
+        { $unwind: '$items' },
+        { $match: { 'items.productId': productObjectId } },
+        {
+          $group: {
+            _id: null,
+            unitsSold: { $sum: '$items.quantity' },
+            revenue: { $sum: '$items.subtotal' },
+            orderIds: { $addToSet: '$_id' },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            unitsSold: 1,
+            revenue: 1,
+            orderCount: { $size: '$orderIds' },
+          },
+        },
+      ]),
+    ]);
+
+    if (!product) {
+      return res.status(404).json({ message: 'Producto no encontrado.' });
+    }
+
+    const summary = aggregateRows[0] || { unitsSold: 0, revenue: 0, orderCount: 0 };
+    return res.status(200).json({
+      productId,
+      productName: product.name || 'Producto',
+      currentStock: Number(product.stock || 0),
+      unitsSold: Number(summary.unitsSold || 0),
+      orderCount: Number(summary.orderCount || 0),
+      revenue: Number(summary.revenue || 0),
+      from: String(req.query.from || '').trim(),
+      to: String(req.query.to || '').trim(),
+      storeId: String(req.query.storeId || '').trim(),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo calcular las ventas del producto.' });
   }
 });
 

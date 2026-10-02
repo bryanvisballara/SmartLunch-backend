@@ -3098,6 +3098,22 @@ body.login-boot-active main.container {
   font-size: 0.9rem;
 }
 
+.admin-product-sales-summary {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #dbe7ef;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.admin-product-sales-summary p {
+  margin: 0 0 0.45rem;
+}
+
+.admin-product-sales-summary p:last-child {
+  margin-bottom: 0;
+}
+
 .simple-table {
   width: 100%;
   border-collapse: collapse;

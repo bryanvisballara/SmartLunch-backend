@@ -76,6 +76,7 @@ import {
   backfillSchoolBillingStatements,
   rebuildSchoolBillingStatementsFromCollectionDates,
   getSchoolBillingStatementDocument,
+  getProductSalesSummary,
 } from '../services/orders.service';
 import { getStudents } from '../services/students.service';
 import {
@@ -940,6 +941,7 @@ function AdminDashboard() {
     to: '',
     storeId: '',
     paymentMethod: '',
+    productId: '',
   });
   const [historyType, setHistoryType] = useState('sales');
   const [schoolBillingFilters, setSchoolBillingFilters] = useState({ from: '', to: '', q: '' });
@@ -954,6 +956,9 @@ function AdminDashboard() {
   const [selectedSchoolBillingOrderIds, setSelectedSchoolBillingOrderIds] = useState([]);
   const [salesStudentQuery, setSalesStudentQuery] = useState('');
   const [showSalesStudentOptions, setShowSalesStudentOptions] = useState(false);
+  const [salesProductQuery, setSalesProductQuery] = useState('');
+  const [showSalesProductOptions, setShowSalesProductOptions] = useState(false);
+  const [productSalesSummary, setProductSalesSummary] = useState(null);
   const [salesPage, setSalesPage] = useState(1);
   const [topupHistory, setTopupHistory] = useState([]);
   const [closureFilters, setClosureFilters] = useState({ storeId: '', from: '', to: '' });
@@ -1772,6 +1777,18 @@ function AdminDashboard() {
     });
   }, [students, salesStudentQuery]);
 
+  const filteredSalesProducts = useMemo(() => {
+    const baseProducts = salesFilters.storeId
+      ? products.filter((product) => String(product.storeId?._id || product.storeId || '') === String(salesFilters.storeId))
+      : products;
+    const query = String(salesProductQuery || '').trim().toLowerCase();
+    if (!query) {
+      return baseProducts;
+    }
+
+    return baseProducts.filter((product) => String(product.name || '').toLowerCase().includes(query));
+  }, [products, salesFilters.storeId, salesProductQuery]);
+
   const filteredPromoPushStudents = useMemo(() => {
     const query = String(promoPushStudentQuery || '').trim().toLowerCase();
     if (!query) {
@@ -2423,18 +2440,26 @@ function AdminDashboard() {
   }, [products, inventoryForm.storeId, inventoryProductQuery]);
 
   const salesRows = useMemo(() => {
-    return orders.map((order) => ({
-      store: order.storeId?.name || 'N/A',
-      orderNumber: order.orderNumber || order._id,
-      student: formatOrderCustomerName(order),
-      pedidos: (order.items || []).map((item) => `${Number(item.quantity || 0)}x ${item.nameSnapshot || 'Producto'}`).join(', ') || 'N/A',
-      paymentMethod: paymentMethodLabel[order.paymentMethod] || order.paymentMethod || 'N/A',
-      amountRaw: Number(order.total || 0),
-      total: formatCurrency(order.total),
-      dateTime: new Date(order.createdAt).toLocaleString('es-CO'),
-      _id: order._id,
-    }));
-  }, [orders]);
+    const productIdFilter = String(salesFilters.productId || '');
+    return orders.map((order) => {
+      const matchingItems = productIdFilter
+        ? (order.items || []).filter((item) => String(item.productId?._id || item.productId || '') === productIdFilter)
+        : (order.items || []);
+      const productUnits = matchingItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      return {
+        store: order.storeId?.name || 'N/A',
+        orderNumber: order.orderNumber || order._id,
+        student: formatOrderCustomerName(order),
+        pedidos: (order.items || []).map((item) => `${Number(item.quantity || 0)}x ${item.nameSnapshot || 'Producto'}`).join(', ') || 'N/A',
+        productUnits: productIdFilter ? productUnits : null,
+        paymentMethod: paymentMethodLabel[order.paymentMethod] || order.paymentMethod || 'N/A',
+        amountRaw: Number(order.total || 0),
+        total: formatCurrency(order.total),
+        dateTime: new Date(order.createdAt).toLocaleString('es-CO'),
+        _id: order._id,
+      };
+    });
+  }, [orders, salesFilters.productId]);
 
   const topupRows = useMemo(() => {
     const fromDate = salesFilters.from ? new Date(`${salesFilters.from}T00:00:00`) : null;
@@ -2772,9 +2797,31 @@ function AdminDashboard() {
     if (filters.paymentMethod) {
       params.paymentMethod = filters.paymentMethod;
     }
+    if (filters.productId) {
+      params.productId = filters.productId;
+    }
 
     const response = await getOrders(params);
     setOrders(response.data || []);
+  };
+
+  const loadProductSalesSummary = async (filters = salesFilters) => {
+    if (!filters.productId) {
+      setProductSalesSummary(null);
+      return null;
+    }
+
+    const params = { productId: filters.productId };
+    if (filters.from) params.from = filters.from;
+    if (filters.to) params.to = filters.to;
+    if (filters.storeId) params.storeId = filters.storeId;
+    if (filters.studentId) params.studentId = filters.studentId;
+    if (filters.paymentMethod) params.paymentMethod = filters.paymentMethod;
+
+    const response = await getProductSalesSummary(params);
+    const summary = response.data || null;
+    setProductSalesSummary(summary);
+    return summary;
   };
 
   const onToggleDeletedParent = (parentId) => {
@@ -4316,7 +4363,15 @@ function AdminDashboard() {
 
   const onApplySalesFilters = (event) => {
     event.preventDefault();
-    const loadHistory = historyType === 'sales' ? () => loadOrders(salesFilters) : () => loadTopupHistory(salesFilters);
+    const loadHistory = historyType === 'sales'
+      ? async () => {
+        await loadOrders(salesFilters);
+        await loadProductSalesSummary(salesFilters);
+      }
+      : async () => {
+        setProductSalesSummary(null);
+        await loadTopupHistory(salesFilters);
+      };
     const successMessage = historyType === 'sales' ? 'Ventas filtradas.' : 'Recargas filtradas.';
     runAction(loadHistory, successMessage, async () => {
       setSalesPage(1);
@@ -6853,6 +6908,61 @@ function AdminDashboard() {
             </label>
           </div>
           <form className="admin-form-grid" onSubmit={onApplySalesFilters}>
+            {historyType === 'sales' ? (
+              <label>
+                Producto
+                <div className="product-picker">
+                  <input
+                    placeholder="Todos los productos"
+                    value={salesProductQuery}
+                    onFocus={() => setShowSalesProductOptions(true)}
+                    onBlur={() => {
+                      setTimeout(() => {
+                        setShowSalesProductOptions(false);
+                      }, 120);
+                    }}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setSalesProductQuery(value);
+                      setSalesFilters((prev) => ({ ...prev, productId: '' }));
+                      setProductSalesSummary(null);
+                      setShowSalesProductOptions(true);
+                    }}
+                  />
+                  {showSalesProductOptions ? (
+                    <div className="product-picker-menu">
+                      <button
+                        className="product-picker-option"
+                        onMouseDown={() => {
+                          setSalesFilters((prev) => ({ ...prev, productId: '' }));
+                          setSalesProductQuery('');
+                          setProductSalesSummary(null);
+                          setShowSalesProductOptions(false);
+                        }}
+                        type="button"
+                      >
+                        Todos los productos
+                      </button>
+                      {filteredSalesProducts.slice(0, 80).map((product) => (
+                        <button
+                          className="product-picker-option"
+                          key={product._id}
+                          onMouseDown={() => {
+                            setSalesFilters((prev) => ({ ...prev, productId: product._id }));
+                            setSalesProductQuery(product.name || 'Producto');
+                            setShowSalesProductOptions(false);
+                          }}
+                          type="button"
+                        >
+                          {product.name || 'Producto'} (stock {product.stock ?? 0})
+                        </button>
+                      ))}
+                      {filteredSalesProducts.length === 0 ? <p className="product-picker-empty">Sin coincidencias</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+              </label>
+            ) : null}
             <label>
               Alumno
               <div className="product-picker">
@@ -6917,7 +7027,22 @@ function AdminDashboard() {
                 Tienda
                 <select
                   value={salesFilters.storeId}
-                  onChange={(event) => setSalesFilters((prev) => ({ ...prev, storeId: event.target.value }))}
+                  onChange={(event) => {
+                    const storeId = event.target.value;
+                    setSalesFilters((prev) => {
+                      const next = { ...prev, storeId };
+                      if (prev.productId && storeId) {
+                        const selectedProduct = products.find((product) => String(product._id) === String(prev.productId));
+                        const productStoreId = String(selectedProduct?.storeId?._id || selectedProduct?.storeId || '');
+                        if (selectedProduct && productStoreId !== String(storeId)) {
+                          next.productId = '';
+                          setSalesProductQuery('');
+                          setProductSalesSummary(null);
+                        }
+                      }
+                      return next;
+                    });
+                  }}
                 >
                   <option value="">Todas</option>
                   {stores.map((store) => (
@@ -6955,11 +7080,43 @@ function AdminDashboard() {
                 Descargar PDF
               </button>
             </div>
+            {historyType === 'sales' && productSalesSummary ? (
+              <div className="admin-product-sales-summary">
+                <p>
+                  <strong>{productSalesSummary.productName}</strong>
+                  {' · '}
+                  {productSalesSummary.unitsSold}{' '}
+                  {productSalesSummary.unitsSold === 1 ? 'unidad vendida' : 'unidades vendidas'}
+                  {' en '}
+                  {productSalesSummary.orderCount}{' '}
+                  {productSalesSummary.orderCount === 1 ? 'orden' : 'órdenes'}
+                  {productSalesSummary.from || productSalesSummary.to ? (
+                    <>
+                      {' · '}
+                      {productSalesSummary.from ? `desde ${productSalesSummary.from}` : ''}
+                      {productSalesSummary.from && productSalesSummary.to ? ' ' : ''}
+                      {productSalesSummary.to ? `hasta ${productSalesSummary.to}` : ''}
+                    </>
+                  ) : null}
+                </p>
+                <p>
+                  Stock actual en inventario: <strong>{productSalesSummary.currentStock}</strong>
+                  {' · '}
+                  Ingresos por ese producto: <strong>{formatCurrency(productSalesSummary.revenue)}</strong>
+                </p>
+                <p className="muted">
+                  Para validar una entrega del proveedor: lo recibido debería coincidir con vendido + stock actual, si no hubo mermas ni otros movimientos de inventario.
+                </p>
+              </div>
+            ) : null}
             <p>
               <strong>
                 {historyType === 'sales' ? 'Suma total de ventas filtradas' : 'Suma total de recargas filtradas'}:{' '}
                 {formatCurrency(historyTotalAmount)}
               </strong>
+              {historyType === 'sales' && salesFilters.productId ? (
+                <span className="muted"> · Mostrando órdenes que incluyen el producto seleccionado.</span>
+              ) : null}
             </p>
             <table className="simple-table">
               <thead>
@@ -6968,6 +7125,7 @@ function AdminDashboard() {
                     <th>Tienda</th>
                     <th>Número de orden</th>
                     <th>Alumno</th>
+                    {salesFilters.productId ? <th>Unid. producto</th> : null}
                     <th>Pedidos</th>
                     <th>Método de pago</th>
                     <th>Total</th>
@@ -6996,6 +7154,7 @@ function AdminDashboard() {
                         <td>{row.store}</td>
                         <td>{row.orderNumber}</td>
                         <td>{row.student}</td>
+                        {salesFilters.productId ? <td>{row.productUnits ?? 0}</td> : null}
                         <td>{row.pedidos}</td>
                         <td>{row.paymentMethod}</td>
                         <td>{row.total}</td>
