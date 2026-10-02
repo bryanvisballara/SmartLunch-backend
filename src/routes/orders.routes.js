@@ -363,9 +363,9 @@ async function createSchoolBillingStatement({
     throw new Error('Debes seleccionar al menos una orden de cuenta de cobro colegio.');
   }
 
-  const alreadyLinked = orders.filter((order) => order.schoolBillingStatementId);
-  if (alreadyLinked.length) {
-    throw new Error('Una o más órdenes ya están incluidas en una cuenta de cobro generada.');
+  const alreadyCollected = orders.filter((order) => order.schoolBillingStatus === 'collected');
+  if (alreadyCollected.length) {
+    throw new Error('Las órdenes marcadas como cobradas no se pueden volver a imprimir.');
   }
 
   const billingFor = pickSchoolBillingPartyLabel(orders, 'schoolBillingFor');
@@ -489,9 +489,15 @@ async function loadSchoolBillingOrdersInRange({ schoolId, from = '', to = '' }) 
 }
 
 async function cleanupOrphanedSchoolBillingStatements(schoolId) {
-  const statements = await SchoolBillingStatement.find({ schoolId }).select('_id').lean();
+  const statements = await SchoolBillingStatement.find({ schoolId })
+    .select('_id orderCount documentHtml')
+    .lean();
 
   await Promise.all(statements.map(async (statement) => {
+    if (Number(statement.orderCount || 0) > 0 || String(statement.documentHtml || '').trim()) {
+      return;
+    }
+
     const linkedOrderCount = await Order.countDocuments({
       schoolId,
       schoolBillingStatementId: statement._id,
@@ -1627,7 +1633,7 @@ router.post('/school-billing/statements', roleMiddleware('admin'), async (req, r
       message: messageParts.join(' '),
     });
   } catch (error) {
-    const statusCode = /seleccionar|incluidas|compartir/i.test(String(error.message || '')) ? 400 : 500;
+    const statusCode = /seleccionar|incluidas|compartir|cobradas/i.test(String(error.message || '')) ? 400 : 500;
     return res.status(statusCode).json({ message: error.message });
   }
 });

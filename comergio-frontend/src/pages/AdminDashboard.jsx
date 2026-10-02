@@ -1597,9 +1597,7 @@ function AdminDashboard() {
   );
 
   const selectableSchoolBillingOrders = useMemo(
-    () => pendingSchoolBillingOrders.filter((order) => (
-      !order.schoolBillingStatementId && String(order.status || '').toLowerCase() !== 'cancelled'
-    )),
+    () => pendingSchoolBillingOrders.filter((order) => String(order.status || '').toLowerCase() !== 'cancelled'),
     [pendingSchoolBillingOrders]
   );
 
@@ -7155,7 +7153,7 @@ function AdminDashboard() {
           <div className="card admin-school-billing__card">
             <h4>Generar cuenta de cobro</h4>
             <p className="helper">
-              Selecciona las órdenes pendientes. Salen en una sola cuenta, agrupadas por dirigido y responsable. Las órdenes anuladas no se incluyen.
+              Selecciona las órdenes pendientes. Puedes volver a imprimirlas hasta que las marques como cobradas. Las anuladas no se incluyen.
             </p>
             <div className="admin-school-billing__action-row">
               <button
@@ -7264,9 +7262,7 @@ function AdminDashboard() {
                       return (
                       <tr key={`summary-${order._id}`} className="school-billing-row-detail">
                         <td>
-                          {order.schoolBillingStatementId ? (
-                            <span className="helper">En historial</span>
-                          ) : isCancelledOrder ? (
+                          {isCancelledOrder ? (
                             <span className="helper">Anulada</span>
                           ) : (
                             <input
