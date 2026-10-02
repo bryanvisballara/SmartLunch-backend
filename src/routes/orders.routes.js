@@ -21,7 +21,6 @@ const {
 } = require('../services/notification.service');
 const {
   buildSchoolBillingStatementHtml,
-  buildSchoolBillingStatementsPrintHtml,
   serializeStatementOrder,
   resolveStatementHeaderParties,
 } = require('../utils/schoolBillingStatementDocument');
@@ -304,21 +303,6 @@ function schoolBillingPartiesMatch(left = '', right = '') {
   return normalizeSchoolBillingParty(left).toLowerCase() === normalizeSchoolBillingParty(right).toLowerCase();
 }
 
-function groupSchoolBillingOrdersByParty(orders = []) {
-  const groups = new Map();
-
-  orders.forEach((order) => {
-    const billingFor = normalizeSchoolBillingParty(order.schoolBillingFor).toLowerCase();
-    const billingResponsible = normalizeSchoolBillingParty(order.schoolBillingResponsible).toLowerCase();
-    const key = `${billingFor}::${billingResponsible}`;
-    const current = groups.get(key) || [];
-    current.push(order);
-    groups.set(key, current);
-  });
-
-  return Array.from(groups.values());
-}
-
 function pickSchoolBillingPartyLabel(orders = [], field) {
   const values = orders
     .map((order) => normalizeSchoolBillingParty(order[field]))
@@ -386,23 +370,38 @@ async function createSchoolBillingStatement({
 
   const billingFor = pickSchoolBillingPartyLabel(orders, 'schoolBillingFor');
   const billingResponsible = pickSchoolBillingPartyLabel(orders, 'schoolBillingResponsible');
-  const mismatchedOrder = orders.find((order) => (
-    !schoolBillingPartiesMatch(order.schoolBillingFor, billingFor)
-    || !schoolBillingPartiesMatch(order.schoolBillingResponsible, billingResponsible)
+  const sameParties = orders.every((order) => (
+    schoolBillingPartiesMatch(order.schoolBillingFor, billingFor)
+    && schoolBillingPartiesMatch(order.schoolBillingResponsible, billingResponsible)
   ));
+  const ordered = [...orders].sort((left, right) => {
+    const forCompare = normalizeSchoolBillingParty(left.schoolBillingFor).localeCompare(
+      normalizeSchoolBillingParty(right.schoolBillingFor),
+      'es',
+      { sensitivity: 'base' }
+    );
+    if (forCompare) {
+      return forCompare;
+    }
+    const responsibleCompare = normalizeSchoolBillingParty(left.schoolBillingResponsible).localeCompare(
+      normalizeSchoolBillingParty(right.schoolBillingResponsible),
+      'es',
+      { sensitivity: 'base' }
+    );
+    if (responsibleCompare) {
+      return responsibleCompare;
+    }
+    return new Date(left.createdAt || 0) - new Date(right.createdAt || 0);
+  });
 
-  if (mismatchedOrder) {
-    throw new Error('Todas las órdenes de una cuenta de cobro deben compartir el mismo dirigido a y responsable.');
-  }
-
-  const serializedOrders = orders.map(serializeStatementOrder);
+  const serializedOrders = ordered.map(serializeStatementOrder);
   const totalAmount = serializedOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
   const statementNumber = await buildNextSchoolBillingStatementNumber(schoolId);
   const resolvedGeneratedAt = generatedAt || resolveSchoolBillingGeneratedAt(orders);
   const headerParties = resolveStatementHeaderParties(
     serializedOrders,
-    billingFor,
-    billingResponsible
+    sameParties ? billingFor : '',
+    sameParties ? billingResponsible : ''
   );
   const documentHtml = buildSchoolBillingStatementHtml({
     schoolName,
@@ -1606,25 +1605,14 @@ router.post('/school-billing/statements', roleMiddleware('admin'), async (req, r
       });
     }
 
-    const statements = [];
-    for (const group of groupSchoolBillingOrdersByParty(orders)) {
-      statements.push(await createSchoolBillingStatement({
-        schoolId,
-        schoolName,
-        userId,
-        userName,
-        orders: group,
-      }));
-    }
-
-    const documentHtml = statements.length === 1
-      ? statements[0].documentHtml
-      : buildSchoolBillingStatementsPrintHtml(statements.map((statement) => statement.documentHtml));
-    const messageParts = [
-      statements.length === 1
-        ? 'Se generó 1 cuenta de cobro.'
-        : `Se generaron ${statements.length} cuentas de cobro, una por cada dirigido y responsable.`,
-    ];
+    const statement = await createSchoolBillingStatement({
+      schoolId,
+      schoolName,
+      userId,
+      userName,
+      orders,
+    });
+    const messageParts = ['Se generó 1 cuenta de cobro.'];
     if (skippedCancelledCount) {
       messageParts.push(
         skippedCancelledCount === 1
@@ -1633,22 +1621,8 @@ router.post('/school-billing/statements', roleMiddleware('admin'), async (req, r
       );
     }
 
-    const payload = statements.length === 1 ? statements[0].toObject() : {
-      statements: statements.map((statement) => ({
-        _id: statement._id,
-        statementNumber: statement.statementNumber,
-        billingFor: statement.billingFor,
-        billingResponsible: statement.billingResponsible,
-        orderCount: statement.orderCount,
-        totalAmount: statement.totalAmount,
-        createdAt: statement.createdAt,
-      })),
-    };
-
     return res.status(201).json({
-      ...payload,
-      documentHtml,
-      statementCount: statements.length,
+      ...statement.toObject(),
       skippedCancelledCount,
       message: messageParts.join(' '),
     });
@@ -2267,6 +2241,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+router.createSchoolBillingStatement = createSchoolBillingStatement;
 router.createConsolidatedSchoolBillingStatement = createConsolidatedSchoolBillingStatement;
 router.rebuildSchoolBillingStatementsFromCollectionDates = rebuildSchoolBillingStatementsFromCollectionDates;
 router.createSchoolBillingStatementFromCollectionBatch = createSchoolBillingStatementFromCollectionBatch;

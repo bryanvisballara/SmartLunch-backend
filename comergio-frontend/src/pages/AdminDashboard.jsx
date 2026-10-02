@@ -3032,7 +3032,7 @@ function AdminDashboard() {
         loadSchoolBillingOrders(schoolBillingFilters),
         loadSchoolBillingStatements(),
       ]);
-    }, 'Cuentas de cobro generadas y guardadas en el historial.');
+    }, 'Cuenta de cobro generada y guardada en el historial.');
   };
 
   const onOpenSchoolBillingStatement = (statementId) => {
@@ -7155,7 +7155,7 @@ function AdminDashboard() {
           <div className="card admin-school-billing__card">
             <h4>Generar cuenta de cobro</h4>
             <p className="helper">
-              Selecciona las órdenes pendientes. Si tienen distinto dirigido o responsable, se genera una cuenta por cada grupo. Las órdenes anuladas no se incluyen.
+              Selecciona las órdenes pendientes. Salen en una sola cuenta, agrupadas por dirigido y responsable. Las órdenes anuladas no se incluyen.
             </p>
             <div className="admin-school-billing__action-row">
               <button

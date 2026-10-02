@@ -174,38 +174,8 @@ function serializeStatementOrder(order = {}) {
   };
 }
 
-function buildSchoolBillingStatementsPrintHtml(documents = []) {
-  const pages = (Array.isArray(documents) ? documents : [])
-    .map((html) => {
-      const source = String(html || '');
-      const bodyMatch = source.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-      return bodyMatch ? bodyMatch[1] : source;
-    })
-    .filter(Boolean);
-
-  const firstStyleMatch = String(documents.find(Boolean) || '').match(/<style>([\s\S]*?)<\/style>/i);
-  const baseStyle = firstStyleMatch ? firstStyleMatch[1] : '';
-
-  return `<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <title>Cuentas de cobro colegio</title>
-    <style>
-      ${baseStyle}
-      .statement-page { page-break-after: always; }
-      .statement-page:last-child { page-break-after: auto; }
-    </style>
-  </head>
-  <body>
-    ${pages.map((page) => `<section class="statement-page">${page}</section>`).join('')}
-  </body>
-</html>`;
-}
-
 module.exports = {
   buildSchoolBillingStatementHtml,
-  buildSchoolBillingStatementsPrintHtml,
   serializeStatementOrder,
   resolveStatementHeaderParties,
   formatCurrency,
