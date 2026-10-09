@@ -18,6 +18,7 @@ const APPOINTMENT_TYPE_LABELS = {
   virtual: 'Cita virtual',
   phone: 'Llamada telefónica',
   in_person: 'Cita presencial',
+  none: 'Sin cita',
 };
 
 const LOCATION_OPTIONS = {
@@ -33,6 +34,7 @@ const HOW_HEARD_OPTIONS = {
   whatsapp: 'WhatsApp',
   google: 'Google',
   referido: 'Referido',
+  activacion_mall_plaza: 'Activación mall plaza',
   otro: 'Otro',
 };
 
@@ -67,6 +69,7 @@ function normalizeAppointmentType(value) {
   if (['virtual', 'cita_virtual'].includes(raw)) return 'virtual';
   if (['phone', 'llamada', 'llamada_telefonica', 'llamada_telefónica', 'telefono', 'teléfono'].includes(raw)) return 'phone';
   if (['in_person', 'presencial', 'cita_presencial'].includes(raw)) return 'in_person';
+  if (['none', 'sin_cita', 'sin_cita_agendada', 'no_appointment'].includes(raw)) return 'none';
   return '';
 }
 
@@ -214,9 +217,9 @@ function buildWhatsAppMessage({
     `• Periodo: ${academicYear}`,
     referenceOrigin ? `• Cómo llegaste al Berckley: ${referenceOrigin}` : '',
     `• Tipo de cita: ${typeLabel}`,
-    `• Fecha: ${formatAppointmentDateLabel(appointmentDate)}`,
-    `• Hora: ${formatTimeLabel(appointmentTime)}`,
-    locationLabel ? `• Ubicación: ${locationLabel}` : '',
+    appointmentType === 'none' ? '' : `• Fecha: ${formatAppointmentDateLabel(appointmentDate)}`,
+    appointmentType === 'none' ? '' : `• Hora: ${formatTimeLabel(appointmentTime)}`,
+    appointmentType === 'none' || !locationLabel ? '' : `• Ubicación: ${locationLabel}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -319,6 +322,7 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
         { value: 'virtual', label: APPOINTMENT_TYPE_LABELS.virtual },
         { value: 'phone', label: APPOINTMENT_TYPE_LABELS.phone },
         { value: 'in_person', label: APPOINTMENT_TYPE_LABELS.in_person },
+        { value: 'none', label: APPOINTMENT_TYPE_LABELS.none },
       ],
       locations: Object.entries(LOCATION_OPTIONS).map(([value, label]) => ({ value, label })),
       grades: gradeOptions,
@@ -360,8 +364,9 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
   if (howHeard === 'otro' && !howHeardOther) missing.push('detalle de cómo llegaste al Berckley');
   if (!grade) missing.push('grado');
   if (!appointmentType) missing.push('tipo de cita');
-  if (!appointmentDate) missing.push('fecha de la cita');
-  if (!appointmentTime) missing.push('hora de la cita');
+  const schedulingAppointment = appointmentType !== 'none';
+  if (schedulingAppointment && !appointmentDate) missing.push('fecha de la cita');
+  if (schedulingAppointment && !appointmentTime) missing.push('hora de la cita');
   if (appointmentType === 'in_person' && !locationKey) missing.push('sede presencial');
 
   if (missing.length) {
@@ -382,25 +387,27 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
     }
   }
 
-  const offeredTimes = resolveSlotTimes(agendaSettings);
-  if (!offeredTimes.includes(appointmentTime) || isSlotBlocked(agendaSettings, appointmentDate, appointmentTime)) {
-    const error = new Error('La hora seleccionada no está disponible. Elige otro horario.');
-    error.statusCode = 400;
-    throw error;
-  }
+  if (schedulingAppointment) {
+    const offeredTimes = resolveSlotTimes(agendaSettings);
+    if (!offeredTimes.includes(appointmentTime) || isSlotBlocked(agendaSettings, appointmentDate, appointmentTime)) {
+      const error = new Error('La hora seleccionada no está disponible. Elige otro horario.');
+      error.statusCode = 400;
+      throw error;
+    }
 
-  const dateObj = parseDateKey(appointmentDate);
-  if (!dateObj || !isWeekday(dateObj)) {
-    const error = new Error('Las citas solo están disponibles de lunes a viernes.');
-    error.statusCode = 400;
-    throw error;
-  }
+    const dateObj = parseDateKey(appointmentDate);
+    if (!dateObj || !isWeekday(dateObj)) {
+      const error = new Error('Las citas solo están disponibles de lunes a viernes.');
+      error.statusCode = 400;
+      throw error;
+    }
 
-  const todayKey = toDateKey(new Date());
-  if (appointmentDate < todayKey) {
-    const error = new Error('No puedes agendar una cita en una fecha pasada.');
-    error.statusCode = 400;
-    throw error;
+    const todayKey = toDateKey(new Date());
+    if (appointmentDate < todayKey) {
+      const error = new Error('No puedes agendar una cita en una fecha pasada.');
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   return {
@@ -413,9 +420,9 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
     grade,
     academicYear,
     appointmentType,
-    appointmentDate,
-    appointmentTime,
-    locationKey,
+    appointmentDate: schedulingAppointment ? appointmentDate : '',
+    appointmentTime: schedulingAppointment ? appointmentTime : '',
+    locationKey: schedulingAppointment ? locationKey : '',
     howHeard,
     howHeardOther: howHeard === 'otro' ? howHeardOther : '',
     referenceOrigin,
@@ -430,26 +437,80 @@ async function submitPrimerContacto(body = {}) {
     ]);
     const payload = validatePrimerContactoPayload(body, gradeOptions, agendaSettings);
     const gradeLabel = getGradeLabel(payload.grade, gradeOptions);
-    const busyAppointments = await listBusyAppointments(
-      BERCKLEY_SCHOOL_ID,
-      payload.appointmentDate,
-      payload.appointmentDate,
-    );
+    const schedulingAppointment = payload.appointmentType !== 'none';
 
-    if (isSlotBusy(busyAppointments, payload.appointmentDate, payload.appointmentTime)) {
-      const error = new Error('Ese horario acaba de ocuparse. Elige otra hora disponible.');
-      error.statusCode = 409;
-      throw error;
+    if (schedulingAppointment) {
+      const busyAppointments = await listBusyAppointments(
+        BERCKLEY_SCHOOL_ID,
+        payload.appointmentDate,
+        payload.appointmentDate,
+      );
+
+      if (isSlotBusy(busyAppointments, payload.appointmentDate, payload.appointmentTime)) {
+        const error = new Error('Ese horario acaba de ocuparse. Elige otra hora disponible.');
+        error.statusCode = 409;
+        throw error;
+      }
     }
 
     const schoolName = await getSchoolDisplayName(BERCKLEY_SCHOOL_ID) || 'International Berckley School';
     const typeLabel = APPOINTMENT_TYPE_LABELS[payload.appointmentType];
-    const locationLabel = resolveCalendarLocation({
-      appointmentType: payload.appointmentType,
-      locationKey: payload.locationKey,
-      schoolName,
-    });
-    const scheduledAt = new Date(`${payload.appointmentDate}T${payload.appointmentTime}:00`);
+    const locationLabel = schedulingAppointment
+      ? resolveCalendarLocation({
+        appointmentType: payload.appointmentType,
+        locationKey: payload.locationKey,
+        schoolName,
+      })
+      : '';
+    const scheduledAt = schedulingAppointment
+      ? new Date(`${payload.appointmentDate}T${payload.appointmentTime}:00`)
+      : null;
+
+    const admissionEvents = [
+      {
+        title: 'Aspirante creado',
+        notes: 'Registro desde Primer Contacto (comergio.com/berckleyprimercontacto).',
+        stageKey: 'interesados',
+        stageLabel: 'Interesados',
+        responsible: 'Primer Contacto',
+        inProgress: true,
+        createdByName: 'Primer Contacto web',
+      },
+    ];
+
+    if (schedulingAppointment) {
+      admissionEvents.push({
+        title: 'CITA AGENDADA',
+        notes: `CITA AGENDADA: ${typeLabel} · ${payload.appointmentDate} ${payload.appointmentTime}${payload.appointmentType === 'in_person' ? ` · ${locationLabel}` : ''}`,
+        stageKey: 'agendamiento',
+        stageLabel: 'Agendamiento',
+        responsible: 'Primer Contacto',
+        clientVisible: true,
+        inProgress: true,
+        createdByName: 'Primer Contacto web',
+        appointment: {
+          type: payload.appointmentType,
+          label: typeLabel,
+          date: payload.appointmentDate,
+          time: payload.appointmentTime,
+          locationKey: payload.locationKey || '',
+          locationLabel: payload.appointmentType === 'in_person' ? locationLabel : '',
+          guardianEmail: payload.guardianEmail,
+          scheduledAt: scheduledAt && !Number.isNaN(scheduledAt.getTime()) ? scheduledAt : null,
+        },
+      });
+    } else {
+      admissionEvents.push({
+        title: 'PRIMER CONTACTO SIN CITA',
+        notes: `Tipo de contacto: ${typeLabel}. El aspirante dejó sus datos sin agendar fecha y hora.`,
+        stageKey: 'interesados',
+        stageLabel: 'Interesados',
+        responsible: 'Primer Contacto',
+        clientVisible: true,
+        inProgress: true,
+        createdByName: 'Primer Contacto web',
+      });
+    }
 
     const applicant = await AdmissionApplicant.create({
       schoolId: BERCKLEY_SCHOOL_ID,
@@ -480,37 +541,7 @@ async function submitPrimerContacto(body = {}) {
         { key: 'resultados', label: 'Resultados', confirmed: false, inProgress: false },
         { key: 'matriculados', label: 'Matriculados', confirmed: false, inProgress: false },
       ],
-      admissionEvents: [
-        {
-          title: 'Aspirante creado',
-          notes: 'Registro desde Primer Contacto (comergio.com/berckleyprimercontacto).',
-          stageKey: 'interesados',
-          stageLabel: 'Interesados',
-          responsible: 'Primer Contacto',
-          inProgress: true,
-          createdByName: 'Primer Contacto web',
-        },
-        {
-          title: 'CITA AGENDADA',
-          notes: `CITA AGENDADA: ${typeLabel} · ${payload.appointmentDate} ${payload.appointmentTime}${payload.appointmentType === 'in_person' ? ` · ${locationLabel}` : ''}`,
-          stageKey: 'agendamiento',
-          stageLabel: 'Agendamiento',
-          responsible: 'Primer Contacto',
-          clientVisible: true,
-          inProgress: true,
-          createdByName: 'Primer Contacto web',
-          appointment: {
-            type: payload.appointmentType,
-            label: typeLabel,
-            date: payload.appointmentDate,
-            time: payload.appointmentTime,
-            locationKey: payload.locationKey || '',
-            locationLabel: payload.appointmentType === 'in_person' ? locationLabel : '',
-            guardianEmail: payload.guardianEmail,
-            scheduledAt: Number.isNaN(scheduledAt.getTime()) ? null : scheduledAt,
-          },
-        },
-      ],
+      admissionEvents,
     });
 
     // Keep pipeline stage on interesados as requested (stage 1), while recording the appointment event.
@@ -518,49 +549,51 @@ async function submitPrimerContacto(body = {}) {
     applicant.status = 'interested';
     await applicant.save();
 
-    const appointmentNotice = {
-      schoolName,
-      applicantName: payload.fullName,
-      grade: gradeLabel,
-      appointmentTypeLabel: typeLabel,
-      appointmentDateLabel: formatAppointmentDateLabel(payload.appointmentDate),
-      appointmentDate: payload.appointmentDate,
-      appointmentTime: payload.appointmentTime,
-      calendarLocation: locationLabel,
-      durationMinutes: SLOT_DURATION_MINUTES,
-    };
-    const emailResults = await Promise.allSettled([
-      sendAdmissionAppointmentEmail({
-        ...appointmentNotice,
-        toEmail: payload.guardianEmail,
-        toName: payload.guardianName,
-        notes: 'Gracias por dar el primer paso con International Berckley School. Nuestro equipo de Admisiones te acompañará en cada etapa del proceso. Si necesitas reprogramar, responde este correo o escríbenos por WhatsApp.',
-        departmentLabel: 'Departamento de Admisiones',
-        retentionIntro: 'Estamos muy contentos de conocerte. Esta cita es el comienzo de una experiencia educativa bilingüe, cercana y diseñada para que tu familia se sienta acompañada desde el primer momento.',
-      }),
-      sendBerckleyAdmissionsOfficeAppointmentEmail({
-        ...appointmentNotice,
-        schoolId: BERCKLEY_SCHOOL_ID,
-        birthDate: formatAppointmentDateLabel(payload.birthDate),
-        previousSchool: payload.previousSchool,
-        guardianName: payload.guardianName,
-        guardianEmail: payload.guardianEmail,
-        guardianPhone: payload.guardianPhone,
-        source: payload.referenceOrigin || 'Primer contacto',
-      }),
-    ]);
-    emailResults.forEach((result) => {
-      if (result.status === 'rejected') {
-        console.warn(`[PRIMER_CONTACTO_EMAIL_FAILED] applicantId=${applicant._id} error=${result.reason?.message || result.reason}`);
-      }
-    });
+    if (schedulingAppointment) {
+      const appointmentNotice = {
+        schoolName,
+        applicantName: payload.fullName,
+        grade: gradeLabel,
+        appointmentTypeLabel: typeLabel,
+        appointmentDateLabel: formatAppointmentDateLabel(payload.appointmentDate),
+        appointmentDate: payload.appointmentDate,
+        appointmentTime: payload.appointmentTime,
+        calendarLocation: locationLabel,
+        durationMinutes: SLOT_DURATION_MINUTES,
+      };
+      const emailResults = await Promise.allSettled([
+        sendAdmissionAppointmentEmail({
+          ...appointmentNotice,
+          toEmail: payload.guardianEmail,
+          toName: payload.guardianName,
+          notes: 'Gracias por dar el primer paso con International Berckley School. Nuestro equipo de Admisiones te acompañará en cada etapa del proceso. Si necesitas reprogramar, responde este correo o escríbenos por WhatsApp.',
+          departmentLabel: 'Departamento de Admisiones',
+          retentionIntro: 'Estamos muy contentos de conocerte. Esta cita es el comienzo de una experiencia educativa bilingüe, cercana y diseñada para que tu familia se sienta acompañada desde el primer momento.',
+        }),
+        sendBerckleyAdmissionsOfficeAppointmentEmail({
+          ...appointmentNotice,
+          schoolId: BERCKLEY_SCHOOL_ID,
+          birthDate: formatAppointmentDateLabel(payload.birthDate),
+          previousSchool: payload.previousSchool,
+          guardianName: payload.guardianName,
+          guardianEmail: payload.guardianEmail,
+          guardianPhone: payload.guardianPhone,
+          source: payload.referenceOrigin || 'Primer contacto',
+        }),
+      ]);
+      emailResults.forEach((result) => {
+        if (result.status === 'rejected') {
+          console.warn(`[PRIMER_CONTACTO_EMAIL_FAILED] applicantId=${applicant._id} error=${result.reason?.message || result.reason}`);
+        }
+      });
+    }
 
     const whatsappMessage = buildWhatsAppMessage({ ...payload, grade: gradeLabel });
     return {
       ok: true,
       applicantId: String(applicant._id),
       schoolName,
-      appointment: {
+      appointment: schedulingAppointment ? {
         type: payload.appointmentType,
         typeLabel,
         date: payload.appointmentDate,
@@ -569,6 +602,15 @@ async function submitPrimerContacto(body = {}) {
         timeLabel: formatTimeLabel(payload.appointmentTime),
         locationKey: payload.locationKey || '',
         locationLabel: payload.appointmentType === 'in_person' ? locationLabel : locationLabel,
+      } : {
+        type: payload.appointmentType,
+        typeLabel,
+        date: '',
+        dateLabel: '',
+        time: '',
+        timeLabel: '',
+        locationKey: '',
+        locationLabel: '',
       },
       whatsappUrl: buildWhatsAppUrl(whatsappMessage),
       whatsappNumber: WHATSAPP_NUMBER,

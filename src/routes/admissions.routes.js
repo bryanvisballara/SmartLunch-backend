@@ -275,6 +275,7 @@ function normalizeAppointmentType(value) {
   if (['virtual', 'cita_virtual'].includes(rawType)) return 'virtual';
   if (['phone', 'llamada', 'llamada_telefonica', 'llamada_telefónica', 'telefono', 'teléfono'].includes(rawType)) return 'phone';
   if (['in_person', 'presencial', 'cita_presencial'].includes(rawType)) return 'in_person';
+  if (['none', 'sin_cita', 'sin_cita_agendada', 'no_appointment'].includes(rawType)) return 'none';
   return '';
 }
 

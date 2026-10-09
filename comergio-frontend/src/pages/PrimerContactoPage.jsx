@@ -81,6 +81,11 @@ const APPOINTMENT_TYPES = [
     label: 'Cita presencial',
     description: 'Visita a una de nuestras sedes',
   },
+  {
+    value: 'none',
+    label: 'Sin cita',
+    description: 'Solo quiero dejar mis datos por ahora',
+  },
 ];
 
 function IconClose({ className }) {
@@ -184,6 +189,7 @@ const HOW_HEARD_OPTIONS = [
   { value: 'whatsapp', label: 'WhatsApp' },
   { value: 'google', label: 'Google' },
   { value: 'referido', label: 'Referido' },
+  { value: 'activacion_mall_plaza', label: 'Activación mall plaza' },
   { value: 'otro', label: 'Otro' },
 ];
 
@@ -374,9 +380,11 @@ export default function PrimerContactoPage() {
     && (form.howHeard !== 'otro' || form.howHeardOther.trim())
     && form.grade
     && form.appointmentType
-    && form.appointmentDate
-    && form.appointmentTime
-    && (form.appointmentType !== 'in_person' || form.locationKey)
+    && (form.appointmentType === 'none' || (
+      form.appointmentDate
+      && form.appointmentTime
+      && (form.appointmentType !== 'in_person' || form.locationKey)
+    ))
     && !submitting
   );
 
@@ -729,8 +737,14 @@ export default function PrimerContactoPage() {
                         type="button"
                         className={`primer-contacto-type${form.appointmentType === type.value ? ' is-selected' : ''}`}
                         onClick={() => {
-                          updateField('appointmentType')(type.value);
-                          if (type.value !== 'in_person') updateField('locationKey')('');
+                          setForm((previous) => ({
+                            ...previous,
+                            appointmentType: type.value,
+                            locationKey: type.value === 'in_person' ? previous.locationKey : '',
+                            appointmentDate: type.value === 'none' ? '' : previous.appointmentDate,
+                            appointmentTime: type.value === 'none' ? '' : previous.appointmentTime,
+                          }));
+                          if (type.value === 'none') setSelectedDate('');
                         }}
                       >
                         <strong>{type.label}</strong>
@@ -757,7 +771,7 @@ export default function PrimerContactoPage() {
                   </div>
                 ) : null}
 
-                {form.appointmentType ? (
+                {form.appointmentType && form.appointmentType !== 'none' ? (
                   <div className="primer-contacto-scheduler">
                     <div className="primer-contacto-scheduler__meta">
                       <strong>1. Elige la fecha</strong>
