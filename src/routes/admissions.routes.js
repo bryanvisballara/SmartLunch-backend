@@ -449,6 +449,7 @@ function buildApplicantPayload(body = {}, existingApplicant = null) {
       lastName: normalizeAdmissionText(student.lastName || student.studentLastName || existing.student?.lastName),
       documentNumber: normalizeAdmissionText(student.documentNumber || student.document || existing.student?.documentNumber),
       birthDate: student.birthDate ? new Date(student.birthDate) : (existing.student?.birthDate || null),
+      age: normalizeAdmissionText(student.age || student.studentAge || existing.student?.age),
       previousSchool: normalizeAdmissionText(student.previousSchool || student.schoolOfOrigin || existing.student?.previousSchool),
     },
     guardian: {
@@ -460,6 +461,9 @@ function buildApplicantPayload(body = {}, existingApplicant = null) {
     academicYear: normalizeAdmissionText(body.academicYear || existing.academicYear || new Date().getFullYear()),
     source: {
       referenceOrigin: normalizeAdmissionText(body.source?.referenceOrigin || body.referenceOrigin || existing.source?.referenceOrigin),
+      additionalRequest: normalizeAdmissionText(
+        body.source?.additionalRequest || body.additionalRequest || existing.source?.additionalRequest,
+      ),
     },
     currentStageKey,
     status: nextStatus,

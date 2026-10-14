@@ -38,6 +38,12 @@ const HOW_HEARD_OPTIONS = {
   otro: 'Otro',
 };
 
+const ADDITIONAL_REQUEST_LABELS = {
+  bloom: 'Información programa de estimulación BLOOM',
+  millennium_discovery: 'Información colegio millennium y discovery',
+  none: 'Ninguna',
+};
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -58,6 +64,21 @@ function resolveHowHeardReference(body = {}) {
 
 function normalizeEmail(value) {
   return normalizeText(value).toLowerCase();
+}
+
+function normalizeAdditionalRequest(value) {
+  const raw = normalizeText(value).toLowerCase();
+  if (['bloom', 'millennium_discovery', 'none'].includes(raw)) return raw;
+  return '';
+}
+
+function getAdditionalRequestLabel(value) {
+  const key = normalizeAdditionalRequest(value);
+  return key ? (ADDITIONAL_REQUEST_LABELS[key] || key) : '';
+}
+
+function normalizeStudentAge(value) {
+  return normalizeText(value);
 }
 
 function isValidEmail(value) {
@@ -198,8 +219,11 @@ function buildWhatsAppMessage({
   appointmentTime,
   locationKey,
   referenceOrigin,
+  studentAge,
+  additionalRequest,
 }) {
   const typeLabel = APPOINTMENT_TYPE_LABELS[appointmentType] || appointmentType;
+  const additionalLabel = getAdditionalRequestLabel(additionalRequest);
   const locationLabel = appointmentType === 'in_person'
     ? (LOCATION_OPTIONS[locationKey] || '')
     : resolveCalendarLocation({ appointmentType, locationKey });
@@ -207,16 +231,18 @@ function buildWhatsAppMessage({
   return [
     'Hola, me interesa International Berckley School. Acabo de registrar mis datos en Primer Contacto y quiero continuar por WhatsApp.',
     '',
-    `• Aspirante: ${fullName}`,
-    `• Fecha de nacimiento: ${birthDate}`,
-    `• Colegio de procedencia: ${previousSchool}`,
-    `• Acudiente: ${guardianName}`,
-    `• Email: ${guardianEmail}`,
-    `• Teléfono: ${guardianPhone}`,
-    `• Grado/programa: ${grade}`,
-    `• Periodo: ${academicYear}`,
+    fullName ? `• Aspirante: ${fullName}` : '',
+    birthDate ? `• Fecha de nacimiento: ${birthDate}` : '',
+    studentAge ? `• Edad: ${studentAge}` : '',
+    previousSchool ? `• Colegio de procedencia: ${previousSchool}` : '',
+    guardianName ? `• Acudiente: ${guardianName}` : '',
+    guardianEmail ? `• Email: ${guardianEmail}` : '',
+    guardianPhone ? `• Teléfono: ${guardianPhone}` : '',
+    grade ? `• Grado/programa: ${grade}` : '',
+    academicYear ? `• Periodo: ${academicYear}` : '',
     referenceOrigin ? `• Cómo llegaste al Berckley: ${referenceOrigin}` : '',
-    `• Tipo de cita: ${typeLabel}`,
+    additionalLabel ? `• Solicitudes adicionales: ${additionalLabel}` : '',
+    appointmentType ? `• Tipo de cita: ${typeLabel}` : '',
     appointmentType === 'none' ? '' : `• Fecha: ${formatAppointmentDateLabel(appointmentDate)}`,
     appointmentType === 'none' ? '' : `• Hora: ${formatTimeLabel(appointmentTime)}`,
     appointmentType === 'none' || !locationLabel ? '' : `• Ubicación: ${locationLabel}`,
@@ -337,9 +363,12 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
 }
 
 function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSettings = null) {
+  const noSchooling = Boolean(body.noSchooling);
   const fullName = normalizeText(body.fullName || body.student?.firstName);
   const birthDate = normalizeText(body.birthDate || body.student?.birthDate);
-  const previousSchool = normalizeText(body.previousSchool || body.student?.previousSchool);
+  let previousSchool = normalizeText(body.previousSchool || body.student?.previousSchool);
+  if (noSchooling) previousSchool = 'Sin escolaridad';
+  const studentAge = normalizeStudentAge(body.studentAge || body.student?.age);
   const guardianName = normalizeText(body.guardianName || body.guardian?.name);
   const guardianEmail = normalizeEmail(body.guardianEmail || body.guardian?.email);
   const guardianPhone = normalizeText(body.guardianPhone || body.guardian?.phone);
@@ -352,31 +381,25 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
   const howHeard = String(body.howHeard || body.howDidYouHear || '').trim().toLowerCase();
   const howHeardOther = normalizeText(body.howHeardOther || body.howDidYouHearOther);
   const referenceOrigin = resolveHowHeardReference(body);
+  const additionalRequest = normalizeAdditionalRequest(
+    body.additionalRequest || body.source?.additionalRequest,
+  );
 
-  const missing = [];
-  if (!fullName) missing.push('nombre del aspirante');
-  if (!birthDate) missing.push('fecha de nacimiento');
-  if (!previousSchool) missing.push('colegio de procedencia');
-  if (!guardianName) missing.push('nombre del acudiente');
-  if (!guardianEmail || !isValidEmail(guardianEmail)) missing.push('email del acudiente');
-  if (!guardianPhone) missing.push('teléfono del acudiente');
-  if (!howHeard || !HOW_HEARD_OPTIONS[howHeard]) missing.push('cómo llegaste al Berckley');
-  if (howHeard === 'otro' && !howHeardOther) missing.push('detalle de cómo llegaste al Berckley');
-  if (!grade) missing.push('grado');
-  if (!appointmentType) missing.push('tipo de cita');
-  const schedulingAppointment = appointmentType !== 'none';
-  if (schedulingAppointment && !appointmentDate) missing.push('fecha de la cita');
-  if (schedulingAppointment && !appointmentTime) missing.push('hora de la cita');
-  if (appointmentType === 'in_person' && !locationKey) missing.push('sede presencial');
+  const invalid = [];
+  if (guardianEmail && !isValidEmail(guardianEmail)) invalid.push('email del acudiente válido');
+  const schedulingAppointment = Boolean(appointmentType && appointmentType !== 'none');
+  if (schedulingAppointment && !appointmentDate) invalid.push('fecha de la cita');
+  if (schedulingAppointment && !appointmentTime) invalid.push('hora de la cita');
+  if (appointmentType === 'in_person' && schedulingAppointment && !locationKey) invalid.push('sede presencial');
 
-  if (missing.length) {
-    const error = new Error(`Completa: ${missing.join(', ')}.`);
+  if (invalid.length) {
+    const error = new Error(`Revisa: ${invalid.join(', ')}.`);
     error.statusCode = 400;
     throw error;
   }
 
   const allowedGrades = Array.isArray(gradeOptions) ? gradeOptions : [];
-  if (allowedGrades.length) {
+  if (grade && allowedGrades.length) {
     const gradeAllowed = allowedGrades.some((option) => (
       option.value === grade || option.key === grade || option.label === grade
     ));
@@ -414,18 +437,20 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
     fullName,
     birthDate,
     previousSchool,
+    studentAge,
     guardianName,
     guardianEmail,
     guardianPhone,
     grade,
     academicYear,
-    appointmentType,
+    appointmentType: appointmentType || 'none',
     appointmentDate: schedulingAppointment ? appointmentDate : '',
     appointmentTime: schedulingAppointment ? appointmentTime : '',
     locationKey: schedulingAppointment ? locationKey : '',
     howHeard,
     howHeardOther: howHeard === 'otro' ? howHeardOther : '',
     referenceOrigin,
+    additionalRequest,
   };
 }
 
@@ -518,6 +543,7 @@ async function submitPrimerContacto(body = {}) {
         firstName: payload.fullName,
         lastName: '',
         birthDate: payload.birthDate ? new Date(`${payload.birthDate}T12:00:00`) : null,
+        age: payload.studentAge,
         previousSchool: payload.previousSchool,
       },
       guardian: {
@@ -529,6 +555,7 @@ async function submitPrimerContacto(body = {}) {
       academicYear: payload.academicYear,
       source: {
         referenceOrigin: payload.referenceOrigin,
+        additionalRequest: payload.additionalRequest,
       },
       currentStageKey: 'interesados',
       status: 'interested',

@@ -39,11 +39,13 @@ import {
   updateAdmissionEvent,
   uploadAdmissionDocuments,
 } from '../services/admissions.service';
+import { getAdditionalRequestLabel, ADDITIONAL_REQUEST_OPTIONS } from '../lib/berckleyAdditionalRequests';
 import './AdmissionsDashboard.css';
 
 const emptyApplicantForm = {
   fullName: '',
   birthDate: '',
+  studentAge: '',
   previousSchool: '',
   guardianName: '',
   guardianEmail: '',
@@ -51,6 +53,7 @@ const emptyApplicantForm = {
   grade: '',
   academicYear: String(new Date().getFullYear()),
   referenceOrigin: '',
+  additionalRequest: '',
 };
 
 const emptyEventForm = {
@@ -289,6 +292,7 @@ const ADMISSION_WORKLIST_EXPORT_HEADERS = [
   'Teléfono acudiente',
   'Correo acudiente',
   'Referencia/origen',
+  'Solicitudes adicionales',
   'Código etapa',
   'Etapa',
   'Estado',
@@ -296,10 +300,21 @@ const ADMISSION_WORKLIST_EXPORT_HEADERS = [
   'Última actualización',
 ];
 
+function resolveApplicantAgeDisplay(applicant) {
+  const stored = String(applicant?.student?.age || '').trim();
+  if (stored) return stored;
+  const fromBirth = calculateAgeFromBirthDate(formatDateForExcel(applicant?.student?.birthDate));
+  return fromBirth === null ? '-' : String(fromBirth);
+}
+
 function buildApplicantFormFromRecord(applicant = {}) {
+  const birthDate = formatDateForExcel(applicant.student?.birthDate);
+  const storedAge = String(applicant.student?.age || '').trim();
+  const autoAge = calculateAgeFromBirthDate(birthDate);
   return {
     fullName: applicant.studentName || [applicant.student?.firstName, applicant.student?.lastName].filter(Boolean).join(' '),
-    birthDate: formatDateForExcel(applicant.student?.birthDate),
+    birthDate,
+    studentAge: storedAge || (autoAge === null ? '' : String(autoAge)),
     previousSchool: applicant.student?.previousSchool || '',
     guardianName: applicant.guardian?.name || '',
     guardianEmail: applicant.guardian?.email || '',
@@ -307,6 +322,7 @@ function buildApplicantFormFromRecord(applicant = {}) {
     grade: applicant.grade || '',
     academicYear: applicant.academicYear || String(new Date().getFullYear()),
     referenceOrigin: applicant.source?.referenceOrigin || '',
+    additionalRequest: applicant.source?.additionalRequest || '',
   };
 }
 
@@ -316,6 +332,7 @@ function buildApplicantPayloadFromForm(applicantForm = {}) {
       firstName: applicantForm.fullName,
       lastName: '',
       birthDate: applicantForm.birthDate,
+      age: applicantForm.studentAge,
       previousSchool: applicantForm.previousSchool,
     },
     guardian: {
@@ -327,6 +344,7 @@ function buildApplicantPayloadFromForm(applicantForm = {}) {
     academicYear: applicantForm.academicYear,
     source: {
       referenceOrigin: applicantForm.referenceOrigin,
+      additionalRequest: applicantForm.additionalRequest,
     },
   };
 }
@@ -464,8 +482,13 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
   const visibleStageApplicantIds = useMemo(() => applicants.map((applicant) => String(applicant.id || applicant._id || '')).filter(Boolean), [applicants]);
   const selectedStageApplicantCount = selectedStageApplicantIds.length;
   const allVisibleStageApplicantsSelected = Boolean(visibleStageApplicantIds.length) && visibleStageApplicantIds.every((applicantId) => selectedStageApplicantIds.includes(applicantId));
-  const applicantAge = useMemo(() => calculateAgeFromBirthDate(applicantForm.birthDate), [applicantForm.birthDate]);
-  const applicantAgeLabel = applicantAge === null ? '' : `${applicantAge} ${applicantAge === 1 ? 'año' : 'años'}`;
+  useEffect(() => {
+    if (!showApplicantForm || !applicantForm.birthDate) return;
+    const autoAge = calculateAgeFromBirthDate(applicantForm.birthDate);
+    if (autoAge === null) return;
+    setApplicantForm((previous) => ({ ...previous, studentAge: String(autoAge) }));
+  }, [applicantForm.birthDate, showApplicantForm]);
+
   const calendarDays = useMemo(() => buildCalendarDays(agendaMonthDate), [agendaMonthDate]);
   const agendaMonthLabel = agendaMonthDate.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
   const todayDateKey = getLocalDateKey(new Date());
@@ -711,12 +734,13 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
         applicant.grade || '',
         applicant.academicYear || '',
         formatDateForExcel(birthDate),
-        calculateAgeFromBirthDate(formatDateForExcel(birthDate)) ?? '',
+        resolveApplicantAgeDisplay(applicant),
         applicant.student?.previousSchool || '',
         applicant.guardian?.name || '',
         applicant.guardian?.phone || '',
         applicant.guardian?.email || '',
         applicant.source?.referenceOrigin || '',
+        getAdditionalRequestLabel(applicant.source?.additionalRequest),
         getStageCode(stageTemplates, applicant.currentStageKey),
         getStageLabel(stageTemplates, applicant.currentStageKey),
         getApplicantStatusLabel(applicant),
@@ -1383,26 +1407,28 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                     <thead>
                       <tr>
                         <th className="admissions-check-column"><input type="checkbox" aria-label="Seleccionar todos los aspirantes" checked={allVisibleStageApplicantsSelected} disabled={!visibleStageApplicantIds.length} onChange={toggleAllStageApplicants} /></th>
-                        <th>Aspirante</th><th>Grado que aspira</th><th>Fecha de nacimiento</th><th>Colegio de procedencia</th><th>Acudiente</th><th>Teléfono</th><th>Correo</th><th>Referencia</th><th>Acción</th>
+                        <th>Aspirante</th><th>Grado que aspira</th><th>Fecha de nacimiento</th><th>Edad</th><th>Colegio de procedencia</th><th>Acudiente</th><th>Teléfono</th><th>Correo</th><th>Referencia</th><th>Solicitudes adicionales</th><th>Acción</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {loading ? <tr><td colSpan="10"><div className="empty-state">Cargando aspirantes...</div></td></tr> : null}
+                      {loading ? <tr><td colSpan="12"><div className="empty-state">Cargando aspirantes...</div></td></tr> : null}
                       {!loading && applicants.length ? applicants.map((applicant) => (
                         <tr className={selectedApplicantId === applicant.id ? 'is-selected' : ''} key={applicant.id} onClick={() => openApplicantFromStage(applicant)}>
                           <td className="admissions-check-column" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Seleccionar ${applicant.studentName || 'aspirante'}`} checked={selectedStageApplicantIds.includes(String(applicant.id || applicant._id || ''))} onChange={() => toggleStageApplicantSelection(applicant.id || applicant._id)} /></td>
                           <td>{applicant.studentName}</td>
                           <td>{applicant.grade || '-'}</td>
                           <td>{formatDate(applicant.student?.birthDate)}</td>
+                          <td>{resolveApplicantAgeDisplay(applicant)}</td>
                           <td>{applicant.student?.previousSchool || '-'}</td>
                           <td>{applicant.guardian?.name || '-'}</td>
                           <td>{applicant.guardian?.phone || '-'}</td>
                           <td>{applicant.guardian?.email || '-'}</td>
                           <td>{applicant.source?.referenceOrigin || '-'}</td>
+                          <td>{getAdditionalRequestLabel(applicant.source?.additionalRequest)}</td>
                           <td><button className="tracking-icon-button" type="button" onClick={(event) => { event.stopPropagation(); openApplicantFromStage(applicant); }}>→</button></td>
                         </tr>
                       )) : null}
-                      {!loading && !applicants.length ? <tr><td colSpan="10"><div className="empty-state">No hay aspirantes en este estado.</div></td></tr> : null}
+                      {!loading && !applicants.length ? <tr><td colSpan="12"><div className="empty-state">No hay aspirantes en este estado.</div></td></tr> : null}
                     </tbody>
                   </table>
                 </div>
@@ -1470,7 +1496,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                       <div className="tracking-search-grid admissions-create-grid">
                         <label><span>Nombres y apellidos</span><input placeholder="Nombre completo" value={applicantForm.fullName} onChange={(event) => updateApplicantForm('fullName', event.target.value)} /></label>
                         <label><span>Fecha de nacimiento</span><input type="date" value={applicantForm.birthDate} onChange={(event) => updateApplicantForm('birthDate', event.target.value)} /></label>
-                        <label><span>Edad</span><input value={applicantAgeLabel} readOnly placeholder="Automática" /></label>
+                        <label><span>Edad</span><input placeholder="Ej. 5" value={applicantForm.studentAge} onChange={(event) => updateApplicantForm('studentAge', event.target.value)} /></label>
                         <label><span>Colegio de procedencia</span><input placeholder="Colegio de procedencia" value={applicantForm.previousSchool} onChange={(event) => updateApplicantForm('previousSchool', event.target.value)} /></label>
                       </div>
                     </fieldset>
@@ -1501,6 +1527,15 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                       <legend>Fuente</legend>
                       <div className="admissions-create-grid admissions-create-grid-compact">
                         <label><span>Referencia/Origen</span><input placeholder="Referencia/Origen" value={applicantForm.referenceOrigin} onChange={(event) => updateApplicantForm('referenceOrigin', event.target.value)} /></label>
+                        <label>
+                          <span>Solicitudes adicionales</span>
+                          <select value={applicantForm.additionalRequest} onChange={(event) => updateApplicantForm('additionalRequest', event.target.value)}>
+                            <option value="">Sin selección</option>
+                            {ADDITIONAL_REQUEST_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
                     </fieldset>
                   </div>
@@ -1551,19 +1586,21 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
             </div>
             <div className="tracking-table-wrap">
               <table className="tracking-data-table tracking-search-results-table">
-                <thead><tr><th>Aspirante</th><th>Grado que aspira</th><th>Fecha de nacimiento</th><th>Colegio de procedencia</th><th>Acudiente</th><th>Teléfono</th><th>Correo</th><th>Referencia</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Aspirante</th><th>Grado que aspira</th><th>Fecha de nacimiento</th><th>Edad</th><th>Colegio de procedencia</th><th>Acudiente</th><th>Teléfono</th><th>Correo</th><th>Referencia</th><th>Solicitudes adicionales</th><th>Acciones</th></tr></thead>
                 <tbody>
-                  {loading ? <tr><td colSpan="9"><div className="empty-state">Cargando aspirantes...</div></td></tr> : null}
+                  {loading ? <tr><td colSpan="11"><div className="empty-state">Cargando aspirantes...</div></td></tr> : null}
                   {!loading && applicants.length ? applicants.map((applicant) => (
                     <tr className={selectedApplicantId === applicant.id ? 'is-selected' : ''} key={applicant.id} onClick={() => selectApplicant(applicant)}>
                       <td>{applicant.studentName}</td>
                       <td>{applicant.grade || '-'}</td>
                       <td>{formatDate(applicant.student?.birthDate)}</td>
+                      <td>{resolveApplicantAgeDisplay(applicant)}</td>
                       <td>{applicant.student?.previousSchool || '-'}</td>
                       <td>{applicant.guardian?.name || '-'}</td>
                       <td>{applicant.guardian?.phone || '-'}</td>
                       <td>{applicant.guardian?.email || '-'}</td>
                       <td>{applicant.source?.referenceOrigin || '-'}</td>
+                      <td>{getAdditionalRequestLabel(applicant.source?.additionalRequest)}</td>
                       <td>
                         <div className="admissions-row-actions">
                           <button className="tracking-icon-button" type="button" aria-label={`Abrir ${applicant.studentName || 'aspirante'}`} title="Abrir" onClick={(event) => { event.stopPropagation(); selectApplicant(applicant); }}>→</button>
@@ -1573,7 +1610,7 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                       </td>
                     </tr>
                   )) : null}
-                  {!loading && !applicants.length ? <tr><td colSpan="9"><div className="empty-state">{currentViewConfig.empty}</div></td></tr> : null}
+                  {!loading && !applicants.length ? <tr><td colSpan="11"><div className="empty-state">{currentViewConfig.empty}</div></td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -1845,8 +1882,10 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
                   <div className="admissions-detail-metadata">
                     <div><span>Grado que aspira</span><strong>{selectedApplicant.grade || '-'}</strong></div>
                     <div><span>Fecha de nacimiento</span><strong>{formatDate(selectedApplicant.student?.birthDate)}</strong></div>
+                    <div><span>Edad</span><strong>{resolveApplicantAgeDisplay(selectedApplicant)}</strong></div>
                     <div><span>Colegio de procedencia</span><strong>{selectedApplicant.student?.previousSchool || '-'}</strong></div>
                     <div><span>Referencia</span><strong>{selectedApplicant.source?.referenceOrigin || '-'}</strong></div>
+                    <div><span>Solicitudes adicionales</span><strong>{getAdditionalRequestLabel(selectedApplicant.source?.additionalRequest)}</strong></div>
                     <div><span>Acudiente</span><strong>{selectedApplicant.guardian?.name || '-'}</strong></div>
                     <div><span>Teléfono</span><strong>{selectedApplicant.guardian?.phone || '-'}</strong></div>
                     <div><span>Correo</span><strong>{selectedApplicant.guardian?.email || '-'}</strong></div>

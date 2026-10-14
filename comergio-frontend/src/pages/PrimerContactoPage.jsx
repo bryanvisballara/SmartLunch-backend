@@ -5,6 +5,7 @@ import {
 } from '../services/primerContacto.service';
 import colibriLogo from '../assets/colibrisinfondo.png';
 import berckleyCampusPhoto from '../assets/berckley-campus-primer-contacto.png';
+import { ADDITIONAL_REQUEST_OPTIONS } from '../lib/berckleyAdditionalRequests';
 import './PrimerContactoPage.css';
 
 function IconCalendar({ className }) {
@@ -111,8 +112,8 @@ const HOW_IT_WORKS_STEPS = [
     text: 'Ingresa los datos del aspirante, del acudiente y agenda tu cita con Admisiones.',
   },
   {
-    title: 'Se te habilitará el botón para redirigirte a WhatsApp',
-    text: 'Solo cuando el formulario esté completo podrás continuar por WhatsApp.',
+    title: 'Guarda y continúa por WhatsApp',
+    text: 'Puedes enviar los datos que tengas a mano y seguir la conversación con Admisiones.',
   },
   {
     title: 'Revisaremos tus datos suministrados',
@@ -178,6 +179,8 @@ function createEmptyForm() {
     locationKey: '',
     appointmentDate: '',
     appointmentTime: '',
+    studentAge: '',
+    additionalRequest: '',
   };
 }
 
@@ -202,15 +205,15 @@ function resolveHowHeardReference(howHeard, howHeardOther) {
   return selected.label;
 }
 
-function calcAgeFromBirthDate(birthDate) {
-  if (!birthDate) return 'Automática';
+function calcAgeNumberFromBirthDate(birthDate) {
+  if (!birthDate) return null;
   const born = new Date(`${birthDate}T00:00:00`);
-  if (Number.isNaN(born.getTime())) return 'Automática';
+  if (Number.isNaN(born.getTime())) return null;
   const now = new Date();
   let age = now.getFullYear() - born.getFullYear();
   const monthDiff = now.getMonth() - born.getMonth();
   if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < born.getDate())) age -= 1;
-  return age >= 0 && age < 120 ? `${age} años` : 'Automática';
+  return age >= 0 && age < 120 ? age : null;
 }
 
 function openWhatsApp(url) {
@@ -325,7 +328,13 @@ export default function PrimerContactoPage() {
     };
   }, []);
 
-  const ageLabel = useMemo(() => calcAgeFromBirthDate(form.birthDate), [form.birthDate]);
+  useEffect(() => {
+    if (!form.birthDate) return;
+    const autoAge = calcAgeNumberFromBirthDate(form.birthDate);
+    if (autoAge === null) return;
+    setForm((previous) => ({ ...previous, studentAge: String(autoAge) }));
+  }, [form.birthDate]);
+
   const grades = availability?.grades || [];
   const locations = availability?.locations || [
     { value: 'sede_km5', label: 'Sede km 5 (primaria y secundaria)' },
@@ -369,24 +378,7 @@ export default function PrimerContactoPage() {
     if (error) setError('');
   };
 
-  const canSubmit = Boolean(
-    form.fullName.trim()
-    && form.birthDate
-    && (form.noSchooling || form.previousSchool.trim())
-    && form.guardianName.trim()
-    && form.guardianEmail.trim()
-    && form.guardianPhone.trim()
-    && form.howHeard
-    && (form.howHeard !== 'otro' || form.howHeardOther.trim())
-    && form.grade
-    && form.appointmentType
-    && (form.appointmentType === 'none' || (
-      form.appointmentDate
-      && form.appointmentTime
-      && (form.appointmentType !== 'in_person' || form.locationKey)
-    ))
-    && !submitting
-  );
+  const canSubmit = !submitting;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -493,7 +485,7 @@ export default function PrimerContactoPage() {
 
             <div className="primer-contacto-modal__footer">
               <p>
-                WhatsApp se habilita solo cuando completes el formulario. Así podemos atenderte con tu información lista.
+                Al guardar, te llevamos a WhatsApp para continuar con Admisiones con la información que compartiste.
               </p>
               <button
                 type="button"
@@ -564,6 +556,81 @@ export default function PrimerContactoPage() {
 
           <form className="primer-contacto-form" onSubmit={handleSubmit}>
             <div className="primer-contacto-section">
+              <h3 className="primer-contacto-section__title">Acudiente</h3>
+              <div className="primer-contacto-grid primer-contacto-grid--2">
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-guardianName">Nombre</label>
+                  <input
+                    id="pc-guardianName"
+                    placeholder="Acudiente"
+                    value={form.guardianName}
+                    onChange={(event) => updateField('guardianName')(event.target.value)}
+                  />
+                </div>
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-guardianEmail">Email</label>
+                  <input
+                    id="pc-guardianEmail"
+                    type="email"
+                    placeholder="Email acudiente"
+                    value={form.guardianEmail}
+                    onChange={(event) => updateField('guardianEmail')(event.target.value)}
+                  />
+                </div>
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-guardianPhone">Teléfono</label>
+                  <input
+                    id="pc-guardianPhone"
+                    placeholder="Teléfono"
+                    value={form.guardianPhone}
+                    onChange={(event) => updateField('guardianPhone')(event.target.value)}
+                  />
+                </div>
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-academicYear">Periodo</label>
+                  <input
+                    id="pc-academicYear"
+                    value={form.academicYear}
+                    onChange={(event) => updateField('academicYear')(event.target.value)}
+                  />
+                </div>
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-howHeard">¿Cómo llegaste al Berckley?</label>
+                  <select
+                    id="pc-howHeard"
+                    value={form.howHeard}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setForm((previous) => ({
+                        ...previous,
+                        howHeard: value,
+                        howHeardOther: value === 'otro' ? previous.howHeardOther : '',
+                      }));
+                      if (error) setError('');
+                      if (success) setSuccess('');
+                    }}
+                  >
+                    <option value="">Selecciona una opción</option>
+                    {HOW_HEARD_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {form.howHeard === 'otro' ? (
+                  <div className="primer-contacto-field">
+                    <label htmlFor="pc-howHeardOther">Cuéntanos cómo nos conociste</label>
+                    <input
+                      id="pc-howHeardOther"
+                      placeholder="Escribe tu respuesta"
+                      value={form.howHeardOther}
+                      onChange={(event) => updateField('howHeardOther')(event.target.value)}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="primer-contacto-section">
               <h3 className="primer-contacto-section__title">Datos del aspirante (alumno)</h3>
               <div className="primer-contacto-grid">
                 <div className="primer-contacto-field">
@@ -573,7 +640,6 @@ export default function PrimerContactoPage() {
                     placeholder="Nombre completo"
                     value={form.fullName}
                     onChange={(event) => updateField('fullName')(event.target.value)}
-                    required
                   />
                 </div>
                 <div className="primer-contacto-grid primer-contacto-grid--2">
@@ -584,12 +650,16 @@ export default function PrimerContactoPage() {
                       type="date"
                       value={form.birthDate}
                       onChange={(event) => updateField('birthDate')(event.target.value)}
-                      required
                     />
                   </div>
                   <div className="primer-contacto-field primer-contacto-field--age">
                     <label htmlFor="pc-age">Edad</label>
-                    <input id="pc-age" value={ageLabel} readOnly />
+                    <input
+                      id="pc-age"
+                      placeholder="Ej. 5"
+                      value={form.studentAge}
+                      onChange={(event) => updateField('studentAge')(event.target.value)}
+                    />
                   </div>
                 </div>
                 <div className="primer-contacto-school-row">
@@ -601,7 +671,6 @@ export default function PrimerContactoPage() {
                       value={form.noSchooling ? '' : form.previousSchool}
                       onChange={(event) => updateField('previousSchool')(event.target.value)}
                       disabled={form.noSchooling}
-                      required={!form.noSchooling}
                     />
                   </div>
                   <label className="primer-contacto-check" htmlFor="pc-noSchooling">
@@ -627,87 +696,6 @@ export default function PrimerContactoPage() {
             </div>
 
             <div className="primer-contacto-section">
-              <h3 className="primer-contacto-section__title">Acudiente</h3>
-              <div className="primer-contacto-grid primer-contacto-grid--2">
-                <div className="primer-contacto-field">
-                  <label htmlFor="pc-guardianName">Nombre</label>
-                  <input
-                    id="pc-guardianName"
-                    placeholder="Acudiente"
-                    value={form.guardianName}
-                    onChange={(event) => updateField('guardianName')(event.target.value)}
-                    required
-                  />
-                </div>
-                <div className="primer-contacto-field">
-                  <label htmlFor="pc-guardianEmail">Email</label>
-                  <input
-                    id="pc-guardianEmail"
-                    type="email"
-                    placeholder="Email acudiente"
-                    value={form.guardianEmail}
-                    onChange={(event) => updateField('guardianEmail')(event.target.value)}
-                    required
-                  />
-                </div>
-                <div className="primer-contacto-field">
-                  <label htmlFor="pc-guardianPhone">Teléfono</label>
-                  <input
-                    id="pc-guardianPhone"
-                    placeholder="Teléfono"
-                    value={form.guardianPhone}
-                    onChange={(event) => updateField('guardianPhone')(event.target.value)}
-                    required
-                  />
-                </div>
-                <div className="primer-contacto-field">
-                  <label htmlFor="pc-academicYear">Periodo</label>
-                  <input
-                    id="pc-academicYear"
-                    value={form.academicYear}
-                    onChange={(event) => updateField('academicYear')(event.target.value)}
-                    required
-                  />
-                </div>
-                <div className="primer-contacto-field">
-                  <label htmlFor="pc-howHeard">¿Cómo llegaste al Berckley?</label>
-                  <select
-                    id="pc-howHeard"
-                    value={form.howHeard}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      setForm((previous) => ({
-                        ...previous,
-                        howHeard: value,
-                        howHeardOther: value === 'otro' ? previous.howHeardOther : '',
-                      }));
-                      if (error) setError('');
-                      if (success) setSuccess('');
-                    }}
-                    required
-                  >
-                    <option value="">Selecciona una opción</option>
-                    {HOW_HEARD_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-                {form.howHeard === 'otro' ? (
-                  <div className="primer-contacto-field">
-                    <label htmlFor="pc-howHeardOther">Cuéntanos cómo nos conociste</label>
-                    <input
-                      id="pc-howHeardOther"
-                      placeholder="Escribe tu respuesta"
-                      value={form.howHeardOther}
-                      onChange={(event) => updateField('howHeardOther')(event.target.value)}
-                      required
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="primer-contacto-section">
               <h3 className="primer-contacto-section__title">Proceso y agenda</h3>
               <div className="primer-contacto-grid">
                 <div className="primer-contacto-field">
@@ -717,7 +705,6 @@ export default function PrimerContactoPage() {
                     value={form.grade}
                     onChange={(event) => updateField('grade')(event.target.value)}
                     disabled={!grades.length}
-                    required
                   >
                     <option value="">
                       {grades.length ? 'Selecciona grado' : (loadingSlots ? 'Cargando grados…' : 'Sin grados configurados')}
@@ -761,7 +748,6 @@ export default function PrimerContactoPage() {
                       id="pc-location"
                       value={form.locationKey}
                       onChange={(event) => updateField('locationKey')(event.target.value)}
-                      required
                     >
                       <option value="">Selecciona sede</option>
                       {locations.map((location) => (
@@ -885,6 +871,25 @@ export default function PrimerContactoPage() {
                     ) : null}
                   </div>
                 ) : null}
+              </div>
+            </div>
+
+            <div className="primer-contacto-section">
+              <h3 className="primer-contacto-section__title">Solicitudes adicionales</h3>
+              <div className="primer-contacto-grid">
+                <div className="primer-contacto-field">
+                  <label htmlFor="pc-additionalRequest">¿Te interesa recibir información adicional?</label>
+                  <select
+                    id="pc-additionalRequest"
+                    value={form.additionalRequest}
+                    onChange={(event) => updateField('additionalRequest')(event.target.value)}
+                  >
+                    <option value="">Selecciona una opción</option>
+                    {ADDITIONAL_REQUEST_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 

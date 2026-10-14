@@ -57,6 +57,7 @@ const admissionApplicantSchema = new mongoose.Schema({
     lastName: { type: String, default: '', trim: true },
     documentNumber: { type: String, default: '', trim: true, index: true },
     birthDate: { type: Date, default: null },
+    age: { type: String, default: '', trim: true },
     previousSchool: { type: String, default: '', trim: true },
   },
   guardian: {
@@ -68,6 +69,7 @@ const admissionApplicantSchema = new mongoose.Schema({
   academicYear: { type: String, default: '', trim: true },
   source: {
     referenceOrigin: { type: String, default: '', trim: true },
+    additionalRequest: { type: String, default: '', trim: true },
   },
   status: {
     type: String,
