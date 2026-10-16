@@ -425,6 +425,7 @@ app.use('/conecta', conectaRoutes);
 app.use('/informa', informaRoutes);
 app.use('/academic-secretary/admissions', admissionsRoutes);
 app.use('/public/berckley/primer-contacto', publicPrimerContactoRoutes);
+app.use('/public/millennium/primer-contacto', require('./routes/publicMillenniumPrimerContacto.routes'));
 app.use('/academic-secretary', academicSecretaryRoutes);
 app.use('/school-creation', limiter, schoolCreationRoutes);
 app.use('/super-admin', superAdminRoutes);

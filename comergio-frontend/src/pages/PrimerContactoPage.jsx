@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  fetchPrimerContactoAvailability,
-  submitPrimerContacto,
-} from '../services/primerContacto.service';
-import colibriLogo from '../assets/colibrisinfondo.png';
-import berckleyCampusPhoto from '../assets/berckley-campus-primer-contacto.png';
 import { ADDITIONAL_REQUEST_OPTIONS } from '../lib/berckleyAdditionalRequests';
+import { getPrimerContactoPreset } from '../lib/primerContactoPresets';
 import './PrimerContactoPage.css';
 
 function IconCalendar({ className }) {
@@ -105,29 +100,6 @@ function IconSpark({ className }) {
     </svg>
   );
 }
-
-const HOW_IT_WORKS_STEPS = [
-  {
-    title: 'Completa este formulario',
-    text: 'Ingresa los datos del aspirante, del acudiente y agenda tu cita con Admisiones.',
-  },
-  {
-    title: 'Guarda y continúa por WhatsApp',
-    text: 'Puedes enviar los datos que tengas a mano y seguir la conversación con Admisiones.',
-  },
-  {
-    title: 'Revisaremos tus datos suministrados',
-    text: 'Nuestro equipo de Admisiones validará la información que nos compartiste.',
-  },
-  {
-    title: 'Recibirás más información y responderemos todas tus dudas',
-    text: 'Te guiaremos en los siguientes pasos del proceso.',
-  },
-  {
-    title: '¡Empezamos el proceso de admisión!',
-    text: 'Con tu primer contacto listo, iniciamos juntos el camino hacia Berckley.',
-  },
-];
 
 const FEATURES = [
   {
@@ -271,7 +243,8 @@ function buildMonthCells(monthDate) {
   return cells;
 }
 
-export default function PrimerContactoPage() {
+export default function PrimerContactoPage({ presetKey = 'berckley' } = {}) {
+  const preset = getPrimerContactoPreset(presetKey);
   const [form, setForm] = useState(createEmptyForm);
   const [availability, setAvailability] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(true);
@@ -283,8 +256,8 @@ export default function PrimerContactoPage() {
   const [howItWorksOpen, setHowItWorksOpen] = useState(false);
 
   useEffect(() => {
-    document.title = 'Primer contacto | International Berckley School';
-  }, []);
+    document.title = preset.documentTitle;
+  }, [preset.documentTitle]);
 
   useEffect(() => {
     if (!howItWorksOpen) return undefined;
@@ -305,7 +278,7 @@ export default function PrimerContactoPage() {
     (async () => {
       setLoadingSlots(true);
       try {
-        const data = await fetchPrimerContactoAvailability({ days: 60 });
+        const data = await preset.fetchAvailability({ days: 60 });
         if (!cancelled) {
           setAvailability(data);
           const firstAvailable = (data?.days || []).find((day) => day.availableCount > 0);
@@ -326,7 +299,7 @@ export default function PrimerContactoPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preset]);
 
   useEffect(() => {
     if (!form.birthDate) return;
@@ -397,14 +370,14 @@ export default function PrimerContactoPage() {
         howHeard: form.howHeard,
         howHeardOther: form.howHeard === 'otro' ? form.howHeardOther.trim() : '',
       };
-      const result = await submitPrimerContacto(payload);
+      const result = await preset.submit(payload);
       setSuccess('Registro guardado. Te enviamos el recordatorio al correo y te llevamos a WhatsApp.');
       if (result?.whatsappUrl) {
         openWhatsApp(result.whatsappUrl);
       }
       setForm(createEmptyForm());
       setSelectedDate('');
-      const refreshed = await fetchPrimerContactoAvailability({ days: 60 });
+      const refreshed = await preset.fetchAvailability({ days: 60 });
       setAvailability(refreshed);
     } catch (submitError) {
       setError(submitError?.response?.data?.message || 'No se pudo completar el registro. Intenta de nuevo.');
@@ -414,11 +387,11 @@ export default function PrimerContactoPage() {
   };
 
   return (
-    <div className="primer-contacto-page">
+    <div className={preset.pageClass}>
       <header className="primer-contacto-topbar">
-        <a className="primer-contacto-topbar__brand" href="https://comergio.com">
-          <img src={colibriLogo} alt="" />
-          <span>Comergio</span>
+        <a className="primer-contacto-topbar__brand" href={preset.brandHref}>
+          <img src={preset.brandLogo} alt="" />
+          <span>{preset.brandLabel}</span>
         </a>
         <div className="primer-contacto-topbar__actions">
           <button
@@ -470,7 +443,7 @@ export default function PrimerContactoPage() {
             </div>
 
             <ol className="primer-contacto-modal__steps">
-              {HOW_IT_WORKS_STEPS.map((step, index) => (
+              {preset.howItWorksSteps.map((step, index) => (
                 <li key={step.title}>
                   <span className="primer-contacto-modal__rail" aria-hidden="true">
                     <span className="primer-contacto-modal__step-num">{index + 1}</span>
@@ -504,11 +477,11 @@ export default function PrimerContactoPage() {
       ) : null}
       <div className="primer-contacto-layout">
         <aside className="primer-contacto-side primer-contacto-side--left">
-          <p className="primer-contacto-side__eyebrow">Departamento de Admisiones</p>
-          <h1 className="primer-contacto-side__title">International Berckley School</h1>
+          <p className="primer-contacto-side__eyebrow">{preset.sideEyebrow}</p>
+          <h1 className="primer-contacto-side__title">{preset.schoolName}</h1>
           <span className="primer-contacto-side__accent" aria-hidden="true" />
           <p className="primer-contacto-side__lead">
-            Agenda tu primer contacto con nosotros. Completa tus datos, elige el tipo de cita y un horario disponible.
+            {preset.sideLead}
           </p>
           <ul className="primer-contacto-features">
             {FEATURES.map((feature) => (
@@ -526,7 +499,7 @@ export default function PrimerContactoPage() {
           <figure className="primer-contacto-side__photo">
             <div className="primer-contacto-side__photo-media" aria-hidden="true">
               <img
-                src={berckleyCampusPhoto}
+                src={preset.campusPhoto}
                 alt=""
               />
             </div>
@@ -534,7 +507,7 @@ export default function PrimerContactoPage() {
               <IconShield />
             </span>
             <figcaption className="sr-only">
-              Fachada del campus International Berckley School
+              {preset.campusPhotoCaption}
             </figcaption>
           </figure>
         </aside>
@@ -595,7 +568,7 @@ export default function PrimerContactoPage() {
                   />
                 </div>
                 <div className="primer-contacto-field">
-                  <label htmlFor="pc-howHeard">¿Cómo llegaste al Berckley?</label>
+                  <label htmlFor="pc-howHeard">{preset.howHeardLabel}</label>
                   <select
                     id="pc-howHeard"
                     value={form.howHeard}

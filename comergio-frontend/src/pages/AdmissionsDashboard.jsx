@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { resolveApiAssetUrl } from '../lib/api';
 import { redirectToLoginPage } from '../lib/authNavigation';
 import { getSchoolDisplayName } from '../lib/schools';
+import { isMillenniumSchool } from '../lib/millenniumEnrollmentContracts';
 import useAuthStore from '../store/auth.store';
 import AcademicSecretaryDashboard from './AcademicSecretaryDashboard';
 import EnrollmentMatriculaRectoriaPanel from '../components/enrollment-matricula/EnrollmentMatriculaRectoriaPanel';
@@ -506,7 +507,12 @@ function AdmissionsDashboard({ activeView = '', embedded = false } = {}) {
     agendaBlocks.filter((block) => block.scope === 'date' && block.date).map((block) => block.date)
   ), [agendaBlocks]);
   const closedAgendaDates = useMemo(() => new Set(agendaSettings?.closedDates || []), [agendaSettings]);
-  const publicAgendaLink = `${window.location.origin}/berckleyprimercontacto`;
+  const publicAgendaLink = useMemo(() => {
+    const slug = isMillenniumSchool(schoolDisplayName, user?.schoolId)
+      ? 'millenniumprimercontacto'
+      : 'berckleyprimercontacto';
+    return `${window.location.origin}/${slug}`;
+  }, [schoolDisplayName, user?.schoolId]);
   const agendaSlotTimes = agendaSettings?.slotTimes?.length
     ? agendaSettings.slotTimes
     : buildAgendaSlotTimes(DEFAULT_AGENDA_WINDOWS);

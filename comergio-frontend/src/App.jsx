@@ -37,6 +37,7 @@ import MeriendasOperator from './pages/MeriendasOperator';
 import Privacy from './pages/Privacy';
 import Contact from './pages/Contact';
 import PrimerContactoPage from './pages/PrimerContactoPage';
+import MillenniumPrimerContactoPage from './pages/MillenniumPrimerContactoPage';
 import AccountDeletionRequest from './pages/AccountDeletionRequest';
 import Register from './pages/Register';
 import RegisterVerifiedNext from './pages/RegisterVerifiedNext';
@@ -169,7 +170,8 @@ function App() {
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
   const isLandingRoute = normalizedPathname === '/landing';
-  const isPrimerContactoRoute = normalizedPathname === '/berckleyprimercontacto';
+  const isPrimerContactoRoute = normalizedPathname === '/berckleyprimercontacto'
+    || normalizedPathname === '/millenniumprimercontacto';
   const isLoginRoute = normalizedPathname === '/';
   const isRegisterRoute = normalizedPathname === '/register' || normalizedPathname === '/register/next-step';
   const isAuthFlowRoute = isLoginRoute || isRegisterRoute;
@@ -514,6 +516,7 @@ function App() {
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<LandingPage />} path="/landing" />
           <Route element={<PrimerContactoPage />} path="/berckleyprimercontacto" />
+          <Route element={<MillenniumPrimerContactoPage />} path="/millenniumprimercontacto" />
           <Route element={<Navigate replace to="/berckleyprimercontacto" />} path="/primercontacto" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="rectoria" postLoginPath="/rectoria" />} path="/login/rectoria" /> : null}

@@ -12,7 +12,36 @@ const {
 } = require('./admissionAgenda.service');
 
 const BERCKLEY_SCHOOL_ID = 'International Berckley School';
+const MILLENNIUM_SCHOOL_ID = 'Millennium School';
 const WHATSAPP_NUMBER = '573165283537';
+const MILLENNIUM_WHATSAPP_NUMBER = '573113212856';
+
+const PRIMER_CONTACTO_PROFILES = {
+  berckley: {
+    key: 'berckley',
+    schoolId: BERCKLEY_SCHOOL_ID,
+    whatsappNumber: WHATSAPP_NUMBER,
+    defaultReference: 'Primer contacto — comergio.com/berckleyprimercontacto',
+    applicantNotes: 'Registro desde Primer Contacto (comergio.com/berckleyprimercontacto).',
+    whatsappIntro: 'Hola, me interesa International Berckley School. Acabo de registrar mis datos en Primer Contacto y quiero continuar por WhatsApp.',
+    referenceWhatsappLabel: 'Cómo llegaste al Berckley',
+    sendBerckleyOfficeEmail: true,
+    guardianEmailNotes: 'Gracias por dar el primer paso con International Berckley School. Nuestro equipo de Admisiones te acompañará en cada etapa del proceso. Si necesitas reprogramar, responde este correo o escríbenos por WhatsApp.',
+    guardianEmailRetentionIntro: 'Estamos muy contentos de conocerte. Esta cita es el comienzo de una experiencia educativa bilingüe, cercana y diseñada para que tu familia se sienta acompañada desde el primer momento.',
+  },
+  millennium: {
+    key: 'millennium',
+    schoolId: MILLENNIUM_SCHOOL_ID,
+    whatsappNumber: MILLENNIUM_WHATSAPP_NUMBER,
+    defaultReference: 'Primer contacto — comergio.com/millenniumprimercontacto',
+    applicantNotes: 'Registro desde Primer Contacto (comergio.com/millenniumprimercontacto).',
+    whatsappIntro: 'Hola, me interesa Millennium School. Acabo de registrar mis datos en Primer Contacto y quiero continuar por WhatsApp.',
+    referenceWhatsappLabel: 'Cómo llegaste a Millennium School',
+    sendBerckleyOfficeEmail: false,
+    guardianEmailNotes: 'Gracias por dar el primer paso con Millennium School. Nuestro equipo de Admisiones te acompañará en cada etapa del proceso. Si necesitas reprogramar, responde este correo o escríbenos por WhatsApp.',
+    guardianEmailRetentionIntro: 'Estamos muy contentos de conocerte. Esta cita es el comienzo de una experiencia educativa cercana y diseñada para que tu familia se sienta acompañada desde el primer momento.',
+  },
+};
 
 const APPOINTMENT_TYPE_LABELS = {
   virtual: 'Cita virtual',
@@ -48,7 +77,12 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function resolveHowHeardReference(body = {}) {
+function resolvePrimerContactoProfile(profileKey = 'berckley') {
+  const key = normalizeText(profileKey).toLowerCase();
+  return PRIMER_CONTACTO_PROFILES[key] || PRIMER_CONTACTO_PROFILES.berckley;
+}
+
+function resolveHowHeardReference(body = {}, defaultReference = PRIMER_CONTACTO_PROFILES.berckley.defaultReference) {
   const howHeard = String(body.howHeard || body.howDidYouHear || '').trim().toLowerCase();
   const howHeardOther = normalizeText(body.howHeardOther || body.howDidYouHearOther);
   const explicitReference = normalizeText(body.referenceOrigin || body.source?.referenceOrigin);
@@ -59,7 +93,7 @@ function resolveHowHeardReference(body = {}) {
   if (HOW_HEARD_OPTIONS[howHeard]) {
     return HOW_HEARD_OPTIONS[howHeard];
   }
-  return explicitReference || 'Primer contacto — comergio.com/berckleyprimercontacto';
+  return explicitReference || defaultReference;
 }
 
 function normalizeEmail(value) {
@@ -205,31 +239,33 @@ function resolveCalendarLocation({ appointmentType, locationKey, schoolName }) {
   return schoolName || 'International Berckley School';
 }
 
-function buildWhatsAppMessage({
-  fullName,
-  birthDate,
-  previousSchool,
-  guardianName,
-  guardianEmail,
-  guardianPhone,
-  grade,
-  academicYear,
-  appointmentType,
-  appointmentDate,
-  appointmentTime,
-  locationKey,
-  referenceOrigin,
-  studentAge,
-  additionalRequest,
-}) {
+function buildWhatsAppMessage(payload, profile = PRIMER_CONTACTO_PROFILES.berckley) {
+  const {
+    fullName,
+    birthDate,
+    previousSchool,
+    guardianName,
+    guardianEmail,
+    guardianPhone,
+    grade,
+    academicYear,
+    appointmentType,
+    appointmentDate,
+    appointmentTime,
+    locationKey,
+    referenceOrigin,
+    studentAge,
+    additionalRequest,
+  } = payload;
+
   const typeLabel = APPOINTMENT_TYPE_LABELS[appointmentType] || appointmentType;
   const additionalLabel = getAdditionalRequestLabel(additionalRequest);
   const locationLabel = appointmentType === 'in_person'
     ? (LOCATION_OPTIONS[locationKey] || '')
-    : resolveCalendarLocation({ appointmentType, locationKey });
+    : resolveCalendarLocation({ appointmentType, locationKey, schoolName: profile.schoolId });
 
   return [
-    'Hola, me interesa International Berckley School. Acabo de registrar mis datos en Primer Contacto y quiero continuar por WhatsApp.',
+    profile.whatsappIntro,
     '',
     fullName ? `• Aspirante: ${fullName}` : '',
     birthDate ? `• Fecha de nacimiento: ${birthDate}` : '',
@@ -240,7 +276,7 @@ function buildWhatsAppMessage({
     guardianPhone ? `• Teléfono: ${guardianPhone}` : '',
     grade ? `• Grado/programa: ${grade}` : '',
     academicYear ? `• Periodo: ${academicYear}` : '',
-    referenceOrigin ? `• Cómo llegaste al Berckley: ${referenceOrigin}` : '',
+    referenceOrigin ? `• ${profile.referenceWhatsappLabel}: ${referenceOrigin}` : '',
     additionalLabel ? `• Solicitudes adicionales: ${additionalLabel}` : '',
     appointmentType ? `• Tipo de cita: ${typeLabel}` : '',
     appointmentType === 'none' ? '' : `• Fecha: ${formatAppointmentDateLabel(appointmentDate)}`,
@@ -249,8 +285,8 @@ function buildWhatsAppMessage({
   ].filter(Boolean).join('\n');
 }
 
-function buildWhatsAppUrl(message) {
-  return `https://api.whatsapp.com/send?phone=${WHATSAPP_NUMBER}&text=${encodeURIComponent(message)}`;
+function buildWhatsAppUrl(message, whatsappNumber = WHATSAPP_NUMBER) {
+  return `https://api.whatsapp.com/send?phone=${whatsappNumber}&text=${encodeURIComponent(message)}`;
 }
 
 async function listBusyAppointments(schoolId, fromDateKey, toDateKey) {
@@ -320,8 +356,9 @@ function buildAvailabilityDays({
   return days;
 }
 
-async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
-  return runWithSchoolContext(BERCKLEY_SCHOOL_ID, async () => {
+async function getPrimerContactoAvailabilityForProfile(profileKey, { from, days = 21 } = {}) {
+  const profile = resolvePrimerContactoProfile(profileKey);
+  return runWithSchoolContext(profile.schoolId, async () => {
     const fromDate = from ? parseDateKey(from) : new Date();
     const safeFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : new Date();
     const dayCount = Math.min(42, Math.max(7, Number(days) || 21));
@@ -329,14 +366,14 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
     const fromDateKey = toDateKey(safeFrom);
     const toDateKeyValue = toDateKey(toDate);
     const [busyAppointments, agendaSettings, gradeOptions] = await Promise.all([
-      listBusyAppointments(BERCKLEY_SCHOOL_ID, fromDateKey, toDateKeyValue),
-      getAgendaSettings(BERCKLEY_SCHOOL_ID),
-      getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID),
+      listBusyAppointments(profile.schoolId, fromDateKey, toDateKeyValue),
+      getAgendaSettings(profile.schoolId),
+      getRectoriaGradeOptions(profile.schoolId),
     ]);
 
     return {
-      schoolId: BERCKLEY_SCHOOL_ID,
-      schoolName: await getSchoolDisplayName(BERCKLEY_SCHOOL_ID) || 'International Berckley School',
+      schoolId: profile.schoolId,
+      schoolName: await getSchoolDisplayName(profile.schoolId) || profile.schoolId,
       timezone: 'America/Bogota',
       slotDurationMinutes: SLOT_DURATION_MINUTES,
       windows: resolveWindows(agendaSettings).map((window, index) => ({
@@ -362,7 +399,15 @@ async function getPrimerContactoAvailability({ from, days = 21 } = {}) {
   });
 }
 
-function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSettings = null) {
+async function getPrimerContactoAvailability(options = {}) {
+  return getPrimerContactoAvailabilityForProfile('berckley', options);
+}
+
+async function getMillenniumPrimerContactoAvailability(options = {}) {
+  return getPrimerContactoAvailabilityForProfile('millennium', options);
+}
+
+function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSettings = null, profile = PRIMER_CONTACTO_PROFILES.berckley) {
   const noSchooling = Boolean(body.noSchooling);
   const fullName = normalizeText(body.fullName || body.student?.firstName);
   const birthDate = normalizeText(body.birthDate || body.student?.birthDate);
@@ -380,7 +425,7 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
   const locationKey = normalizeLocationKey(body.locationKey || body.appointmentLocation || body.appointment?.locationKey);
   const howHeard = String(body.howHeard || body.howDidYouHear || '').trim().toLowerCase();
   const howHeardOther = normalizeText(body.howHeardOther || body.howDidYouHearOther);
-  const referenceOrigin = resolveHowHeardReference(body);
+  const referenceOrigin = resolveHowHeardReference(body, profile.defaultReference);
   const additionalRequest = normalizeAdditionalRequest(
     body.additionalRequest || body.source?.additionalRequest,
   );
@@ -454,19 +499,20 @@ function validatePrimerContactoPayload(body = {}, gradeOptions = [], agendaSetti
   };
 }
 
-async function submitPrimerContacto(body = {}) {
-  return runWithSchoolContext(BERCKLEY_SCHOOL_ID, async () => {
+async function submitPrimerContactoForProfile(profileKey, body = {}) {
+  const profile = resolvePrimerContactoProfile(profileKey);
+  return runWithSchoolContext(profile.schoolId, async () => {
     const [gradeOptions, agendaSettings] = await Promise.all([
-      getRectoriaGradeOptions(BERCKLEY_SCHOOL_ID),
-      getAgendaSettings(BERCKLEY_SCHOOL_ID),
+      getRectoriaGradeOptions(profile.schoolId),
+      getAgendaSettings(profile.schoolId),
     ]);
-    const payload = validatePrimerContactoPayload(body, gradeOptions, agendaSettings);
+    const payload = validatePrimerContactoPayload(body, gradeOptions, agendaSettings, profile);
     const gradeLabel = getGradeLabel(payload.grade, gradeOptions);
     const schedulingAppointment = payload.appointmentType !== 'none';
 
     if (schedulingAppointment) {
       const busyAppointments = await listBusyAppointments(
-        BERCKLEY_SCHOOL_ID,
+        profile.schoolId,
         payload.appointmentDate,
         payload.appointmentDate,
       );
@@ -478,7 +524,7 @@ async function submitPrimerContacto(body = {}) {
       }
     }
 
-    const schoolName = await getSchoolDisplayName(BERCKLEY_SCHOOL_ID) || 'International Berckley School';
+    const schoolName = await getSchoolDisplayName(profile.schoolId) || profile.schoolId;
     const typeLabel = APPOINTMENT_TYPE_LABELS[payload.appointmentType];
     const locationLabel = schedulingAppointment
       ? resolveCalendarLocation({
@@ -494,7 +540,7 @@ async function submitPrimerContacto(body = {}) {
     const admissionEvents = [
       {
         title: 'Aspirante creado',
-        notes: 'Registro desde Primer Contacto (comergio.com/berckleyprimercontacto).',
+        notes: profile.applicantNotes,
         stageKey: 'interesados',
         stageLabel: 'Interesados',
         responsible: 'Primer Contacto',
@@ -538,7 +584,7 @@ async function submitPrimerContacto(body = {}) {
     }
 
     const applicant = await AdmissionApplicant.create({
-      schoolId: BERCKLEY_SCHOOL_ID,
+      schoolId: profile.schoolId,
       student: {
         firstName: payload.fullName,
         lastName: '',
@@ -588,26 +634,29 @@ async function submitPrimerContacto(body = {}) {
         calendarLocation: locationLabel,
         durationMinutes: SLOT_DURATION_MINUTES,
       };
-      const emailResults = await Promise.allSettled([
+      const emailTasks = [
         sendAdmissionAppointmentEmail({
           ...appointmentNotice,
           toEmail: payload.guardianEmail,
           toName: payload.guardianName,
-          notes: 'Gracias por dar el primer paso con International Berckley School. Nuestro equipo de Admisiones te acompañará en cada etapa del proceso. Si necesitas reprogramar, responde este correo o escríbenos por WhatsApp.',
+          notes: profile.guardianEmailNotes,
           departmentLabel: 'Departamento de Admisiones',
-          retentionIntro: 'Estamos muy contentos de conocerte. Esta cita es el comienzo de una experiencia educativa bilingüe, cercana y diseñada para que tu familia se sienta acompañada desde el primer momento.',
+          retentionIntro: profile.guardianEmailRetentionIntro,
         }),
-        sendBerckleyAdmissionsOfficeAppointmentEmail({
+      ];
+      if (profile.sendBerckleyOfficeEmail) {
+        emailTasks.push(sendBerckleyAdmissionsOfficeAppointmentEmail({
           ...appointmentNotice,
-          schoolId: BERCKLEY_SCHOOL_ID,
+          schoolId: profile.schoolId,
           birthDate: formatAppointmentDateLabel(payload.birthDate),
           previousSchool: payload.previousSchool,
           guardianName: payload.guardianName,
           guardianEmail: payload.guardianEmail,
           guardianPhone: payload.guardianPhone,
           source: payload.referenceOrigin || 'Primer contacto',
-        }),
-      ]);
+        }));
+      }
+      const emailResults = await Promise.allSettled(emailTasks);
       emailResults.forEach((result) => {
         if (result.status === 'rejected') {
           console.warn(`[PRIMER_CONTACTO_EMAIL_FAILED] applicantId=${applicant._id} error=${result.reason?.message || result.reason}`);
@@ -615,7 +664,7 @@ async function submitPrimerContacto(body = {}) {
       });
     }
 
-    const whatsappMessage = buildWhatsAppMessage({ ...payload, grade: gradeLabel });
+    const whatsappMessage = buildWhatsAppMessage({ ...payload, grade: gradeLabel }, profile);
     return {
       ok: true,
       applicantId: String(applicant._id),
@@ -639,16 +688,27 @@ async function submitPrimerContacto(body = {}) {
         locationKey: '',
         locationLabel: '',
       },
-      whatsappUrl: buildWhatsAppUrl(whatsappMessage),
-      whatsappNumber: WHATSAPP_NUMBER,
+      whatsappUrl: buildWhatsAppUrl(whatsappMessage, profile.whatsappNumber),
+      whatsappNumber: profile.whatsappNumber,
     };
   });
 }
 
+async function submitPrimerContacto(body = {}) {
+  return submitPrimerContactoForProfile('berckley', body);
+}
+
+async function submitMillenniumPrimerContacto(body = {}) {
+  return submitPrimerContactoForProfile('millennium', body);
+}
+
 module.exports = {
   BERCKLEY_SCHOOL_ID,
+  MILLENNIUM_SCHOOL_ID,
   getPrimerContactoAvailability,
+  getMillenniumPrimerContactoAvailability,
   submitPrimerContacto,
+  submitMillenniumPrimerContacto,
   APPOINTMENT_TYPE_LABELS,
   LOCATION_OPTIONS,
   getRectoriaGradeOptions,

@@ -1,0 +1,72 @@
+.primer-contacto-page--millennium {
+  --pc-ink: #1a2744;
+  --pc-muted: #5c6478;
+  --pc-teal: #1e3a5f;
+  --pc-teal-bright: #2a5082;
+  --pc-teal-deep: #152238;
+  --pc-line: rgba(200, 148, 61, 0.22);
+  --pc-soft: #f7f4ef;
+  --pc-sand: #faf8f5;
+  color: var(--pc-ink);
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 100%, rgba(200, 148, 61, 0.1), transparent 55%),
+    radial-gradient(circle at 12% 0%, rgba(30, 58, 95, 0.12), transparent 38%),
+    radial-gradient(circle at 88% 5%, rgba(200, 148, 61, 0.08), transparent 32%),
+    linear-gradient(180deg, #f3f0ea 0%, #faf8f5 48%, #ebe6de 100%);
+}
+
+.primer-contacto-page--millennium::after {
+  background:
+    radial-gradient(ellipse 120% 80% at 20% 120%, rgba(30, 58, 95, 0.08), transparent 50%),
+    radial-gradient(ellipse 100% 70% at 80% 130%, rgba(200, 148, 61, 0.1), transparent 48%);
+}
+
+.primer-contacto-page--millennium .primer-contacto-topbar {
+  border-bottom-color: rgba(200, 148, 61, 0.18);
+}
+
+.primer-contacto-page--millennium .primer-contacto-topbar__brand img {
+  width: 2.2rem;
+  height: 2.2rem;
+}
+
+.primer-contacto-page--millennium .primer-contacto-topbar__solid,
+.primer-contacto-page--millennium .primer-contacto-submit,
+.primer-contacto-page--millennium .primer-contacto-modal__cta {
+  background: linear-gradient(135deg, #1e3a5f 0%, #2a5082 100%);
+  border-color: #1e3a5f;
+}
+
+.primer-contacto-page--millennium .primer-contacto-topbar__solid:hover,
+.primer-contacto-page--millennium .primer-contacto-submit:hover:not(:disabled),
+.primer-contacto-page--millennium .primer-contacto-modal__cta:hover {
+  background: linear-gradient(135deg, #152238 0%, #1e3a5f 100%);
+}
+
+.primer-contacto-page--millennium .primer-contacto-side__accent {
+  background: linear-gradient(90deg, #c8943d, #e8b85c);
+}
+
+.primer-contacto-page--millennium .primer-contacto-side__photo-media img {
+  object-fit: contain;
+  padding: 1.25rem;
+  background: linear-gradient(160deg, #fff 0%, #f7f4ef 100%);
+}
+
+.primer-contacto-page--millennium .primer-contacto-card__badge,
+.primer-contacto-page--millennium .primer-contacto-features__icon,
+.primer-contacto-page--millennium .primer-contacto-slot.is-selected,
+.primer-contacto-page--millennium .primer-contacto-calendar__day.is-selected {
+  background: rgba(30, 58, 95, 0.1);
+  color: #1e3a5f;
+  border-color: rgba(200, 148, 61, 0.35);
+}
+
+.primer-contacto-page--millennium .primer-contacto-appointment-type.is-selected {
+  border-color: #c8943d;
+  box-shadow: 0 0 0 1px rgba(200, 148, 61, 0.35);
+}
+
+.primer-contacto-page--millennium .primer-contacto-side__title {
+  font-family: 'Fraunces', Georgia, serif;
+}
