@@ -7,6 +7,7 @@ const campusSubjectReportStudentSchema = new mongoose.Schema(
     studentSchoolCode: { type: String, trim: true, default: '' },
     periodAverage: { type: Number, default: null },
     observation: { type: String, trim: true, default: '' },
+    includedInReport: { type: Boolean, default: false },
   },
   { _id: false }
 );
@@ -27,7 +28,7 @@ const campusSubjectReportCardSchema = new mongoose.Schema(
     headroomTeacherUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     status: {
       type: String,
-      enum: ['draft', 'submitted'],
+      enum: ['draft', 'partial', 'submitted'],
       default: 'draft',
       index: true,
     },

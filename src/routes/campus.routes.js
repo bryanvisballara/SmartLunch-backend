@@ -7420,6 +7420,19 @@ router.patch('/coordination/courses/:id', requireCampusCoordinationAccess, async
   }
 });
 
+function subjectReportStudentsVisibleToHeadroom(report) {
+  if (!report) return [];
+  const students = Array.isArray(report.students) ? report.students : [];
+  const status = normalizeText(report.status);
+  if (status === 'partial') {
+    return students.filter((student) => student.includedInReport === true);
+  }
+  if (status === 'submitted') {
+    return students.filter((student) => student.includedInReport !== false);
+  }
+  return [];
+}
+
 function serializeSubjectReportCard(report) {
   if (!report) return null;
   return {
@@ -7444,6 +7457,7 @@ function serializeSubjectReportCard(report) {
         ? null
         : Number(student.periodAverage),
       observation: normalizeText(student.observation),
+      includedInReport: student.includedInReport === true,
     })),
     submittedAt: report.submittedAt || null,
     createdAt: report.createdAt || null,
@@ -7617,8 +7631,13 @@ router.post('/teacher/courses/:id/report-cards', requireCampusTeacherAccess, asy
     const { schoolId, userId, name } = req.user;
     const { id } = req.params;
     const academicPeriodKey = normalizeText(req.body?.academicPeriodKey);
-    const status = normalizeText(req.body?.status) === 'submitted' ? 'submitted' : 'draft';
+    const requestedStatus = normalizeText(req.body?.status);
+    const status = requestedStatus === 'submitted' ? 'submitted' : 'draft';
     const incomingStudents = Array.isArray(req.body?.students) ? req.body.students : [];
+    const selectedStudentIds = Array.isArray(req.body?.selectedStudentIds)
+      ? req.body.selectedStudentIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : incomingStudents.map((entry) => String(entry?.studentId || '').trim()).filter(Boolean);
+    const selectedStudentIdSet = new Set(selectedStudentIds);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: 'Invalid course id' });
@@ -7646,25 +7665,68 @@ router.post('/teacher/courses/:id/report-cards', requireCampusTeacherAccess, asy
       return res.status(400).json({ message: 'El periodo académico indicado no existe en este curso.' });
     }
 
+    if (status === 'submitted' && selectedStudentIdSet.size === 0) {
+      return res.status(400).json({ message: 'Selecciona al menos un alumno para enviar el boletín.' });
+    }
+
     const observationByStudentId = new Map(
       incomingStudents
         .map((entry) => [String(entry?.studentId || '').trim(), normalizeText(entry?.observation).slice(0, 1000)])
         .filter(([studentId]) => studentId)
     );
 
-    const students = rosterAverages.map((student) => ({
-      studentId: student.studentId,
-      studentName: student.studentName,
-      studentSchoolCode: student.studentSchoolCode,
-      periodAverage: student.periodAverage,
-      observation: observationByStudentId.get(String(student.studentId)) || '',
-    }));
+    const existingReport = await CampusSubjectReportCard.findOne({
+      schoolId,
+      campusCourseId: course._id,
+      academicPeriodKey: period.key,
+    }).lean();
+    const existingStudentById = new Map(
+      (Array.isArray(existingReport?.students) ? existingReport.students : []).map((student) => [
+        String(student.studentId?._id || student.studentId || ''),
+        student,
+      ])
+    );
 
-    if (status === 'submitted' && students.some((student) => student.periodAverage === null || student.periodAverage === undefined)) {
-      return res.status(400).json({
-        message: 'Todos los alumnos deben tener promedio del periodo antes de enviar el boletín al director de grupo.',
-      });
+    const students = rosterAverages.map((student) => {
+      const studentId = String(student.studentId);
+      const previous = existingStudentById.get(studentId);
+      const isSelected = selectedStudentIdSet.has(studentId);
+      let observation = normalizeText(previous?.observation);
+      if (isSelected && observationByStudentId.has(studentId)) {
+        observation = observationByStudentId.get(studentId);
+      } else if (status === 'draft' && isSelected) {
+        observation = observationByStudentId.get(studentId) || observation;
+      }
+      let includedInReport = previous?.includedInReport === true;
+      if (status === 'submitted' && isSelected) {
+        includedInReport = true;
+      }
+      return {
+        studentId: student.studentId,
+        studentName: student.studentName,
+        studentSchoolCode: student.studentSchoolCode,
+        periodAverage: student.periodAverage,
+        observation,
+        includedInReport,
+      };
+    });
+
+    if (status === 'submitted') {
+      const missingAverage = students.filter(
+        (student) => selectedStudentIdSet.has(String(student.studentId))
+          && (student.periodAverage === null || student.periodAverage === undefined)
+      );
+      if (missingAverage.length) {
+        return res.status(400).json({
+          message: 'Los alumnos seleccionados deben tener promedio del periodo antes de enviar el boletín al director de grupo.',
+        });
+      }
     }
+
+    const allStudentsIncluded = students.length > 0 && students.every((student) => student.includedInReport);
+    const finalStatus = status === 'submitted'
+      ? (allStudentsIncluded ? 'submitted' : 'partial')
+      : (existingReport?.status === 'submitted' ? 'submitted' : (existingReport?.status === 'partial' ? 'partial' : 'draft'));
 
     const report = await CampusSubjectReportCard.findOneAndUpdate(
       {
@@ -7686,9 +7748,11 @@ router.post('/teacher/courses/:id/report-cards', requireCampusTeacherAccess, asy
           teacherUserId: userId,
           teacherName: normalizeText(name),
           headroomTeacherUserId: headroom?.headroomTeacherUserId || null,
-          status,
+          status: finalStatus,
           students,
-          submittedAt: status === 'submitted' ? new Date() : null,
+          submittedAt: finalStatus === 'submitted' || finalStatus === 'partial'
+            ? (existingReport?.submittedAt || new Date())
+            : null,
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -7767,12 +7831,18 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
 
       const subjectChecklist = subjectCourses.map((course) => {
         const report = reportsByCourseId.get(String(course._id));
+        const reportStatus = normalizeText(report?.status);
+        const includedCount = subjectReportStudentsVisibleToHeadroom(report).length;
+        const rosterCount = Array.isArray(report?.students) ? report.students.length : 0;
         return {
           campusCourseId: String(course._id),
           subject: normalizeText(course.subject) || normalizeText(course.title),
           teacherUserId: String(course.teacherUserId || ''),
           report: report ? serializeSubjectReportCard(report) : null,
-          submitted: report?.status === 'submitted',
+          submitted: reportStatus === 'submitted',
+          partial: reportStatus === 'partial',
+          includedStudentCount: includedCount,
+          rosterStudentCount: rosterCount,
         };
       });
 
@@ -7863,7 +7933,7 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
 
     const studentsById = new Map();
     subjectReports.forEach((report) => {
-      (report.students || []).forEach((student) => {
+      subjectReportStudentsVisibleToHeadroom(report).forEach((student) => {
         const studentId = String(student.studentId || '');
         if (!studentId) return;
         const current = studentsById.get(studentId) || {

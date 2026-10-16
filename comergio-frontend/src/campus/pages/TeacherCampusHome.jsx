@@ -77,6 +77,18 @@ const weekdayLongLabels = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves',
 const maxMaterialFileBytes = 25 * 1024 * 1024;
 const maxMaterialFileCount = 6;
 
+function studentsIncludedInSubjectReport(report) {
+  if (!report) return [];
+  const students = Array.isArray(report.students) ? report.students : [];
+  if (report.status === 'partial') {
+    return students.filter((student) => student.includedInReport);
+  }
+  if (report.status === 'submitted') {
+    return students.filter((student) => student.includedInReport !== false);
+  }
+  return [];
+}
+
 const teacherNavGroups = [
   { id: 'main', label: 'Inicio', keys: ['dashboard', 'schedule', 'courses'] },
   {
@@ -3594,6 +3606,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [gradebookSaveModal, setGradebookSaveModal] = useState(null);
   const [reportCardPeriodKey, setReportCardPeriodKey] = useState('');
   const [reportCardObservations, setReportCardObservations] = useState({});
+  const [reportCardSelectedStudentIds, setReportCardSelectedStudentIds] = useState(null);
   const [headroomReportSectionKey, setHeadroomReportSectionKey] = useState('');
   const [headroomReportPeriodKey, setHeadroomReportPeriodKey] = useState('');
   const [headroomObservations, setHeadroomObservations] = useState({});
@@ -4723,7 +4736,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     return students.map((student) => {
       const periods = buildStudentPeriods(student, selectedCourseAcademicPeriods);
       const period = periods.find((item) => String(item.key) === String(effectiveReportCardPeriodKey)) || periods[0];
-      const savedObservation = selectedSubjectReport?.students?.find((entry) => String(entry.studentId) === String(student.studentId))?.observation || '';
+      const savedEntry = selectedSubjectReport?.students?.find((entry) => String(entry.studentId) === String(student.studentId));
+      const savedObservation = savedEntry?.observation || '';
       return {
         studentId: String(student.studentId),
         name: student.name,
@@ -4732,6 +4746,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         observation: Object.prototype.hasOwnProperty.call(reportCardObservations, student.studentId)
           ? reportCardObservations[student.studentId]
           : savedObservation,
+        includedInReport: savedEntry?.includedInReport === true,
       };
     });
   }, [
@@ -4741,6 +4756,76 @@ function TeacherCampusHome({ forcePreview = false }) {
     selectedSubjectReport,
     workspaceStudents,
   ]);
+
+  const reportCardSelectionScopeKey = `${selectedCourseId}:${effectiveReportCardPeriodKey}`;
+
+  useEffect(() => {
+    setReportCardSelectedStudentIds(null);
+  }, [reportCardSelectionScopeKey]);
+
+  const reportCardLockedSentStudentIds = useMemo(
+    () => new Set(reportCardStudentRows.filter((student) => student.includedInReport).map((student) => student.studentId)),
+    [reportCardStudentRows]
+  );
+
+  const defaultReportCardSelectedStudentIds = useMemo(
+    () => new Set(reportCardStudentRows.map((student) => student.studentId)),
+    [reportCardStudentRows]
+  );
+
+  const activeReportCardSelectedStudentIds = reportCardSelectedStudentIds ?? defaultReportCardSelectedStudentIds;
+
+  const reportCardSelectableStudentIds = useMemo(
+    () => reportCardStudentRows
+      .filter((student) => !reportCardLockedSentStudentIds.has(student.studentId))
+      .map((student) => student.studentId),
+    [reportCardLockedSentStudentIds, reportCardStudentRows]
+  );
+
+  const allReportCardSelectableSelected = reportCardSelectableStudentIds.length > 0
+    && reportCardSelectableStudentIds.every((studentId) => activeReportCardSelectedStudentIds.has(studentId));
+
+  const someReportCardSelectableSelected = reportCardSelectableStudentIds.some(
+    (studentId) => activeReportCardSelectedStudentIds.has(studentId)
+  );
+
+  const isSubjectReportFullySubmitted = selectedSubjectReport?.status === 'submitted';
+
+  const subjectReportStatusLabel = useMemo(() => {
+    if (!selectedSubjectReport) return 'Borrador / pendiente';
+    if (selectedSubjectReport.status === 'submitted') return 'Enviado al director de grupo';
+    if (selectedSubjectReport.status === 'partial') {
+      const sentCount = (selectedSubjectReport.students || []).filter((student) => student.includedInReport).length;
+      const totalCount = reportCardStudentRows.length || selectedSubjectReport.students?.length || 0;
+      return `Envío parcial (${sentCount}/${totalCount})`;
+    }
+    return 'Borrador / pendiente';
+  }, [reportCardStudentRows.length, selectedSubjectReport]);
+
+  const toggleReportCardStudentSelection = (studentId, checked) => {
+    if (reportCardLockedSentStudentIds.has(studentId)) return;
+    setReportCardSelectedStudentIds((current) => {
+      const base = current ?? defaultReportCardSelectedStudentIds;
+      const next = new Set(base);
+      if (checked) {
+        next.add(studentId);
+      } else {
+        next.delete(studentId);
+      }
+      reportCardLockedSentStudentIds.forEach((lockedId) => next.add(lockedId));
+      return next;
+    });
+  };
+
+  const toggleAllReportCardStudentSelection = (checked) => {
+    setReportCardSelectedStudentIds(() => {
+      const next = new Set(reportCardLockedSentStudentIds);
+      if (checked) {
+        reportCardSelectableStudentIds.forEach((studentId) => next.add(studentId));
+      }
+      return next;
+    });
+  };
 
   const headroomReportSections = Array.isArray(headroomReportCardsQuery.data?.sections)
     ? headroomReportCardsQuery.data.sections
@@ -4815,22 +4900,42 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
+    const targetRows = reportCardStudentRows.filter((student) => {
+      if (!activeReportCardSelectedStudentIds.has(student.studentId)) return false;
+      if (nextStatus === 'submitted' && student.includedInReport) return false;
+      return true;
+    });
+
+    if (!targetRows.length) {
+      setNotice({
+        type: 'error',
+        text: nextStatus === 'submitted'
+          ? 'Selecciona al menos un alumno que aún no haya sido enviado al director de grupo.'
+          : 'Selecciona al menos un alumno para guardar el borrador.',
+      });
+      return;
+    }
+
     try {
       await saveSubjectReportCardMutation.mutateAsync({
         courseId: selectedCourse.id,
         payload: {
           academicPeriodKey: effectiveReportCardPeriodKey,
           status: nextStatus,
-          students: reportCardStudentRows.map((student) => ({
+          selectedStudentIds: targetRows.map((student) => student.studentId),
+          students: targetRows.map((student) => ({
             studentId: student.studentId,
             observation: String(student.observation || '').trim(),
           })),
         },
       });
+      setReportCardSelectedStudentIds(null);
       setNotice({
         type: 'success',
         text: nextStatus === 'submitted'
-          ? 'Boletín enviado al director de grupo.'
+          ? (targetRows.length === 1
+            ? 'Boletín del alumno enviado al director de grupo.'
+            : `Boletín de ${targetRows.length} alumnos enviado al director de grupo.`)
           : 'Borrador del boletín guardado.',
       });
       await subjectReportCardsQuery.refetch();
@@ -4854,7 +4959,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       : (() => {
         const byStudent = new Map();
         (selectedHeadroomSection.subjects || []).forEach((subjectItem) => {
-          (subjectItem.report?.students || []).forEach((student) => {
+          studentsIncludedInSubjectReport(subjectItem.report).forEach((student) => {
             const studentId = String(student.studentId);
             const current = byStudent.get(studentId) || {
               studentId,
@@ -11339,8 +11444,8 @@ function TeacherCampusHome({ forcePreview = false }) {
                               ))}
                             </select>
                           </label>
-                          <span className={`campus-teacher__mode-pill${selectedSubjectReport?.status === 'submitted' ? ' is-success' : ''}`}>
-                            {selectedSubjectReport?.status === 'submitted' ? 'Enviado al director de grupo' : 'Borrador / pendiente'}
+                          <span className={`campus-teacher__mode-pill${selectedSubjectReport?.status === 'submitted' ? ' is-success' : selectedSubjectReport?.status === 'partial' ? ' is-warning' : ''}`}>
+                            {subjectReportStatusLabel}
                           </span>
                         </div>
 
@@ -11358,17 +11463,44 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <table className="campus-teacher__report-card-table">
                             <thead>
                               <tr>
+                                <th className="campus-teacher__report-card-select-col">
+                                  <input
+                                    aria-label="Seleccionar todos los alumnos"
+                                    checked={allReportCardSelectableSelected}
+                                    disabled={isSubjectReportFullySubmitted || !reportCardSelectableStudentIds.length || saveSubjectReportCardMutation.isPending}
+                                    onChange={(event) => toggleAllReportCardStudentSelection(event.target.checked)}
+                                    ref={(input) => {
+                                      if (input) {
+                                        input.indeterminate = !allReportCardSelectableSelected && someReportCardSelectableSelected;
+                                      }
+                                    }}
+                                    type="checkbox"
+                                  />
+                                </th>
                                 <th>Alumno</th>
                                 <th>Promedio del periodo</th>
                                 <th>Observación</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {reportCardStudentRows.length ? reportCardStudentRows.map((student) => (
-                                <tr key={student.studentId}>
+                              {reportCardStudentRows.length ? reportCardStudentRows.map((student) => {
+                                const rowLocked = isSubjectReportFullySubmitted || student.includedInReport;
+                                const rowSelected = activeReportCardSelectedStudentIds.has(student.studentId);
+                                return (
+                                <tr key={student.studentId} className={student.includedInReport ? 'is-sent' : ''}>
+                                  <td className="campus-teacher__report-card-select-col">
+                                    <input
+                                      aria-label={`Incluir a ${student.name} en el boletín`}
+                                      checked={rowSelected}
+                                      disabled={rowLocked || saveSubjectReportCardMutation.isPending}
+                                      onChange={(event) => toggleReportCardStudentSelection(student.studentId, event.target.checked)}
+                                      type="checkbox"
+                                    />
+                                  </td>
                                   <td>
                                     <strong>{student.name}</strong>
                                     {student.grade ? <small>{student.grade}</small> : null}
+                                    {student.includedInReport ? <small className="campus-teacher__report-card-sent-tag">Enviado al director</small> : null}
                                   </td>
                                   <td>
                                     {student.periodAverage === null || student.periodAverage === undefined
@@ -11377,7 +11509,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                   </td>
                                   <td>
                                     <textarea
-                                      disabled={selectedSubjectReport?.status === 'submitted' || saveSubjectReportCardMutation.isPending}
+                                      disabled={rowLocked || saveSubjectReportCardMutation.isPending}
                                       onChange={(event) => setReportCardObservations((current) => ({
                                         ...current,
                                         [student.studentId]: event.target.value,
@@ -11388,9 +11520,9 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     />
                                   </td>
                                 </tr>
-                              )) : (
+                              );}) : (
                                 <tr>
-                                  <td colSpan={3}>No hay alumnos para este curso.</td>
+                                  <td colSpan={4}>No hay alumnos para este curso.</td>
                                 </tr>
                               )}
                             </tbody>
@@ -11404,7 +11536,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           <div className="campus-teacher__report-card-actions">
                             <button
                               className="campus-teacher__ghost-btn"
-                              disabled={isBusy || selectedSubjectReport?.status === 'submitted'}
+                              disabled={isBusy || isSubjectReportFullySubmitted}
                               onClick={() => onSubmitSubjectReportCard('draft')}
                               type="button"
                             >
@@ -11412,11 +11544,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                             </button>
                             <button
                               className="campus-teacher__action-btn"
-                              disabled={isBusy || selectedSubjectReport?.status === 'submitted' || !subjectReportCardsQuery.data?.headroomTeacherUserId}
+                              disabled={isBusy || isSubjectReportFullySubmitted || !subjectReportCardsQuery.data?.headroomTeacherUserId}
                               onClick={() => onSubmitSubjectReportCard('submitted')}
                               type="button"
                             >
-                              {saveSubjectReportCardMutation.isPending ? 'Enviando...' : 'Enviar a director de grupo'}
+                              {saveSubjectReportCardMutation.isPending ? 'Enviando...' : 'Enviar seleccionados al director de grupo'}
                             </button>
                           </div>
                         </div>
@@ -11691,9 +11823,15 @@ function TeacherCampusHome({ forcePreview = false }) {
                       <h3>Materias</h3>
                       <ul>
                         {(selectedHeadroomSection.subjects || []).map((subjectItem) => (
-                          <li key={subjectItem.campusCourseId} className={subjectItem.submitted ? 'is-ready' : 'is-pending'}>
+                          <li key={subjectItem.campusCourseId} className={subjectItem.submitted ? 'is-ready' : subjectItem.partial ? 'is-partial' : 'is-pending'}>
                             <strong>{subjectItem.subject}</strong>
-                            <span>{subjectItem.submitted ? 'Boletín enviado' : 'Pendiente'}</span>
+                            <span>
+                              {subjectItem.submitted
+                                ? 'Boletín enviado'
+                                : subjectItem.partial
+                                  ? `Envío parcial (${subjectItem.includedStudentCount || 0}/${subjectItem.rosterStudentCount || '?'})`
+                                  : 'Pendiente'}
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -11717,7 +11855,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                 : (() => {
                                   const byStudent = new Map();
                                   (selectedHeadroomSection.subjects || []).forEach((subjectItem) => {
-                                    (subjectItem.report?.students || []).forEach((student) => {
+                                    studentsIncludedInSubjectReport(subjectItem.report).forEach((student) => {
                                       const studentId = String(student.studentId);
                                       const current = byStudent.get(studentId) || {
                                         studentId,

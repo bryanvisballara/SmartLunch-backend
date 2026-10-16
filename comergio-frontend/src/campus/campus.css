@@ -17415,6 +17415,11 @@ button.campus-teacher__home-kpi-card:focus-visible {
   color: #0f766e;
 }
 
+.campus-teacher__mode-pill.is-warning {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+}
+
 .campus-teacher__report-card-table-wrap {
   overflow: auto;
   border: 1px solid rgba(23, 32, 51, 0.08);
@@ -17441,6 +17446,29 @@ button.campus-teacher__home-kpi-card:focus-visible {
   font-size: 0.78rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.campus-teacher__report-card-select-col {
+  width: 2.75rem;
+  text-align: center;
+}
+
+.campus-teacher__report-card-select-col input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.campus-teacher__report-card-table tr.is-sent {
+  background: rgba(15, 118, 110, 0.04);
+}
+
+.campus-teacher__report-card-sent-tag {
+  display: block;
+  margin-top: 0.2rem;
+  color: #0f766e;
+  font-weight: 600;
 }
 
 .campus-teacher__report-card-table td strong {
@@ -17499,6 +17527,11 @@ button.campus-teacher__home-kpi-card:focus-visible {
 .campus-teacher__report-card-checklist li.is-ready {
   border-color: rgba(15, 118, 110, 0.28);
   background: rgba(240, 253, 250, 0.95);
+}
+
+.campus-teacher__report-card-checklist li.is-partial {
+  border-color: rgba(217, 119, 6, 0.25);
+  background: rgba(217, 119, 6, 0.06);
 }
 
 .campus-teacher__report-card-checklist li.is-pending {
