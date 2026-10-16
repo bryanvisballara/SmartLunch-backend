@@ -209,17 +209,42 @@ function computeDisciplineScore({ startingScore = 100, observations = [] }) {
 }
 
 async function buildStudentCoexistenceScore({ schoolId, studentId }) {
-  const [policy, observations] = await Promise.all([
-    getOrCreateCoexistencePolicy(schoolId),
+  return buildStudentCoexistenceScoreForPeriod({ schoolId, studentId, academicPeriodKey: '' });
+}
+
+async function buildStudentCoexistenceScoreForPeriod({ schoolId, studentId, academicPeriodKey = '' }) {
+  const AcademicStructure = require('../models/academicStructure.model');
+  const normalizedSchoolId = normalizeText(schoolId);
+  const normalizedStudentId = studentId;
+  const normalizedPeriodKey = normalizeText(academicPeriodKey);
+
+  const [policy, structure, observationsRaw] = await Promise.all([
+    getOrCreateCoexistencePolicy(normalizedSchoolId),
+    AcademicStructure.findOne({ schoolId: normalizedSchoolId }).select('academicPeriods').lean(),
     CampusDisciplineObservation.find({
-      schoolId,
-      studentId,
+      schoolId: normalizedSchoolId,
+      studentId: normalizedStudentId,
       status: { $in: ['submitted', 'reviewed'] },
       $or: [{ destination: 'coexistence' }, { destination: { $exists: false } }, { destination: null }],
     })
-      .select('deductionPercent destination status')
+      .select('deductionPercent destination status incidentAt submittedAt createdAt')
       .lean(),
   ]);
+
+  let observations = observationsRaw;
+  const period = (Array.isArray(structure?.academicPeriods) ? structure.academicPeriods : [])
+    .find((item) => normalizeText(item?.key) === normalizedPeriodKey);
+  if (normalizedPeriodKey && period?.startDate && period?.endDate) {
+    const start = new Date(period.startDate);
+    const end = new Date(period.endDate);
+    end.setHours(23, 59, 59, 999);
+    observations = observationsRaw.filter((item) => {
+      const when = item.incidentAt || item.submittedAt || item.createdAt;
+      if (!when) return false;
+      const date = new Date(when);
+      return date >= start && date <= end;
+    });
+  }
 
   const serializedPolicy = serializeCoexistencePolicy(policy);
   const scoreSummary = computeDisciplineScore({
@@ -230,6 +255,8 @@ async function buildStudentCoexistenceScore({ schoolId, studentId }) {
   return {
     ...scoreSummary,
     observationCount: observations.length,
+    academicPeriodKey: normalizedPeriodKey,
+    scopedToPeriodDates: Boolean(normalizedPeriodKey && period?.startDate && period?.endDate),
   };
 }
 
@@ -240,6 +267,7 @@ module.exports = {
   findActiveInfraction,
   computeDisciplineScore,
   buildStudentCoexistenceScore,
+  buildStudentCoexistenceScoreForPeriod,
   slugifyInfractionKey,
   clampPercent,
 };

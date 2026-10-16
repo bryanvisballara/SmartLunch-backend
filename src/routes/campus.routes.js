@@ -34,8 +34,18 @@ const {
   serializeCoexistencePolicy,
   findActiveInfraction,
   buildStudentCoexistenceScore,
+  buildStudentCoexistenceScoreForPeriod,
   computeDisciplineScore,
 } = require('../services/campusCoexistencePolicy.service');
+const {
+  normalizeHeadroomSubjectSlug,
+  dedupeHeadroomSubjectCourses,
+  dedupeStudentSubjectLines,
+  listHeadroomSubjectAssignmentsForSection,
+  listExpectedHeadroomSubjectsForSection,
+  enrichHeadroomSubjectChecklist,
+  normalizeReportSignatureDataUrl,
+} = require('../services/campusHeadroomBoletin.service');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
@@ -7433,6 +7443,30 @@ function subjectReportStudentsVisibleToHeadroom(report) {
   return [];
 }
 
+async function ensureHeadroomSectionSubjectCoursesReady({
+  schoolId,
+  academicStructure,
+  guidanceCourse,
+  subjectCourses,
+}) {
+  const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
+  const sectionKey = normalizeText(guidanceCourse.sourceCourseKey).toUpperCase();
+  const presentSlugs = new Set(
+    subjectCourses.map((course) => normalizeHeadroomSubjectSlug(course.subject, course.subjectKey))
+  );
+  const missingTeachers = new Set(
+    listHeadroomSubjectAssignmentsForSection(academicStructure, gradeKey, sectionKey)
+      .filter((assignment) => !presentSlugs.has(assignment.slug))
+      .map((assignment) => assignment.teacherUserId)
+      .filter(Boolean)
+  );
+
+  for (const teacherUserId of missingTeachers) {
+    // eslint-disable-next-line no-await-in-loop
+    await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId });
+  }
+}
+
 function serializeSubjectReportCard(report) {
   if (!report) return null;
   return {
@@ -7463,6 +7497,18 @@ function serializeSubjectReportCard(report) {
     createdAt: report.createdAt || null,
     updatedAt: report.updatedAt || null,
   };
+}
+
+function resolvePerformanceLevelForScore(score, gradingScale) {
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return null;
+  }
+  const levels = Array.isArray(gradingScale?.performanceLevels) ? gradingScale.performanceLevels : [];
+  return levels.find((level) => (
+    numericScore >= Number(level.minScore)
+    && numericScore <= Number(level.maxScore)
+  )) || null;
 }
 
 function serializeGeneralReportCard(report) {
@@ -7497,7 +7543,23 @@ function serializeGeneralReportCard(report) {
         ? null
         : Number(student.overallAverage),
       headroomObservation: normalizeText(student.headroomObservation),
+      coexistenceScore: student.coexistenceScore === null || student.coexistenceScore === undefined
+        ? null
+        : Number(student.coexistenceScore),
+      coexistenceTotalDeducted: student.coexistenceTotalDeducted === null || student.coexistenceTotalDeducted === undefined
+        ? null
+        : Number(student.coexistenceTotalDeducted),
+      coexistenceObservationCount: Number(student.coexistenceObservationCount || 0),
+      coexistencePerformanceLabel: normalizeText(student.coexistencePerformanceLabel),
+      coexistenceObservation: normalizeText(student.coexistenceObservation),
     })),
+    headroomSignatureDataUrl: normalizeReportSignatureDataUrl(report.headroomSignatureDataUrl),
+    headroomSignatureSignedAt: report.headroomSignatureSignedAt || null,
+    headroomSignerName: normalizeText(report.headroomSignerName) || normalizeText(report.headroomTeacherName),
+    coordinatorUserId: String(report.coordinatorUserId?._id || report.coordinatorUserId || ''),
+    coordinatorSignatureDataUrl: normalizeReportSignatureDataUrl(report.coordinatorSignatureDataUrl),
+    coordinatorSignatureSignedAt: report.coordinatorSignatureSignedAt || null,
+    coordinatorSignerName: normalizeText(report.coordinatorSignerName),
     publishedAt: report.publishedAt || null,
     createdAt: report.createdAt || null,
     updatedAt: report.updatedAt || null,
@@ -7798,17 +7860,40 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
       return res.status(200).json({ sections: [] });
     }
 
+    const academicStructure = await AcademicStructure.findOne({ schoolId })
+      .select('gradeSchedules grades subjects levels classroomGroups')
+      .lean();
+
     const sections = [];
     for (const guidanceCourse of guidanceCourses) {
       const sectionKey = normalizeText(guidanceCourse.sourceCourseKey).toUpperCase();
       const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
-      const subjectCourses = await CampusCourse.find({
+      let subjectCourses = await CampusCourse.find({
         schoolId,
         status: 'active',
         courseType: { $ne: 'guidance_routine' },
         sourceCourseKey: sectionKey,
         ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
-      }).select('_id title subject teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+      }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+
+      try {
+        await ensureHeadroomSectionSubjectCoursesReady({
+          schoolId,
+          academicStructure,
+          guidanceCourse,
+          subjectCourses,
+        });
+      } catch (syncError) {
+        console.warn(`[CAMPUS_HEADROOM_SYNC] ${syncError.message}`);
+      }
+
+      subjectCourses = await CampusCourse.find({
+        schoolId,
+        status: 'active',
+        courseType: { $ne: 'guidance_routine' },
+        sourceCourseKey: sectionKey,
+        ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
+      }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
 
       const periodOptions = new Map();
       subjectCourses.forEach((course) => {
@@ -7828,8 +7913,9 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         }).lean()
         : [];
       const reportsByCourseId = new Map(subjectReports.map((report) => [String(report.campusCourseId), report]));
+      subjectCourses = dedupeHeadroomSubjectCourses(subjectCourses, reportsByCourseId);
 
-      const subjectChecklist = subjectCourses.map((course) => {
+      let subjectChecklist = subjectCourses.map((course) => {
         const report = reportsByCourseId.get(String(course._id));
         const reportStatus = normalizeText(report?.status);
         const includedCount = subjectReportStudentsVisibleToHeadroom(report).length;
@@ -7846,6 +7932,16 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         };
       });
 
+      const expectedSubjects = listExpectedHeadroomSubjectsForSection(academicStructure, gradeKey, sectionKey);
+      subjectChecklist = enrichHeadroomSubjectChecklist({
+        subjectChecklist,
+        expectedSubjects,
+        subjectCourses,
+        reportsByCourseId,
+        serializeSubjectReportCard,
+        countVisibleReportStudents: subjectReportStudentsVisibleToHeadroom,
+      });
+
       const allSubmitted = subjectChecklist.length > 0 && subjectChecklist.every((item) => item.submitted);
       const generalReport = selectedPeriodKey
         ? await CampusGeneralReportCard.findOne({
@@ -7856,6 +7952,41 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         }).lean()
         : null;
 
+      const gradingContext = await loadCampusGradingContext(schoolId);
+      const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, guidanceCourse);
+      const studentIdSet = new Set();
+      subjectReports.forEach((report) => {
+        subjectReportStudentsVisibleToHeadroom(report).forEach((student) => {
+          const studentId = String(student.studentId || '');
+          if (studentId) studentIdSet.add(studentId);
+        });
+      });
+      (generalReport?.students || []).forEach((student) => {
+        const studentId = String(student.studentId || '');
+        if (studentId) studentIdSet.add(studentId);
+      });
+
+      const coexistenceByStudentId = {};
+      for (const studentId of studentIdSet) {
+        const summary = selectedPeriodKey
+          ? await buildStudentCoexistenceScoreForPeriod({
+            schoolId,
+            studentId,
+            academicPeriodKey: selectedPeriodKey,
+          })
+          : await buildStudentCoexistenceScore({ schoolId, studentId });
+        const performanceLevel = resolvePerformanceLevelForScore(summary.score, gradingScale);
+        coexistenceByStudentId[studentId] = {
+          score: summary.score,
+          startingScore: summary.startingScore,
+          totalDeducted: summary.totalDeducted,
+          observationCount: summary.observationCount,
+          performanceLabel: normalizeText(performanceLevel?.label),
+          performanceColor: normalizeText(performanceLevel?.color),
+          scopedToPeriodDates: summary.scopedToPeriodDates === true,
+        };
+      }
+
       sections.push({
         sourceCourseKey: sectionKey,
         studentGradeKey: gradeKey,
@@ -7865,6 +7996,8 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         academicPeriodKey: selectedPeriodKey,
         subjects: subjectChecklist,
         allSubjectsSubmitted: allSubmitted,
+        gradingScale,
+        coexistenceByStudentId,
         generalReport: serializeGeneralReportCard(generalReport),
       });
     }
@@ -7899,35 +8032,78 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
     }
 
     const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
-    const subjectCourses = await CampusCourse.find({
+    const academicStructure = await AcademicStructure.findOne({ schoolId })
+      .select('gradeSchedules grades subjects levels classroomGroups')
+      .lean();
+
+    let subjectCourses = await CampusCourse.find({
       schoolId,
       status: 'active',
       courseType: { $ne: 'guidance_routine' },
       sourceCourseKey,
       ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
-    }).lean();
+    }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+
+    try {
+      await ensureHeadroomSectionSubjectCoursesReady({
+        schoolId,
+        academicStructure,
+        guidanceCourse,
+        subjectCourses,
+      });
+    } catch (syncError) {
+      console.warn(`[CAMPUS_HEADROOM_SYNC] ${syncError.message}`);
+    }
+
+    subjectCourses = await CampusCourse.find({
+      schoolId,
+      status: 'active',
+      courseType: { $ne: 'guidance_routine' },
+      sourceCourseKey,
+      ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
+    }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
 
     if (!subjectCourses.length) {
       return res.status(400).json({ message: 'No hay materias activas para este curso.' });
     }
 
-    const subjectReports = await CampusSubjectReportCard.find({
+    const subjectReportsAll = await CampusSubjectReportCard.find({
       schoolId,
       sourceCourseKey,
       academicPeriodKey,
       status: 'submitted',
       campusCourseId: { $in: subjectCourses.map((course) => course._id) },
     }).lean();
+    const reportsByCourseId = new Map(subjectReportsAll.map((report) => [String(report.campusCourseId), report]));
+    subjectCourses = dedupeHeadroomSubjectCourses(subjectCourses, reportsByCourseId);
+    const subjectCourseIds = new Set(subjectCourses.map((course) => String(course._id)));
+    const subjectReports = subjectReportsAll.filter((report) => subjectCourseIds.has(String(report.campusCourseId)));
 
-    if (subjectReports.length !== subjectCourses.length) {
+    const expectedSubjectsForPublish = listExpectedHeadroomSubjectsForSection(
+      academicStructure,
+      gradeKey,
+      sourceCourseKey
+    );
+    const submittedSubjectSlugs = new Set(
+      subjectReports.map((report) => normalizeHeadroomSubjectSlug(report.subject))
+    );
+    const missingSubjectReports = expectedSubjectsForPublish.filter(
+      (expected) => !submittedSubjectSlugs.has(expected.slug)
+    );
+    if (missingSubjectReports.length) {
       return res.status(400).json({
-        message: 'Aún faltan boletines de materias por enviar. El boletín general se puede generar cuando todas las materias estén listas.',
+        message: `Aún faltan boletines por enviar: ${missingSubjectReports.map((item) => item.subjectLabel).join(', ')}.`,
       });
     }
 
     const observationByStudentId = new Map(
       incomingStudents
         .map((entry) => [String(entry?.studentId || '').trim(), normalizeText(entry?.headroomObservation).slice(0, 1000)])
+        .filter(([studentId]) => studentId)
+    );
+    const coexistenceObservationByStudentId = new Map(
+      incomingStudents
+        .map((entry) => [String(entry?.studentId || '').trim(), normalizeText(entry?.coexistenceObservation).slice(0, 1000)])
         .filter(([studentId]) => studentId)
     );
 
@@ -7957,22 +8133,85 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
       });
     });
 
-    const students = Array.from(studentsById.values())
-      .map((student) => {
-        const averages = student.subjectLines
-          .map((line) => Number(line.periodAverage))
-          .filter((value) => Number.isFinite(value));
-        const overallAverage = averages.length
+    studentsById.forEach((student, studentId) => {
+      const subjectLines = dedupeStudentSubjectLines(student.subjectLines)
+        .sort((left, right) => left.subject.localeCompare(right.subject, 'es'));
+      const averages = subjectLines
+        .map((line) => Number(line.periodAverage))
+        .filter((value) => Number.isFinite(value));
+      studentsById.set(studentId, {
+        ...student,
+        subjectLines,
+        overallAverage: averages.length
           ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
-          : null;
+          : null,
+      });
+    });
+
+    const gradingContext = await loadCampusGradingContext(schoolId);
+    const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, guidanceCourse);
+
+    const students = await Promise.all(Array.from(studentsById.values())
+      .map(async (student) => {
+        const coexistenceSummary = await buildStudentCoexistenceScoreForPeriod({
+          schoolId,
+          studentId: student.studentId,
+          academicPeriodKey,
+        });
+        const performanceLevel = resolvePerformanceLevelForScore(coexistenceSummary.score, gradingScale);
         return {
           ...student,
-          subjectLines: student.subjectLines.sort((left, right) => left.subject.localeCompare(right.subject, 'es')),
-          overallAverage,
           headroomObservation: observationByStudentId.get(String(student.studentId)) || '',
+          coexistenceScore: coexistenceSummary.score,
+          coexistenceTotalDeducted: coexistenceSummary.totalDeducted,
+          coexistenceObservationCount: coexistenceSummary.observationCount,
+          coexistencePerformanceLabel: normalizeText(performanceLevel?.label),
+          coexistenceObservation: coexistenceObservationByStudentId.get(String(student.studentId)) || '',
         };
-      })
-      .sort((left, right) => left.studentName.localeCompare(right.studentName, 'es'));
+      }));
+
+    students.sort((left, right) => left.studentName.localeCompare(right.studentName, 'es'));
+
+    if (status === 'published') {
+      const missingCoexistenceComment = students.find(
+        (student) => !normalizeText(student.coexistenceObservation)
+      );
+      if (missingCoexistenceComment) {
+        return res.status(400).json({
+          message: `Debes escribir la observación de convivencia para ${missingCoexistenceComment.studentName || 'cada alumno'} antes de publicar el boletín.`,
+        });
+      }
+    }
+
+    const existingReport = await CampusGeneralReportCard.findOne({
+      schoolId,
+      sourceCourseKey,
+      academicPeriodKey,
+    }).lean();
+
+    const incomingHeadroomSignature = Object.prototype.hasOwnProperty.call(req.body || {}, 'headroomSignatureDataUrl')
+      ? normalizeReportSignatureDataUrl(req.body.headroomSignatureDataUrl)
+      : null;
+    const resolvedHeadroomSignature = incomingHeadroomSignature !== null
+      ? incomingHeadroomSignature
+      : normalizeReportSignatureDataUrl(existingReport?.headroomSignatureDataUrl);
+
+    if (status === 'published' && !resolvedHeadroomSignature) {
+      return res.status(400).json({
+        message: 'Debes firmar como director de grupo antes de publicar el boletín general.',
+      });
+    }
+
+    const headroomSignatureUpdate = {};
+    if (incomingHeadroomSignature !== null && incomingHeadroomSignature) {
+      headroomSignatureUpdate.headroomSignatureDataUrl = incomingHeadroomSignature;
+      headroomSignatureUpdate.headroomSignatureSignedAt = new Date();
+      headroomSignatureUpdate.headroomSignerName = normalizeText(name);
+    } else if (incomingHeadroomSignature === '') {
+      headroomSignatureUpdate.headroomSignatureDataUrl = '';
+      headroomSignatureUpdate.headroomSignatureSignedAt = null;
+      headroomSignatureUpdate.headroomSignerName = '';
+    }
 
     const periodName = normalizeText(subjectReports[0]?.academicPeriodName) || academicPeriodKey;
     const report = await CampusGeneralReportCard.findOneAndUpdate(
@@ -7995,6 +8234,7 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
           subjectReportIds: subjectReports.map((item) => item._id),
           students,
           publishedAt: status === 'published' ? new Date() : null,
+          ...headroomSignatureUpdate,
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -8003,6 +8243,132 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
     return res.status(status === 'published' ? 201 : 200).json({ report: serializeGeneralReportCard(report) });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo guardar el boletín general.' });
+  }
+});
+
+router.post('/teacher/headroom/report-cards/signature', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const sourceCourseKey = normalizeText(req.body?.sourceCourseKey).toUpperCase();
+    const academicPeriodKey = normalizeText(req.body?.academicPeriodKey);
+    const signatureDataUrl = normalizeReportSignatureDataUrl(req.body?.signatureDataUrl);
+
+    if (!sourceCourseKey || !academicPeriodKey) {
+      return res.status(400).json({ message: 'Debes indicar el curso y el periodo del boletín general.' });
+    }
+    if (!signatureDataUrl) {
+      return res.status(400).json({ message: 'Dibuja tu firma antes de guardar.' });
+    }
+
+    const guidanceCourse = await CampusCourse.findOne({
+      schoolId,
+      teacherUserId: userId,
+      status: 'active',
+      courseType: 'guidance_routine',
+      sourceCourseKey,
+    }).lean();
+    if (!guidanceCourse) {
+      return res.status(403).json({ message: 'No eres director de grupo de este curso.' });
+    }
+
+    const report = await CampusGeneralReportCard.findOneAndUpdate(
+      {
+        schoolId,
+        sourceCourseKey,
+        academicPeriodKey,
+      },
+      {
+        $set: {
+          headroomSignatureDataUrl: signatureDataUrl,
+          headroomSignatureSignedAt: new Date(),
+          headroomSignerName: normalizeText(name),
+          headroomTeacherUserId: userId,
+          headroomTeacherName: normalizeText(name),
+        },
+        $setOnInsert: {
+          schoolId,
+          sourceCourseKey,
+          academicPeriodKey,
+          studentGradeKey: normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel),
+          sectionLabel: normalizeText(guidanceCourse.section) || sourceCourseKey,
+          status: 'draft',
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return res.status(200).json({ report: serializeGeneralReportCard(report) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo guardar la firma.' });
+  }
+});
+
+router.get('/coordination/general-report-cards', requireCampusCoordinationAccess, async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const academicPeriodKey = normalizeText(req.query?.academicPeriodKey);
+    const coordinationGradeKeys = await resolveCampusCoordinationGradeKeys(schoolId, req.user.coordinationScope);
+
+    const query = {
+      schoolId,
+      status: 'published',
+      ...(academicPeriodKey ? { academicPeriodKey } : {}),
+      ...(coordinationGradeKeys.length ? { studentGradeKey: { $in: coordinationGradeKeys } } : {}),
+    };
+
+    const reports = await CampusGeneralReportCard.find(query)
+      .sort({ academicPeriodKey: -1, sectionLabel: 1, sourceCourseKey: 1 })
+      .lean();
+
+    return res.status(200).json({
+      reports: reports.map((report) => serializeGeneralReportCard(report)),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron cargar los boletines generales.' });
+  }
+});
+
+router.post('/coordination/general-report-cards/:id/signature', requireCampusCoordinationAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const { id } = req.params;
+    const signatureDataUrl = normalizeReportSignatureDataUrl(req.body?.signatureDataUrl);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Identificador de boletín inválido.' });
+    }
+    if (!signatureDataUrl) {
+      return res.status(400).json({ message: 'Dibuja tu firma antes de guardar.' });
+    }
+
+    const coordinationGradeKeys = await resolveCampusCoordinationGradeKeys(schoolId, req.user.coordinationScope);
+    const report = await CampusGeneralReportCard.findOne({
+      _id: id,
+      schoolId,
+      status: 'published',
+      ...(coordinationGradeKeys.length ? { studentGradeKey: { $in: coordinationGradeKeys } } : {}),
+    }).lean();
+
+    if (!report) {
+      return res.status(404).json({ message: 'Boletín general no encontrado o fuera de tu alcance de coordinación.' });
+    }
+
+    const updated = await CampusGeneralReportCard.findOneAndUpdate(
+      { _id: report._id, schoolId },
+      {
+        $set: {
+          coordinatorUserId: userId,
+          coordinatorSignatureDataUrl: signatureDataUrl,
+          coordinatorSignatureSignedAt: new Date(),
+          coordinatorSignerName: normalizeText(name),
+        },
+      },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json({ report: serializeGeneralReportCard(updated) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo guardar la firma de coordinación.' });
   }
 });
 
@@ -8182,3 +8548,4 @@ router.put('/coexistence-policy', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.syncTeacherCoursesFromAcademicStructure = syncTeacherCoursesFromAcademicStructure;

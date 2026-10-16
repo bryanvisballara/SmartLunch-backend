@@ -17495,6 +17495,114 @@ button.campus-teacher__home-kpi-card:focus-visible {
   gap: 0.55rem;
 }
 
+.campus-teacher__report-card-coexistence {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1.35rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.campus-teacher__report-card-section-title,
+.campus-teacher__report-card-coexistence h3 {
+  margin: 0 0 0.35rem;
+  color: #172033;
+  font-size: 1rem;
+}
+
+.campus-teacher__report-card-coexistence-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.5rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: #181818;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.campus-teacher__report-card-table--coexistence td small {
+  display: block;
+  margin-top: 0.2rem;
+  color: #64748b;
+}
+
+.campus-teacher__report-card-signatures {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.campus-teacher__report-card-signatures h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #172033;
+}
+
+.campus-report-card-signature {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 22rem;
+}
+
+.campus-report-card-signature__canvas {
+  width: 100%;
+  height: 7.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.65rem;
+  background: #fff;
+  touch-action: none;
+}
+
+.campus-teacher__report-card-signatures-name {
+  margin: 0;
+  font-weight: 700;
+  color: #172033;
+}
+
+.campus-coordination__report-signatures {
+  grid-column: 1 / -1;
+}
+
+.campus-coordination__report-signature-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.campus-coordination__report-signature-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.campus-coordination__report-signature-card strong {
+  display: block;
+}
+
+.campus-coordination__report-signature-card span,
+.campus-coordination__report-signature-card small {
+  display: block;
+  color: #64748b;
+}
+
+.campus-coordination__report-signature-done img {
+  max-width: 14rem;
+  max-height: 4rem;
+  object-fit: contain;
+}
+
+.campus-coordination__report-signature-done p {
+  margin: 0.35rem 0 0;
+  font-weight: 700;
+}
+
 .campus-teacher__report-card-checklist {
   display: grid;
   gap: 0.55rem;

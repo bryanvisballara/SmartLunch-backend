@@ -21,6 +21,11 @@ const campusGeneralReportStudentSchema = new mongoose.Schema(
     subjectLines: { type: [campusGeneralReportSubjectLineSchema], default: [] },
     overallAverage: { type: Number, default: null },
     headroomObservation: { type: String, trim: true, default: '' },
+    coexistenceScore: { type: Number, default: null },
+    coexistenceTotalDeducted: { type: Number, default: null },
+    coexistenceObservationCount: { type: Number, default: 0 },
+    coexistencePerformanceLabel: { type: String, trim: true, default: '' },
+    coexistenceObservation: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
@@ -43,6 +48,13 @@ const campusGeneralReportCardSchema = new mongoose.Schema(
     },
     subjectReportIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'CampusSubjectReportCard' }],
     students: { type: [campusGeneralReportStudentSchema], default: [] },
+    headroomSignatureDataUrl: { type: String, default: '' },
+    headroomSignatureSignedAt: { type: Date, default: null },
+    headroomSignerName: { type: String, trim: true, default: '' },
+    coordinatorUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+    coordinatorSignatureDataUrl: { type: String, default: '' },
+    coordinatorSignatureSignedAt: { type: Date, default: null },
+    coordinatorSignerName: { type: String, trim: true, default: '' },
     publishedAt: { type: Date, default: null },
   },
   { timestamps: true }

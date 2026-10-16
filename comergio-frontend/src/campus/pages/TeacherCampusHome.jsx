@@ -52,6 +52,7 @@ import {
   saveCampusTeacherCourseReportCard,
   getCampusTeacherHeadroomReportCards,
   saveCampusTeacherHeadroomReportCard,
+  saveCampusTeacherHeadroomReportCardSignature,
   getCampusTeacherCourseFlyLock,
   updateCampusTeacherCourseFlyLock,
   uploadCampusTeacherParentFeedMedia,
@@ -68,6 +69,7 @@ import { resolveEducationalGradeLabel } from '../../lib/educationalGradeLabels';
 import ClickableOptionPicker from '../../components/audience/ClickableOptionPicker';
 import { addAudienceListValue, removeAudienceListValue } from '../../lib/publicationAudience';
 import { mockTeacherWorkspace } from '../mockCampusContext';
+import ReportCardSignaturePad from '../components/ReportCardSignaturePad';
 import '../campus.css';
 
 const campusPreviewEnabled = import.meta.env.DEV && String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
@@ -87,6 +89,45 @@ function studentsIncludedInSubjectReport(report) {
     return students.filter((student) => student.includedInReport !== false);
   }
   return [];
+}
+
+function buildHeadroomStudentRowsForSection(section) {
+  if (!section) return [];
+
+  if (section.generalReport?.students?.length) {
+    return section.generalReport.students;
+  }
+
+  const byStudent = new Map();
+  (section.subjects || []).forEach((subjectItem) => {
+    studentsIncludedInSubjectReport(subjectItem.report).forEach((student) => {
+      const studentId = String(student.studentId);
+      const current = byStudent.get(studentId) || {
+        studentId,
+        studentName: student.studentName,
+        subjectLines: [],
+      };
+      current.subjectLines.push({
+        subject: subjectItem.subject,
+        periodAverage: student.periodAverage,
+        teacherObservation: student.observation,
+        teacherName: subjectItem.report?.teacherName || '',
+      });
+      byStudent.set(studentId, current);
+    });
+  });
+
+  return Array.from(byStudent.values()).map((student) => {
+    const averages = student.subjectLines
+      .map((line) => Number(line.periodAverage))
+      .filter((value) => Number.isFinite(value));
+    return {
+      ...student,
+      overallAverage: averages.length
+        ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
+        : null,
+    };
+  });
 }
 
 const teacherNavGroups = [
@@ -3610,6 +3651,8 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [headroomReportSectionKey, setHeadroomReportSectionKey] = useState('');
   const [headroomReportPeriodKey, setHeadroomReportPeriodKey] = useState('');
   const [headroomObservations, setHeadroomObservations] = useState({});
+  const [headroomCoexistenceObservations, setHeadroomCoexistenceObservations] = useState({});
+  const [headroomSignatureDataUrl, setHeadroomSignatureDataUrl] = useState('');
   const [editingPostId, setEditingPostId] = useState('');
   const [showAssignmentComposer, setShowAssignmentComposer] = useState(false);
   const [showClassworkCreateMenu, setShowClassworkCreateMenu] = useState(false);
@@ -4114,6 +4157,13 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   const saveHeadroomReportCardMutation = useMutation({
     mutationFn: saveCampusTeacherHeadroomReportCard,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'headroom-report-cards'] });
+    },
+  });
+
+  const saveHeadroomSignatureMutation = useMutation({
+    mutationFn: saveCampusTeacherHeadroomReportCardSignature,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'headroom-report-cards'] });
     },
@@ -4841,6 +4891,17 @@ function TeacherCampusHome({ forcePreview = false }) {
     || selectedHeadroomSection?.periods?.[0]?.key
     || '';
 
+  const headroomStudentRows = useMemo(
+    () => buildHeadroomStudentRowsForSection(selectedHeadroomSection),
+    [
+      selectedHeadroomSection,
+      selectedHeadroomSection?.sourceCourseKey,
+      selectedHeadroomSection?.academicPeriodKey,
+      selectedHeadroomSection?.generalReport?.updatedAt,
+      selectedHeadroomSection?.subjects,
+    ]
+  );
+
   useEffect(() => {
     if (!subjectReportPeriods.length) return;
     if (!reportCardPeriodKey || !subjectReportPeriods.some((period) => period.key === reportCardPeriodKey)) {
@@ -4893,6 +4954,53 @@ function TeacherCampusHome({ forcePreview = false }) {
     });
     setHeadroomObservations(nextObservations);
   }, [selectedHeadroomSection?.generalReport?.id, selectedHeadroomSection?.generalReport?.updatedAt, selectedHeadroomSection?.sourceCourseKey, selectedHeadroomPeriodKey]);
+
+  useEffect(() => {
+    const generalStudents = selectedHeadroomSection?.generalReport?.students || [];
+    if (!generalStudents.length) {
+      setHeadroomCoexistenceObservations({});
+      return;
+    }
+    const nextObservations = {};
+    generalStudents.forEach((student) => {
+      nextObservations[String(student.studentId)] = String(student.coexistenceObservation || '');
+    });
+    setHeadroomCoexistenceObservations(nextObservations);
+  }, [
+    selectedHeadroomSection?.generalReport?.id,
+    selectedHeadroomSection?.generalReport?.updatedAt,
+    selectedHeadroomSection?.sourceCourseKey,
+    selectedHeadroomPeriodKey,
+  ]);
+
+  useEffect(() => {
+    const savedSignature = selectedHeadroomSection?.generalReport?.headroomSignatureDataUrl || '';
+    setHeadroomSignatureDataUrl(savedSignature);
+  }, [
+    selectedHeadroomSection?.generalReport?.id,
+    selectedHeadroomSection?.generalReport?.updatedAt,
+    selectedHeadroomSection?.generalReport?.headroomSignatureDataUrl,
+    selectedHeadroomSection?.sourceCourseKey,
+    selectedHeadroomPeriodKey,
+  ]);
+
+  const resolveHeadroomCoexistenceForStudent = (studentId, savedStudent = null) => {
+    const key = String(studentId || '');
+    const fromReport = savedStudent || selectedHeadroomSection?.generalReport?.students?.find(
+      (student) => String(student.studentId) === key
+    );
+    const fromApi = selectedHeadroomSection?.coexistenceByStudentId?.[key] || null;
+    const gradingScale = selectedHeadroomSection?.gradingScale || {};
+    const score = fromReport?.coexistenceScore ?? fromApi?.score ?? null;
+    const performanceLevel = resolveTeacherPerformanceLevel(score, gradingScale);
+    return {
+      score,
+      totalDeducted: fromReport?.coexistenceTotalDeducted ?? fromApi?.totalDeducted ?? null,
+      observationCount: fromReport?.coexistenceObservationCount ?? fromApi?.observationCount ?? 0,
+      performanceLabel: fromReport?.coexistencePerformanceLabel || fromApi?.performanceLabel || performanceLevel?.label || '',
+      performanceColor: fromApi?.performanceColor || performanceLevel?.color || '',
+    };
+  };
 
   const onSubmitSubjectReportCard = async (nextStatus) => {
     if (!selectedCourse?.id || !effectiveReportCardPeriodKey) {
@@ -4953,51 +5061,30 @@ function TeacherCampusHome({ forcePreview = false }) {
       setNotice({ type: 'error', text: 'Aún faltan materias por enviar su boletín.' });
       return;
     }
+    if (nextStatus === 'published' && !headroomSignatureDataUrl) {
+      setNotice({ type: 'error', text: 'Debes firmar como director de grupo antes de publicar el boletín general.' });
+      return;
+    }
 
-    const baseStudents = selectedHeadroomSection.generalReport?.students?.length
-      ? selectedHeadroomSection.generalReport.students
-      : (() => {
-        const byStudent = new Map();
-        (selectedHeadroomSection.subjects || []).forEach((subjectItem) => {
-          studentsIncludedInSubjectReport(subjectItem.report).forEach((student) => {
-            const studentId = String(student.studentId);
-            const current = byStudent.get(studentId) || {
-              studentId,
-              studentName: student.studentName,
-              subjectLines: [],
-            };
-            current.subjectLines.push({
-              subject: subjectItem.subject,
-              periodAverage: student.periodAverage,
-              teacherObservation: student.observation,
-              teacherName: subjectItem.report?.teacherName || '',
-            });
-            byStudent.set(studentId, current);
-          });
-        });
-        return Array.from(byStudent.values()).map((student) => {
-          const averages = student.subjectLines.map((line) => Number(line.periodAverage)).filter((value) => Number.isFinite(value));
-          return {
-            ...student,
-            overallAverage: averages.length
-              ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
-              : null,
-            headroomObservation: headroomObservations[student.studentId] || '',
-          };
-        });
-      })();
+    const baseStudents = headroomStudentRows;
 
     try {
       await saveHeadroomReportCardMutation.mutateAsync({
         sourceCourseKey: selectedHeadroomSection.sourceCourseKey,
         academicPeriodKey: selectedHeadroomPeriodKey,
         status: nextStatus,
+        headroomSignatureDataUrl,
         students: baseStudents.map((student) => ({
           studentId: student.studentId,
           headroomObservation: String(
             Object.prototype.hasOwnProperty.call(headroomObservations, student.studentId)
               ? headroomObservations[student.studentId]
               : (student.headroomObservation || '')
+          ).trim(),
+          coexistenceObservation: String(
+            Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, student.studentId)
+              ? headroomCoexistenceObservations[student.studentId]
+              : (student.coexistenceObservation || '')
           ).trim(),
         })),
       });
@@ -5010,6 +5097,28 @@ function TeacherCampusHome({ forcePreview = false }) {
       await headroomReportCardsQuery.refetch();
     } catch (error) {
       setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar el boletín general.' });
+    }
+  };
+
+  const onSaveHeadroomSignature = async () => {
+    if (!selectedHeadroomSection?.sourceCourseKey || !selectedHeadroomPeriodKey) {
+      setNotice({ type: 'error', text: 'Selecciona el curso y el periodo del boletín general.' });
+      return;
+    }
+    if (!headroomSignatureDataUrl) {
+      setNotice({ type: 'error', text: 'Dibuja tu firma antes de guardar.' });
+      return;
+    }
+    try {
+      await saveHeadroomSignatureMutation.mutateAsync({
+        sourceCourseKey: selectedHeadroomSection.sourceCourseKey,
+        academicPeriodKey: selectedHeadroomPeriodKey,
+        signatureDataUrl: headroomSignatureDataUrl,
+      });
+      setNotice({ type: 'success', text: 'Firma del director de grupo guardada.' });
+      await headroomReportCardsQuery.refetch();
+    } catch (error) {
+      setNotice({ type: 'error', text: error?.response?.data?.message || error?.message || 'No se pudo guardar la firma.' });
     }
   };
 
@@ -11772,7 +11881,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                     <span className="campus-panel__kicker">Director de grupo</span>
                     <h2 className="campus-teacher__classroom-title">Boletín general</h2>
                     <p className="campus-teacher__classroom-subtitle">
-                      Cuando todas las materias hayan enviado su boletín, consolida promedios, comentarios docentes y tu observación general.
+                      Cuando todas las materias hayan enviado su boletín, consolida promedios, convivencia escolar y tus observaciones como director de grupo.
                     </p>
                   </div>
                 </header>
@@ -11837,8 +11946,45 @@ function TeacherCampusHome({ forcePreview = false }) {
                       </ul>
                     </div>
 
+                    <div className="campus-teacher__report-card-signatures">
+                      <h3>Firma del director de grupo</h3>
+                      <p className="campus-panel__meta">
+                        Esta firma aparecerá al pie de cada boletín impreso de este curso y periodo.
+                        Es obligatoria para publicar el boletín general.
+                      </p>
+                      <ReportCardSignaturePad
+                        ariaLabel="Firma del director de grupo"
+                        disabled={
+                          selectedHeadroomSection.generalReport?.status === 'published'
+                          || saveHeadroomSignatureMutation.isPending
+                          || saveHeadroomReportCardMutation.isPending
+                        }
+                        onChange={setHeadroomSignatureDataUrl}
+                        value={headroomSignatureDataUrl}
+                      />
+                      <p className="campus-teacher__report-card-signatures-name">
+                        {selectedHeadroomSection.generalReport?.headroomSignerName
+                          || selectedHeadroomSection.generalReport?.headroomTeacherName
+                          || authUser?.name
+                          || 'Director de grupo'}
+                      </p>
+                      <button
+                        className="campus-teacher__ghost-btn campus-teacher__action-btn--compact"
+                        disabled={
+                          selectedHeadroomSection.generalReport?.status === 'published'
+                          || saveHeadroomSignatureMutation.isPending
+                          || !headroomSignatureDataUrl
+                        }
+                        onClick={onSaveHeadroomSignature}
+                        type="button"
+                      >
+                        {saveHeadroomSignatureMutation.isPending ? 'Guardando firma...' : 'Guardar firma'}
+                      </button>
+                    </div>
+
                     {selectedHeadroomSection.allSubjectsSubmitted ? (
                       <>
+                        <h3 className="campus-teacher__report-card-section-title">Parte académica</h3>
                         <div className="campus-teacher__report-card-table-wrap">
                           <table className="campus-teacher__report-card-table campus-teacher__report-card-table--general">
                             <thead>
@@ -11850,41 +11996,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                               </tr>
                             </thead>
                             <tbody>
-                              {(selectedHeadroomSection.generalReport?.students?.length
-                                ? selectedHeadroomSection.generalReport.students
-                                : (() => {
-                                  const byStudent = new Map();
-                                  (selectedHeadroomSection.subjects || []).forEach((subjectItem) => {
-                                    studentsIncludedInSubjectReport(subjectItem.report).forEach((student) => {
-                                      const studentId = String(student.studentId);
-                                      const current = byStudent.get(studentId) || {
-                                        studentId,
-                                        studentName: student.studentName,
-                                        subjectLines: [],
-                                      };
-                                      current.subjectLines.push({
-                                        subject: subjectItem.subject,
-                                        periodAverage: student.periodAverage,
-                                        teacherObservation: student.observation,
-                                        teacherName: subjectItem.report?.teacherName || '',
-                                      });
-                                      byStudent.set(studentId, current);
-                                    });
-                                  });
-                                  return Array.from(byStudent.values()).map((student) => {
-                                    const averages = student.subjectLines
-                                      .map((line) => Number(line.periodAverage))
-                                      .filter((value) => Number.isFinite(value));
-                                    return {
-                                      ...student,
-                                      overallAverage: averages.length
-                                        ? Number((averages.reduce((sum, value) => sum + value, 0) / averages.length).toFixed(2))
-                                        : null,
-                                      headroomObservation: headroomObservations[student.studentId] || '',
-                                    };
-                                  });
-                                })()
-                              ).map((student) => (
+                              {headroomStudentRows.map((student) => (
                                 <tr key={student.studentId}>
                                   <td><strong>{student.studentName}</strong></td>
                                   <td>
@@ -11918,6 +12030,70 @@ function TeacherCampusHome({ forcePreview = false }) {
                               ))}
                             </tbody>
                           </table>
+                        </div>
+
+                        <div className="campus-teacher__report-card-coexistence">
+                          <h3>Convivencia escolar</h3>
+                          <p className="campus-panel__meta">
+                            El puntaje de convivencia usa la escala de calificaciones del nivel académico del curso.
+                            Al publicar el boletín debes dejar una observación de convivencia para cada alumno.
+                          </p>
+                          <div className="campus-teacher__report-card-table-wrap">
+                            <table className="campus-teacher__report-card-table campus-teacher__report-card-table--coexistence">
+                              <thead>
+                                <tr>
+                                  <th>Alumno</th>
+                                  <th>Puntaje</th>
+                                  <th>Categoría</th>
+                                  <th>Observación de convivencia</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {headroomStudentRows.map((student) => {
+                                  const coexistence = resolveHeadroomCoexistenceForStudent(student.studentId, student);
+                                  return (
+                                    <tr key={`coexistence-${student.studentId}`}>
+                                      <td><strong>{student.studentName}</strong></td>
+                                      <td>
+                                        {coexistence.score === null || coexistence.score === undefined
+                                          ? '—'
+                                          : `${coexistence.score}%`}
+                                        {Number(coexistence.totalDeducted) > 0 ? (
+                                          <small>−{coexistence.totalDeducted}% por {coexistence.observationCount} observación{coexistence.observationCount === 1 ? '' : 'es'}</small>
+                                        ) : null}
+                                      </td>
+                                      <td>
+                                        {coexistence.performanceLabel ? (
+                                          <span
+                                            className="campus-teacher__report-card-coexistence-pill"
+                                            style={coexistence.performanceColor ? { backgroundColor: coexistence.performanceColor } : undefined}
+                                          >
+                                            {coexistence.performanceLabel}
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                      <td>
+                                        <textarea
+                                          disabled={selectedHeadroomSection.generalReport?.status === 'published' || saveHeadroomReportCardMutation.isPending}
+                                          onChange={(event) => setHeadroomCoexistenceObservations((current) => ({
+                                            ...current,
+                                            [student.studentId]: event.target.value,
+                                          }))}
+                                          placeholder="Comentario del director de grupo sobre la convivencia del alumno en este periodo"
+                                          rows={3}
+                                          value={
+                                            Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, student.studentId)
+                                              ? headroomCoexistenceObservations[student.studentId]
+                                              : (student.coexistenceObservation || '')
+                                          }
+                                        />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
 
                         <div className="campus-teacher__classroom-footer">

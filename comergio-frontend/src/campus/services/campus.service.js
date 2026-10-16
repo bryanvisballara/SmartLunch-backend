@@ -165,6 +165,18 @@ export function saveCampusTeacherHeadroomReportCard(payload) {
   return api.post('/campus/teacher/headroom/report-cards', payload).then((response) => response.data);
 }
 
+export function saveCampusTeacherHeadroomReportCardSignature(payload) {
+  return api.post('/campus/teacher/headroom/report-cards/signature', payload).then((response) => response.data);
+}
+
+export function getCampusCoordinationGeneralReportCards(params = {}) {
+  return api.get('/campus/coordination/general-report-cards', { params }).then((response) => response.data);
+}
+
+export function saveCampusCoordinationGeneralReportCardSignature(reportId, payload) {
+  return api.post(`/campus/coordination/general-report-cards/${reportId}/signature`, payload).then((response) => response.data);
+}
+
 export function getCampusTeacherCourseFlyLock(courseId) {
   return api.get(`/campus/teacher/courses/${courseId}/fly-lock`).then((response) => response.data);
 }
