@@ -413,6 +413,7 @@ app.use('/parent', parentRoutes);
 app.use('/parent', parentEnrollmentMatriculaRouter);
 app.use('/student', studentPortalRoutes);
 app.use('/enrollment-matricula', rectoriaEnrollmentMatriculaRouter);
+app.use('/campus/preschool-bulletin', require('./routes/preschoolBulletin.routes'));
 app.use('/campus', campusRoutes);
 app.use('/arena', arenaRoutes);
 app.use('/trivia', triviaRoutes);

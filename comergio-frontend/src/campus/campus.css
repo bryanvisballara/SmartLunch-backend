@@ -17604,6 +17604,214 @@ button.campus-teacher__home-kpi-card:focus-visible {
   font-weight: 700;
 }
 
+.campus-parent-bulletin,
+.campus-parent-bulletin__locked {
+  display: grid;
+  gap: 1rem;
+}
+
+.campus-parent-bulletin__locked {
+  padding: 1.1rem;
+  border-radius: 18px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.campus-parent-bulletin__locked h3,
+.campus-parent-bulletin header h3 {
+  margin: 0;
+}
+
+.campus-parent-bulletin header p,
+.campus-parent-bulletin__locked p {
+  margin: 0.35rem 0 0;
+}
+
+.campus-parent-bulletin__sheet {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+  border: 1px solid #e7e5e4;
+  border-radius: 22px;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(180deg, #0f766e, #d6b25e) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+
+.campus-parent-bulletin__sheet > header p {
+  margin: 0;
+  color: #0f766e;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.campus-parent-bulletin__sheet > header h3 {
+  margin: 0.15rem 0;
+  font-size: 1.45rem;
+}
+
+.campus-parent-bulletin__sheet > header span,
+.campus-parent-bulletin__sheet section > p {
+  color: #64748b;
+}
+
+.campus-parent-bulletin__sheet dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.campus-parent-bulletin__sheet dt {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.campus-parent-bulletin__sheet dd {
+  margin: 0.15rem 0 0;
+  font-weight: 700;
+}
+
+.campus-parent-bulletin__sheet section h4 {
+  margin: 0 0 0.45rem;
+}
+
+.campus-parent-bulletin__sheet ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.campus-parent-bulletin__sheet li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 0.8rem;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.campus-parent-bulletin__sheet li span,
+.campus-parent-bulletin__sheet li em {
+  display: block;
+  margin-top: 0.2rem;
+  color: #64748b;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.campus-parent-bulletin__pill,
+.campus-parent-bulletin__score {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.campus-parent-bulletin__pill.is-ip {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.campus-parent-bulletin__pill.is-ep {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.campus-parent-bulletin__pill.is-ia {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.campus-parent-bulletin__summary {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.campus-preschool-grade {
+  display: grid;
+  gap: 1rem;
+}
+
+.campus-preschool-grade header h3,
+.campus-preschool-grade h4 {
+  margin: 0;
+}
+
+.campus-preschool-grade header p,
+.campus-preschool-grade article span {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+}
+
+.campus-preschool-grade label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.campus-preschool-grade select,
+.campus-preschool-grade textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  font-weight: 500;
+}
+
+.campus-preschool-grade section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.campus-preschool-grade article {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.campus-preschool-grade__levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.campus-preschool-grade__levels button,
+.campus-preschool-grade__actions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.campus-preschool-grade__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.campus-preschool-grade__actions button:last-child {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
 .campus-teacher__report-card-checklist {
   display: grid;
   gap: 0.55rem;

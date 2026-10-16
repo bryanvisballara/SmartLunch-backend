@@ -56,6 +56,7 @@ export const COORDINATION_PORTAL_NAV = [
     items: [
       { key: 'team', label: 'Cuerpo institucional' },
       { key: 'students', label: 'Gestión académica' },
+      { key: 'preschool_bulletin', label: 'Boletín preescolar' },
     ],
   },
   { type: 'item', key: 'staff_announcements', label: 'Comunicados internos' },
@@ -76,6 +77,7 @@ export const RECTORIA_PORTAL_NAV = [
     items: [
       { key: 'team', label: 'Cuerpo institucional' },
       { key: 'students', label: 'Gestión académica' },
+      { key: 'preschool_bulletin', label: 'Boletín preescolar' },
       { key: 'fees', label: 'Costos' },
     ],
   },

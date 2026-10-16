@@ -22,6 +22,7 @@ import { useStudentGamesAvailable } from '../../hooks/useStudentGamesAvailable';
 import useAuthStore from '../../store/auth.store';
 import ParentPortal from '../../pages/ParentPortal';
 import { ParentViewMotion } from '../components/ParentViewMotion';
+import ParentBulletinsPanel from '../components/ParentBulletinsPanel';
 import {
   createCommunityPublication,
   createParentAcademicFeedComment,
@@ -320,6 +321,13 @@ const academicMenuItems = [
     title: 'Horario de clase',
     navShortTitle: 'Horario',
     icon: 'schedule',
+  },
+  {
+    id: 'academic-bulletins',
+    title: 'Boletines',
+    navShortTitle: 'Boletines',
+    description: 'Boletines generados del periodo. Solo se consultan con la cartera al día.',
+    icon: 'bulletin',
   },
 ];
 
@@ -3400,6 +3408,14 @@ function AcademicMenuIcon({ icon }) {
       </svg>
     );
   }
+  if (icon === 'bulletin') {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M7 3.5h7.5L19 8v12.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-16a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.9" />
+        <path d="M14 3.5V8h5M8.5 12h7M8.5 16h5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.9" />
+      </svg>
+    );
+  }
   if (icon === 'schedule') {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -4533,7 +4549,7 @@ function ParentAcademicContent({
       ? { ranking: selectedChild.academicRanking || null, calendar: [], behavior: { teacherComments: [] }, attendance: { records: [] }, insights: [], gradebook: selectedChild.academicGrades || [] }
       : buildAcademicWorkspace(selectedChild)
   ), [selectedChild]);
-  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-calendar', 'academic-attendance', 'academic-assignments', 'academic-content', 'academic-ranking'].includes(activeView)
+  const effectiveActiveView = selectedChild?.isRealParentChild && !['academic-performance', 'academic-grades', 'academic-schedule', 'academic-bulletins', 'academic-calendar', 'academic-attendance', 'academic-assignments', 'academic-content', 'academic-ranking'].includes(activeView)
     ? 'academic-performance'
     : activeView;
   const weeklyClassSchedule = useMemo(() => {
@@ -5544,6 +5560,17 @@ function ParentAcademicContent({
             ))}
           </div>
         </section>
+      </section>
+    );
+  }
+
+  if (effectiveActiveView === 'academic-bulletins') {
+    return (
+      <section className="campus-parent-mobile__academic-page">
+        <ParentBulletinsPanel
+          studentId={selectedChild?.id || ''}
+          studentName={selectedChild?.name || ''}
+        />
       </section>
     );
   }

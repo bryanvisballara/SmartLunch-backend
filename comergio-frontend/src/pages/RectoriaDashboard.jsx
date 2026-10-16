@@ -39,6 +39,7 @@ import '../components/rectoria/RectoriaPortalSidebar.css';
 import useAuthStore from '../store/auth.store';
 import { filterStaffPortalNav } from '../lib/staffFeatures';
 import BrandConfirmModal from '../components/BrandConfirmModal';
+import PreschoolBulletinModelPanel from '../components/preschool/PreschoolBulletinModelPanel';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
 import { resolvePlayableFeedVideoUrl } from '../lib/feedMedia';
@@ -9785,6 +9786,10 @@ function RectoriaDashboard() {
           teacherLabelById={teacherLabelById}
           view={activeSection}
         />
+      ) : null}
+
+      {activeSection === 'preschool_bulletin' ? (
+        <PreschoolBulletinModelPanel />
       ) : null}
 
       {activeSection === 'overview' ? (

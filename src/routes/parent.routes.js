@@ -52,6 +52,9 @@ const CampusPostSubmission = require('../models/campusPostSubmission.model');
 const AcademicStructure = require('../models/academicStructure.model');
 const StudentBillingProfile = require('../models/studentBillingProfile.model');
 const CampusGradeEntry = require('../models/campusGradeEntry.model');
+const CampusGeneralReportCard = require('../models/campusGeneralReportCard.model');
+const PreschoolBulletinReport = require('../models/preschoolBulletinReport.model');
+const PreschoolBulletinTemplate = require('../models/preschoolBulletinTemplate.model');
 const PsychologyCase = require('../models/psychologyCase.model');
 const CampusDisciplineObservation = require('../models/campusDisciplineObservation.model');
 const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.model');
@@ -8097,6 +8100,158 @@ router.post('/portal/meriendas/waitlist', roleMiddleware('parent'), async (req, 
     return res.status(200).json({ message: 'Agregado a la lista de espera correctamente.' });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+function compactBulletinKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function studentMatchesBulletinGrade(studentGrade, gradeKey, gradeLabel) {
+  const studentKeys = new Set(
+    [...getFeeGradeAliases(studentGrade), studentGrade].map(compactBulletinKey).filter(Boolean)
+  );
+  const gradeKeys = [...getFeeGradeAliases(gradeKey), gradeKey, gradeLabel].map(compactBulletinKey).filter(Boolean);
+  return gradeKeys.some((key) => studentKeys.has(key));
+}
+
+async function studentCarteraIsCurrent(schoolId, studentId) {
+  const charges = await AcademicCharge.find({
+    schoolId,
+    studentId,
+    status: { $in: ['pending', 'overdue'] },
+  }).select('status dueDate').lean();
+  const today = startOfToday();
+  return !charges.some((charge) => (
+    String(charge.status) === 'overdue'
+    || (charge.dueDate && new Date(charge.dueDate) < today)
+  ));
+}
+
+router.get('/portal/children/:studentId/bulletins', roleMiddleware('parent', 'admin', 'student'), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const access = await assertPortalStudentIdAccess(req, req.params.studentId);
+    if (!access.ok) {
+      return res.status(access.status).json({ message: access.message });
+    }
+
+    const student = await Student.findOne({
+      _id: access.selectedStudentId,
+      schoolId,
+      deletedAt: null,
+    }).select('name grade schoolCode').lean();
+    if (!student) {
+      return res.status(404).json({ message: 'Estudiante no encontrado.' });
+    }
+
+    const carteraClear = await studentCarteraIsCurrent(schoolId, student._id);
+    if (!carteraClear) {
+      return res.status(200).json({
+        carteraClear: false,
+        message: 'Los boletines se habilitan cuando la cartera de este estudiante está al día.',
+        bulletins: [],
+      });
+    }
+
+    const structure = await AcademicStructure.findOne({ schoolId }).select('schoolName').lean();
+    const templates = await PreschoolBulletinTemplate.find({ schoolId }).lean();
+    const gradeTemplates = templates.filter((template) => studentMatchesBulletinGrade(student.grade, template.gradeKey, template.gradeLabel));
+    const gradeKeys = [...new Set(gradeTemplates.map((template) => template.gradeKey).filter(Boolean))];
+    const preschoolReports = gradeKeys.length
+      ? await PreschoolBulletinReport.find({
+        schoolId,
+        gradeKey: { $in: gradeKeys },
+        status: 'submitted',
+      }).lean()
+      : [];
+
+    const preschoolBulletins = [];
+    const periods = [...new Set(preschoolReports.map((report) => report.academicPeriodKey).filter(Boolean))];
+    periods.forEach((periodKey) => {
+      const template = gradeTemplates.find((item) => item.academicPeriodKey === periodKey && item.blocks?.length);
+      if (!template) return;
+      const periodReports = preschoolReports.filter((report) => report.academicPeriodKey === periodKey && report.gradeKey === template.gradeKey);
+      if (!periodReports.length) return;
+      const blocks = (template.blocks || []).map((block) => ({
+        id: String(block._id || ''),
+        kind: block.kind === 'topic' ? 'topic' : 'dimension',
+        name: String(block.name || '').trim(),
+        teacherName: String(block.teacherName || '').trim(),
+        indicators: (block.indicators || []).map((indicator) => {
+          const indicatorId = String(indicator._id || '');
+          const entry = periodReports.flatMap((report) => report.entries || []).find((item) => (
+            String(item.studentId) === String(student._id) && String(item.indicatorId) === indicatorId
+          ));
+          return {
+            id: indicatorId,
+            text: String(indicator.text || '').trim(),
+            performanceLabel: String(entry?.performanceLabel || '').trim(),
+            observation: String(entry?.observation || '').trim(),
+          };
+        }).filter((indicator) => indicator.text),
+      })).filter((block) => block.name && block.indicators.length);
+      if (!blocks.length) return;
+      const generatedAt = periodReports.reduce((latest, report) => {
+        const stamp = report.submittedAt || report.updatedAt;
+        if (!stamp) return latest;
+        return !latest || new Date(stamp) > new Date(latest) ? stamp : latest;
+      }, null);
+      preschoolBulletins.push({
+        id: `preschool-${template.gradeKey}-${periodKey}`,
+        kind: 'preschool',
+        periodName: template.academicPeriodLabel || periodKey,
+        gradeLabel: template.gradeLabel || student.grade,
+        generatedAt,
+        blocks,
+      });
+    });
+
+    const generalReports = await CampusGeneralReportCard.find({
+      schoolId,
+      status: 'published',
+      'students.studentId': student._id,
+    }).sort({ academicPeriodKey: 1 }).lean();
+    const generalBulletins = generalReports.map((report) => {
+      const row = (report.students || []).find((item) => String(item.studentId) === String(student._id));
+      if (!row) return null;
+      return {
+        id: String(report._id),
+        kind: 'general',
+        periodName: report.academicPeriodName || report.academicPeriodKey,
+        gradeLabel: report.sectionLabel || report.studentGradeKey || student.grade,
+        generatedAt: report.publishedAt || report.updatedAt,
+        headroomTeacherName: report.headroomTeacherName || '',
+        overallAverage: row.overallAverage ?? null,
+        headroomObservation: row.headroomObservation || '',
+        coexistenceLabel: row.coexistencePerformanceLabel || '',
+        coexistenceObservation: row.coexistenceObservation || '',
+        subjects: (row.subjectLines || []).map((line) => ({
+          subject: line.subject || '',
+          teacherName: line.teacherName || '',
+          periodAverage: line.periodAverage ?? null,
+          observation: line.teacherObservation || '',
+        })),
+      };
+    }).filter(Boolean);
+
+    return res.status(200).json({
+      carteraClear: true,
+      schoolName: structure?.schoolName || '',
+      student: {
+        id: String(student._id),
+        name: student.name || '',
+        grade: student.grade || '',
+        schoolCode: student.schoolCode || '',
+      },
+      bulletins: [...preschoolBulletins, ...generalBulletins],
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron consultar los boletines.' });
   }
 });
 

@@ -22,6 +22,8 @@ const CampusPostSubmission = require('../models/campusPostSubmission.model');
 const CampusSchoolRoute = require('../models/campusSchoolRoute.model');
 const CampusSubjectReportCard = require('../models/campusSubjectReportCard.model');
 const CampusGeneralReportCard = require('../models/campusGeneralReportCard.model');
+const PreschoolBulletinReport = require('../models/preschoolBulletinReport.model');
+const PreschoolBulletinTemplate = require('../models/preschoolBulletinTemplate.model');
 const {
   getFlyLockForCourse,
   setFlyLockForCourse,
@@ -7842,6 +7844,116 @@ router.post('/teacher/courses/:id/report-cards', requireCampusTeacherAccess, asy
   }
 });
 
+function preschoolMatchKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+async function loadPreschoolBulletinForHeadroom({ schoolId, gradeKey, periodKey }) {
+  const wantedGrade = preschoolMatchKey(gradeKey);
+  const wantedPeriod = preschoolMatchKey(periodKey);
+  if (!wantedGrade || !wantedPeriod) return null;
+
+  const templates = await PreschoolBulletinTemplate.find({ schoolId }).lean();
+  const template = templates.find((item) => (
+    preschoolMatchKey(item.gradeKey) === wantedGrade
+    && preschoolMatchKey(item.academicPeriodKey) === wantedPeriod
+  ));
+  if (!template || !Array.isArray(template.blocks) || !template.blocks.length) return null;
+
+  const reports = await PreschoolBulletinReport.find({
+    schoolId,
+    gradeKey: template.gradeKey,
+    academicPeriodKey: template.academicPeriodKey,
+  }).lean();
+  const reportByTeacherId = new Map(reports.map((report) => [String(report.teacherUserId || ''), report]));
+
+  const blocks = template.blocks.map((block) => {
+    const teacherUserId = String(block.teacherUserId || '');
+    const report = reportByTeacherId.get(teacherUserId);
+    const indicators = (Array.isArray(block.indicators) ? block.indicators : [])
+      .map((indicator) => ({
+        id: String(indicator._id || ''),
+        text: normalizeText(indicator.text),
+        subjectKey: normalizeText(indicator.subjectKey),
+        subjectLabel: normalizeText(indicator.subjectLabel),
+      }))
+      .filter((indicator) => indicator.id && indicator.text);
+    if (!normalizeText(block.name) || !indicators.length) return null;
+    return {
+      id: String(block._id || ''),
+      kind: block.kind === 'topic' ? 'topic' : 'dimension',
+      name: normalizeText(block.name),
+      teacherUserId,
+      teacherName: normalizeText(block.teacherName),
+      submitted: report?.status === 'submitted',
+      indicators,
+    };
+  }).filter(Boolean);
+
+  if (!blocks.length) return null;
+
+  const gradeAliases = new Set(
+    [...getFeeGradeAliases(template.gradeKey), template.gradeKey, template.gradeLabel]
+      .map(preschoolMatchKey)
+      .filter(Boolean)
+  );
+  const students = await Student.find({ schoolId, status: 'active', deletedAt: null })
+    .select('name grade schoolCode')
+    .lean();
+  const roster = students
+    .filter((student) => {
+      const studentKeys = [...getFeeGradeAliases(student.grade), student.grade].map(preschoolMatchKey);
+      return studentKeys.some((key) => gradeAliases.has(key));
+    })
+    .map((student) => ({
+      id: String(student._id),
+      name: normalizeText(student.name),
+      schoolCode: normalizeText(student.schoolCode),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, 'es', { sensitivity: 'base' }));
+
+  const entries = reports.flatMap((report) => (
+    (Array.isArray(report.entries) ? report.entries : []).map((entry) => ({
+      studentId: String(entry.studentId || ''),
+      indicatorId: normalizeText(entry.indicatorId),
+      observation: normalizeText(entry.observation),
+      performanceKey: normalizeText(entry.performanceKey),
+      performanceLabel: normalizeText(entry.performanceLabel),
+      score: entry.score === null || entry.score === undefined ? null : Number(entry.score),
+      teacherUserId: String(report.teacherUserId || ''),
+      status: report.status || 'draft',
+    }))
+  )).filter((entry) => entry.studentId && entry.indicatorId);
+
+  const gradingContext = await loadCampusGradingContext(schoolId);
+  const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, {
+    studentGradeKey: template.gradeKey,
+  });
+  const performanceLevels = Array.isArray(gradingScale?.performanceLevels) && gradingScale.performanceLevels.length
+    ? gradingScale.performanceLevels
+    : [
+      { key: 'ip', label: 'Iniciando proceso (IP)', minScore: 0, maxScore: 40, color: '#ef4444', order: 10 },
+      { key: 'ep', label: 'En proceso (EP)', minScore: 41, maxScore: 79, color: '#f97316', order: 20 },
+      { key: 'ia', label: 'Indicador alcanzado (IA)', minScore: 80, maxScore: 100, color: '#15803d', order: 30 },
+    ];
+
+  return {
+    gradeKey: normalizeText(template.gradeKey),
+    gradeLabel: normalizeText(template.gradeLabel),
+    academicPeriodKey: normalizeText(template.academicPeriodKey),
+    academicPeriodLabel: normalizeText(template.academicPeriodLabel),
+    blocks,
+    students: roster,
+    entries,
+    performanceLevels,
+    allSubmitted: blocks.every((block) => block.submitted),
+  };
+}
+
 router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (req, res) => {
   try {
     const { schoolId, userId } = req.user;
@@ -7853,7 +7965,6 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
       teacherUserId: userId,
       status: 'active',
       courseType: 'guidance_routine',
-      ...(sourceCourseKey ? { sourceCourseKey } : {}),
     }).sort({ section: 1, title: 1 }).lean();
 
     if (!guidanceCourses.length) {
@@ -7868,6 +7979,24 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
     for (const guidanceCourse of guidanceCourses) {
       const sectionKey = normalizeText(guidanceCourse.sourceCourseKey).toUpperCase();
       const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
+      const sectionLabel = normalizeText(guidanceCourse.section) || normalizeText(guidanceCourse.gradeLevel) || sectionKey;
+      if (sourceCourseKey && sectionKey !== sourceCourseKey) {
+        sections.push({
+          sourceCourseKey: sectionKey,
+          studentGradeKey: gradeKey,
+          sectionLabel,
+          guidanceCourseId: String(guidanceCourse._id),
+          periods: [],
+          academicPeriodKey: '',
+          subjects: [],
+          allSubjectsSubmitted: false,
+          preschoolBulletin: null,
+          gradingScale: null,
+          coexistenceByStudentId: {},
+          generalReport: null,
+        });
+        continue;
+      }
       let subjectCourses = await CampusCourse.find({
         schoolId,
         status: 'active',
@@ -7951,6 +8080,11 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
           headroomTeacherUserId: userId,
         }).lean()
         : null;
+      const preschoolBulletin = await loadPreschoolBulletinForHeadroom({
+        schoolId,
+        gradeKey,
+        periodKey: selectedPeriodKey,
+      });
 
       const gradingContext = await loadCampusGradingContext(schoolId);
       const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, guidanceCourse);
@@ -7990,12 +8124,13 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
       sections.push({
         sourceCourseKey: sectionKey,
         studentGradeKey: gradeKey,
-        sectionLabel: normalizeText(guidanceCourse.section) || sectionKey,
+        sectionLabel,
         guidanceCourseId: String(guidanceCourse._id),
         periods: Array.from(periodOptions.values()),
         academicPeriodKey: selectedPeriodKey,
         subjects: subjectChecklist,
         allSubjectsSubmitted: allSubmitted,
+        preschoolBulletin,
         gradingScale,
         coexistenceByStudentId,
         generalReport: serializeGeneralReportCard(generalReport),

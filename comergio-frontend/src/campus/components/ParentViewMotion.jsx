@@ -9,6 +9,7 @@ const MOTION_BY_VIEW = [
   ['academic-grades', 'slide-right'],
   ['academic-calendar', 'flip-soft'],
   ['academic-schedule', 'slide-left'],
+  ['academic-bulletins', 'slide-up'],
   ['academic-ranking', 'pop'],
   ['academic-tasks', 'slide-up'],
   ['academic-behavior', 'soft-rise'],

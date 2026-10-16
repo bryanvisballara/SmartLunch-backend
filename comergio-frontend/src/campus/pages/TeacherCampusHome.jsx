@@ -70,6 +70,8 @@ import ClickableOptionPicker from '../../components/audience/ClickableOptionPick
 import { addAudienceListValue, removeAudienceListValue } from '../../lib/publicationAudience';
 import { mockTeacherWorkspace } from '../mockCampusContext';
 import ReportCardSignaturePad from '../components/ReportCardSignaturePad';
+import HeadroomPreschoolBulletinView from '../components/HeadroomPreschoolBulletinView';
+import TeacherPreschoolBulletinPanel from '../components/TeacherPreschoolBulletinPanel';
 import '../campus.css';
 
 const campusPreviewEnabled = import.meta.env.DEV && String(import.meta.env.VITE_CAMPUS_PREVIEW || '').trim() === 'true';
@@ -313,6 +315,7 @@ const teacherSectionOptions = [
   { key: 'courses', label: 'Cursos', icon: 'courses', description: 'Ver todos los cursos donde dictas clase.' },
   { key: 'guidance_routine', label: 'Guidance Routine', icon: 'guidance', description: 'Tomar asistencia de la rutina de orientacion del curso asignado.' },
   { key: 'general_report_card', label: 'Boletín general', icon: 'report', description: 'Genera el boletín consolidado del curso cuando todas las materias hayan enviado su boletín.' },
+  { key: 'preschool_bulletin', label: 'Boletín preescolar', icon: 'report', description: 'Observaciones de dimensiones, tópicos e indicadores asignados a tu grado.' },
   { key: 'attendance', label: 'Asistencia a clase', icon: 'attendance', description: 'Registrar si el alumno entró a tiempo, llegó tarde o no asistió a tu clase.' },
   { key: 'academic_management', label: 'Gestión académica', icon: 'academic', description: 'Definir evaluación y crear contenido académico por materia.' },
   { key: 'academic_content', label: 'Contenido académico', icon: 'content', description: 'Planear los temas de estudio por grado y asignatura.' },
@@ -11874,6 +11877,12 @@ function TeacherCampusHome({ forcePreview = false }) {
               </div>
             ) : null}
 
+            {activeTeacherSection === 'preschool_bulletin' ? (
+              <TeacherPreschoolBulletinPanel
+                onNotice={setNotice}
+              />
+            ) : null}
+
             {activeTeacherSection === 'general_report_card' ? (
               <article className="campus-teacher__gradebook-panel campus-teacher__embedded-panel campus-teacher__report-card-panel">
                 <header className="campus-teacher__classroom-head">
@@ -11881,7 +11890,9 @@ function TeacherCampusHome({ forcePreview = false }) {
                     <span className="campus-panel__kicker">Director de grupo</span>
                     <h2 className="campus-teacher__classroom-title">Boletín general</h2>
                     <p className="campus-teacher__classroom-subtitle">
-                      Cuando todas las materias hayan enviado su boletín, consolida promedios, convivencia escolar y tus observaciones como director de grupo.
+                      {selectedHeadroomSection?.preschoolBulletin
+                        ? 'Elige un estudiante y califica cada indicador: Iniciando proceso (IP), En proceso (EP) o Indicador alcanzado (IA). El comentario es opcional.'
+                        : 'Cuando todas las materias hayan enviado su boletín, consolida promedios, convivencia escolar y tus observaciones como director de grupo.'}
                     </p>
                   </div>
                 </header>
@@ -11921,30 +11932,43 @@ function TeacherCampusHome({ forcePreview = false }) {
                           ))}
                         </select>
                       </label>
-                      <span className={`campus-teacher__mode-pill${selectedHeadroomSection.allSubjectsSubmitted ? ' is-success' : ''}`}>
-                        {selectedHeadroomSection.allSubjectsSubmitted
-                          ? 'Todas las materias listas'
-                          : 'Esperando boletines de materias'}
+                      <span className={`campus-teacher__mode-pill${(selectedHeadroomSection.preschoolBulletin ? selectedHeadroomSection.preschoolBulletin.allSubmitted : selectedHeadroomSection.allSubjectsSubmitted) ? ' is-success' : ''}`}>
+                        {selectedHeadroomSection.preschoolBulletin
+                          ? (selectedHeadroomSection.preschoolBulletin.allSubmitted
+                            ? 'Observaciones de preescolar listas'
+                            : 'Boletín de preescolar')
+                          : (selectedHeadroomSection.allSubjectsSubmitted
+                            ? 'Todas las materias listas'
+                            : 'Esperando boletines de materias')}
                       </span>
                     </div>
 
-                    <div className="campus-teacher__report-card-checklist">
-                      <h3>Materias</h3>
-                      <ul>
-                        {(selectedHeadroomSection.subjects || []).map((subjectItem) => (
-                          <li key={subjectItem.campusCourseId} className={subjectItem.submitted ? 'is-ready' : subjectItem.partial ? 'is-partial' : 'is-pending'}>
-                            <strong>{subjectItem.subject}</strong>
-                            <span>
-                              {subjectItem.submitted
-                                ? 'Boletín enviado'
-                                : subjectItem.partial
-                                  ? `Envío parcial (${subjectItem.includedStudentCount || 0}/${subjectItem.rosterStudentCount || '?'})`
-                                  : 'Pendiente'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                    {selectedHeadroomSection.preschoolBulletin ? (
+                      <HeadroomPreschoolBulletinView
+                        bulletin={selectedHeadroomSection.preschoolBulletin}
+                        onNotice={setNotice}
+                        onSaved={() => headroomReportCardsQuery.refetch()}
+                        teacherUserId={authUser?.id}
+                      />
+                    ) : (
+                      <div className="campus-teacher__report-card-checklist">
+                        <h3>Materias</h3>
+                        <ul>
+                          {(selectedHeadroomSection.subjects || []).map((subjectItem) => (
+                            <li key={subjectItem.campusCourseId} className={subjectItem.submitted ? 'is-ready' : subjectItem.partial ? 'is-partial' : 'is-pending'}>
+                              <strong>{subjectItem.subject}</strong>
+                              <span>
+                                {subjectItem.submitted
+                                  ? 'Boletín enviado'
+                                  : subjectItem.partial
+                                    ? `Envío parcial (${subjectItem.includedStudentCount || 0}/${subjectItem.rosterStudentCount || '?'})`
+                                    : 'Pendiente'}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     <div className="campus-teacher__report-card-signatures">
                       <h3>Firma del director de grupo</h3>
@@ -11982,7 +12006,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                       </button>
                     </div>
 
-                    {selectedHeadroomSection.allSubjectsSubmitted ? (
+                    {!selectedHeadroomSection.preschoolBulletin && selectedHeadroomSection.allSubjectsSubmitted ? (
                       <>
                         <h3 className="campus-teacher__report-card-section-title">Parte académica</h3>
                         <div className="campus-teacher__report-card-table-wrap">
@@ -12122,7 +12146,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </div>
                         </div>
                       </>
-                    ) : (
+                    ) : selectedHeadroomSection.preschoolBulletin ? null : (
                       <p className="campus-panel__meta">
                         Cuando todas las materias envíen su boletín de este periodo, podrás generar el boletín general aquí.
                       </p>
