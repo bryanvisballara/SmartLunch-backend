@@ -402,6 +402,11 @@ function buildTeacherCommunicationAuthorName(request = {}) {
   if (publisherRole === 'student') {
     return normalizeText(request.teacherName) || 'Alumno';
   }
+  if (publisherRole === 'nursing') {
+    const staffName = normalizeText(request.teacherName || request.teacherUserId?.name) || 'Enfermería';
+    const areaLabel = normalizeText(request.subject) || 'Enfermería';
+    return areaLabel ? `${staffName} - ${areaLabel}` : staffName;
+  }
 
   const teacherName = normalizeText(request.teacherUserId?.name || request.teacherName || request.teacherUserId?.username) || 'Docente';
   const subjectLabel = normalizeText(request.subject)
@@ -416,6 +421,7 @@ function getCommunicationRequestPublisherLabel(request = {}) {
   const publisherRole = normalizeText(request.publisherRole) || 'teacher';
   if (publisherRole === 'parent') return 'Acudiente';
   if (publisherRole === 'student') return 'Alumno';
+  if (publisherRole === 'nursing') return 'Enfermería';
   return 'Docente';
 }
 
@@ -5572,7 +5578,13 @@ function serializeCommunicationRequest(request) {
   const publisherRole = normalizeText(request.publisherRole) || 'teacher';
   const requesterName = request.teacherName
     || request.teacherUserId?.name
-    || (publisherRole === 'parent' ? 'Acudiente' : publisherRole === 'student' ? 'Alumno' : 'Docente');
+    || (publisherRole === 'parent'
+      ? 'Acudiente'
+      : publisherRole === 'student'
+        ? 'Alumno'
+        : publisherRole === 'nursing'
+          ? 'Enfermería'
+          : 'Docente');
 
   return {
     _id: request._id,

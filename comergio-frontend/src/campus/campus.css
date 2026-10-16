@@ -17556,6 +17556,7 @@ button.campus-teacher__home-kpi-card:focus-visible {
   border-radius: 0.65rem;
   background: #fff;
   touch-action: none;
+  image-rendering: crisp-edges;
 }
 
 .campus-teacher__report-card-signatures-name {

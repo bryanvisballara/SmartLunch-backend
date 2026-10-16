@@ -5,7 +5,7 @@ const academicCommunicationRequestSchema = new mongoose.Schema(
     schoolId: { type: String, required: true, index: true },
     publisherRole: {
       type: String,
-      enum: ['teacher', 'parent', 'student', ''],
+      enum: ['teacher', 'parent', 'student', 'nursing', ''],
       default: 'teacher',
       index: true,
     },

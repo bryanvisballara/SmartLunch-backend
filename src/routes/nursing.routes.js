@@ -5,6 +5,24 @@ const authMiddleware = require('../middleware/authMiddleware');
 const roleMiddleware = require('../middleware/roleMiddleware');
 const AcademicStructure = require('../models/academicStructure.model');
 const NursingVisit = require('../models/nursingVisit.model');
+const AcademicCommunicationRequest = require('../models/academicCommunicationRequest.model');
+const { resolveGradeCourses } = require('../utils/academicGradeCourses');
+const {
+  serializeClassroomGroups,
+  buildClassroomGroupAudienceOptions,
+  expandCourseTargetsWithClassroomGroups,
+} = require('../utils/classroomGroups');
+const {
+  MAX_CAMPUS_MATERIAL_FILES,
+  uploadCampusMaterialsMiddleware,
+} = require('../utils/campusMaterialUpload');
+const {
+  createParentFeedMediaSignature,
+  describeCampusMediaUploadError,
+  normalizeParentFeedMedia,
+  processParentFeedMediaFiles,
+  registerRemoteParentFeedMedia,
+} = require('../services/staffParentFeedMedia.service');
 const ParentStudentLink = require('../models/parentStudentLink.model');
 const Student = require('../models/student.model');
 const User = require('../models/user.model');
@@ -27,7 +45,9 @@ router.use(authMiddleware);
 
 const nursingStaffRoles = ['nursing', 'admin', 'rectoria', 'direccion'];
 const nursingSummaryViewerRoles = ['nursing', 'admin', 'rectoria', 'direccion', 'coordination'];
+const nursingPublicationRoles = ['nursing', 'admin'];
 const MAX_NURSING_VISIT_PHOTOS = 6;
+const NURSING_PUBLICATION_SUBJECT = 'Enfermería';
 
 function isValidObjectId(value) {
   return mongoose.Types.ObjectId.isValid(String(value || ''));
@@ -143,6 +163,118 @@ function getStudentGradeCandidates(student = {}) {
     normalizeLookup(student.grade),
     normalizeLookup(gradeKeyFromCourse),
   ].filter(Boolean)));
+}
+
+function buildNursingPublicationCourseOptions(academicStructure = {}) {
+  const grades = Array.isArray(academicStructure?.grades) ? academicStructure.grades : [];
+
+  return grades.flatMap((grade) => {
+    const siblingCourses = resolveGradeCourses(grade);
+    return siblingCourses.map((course) => {
+      const label = buildAcademicCourseDisplayLabel(grade, course, siblingCourses);
+      const value = normalizeText(course.key || label);
+      const gradeKey = normalizeText(grade.key);
+
+      return {
+        value,
+        label,
+        gradeKey,
+        gradeKeys: gradeKey ? [gradeKey] : [],
+        aliases: Array.from(new Set([
+          value,
+          label,
+          normalizeText(course.label),
+          normalizeText(course.section),
+          normalizeText(course.key),
+          gradeKey,
+          normalizeText(grade.label),
+        ].filter(Boolean))),
+      };
+    });
+  }).filter((item) => item.value && item.label);
+}
+
+function buildNursingPublicationAudienceOptions(academicStructure = {}) {
+  const classroomGroups = serializeClassroomGroups(academicStructure?.classroomGroups || []);
+  const groupOptions = buildClassroomGroupAudienceOptions(classroomGroups);
+  const courseOptions = buildNursingPublicationCourseOptions(academicStructure);
+  return [...groupOptions, ...courseOptions.map((course) => ({
+    value: course.value,
+    label: course.label,
+    kind: 'course',
+    gradeKeys: course.gradeKeys,
+    aliases: course.aliases,
+  }))];
+}
+
+function resolveNursingPublicationTargets({ audienceValues, academicStructure, audienceOptions }) {
+  const values = Array.from(new Set((Array.isArray(audienceValues) ? audienceValues : [])
+    .map((item) => normalizeText(item))
+    .filter(Boolean)));
+
+  if (!values.length) {
+    return null;
+  }
+
+  const optionByValue = new Map(
+    (Array.isArray(audienceOptions) ? audienceOptions : [])
+      .map((option) => [normalizeText(option.value), option])
+      .filter(([value]) => value)
+  );
+
+  const gradeTargets = new Set();
+  const courseTargets = new Set();
+
+  values.forEach((value) => {
+    const option = optionByValue.get(value);
+    if (!option) {
+      courseTargets.add(value);
+      return;
+    }
+
+    courseTargets.add(value);
+    courseTargets.add(normalizeText(option.label));
+    (Array.isArray(option.aliases) ? option.aliases : []).forEach((alias) => {
+      const text = normalizeText(alias);
+      if (text) {
+        courseTargets.add(text);
+      }
+    });
+    (Array.isArray(option.gradeKeys) ? option.gradeKeys : []).forEach((gradeKey) => {
+      const text = normalizeText(gradeKey);
+      if (text) {
+        gradeTargets.add(text);
+      }
+    });
+  });
+
+  const expandedCourseTargets = expandCourseTargetsWithClassroomGroups(
+    [...courseTargets],
+    academicStructure?.classroomGroups || []
+  );
+
+  return {
+    gradeTargets: [...gradeTargets],
+    courseTargets: expandedCourseTargets,
+  };
+}
+
+function serializeNursingPublicationRequest(request = {}) {
+  return {
+    _id: request._id,
+    title: normalizeText(request.title),
+    body: normalizeText(request.body),
+    subject: normalizeText(request.subject),
+    audienceType: normalizeText(request.audienceType) || 'course',
+    gradeTargets: Array.isArray(request.gradeTargets) ? request.gradeTargets : [],
+    courseTargets: Array.isArray(request.courseTargets) ? request.courseTargets : [],
+    media: Array.isArray(request.media) ? request.media : [],
+    status: normalizeText(request.status) || 'pending',
+    reviewNotes: normalizeText(request.reviewNotes),
+    reviewedByName: normalizeText(request.reviewedByName),
+    submittedAt: request.submittedAt || request.createdAt,
+    reviewedAt: request.reviewedAt || null,
+  };
 }
 
 function buildAcademicCourseAliases(grade = {}, course = {}, siblingCourses = []) {
@@ -746,6 +878,127 @@ router.get('/summary', roleMiddleware(nursingSummaryViewerRoles), async (req, re
         };
       }),
     });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/publications/audiences', roleMiddleware(nursingPublicationRoles), async (req, res) => {
+  try {
+    const { schoolId } = req.user;
+    const academicStructure = await AcademicStructure.findOne({ schoolId })
+      .select('grades classroomGroups')
+      .lean();
+
+    const classroomGroups = serializeClassroomGroups(academicStructure?.classroomGroups || []);
+    const courseOptions = buildNursingPublicationCourseOptions(academicStructure || {});
+    const audienceOptions = buildNursingPublicationAudienceOptions(academicStructure || {});
+
+    return res.status(200).json({
+      classroomGroups,
+      courseOptions,
+      audienceOptions,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/parent-feed-requests', roleMiddleware(nursingPublicationRoles), async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const requests = await AcademicCommunicationRequest.find({
+      schoolId,
+      publisherRole: 'nursing',
+      requesterUserId: userId,
+    })
+      .sort({ submittedAt: -1, createdAt: -1 })
+      .lean();
+
+    return res.status(200).json(requests.map((request) => serializeNursingPublicationRequest(request)));
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.post('/parent-feed-requests/media-signature', roleMiddleware(nursingPublicationRoles), (req, res) => (
+  createParentFeedMediaSignature(req, res)
+));
+
+router.post('/parent-feed-requests/media', roleMiddleware(nursingPublicationRoles), (req, res) => {
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    return registerRemoteParentFeedMedia(req, res, { altDefault: 'Publicación de enfermería' }).catch((error) => (
+      res.status(400).json({ message: describeCampusMediaUploadError(error) })
+    ));
+  }
+
+  return uploadCampusMaterialsMiddleware.array('files', MAX_CAMPUS_MATERIAL_FILES)(req, res, (uploadError) => {
+    if (uploadError) {
+      const statusCode = uploadError?.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(statusCode).json({
+        message: describeCampusMediaUploadError(uploadError),
+      });
+    }
+
+    return processParentFeedMediaFiles(req, res, {
+      preferredNameDefault: 'publicacion-enfermeria',
+      altDefault: 'Publicación de enfermería',
+    });
+  });
+});
+
+router.post('/parent-feed-requests', roleMiddleware(nursingPublicationRoles), async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const title = normalizeText(req.body.title);
+    const body = normalizeText(req.body.body);
+    const audienceValues = Array.isArray(req.body.audienceValues) ? req.body.audienceValues : [];
+    const media = normalizeParentFeedMedia(Array.isArray(req.body.media) ? req.body.media : []);
+
+    if (!title || !body) {
+      return res.status(400).json({ message: 'title and body are required' });
+    }
+
+    const academicStructure = await AcademicStructure.findOne({ schoolId })
+      .select('grades classroomGroups')
+      .lean();
+    const audienceOptions = buildNursingPublicationAudienceOptions(academicStructure || {});
+    const targets = resolveNursingPublicationTargets({
+      audienceValues,
+      academicStructure: academicStructure || {},
+      audienceOptions,
+    });
+
+    if (!targets || !targets.courseTargets.length) {
+      return res.status(400).json({ message: 'Selecciona al menos un grupo o curso destinatario.' });
+    }
+
+    const request = await AcademicCommunicationRequest.create({
+      schoolId,
+      publisherRole: 'nursing',
+      teacherName: normalizeText(name) || 'Enfermería',
+      requesterUserId: userId,
+      subject: NURSING_PUBLICATION_SUBJECT,
+      title,
+      body,
+      emailSubject: title,
+      audienceType: 'course',
+      gradeTargets: targets.gradeTargets,
+      courseTargets: targets.courseTargets,
+      media,
+      channels: {
+        push: req.body?.channels?.push !== false,
+        email: req.body?.channels?.email !== false,
+      },
+      status: 'pending',
+      submittedAt: new Date(),
+      originalTitle: title,
+      originalBody: body,
+      originalEmailSubject: title,
+    });
+
+    return res.status(201).json(serializeNursingPublicationRequest(request));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

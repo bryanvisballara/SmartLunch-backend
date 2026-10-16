@@ -16,7 +16,7 @@ const academicCommunicationSchema = new mongoose.Schema(
     courseTargets: { type: [String], default: [] },
     cohortKey: { type: String, trim: true, default: '', index: true },
     academicYear: { type: String, trim: true, default: '' },
-    publisherRole: { type: String, enum: ['secretary', 'teacher', 'parent', 'student', ''], default: '', index: true },
+    publisherRole: { type: String, enum: ['secretary', 'teacher', 'parent', 'student', 'nursing', ''], default: '', index: true },
     authorStudentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null, index: true },
     parentTargets: { type: [mongoose.Schema.Types.ObjectId], ref: 'User', default: [] },
     studentTargets: { type: [mongoose.Schema.Types.ObjectId], ref: 'Student', default: [] },

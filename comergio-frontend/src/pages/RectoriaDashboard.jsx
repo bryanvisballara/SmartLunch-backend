@@ -292,6 +292,7 @@ function formatFamilyFeedOrigin(item = {}) {
   if (role === 'teacher') return 'Docente';
   if (role === 'parent') return 'Acudiente';
   if (role === 'student') return 'Alumno';
+  if (role === 'nursing') return 'Enfermería';
   if (role === 'secretary') return 'Secretaría académica';
   return 'Institucional';
 }

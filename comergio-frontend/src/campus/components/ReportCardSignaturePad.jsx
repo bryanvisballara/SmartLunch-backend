@@ -20,7 +20,6 @@ export default function ReportCardSignaturePad({
 }) {
   const canvasRef = useRef(null);
   const drawingRef = useRef(false);
-  const emitFrameRef = useRef(null);
   const displaySizeRef = useRef({ width: 0, height: 0 });
   const snapshotRef = useRef(value || '');
   const onChangeRef = useRef(onChange);
@@ -30,19 +29,37 @@ export default function ReportCardSignaturePad({
   }, [onChange]);
 
   useEffect(() => {
-    snapshotRef.current = value || '';
+    const nextValue = value || '';
+    if (nextValue === snapshotRef.current) {
+      return;
+    }
+    if (drawingRef.current) {
+      return;
+    }
+
+    snapshotRef.current = nextValue;
     const canvas = canvasRef.current;
-    if (!canvas || !value) return;
+    if (!canvas) return;
+
     const context = canvas.getContext('2d');
     if (!context) return;
+
+    if (!nextValue) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      configureContext(context);
+      return;
+    }
+
     const image = new Image();
     image.onload = () => {
       const { width, height } = displaySizeRef.current;
       if (!width || !height) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
+      configureContext(context);
+      context.imageSmoothingEnabled = false;
       context.drawImage(image, 0, 0, width, height);
     };
-    image.src = value;
+    image.src = nextValue;
   }, [value]);
 
   const emitSignature = () => {
@@ -53,19 +70,16 @@ export default function ReportCardSignaturePad({
     onChangeRef.current?.(dataUrl);
   };
 
-  const scheduleEmitSignature = () => {
-    if (emitFrameRef.current) return;
-    emitFrameRef.current = window.requestAnimationFrame(() => {
-      emitFrameRef.current = null;
-      emitSignature();
-    });
-  };
-
   const configureContext = (context) => {
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-    context.lineWidth = 2.4;
+    context.lineCap = 'butt';
+    context.lineJoin = 'miter';
+    context.miterLimit = 2.5;
+    context.lineWidth = 1.85;
     context.strokeStyle = '#0f172a';
+    context.globalAlpha = 1;
+    context.shadowBlur = 0;
+    context.shadowColor = 'transparent';
+    context.imageSmoothingEnabled = false;
   };
 
   useEffect(() => {
@@ -82,6 +96,7 @@ export default function ReportCardSignaturePad({
         const { width, height } = displaySizeRef.current;
         context.clearRect(0, 0, canvas.width, canvas.height);
         configureContext(context);
+        context.imageSmoothingEnabled = false;
         context.drawImage(image, 0, 0, width, height);
       };
       image.src = dataUrl;
@@ -107,25 +122,37 @@ export default function ReportCardSignaturePad({
     resize();
     window.addEventListener('resize', resize);
 
+    let lastPoint = null;
+
     const startDraw = (point) => {
       const context = canvas.getContext('2d');
       if (!context) return;
       drawingRef.current = true;
+      configureContext(context);
+      lastPoint = point;
       context.beginPath();
       context.moveTo(point.x, point.y);
+      context.lineTo(point.x + 0.01, point.y + 0.01);
+      context.stroke();
     };
 
     const draw = (point) => {
-      if (!drawingRef.current) return;
+      if (!drawingRef.current || !lastPoint) return;
       const context = canvas.getContext('2d');
       if (!context) return;
+      configureContext(context);
+      context.beginPath();
+      context.moveTo(lastPoint.x, lastPoint.y);
       context.lineTo(point.x, point.y);
       context.stroke();
-      scheduleEmitSignature();
+      lastPoint = point;
     };
 
     const endDraw = () => {
+      if (!drawingRef.current) return;
       drawingRef.current = false;
+      lastPoint = null;
+      emitSignature();
     };
 
     const onPointerDown = (event) => {
@@ -153,9 +180,6 @@ export default function ReportCardSignaturePad({
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointerleave', onPointerUp);
-      if (emitFrameRef.current) {
-        window.cancelAnimationFrame(emitFrameRef.current);
-      }
     };
   }, [disabled]);
 

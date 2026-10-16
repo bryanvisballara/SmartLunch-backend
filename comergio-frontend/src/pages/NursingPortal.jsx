@@ -14,6 +14,7 @@ import { isComergioAcademySection } from '../components/comergio-academy/academy
 import StaffPortalShell from '../components/staff-chrome/StaffPortalShell';
 import NursingResourcesPanel from '../components/nursing/NursingResourcesPanel';
 import NursingMedicalSignaturesPanel from '../components/nursing/NursingMedicalSignaturesPanel';
+import NursingPublicationsPanel from '../components/nursing/NursingPublicationsPanel';
 import GuidanceAttendanceReportPanel from '../components/attendance/GuidanceAttendanceReportPanel';
 import { getSchoolDisplayName } from '../lib/schools';
 
@@ -565,6 +566,7 @@ function NursingPortal() {
         { key: 'attention', label: 'Atención' },
         { key: 'asistencia', label: 'Asistencia del día' },
         { key: 'resources', label: 'Recursos' },
+        { key: 'publications', label: 'Publicaciones' },
         { key: 'medical_signatures', label: 'Firmas de fichas médicas' },
         {
           key: 'staff_announcements',
@@ -606,6 +608,13 @@ function NursingPortal() {
 
         {activePortalView === 'resources' ? (
           <NursingResourcesPanel className="nursing-panel" />
+        ) : null}
+
+        {activePortalView === 'publications' ? (
+          <NursingPublicationsPanel
+            className="nursing-panel"
+            onNotice={setNotice}
+          />
         ) : null}
 
         {activePortalView === 'medical_signatures' ? (
