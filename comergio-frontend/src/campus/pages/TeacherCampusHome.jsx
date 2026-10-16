@@ -87,6 +87,7 @@ const teacherNavGroups = [
       'academic_content',
       'attendance',
       'guidance_routine',
+      'general_report_card',
       'school_coexistence',
       'family_feed',
       'social_publications',
