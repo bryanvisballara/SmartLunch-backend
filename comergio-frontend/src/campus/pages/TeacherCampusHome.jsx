@@ -1109,8 +1109,9 @@ function buildTeacherWeeklyScheduleFallback(courses) {
         return;
       }
 
+      const sectionScope = String(course.sourceCourseKey || course.section || course.id || '').trim();
       const sharedBlockKey = course.classroomGroupKey
-        ? `${course.classroomGroupKey}::${course.subject}::${weekday}:${session.startTime}:${session.endTime}`
+        ? `${course.classroomGroupKey}::${sectionScope}::${course.subject}::${weekday}:${session.startTime}:${session.endTime}`
         : `${course.id}:${weekday}:${session.startTime}:${session.endTime}`;
       if (seenSharedBlocks.has(sharedBlockKey)) {
         return;
@@ -1124,6 +1125,7 @@ function buildTeacherWeeklyScheduleFallback(courses) {
         courseId: course.id,
         courseTitle: getCourseOptionLabel(course),
         subject: course.subject,
+        courseGroupLabel: getCourseGroupLabel(course),
         studentGradeKey: course.studentGradeKey,
         classroomGroupKey: course.classroomGroupKey || '',
         classroomGroupLabel: course.classroomGroupLabel || '',
@@ -1221,7 +1223,7 @@ function exportTeacherWeeklyScheduleCsv(schedule, weekdays = []) {
           `${item.startTime || ''} - ${item.endTime || ''}`.trim(),
           item.courseTitle || '',
           item.subject || '',
-          item.classroomGroupLabel || item.studentGradeKey || '',
+          item.courseGroupLabel || item.classroomGroupLabel || item.studentGradeKey || '',
           item.label || '',
         ]);
       });
@@ -14557,8 +14559,15 @@ function TeacherCampusHome({ forcePreview = false }) {
                                     {(day.items || []).length > 0 ? (
                                       <div className="campus-teacher__horario-cell-stack">
                                         {day.items.map((item) => {
-                                          const groupLabel = getCourseGroupLabel(item) || getCourseGradeLabel(item) || item.studentGradeKey || 'Grupo';
-                                          const subjectLine = [item.subject, getCourseGradeLabel(item) || item.studentGradeKey]
+                                          const linkedCourse = courses.find((entry) => String(entry.id) === String(item.courseId)) || null;
+                                          const labelCourse = linkedCourse || item;
+                                          const sectionLabel = normalizeCourseDisplayText(item.courseGroupLabel)
+                                            || getCourseGroupLabel(labelCourse)
+                                            || getCourseGradeLabel(labelCourse)
+                                            || item.studentGradeKey
+                                            || 'Grupo';
+                                          const groupLabel = sectionLabel;
+                                          const subjectLine = [item.subject, sectionLabel]
                                             .filter(Boolean)
                                             .join(' · ');
                                           return (

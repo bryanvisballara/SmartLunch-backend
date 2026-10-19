@@ -1168,9 +1168,12 @@ function buildTeacherWeeklySchedule(courses) {
         continue;
       }
 
-      const sharedBlockKey = normalizedCourse.classroomGroupKey
-        ? `${normalizedCourse.classroomGroupKey}::${normalizedCourse.subject}::${weekday}:${normalizeText(session.startTime)}:${normalizeText(session.endTime)}`
-        : `${normalizedCourse.id}:${weekday}:${normalizeText(session.startTime)}:${normalizeText(session.endTime)}`;
+      const sharedBlockKey = buildTeacherScheduleSharedBlockKey(
+        normalizedCourse,
+        weekday,
+        session.startTime,
+        session.endTime,
+      );
       if (seenSharedBlocks.has(sharedBlockKey)) {
         continue;
       }
@@ -1181,6 +1184,10 @@ function buildTeacherWeeklySchedule(courses) {
         courseId: normalizedCourse.id,
         courseTitle: normalizedCourse.title,
         subject: normalizedCourse.subject,
+        gradeLevel: normalizedCourse.gradeLevel,
+        section: normalizedCourse.section,
+        sourceCourseKey: normalizedCourse.sourceCourseKey,
+        courseGroupLabel: resolveTeacherCourseGroupLabel(normalizedCourse),
         studentGradeKey: normalizedCourse.studentGradeKey,
         classroomGroupKey: normalizedCourse.classroomGroupKey,
         classroomGroupLabel: normalizedCourse.classroomGroupLabel,
@@ -2356,6 +2363,49 @@ function buildAcademicCourseSectionFromKey(courseKey = '') {
   }
 
   return normalizedCourseKey.toUpperCase();
+}
+
+function resolveTeacherCourseGroupLabel(course) {
+  const classroomGroupLabel = normalizeText(course?.classroomGroupLabel);
+  if (classroomGroupLabel) {
+    return classroomGroupLabel;
+  }
+
+  const fromSourceKey = buildAcademicCourseSectionFromKey(course?.sourceCourseKey);
+  if (/^\d+[A-Z]$/.test(fromSourceKey)) {
+    return fromSourceKey;
+  }
+
+  const sectionLabel = normalizeText(course?.section);
+  const fromSectionKey = buildAcademicCourseSectionFromKey(sectionLabel);
+  if (/^\d+[A-Z]$/.test(fromSectionKey)) {
+    return fromSectionKey;
+  }
+
+  const gradeLevel = normalizeText(course?.gradeLevel);
+  if (gradeLevel && sectionLabel) {
+    if (/^[A-Z]$/i.test(sectionLabel)) {
+      return `${gradeLevel}${sectionLabel}`.toUpperCase();
+    }
+    if (sectionLabel.toLowerCase() !== gradeLevel.toLowerCase()) {
+      return `${gradeLevel} ${sectionLabel}`.trim();
+    }
+  }
+
+  return fromSourceKey || gradeLevel || normalizeText(course?.studentGradeKey) || '';
+}
+
+function buildTeacherScheduleSharedBlockKey(course, weekday, startTime, endTime) {
+  const sectionScope = normalizeText(course?.sourceCourseKey)
+    || buildAcademicCourseSectionFromKey(course?.section)
+    || String(course?.id || '');
+  const classroomGroupKey = normalizeText(course?.classroomGroupKey);
+
+  if (classroomGroupKey) {
+    return `${classroomGroupKey}::${sectionScope}::${normalizeText(course?.subject)}::${weekday}:${normalizeText(startTime)}:${normalizeText(endTime)}`;
+  }
+
+  return `${String(course?.id || sectionScope)}:${weekday}:${normalizeText(startTime)}:${normalizeText(endTime)}`;
 }
 
 function resolveAcademicCourseMetadata(grade, courseKey) {
