@@ -68,6 +68,7 @@ import { isEducationalLevelKey } from '../../lib/feeGradeMatching';
 import { resolveEducationalGradeLabel } from '../../lib/educationalGradeLabels';
 import ClickableOptionPicker from '../../components/audience/ClickableOptionPicker';
 import { addAudienceListValue, removeAudienceListValue } from '../../lib/publicationAudience';
+import { formatGradeSectionDisplayLabel } from '../../lib/gradeSectionDisplay';
 import { mockTeacherWorkspace } from '../mockCampusContext';
 import ReportCardSignaturePad from '../components/ReportCardSignaturePad';
 import HeadroomPreschoolBulletinView from '../components/HeadroomPreschoolBulletinView';
@@ -2095,7 +2096,11 @@ function buildTeacherPublicationAudienceOptions(courses = []) {
 
     individuals.push({
       value: course.id,
-      label: getNativeCourseGradeLabel(course) || String(course?.studentGradeKey || course?.gradeLevel || course?.title || '').trim() || 'Curso',
+      label: formatGradeSectionDisplayLabel(course, { ignoreClassroomGroup: true })
+        || getCourseGroupLabel(course)
+        || getNativeCourseGradeLabel(course)
+        || String(course?.studentGradeKey || course?.gradeLevel || course?.title || '').trim()
+        || 'Curso',
       kind: 'course',
       courseIds: [course.id],
     });
@@ -2320,47 +2325,24 @@ function buildGradeAliasSet(course, groupLabel) {
 }
 
 function getCourseGroupLabel(course) {
-  const classroomGroupLabel = normalizeCourseDisplayText(course?.classroomGroupLabel);
-  if (classroomGroupLabel) {
-    return classroomGroupLabel;
-  }
-
   const educationalLabel = resolveEducationalGradeLabel(course);
   if (educationalLabel) {
     return educationalLabel;
   }
 
-  const sourceCourseKeyGroup = extractCourseGroupFromKey(course?.sourceCourseKey);
-  const studentGradeKeyGroup = extractCourseGroupFromKey(course?.studentGradeKey);
-  const sectionGroup = extractCourseGroupFromKey(course?.section);
-  const titleGroup = extractCourseGroupFromKey(course?.title);
+  const formattedGradeSection = formatGradeSectionDisplayLabel(course);
+  if (formattedGradeSection) {
+    return formattedGradeSection;
+  }
+
   const gradeLabel = normalizeCourseDisplayText(course?.gradeLevel);
   const sectionLabel = normalizeCourseDisplayText(course?.section);
-
-  if (sourceCourseKeyGroup) {
-    return sourceCourseKeyGroup;
-  }
-
-  if (sectionGroup) {
-    return sectionGroup;
-  }
-
-  if (studentGradeKeyGroup) {
-    return studentGradeKeyGroup;
-  }
-
-  if (titleGroup) {
-    return titleGroup;
-  }
-
   if (!gradeLabel) {
     return sectionLabel || normalizeCourseDisplayText(course?.studentGradeKey);
   }
-
   if (!sectionLabel || sectionLabel.toLowerCase() === gradeLabel.toLowerCase()) {
     return gradeLabel;
   }
-
   return `${gradeLabel} ${sectionLabel}`;
 }
 
@@ -14561,7 +14543,8 @@ function TeacherCampusHome({ forcePreview = false }) {
                                         {day.items.map((item) => {
                                           const linkedCourse = courses.find((entry) => String(entry.id) === String(item.courseId)) || null;
                                           const labelCourse = linkedCourse || item;
-                                          const sectionLabel = normalizeCourseDisplayText(item.courseGroupLabel)
+                                          const sectionLabel = formatGradeSectionDisplayLabel(labelCourse, { ignoreClassroomGroup: true })
+                                            || normalizeCourseDisplayText(item.courseGroupLabel)
                                             || getCourseGroupLabel(labelCourse)
                                             || getCourseGradeLabel(labelCourse)
                                             || item.studentGradeKey
