@@ -2841,6 +2841,14 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       }
     }
 
+    const resolveCandidateClassSessions = (courseLike = {}) => resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, {
+      subject: courseLike.subject || candidate.subject,
+      studentGradeKey: courseLike.studentGradeKey || candidate.studentGradeKey,
+      section: courseLike.section || candidate.section,
+      sourceCourseKey: courseLike.sourceCourseKey || candidate.sourceCourseKey,
+      title: courseLike.title || candidate.title,
+    });
+
     if (existingCourse) {
       existingCourse.courseType = candidateCourseType;
       existingCourse.sourceCourseKey = candidate.sourceCourseKey || existingCourse.sourceCourseKey || '';
@@ -2851,13 +2859,7 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       existingCourse.studentGradeKey = existingCourse.studentGradeKey || candidate.studentGradeKey;
       existingCourse.classroomGroupKey = candidate.classroomGroupKey || '';
       existingCourse.classroomGroupLabel = candidate.classroomGroupLabel || '';
-      const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, {
-        subject: existingCourse.subject || candidate.subject,
-        studentGradeKey: existingCourse.studentGradeKey || candidate.studentGradeKey,
-        section: existingCourse.section || candidate.section,
-        sourceCourseKey: existingCourse.sourceCourseKey || candidate.sourceCourseKey,
-        title: existingCourse.title || candidate.title,
-      });
+      const resolvedClassSessions = resolveCandidateClassSessions(existingCourse);
       if (resolvedClassSessions.length > 0) {
         existingCourse.classSessions = resolvedClassSessions;
       } else if (Array.isArray(candidate.classSessions) && candidate.classSessions.length > 0) {
@@ -2875,6 +2877,7 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       continue;
     }
 
+    const resolvedCreateClassSessions = resolveCandidateClassSessions(candidate);
     const createdCourse = await CampusCourse.create({
       schoolId,
       teacherUserId,
@@ -2888,7 +2891,9 @@ async function syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId
       classroomGroupKey: candidate.classroomGroupKey || '',
       classroomGroupLabel: candidate.classroomGroupLabel || '',
       description: 'Curso sincronizado desde Rectoría.',
-      classSessions: candidate.classSessions,
+      classSessions: resolvedCreateClassSessions.length > 0
+        ? resolvedCreateClassSessions
+        : (Array.isArray(candidate.classSessions) ? candidate.classSessions : []),
       academicPeriods: candidate.courseType === 'guidance_routine' ? [] : academicPeriods,
       gradingComponents: candidate.courseType === 'guidance_routine' ? [] : (academicPeriods[0]?.gradingComponents || buildDefaultGradingComponents()),
       status: 'active',

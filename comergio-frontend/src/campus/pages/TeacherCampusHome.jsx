@@ -2454,7 +2454,16 @@ function getCourseGradeGroupKey(course) {
     return `${subjectKey}::classroom:${classroomKey}`;
   }
 
+  const sectionGroupKey = normalizeCourseDisplayKey(getCourseGroupLabel(course) || course?.section || course?.sourceCourseKey || '');
+  const titleSectionKey = normalizeCourseDisplayKey(extractCourseGroupFromKey(getCourseDisplayTitle(course)) || '');
   const nativeGrade = normalizeCourseDisplayKey(getNativeCourseGradeLabel(course) || course?.studentGradeKey);
+  const effectiveSectionKey = sectionGroupKey && sectionGroupKey !== nativeGrade
+    ? sectionGroupKey
+    : (titleSectionKey && titleSectionKey !== nativeGrade ? titleSectionKey : '');
+  if (effectiveSectionKey) {
+    return `${subjectKey}::section:${effectiveSectionKey}`;
+  }
+
   const displayTitle = normalizeCourseDisplayKey(getCourseDisplayTitle(course));
   if (
     displayTitle
@@ -4579,6 +4588,10 @@ function TeacherCampusHome({ forcePreview = false }) {
       };
     };
 
+    if (activeTeacherSection === 'academic_content') {
+      return sourceCourses.map((course, index) => buildRow(course, index));
+    }
+
     if (activeTeacherSection === 'academic_management') {
       return buildCourseGradeGroups(sourceCourses).map((group, index) => {
         const firstCourse = group.courses[0];
@@ -4653,9 +4666,28 @@ function TeacherCampusHome({ forcePreview = false }) {
     setCoursesDetailOpen(false);
     setSelectedTimelineDate('');
   };
+  const openAcademicContentWorkspace = (course) => {
+    if (!course?.id) {
+      return;
+    }
+    const subjectLabel = normalizeSubjectLabel(course.subject);
+    const subjectKey = slugifyComponentKey(subjectLabel) || 'subject';
+    setSelectedSubjectKey(subjectKey);
+    setSelectedCourseId(course.id);
+    setTimelineCourseId(course.id);
+    setSelectedPortalGradeKey(getCourseGradeGroupKey(course));
+    setClassroomGradeScope(String(course.id));
+    setShowSelectedCourseWorkspace(true);
+    setCoursesDetailOpen(false);
+    setSelectedTimelineDate('');
+  };
   const openCatalogCourse = (course) => {
     if (activeTeacherSection === 'academic_management') {
       openAcademicManagementWorkspace(course, 'grading');
+      return;
+    }
+    if (activeTeacherSection === 'academic_content') {
+      openAcademicContentWorkspace(course);
       return;
     }
     openCoursesDetail(course);
@@ -9397,14 +9429,14 @@ function TeacherCampusHome({ forcePreview = false }) {
 
           <div className="campus-teacher__workspace">
             <section className="campus-teacher__course-deck campus-teacher__panel-surface">
-              <div className="campus-teacher__section-head" hidden={activeTeacherSection === 'conecta' || activeTeacherSection === 'dashboard' || activeTeacherSection === 'schedule' || activeTeacherSection === 'courses' || activeTeacherSection === 'academic_management' || isAttendanceLikeSection || activeTeacherSection === 'school_coexistence' || activeTeacherSection === 'juegos'}>
+              <div className="campus-teacher__section-head" hidden={activeTeacherSection === 'conecta' || activeTeacherSection === 'dashboard' || activeTeacherSection === 'schedule' || activeTeacherSection === 'courses' || activeTeacherSection === 'academic_management' || activeTeacherSection === 'academic_content' || isAttendanceLikeSection || activeTeacherSection === 'school_coexistence' || activeTeacherSection === 'juegos'}>
                 <div>
                   <span className="campus-panel__kicker">{activeSectionLabel}</span>
                   <h2>{activeSectionDescription}</h2>
                 </div>
               </div>
 
-            {activeTeacherSection === 'courses' || (activeTeacherSection === 'academic_management' && !showSelectedCourseWorkspace) ? (
+            {activeTeacherSection === 'courses' || ((activeTeacherSection === 'academic_management' || activeTeacherSection === 'academic_content') && !showSelectedCourseWorkspace) ? (
               <div className="campus-teacher__courses-stage">
                 {activeTeacherSection === 'courses' && coursesDetailOpen && timelineCourse ? (
                   <div className="campus-teacher__cursos-detail">
@@ -9608,19 +9640,27 @@ function TeacherCampusHome({ forcePreview = false }) {
                         <span className="campus-teacher__cursos-kicker">
                           {activeTeacherSection === 'academic_management'
                             ? (selectedSubject?.label || 'Gestión académica')
-                            : 'Cursos'}
+                            : activeTeacherSection === 'academic_content'
+                              ? (selectedSubject?.label || 'Contenido académico')
+                              : 'Cursos'}
                         </span>
                         <h2>
                           {activeTeacherSection === 'academic_management'
                             ? (selectedSubject
                               ? `Gestiona evaluación y contenidos de ${selectedSubject.label}.`
                               : 'Gestiona evaluación y contenidos por materia.')
-                            : 'Ver todos los cursos donde dictas clase.'}
+                            : activeTeacherSection === 'academic_content'
+                              ? (selectedSubject
+                                ? `Planea los temas de estudio de ${selectedSubject.label} por curso.`
+                                : 'Planea los temas de estudio por materia y curso.')
+                              : 'Ver todos los cursos donde dictas clase.'}
                         </h2>
                         <p>
                           {activeTeacherSection === 'academic_management'
                             ? 'Abre un curso para definir evaluación, crear asignaciones y gestionar el libro de notas.'
-                            : 'Consulta el rendimiento, alumnos, tareas y más detalles de cada curso.'}
+                            : activeTeacherSection === 'academic_content'
+                              ? 'Abre cada curso (por ejemplo 1A y 1B) para planear temas y materiales por periodo.'
+                              : 'Consulta el rendimiento, alumnos, tareas y más detalles de cada curso.'}
                         </p>
                       </div>
                       <div className="campus-teacher__cursos-toolbar">
@@ -9692,7 +9732,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                           ? (selectedSubject
                             ? `Rectoría todavía no te ha asignado cursos de ${selectedSubject.label}.`
                             : 'Selecciona una asignatura en el menú para ver sus cursos.')
-                          : 'Rectoría todavía no te ha asignado cursos.'}
+                          : activeTeacherSection === 'academic_content'
+                            ? (selectedSubject
+                              ? `Rectoría todavía no te ha asignado cursos de ${selectedSubject.label} para planear contenido.`
+                              : 'Selecciona una asignatura en el menú para ver sus cursos.')
+                            : 'Rectoría todavía no te ha asignado cursos.'}
                       </p>
                     ) : coursesCatalogView === 'grid' ? (
                       <div className="campus-teacher__cursos-grid">
@@ -9749,7 +9793,11 @@ function TeacherCampusHome({ forcePreview = false }) {
                               </li>
                             </ul>
                             <button className="campus-teacher__cursos-card-cta" onClick={() => openCatalogCourse(row.course)} type="button">
-                              {activeTeacherSection === 'academic_management' ? 'Abrir curso' : 'Ver detalles'}
+                              {activeTeacherSection === 'academic_management'
+                                ? 'Abrir curso'
+                                : activeTeacherSection === 'academic_content'
+                                  ? 'Abrir contenido'
+                                  : 'Ver detalles'}
                               <span aria-hidden="true">→</span>
                             </button>
                           </article>
@@ -9885,80 +9933,6 @@ function TeacherCampusHome({ forcePreview = false }) {
 
             {isCourseManagementSection ? (
               <div className="campus-teacher__courses-stage">
-                {activeTeacherSection === 'academic_content' && !showSelectedCourseWorkspace ? (
-                  <div className="campus-teacher__course-strip">
-                    {portalSectionGradeGroups.length === 0 ? <p className="campus-panel__meta">Rectoría todavía no te ha asignado cursos para esta sección.</p> : null}
-                    {portalSectionGradeGroups.map((gradeGroup) => {
-                      const firstCourse = gradeGroup.courses[0] || null;
-                      const isSelected = selectedPortalGradeKey === gradeGroup.key;
-                      const cardStats = buildCourseGradeGroupStats(gradeGroup, previewEnabled ? previewWorkspace : null);
-                      return (
-                        <button
-                          className={`campus-teacher__course-selector campus-teacher__course-selector--portal${isSelected ? ' is-selected' : ''}`}
-                          key={gradeGroup.key}
-                          onClick={() => {
-                            setSelectedPortalGradeKey(gradeGroup.key);
-                            if (firstCourse) {
-                              setSelectedCourseId(firstCourse.id);
-                              setTimelineCourseId(firstCourse.id);
-                            }
-                            setActiveCourseWorkspaceTab('grading');
-                            setTimelineMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-                            setShowSelectedCourseWorkspace(Boolean(firstCourse));
-                          }}
-                          style={{ '--campus-course-accent': firstCourse?.colorToken || '#2a6f97' }}
-                          type="button"
-                        >
-                          <div className="campus-teacher__course-selector-band" />
-                          <div className="campus-teacher__course-top">
-                            <div>
-                              <h4>{gradeGroup.title}</h4>
-                              <span className="campus-teacher__course-subtitle">
-                                {gradeGroup.gradesLabel || `${cardStats.courseCount} curso${cardStats.courseCount === 1 ? '' : 's'} asignado${cardStats.courseCount === 1 ? '' : 's'}`}
-                              </span>
-                            </div>
-                            <span className="campus-teacher__status-pill is-active">Activo</span>
-                          </div>
-                          <div className="campus-teacher__course-facts">
-                            {gradeGroup.gradesLabel ? <span>🏫 {gradeGroup.gradesLabel}</span> : null}
-                            <span>👥 {cardStats.studentCount} alumnos</span>
-                            <span>📊 Promedio: {cardStats.averageScore === null ? 'Sin notas' : cardStats.averageScore}</span>
-                            <span>⚠️ {cardStats.atRiskCount} en riesgo</span>
-                            <span>📝 {cardStats.pendingGradingCount} tareas por calificar</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {activeTeacherSection === 'academic_content' && selectedPortalGradeGroup && !showSelectedCourseWorkspace ? (
-                  <article className="campus-teacher__activity-timeline campus-teacher__activity-timeline--course-filter campus-teacher__embedded-panel">
-                    <div className="campus-teacher__activity-timeline-top">
-                      <div>
-                        <span className="campus-panel__kicker">Planeación del grado</span>
-                        <h3>{selectedPortalGradeGroup.title}</h3>
-                      </div>
-                      <button
-                        className="campus-teacher__action-btn"
-                        disabled={!selectedPortalGradeCourses.length}
-                        onClick={() => {
-                          const firstCourse = selectedPortalGradeCourses[0] || null;
-                          if (firstCourse) {
-                            setSelectedCourseId(firstCourse.id);
-                            setTimelineCourseId(firstCourse.id);
-                            setShowSelectedCourseWorkspace(true);
-                          }
-                        }}
-                        type="button"
-                      >
-                        Abrir contenido
-                      </button>
-                    </div>
-                    <p className="campus-panel__meta">Los temas guardados aquí se aplican a todos los grupos de este grado.</p>
-                  </article>
-                ) : null}
-
                 {activeTeacherSection === 'academic_management' && selectedCourse && showSelectedCourseWorkspace ? (
                   <div className="campus-teacher__course-workspace campus-teacher__panel-surface">
                     <div className="campus-teacher__course-open-head">
