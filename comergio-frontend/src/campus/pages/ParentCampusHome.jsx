@@ -32,6 +32,7 @@ import {
   getParentAcademicBilling,
   getParentAcademicFeed,
   getParentPortalOverview,
+  uploadParentPortalStudentPhoto,
   createWompiAcademicChargeCheckout,
   getWompiAcademicChargePaymentStatus,
   payParentAcademicCharge,
@@ -3037,8 +3038,10 @@ function ParentCafeteriaContent({
   guardianName,
   onLogout,
   onNotificationNavigate = null,
+  onOpenStudentPhotoPicker = null,
   onSelectChild,
   onSelectView,
+  onStudentPhotoSelected = null,
   onToggleChildOptions,
   onToggleMenu,
   onToggleUserMenu,
@@ -3047,9 +3050,12 @@ function ParentCafeteriaContent({
   showChildOptions,
   showMenu,
   showUserMenu,
+  studentPhotoError = '',
+  studentPhotoInputRef = null,
+  studentPhotoSuccess = '',
+  studentPhotoUploading = false,
   userMenuRef,
 }) {
-  const studentSwitcherRef = useRef(null);
   const spendingCards = [
     { id: 'day', label: 'Compras del día', amount: selectedChild.cafeteria.spending.day },
     { id: 'week', label: 'Compras de la semana', amount: selectedChild.cafeteria.spending.week },
@@ -3057,14 +3063,6 @@ function ParentCafeteriaContent({
   ];
   const parentFirstName = String(guardianName || 'Padre').split(' ')[0] || 'Padre';
   const parentInitial = String(guardianName || 'P').charAt(0).toUpperCase();
-
-  const renderStudentAvatar = (child, sizeClass = '') => (
-    <span className={`parent-student-avatar${sizeClass ? ` ${sizeClass}` : ''}`}>
-      {child.thumbUrl || child.imageUrl ? (
-        <img alt={child.name || 'Alumno'} decoding="async" loading="lazy" src={resolveIosCompatibleImageUrl(child.thumbUrl || child.imageUrl)} />
-      ) : (child.avatar || String(child.name || 'A').slice(0, 2).toUpperCase())}
-    </span>
-  );
 
   return (
     <div className="parent-mobile-page parent-mobile-page--cafeteria">
@@ -3159,34 +3157,19 @@ function ParentCafeteriaContent({
         </button>
       </aside>
 
-      <section className={`parent-student-switcher${showChildOptions ? ' is-open' : ''}`} ref={studentSwitcherRef}>
-        <div className="parent-student-toggle-card">
-          <button className="parent-student-toggle" onClick={onToggleChildOptions} type="button">
-            <div className="parent-student-toggle-copy">
-              <p className="meta">Alumno seleccionado</p>
-              <h3>{selectedChild.name}</h3>
-              <p>{getParentStudentGradeLabel(selectedChild)}</p>
-            </div>
-            <span className={`chevron ${showChildOptions ? 'open' : ''}`}>⌄</span>
-          </button>
-
-          <button aria-label={`Avatar de ${selectedChild.name}`} className="parent-student-photo-btn" type="button">
-            {renderStudentAvatar(selectedChild)}
-          </button>
-        </div>
-
-        <ParentStudentOptionsPortal anchorRef={studentSwitcherRef} isOpen={showChildOptions}>
-            {children.map((child) => (
-              <button key={child.id} onClick={() => onSelectChild(child.id)} type="button">
-                {renderStudentAvatar(child, 'is-small')}
-                <span className="parent-student-option-copy">
-                  <strong>{child.name}</strong>
-                  <span>{getParentStudentGradeLabel(child)}</span>
-                </span>
-              </button>
-            ))}
-        </ParentStudentOptionsPortal>
-      </section>
+      <ParentFinanceStudentSelector
+        children={children}
+        isOpen={showChildOptions}
+        onOpenStudentPhotoPicker={onOpenStudentPhotoPicker}
+        onSelectChild={onSelectChild}
+        onStudentPhotoSelected={onStudentPhotoSelected}
+        onToggle={onToggleChildOptions}
+        selectedChild={selectedChild}
+        studentPhotoError={studentPhotoError}
+        studentPhotoInputRef={studentPhotoInputRef}
+        studentPhotoSuccess={studentPhotoSuccess}
+        studentPhotoUploading={studentPhotoUploading}
+      />
 
       <main className="parent-mobile-content">
         <ParentViewMotion viewKey={activeView || 'cafeteria-overview'}>
@@ -4071,8 +4054,27 @@ function ParentStudentOptionsPortal({ anchorRef, children, isOpen }) {
   );
 }
 
-function ParentFinanceStudentSelector({ children, className = '', includeAllOption = false, isOpen, onSelectChild, onToggle, readOnly = false, selectedChild }) {
+function ParentFinanceStudentSelector({
+  children,
+  className = '',
+  includeAllOption = false,
+  isOpen,
+  onOpenStudentPhotoPicker = null,
+  onSelectChild,
+  onStudentPhotoSelected = null,
+  onToggle,
+  readOnly = false,
+  selectedChild,
+  studentPhotoError = '',
+  studentPhotoInputRef = null,
+  studentPhotoSuccess = '',
+  studentPhotoUploading = false,
+}) {
   const studentSwitcherRef = useRef(null);
+  const photoUploadEnabled = Boolean(onOpenStudentPhotoPicker && onStudentPhotoSelected && studentPhotoInputRef);
+  const isAggregateFeedSelection = selectedChild?.id === PARENT_FEED_ALL_CHILDREN_ID;
+  const selectedPhotoSrc = String(selectedChild?.thumbUrl || selectedChild?.imageUrl || '').trim();
+
   const renderStudentAvatar = (child, sizeClass = '') => (
     <span className={`parent-student-avatar${sizeClass ? ` ${sizeClass}` : ''}`}>
       {child.thumbUrl || child.imageUrl ? (
@@ -4093,10 +4095,35 @@ function ParentFinanceStudentSelector({ children, className = '', includeAllOpti
           {readOnly ? null : <span className={`chevron ${isOpen ? 'open' : ''}`}>⌄</span>}
         </button>
 
-        <button aria-label={`Avatar de ${selectedChild.name}`} className="parent-student-photo-btn" type="button">
-          {selectedChild.thumbUrl || selectedChild.imageUrl || selectedChild.avatar ? renderStudentAvatar(selectedChild) : <span aria-hidden="true">+</span>}
-        </button>
+        {photoUploadEnabled && !isAggregateFeedSelection ? (
+          <button
+            aria-label={selectedPhotoSrc ? `Cambiar foto de ${selectedChild.name}` : `Subir foto de ${selectedChild.name}`}
+            className="parent-student-photo-btn"
+            disabled={!selectedChild?.id || studentPhotoUploading}
+            onClick={onOpenStudentPhotoPicker}
+            type="button"
+          >
+            {selectedPhotoSrc ? renderStudentAvatar(selectedChild) : <span aria-hidden="true">+</span>}
+          </button>
+        ) : (
+          <button aria-label={`Avatar de ${selectedChild.name}`} className="parent-student-photo-btn" type="button">
+            {selectedPhotoSrc ? renderStudentAvatar(selectedChild) : <span aria-hidden="true">+</span>}
+          </button>
+        )}
       </div>
+
+      {photoUploadEnabled && !isAggregateFeedSelection ? (
+        <input
+          accept="image/*"
+          hidden
+          onChange={onStudentPhotoSelected}
+          ref={studentPhotoInputRef}
+          type="file"
+        />
+      ) : null}
+
+      {studentPhotoError ? <p className="parent-student-upload-feedback is-error">{studentPhotoError}</p> : null}
+      {!studentPhotoError && studentPhotoSuccess ? <p className="parent-student-upload-feedback">{studentPhotoSuccess}</p> : null}
 
       <ParentStudentOptionsPortal anchorRef={studentSwitcherRef} isOpen={isOpen}>
           {children.map((child) => (
@@ -6366,6 +6393,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
   const [focusedAssignmentId, setFocusedAssignmentId] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showFinanceChildOptions, setShowFinanceChildOptions] = useState(false);
+  const studentPhotoInputRef = useRef(null);
+  const [studentPhotoUploading, setStudentPhotoUploading] = useState(false);
+  const [studentPhotoError, setStudentPhotoError] = useState('');
+  const [studentPhotoSuccess, setStudentPhotoSuccess] = useState('');
   const [showAcademicMenu, setShowAcademicMenu] = useState(false);
   const [showCafeteriaMenu, setShowCafeteriaMenu] = useState(false);
   const [activeCafeteriaView, setActiveCafeteriaView] = useState('cafeteria-overview');
@@ -7256,6 +7287,106 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
     enabled: canUseCampusPullRefresh,
     onRefresh: refreshParentSection,
   });
+
+  const mergeStudentPhotoIntoOverview = useCallback((updatedStudent) => {
+    if (!updatedStudent) {
+      return;
+    }
+
+    const studentId = String(updatedStudent._id || updatedStudent.id || '').trim();
+    if (!studentId) {
+      return;
+    }
+
+    const nextImageUrl = String(updatedStudent.imageUrl || '').trim();
+    const nextThumbUrl = String(updatedStudent.thumbUrl || '').trim();
+
+    setParentOverview((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      const mapChild = (child) => {
+        if (String(child._id || child.id || '') !== studentId) {
+          return child;
+        }
+
+        return {
+          ...child,
+          ...(nextImageUrl ? { imageUrl: nextImageUrl } : {}),
+          ...(nextThumbUrl ? { thumbUrl: nextThumbUrl } : {}),
+        };
+      };
+
+      return {
+        ...prev,
+        children: Array.isArray(prev.children) ? prev.children.map(mapChild) : prev.children,
+        selectedStudent: prev.selectedStudent ? mapChild(prev.selectedStudent) : prev.selectedStudent,
+      };
+    });
+  }, []);
+
+  const onOpenStudentPhotoPicker = useCallback(() => {
+    if (isAllChildrenFeedSelected) {
+      return;
+    }
+
+    const uploadStudentId = selectedChild?.id || selectedChildId;
+    if (!uploadStudentId || uploadStudentId === PARENT_FEED_ALL_CHILDREN_ID) {
+      setStudentPhotoError('Selecciona un alumno antes de subir la foto.');
+      return;
+    }
+
+    if (studentPhotoUploading) {
+      return;
+    }
+
+    setStudentPhotoError('');
+    setStudentPhotoSuccess('');
+    studentPhotoInputRef.current?.click();
+  }, [isAllChildrenFeedSelected, selectedChild?.id, selectedChildId, studentPhotoUploading]);
+
+  const onStudentPhotoSelected = useCallback(async (event) => {
+    const input = event.target;
+    const file = input?.files?.[0] || null;
+
+    if (input) {
+      input.value = '';
+    }
+
+    if (!file) {
+      return;
+    }
+
+    if (!String(file.type || '').startsWith('image/')) {
+      setStudentPhotoError('Selecciona una imagen válida para el alumno.');
+      return;
+    }
+
+    const uploadStudentId = selectedChild?.id || selectedChildId;
+    if (!uploadStudentId || uploadStudentId === PARENT_FEED_ALL_CHILDREN_ID) {
+      setStudentPhotoError('Selecciona un alumno antes de subir la foto.');
+      return;
+    }
+
+    setStudentPhotoUploading(true);
+    setStudentPhotoError('');
+    setStudentPhotoSuccess('');
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('preferredName', String(selectedChild?.name || uploadStudentId));
+
+      const response = await uploadParentPortalStudentPhoto(uploadStudentId, formData);
+      mergeStudentPhotoIntoOverview(response.data?.student || null);
+      setStudentPhotoSuccess('Foto del alumno actualizada correctamente.');
+    } catch (requestError) {
+      setStudentPhotoError(requestError?.response?.data?.message || requestError?.message || 'No se pudo subir la foto del alumno.');
+    } finally {
+      setStudentPhotoUploading(false);
+    }
+  }, [mergeStudentPhotoIntoOverview, selectedChild?.id, selectedChild?.name, selectedChildId]);
 
   const financeCharges = useMemo(() => {
     if (!selectedChild) {
@@ -8666,13 +8797,19 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               children={workspace.children}
               includeAllOption={!studentPortalMode && activeSection === 'home' && workspace.children.length > 1}
               isOpen={showFinanceChildOptions}
+              onOpenStudentPhotoPicker={onOpenStudentPhotoPicker}
               onSelectChild={(childId) => {
                 setSelectedChildId(childId);
                 setShowFinanceChildOptions(false);
               }}
+              onStudentPhotoSelected={onStudentPhotoSelected}
               onToggle={() => setShowFinanceChildOptions((currentValue) => !currentValue)}
               readOnly={studentPortalMode}
               selectedChild={selectedChildForSwitcher}
+              studentPhotoError={studentPhotoError}
+              studentPhotoInputRef={studentPhotoInputRef}
+              studentPhotoSuccess={studentPhotoSuccess}
+              studentPhotoUploading={studentPhotoUploading}
             />
           ) : null}
           {parentCareSectionContent}
@@ -8697,6 +8834,17 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
         onClose={() => setShowCommunityCamera(false)}
         onFilesReady={(files) => uploadCommunityMediaFiles(files, { fromCamera: true })}
       />
+      {studentPhotoUploading ? (
+        <div className="brand-popup-overlay" role="status" aria-live="polite" aria-busy="true">
+          <div className="brand-popup">
+            <div className="legacy-migration-spinner" aria-hidden="true" />
+            <h3>Subiendo foto...</h3>
+            <p>
+              Estamos actualizando la foto de {selectedChild?.name || 'tu alumno'}. Esto puede tardar unos segundos.
+            </p>
+          </div>
+        </div>
+      ) : null}
       {showCommunityComposer ? (
         <div
           className="campus-parent-community-composer-layer"
@@ -9007,10 +9155,12 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               guardianName={workspace.guardian.name}
               onLogout={onLogout}
               onNotificationNavigate={handleNotificationNavigate}
+              onOpenStudentPhotoPicker={onOpenStudentPhotoPicker}
               onSelectChild={(childId) => {
                 setSelectedChildId(childId);
                 setShowFinanceChildOptions(false);
               }}
+              onStudentPhotoSelected={onStudentPhotoSelected}
               onSelectView={(viewId) => {
                 setActiveCafeteriaView(viewId);
                 setShowCafeteriaMenu(false);
@@ -9023,6 +9173,10 @@ function ParentCampusHome({ routeBase = '', embedPortal = false, studentPortalMo
               showChildOptions={showFinanceChildOptions}
               showMenu={showCafeteriaMenu}
               showUserMenu={showUserMenu}
+              studentPhotoError={studentPhotoError}
+              studentPhotoInputRef={studentPhotoInputRef}
+              studentPhotoSuccess={studentPhotoSuccess}
+              studentPhotoUploading={studentPhotoUploading}
               userMenuRef={userMenuRef}
             />
           )}
