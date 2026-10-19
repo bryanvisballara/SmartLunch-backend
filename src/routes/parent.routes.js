@@ -91,6 +91,7 @@ const {
   findAccessibleCommunityCommunication,
   submitCommunityPublication,
 } = require('../services/communityFeed.service');
+const { enrichCommunicationsWithLiveAuthorNames } = require('../utils/academicCommunicationAuthor');
 const {
   MAX_CAMPUS_MATERIAL_FILES,
   uploadCampusMaterialsMiddleware,
@@ -4325,8 +4326,9 @@ router.get('/portal/academic-feed', async (req, res) => {
       .sort({ sentAt: -1, createdAt: -1 })
       .limit(50)
       .lean();
+    const feedWithLiveAuthors = await enrichCommunicationsWithLiveAuthorNames(schoolId, feed);
 
-    return res.status(200).json(feed.map((item) => serializeAcademicFeedItem(item, actorUserId, req)));
+    return res.status(200).json(feedWithLiveAuthors.map((item) => serializeAcademicFeedItem(item, actorUserId, req)));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

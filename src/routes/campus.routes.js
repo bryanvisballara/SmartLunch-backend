@@ -82,6 +82,7 @@ const {
   buildCohortKey,
   resolveSchoolAcademicYear,
 } = require('../services/communityFeed.service');
+const { enrichCommunicationsWithLiveAuthorNames } = require('../utils/academicCommunicationAuthor');
 const {
   buildParentPushUrl,
   getCampusPostCategoryLabel,
@@ -5685,8 +5686,9 @@ router.get('/teacher/family-feed', requireCampusTeacherAccess, async (req, res) 
       .sort({ sentAt: -1, createdAt: -1 })
       .limit(50)
       .lean();
+    const communicationsWithLiveAuthors = await enrichCommunicationsWithLiveAuthorNames(schoolId, communications);
 
-    return res.status(200).json(communications.map((item) => serializeTeacherFamilyFeedItem(item, userId)));
+    return res.status(200).json(communicationsWithLiveAuthors.map((item) => serializeTeacherFamilyFeedItem(item, userId)));
   } catch (error) {
     return res.status(500).json({ message: error.message });
   }

@@ -81,6 +81,10 @@ const {
   uploadCampusMaterialsMiddleware,
   processStoredCampusMaterialFiles,
 } = require('../utils/campusMaterialUpload');
+const {
+  buildTeacherCommunicationAuthorName,
+  enrichCommunicationsWithLiveAuthorNames,
+} = require('../utils/academicCommunicationAuthor');
 
 const router = express.Router();
 const uploadAcademicCommunicationImage = uploadImageMiddleware.single('image');
@@ -392,29 +396,6 @@ function buildAcademicCourseDisplayLabel(grade = {}, course = {}, siblingCourses
   }
 
   return `${gradeLabel} ${courseLabel}`.trim();
-}
-
-function buildTeacherCommunicationAuthorName(request = {}) {
-  const publisherRole = normalizeText(request.publisherRole) || 'teacher';
-  if (publisherRole === 'parent') {
-    return normalizeText(request.teacherName) || 'Acudiente';
-  }
-  if (publisherRole === 'student') {
-    return normalizeText(request.teacherName) || 'Alumno';
-  }
-  if (publisherRole === 'nursing') {
-    const staffName = normalizeText(request.teacherName || request.teacherUserId?.name) || 'Enfermería';
-    const areaLabel = normalizeText(request.subject) || 'Enfermería';
-    return areaLabel ? `${staffName} - ${areaLabel}` : staffName;
-  }
-
-  const teacherName = normalizeText(request.teacherUserId?.name || request.teacherName || request.teacherUserId?.username) || 'Docente';
-  const subjectLabel = normalizeText(request.subject)
-    || normalizeText(request.courseId?.subject)
-    || normalizeText(request.courseTitle).split(' - ')[0]
-    || normalizeText(request.courseTitle);
-
-  return subjectLabel ? `${teacherName} - ${subjectLabel}` : teacherName;
 }
 
 function getCommunicationRequestPublisherLabel(request = {}) {
@@ -6938,10 +6919,14 @@ router.get('/bootstrap', async (req, res) => {
       visibleAcademicStructure.grades,
     );
 
+    const communicationsWithLiveAuthors = isBillingUser || isAdmissionsUser || !communications.length
+      ? communications
+      : await enrichCommunicationsWithLiveAuthorNames(schoolId, communications);
+
     return res.status(200).json({
       parents: isAdmissionsUser ? [] : parents,
       students: isAdmissionsUser ? [] : visibleStudents,
-      communications: isBillingUser || isAdmissionsUser ? [] : communications.map(serializeCommunicationForDashboard),
+      communications: isBillingUser || isAdmissionsUser ? [] : communicationsWithLiveAuthors.map(serializeCommunicationForDashboard),
       communicationAuthors: isBillingUser || isAdmissionsUser ? [] : communicationAuthors.map(serializeCommunicationAuthor),
       grades,
       courses: courseKeys,
