@@ -8140,6 +8140,8 @@ router.put('/academic-management/subject-load-templates', async (req, res) => {
       ...nextSubjectKeysByTeacher.keys(),
     ]);
 
+    const { syncTeacherCoursesFromAcademicStructure } = require('./campus.routes');
+
     await Promise.all(Array.from(affectedTeacherIds).map(async (teacherUserId) => {
       const previousKeys = previousSubjectKeysByTeacher.get(teacherUserId) || new Set();
       const nextKeys = nextSubjectKeysByTeacher.get(teacherUserId) || new Set();
@@ -8159,6 +8161,10 @@ router.put('/academic-management/subject-load-templates', async (req, res) => {
           { $set: { assignedSubjects } },
         ),
       ]);
+
+      if (nextKeys.size > 0) {
+        await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId });
+      }
     }));
 
     return res.status(200).json({ academicStructure: serializeAcademicStructureConfiguration(configuration) });

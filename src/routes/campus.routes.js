@@ -2646,6 +2646,33 @@ function buildTeacherAcademicCourseCandidates({ academicStructure, teacherUserId
     });
   });
 
+  (Array.isArray(academicStructure?.subjectLoadTemplates) ? academicStructure.subjectLoadTemplates : []).forEach((template) => {
+    if (normalizeText(template?.teacherUserId) !== normalizedTeacherUserId) {
+      return;
+    }
+
+    const subjectKey = normalizeText(template?.subjectKey);
+    if (!subjectKey) {
+      return;
+    }
+
+    (Array.isArray(template?.gradeKeys) ? template.gradeKeys : []).forEach((rawGradeKey) => {
+      const gradeKey = normalizeText(rawGradeKey);
+      if (!gradeKey) {
+        return;
+      }
+
+      const grade = gradesByKey.get(gradeKey) || null;
+      const courseKeysForLoad = (Array.isArray(grade?.courses) && grade.courses.length > 0
+        ? grade.courses.map((course) => normalizeText(course?.key)).filter(Boolean)
+        : ['']);
+
+      courseKeysForLoad.forEach((targetCourseKey) => {
+        ensureCandidate({ gradeKey, courseKey: targetCourseKey, subjectKey });
+      });
+    });
+  });
+
   // Do not expand every subject candidate into every course of the grade a second time.
   // That previous fan-out created duplicate campus courses (e.g. Arte × every section).
 
