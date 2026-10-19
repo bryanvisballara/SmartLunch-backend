@@ -131,7 +131,7 @@ function FamilyFeedMedia({ item }) {
   );
 }
 
-function FamilyFeedPost({ item, subtitle, onOpenLikes, onOpenComments }) {
+function FamilyFeedPost({ item, subtitle, onOpenLikes, onOpenComments, onDelete }) {
   const authorName = item.authorName || 'Institucional';
   const photoUrl = resolveApiAssetUrl(item.authorThumbUrl || item.authorPhotoUrl || '');
   const likesCount = Number(item.likesCount || item.likes?.length || 0);
@@ -147,6 +147,26 @@ function FamilyFeedPost({ item, subtitle, onOpenLikes, onOpenComments }) {
           <strong>{authorName}</strong>
           <span>{subtitle}</span>
         </div>
+        {onDelete ? (
+          <button
+            aria-label={`Eliminar publicación ${item.title || ''}`.trim()}
+            className="family-feed__delete"
+            onClick={() => onDelete(item)}
+            title="Eliminar publicación"
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path
+                d="M3 6h18M8 6V4h8v2m-1 0v14H9V6"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.9"
+              />
+            </svg>
+          </button>
+        ) : null}
       </div>
       <FamilyFeedMedia item={item} />
       <div className="family-feed__actions">
@@ -171,6 +191,7 @@ export default function FamilyFeed({
   items = [],
   emptyLabel = 'Aún no hay publicaciones en el feed de familias.',
   getSubtitle,
+  onDelete,
   onOpenLikes,
   onOpenComments,
 }) {
@@ -185,6 +206,7 @@ export default function FamilyFeed({
               <FamilyFeedPost
                 item={item}
                 key={item._id || item.id}
+                onDelete={onDelete}
                 onOpenComments={onOpenComments}
                 onOpenLikes={onOpenLikes}
                 subtitle={getSubtitle?.(item) || ''}

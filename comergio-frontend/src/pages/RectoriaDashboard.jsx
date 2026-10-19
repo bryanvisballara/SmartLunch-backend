@@ -69,6 +69,7 @@ import {
   createAcademicSecretaryBillingFollowUp,
   createAcademicSecretaryCommunicationAuthor,
   createAcademicSecretaryCommunication,
+  deleteAcademicSecretaryCommunication,
   deleteAcademicSecretaryCommunicationAuthor,
   deleteAcademicSecretaryCommunicationComment,
   deleteAcademicManagementLevel,
@@ -3426,6 +3427,7 @@ function RectoriaDashboard() {
   const [communicationEngagementModal, setCommunicationEngagementModal] = useState({ open: false, type: 'comments', item: null });
   const [deleteAuthorModal, setDeleteAuthorModal] = useState({ open: false, author: null });
   const [deleteCommentModal, setDeleteCommentModal] = useState({ open: false, communication: null, comment: null });
+  const [deleteCommunicationModal, setDeleteCommunicationModal] = useState({ open: false, item: null });
   const [editLevelModal, setEditLevelModal] = useState({ open: false, levelKey: '', levelLabel: '', includeClassAttendance: true, error: '' });
   const [selectedAcademicGradingLevelKey, setSelectedAcademicGradingLevelKey] = useState('');
   const [deleteLevelModal, setDeleteLevelModal] = useState({ open: false, levelKey: '', levelLabel: '', password: '', error: '' });
@@ -3695,6 +3697,43 @@ function RectoriaDashboard() {
       setSuccess('Comentario eliminado correctamente.');
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo borrar el comentario.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openDeleteCommunicationModal = (item) => {
+    if (!item?._id) return;
+    setDeleteCommunicationModal({ open: true, item });
+  };
+
+  const closeDeleteCommunicationModal = () => {
+    if (busy) return;
+    setDeleteCommunicationModal({ open: false, item: null });
+  };
+
+  const onDeleteCommunication = async () => {
+    const communication = deleteCommunicationModal.item;
+    if (!communication?._id) return;
+
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await deleteAcademicSecretaryCommunication(communication._id);
+      setBillingBootstrap((previous) => ({
+        ...previous,
+        communications: (previous.communications || []).filter(
+          (item) => String(item._id) !== String(communication._id)
+        ),
+      }));
+      if (communicationEngagementModal.item && String(communicationEngagementModal.item._id) === String(communication._id)) {
+        closeCommunicationEngagementModal();
+      }
+      setDeleteCommunicationModal({ open: false, item: null });
+      setSuccess('Publicación eliminada del feed.');
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo eliminar la publicación.');
     } finally {
       setBusy(false);
     }
@@ -10441,6 +10480,7 @@ function RectoriaDashboard() {
                 ].filter(Boolean).join(' · ')
               )}
               items={familyFeedCommunications}
+              onDelete={openDeleteCommunicationModal}
               onOpenComments={(item) => setCommunicationEngagementModal({ open: true, type: 'comments', item })}
               onOpenLikes={(item) => setCommunicationEngagementModal({ open: true, type: 'likes', item })}
             />
@@ -14805,6 +14845,18 @@ function RectoriaDashboard() {
           onCancel={closeDeleteCommunicationCommentModal}
           onConfirm={onDeleteCommunicationComment}
           title="¿Borrar este comentario?"
+        />
+      ) : null}
+
+      {deleteCommunicationModal.open ? (
+        <BrandConfirmModal
+          confirmLabel="Eliminar"
+          eyebrow="Feed de familias"
+          loading={busy}
+          message="La publicación desaparecerá del feed de acudientes, alumnos y docentes. Esta acción no se puede deshacer."
+          onCancel={closeDeleteCommunicationModal}
+          onConfirm={onDeleteCommunication}
+          title={`¿Eliminar "${deleteCommunicationModal.item?.title || 'esta publicación'}"?`}
         />
       ) : null}
 

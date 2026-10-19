@@ -90,8 +90,19 @@ function resolveLoginSchoolId({
     return exactTypedSchool.id;
   }
 
-  return selectedCountrySchoolId
-    || (filteredSchoolOptions.length === 1 ? filteredSchoolOptions[0].id : '');
+  if (selectedCountrySchoolId) {
+    return selectedCountrySchoolId;
+  }
+
+  if (typedSchoolKey && filteredSchoolOptions.length === 1) {
+    return filteredSchoolOptions[0].id;
+  }
+
+  if (!typedSchoolKey && countrySchoolOptions.length === 1) {
+    return countrySchoolOptions[0].id;
+  }
+
+  return '';
 }
 
 function InputAdornment({ kind }) {
@@ -193,11 +204,15 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
 
   const filteredSchoolOptions = useMemo(() => {
     const query = normalizeSearchText(schoolSearch);
+    const sortedOptions = [...countrySchoolOptions].sort((left, right) => (
+      left.label.localeCompare(right.label, 'es', { sensitivity: 'base' })
+    ));
+
     if (!query) {
-      return [];
+      return sortedOptions;
     }
 
-    return countrySchoolOptions.filter((school) => (
+    return sortedOptions.filter((school) => (
       normalizeSearchText(`${school.label} ${school.id}`).includes(query)
     ));
   }, [countrySchoolOptions, schoolSearch]);
@@ -819,21 +834,28 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
                 const nextValue = e.target.value;
                 schoolSelectionTouchedRef.current = true;
                 setSchoolSearch(nextValue);
-                setIsSchoolPickerOpen(Boolean(String(nextValue || '').trim()));
+                setIsSchoolPickerOpen(true);
                 if (selectedSchool && normalizeSearchText(nextValue) !== normalizeSearchText(selectedSchool.label)) {
                   setSelectedSchoolId('');
                 }
               }}
-              onFocus={() => {
-                if (normalizeSearchText(schoolSearch)) {
-                  setIsSchoolPickerOpen(true);
-                }
-              }}
+              onClick={() => setIsSchoolPickerOpen(true)}
+              onFocus={() => setIsSchoolPickerOpen(true)}
               placeholder="Selecciona tu colegio"
               role="combobox"
               spellCheck={false}
               value={schoolSearch}
             />
+            <button
+              aria-label={isSchoolPickerOpen ? 'Ocultar colegios' : 'Mostrar colegios'}
+              className={`login-school-combobox-toggle${isSchoolPickerOpen ? ' is-open' : ''}`}
+              onClick={() => setIsSchoolPickerOpen((currentValue) => !currentValue)}
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="m5 7 5 5 5-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+              </svg>
+            </button>
             {isSchoolPickerOpen ? (
               <div className="login-school-options" id="login-school-options" role="listbox">
                 {filteredSchoolOptions.length ? filteredSchoolOptions.map((school) => (
@@ -858,7 +880,7 @@ function Login({ devDirectProfile = '', postLoginPath = '' }) {
                   <span className="login-school-options-empty">
                     {normalizeSearchText(schoolSearch)
                       ? 'No encontramos un colegio con ese nombre.'
-                      : 'Escribe para buscar tu colegio.'}
+                      : 'No hay colegios disponibles para este país.'}
                   </span>
                 )}
               </div>

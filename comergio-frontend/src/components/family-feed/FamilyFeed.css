@@ -51,6 +51,31 @@
   padding-top: 0.15rem;
 }
 
+.family-feed__delete {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #b42318;
+  cursor: pointer;
+}
+
+.family-feed__delete svg {
+  width: 17px;
+  height: 17px;
+}
+
+.family-feed__delete:hover,
+.family-feed__delete:focus-visible {
+  background: rgba(239, 68, 68, 0.18);
+  outline: none;
+}
+
 .family-feed__author {
   display: grid;
   gap: 0.1rem;
