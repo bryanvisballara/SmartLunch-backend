@@ -2417,7 +2417,52 @@ function collectTeacherSubjectKeysForGradeSchedule(academicStructure, gradeSched
     collectFromSchedule(gradeLevelSchedule);
   }
 
+  (Array.isArray(academicStructure?.subjectLoadTemplates) ? academicStructure.subjectLoadTemplates : []).forEach((template) => {
+    if (normalizeText(template?.teacherUserId) !== normalizedTeacherUserId) {
+      return;
+    }
+    if (gradeKey && !(Array.isArray(template?.gradeKeys) ? template.gradeKeys : []).map((item) => normalizeText(item)).includes(gradeKey)) {
+      return;
+    }
+    const subjectKey = normalizeText(template?.subjectKey);
+    if (subjectKey) {
+      keys.add(subjectKey);
+    }
+  });
+
   return keys;
+}
+
+function gradeScheduleMatchesCourse(gradeSchedule, course) {
+  const scheduleCourseKey = normalizeText(gradeSchedule?.courseKey);
+  const sourceCourseKey = normalizeText(course?.sourceCourseKey);
+  const sectionLabel = normalizeText(course?.section);
+  const titleLabel = normalizeText(course?.title);
+
+  if (!scheduleCourseKey) {
+    return !sourceCourseKey && !sectionLabel;
+  }
+
+  if (sourceCourseKey && scheduleCourseKey.toUpperCase() === sourceCourseKey.toUpperCase()) {
+    return true;
+  }
+
+  const scheduleSection = buildAcademicCourseSectionFromKey(scheduleCourseKey);
+  const sectionCandidates = [
+    buildAcademicCourseSectionFromKey(sectionLabel),
+    buildAcademicCourseSectionFromKey(sourceCourseKey),
+    sectionLabel.replace(/\s+/g, '').toUpperCase(),
+  ].filter(Boolean);
+
+  if (scheduleSection && sectionCandidates.some((candidate) => candidate.toUpperCase() === scheduleSection.toUpperCase())) {
+    return true;
+  }
+
+  if (scheduleSection && titleLabel.toUpperCase().includes(scheduleSection)) {
+    return true;
+  }
+
+  return false;
 }
 
 function weeklyScheduleEntryMatchesTeacher(entry, teacherUserId, teacherSubjectKeys) {
@@ -2503,8 +2548,11 @@ function resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacher
   const seen = new Set();
 
   for (const gradeSchedule of rankedSchedules) {
+    if (!gradeScheduleMatchesCourse(gradeSchedule, course)) {
+      continue;
+    }
+
     const teacherSubjectKeys = collectTeacherSubjectKeysForGradeSchedule(academicStructure, gradeSchedule, teacherUserId);
-    let matchedCount = 0;
 
     (Array.isArray(gradeSchedule?.weeklySchedule) ? gradeSchedule.weeklySchedule : []).forEach((entry) => {
       const entrySubjectKey = normalizeText(entry?.subjectKey);
@@ -2529,7 +2577,6 @@ function resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacher
       }
 
       seen.add(sessionKey);
-      matchedCount += 1;
       sessions.push({
         weekday,
         startTime,
@@ -2537,10 +2584,6 @@ function resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacher
         label: normalizeText(entry?.label) || `Bloque ${entry?.block || ''}`.trim() || 'Bloque de clase',
       });
     });
-
-    if (matchedCount > 0) {
-      break;
-    }
   }
 
   return sessions.sort((left, right) => (
@@ -4429,7 +4472,7 @@ function enrichTeacherOverviewCourses(academicStructure, teacherUserId, courses)
       classroomGroupLabel: classroomGroup?.label || course.classroomGroupLabel || '',
     };
     const resolvedClassSessions = resolveCourseClassSessionsFromGradeSchedules(academicStructure, teacherUserId, withClassroomGroup);
-    if (resolvedClassSessions.length > 0 && (!Array.isArray(course.classSessions) || course.classSessions.length === 0)) {
+    if (resolvedClassSessions.length > 0) {
       return { ...withClassroomGroup, classSessions: resolvedClassSessions };
     }
     return withClassroomGroup;
@@ -4439,7 +4482,7 @@ function enrichTeacherOverviewCourses(academicStructure, teacherUserId, courses)
 async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
   await syncTeacherCoursesFromAcademicStructure({ schoolId, teacherUserId: userId });
 
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups').lean();
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups subjectLoadTemplates').lean();
   const [teacherUser, courses, recentPosts, gradingContext] = await Promise.all([
     User.findOne({ _id: userId, schoolId })
       .select('_id name username campusPhotoUrl campusPhotoThumbUrl')
@@ -4455,6 +4498,7 @@ async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
     loadCampusGradingContext(schoolId),
   ]);
 
+  const enrichedAllCourses = enrichTeacherOverviewCourses(academicStructure, userId, courses);
   const overviewCourses = selectTeacherOverviewCourses(courses, new Map(), new Map());
   const enrichedOverviewCourses = enrichTeacherOverviewCourses(academicStructure, userId, overviewCourses);
   const normalizedCourses = enrichedOverviewCourses.map((course) => {
@@ -4477,13 +4521,13 @@ async function buildTeacherOverviewShell({ schoolId, userId, name, username }) {
     },
     courses: normalizedCourses,
     gradingScale: gradingContext.defaultScale,
-    weeklySchedule: buildTeacherWeeklySchedule(enrichedOverviewCourses),
+    weeklySchedule: buildTeacherWeeklySchedule(enrichedAllCourses),
     recentPosts: normalizedRecentPosts,
   };
 }
 
 async function buildTeacherOverviewMetrics({ schoolId, userId }) {
-  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups').lean();
+  const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups subjectLoadTemplates').lean();
   const gradingContext = await loadCampusGradingContext(schoolId);
   let courses = await CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
     .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
