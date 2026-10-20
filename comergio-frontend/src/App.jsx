@@ -37,6 +37,7 @@ import MeriendasOperator from './pages/MeriendasOperator';
 import Privacy from './pages/Privacy';
 import Contact from './pages/Contact';
 import PrimerContactoPage from './pages/PrimerContactoPage';
+import SchoolInterviewPage from './pages/SchoolInterviewPage';
 import MillenniumPrimerContactoPage from './pages/MillenniumPrimerContactoPage';
 import AccountDeletionRequest from './pages/AccountDeletionRequest';
 import Register from './pages/Register';
@@ -172,6 +173,7 @@ function App() {
   const isLandingRoute = normalizedPathname === '/landing';
   const isPrimerContactoRoute = normalizedPathname === '/berckleyprimercontacto'
     || normalizedPathname === '/millenniumprimercontacto';
+  const isInterviewRoute = normalizedPathname === '/interview';
   const isLoginRoute = normalizedPathname === '/';
   const isRegisterRoute = normalizedPathname === '/register' || normalizedPathname === '/register/next-step';
   const isAuthFlowRoute = isLoginRoute || isRegisterRoute;
@@ -232,6 +234,7 @@ function App() {
   const showNavbar =
     !isLandingRoute &&
     !isPrimerContactoRoute &&
+    !isInterviewRoute &&
     !isLoginRoute &&
     normalizedPathname !== '/cuenta-eliminada' &&
     normalizedPathname !== '/register' &&
@@ -248,6 +251,7 @@ function App() {
   const hideFooter =
     isLandingRoute ||
     isPrimerContactoRoute ||
+    isInterviewRoute ||
     isLoginRoute ||
     normalizedPathname === '/cuenta-eliminada' ||
     normalizedPathname === '/register' ||
@@ -511,11 +515,12 @@ function App() {
     <AppErrorBoundary>
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isStaffPortalChromeRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
+      <main className={isInterviewRoute ? 'interview-app-main' : isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isStaffPortalChromeRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
           <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
           <Route element={<LandingPage />} path="/landing" />
           <Route element={<PrimerContactoPage />} path="/berckleyprimercontacto" />
+          <Route element={<SchoolInterviewPage />} path="/interview" />
           <Route element={<MillenniumPrimerContactoPage />} path="/millenniumprimercontacto" />
           <Route element={<Navigate replace to="/berckleyprimercontacto" />} path="/primercontacto" />
           {import.meta.env.DEV ? <Route element={<Login devDirectProfile="laura-medina" postLoginPath="/campus/teacher" />} path="/login/laura-medina" /> : null}

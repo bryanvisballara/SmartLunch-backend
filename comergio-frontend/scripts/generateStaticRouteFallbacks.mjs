@@ -102,6 +102,7 @@ const ROUTE_FALLBACKS = [
   'epayco-resultado',
   'landing',
   'berckleyprimercontacto',
+  'interview',
   'millenniumprimercontacto',
   'primercontacto',
   'login',

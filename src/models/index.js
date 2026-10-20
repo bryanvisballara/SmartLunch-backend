@@ -81,3 +81,4 @@ require('./triviaInvitation.model');
 require('./triviaMatch.model');
 require('./triviaSafetyReport.model');
 require('./communityReport.model');
+require('./schoolProcessInterview.model');
