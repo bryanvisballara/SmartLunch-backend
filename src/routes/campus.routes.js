@@ -4097,16 +4097,19 @@ function countStudentsGradedForAssignment(students, assignment) {
   const subcomponentKey = normalizeText(assignment.subcomponentKey);
 
   let gradedCount = 0;
+  const missingStudentNames = [];
   roster.forEach((student) => {
     const period = (student.periods || []).find((entry) => normalizeText(entry.key || entry.periodKey) === periodKey);
     const component = (period?.scores || []).find((entry) => normalizeText(entry.componentKey) === componentKey);
     const subcomponent = (component?.subcomponents || []).find((entry) => normalizeText(entry.subcomponentKey) === subcomponentKey);
     if (hasFiniteScore(subcomponent?.score)) {
       gradedCount += 1;
+    } else {
+      missingStudentNames.push(normalizeText(student.name) || normalizeText(student.studentId) || 'Alumno');
     }
   });
 
-  return { gradedCount, totalCount: roster.length };
+  return { gradedCount, totalCount: roster.length, missingStudentNames };
 }
 
 function normalizeAssignmentFamilyPart(value) {
@@ -4470,6 +4473,16 @@ function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingSco
   const gradedEntriesCount = scoreCoverageEntries.filter((score) => score.score !== null && score.score !== undefined && score.score !== '').length;
 
   const pendingGradingPosts = getPendingGradingPosts(posts, academicPeriods, students);
+  const pendingGradingDetailsByPostId = {};
+  pendingGradingPosts.forEach((post) => {
+    const roster = filterStudentsByCampusAudience(students, post);
+    const assignment = resolveGradebookAssignmentForPostTitle(post?.title, academicPeriods);
+    const detail = countStudentsGradedForAssignment(roster, assignment);
+    pendingGradingDetailsByPostId[String(post._id || post.id || '')] = {
+      missingCount: Math.max(0, Number(detail.totalCount || 0) - Number(detail.gradedCount || 0)),
+      missingStudentNames: Array.isArray(detail.missingStudentNames) ? detail.missingStudentNames : [],
+    };
+  });
 
   return {
     studentCount: students.length,
@@ -4493,6 +4506,7 @@ function buildCourseCardStats({ courseDetail, posts, gradingScale = { passingSco
     pendingAssignmentKeys: pendingGradingPosts
       .map((post) => `${normalizeAssignmentFamilyPart(post.type)}::${normalizeAssignmentFamilyPart(post.title)}`)
       .filter((key) => key !== '::'),
+    pendingGradingDetailsByPostId,
   };
 }
 
@@ -4837,11 +4851,19 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
             ? dueDate.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
             : 'Sin fecha';
 
+          const pendingDetail = course.stats?.pendingGradingDetailsByPostId?.[String(post._id || post.id || '')] || null;
+          const missingCount = Number(pendingDetail?.missingCount || 0);
+          const missingStudentNames = Array.isArray(pendingDetail?.missingStudentNames)
+            ? pendingDetail.missingStudentNames
+            : [];
+
           return [{
             id: String(post._id || post.id || ''),
             courseId: String(course.id),
             familyKey,
             title: normalizeText(post.title) || normalizeText(post.type) || 'Actividad',
+            missingCount,
+            missingStudentNames,
             type: normalizeText(post.type),
             typeLabel: normalizeText(post.type) || 'Actividad',
             courseTitle: buildPendingGradingCourseTitle(course),
@@ -8853,3 +8875,4 @@ router.put('/coexistence-policy', async (req, res) => {
 
 module.exports = router;
 module.exports.syncTeacherCoursesFromAcademicStructure = syncTeacherCoursesFromAcademicStructure;
+module.exports.buildTeacherOverviewMetrics = buildTeacherOverviewMetrics;

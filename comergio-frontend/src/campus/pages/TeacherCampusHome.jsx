@@ -1873,6 +1873,8 @@ function buildTeacherManagementOverview(courses, posts, workspace, options = {})
         deliveryLabel: String(item?.deliveryLabel || '').trim() || 'Sin fecha definida',
         dateLabel: String(item?.dateLabel || '').trim() || formatDateLabel(item?.dueAt || item?.scheduledClassDate || item?.updatedAt),
         description: String(item?.description || item?.body || 'Actividad pendiente de revisión o calificación.').trim(),
+        missingCount: Number(item?.missingCount || 0),
+        missingStudentNames: Array.isArray(item?.missingStudentNames) ? item.missingStudentNames : [],
       }))
       .filter((item) => item.id)
     : [];
@@ -4080,6 +4082,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       }
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'course', teacherQueryScope] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview'], refetchType: 'all' });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'overview', 'metrics', teacherQueryScope] });
     },
   });
 
@@ -14285,6 +14288,14 @@ function TeacherCampusHome({ forcePreview = false }) {
                             <span className="campus-teacher__timeline-modal-item-kind">{item.typeLabel}</span>
                             <strong>{item.title}</strong>
                             <span>{item.courseTitle} · {item.deliveryLabel} · {item.dateLabel}</span>
+                            {item.missingCount > 0 ? (
+                              <span className="campus-panel__meta">
+                                Faltan {item.missingCount} alumno{item.missingCount === 1 ? '' : 's'}
+                                {item.missingStudentNames?.length
+                                  ? `: ${item.missingStudentNames.slice(0, 3).join(', ')}${item.missingStudentNames.length > 3 ? '…' : ''}`
+                                  : ''}
+                              </span>
+                            ) : null}
                             <p>{item.description}</p>
                             <span className="campus-teacher__timeline-modal-item-action">Ir al libro de notas</span>
                           </button>
