@@ -4038,13 +4038,58 @@ function buildGradebookAssignmentOptions(periods) {
   ));
 }
 
-function resolveGradebookAssignmentForPostTitle(title, periods) {
+function resolveGradebookAssignmentsForPostTitle(title, periods) {
   const options = buildGradebookAssignmentOptions(periods);
   if (!options.length) {
+    return [];
+  }
+
+  return options.filter((option) => assignmentTitleMatchesOption(title, option));
+}
+
+function resolveGradebookAssignmentForPostTitle(title, periods) {
+  return resolveGradebookAssignmentsForPostTitle(title, periods)[0] || null;
+}
+
+function findSubcomponentInPeriods(periods, assignment) {
+  if (!assignment) {
     return null;
   }
 
-  return options.find((option) => assignmentTitleMatchesOption(title, option)) || null;
+  const periodKey = normalizeText(assignment.periodKey);
+  const componentKey = normalizeText(assignment.componentKey);
+  const subcomponentKey = normalizeText(assignment.subcomponentKey);
+
+  for (const period of Array.isArray(periods) ? periods : []) {
+    if (normalizeText(period.key) !== periodKey) {
+      continue;
+    }
+    for (const component of period.gradingComponents || []) {
+      if (normalizeText(component.key) !== componentKey) {
+        continue;
+      }
+      return (component.subcomponents || []).find(
+        (subcomponent) => normalizeText(subcomponent.key) === subcomponentKey
+      ) || null;
+    }
+  }
+
+  return null;
+}
+
+function isPostLinkedGradebookSubcomponent(subcomponent) {
+  if (!subcomponent) {
+    return false;
+  }
+
+  const audience = serializeCampusAssignmentAudience(subcomponent);
+  if (audience.targetType === 'students' && audience.targetStudentIds.length > 0) {
+    return true;
+  }
+
+  const hasDate = Boolean(normalizeDateString(subcomponent.date));
+  const hasTopic = Boolean(normalizeText(subcomponent.topic));
+  return hasDate && hasTopic;
 }
 
 function applyPostAudiencesToAcademicPeriods(periods, posts) {
@@ -4252,11 +4297,16 @@ async function removeGradebookAssignmentForPostFromCourse({ schoolId, course, po
   }
 
   const periods = getCourseAcademicPeriods(course);
-  const assignment = resolveGradebookAssignmentForPostTitle(postTitle, periods);
+  const assignments = resolveGradebookAssignmentsForPostTitle(postTitle, periods);
+  let nextPeriods = periods;
   let stripped = false;
 
-  if (assignment) {
-    const nextPeriods = stripAssignmentFromAcademicPeriods(periods, assignment);
+  assignments.forEach((assignment) => {
+    nextPeriods = stripAssignmentFromAcademicPeriods(nextPeriods, assignment);
+    stripped = true;
+  });
+
+  if (stripped) {
     course.academicPeriods = nextPeriods;
     course.gradingComponents = nextPeriods[0]?.gradingComponents || [];
     if (typeof course.save === 'function') {
@@ -4267,15 +4317,27 @@ async function removeGradebookAssignmentForPostFromCourse({ schoolId, course, po
         { $set: { academicPeriods: nextPeriods, gradingComponents: nextPeriods[0]?.gradingComponents || [] } }
       );
     }
-    stripped = true;
   }
 
-  const deletedCount = await deleteGradeEntriesForPostTitle({
-    schoolId,
-    courseId: course._id,
-    postTitle,
-    assignment,
-  });
+  let deletedCount = 0;
+  if (assignments.length) {
+    for (const assignment of assignments) {
+      deletedCount += await deleteGradeEntriesForPostTitle({
+        schoolId,
+        courseId: course._id,
+        postTitle,
+        assignment,
+      });
+    }
+  } else {
+    deletedCount = await deleteGradeEntriesForPostTitle({
+      schoolId,
+      courseId: course._id,
+      postTitle,
+      assignment: null,
+    });
+  }
+
   return stripped || deletedCount > 0;
 }
 
@@ -4422,6 +4484,95 @@ async function healArchivedAssignmentGradebook({ schoolId, teacherUserId, academ
   }
 
   return changed;
+}
+
+async function healOrphanPostLinkedGradebookAssignments({ schoolId, teacherUserId, courses, posts }) {
+  const courseList = Array.isArray(courses) ? courses : [];
+  const teacherPosts = Array.isArray(posts) ? posts : [];
+  let changed = false;
+
+  for (const course of courseList) {
+    if (!course?._id) {
+      continue;
+    }
+
+    const courseDoc = await CampusCourse.findOne({ _id: course._id, schoolId, teacherUserId });
+    if (!courseDoc) {
+      continue;
+    }
+
+    const siblingCourses = await collectClassroomGroupSiblingCourses({ schoolId, course: courseDoc });
+    const siblingCourseIds = new Set(siblingCourses.map((item) => String(item._id)).filter(Boolean));
+    const relevantPosts = teacherPosts.filter((post) => siblingCourseIds.has(String(post.courseId || '')));
+
+    let periods = getCourseAcademicPeriods(courseDoc);
+    const options = buildGradebookAssignmentOptions(periods);
+    let nextPeriods = periods;
+    let strippedAny = false;
+    const strippedAssignments = [];
+
+    options.forEach((option) => {
+      const hasMatchingPost = relevantPosts.some((post) => assignmentTitleMatchesOption(post.title, option));
+      if (hasMatchingPost) {
+        return;
+      }
+
+      const subcomponent = findSubcomponentInPeriods(nextPeriods, option);
+      if (!isPostLinkedGradebookSubcomponent(subcomponent)) {
+        return;
+      }
+
+      nextPeriods = stripAssignmentFromAcademicPeriods(nextPeriods, option);
+      strippedAssignments.push(option);
+      strippedAny = true;
+    });
+
+    if (!strippedAny) {
+      continue;
+    }
+
+    courseDoc.academicPeriods = nextPeriods;
+    courseDoc.gradingComponents = nextPeriods[0]?.gradingComponents || [];
+    await courseDoc.save();
+    changed = true;
+
+    for (const assignment of strippedAssignments) {
+      await deleteGradeEntriesForPostTitle({
+        schoolId,
+        courseId: courseDoc._id,
+        postTitle: assignment.subcomponentName || assignment.label || '',
+        assignment,
+      });
+    }
+  }
+
+  return changed;
+}
+
+async function syncTeacherGradebookAssignments({ schoolId, teacherUserId, academicStructure, courses, posts }) {
+  const archivedChanged = await healArchivedAssignmentGradebook({
+    schoolId,
+    teacherUserId,
+    academicStructure,
+    courses,
+    posts,
+  });
+
+  let courseList = Array.isArray(courses) ? courses : [];
+  if (archivedChanged) {
+    courseList = await CampusCourse.find({ schoolId, teacherUserId, status: 'active' })
+      .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
+      .lean();
+  }
+
+  const orphanChanged = await healOrphanPostLinkedGradebookAssignments({
+    schoolId,
+    teacherUserId,
+    courses: courseList,
+    posts,
+  });
+
+  return archivedChanged || orphanChanged;
 }
 
 function isPostPendingGrading(post, academicPeriods, students) {
@@ -4655,7 +4806,7 @@ async function buildTeacherOverviewMetrics({ schoolId, userId }) {
       : [],
   ]);
 
-  const healedArchivedAssignments = await healArchivedAssignmentGradebook({
+  const healedArchivedAssignments = await syncTeacherGradebookAssignments({
     schoolId,
     teacherUserId: userId,
     academicStructure,
@@ -5093,7 +5244,7 @@ router.get('/teacher/courses/:id', requireCampusTeacherAccess, async (req, res) 
       return res.status(400).json({ message: 'Invalid course id' });
     }
 
-    const course = await resolveTeacherAssignedCourse({
+    let course = await resolveTeacherAssignedCourse({
       schoolId,
       teacherUserId: userId,
       courseId: id,
@@ -5107,13 +5258,43 @@ router.get('/teacher/courses/:id', requireCampusTeacherAccess, async (req, res) 
     const gradingContext = await loadCampusGradingContext(schoolId);
     const courseGradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
     const academicStructure = await AcademicStructure.findOne({ schoolId }).select('gradeSchedules grades subjects levels classroomGroups').lean();
-    const [detail, posts] = await Promise.all([
-      buildTeacherCourseDetail({ schoolId, teacherUserId: userId, course, gradingScale: courseGradingScale, academicStructure }),
+    const [allTeacherPosts, posts] = await Promise.all([
+      CampusPost.find({ schoolId, teacherUserId: userId })
+        .select('courseId type status title')
+        .lean(),
       CampusPost.find({ schoolId, teacherUserId: userId, courseId: course._id })
         .populate('courseId', 'title')
         .sort({ dueAt: 1, scheduledClassDate: 1, createdAt: -1 })
         .lean(),
     ]);
+
+    const gradebookHealed = await syncTeacherGradebookAssignments({
+      schoolId,
+      teacherUserId: userId,
+      academicStructure,
+      courses: [course],
+      posts: allTeacherPosts,
+    });
+    if (gradebookHealed) {
+      course = await resolveTeacherAssignedCourse({
+        schoolId,
+        teacherUserId: userId,
+        courseId: id,
+        sync: false,
+        allowInactive: true,
+      });
+      if (!course) {
+        return res.status(404).json({ message: 'Course not found' });
+      }
+    }
+
+    const detail = await buildTeacherCourseDetail({
+      schoolId,
+      teacherUserId: userId,
+      course,
+      gradingScale: courseGradingScale,
+      academicStructure,
+    });
 
     return res.status(200).json({
       ...detail,
