@@ -945,6 +945,25 @@ function endOfToday() {
   return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1);
 }
 
+async function listRelatedProductIdsForBlock(schoolId, productId) {
+  const product = await Product.findOne({ _id: productId, schoolId, deletedAt: null })
+    .select('_id sharedProductId')
+    .lean();
+  if (!product) {
+    return [];
+  }
+
+  const sharedProductId = String(product.sharedProductId || '').trim();
+  if (!sharedProductId) {
+    return [product._id];
+  }
+
+  const related = await Product.find({ schoolId, deletedAt: null, sharedProductId })
+    .select('_id')
+    .lean();
+  return related.map((item) => item._id);
+}
+
 async function buildStudentBlockedProductChecker(schoolId, student) {
   const blockedIds = (Array.isArray(student?.blockedProducts) ? student.blockedProducts : [])
     .map((item) => String(item?._id || item || ''))
@@ -7497,13 +7516,18 @@ router.patch('/portal/students/:studentId/blocks', async (req, res) => {
         return res.status(404).json({ message: 'Product not found' });
       }
 
+      const relatedProductIds = await listRelatedProductIdsForBlock(schoolId, targetObjectId);
+      const relatedIdSet = new Set(relatedProductIds.map((id) => String(id)));
       const current = Array.isArray(student.blockedProducts) ? student.blockedProducts.map((id) => String(id)) : [];
       if (shouldBlock) {
-        if (!current.includes(String(targetObjectId))) {
-          student.blockedProducts.push(targetObjectId);
-        }
+        relatedProductIds.forEach((relatedId) => {
+          if (!current.includes(String(relatedId))) {
+            student.blockedProducts.push(relatedId);
+            current.push(String(relatedId));
+          }
+        });
       } else {
-        student.blockedProducts = student.blockedProducts.filter((id) => String(id) !== String(targetObjectId));
+        student.blockedProducts = student.blockedProducts.filter((id) => !relatedIdSet.has(String(id)));
       }
     }
 

@@ -425,7 +425,7 @@ export function normalizeQuestionAnswer(raw) {
   if (raw && typeof raw === 'object') {
     return {
       selectedIds: Array.isArray(raw.selectedIds) ? raw.selectedIds : [],
-      otherText: String(raw.otherText || '').trim(),
+      otherText: String(raw.otherText ?? ''),
     };
   }
   return { selectedIds: [], otherText: '' };
@@ -440,7 +440,7 @@ export function isQuestionAnswerComplete(raw) {
   if (!selectedIds.length) {
     return false;
   }
-  if (selectedIds.includes(INTERVIEW_OTHER_OPTION_ID) && !otherText) {
+  if (selectedIds.includes(INTERVIEW_OTHER_OPTION_ID) && !otherText.trim()) {
     return false;
   }
   return true;

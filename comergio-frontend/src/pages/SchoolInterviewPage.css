@@ -365,6 +365,62 @@
   background: rgba(15, 118, 110, 0.12);
 }
 
+.interview-result-hub {
+  text-align: center;
+}
+
+.interview-result-hub .interview-lead {
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.interview-result-hub__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 28px;
+}
+
+.interview-result-hub__back {
+  margin: 20px auto 0;
+  display: inline-flex;
+}
+
+.interview-primary--ai:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.interview-result-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.interview-result-source button {
+  border-radius: 999px;
+  padding: 10px 18px;
+  font: inherit;
+  cursor: pointer;
+  background: rgba(255, 252, 247, 0.92);
+  color: #14343a;
+  border: 1px solid rgba(20, 52, 58, 0.18);
+}
+
+.interview-result-source button.is-active {
+  background: #14343a;
+  color: #f7f3ec;
+  border-color: #14343a;
+}
+
+.interview-result-source button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .interview-areas {
   display: grid;
   grid-template-columns: 1fr 1fr;

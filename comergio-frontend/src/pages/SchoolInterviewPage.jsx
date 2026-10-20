@@ -21,6 +21,90 @@ const EMPTY_PROFILE = {
   note: '',
 };
 
+function InterviewReportContent({ profile, report, whatsappText, onRestart }) {
+  return (
+    <>
+      <div className="interview-result__hero">
+        <div>
+          <p className="interview-kicker">{profile.schoolName}</p>
+          <h1>{report.band?.headline}</h1>
+          <p className="interview-lead">{report.band?.paragraph}</p>
+          <p className="interview-band">{report.band?.label}</p>
+        </div>
+        <Donut value={report.overall || 0} />
+      </div>
+      <p className="interview-disclaimer">
+        Este índice describe qué tan reunidos están hoy los procesos. Un número más bajo significa más espacio para acompañar al equipo, no una falla del colegio.
+      </p>
+
+      <div className="interview-areas">
+        {report.areas.map((area) => (
+          <article key={area.id}>
+            <header>
+              <h2>{area.label}</h2>
+              <strong>{area.score == null ? 'No aplica' : area.score}</strong>
+            </header>
+            <div className="interview-bar" aria-hidden="true">
+              <span style={{ width: `${area.score || 0}%` }} />
+            </div>
+            <p>{area.sentence}</p>
+          </article>
+        ))}
+      </div>
+
+      {(report.otherInsights || []).length > 0 ? (
+        <article className="interview-note-card">
+          <h2>Lo que nos contaron</h2>
+          <ul className="interview-other-insights">
+            {report.otherInsights.map((item) => (
+              <li key={item.questionId}>
+                <strong>{item.areaLabel}.</strong> {item.summary || item.text}
+                {item.accompaniment ? <span>{item.accompaniment}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </article>
+      ) : null}
+
+      <div className="interview-split">
+        <article>
+          <h2>Lo que ya está bien cuidado</h2>
+          <ul>
+            {report.strengths.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </article>
+        <article>
+          <h2>Cómo Comergio puede acompañar</h2>
+          <ul>
+            {report.accompaniments.map((item) => (
+              <li key={`${item.questionId}-${item.text}`}>
+                <strong>{item.title}.</strong> {item.text}
+              </li>
+            ))}
+          </ul>
+        </article>
+      </div>
+
+      {profile.note ? (
+        <article className="interview-note-card">
+          <h2>Lo que precisó el colegio</h2>
+          <p>{profile.note}</p>
+        </article>
+      ) : null}
+
+      <div className="interview-actions interview-actions--result">
+        <a className="interview-primary" href={`https://wa.me/573016214806?text=${whatsappText}`}>
+          Conversar esta lectura
+        </a>
+        <button className="interview-ghost" onClick={() => window.print()} type="button">Imprimir</button>
+        <button className="interview-ghost" onClick={onRestart} type="button">
+          Nueva lectura
+        </button>
+      </div>
+    </>
+  );
+}
+
 function Donut({ value }) {
   const radius = 78;
   const circumference = 2 * Math.PI * radius;
@@ -57,6 +141,7 @@ function SchoolInterviewPage() {
   const [aiReport, setAiReport] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [resultView, setResultView] = useState(null);
   const saveStartedRef = useRef(false);
   const analyzeStartedRef = useRef(false);
 
@@ -73,7 +158,14 @@ function SchoolInterviewPage() {
     () => (isResult ? buildSchoolInterviewReport(answers) : null),
     [answers, isResult],
   );
-  const report = aiReport || localReport;
+  const reportToSave = aiReport || localReport;
+  const displayedReport = resultView === 'ai'
+    ? aiReport
+    : resultView === 'system'
+      ? localReport
+      : null;
+  const aiReady = Boolean(aiReport);
+  const canShowAiView = aiReady && !aiLoading;
 
   useEffect(() => {
     if (!isResult || !localReport || analyzeStartedRef.current) {
@@ -114,7 +206,7 @@ function SchoolInterviewPage() {
   }, [answers, isResult, localReport, profile.note, profile.schoolName]);
 
   useEffect(() => {
-    if (!isResult || !report || aiLoading || saveStartedRef.current) {
+    if (!isResult || !reportToSave || aiLoading || saveStartedRef.current) {
       return undefined;
     }
     saveStartedRef.current = true;
@@ -122,7 +214,7 @@ function SchoolInterviewPage() {
     saveSchoolInterview({
       ...profile,
       answers,
-      report,
+      report: reportToSave,
     }).then((response) => {
       if (!cancelled) {
         setSavedId(response?.data?.id || 'saved');
@@ -135,9 +227,23 @@ function SchoolInterviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [aiLoading, answers, isResult, profile, report]);
+  }, [aiLoading, answers, isResult, profile, reportToSave]);
 
   const progress = isIntro ? 0 : Math.min(100, Math.round(((step - 1) / totalSteps) * 100));
+
+  const restartInterview = () => {
+    setStep(0);
+    setAnswers({});
+    setProfile(EMPTY_PROFILE);
+    setSavedId('');
+    setAiReport(null);
+    setAiLoading(false);
+    setAiError('');
+    setResultView(null);
+    saveStartedRef.current = false;
+    analyzeStartedRef.current = false;
+    setError('');
+  };
 
   const toggleOption = (questionId, optionId) => {
     setAnswers((current) => {
@@ -230,7 +336,7 @@ function SchoolInterviewPage() {
             Nombre del colegio
             <input
               autoFocus
-              placeholder="Ej. Hartford International School"
+              placeholder="Ej. International Berckley School"
               value={profile.schoolName}
               onChange={(event) => {
                 setProfile((current) => ({ ...current, schoolName: event.target.value }));
@@ -321,109 +427,83 @@ function SchoolInterviewPage() {
         </section>
       ) : null}
 
-      {isResult && report ? (
-        <section className="interview-result">
+      {isResult && localReport && !resultView ? (
+        <section className="interview-panel interview-result-hub">
+          <p className="interview-kicker">{profile.schoolName}</p>
+          <h1>Su lectura está en camino</h1>
+          <p className="interview-lead">
+            Estamos analizando las respuestas. Puede ver ya la lectura automática del sistema o esperar la versión elaborada con inteligencia artificial.
+          </p>
           {aiLoading ? (
-            <p className="interview-ai-status">Estamos preparando una lectura personalizada…</p>
+            <p className="interview-ai-status">Preparando la lectura con IA… suele tardar unos segundos.</p>
           ) : null}
           {!aiLoading && aiError ? (
             <p className="interview-ai-status is-muted">{aiError}</p>
           ) : null}
-          {!aiLoading && report.aiEnhanced ? (
-            <p className="interview-ai-status is-success">Lectura elaborada con apoyo de inteligencia artificial.</p>
+          {!aiLoading && canShowAiView ? (
+            <p className="interview-ai-status is-success">La lectura con IA ya está lista.</p>
           ) : null}
-          <div className="interview-result__hero">
-            <div>
-              <p className="interview-kicker">{profile.schoolName}</p>
-              <h1>{report.band?.headline}</h1>
-              <p className="interview-lead">{report.band?.paragraph}</p>
-              <p className="interview-band">{report.band?.label}</p>
-            </div>
-            <Donut value={report.overall || 0} />
-          </div>
-          <p className="interview-disclaimer">
-            Este índice describe qué tan reunidos están hoy los procesos. Un número más bajo significa más espacio para acompañar al equipo, no una falla del colegio.
-          </p>
-
-          <div className="interview-areas">
-            {report.areas.map((area) => (
-              <article key={area.id}>
-                <header>
-                  <h2>{area.label}</h2>
-                  <strong>{area.score == null ? 'No aplica' : area.score}</strong>
-                </header>
-                <div className="interview-bar" aria-hidden="true">
-                  <span style={{ width: `${area.score || 0}%` }} />
-                </div>
-                <p>{area.sentence}</p>
-              </article>
-            ))}
-          </div>
-
-          {(report.otherInsights || []).length > 0 ? (
-            <article className="interview-note-card">
-              <h2>Lo que nos contaron</h2>
-              <ul className="interview-other-insights">
-                {report.otherInsights.map((item) => (
-                  <li key={item.questionId}>
-                    <strong>{item.areaLabel}.</strong> {item.summary || item.text}
-                    {item.accompaniment ? <span>{item.accompaniment}</span> : null}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          ) : null}
-
-          <div className="interview-split">
-            <article>
-              <h2>Lo que ya está bien cuidado</h2>
-              <ul>
-                {report.strengths.map((item) => <li key={item}>{item}</li>)}
-              </ul>
-            </article>
-            <article>
-              <h2>Cómo Comergio puede acompañar</h2>
-              <ul>
-                {report.accompaniments.map((item) => (
-                  <li key={`${item.questionId}-${item.text}`}>
-                    <strong>{item.title}.</strong> {item.text}
-                  </li>
-                ))}
-              </ul>
-            </article>
-          </div>
-
-          {profile.note ? (
-            <article className="interview-note-card">
-              <h2>Lo que precisó el colegio</h2>
-              <p>{profile.note}</p>
-            </article>
-          ) : null}
-
-          <div className="interview-actions interview-actions--result">
-            <a className="interview-primary" href={`https://wa.me/573016214806?text=${whatsappText}`}>
-              Conversar esta lectura
-            </a>
-            <button className="interview-ghost" onClick={() => window.print()} type="button">Imprimir</button>
+          <div className="interview-result-hub__actions">
             <button
-              className="interview-ghost"
-              onClick={() => {
-                setStep(0);
-                setAnswers({});
-                setProfile(EMPTY_PROFILE);
-                setSavedId('');
-                setAiReport(null);
-                setAiLoading(false);
-                setAiError('');
-                saveStartedRef.current = false;
-                analyzeStartedRef.current = false;
-                setError('');
-              }}
+              className="interview-primary"
+              onClick={() => setResultView('system')}
               type="button"
             >
-              Nueva lectura
+              Ver lectura del sistema
+            </button>
+            <button
+              className="interview-primary interview-primary--ai"
+              disabled={!canShowAiView}
+              onClick={() => setResultView('ai')}
+              type="button"
+            >
+              {aiLoading ? 'Lectura con IA en preparación…' : 'Ver lectura con IA'}
             </button>
           </div>
+          <button className="interview-ghost interview-result-hub__back" onClick={restartInterview} type="button">
+            Nueva lectura
+          </button>
+        </section>
+      ) : null}
+
+      {isResult && displayedReport ? (
+        <section className="interview-result">
+          <div className="interview-result-source" role="tablist" aria-label="Tipo de lectura">
+            <button
+              className={resultView === 'system' ? 'is-active' : ''}
+              onClick={() => setResultView('system')}
+              role="tab"
+              aria-selected={resultView === 'system'}
+              type="button"
+            >
+              Lectura del sistema
+            </button>
+            <button
+              className={resultView === 'ai' ? 'is-active' : ''}
+              disabled={!canShowAiView}
+              onClick={() => setResultView('ai')}
+              role="tab"
+              aria-selected={resultView === 'ai'}
+              type="button"
+            >
+              {aiLoading ? 'IA preparando…' : 'Lectura con IA'}
+            </button>
+          </div>
+          {resultView === 'system' ? (
+            <p className="interview-ai-status is-muted">Lectura automática según las respuestas del cuestionario.</p>
+          ) : null}
+          {resultView === 'ai' && displayedReport.aiEnhanced ? (
+            <p className="interview-ai-status is-success">Lectura elaborada con apoyo de inteligencia artificial.</p>
+          ) : null}
+          {resultView === 'ai' && !displayedReport.aiEnhanced && aiError ? (
+            <p className="interview-ai-status is-muted">{aiError}</p>
+          ) : null}
+          <InterviewReportContent
+            profile={profile}
+            report={displayedReport}
+            whatsappText={whatsappText}
+            onRestart={restartInterview}
+          />
           {!interviewAnswersComplete(answers) ? null : (
             <p className="interview-saved">
               {savedId && savedId !== 'local'

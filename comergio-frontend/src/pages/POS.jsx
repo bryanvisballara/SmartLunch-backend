@@ -743,7 +743,12 @@ function POS() {
                   onClick={() => selectStudent(studentItem)}
                   type="button"
                 >
-                  {studentItem.name} {studentItem.schoolCode ? `(${studentItem.schoolCode})` : ''}
+                  {studentItem.name}
+                  {studentItem.grade ? ` · ${studentItem.grade}` : ''}
+                  {studentItem.schoolCode ? ` · ${studentItem.schoolCode}` : ''}
+                  {Number.isFinite(Number(studentItem.walletBalance))
+                    ? ` · $${Number(studentItem.walletBalance).toLocaleString('es-CO')}`
+                    : ''}
                 </button>
               ))}
             </div>
