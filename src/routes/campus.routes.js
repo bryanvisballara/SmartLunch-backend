@@ -4373,6 +4373,172 @@ function inferPostGradebookAssignmentPayload(post, course, periods) {
   };
 }
 
+function humanizeSubcomponentKeyLabel(subKey) {
+  const raw = normalizeText(subKey).replace(/_/g, ' ');
+  if (!raw) {
+    return 'Asignacion';
+  }
+  if (/^sept\s+\d+/i.test(raw)) {
+    return raw.replace(/^sept/i, 'Sept');
+  }
+  return raw.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function humanizeComponentKeyLabel(componentKey) {
+  const normalizedKey = slugifyComponentKey(componentKey);
+  const labels = {
+    comportamiento: 'Comportamiento',
+    final_exam: 'Actividad en clase',
+    participacion: 'Participacion',
+    tasks: 'Tareas',
+    notebook: 'Cuaderno',
+    quizzes: 'Quices',
+  };
+  return labels[normalizedKey] || humanizeSubcomponentKeyLabel(normalizedKey);
+}
+
+function resolveGradeEntryStructureKeys(entry) {
+  const periodKey = normalizeText(entry?.academicPeriodKey) || 'period_1';
+  const rawComponentKey = normalizeText(entry?.componentKey);
+  const fallbackSubKey = slugifyComponentKey(entry?.subcomponentKey || '');
+
+  if (rawComponentKey.includes('::')) {
+    const [baseComponentKey, embeddedSubKey] = rawComponentKey.split('::');
+    return {
+      periodKey,
+      componentKey: slugifyComponentKey(baseComponentKey) || normalizeText(baseComponentKey),
+      subcomponentKey: slugifyComponentKey(embeddedSubKey || fallbackSubKey) || fallbackSubKey,
+    };
+  }
+
+  return {
+    periodKey,
+    componentKey: slugifyComponentKey(rawComponentKey) || rawComponentKey,
+    subcomponentKey: fallbackSubKey,
+  };
+}
+
+function subcomponentExistsInPeriods(periods, periodKey, componentKey, subcomponentKey) {
+  return Boolean(findSubcomponentInPeriods(periods, { periodKey, componentKey, subcomponentKey }));
+}
+
+function ensureGradeEntrySubcomponentInPeriods(periods, keys, entry) {
+  const periodKey = normalizeText(keys.periodKey);
+  const componentKey = normalizeText(keys.componentKey);
+  const subcomponentKey = normalizeText(keys.subcomponentKey);
+
+  if (!periodKey || !componentKey || !subcomponentKey) {
+    return { periods, changed: false };
+  }
+
+  if (subcomponentExistsInPeriods(periods, periodKey, componentKey, subcomponentKey)) {
+    return { periods, changed: false };
+  }
+
+  const periodIndex = (Array.isArray(periods) ? periods : []).findIndex((period) => normalizeText(period.key) === periodKey);
+  if (periodIndex < 0) {
+    return { periods, changed: false };
+  }
+
+  const period = periods[periodIndex];
+  const components = Array.isArray(period.gradingComponents) ? [...period.gradingComponents] : [];
+  let componentIndex = components.findIndex((component) => normalizeText(component.key) === componentKey);
+  if (componentIndex < 0) {
+    components.push({
+      key: componentKey,
+      name: humanizeComponentKeyLabel(componentKey),
+      weight: 10,
+      order: (components.length + 1) * 10,
+      subcomponents: [],
+    });
+    componentIndex = components.length - 1;
+  }
+
+  const component = { ...components[componentIndex] };
+  const existingSubcomponents = Array.isArray(component.subcomponents) ? component.subcomponents : [];
+  const gradedDate = entry?.gradedAt || entry?.updatedAt || entry?.createdAt;
+  components[componentIndex] = {
+    ...component,
+    subcomponents: [
+      ...existingSubcomponents,
+      {
+        key: subcomponentKey,
+        name: humanizeSubcomponentKeyLabel(subcomponentKey),
+        weight: 5,
+        date: normalizeDateString(gradedDate),
+        topic: normalizeText(component.name),
+        description: '',
+        order: existingSubcomponents.length + 1,
+      },
+    ],
+  };
+
+  const nextPeriods = periods.map((currentPeriod, currentPeriodIndex) => (
+    currentPeriodIndex !== periodIndex ? currentPeriod : {
+      ...currentPeriod,
+      gradingComponents: components,
+    }
+  ));
+
+  return { periods: nextPeriods, changed: true };
+}
+
+async function healGradeEntryOrphanSubcomponents({ schoolId, teacherUserId, courses }) {
+  const courseList = Array.isArray(courses) ? courses : [];
+  let changed = false;
+
+  for (const course of courseList) {
+    if (!course?._id) {
+      continue;
+    }
+
+    const courseDoc = await CampusCourse.findOne({ _id: course._id, schoolId, teacherUserId });
+    if (!courseDoc) {
+      continue;
+    }
+
+    const entries = await CampusGradeEntry.find({ schoolId, courseId: courseDoc._id }).lean();
+    if (!entries.length) {
+      continue;
+    }
+
+    let periods = getCourseAcademicPeriods(courseDoc);
+    let courseChanged = false;
+    const seen = new Set();
+
+    entries.forEach((entry) => {
+      const keys = resolveGradeEntryStructureKeys(entry);
+      const dedupeKey = [keys.periodKey, keys.componentKey, keys.subcomponentKey].join('::');
+      if (seen.has(dedupeKey)) {
+        return;
+      }
+      seen.add(dedupeKey);
+
+      const ensured = ensureGradeEntrySubcomponentInPeriods(periods, keys, entry);
+      if (ensured.changed) {
+        periods = ensured.periods;
+        courseChanged = true;
+      }
+    });
+
+    if (!courseChanged) {
+      continue;
+    }
+
+    const normalizedPeriods = normalizeAcademicPeriods(periods, { allowIncompleteWeights: true });
+    if (!normalizedPeriods.ok) {
+      continue;
+    }
+
+    courseDoc.academicPeriods = normalizedPeriods.periods;
+    courseDoc.gradingComponents = normalizedPeriods.periods[0]?.gradingComponents || [];
+    await courseDoc.save();
+    changed = true;
+  }
+
+  return changed;
+}
+
 async function deleteGradeEntriesForPostTitle({ schoolId, courseId, postTitle, assignment = null }) {
   if (!courseId || !normalizeText(postTitle)) {
     return 0;
@@ -4652,6 +4818,13 @@ async function healOrphanPostLinkedGradebookAssignments({ schoolId, teacherUserI
     const siblingCourses = await collectClassroomGroupSiblingCourses({ schoolId, course: courseDoc });
     const siblingCourseIds = new Set(siblingCourses.map((item) => String(item._id)).filter(Boolean));
     const relevantPosts = teacherPosts.filter((post) => siblingCourseIds.has(String(post.courseId || '')));
+    const activeRelevantPosts = relevantPosts.filter((post) => normalizeText(post.status) !== 'archived');
+    if (activeRelevantPosts.length === 0) {
+      const courseEntryCount = await CampusGradeEntry.countDocuments({ schoolId, courseId: courseDoc._id });
+      if (courseEntryCount > 0) {
+        continue;
+      }
+    }
 
     let periods = getCourseAcademicPeriods(courseDoc);
     const options = buildGradebookAssignmentOptions(periods);
@@ -4816,7 +4989,19 @@ async function syncTeacherGradebookAssignments({ schoolId, teacherUserId, academ
     posts,
   });
 
-  return archivedChanged || orphanChanged || missingChanged;
+  if (missingChanged) {
+    courseList = await CampusCourse.find({ schoolId, teacherUserId, status: 'active' })
+      .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
+      .lean();
+  }
+
+  const gradeEntryStructureChanged = await healGradeEntryOrphanSubcomponents({
+    schoolId,
+    teacherUserId,
+    courses: courseList,
+  });
+
+  return archivedChanged || orphanChanged || missingChanged || gradeEntryStructureChanged;
 }
 
 function isPostPendingGrading(post, academicPeriods, students) {
