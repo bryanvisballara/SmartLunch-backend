@@ -4242,6 +4242,137 @@ function stripAssignmentFromAcademicPeriods(academicPeriods, assignment) {
   });
 }
 
+async function countGradeEntriesForAssignment({ schoolId, courseId, assignment }) {
+  if (!courseId || !assignment) {
+    return 0;
+  }
+
+  const storedComponentKey = buildStoredGradeComponentKey(assignment.componentKey, assignment.subcomponentKey);
+  const assignmentSlug = slugifyComponentKey(assignment.subcomponentKey || assignment.subcomponentName || '');
+  const or = [
+    { componentKey: storedComponentKey },
+    { componentKey: assignment.componentKey, subcomponentKey: assignment.subcomponentKey },
+    { subcomponentKey: assignment.subcomponentKey },
+  ];
+  if (assignment.periodKey) {
+    or.push({
+      academicPeriodKey: assignment.periodKey,
+      componentKey: storedComponentKey,
+    });
+  }
+  if (assignmentSlug) {
+    or.push(
+      { subcomponentKey: assignmentSlug },
+      { componentKey: new RegExp(`(^|::)${escapeRegExp(assignmentSlug)}$`, 'i') },
+    );
+  }
+
+  return CampusGradeEntry.countDocuments({
+    schoolId,
+    courseId,
+    $or: or,
+  });
+}
+
+function resolveGradebookComponentForPostType(postType, periods) {
+  const normalizedType = normalizeText(postType).toLowerCase();
+  const periodList = Array.isArray(periods) ? periods : [];
+  const firstPeriod = periodList[0];
+  if (!firstPeriod) {
+    return null;
+  }
+
+  const components = Array.isArray(firstPeriod.gradingComponents) ? firstPeriod.gradingComponents : [];
+  const findComponent = (keys) => components.find((component) => {
+    const componentKey = slugifyComponentKey(component.key);
+    const componentName = slugifyComponentKey(component.name);
+    return keys.some((key) => componentKey === key || componentName.includes(key));
+  });
+
+  if (normalizedType.includes('notebook') || normalizedType.includes('cuaderno')) {
+    const component = findComponent(['notebook']);
+    return component ? { period: firstPeriod, component } : null;
+  }
+  if (normalizedType.includes('homework') || normalizedType.includes('tarea')) {
+    const component = findComponent(['tasks', 'tareas']);
+    return component ? { period: firstPeriod, component } : null;
+  }
+  if (normalizedType.includes('worksheet') || normalizedType.includes('quiz')) {
+    const component = findComponent(['quizzes', 'quices']);
+    return component ? { period: firstPeriod, component } : null;
+  }
+  if (normalizedType.includes('participation') || normalizedType.includes('particip')) {
+    const component = findComponent(['participation', 'participacion']);
+    return component ? { period: firstPeriod, component } : null;
+  }
+  if (normalizedType.includes('activity') || normalizedType.includes('actividad')) {
+    const component = findComponent(['final_exam', 'examen']);
+    return component ? { period: firstPeriod, component } : null;
+  }
+
+  return null;
+}
+
+function inferPostGradebookAssignmentPayload(post, course, periods) {
+  if (!isEvaluativePostType(post?.type)) {
+    return null;
+  }
+
+  const postType = normalizePostType(post.type);
+  const topic = postType;
+  let templatePeriod = null;
+  let templateComponent = null;
+  let templateWeight = null;
+
+  for (const period of Array.isArray(periods) ? periods : []) {
+    for (const component of period.gradingComponents || []) {
+      for (const subcomponent of component.subcomponents || []) {
+        if (normalizeText(subcomponent.topic) === normalizeText(topic)) {
+          templatePeriod = period;
+          templateComponent = component;
+          templateWeight = Number(subcomponent.weight);
+          break;
+        }
+      }
+      if (templatePeriod) {
+        break;
+      }
+    }
+    if (templatePeriod) {
+      break;
+    }
+  }
+
+  if (!templatePeriod || !templateComponent) {
+    const resolved = resolveGradebookComponentForPostType(postType, periods);
+    if (!resolved) {
+      return null;
+    }
+    templatePeriod = resolved.period;
+    templateComponent = resolved.component;
+    const sameTopicSubs = (templateComponent.subcomponents || []).filter(
+      (subcomponent) => normalizeText(subcomponent.topic) === normalizeText(topic)
+    );
+    if (sameTopicSubs.length) {
+      templateWeight = sameTopicSubs.reduce((total, subcomponent) => total + Number(subcomponent.weight || 0), 0) / sameTopicSubs.length;
+    }
+  }
+
+  const weight = Number.isFinite(templateWeight) && templateWeight > 0 ? templateWeight : 5;
+  const deliveryDate = normalizeDateString(getTeacherCalendarPostDate(post));
+
+  return {
+    enabled: true,
+    academicPeriodKey: templatePeriod.key,
+    componentKey: templateComponent.key,
+    weight,
+    topic,
+    date: deliveryDate,
+    subcomponentName: normalizeText(post.title),
+    subcomponentDescription: normalizeText(post.body),
+  };
+}
+
 async function deleteGradeEntriesForPostTitle({ schoolId, courseId, postTitle, assignment = null }) {
   if (!courseId || !normalizeText(postTitle)) {
     return 0;
@@ -4467,6 +4598,23 @@ async function healArchivedAssignmentGradebook({ schoolId, teacherUserId, academ
         });
       }
     }
+
+    const activeTeacherPosts = (Array.isArray(posts) ? posts : []).filter(
+      (post) => normalizeText(post.status) !== 'archived' && isEvaluativePostType(post.type)
+    );
+    const hasEquivalentLivePost = activeTeacherPosts.some((post) => {
+      if (!relatedCourseIds.has(String(post.courseId || ''))) {
+        return false;
+      }
+      return assignmentTitleMatchesOption(post.title, {
+        subcomponentName: family.title,
+        label: family.title,
+      });
+    });
+    if (hasEquivalentLivePost) {
+      continue;
+    }
+
     for (const courseId of relatedCourseIds) {
       const course = await CampusCourse.findOne({ _id: courseId, schoolId, teacherUserId });
       if (!course) {
@@ -4511,21 +4659,33 @@ async function healOrphanPostLinkedGradebookAssignments({ schoolId, teacherUserI
     let strippedAny = false;
     const strippedAssignments = [];
 
-    options.forEach((option) => {
-      const hasMatchingPost = relevantPosts.some((post) => assignmentTitleMatchesOption(post.title, option));
+    for (const option of options) {
+      const hasMatchingPost = relevantPosts.some((post) => (
+        normalizeText(post.status) !== 'archived'
+        && assignmentTitleMatchesOption(post.title, option)
+      ));
       if (hasMatchingPost) {
-        return;
+        continue;
       }
 
       const subcomponent = findSubcomponentInPeriods(nextPeriods, option);
       if (!isPostLinkedGradebookSubcomponent(subcomponent)) {
-        return;
+        continue;
+      }
+
+      const gradeEntryCount = await countGradeEntriesForAssignment({
+        schoolId,
+        courseId: courseDoc._id,
+        assignment: option,
+      });
+      if (gradeEntryCount > 0) {
+        continue;
       }
 
       nextPeriods = stripAssignmentFromAcademicPeriods(nextPeriods, option);
       strippedAssignments.push(option);
       strippedAny = true;
-    });
+    }
 
     if (!strippedAny) {
       continue;
@@ -4544,6 +4704,77 @@ async function healOrphanPostLinkedGradebookAssignments({ schoolId, teacherUserI
         assignment,
       });
     }
+  }
+
+  return changed;
+}
+
+async function healMissingPostLinkedGradebookAssignments({ schoolId, teacherUserId, courses, posts }) {
+  const courseList = Array.isArray(courses) ? courses : [];
+  const teacherPosts = Array.isArray(posts) ? posts : [];
+  let changed = false;
+
+  for (const course of courseList) {
+    if (!course?._id) {
+      continue;
+    }
+
+    const courseDoc = await CampusCourse.findOne({ _id: course._id, schoolId, teacherUserId });
+    if (!courseDoc) {
+      continue;
+    }
+
+    const coursePosts = teacherPosts.filter((post) => (
+      String(post.courseId || '') === String(courseDoc._id)
+      && normalizeText(post.status) !== 'archived'
+    ));
+    if (!coursePosts.length) {
+      continue;
+    }
+
+    let periods = getCourseAcademicPeriods(courseDoc);
+    let courseChanged = false;
+
+    for (const post of coursePosts) {
+      if (!isEvaluativePostType(post.type)) {
+        continue;
+      }
+      if (resolveGradebookAssignmentForPostTitle(post.title, periods)) {
+        continue;
+      }
+
+      const payload = inferPostGradebookAssignmentPayload(post, courseDoc, periods);
+      if (!payload) {
+        continue;
+      }
+
+      const calendarDate = getTeacherCalendarPostDate(post);
+      const parsedDate = calendarDate ? new Date(calendarDate) : null;
+      const deliveryDate = parsedDate instanceof Date && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+      const audience = serializeCampusAssignmentAudience(post);
+      const result = buildPostGradebookAssignmentUpdate(
+        payload,
+        { ...courseDoc.toObject(), academicPeriods: periods },
+        post.title,
+        deliveryDate,
+        audience,
+      );
+      if (!result.ok || !result.periods) {
+        continue;
+      }
+
+      periods = result.periods;
+      courseChanged = true;
+    }
+
+    if (!courseChanged) {
+      continue;
+    }
+
+    courseDoc.academicPeriods = periods;
+    courseDoc.gradingComponents = periods[0]?.gradingComponents || [];
+    await courseDoc.save();
+    changed = true;
   }
 
   return changed;
@@ -4572,7 +4803,20 @@ async function syncTeacherGradebookAssignments({ schoolId, teacherUserId, academ
     posts,
   });
 
-  return archivedChanged || orphanChanged;
+  if (orphanChanged) {
+    courseList = await CampusCourse.find({ schoolId, teacherUserId, status: 'active' })
+      .sort({ gradeLevel: 1, section: 1, subject: 1, updatedAt: -1 })
+      .lean();
+  }
+
+  const missingChanged = await healMissingPostLinkedGradebookAssignments({
+    schoolId,
+    teacherUserId,
+    courses: courseList,
+    posts,
+  });
+
+  return archivedChanged || orphanChanged || missingChanged;
 }
 
 function isPostPendingGrading(post, academicPeriods, students) {
@@ -9057,3 +9301,4 @@ router.put('/coexistence-policy', async (req, res) => {
 module.exports = router;
 module.exports.syncTeacherCoursesFromAcademicStructure = syncTeacherCoursesFromAcademicStructure;
 module.exports.buildTeacherOverviewMetrics = buildTeacherOverviewMetrics;
+module.exports.syncTeacherGradebookAssignments = syncTeacherGradebookAssignments;
