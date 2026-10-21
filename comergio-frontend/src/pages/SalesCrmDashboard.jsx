@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  blockSalesAgendaSlot,
   createSalesEvent,
   createSalesProspect,
   deleteSalesEvent,
-  deleteSalesProspect,
   getSalesAgendaSettings,
   getSalesCrm,
   getSalesProspect,
   saveSalesAgendaSettings,
-  setSalesAgendaClosedDate,
   setSalesProspectStage,
   transitionSalesProspectStage,
-  unblockSalesAgendaSlot,
-  updateSalesProspect,
+  updateSalesEvent,
 } from '../services/salesCrm.service';
 import './AdmissionsDashboard.css';
 import './SalesCrmDashboard.css';
@@ -76,12 +72,38 @@ function getLocalDateKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
-function stageCode(templates, key) {
-  return templates.find((s) => s.key === key)?.code || '';
+function getStageCode(templates, key) {
+  const index = templates.findIndex((stage) => stage.key === key);
+  const template = templates[index];
+  return template?.code || (index >= 0 ? `E${index + 1}` : '-');
 }
 
-function stageLabel(templates, key) {
-  return templates.find((s) => s.key === key)?.label || key;
+function getStageLabel(templates, key) {
+  return templates.find((stage) => stage.key === key)?.label || key || '-';
+}
+
+function getAppointmentTypeLabel(type) {
+  return APPOINTMENT_TYPES.find((option) => option.value === type)?.label || '-';
+}
+
+function formatAppointmentDateTime(appointment = {}) {
+  if (appointment?.scheduledAt) return formatDateTime(appointment.scheduledAt);
+  if (appointment?.date && appointment?.time) return `${formatDate(appointment.date)} ${appointment.time}`;
+  return '-';
+}
+
+function whatsappHref(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) {
+    return '';
+  }
+  if (digits.startsWith('57') && digits.length >= 12) {
+    return `https://wa.me/${digits}`;
+  }
+  if (digits.length === 10) {
+    return `https://wa.me/57${digits}`;
+  }
+  return digits.length >= 10 ? `https://wa.me/57${digits.slice(-10)}` : '';
 }
 
 export default function SalesCrmDashboard() {
@@ -107,6 +129,7 @@ export default function SalesCrmDashboard() {
   const [agendaMonthDate, setAgendaMonthDate] = useState(() => new Date());
   const [selectedAgendaDate, setSelectedAgendaDate] = useState(getLocalDateKey());
   const [drilldownStage, setDrilldownStage] = useState('');
+  const [editingEventId, setEditingEventId] = useState('');
 
   const load = useCallback(async (nextFilters = filters, { keepSelection = true } = {}) => {
     setLoading(true);
@@ -188,6 +211,42 @@ export default function SalesCrmDashboard() {
   const closeProspect = () => {
     setSelectedProspect(null);
     setEventForm(emptyEventForm);
+    setEditingEventId('');
+  };
+
+  const updateEventForm = (key, value) => {
+    setEventForm((previous) => ({ ...previous, [key]: value }));
+  };
+
+  const clearEventForm = () => {
+    setEditingEventId('');
+    setEventForm({
+      ...emptyEventForm,
+      stageKey: selectedProspect?.currentStageKey || '',
+      contactEmail: selectedProspect?.contactEmail || '',
+    });
+  };
+
+  const editEvent = (eventItem) => {
+    setEditingEventId(eventItem._id || eventItem.id || '');
+    setEventForm({
+      title: eventItem.title || '',
+      notes: eventItem.notes || '',
+      stageKey: eventItem.stageKey || selectedProspect?.currentStageKey || '',
+      responsible: eventItem.responsible || '',
+      appointmentType: eventItem.appointment?.type || '',
+      appointmentDate: eventItem.appointment?.date || '',
+      appointmentTime: eventItem.appointment?.time || '',
+      contactEmail: eventItem.appointment?.contactEmail || selectedProspect?.contactEmail || '',
+    });
+  };
+
+  const jumpToStage = (stageKey) => {
+    if (!selectedProspect?.id) return;
+    runAction(
+      () => setSalesProspectStage(selectedProspect.id, stageKey),
+      'Etapa actualizada.',
+    );
   };
 
   const submitProspect = async (event) => {
@@ -202,10 +261,20 @@ export default function SalesCrmDashboard() {
   const submitEvent = async (event) => {
     event.preventDefault();
     if (!selectedProspect?.id) return;
+    const wasEditing = editingEventId;
     await runAction(async () => {
-      await createSalesEvent(selectedProspect.id, eventForm);
-      setEventForm({ ...emptyEventForm, stageKey: selectedProspect.currentStageKey, contactEmail: selectedProspect.contactEmail });
-    }, 'Evento registrado.');
+      if (wasEditing) {
+        await updateSalesEvent(selectedProspect.id, editingEventId, eventForm);
+      } else {
+        await createSalesEvent(selectedProspect.id, eventForm);
+      }
+      setEditingEventId('');
+      setEventForm({
+        ...emptyEventForm,
+        stageKey: selectedProspect.currentStageKey,
+        contactEmail: selectedProspect.contactEmail,
+      });
+    }, wasEditing ? 'Evento actualizado.' : 'Evento registrado.');
   };
 
   const removeEvent = (eventId) => {
@@ -277,8 +346,16 @@ export default function SalesCrmDashboard() {
     (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt),
   );
 
+  const activeStageKey = selectedProspect?.currentStageKey || stageTemplates[0]?.key || '';
+  const currentStageIndex = stageTemplates.findIndex((stage) => stage.key === activeStageKey);
+  const isFinalStage = activeStageKey === 'en-produccion';
+  const activeStageDisplay = `${getStageCode(stageTemplates, activeStageKey)} - ${getStageLabel(stageTemplates, activeStageKey)}`;
+  const showAppointmentScheduler = activeStageKey === 'agendado' || eventForm.stageKey === 'agendado';
+  const showProspectDetail = Boolean(selectedProspect);
+
   return (
-    <div className="sales-crm-root admissions-stage">
+    <div className="sales-crm-root admissions-stage admin-dashboard-main admissions-main">
+      {!showProspectDetail ? (
       <nav className="sales-crm-tabs" aria-label="CRM ventas">
         {VIEWS.map((item) => (
           <button
@@ -291,11 +368,12 @@ export default function SalesCrmDashboard() {
           </button>
         ))}
       </nav>
+      ) : null}
 
-      {message ? <p className="sa-message is-success">{message}</p> : null}
-      {error ? <p className="sa-message is-error">{error}</p> : null}
+      {message ? <p className="admissions-feedback is-success" role="status"><span>{message}</span></p> : null}
+      {error ? <p className="admissions-feedback is-error" role="alert"><span>{error}</span></p> : null}
 
-      {!selectedProspect && view === 'dashboard' && !drilldownStage ? (
+      {!showProspectDetail && view === 'dashboard' && !drilldownStage ? (
         <>
           <section className="admin-metrics-grid" aria-label="Métricas CRM">
             <article className="metric-card admin-metric-card"><span>Clientes</span><strong>{metrics.total || 0}</strong><p>Colegios en seguimiento.</p></article>
@@ -335,12 +413,12 @@ export default function SalesCrmDashboard() {
         </>
       ) : null}
 
-      {!selectedProspect && drilldownStage ? (
+      {!showProspectDetail && drilldownStage ? (
         <section className="admissions-stage-results">
           <div className="admissions-stage-toolbar">
             <button className="secondary-button admissions-back-button" type="button" onClick={() => setDrilldownStage('')}>← Volver</button>
           </div>
-          <h2>{stageLabel(stageTemplates, drilldownStage)}</h2>
+          <h2>{getStageLabel(stageTemplates, drilldownStage)}</h2>
           <div className="tracking-table-wrap">
             <table className="tracking-data-table">
               <thead><tr><th>Colegio</th><th>Ciudad</th><th>Contacto</th><th>Canal</th><th>Acción</th></tr></thead>
@@ -360,7 +438,7 @@ export default function SalesCrmDashboard() {
         </section>
       ) : null}
 
-      {!selectedProspect && view === 'clientes' ? (
+      {!showProspectDetail && view === 'clientes' ? (
         <section className="dashboard-card tracking-selector-panel">
           <div className="admin-panel-heading">
             <div><h2>Seguimiento clientes</h2><p>Colegios prospecto fuera de la demo automática.</p></div>
@@ -391,7 +469,7 @@ export default function SalesCrmDashboard() {
                     <td>{p.address || '—'}</td>
                     <td>{p.contactName}<br /><small>{p.contactEmail}</small></td>
                     <td>{p.contactMethodLabel || '—'}</td>
-                    <td>{stageLabel(stageTemplates, p.currentStageKey)}</td>
+                    <td>{getStageLabel(stageTemplates, p.currentStageKey)}</td>
                     <td><button className="tracking-icon-button" type="button" onClick={() => openProspect(p)}>→</button></td>
                   </tr>
                 ))}
@@ -401,7 +479,7 @@ export default function SalesCrmDashboard() {
         </section>
       ) : null}
 
-      {!selectedProspect && view === 'agenda' ? (
+      {!showProspectDetail && view === 'agenda' ? (
         <section className="dashboard-card admissions-agenda-card">
           <h2>Agenda comercial</h2>
           <form className="admissions-agenda-availability" onSubmit={saveAgenda}>
@@ -432,60 +510,141 @@ export default function SalesCrmDashboard() {
         </section>
       ) : null}
 
-      {selectedProspect ? (
-        <section className="dashboard-card admissions-detail-card sales-crm-detail">
-          <div className="admissions-detail-header">
+      {showProspectDetail && selectedProspect ? (
+        <section className="admissions-detail-page">
+          <div className="admissions-detail-toolbar">
             <button className="secondary-button admissions-back-button" type="button" onClick={closeProspect}>← Volver</button>
-            <div>
-              <h2>{selectedProspect.schoolName}</h2>
-              <p>{selectedProspect.city}{selectedProspect.address ? ` · ${selectedProspect.address}` : ''}</p>
-              <p>{selectedProspect.contactName} · {selectedProspect.contactEmail || selectedProspect.contactPhone || 'Sin contacto'}</p>
-              <p>Canal: {selectedProspect.contactMethodLabel || '—'} · Etapa: {stageCode(stageTemplates, selectedProspect.currentStageKey)} {stageLabel(stageTemplates, selectedProspect.currentStageKey)}</p>
-            </div>
-            <div className="sales-crm-stage-actions">
-              <button className="secondary-button" disabled={busy} type="button" onClick={() => moveStage('previous')}>Etapa anterior</button>
-              <button className="secondary-button" disabled={busy} type="button" onClick={() => moveStage('next')}>Siguiente etapa</button>
-            </div>
           </div>
 
-          <form className="admissions-event-form" onSubmit={submitEvent}>
-            <h3>Nuevo evento</h3>
-            <div className="tracking-search-grid">
-              <input placeholder="Título" required value={eventForm.title} onChange={(e) => setEventForm((f) => ({ ...f, title: e.target.value }))} />
-              <select value={eventForm.stageKey} onChange={(e) => setEventForm((f) => ({ ...f, stageKey: e.target.value }))}>
-                {stageTemplates.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-              </select>
-              <input placeholder="Responsable" value={eventForm.responsible} onChange={(e) => setEventForm((f) => ({ ...f, responsible: e.target.value }))} />
-              <textarea placeholder="Notas" rows={2} value={eventForm.notes} onChange={(e) => setEventForm((f) => ({ ...f, notes: e.target.value }))} />
-            </div>
-            <details className="sales-crm-appointment-details">
-              <summary>Cita (opcional)</summary>
-              <div className="tracking-search-grid">
-                <select value={eventForm.appointmentType} onChange={(e) => setEventForm((f) => ({ ...f, appointmentType: e.target.value }))}>
-                  <option value="">Sin cita</option>
-                  {APPOINTMENT_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                <input type="date" value={eventForm.appointmentDate} onChange={(e) => setEventForm((f) => ({ ...f, appointmentDate: e.target.value }))} />
-                <input type="time" value={eventForm.appointmentTime} onChange={(e) => setEventForm((f) => ({ ...f, appointmentTime: e.target.value }))} />
-                <input placeholder="Correo contacto" value={eventForm.contactEmail} onChange={(e) => setEventForm((f) => ({ ...f, contactEmail: e.target.value }))} />
+          <div className="admissions-detail-overview-grid">
+            <article className="dashboard-card admissions-detail-summary-card">
+              <div className="admissions-detail-title-block">
+                <h1>{selectedProspect.schoolName}</h1>
+                <span>{activeStageDisplay}</span>
+                <b>En seguimiento comercial</b>
               </div>
-            </details>
-            <button className="primary-button admissions-primary" disabled={busy} type="submit">Registrar evento</button>
-          </form>
-
-          <div className="admissions-events-list">
-            <h3>Historial</h3>
-            {detailEvents.length ? detailEvents.map((ev) => (
-              <article className="admissions-event-item" key={ev._id}>
-                <div>
-                  <strong>{ev.title}</strong>
-                  <span>{formatDateTime(ev.createdAt)} · {ev.stageLabel}</span>
-                  {ev.notes ? <p>{ev.notes}</p> : null}
-                  {ev.appointment?.date ? <p>Cita: {ev.appointment.date} {ev.appointment.time} · {ev.appointment.label}</p> : null}
+              <div className="admissions-detail-metadata">
+                <div><span>Ciudad</span><strong>{selectedProspect.city || '-'}</strong></div>
+                <div><span>Dirección</span><strong>{selectedProspect.address || '-'}</strong></div>
+                <div><span>Canal de contacto</span><strong>{selectedProspect.contactMethodLabel || '-'}</strong></div>
+                <div><span>Contacto</span><strong>{selectedProspect.contactName || '-'}</strong></div>
+                <div className="sales-crm-phone-field">
+                  <span>Teléfono</span>
+                  <strong>{selectedProspect.contactPhone || '-'}</strong>
+                  {whatsappHref(selectedProspect.contactPhone) ? (
+                    <a
+                      className="sales-crm-whatsapp-btn"
+                      href={whatsappHref(selectedProspect.contactPhone)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      WhatsApp
+                    </a>
+                  ) : null}
                 </div>
-                <button className="tracking-icon-button" type="button" onClick={() => removeEvent(ev._id)}>×</button>
-              </article>
-            )) : <p className="empty-state">Sin eventos.</p>}
+                <div><span>Correo</span><strong>{selectedProspect.contactEmail || '-'}</strong></div>
+                <div><span>Registrado</span><strong>{formatDate(selectedProspect.createdAt)}</strong></div>
+                <div><span>Última actualización</span><strong>{formatDateTime(selectedProspect.updatedAt)}</strong></div>
+              </div>
+            </article>
+
+            <article className="dashboard-card admissions-detail-transition-card">
+              <h2>Transición de etapa</h2>
+              <div className="admissions-detail-transition-actions">
+                <button className="secondary-button" disabled={busy || currentStageIndex <= 0} onClick={() => moveStage('previous')} type="button">← Anterior</button>
+                <button className="secondary-button" disabled={busy || isFinalStage} onClick={() => moveStage('next')} type="button">Siguiente →</button>
+              </div>
+              <p>Puedes avanzar o retroceder libremente. La etapa actual queda en proceso.</p>
+              <div className="admissions-detail-secondary-actions">
+                <button className="primary-button" disabled={busy || isFinalStage} onClick={() => jumpToStage('en-produccion')} type="button">Marcar en producción</button>
+              </div>
+            </article>
+          </div>
+
+          <article className="dashboard-card admissions-detail-timeline-card">
+            <h2>Timeline de etapas</h2>
+            <div className="admissions-detail-timeline-grid">
+              {stageTemplates.map((stage, index) => {
+                const isCompleted = isFinalStage ? index <= currentStageIndex : index < currentStageIndex;
+                const isCurrent = stage.key === activeStageKey && !isFinalStage;
+                return (
+                  <button
+                    key={stage.key}
+                    className={`admissions-detail-timeline-item ${isCompleted ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''} ${!isCompleted && !isCurrent ? 'is-pending' : ''}`}
+                    type="button"
+                    onClick={() => jumpToStage(stage.key)}
+                  >
+                    <span>{stage.code || `E${index + 1}`}</span>
+                    <small>{isCompleted ? 'Completada' : isCurrent ? 'En proceso' : 'Pendiente'}</small>
+                    <strong>{stage.label}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </article>
+
+          <div className="admissions-detail-work-grid">
+            <article className="dashboard-card admissions-detail-events-card">
+              <h2>Eventos recientes</h2>
+              <div className="tracking-table-wrap">
+                <table className="tracking-data-table admissions-detail-events-table">
+                  <thead>
+                    <tr><th>Fecha</th><th>Etapa</th><th>Título</th><th>Descripción</th><th>Cita</th><th>Acciones</th></tr>
+                  </thead>
+                  <tbody>
+                    {detailEvents.map((eventItem) => {
+                      const eventId = eventItem._id || eventItem.id || '';
+                      return (
+                        <tr key={eventId}>
+                          <td>{formatDateTime(eventItem.updatedAt || eventItem.createdAt)}</td>
+                          <td>{getStageCode(stageTemplates, eventItem.stageKey)}</td>
+                          <td>{eventItem.title}</td>
+                          <td>{eventItem.notes || '-'}</td>
+                          <td>
+                            {eventItem.appointment?.type
+                              ? `${eventItem.appointment.label || getAppointmentTypeLabel(eventItem.appointment.type)} · ${formatAppointmentDateTime(eventItem.appointment)}`
+                              : '-'}
+                          </td>
+                          <td className="tracking-actions-cell">
+                            <button onClick={() => editEvent(eventItem)} type="button">✎</button>
+                            <button onClick={() => removeEvent(eventId)} type="button">×</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!detailEvents.length ? <tr><td colSpan="6"><div className="empty-state">Sin eventos.</div></td></tr> : null}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <form className="dashboard-card admissions-detail-new-event-card" onSubmit={submitEvent}>
+              <h2>{editingEventId ? 'Editar evento' : 'Nuevo evento'}</h2>
+              <label><span>Título</span><input placeholder="Título" required={!showAppointmentScheduler} value={eventForm.title} onChange={(event) => updateEventForm('title', event.target.value)} /></label>
+              <label><span>Descripción</span><textarea placeholder="Descripción" value={eventForm.notes} onChange={(event) => updateEventForm('notes', event.target.value)} /></label>
+              <label>
+                <span>Etapa relacionada</span>
+                <select value={eventForm.stageKey || activeStageKey} onChange={(event) => updateEventForm('stageKey', event.target.value)}>
+                  {stageTemplates.map((stage) => (
+                    <option key={stage.key} value={stage.key}>{getStageCode(stageTemplates, stage.key)} - {stage.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label><span>Responsable</span><input placeholder="Responsable" value={eventForm.responsible} onChange={(event) => updateEventForm('responsible', event.target.value)} /></label>
+              {showAppointmentScheduler ? (
+                <fieldset className="admissions-appointment-fieldset">
+                  <legend>Agendar cita</legend>
+                  <label><span>Tipo de cita</span><select value={eventForm.appointmentType} onChange={(event) => updateEventForm('appointmentType', event.target.value)}><option value="">Selecciona una opción</option>{APPOINTMENT_TYPES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                  <label><span>Fecha</span><input type="date" value={eventForm.appointmentDate} onChange={(event) => updateEventForm('appointmentDate', event.target.value)} /></label>
+                  <label><span>Hora</span><input type="time" value={eventForm.appointmentTime} onChange={(event) => updateEventForm('appointmentTime', event.target.value)} /></label>
+                  <label><span>Correo de contacto</span><input type="email" placeholder="correo@colegio.com" value={eventForm.contactEmail} onChange={(event) => updateEventForm('contactEmail', event.target.value)} /></label>
+                </fieldset>
+              ) : null}
+              <div className="admissions-detail-event-actions">
+                <button className="secondary-button" type="button" onClick={clearEventForm}>Limpiar</button>
+                <button className="primary-button" disabled={busy} type="submit">{editingEventId ? 'Actualizar' : '+ Registrar'}</button>
+              </div>
+            </form>
           </div>
         </section>
       ) : null}

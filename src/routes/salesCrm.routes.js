@@ -28,6 +28,7 @@ const contactMethodLabels = {
   google: 'Google',
   recomendado: 'Recomendado',
   llamada: 'Llamada',
+  demo_web: 'Demo web (7 días)',
 };
 
 const appointmentTypeLabels = {

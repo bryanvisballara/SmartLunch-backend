@@ -18,6 +18,7 @@ const DemoScheduledPush = require('../models/demoScheduledPush.model');
 const { processStoredCampusMaterialFiles } = require('../utils/campusMaterialUpload');
 const { buildWelcomeImage, buildPensionImage, buildActivityImage } = require('./demoFeedImages.service');
 const { sendDemoWelcomeEmail } = require('./demoEmails.service');
+const { ensureSalesProspectFromDemoLead } = require('./salesCrmProspect.service');
 
 fs.readdirSync(path.join(__dirname, '../models'))
   .filter((file) => file.endsWith('.model.js'))
@@ -544,6 +545,10 @@ async function createDemoSchool({
     status: 'provisioning',
     requestIp,
     expiresAt: new Date(Date.now() + DEMO_LIFETIME_DAYS * 24 * 60 * 60 * 1000),
+  });
+
+  ensureSalesProspectFromDemoLead(lead).catch((error) => {
+    console.warn(`[SALES_CRM] demo prospect sync failed lead=${lead._id}: ${error.message || error}`);
   });
 
   const sourceDb = getRawDb(TEMPLATE_SCHOOL_ID);

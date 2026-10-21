@@ -92,3 +92,30 @@
   opacity: 0.7;
   font-size: 12px;
 }
+
+.admissions-detail-metadata .sales-crm-phone-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.sales-crm-whatsapp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.sales-crm-whatsapp-btn:hover {
+  background: #1ebe57;
+  color: #fff;
+}

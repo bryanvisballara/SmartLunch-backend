@@ -36,10 +36,11 @@ const salesProspectSchema = new mongoose.Schema({
   address: { type: String, default: '', trim: true },
   contactMethod: {
     type: String,
-    enum: ['instagram', 'meta', 'whatsapp', 'google', 'recomendado', 'llamada', ''],
+    enum: ['instagram', 'meta', 'whatsapp', 'google', 'recomendado', 'llamada', 'demo_web', ''],
     default: '',
     trim: true,
   },
+  demoLeadId: { type: mongoose.Schema.Types.ObjectId, ref: 'DemoLead', default: null, index: true },
   contactName: { type: String, default: '', trim: true },
   contactEmail: { type: String, default: '', trim: true, lowercase: true },
   contactPhone: { type: String, default: '', trim: true },
