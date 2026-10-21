@@ -6,6 +6,7 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const DeviceToken = require('../models/deviceToken.model');
 const Notification = require('../models/notification.model');
 const { queueCafeteriaPromoNotifications } = require('../services/notification.service');
+const { isDemoSchoolId, scheduleDemoWelcomePushes } = require('../services/demoSchool.service');
 
 const router = express.Router();
 
@@ -106,6 +107,12 @@ router.post('/device-tokens', async (req, res) => {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+
+    if (platform !== 'web' && isDemoSchoolId(schoolId)) {
+      scheduleDemoWelcomePushes({ schoolId, userId }).catch((error) => {
+        console.warn(`[DEMO_PUSH] schedule failed school=${schoolId}: ${error.message}`);
+      });
+    }
 
     return res.status(200).json(deviceToken);
   } catch (error) {

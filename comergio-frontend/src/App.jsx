@@ -19,6 +19,7 @@ import Login from './pages/Login';
 import StudentDevPreviewLogin from './pages/StudentDevPreviewLogin';
 import LandingPage from './pages/LandingPage';
 import SchoolPresentationPage from './pages/SchoolPresentationPage';
+import DemoSignupPage from './pages/DemoSignupPage';
 import POS from './pages/POS';
 import Wallet from './pages/Wallet';
 import Orders from './pages/Orders';
@@ -173,7 +174,7 @@ function App() {
   const isAuthenticated = Boolean(token && userRole);
   const isNativeShell = Capacitor.isNativePlatform();
   const isLandingRoute = normalizedPathname === '/landing';
-  const isPresentationRoute = normalizedPathname === '/' && !isNativeShell;
+  const isPresentationRoute = (normalizedPathname === '/' && !isNativeShell) || normalizedPathname === '/demo';
   const isPrimerContactoRoute = normalizedPathname === '/berckleyprimercontacto'
     || normalizedPathname === '/millenniumprimercontacto';
   const isInterviewRoute = normalizedPathname === '/interview';
@@ -567,6 +568,7 @@ function App() {
           <Route element={<Register />} path="/register" />
           <Route element={<RegisterVerifiedNext />} path="/register/next-step" />
           <Route element={<SchoolCreationWizard />} path="/schoolcreation" />
+          <Route element={<DemoSignupPage />} path="/demo" />
           <Route element={<BoldReturnBridge />} path="/bold-resultado" />
           <Route element={<EpaycoReturnBridge />} path="/epayco-resultado" />
           <Route

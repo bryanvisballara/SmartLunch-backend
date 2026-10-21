@@ -425,5 +425,6 @@ module.exports = {
   resolveSchoolDbName,
   runInControlDb,
   runWithSchoolContext,
+  shouldUseControlDbForSchool,
   slugifySchoolId,
 };

@@ -45,6 +45,7 @@ const ROUTE_FALLBACKS = [
   'cartera',
   'portal-institucional',
   'schoolcreation',
+  'demo',
   'bold-resultado',
   'meriendas/operator',
   'campus',

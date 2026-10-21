@@ -13,6 +13,7 @@ import {
 } from '../services/superAdmin.service';
 import { PortalBootSplash } from '../components/PortalBootSplash';
 import SuperAdminDianPanel from './SuperAdminDianPanel';
+import SuperAdminDemosPanel from './SuperAdminDemosPanel';
 import InformaPanel from '../components/comergio-academy/InformaPanel';
 import InformaDraftsPanel from '../components/comergio-academy/InformaDraftsPanel';
 import TriviaAdminPanel from '../components/games/trivia/TriviaAdminPanel';
@@ -26,6 +27,7 @@ import './SuperAdminPortal.css';
 const SA_SECTIONS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'schools', label: 'Colegios' },
+  { id: 'demos', label: 'Demos' },
   { id: 'publications', label: 'Publicaciones' },
   { id: 'trivia', label: 'Trivia global' },
   { id: 'billing', label: 'Facturación' },
@@ -168,6 +170,14 @@ function SaNavIcon({ id }) {
       <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
         <path d="M7 4.5h7.5L18 8v11.5H7V4.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
         <path d="M9.5 12h5M9.5 15.5h3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+  if (id === 'demos') {
+    return (
+      <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+        <path d="M8 4.5h8M10 4.5v5.2L5.6 17.4A1.5 1.5 0 0 0 6.9 19.5h10.2a1.5 1.5 0 0 0 1.3-2.1L14 9.7V4.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+        <path d="M7.8 14.5h8.4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
       </svg>
     );
   }
@@ -669,6 +679,7 @@ function SuperAdminPortal() {
             <p>
               {activeSection === 'dashboard' && 'KPIs consolidados de toda la red de colegios.'}
               {activeSection === 'schools' && 'Consulta, edita y administra cada colegio suscrito.'}
+              {activeSection === 'demos' && 'Leads que crearon un colegio de prueba desde la página web.'}
               {activeSection === 'publications' && 'Borradores y publicaciones de Comergio Informa.'}
               {activeSection === 'trivia' && 'Preguntas globales y moderación de Comergio Trivia.'}
               {activeSection === 'billing' && 'Proyección de cobro y facturación electrónica por colegio.'}
@@ -1173,6 +1184,8 @@ function SuperAdminPortal() {
               <InformaPanel />
             </section>
           ) : null}
+
+          {activeSection === 'demos' ? <SuperAdminDemosPanel /> : null}
 
           {activeSection === 'trivia' ? (
             <TriviaAdminPanel api={triviaAdminApi} />

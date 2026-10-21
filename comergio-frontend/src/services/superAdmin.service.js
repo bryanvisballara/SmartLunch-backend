@@ -28,6 +28,12 @@ export const saveSuperAdminRectoriaUser = (schoolId, data) => (
   api.post(`/super-admin/schools/${encodeURIComponent(schoolId)}/rectoria`, data)
 );
 
+export const listSuperAdminDemos = () => api.get('/super-admin/demos');
+
+export const deleteSuperAdminDemo = (leadId) => (
+  api.delete(`/super-admin/demos/${encodeURIComponent(leadId)}`)
+);
+
 export const getDianConfig = () => api.get('/super-admin/dian/config');
 
 export const saveDianConfig = (data) => api.put('/super-admin/dian/config', data);

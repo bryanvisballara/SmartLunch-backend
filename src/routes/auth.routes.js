@@ -28,6 +28,7 @@ const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.mod
 const { normalizeStaffFeatures } = require('../utils/staffFeatures');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
 const { resolvePrimaryParentEmailForStudent } = require('../utils/studentParentContact');
+const { isDemoSchoolId, recordDemoLogin } = require('../services/demoSchool.service');
 const {
   signAccessToken,
   createRefreshToken,
@@ -1069,6 +1070,10 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(String(password).trim(), user.passwordHash);
     if (!match) {
       return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    if (isDemoSchoolId(user.schoolId)) {
+      recordDemoLogin({ schoolId: user.schoolId, userId: user._id }).catch(() => {});
     }
 
     return res.status(200).json(await issueAuthResponse(user));

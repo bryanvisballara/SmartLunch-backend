@@ -18,6 +18,8 @@ const { normalizeStaffFeatures } = require('../utils/staffFeatures');
 const { normalizeStudentFeatures } = require('../utils/studentFeatures');
 const dianInvoicingService = require('../services/dianInvoicing.service');
 const { sendBrevoEmail } = require('../services/brevo.service');
+const DemoLead = require('../models/demoLead.model');
+const { deleteDemo, isDemoSchoolId } = require('../services/demoSchool.service');
 const multer = require('multer');
 
 const NATIVE_APP_PLATFORMS = ['ios', 'android'];
@@ -264,9 +266,47 @@ async function getSchoolSummary(tenantContext) {
   });
 }
 
+router.get('/demos', async (_req, res) => {
+  try {
+    const leads = await DemoLead.find({}).sort({ createdAt: -1 }).limit(500).lean();
+    return res.status(200).json({
+      demos: leads.map((lead) => ({
+        _id: String(lead._id),
+        schoolName: lead.schoolName,
+        city: lead.city,
+        contactName: lead.contactName,
+        email: lead.email,
+        phone: lead.phone,
+        children: (lead.children || []).map((child) => ({ name: child.name, gradeLabel: child.gradeLabel })),
+        demoSchoolId: lead.demoSchoolId,
+        status: lead.status,
+        errorMessage: lead.errorMessage || '',
+        loginCount: lead.loginCount || 0,
+        firstLoginAt: lead.firstLoginAt,
+        lastLoginAt: lead.lastLoginAt,
+        expiresAt: lead.expiresAt,
+        deletedAt: lead.deletedAt,
+        createdAt: lead.createdAt,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.delete('/demos/:leadId', async (req, res) => {
+  try {
+    const lead = await deleteDemo(req.params.leadId, { reason: 'deleted' });
+    return res.status(200).json({ ok: true, status: lead?.status || 'deleted' });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message });
+  }
+});
+
 router.get('/summary', async (_req, res) => {
   try {
-    const tenantContexts = await listTenantSchoolContexts();
+    const tenantContexts = (await listTenantSchoolContexts())
+      .filter((context) => !isDemoSchoolId(context.schoolId));
     const schools = await Promise.all(tenantContexts.map(getSchoolSummary));
     const sortedSchools = schools.sort((left, right) => left.schoolName.localeCompare(right.schoolName, 'es', { sensitivity: 'base' }));
     const totals = sortedSchools.reduce((accumulator, school) => {

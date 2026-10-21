@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import colibriLogo from '../assets/colibrisinfondo.png';
 import './SchoolPresentationPage.css';
 
-const CREATE_SCHOOL_PATH = '/schoolcreation';
+const DEMO_PATH = '/demo';
 const WHATSAPP_HREF = `https://wa.me/573016214806?text=${encodeURIComponent('Hola, quiero conocer Comergio para mi colegio.')}`;
 const APP_STORE_URL = 'https://apps.apple.com/app/id6760672707';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.comergio.app&hl=es_CO';
@@ -270,9 +270,9 @@ function BrandMark({ compact = false }) {
   );
 }
 
-function CreateCta({ className = '', children = 'Crea tu colegio ahora' }) {
+function CreateCta({ className = '', children = 'Prueba la demo gratis' }) {
   return (
-    <Link className={`sp-cta ${className}`.trim()} to={CREATE_SCHOOL_PATH}>
+    <Link className={`sp-cta ${className}`.trim()} to={DEMO_PATH}>
       {children}
     </Link>
   );
@@ -508,6 +508,16 @@ export default function SchoolPresentationPage() {
               desde una solución diseñada para las necesidades reales de los colegios.
             </p>
           </header>
+          <figure className="sp-value__visual" data-reveal="up">
+            <img
+              src="/presentation/todo-conectado-un-solo-lugar.jpg"
+              alt="Todo conectado en un solo lugar: integraciones educativas y la app Comergio para familias y colegio."
+              width={1920}
+              height={1080}
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
           <ul className="sp-value__grid" data-reveal-stagger>
             {VALUE_POINTS.map((item, index) => (
               <li key={item.title} data-reveal-item style={{ '--i': index }}>
