@@ -37,6 +37,15 @@ const demoLeadSchema = new mongoose.Schema(
       default: [],
     },
     followUpUnsubscribedAt: { type: Date, default: null },
+    feedPosts: {
+      type: [{
+        key: String,
+        communicationId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        publishedAt: Date,
+        commentsAdded: { type: Number, default: 0 },
+      }],
+      default: [],
+    },
     expiresAt: { type: Date, default: null, index: true },
     deletedAt: { type: Date, default: null },
   },

@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-// One-off: generates the base photos used by every demo school feed.
+// One-off: generates the photos shared by every demo school feed.
+//   node scripts/generateDemoFeedImages.js            -> creation-day base photos (src/assets/demo-feed)
+//   node scripts/generateDemoFeedImages.js welcome.jpg -> regenerate a single creation-day photo
+//   node scripts/generateDemoFeedImages.js --daily     -> missing daily-post photos (public/assets/demo-feed)
 // School-specific text is drawn on top at demo creation (demoFeedImages.service.js).
 require('dotenv').config();
 const fs = require('fs/promises');
 const path = require('path');
 const sharp = require('sharp');
 const OpenAI = require('openai');
+const { DEMO_DAILY_POSTS, buildImagePrompt } = require('../src/services/demoDailyPosts');
 
 const OUTPUT_DIR = path.join(__dirname, '../src/assets/demo-feed');
+const DAILY_OUTPUT_DIR = path.join(__dirname, '../public/assets/demo-feed');
+const DAILY_CONCURRENCY = 4;
 
 const IMAGES = [
   {
@@ -24,6 +30,50 @@ const IMAGES = [
   },
 ];
 
+async function generateImage(client, model, { prompt, outputPath }) {
+  const response = await client.images.generate({
+    model,
+    prompt,
+    n: 1,
+    size: '1536x1024',
+  });
+  const item = response?.data?.[0];
+  if (!item?.b64_json) {
+    throw new Error(`No image returned for ${path.basename(outputPath)}`);
+  }
+  const output = await sharp(Buffer.from(item.b64_json, 'base64'))
+    .resize({ width: 1280, withoutEnlargement: true })
+    .jpeg({ quality: 84, mozjpeg: true })
+    .toBuffer();
+  await fs.writeFile(outputPath, output);
+  console.log(`[demo-feed] saved ${path.basename(outputPath)} (${Math.round(output.length / 1024)} KB)`);
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function generateDailyImages(client, model) {
+  await fs.mkdir(DAILY_OUTPUT_DIR, { recursive: true });
+  const pending = [];
+  for (const post of DEMO_DAILY_POSTS) {
+    const outputPath = path.join(DAILY_OUTPUT_DIR, post.image);
+    if (!(await fileExists(outputPath))) {
+      pending.push({ prompt: buildImagePrompt(post), outputPath });
+    }
+  }
+  console.log(`[demo-feed] ${pending.length} daily images to generate with ${model}`);
+
+  for (let index = 0; index < pending.length; index += DAILY_CONCURRENCY) {
+    await Promise.all(pending.slice(index, index + DAILY_CONCURRENCY).map((job) => generateImage(client, model, job)));
+  }
+}
+
 async function main() {
   const apiKey = String(process.env.OPENAI_API_KEY || '').trim();
   if (!apiKey) {
@@ -33,27 +83,17 @@ async function main() {
   const client = new OpenAI({ apiKey });
   const model = String(process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1').trim();
   const only = process.argv[2];
-  await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
+  if (only === '--daily') {
+    await generateDailyImages(client, model);
+    return;
+  }
+
+  await fs.mkdir(OUTPUT_DIR, { recursive: true });
   for (const image of IMAGES) {
     if (only && image.file !== only) continue;
     console.log(`[demo-feed] generating ${image.file} with ${model}`);
-    const response = await client.images.generate({
-      model,
-      prompt: image.prompt,
-      n: 1,
-      size: '1536x1024',
-    });
-    const item = response?.data?.[0];
-    if (!item?.b64_json) {
-      throw new Error(`No image returned for ${image.file}`);
-    }
-
-    const output = await sharp(Buffer.from(item.b64_json, 'base64'))
-      .jpeg({ quality: 86, mozjpeg: true })
-      .toBuffer();
-    await fs.writeFile(path.join(OUTPUT_DIR, image.file), output);
-    console.log(`[demo-feed] saved ${image.file} (${Math.round(output.length / 1024)} KB)`);
+    await generateImage(client, model, { prompt: image.prompt, outputPath: path.join(OUTPUT_DIR, image.file) });
   }
 }
 

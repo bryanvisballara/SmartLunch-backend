@@ -5,10 +5,12 @@ const DeviceToken = require('../models/deviceToken.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
 const { deleteDemo } = require('../services/demoSchool.service');
 const { FOLLOW_UP_DAYS, buildUnsubscribeUrl, sendDemoFollowUpEmail } = require('../services/demoEmails.service');
+const { bogotaDayNumber, bogotaHour, publishDueDemoFeedPosts } = require('../services/demoDailyFeed.service');
 
 const PUSH_POLL_INTERVAL_MS = Number(process.env.DEMO_PUSH_POLL_MS || 15 * 1000);
 const EXPIRY_POLL_INTERVAL_MS = Number(process.env.DEMO_EXPIRY_POLL_MS || 60 * 60 * 1000);
 const FOLLOW_UP_POLL_INTERVAL_MS = Number(process.env.DEMO_FOLLOW_UP_POLL_MS || 10 * 60 * 1000);
+const FEED_POLL_INTERVAL_MS = Number(process.env.DEMO_FEED_POLL_MS || 60 * 1000);
 const MAX_PUSH_ATTEMPTS = 5;
 const ENABLED = String(process.env.DEMO_WORKER_ENABLED || 'true').trim().toLowerCase() !== 'false';
 
@@ -18,6 +20,8 @@ let pushInProgress = false;
 let expiryInProgress = false;
 let followUpInProgress = false;
 let followUpTimer = null;
+let feedInProgress = false;
+let feedTimer = null;
 
 async function sendDuePushes() {
   if (pushInProgress) {
@@ -108,14 +112,19 @@ async function expireOldDemos() {
 }
 
 const FOLLOW_UP_SEND_HOUR = 9;
-const BOGOTA_OFFSET_MS = -5 * 60 * 60 * 1000;
 
-function bogotaDayNumber(date) {
-  return Math.floor((new Date(date).getTime() + BOGOTA_OFFSET_MS) / (24 * 60 * 60 * 1000));
-}
-
-function bogotaHour(date) {
-  return new Date(new Date(date).getTime() + BOGOTA_OFFSET_MS).getUTCHours();
+async function publishFeedPosts() {
+  if (feedInProgress) {
+    return;
+  }
+  feedInProgress = true;
+  try {
+    await publishDueDemoFeedPosts();
+  } catch (error) {
+    console.warn(`[DEMO_FEED] cycle failed: ${error.message || error}`);
+  } finally {
+    feedInProgress = false;
+  }
 }
 
 async function sendDueFollowUpEmails() {
@@ -171,14 +180,16 @@ function startDemoSchoolWorker() {
     return;
   }
 
-  console.info('[DEMO] worker started (scheduled pushes + follow-up emails + expiry)');
+  console.info('[DEMO] worker started (scheduled pushes + daily feed + follow-up emails + expiry)');
   sendDuePushes();
   expireOldDemos();
   sendDueFollowUpEmails();
+  publishFeedPosts();
   pushTimer = setInterval(sendDuePushes, PUSH_POLL_INTERVAL_MS);
   expiryTimer = setInterval(expireOldDemos, EXPIRY_POLL_INTERVAL_MS);
   followUpTimer = setInterval(sendDueFollowUpEmails, FOLLOW_UP_POLL_INTERVAL_MS);
-  [pushTimer, expiryTimer, followUpTimer].forEach((timer) => {
+  feedTimer = setInterval(publishFeedPosts, FEED_POLL_INTERVAL_MS);
+  [pushTimer, expiryTimer, followUpTimer, feedTimer].forEach((timer) => {
     if (typeof timer.unref === 'function') {
       timer.unref();
     }
@@ -189,5 +200,6 @@ module.exports = {
   startDemoSchoolWorker,
   sendDuePushes,
   sendDueFollowUpEmails,
+  publishFeedPosts,
   expireOldDemos,
 };
