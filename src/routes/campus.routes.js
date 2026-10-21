@@ -1598,7 +1598,7 @@ function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
       const componentScoreItems = [];
 
       const scores = (period.gradingComponents || []).map((component) => {
-        const subcomponents = (component.subcomponents || []).map((subcomponent) => {
+        const structuredSubcomponents = (component.subcomponents || []).map((subcomponent) => {
           const entry = entriesByStudentAndComponent.get(
             `${studentId}:${period.key}:${buildStoredGradeComponentKey(component.key, subcomponent.key)}`
           );
@@ -1618,6 +1618,50 @@ function buildCourseStudentRows(students, academicPeriods, gradeEntries = []) {
             updatedAt: entry?.updatedAt || null,
           };
         });
+
+        const structuredSubcomponentKeys = new Set(
+          structuredSubcomponents.map((subcomponent) => slugifyComponentKey(subcomponent.subcomponentKey)).filter(Boolean)
+        );
+        const componentPrefix = `${normalizeText(component.key)}::`;
+        const orphanSubcomponents = (entriesByStudentId.get(studentId) || []).reduce((items, entry) => {
+          if ((normalizeText(entry.academicPeriodKey) || 'period_1') !== period.key) {
+            return items;
+          }
+
+          const entryComponentKey = normalizeText(entry.componentKey);
+          const entrySubcomponentKey = normalizeText(entry.subcomponentKey);
+          let resolvedSubcomponentKey = entrySubcomponentKey;
+
+          if (entryComponentKey.startsWith(componentPrefix)) {
+            resolvedSubcomponentKey = entryComponentKey.slice(componentPrefix.length) || entrySubcomponentKey;
+          } else if (entryComponentKey !== normalizeText(component.key)) {
+            return items;
+          }
+
+          const normalizedSubcomponentKey = slugifyComponentKey(resolvedSubcomponentKey);
+          if (!normalizedSubcomponentKey || structuredSubcomponentKeys.has(normalizedSubcomponentKey)) {
+            return items;
+          }
+
+          structuredSubcomponentKeys.add(normalizedSubcomponentKey);
+          items.push({
+            subcomponentKey: resolvedSubcomponentKey,
+            subcomponentName: humanizeSubcomponentKeyLabel(resolvedSubcomponentKey),
+            weight: 0,
+            date: '',
+            topic: '',
+            description: '',
+            targetType: 'course',
+            targetStudentIds: [],
+            score: Number(entry.score),
+            feedback: normalizeText(entry?.feedback),
+            gradedAt: entry?.gradedAt || null,
+            updatedAt: entry?.updatedAt || null,
+          });
+          return items;
+        }, []);
+
+        const subcomponents = [...structuredSubcomponents, ...orphanSubcomponents];
 
         const legacyComponentEntry = entriesByStudentAndComponent.get(`${studentId}:${period.key}:${component.key}`);
         let score = subcomponents.length > 0
@@ -4051,6 +4095,24 @@ function resolveGradebookAssignmentForPostTitle(title, periods) {
   return resolveGradebookAssignmentsForPostTitle(title, periods)[0] || null;
 }
 
+function periodKeysMatch(storedPeriodKey, requestedPeriodKey) {
+  const stored = slugifyComponentKey(storedPeriodKey) || normalizeText(storedPeriodKey);
+  const requested = slugifyComponentKey(requestedPeriodKey) || normalizeText(requestedPeriodKey);
+  return Boolean(stored && requested && stored === requested);
+}
+
+function componentKeysMatch(storedComponentKey, requestedComponentKey) {
+  const stored = slugifyComponentKey(storedComponentKey) || normalizeText(storedComponentKey);
+  const requested = slugifyComponentKey(requestedComponentKey) || normalizeText(requestedComponentKey);
+  return Boolean(stored && requested && stored === requested);
+}
+
+function subcomponentKeysMatch(storedSubcomponentKey, requestedSubcomponentKey) {
+  const stored = slugifyComponentKey(storedSubcomponentKey) || normalizeText(storedSubcomponentKey);
+  const requested = slugifyComponentKey(requestedSubcomponentKey) || normalizeText(requestedSubcomponentKey);
+  return Boolean(stored && requested && stored === requested);
+}
+
 function findSubcomponentInPeriods(periods, assignment) {
   if (!assignment) {
     return null;
@@ -4061,20 +4123,56 @@ function findSubcomponentInPeriods(periods, assignment) {
   const subcomponentKey = normalizeText(assignment.subcomponentKey);
 
   for (const period of Array.isArray(periods) ? periods : []) {
-    if (normalizeText(period.key) !== periodKey) {
+    if (!periodKeysMatch(period.key, periodKey)) {
       continue;
     }
     for (const component of period.gradingComponents || []) {
-      if (normalizeText(component.key) !== componentKey) {
+      if (!componentKeysMatch(component.key, componentKey)) {
         continue;
       }
       return (component.subcomponents || []).find(
-        (subcomponent) => normalizeText(subcomponent.key) === subcomponentKey
+        (subcomponent) => subcomponentKeysMatch(subcomponent.key, subcomponentKey)
       ) || null;
     }
   }
 
   return null;
+}
+
+function resolveCanonicalGradeStructureKeys(periods, keys) {
+  const resolved = resolveGradeEntryStructureKeys({
+    academicPeriodKey: keys?.periodKey || keys?.academicPeriodKey,
+    componentKey: keys?.componentKey,
+    subcomponentKey: keys?.subcomponentKey,
+  });
+
+  const matchedSubcomponent = findSubcomponentInPeriods(periods, {
+    periodKey: resolved.periodKey,
+    componentKey: resolved.componentKey,
+    subcomponentKey: resolved.subcomponentKey,
+  });
+
+  if (!matchedSubcomponent) {
+    return resolved;
+  }
+
+  for (const period of Array.isArray(periods) ? periods : []) {
+    if (!periodKeysMatch(period.key, resolved.periodKey)) {
+      continue;
+    }
+    for (const component of period.gradingComponents || []) {
+      if (!componentKeysMatch(component.key, resolved.componentKey)) {
+        continue;
+      }
+      return {
+        periodKey: normalizeText(period.key),
+        componentKey: normalizeText(component.key),
+        subcomponentKey: normalizeText(matchedSubcomponent.key),
+      };
+    }
+  }
+
+  return resolved;
 }
 
 function isPostLinkedGradebookSubcomponent(subcomponent) {
@@ -6208,56 +6306,131 @@ router.post('/teacher/courses/:courseId/students/:studentId/grades', requireCamp
 
     const gradingContext = await loadCampusGradingContext(schoolId);
     const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, course);
-    const allowedComponents = new Map();
-    for (const period of getCourseAcademicPeriods(course)) {
-      for (const component of period.gradingComponents || []) {
-        allowedComponents.set(`${normalizeText(period.key)}:${normalizeText(component.key)}`, {
-          periodKey: normalizeText(period.key),
-          componentKey: normalizeText(component.key),
-          subcomponents: Array.isArray(component.subcomponents)
-            ? component.subcomponents.map((subcomponent) => ({ key: normalizeText(subcomponent.key) }))
-            : [],
-        });
+    let coursePeriods = getCourseAcademicPeriods(course);
+    let courseStructureChanged = false;
+
+    for (const gradeItem of incomingGrades) {
+      const resolvedKeys = resolveGradeEntryStructureKeys({
+        academicPeriodKey: gradeItem?.academicPeriodKey,
+        componentKey: gradeItem?.componentKey,
+        subcomponentKey: gradeItem?.subcomponentKey,
+      });
+
+      if (!resolvedKeys.subcomponentKey) {
+        continue;
+      }
+
+      if (subcomponentExistsInPeriods(coursePeriods, resolvedKeys.periodKey, resolvedKeys.componentKey, resolvedKeys.subcomponentKey)) {
+        continue;
+      }
+
+      const ensured = ensureGradeEntrySubcomponentInPeriods(coursePeriods, resolvedKeys, {
+        gradedAt: new Date(),
+      });
+      if (ensured.changed) {
+        coursePeriods = ensured.periods;
+        courseStructureChanged = true;
       }
     }
+
+    if (courseStructureChanged) {
+      const normalizedPeriods = normalizeAcademicPeriods(coursePeriods, { allowIncompleteWeights: true });
+      if (normalizedPeriods.ok) {
+        course.academicPeriods = normalizedPeriods.periods;
+        course.gradingComponents = normalizedPeriods.periods[0]?.gradingComponents || [];
+        await course.save();
+        coursePeriods = normalizedPeriods.periods;
+      }
+    }
+
+    const buildAllowedComponentsMap = (periods) => {
+      const allowedComponents = new Map();
+      for (const period of periods) {
+        for (const component of period.gradingComponents || []) {
+          allowedComponents.set(`${normalizeText(period.key)}:${normalizeText(component.key)}`, {
+            periodKey: normalizeText(period.key),
+            componentKey: normalizeText(component.key),
+            subcomponents: Array.isArray(component.subcomponents)
+              ? component.subcomponents.map((subcomponent) => ({ key: normalizeText(subcomponent.key) }))
+              : [],
+          });
+        }
+      }
+      return allowedComponents;
+    };
+
+    let allowedComponents = buildAllowedComponentsMap(coursePeriods);
     const normalizedGrades = [];
 
     for (const gradeItem of incomingGrades) {
-      const academicPeriodKey = normalizeText(gradeItem?.academicPeriodKey) || normalizeText(getCourseAcademicPeriods(course)[0]?.key) || 'period_1';
-      const componentKey = normalizeText(gradeItem?.componentKey);
-      const subcomponentKey = normalizeText(gradeItem?.subcomponentKey);
+      const canonicalKeys = resolveCanonicalGradeStructureKeys(coursePeriods, {
+        academicPeriodKey: gradeItem?.academicPeriodKey,
+        componentKey: gradeItem?.componentKey,
+        subcomponentKey: gradeItem?.subcomponentKey,
+      });
+      const academicPeriodKey = canonicalKeys.periodKey
+        || normalizeText(gradeItem?.academicPeriodKey)
+        || normalizeText(coursePeriods[0]?.key)
+        || 'period_1';
+      const componentKey = canonicalKeys.componentKey || normalizeText(gradeItem?.componentKey);
+      const subcomponentKey = canonicalKeys.subcomponentKey || normalizeText(gradeItem?.subcomponentKey);
       const score = Number(gradeItem?.score);
       const feedback = normalizeText(gradeItem?.feedback);
-      const allowedComponent = allowedComponents.get(`${academicPeriodKey}:${componentKey}`);
+      let allowedComponent = allowedComponents.get(`${academicPeriodKey}:${componentKey}`);
+
+      if (!allowedComponent) {
+        for (const [mapKey, componentConfig] of allowedComponents.entries()) {
+          const [mapPeriodKey, mapComponentKey] = mapKey.split(':');
+          if (periodKeysMatch(mapPeriodKey, academicPeriodKey) && componentKeysMatch(mapComponentKey, componentKey)) {
+            allowedComponent = componentConfig;
+            break;
+          }
+        }
+      }
 
       if (!allowedComponent) {
         return res.status(400).json({ message: `Invalid component ${componentKey || 'unknown'}` });
       }
 
-      if ((allowedComponent.subcomponents || []).length > 0) {
-        if (!subcomponentKey) {
-          return res.status(400).json({ message: `Component ${componentKey} requires a valid subcomponent` });
-        }
-
-        if (!(allowedComponent.subcomponents || []).some((subcomponent) => subcomponent.key === subcomponentKey)) {
-          return res.status(400).json({ message: `Invalid subcomponent ${subcomponentKey}` });
-        }
-      } else if (subcomponentKey) {
-        return res.status(400).json({ message: `Component ${componentKey} does not accept subcomponent grades` });
-      }
+      const resolvedPeriodKey = allowedComponent.periodKey || academicPeriodKey;
+      const resolvedComponentKey = allowedComponent.componentKey || componentKey;
 
       if (!Number.isFinite(score) || score < gradingScale.minScore || score > gradingScale.maxScore) {
         return res.status(400).json({ message: `Each score must be between ${gradingScale.minScore} and ${gradingScale.maxScore}` });
       }
 
-      normalizedGrades.push({
-        academicPeriodKey,
-        componentKey,
-        subcomponentKey,
-        storedComponentKey: buildStoredGradeComponentKey(componentKey, subcomponentKey),
-        score,
-        feedback,
-      });
+      if ((allowedComponent.subcomponents || []).length > 0) {
+        if (!subcomponentKey) {
+          return res.status(400).json({ message: `Component ${resolvedComponentKey} requires a valid subcomponent` });
+        }
+
+        const matchedSubcomponent = (allowedComponent.subcomponents || []).find(
+          (subcomponent) => subcomponentKeysMatch(subcomponent.key, subcomponentKey)
+        );
+        if (!matchedSubcomponent) {
+          return res.status(400).json({ message: `Invalid subcomponent ${subcomponentKey}` });
+        }
+
+        normalizedGrades.push({
+          academicPeriodKey: resolvedPeriodKey,
+          componentKey: resolvedComponentKey,
+          subcomponentKey: normalizeText(matchedSubcomponent.key),
+          storedComponentKey: buildStoredGradeComponentKey(resolvedComponentKey, matchedSubcomponent.key),
+          score,
+          feedback,
+        });
+      } else if (subcomponentKey) {
+        return res.status(400).json({ message: `Component ${resolvedComponentKey} does not accept subcomponent grades` });
+      } else {
+        normalizedGrades.push({
+          academicPeriodKey: resolvedPeriodKey,
+          componentKey: resolvedComponentKey,
+          subcomponentKey: '',
+          storedComponentKey: buildStoredGradeComponentKey(resolvedComponentKey, ''),
+          score,
+          feedback,
+        });
+      }
     }
 
     await Promise.all(

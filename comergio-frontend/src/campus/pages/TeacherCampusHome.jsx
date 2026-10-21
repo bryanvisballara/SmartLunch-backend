@@ -11380,9 +11380,13 @@ function TeacherCampusHome({ forcePreview = false }) {
                                           </tr>
                                         </thead>
                                         <tbody>
-                                          {selectedGradebookAssignmentStudents
+                                          {workspaceStudents
                                             .filter(student => !gradebookSearch || student.name.toLowerCase().includes(gradebookSearch.toLowerCase()))
                                             .map((student) => {
+                                              const assignmentApplies = campusAudienceAppliesToStudent(
+                                                selectedGradebookAssignmentAudience,
+                                                student.studentId
+                                              );
                                               const draftKey = buildGradeDraftKey(
                                                 selectedGradebookAssignment.periodKey,
                                                 selectedGradebookAssignment.componentKey,
@@ -11395,10 +11399,16 @@ function TeacherCampusHome({ forcePreview = false }) {
                                               const studentFinalScore = calculateFinalScore(studentPeriods);
 
                                               return (
-                                                <tr key={`${selectedGradebookAssignment.key}-${student.studentId}`}>
+                                                <tr
+                                                  className={assignmentApplies ? undefined : 'campus-teacher__assignment-table-row--outside-audience'}
+                                                  key={`${selectedGradebookAssignment.key}-${student.studentId}`}
+                                                >
                                                   <td>
                                                     <strong>{student.name}</strong>
                                                     <span>{student.grade}</span>
+                                                    {!assignmentApplies ? (
+                                                      <span className="campus-panel__meta">Fuera de la audiencia de esta asignación</span>
+                                                    ) : null}
                                                   </td>
                                                   <td>
                                                     {studentFinalScore === null || studentFinalScore === undefined
@@ -11408,6 +11418,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                   <td>
                                                     {selectedCourseGradingScale.qualitativeOnly ? (
                                                       <select
+                                                        disabled={!assignmentApplies}
                                                         value={resolveTeacherPerformanceLevel(
                                                           studentDrafts?.[student.studentId]?.[draftKey]?.score,
                                                           selectedCourseGradingScale
@@ -11432,6 +11443,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                       </select>
                                                     ) : (
                                                       <input
+                                                        disabled={!assignmentApplies}
                                                         max={selectedCourseGradingScale.maxScore}
                                                         min={selectedCourseGradingScale.minScore}
                                                         step="0.1"
@@ -11450,6 +11462,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                                                   </td>
                                                   <td>
                                                     <textarea
+                                                      disabled={!assignmentApplies}
                                                       rows={2}
                                                       value={studentDrafts?.[student.studentId]?.[draftKey]?.feedback ?? ''}
                                                       onChange={(event) => onStudentDraftChange(
