@@ -108,6 +108,26 @@ router.post('/device-tokens', async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    // Keep one active native token per parent per school. forceRefresh on login
+    // creates a new FCM token; without this, every old token still receives pushes.
+    if (platform === 'ios' || platform === 'android') {
+      await DeviceToken.updateMany(
+        {
+          schoolId,
+          userId,
+          status: 'active',
+          platform,
+          token: { $ne: token },
+        },
+        {
+          $set: {
+            status: 'revoked',
+            lastSeenAt: new Date(),
+          },
+        },
+      );
+    }
+
     if (platform !== 'web' && isDemoSchoolId(schoolId)) {
       scheduleDemoWelcomePushes({ schoolId, userId }).catch((error) => {
         console.warn(`[DEMO_PUSH] schedule failed school=${schoolId}: ${error.message}`);

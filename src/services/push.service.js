@@ -197,6 +197,10 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
 
   const targetUrl = resolveTargetUrl(payload, '/parent');
   const apnsTopic = String(process.env.IOS_BUNDLE_ID || 'com.comergio.app').trim();
+  const demoType = String(payload?.type || '').trim();
+  const collapseKey = demoType.startsWith('demo.')
+    ? demoType.slice(0, 64)
+    : null;
   const response = await admin.messaging().sendEachForMulticast({
     tokens: validDocs.map((item) => String(item.token).trim()),
     notification: {
@@ -209,9 +213,11 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
     },
     android: {
       priority: 'high',
+      collapseKey: collapseKey || undefined,
       notification: {
         channelId: ANDROID_PUSH_CHANNEL_ID,
         sound: ANDROID_PUSH_SOUND,
+        tag: collapseKey || undefined,
       },
     },
     apns: {
@@ -219,6 +225,7 @@ async function sendNativePushTokens({ nativeTokens, title, body, payload }) {
         'apns-push-type': 'alert',
         'apns-priority': '10',
         'apns-topic': apnsTopic,
+        ...(collapseKey ? { 'apns-collapse-id': collapseKey } : {}),
       },
       payload: {
         aps: {

@@ -35,7 +35,7 @@ const TEMPLATE_STUDENT_NAMES = {
 const TEMPLATE_LABELS = { kinder: 'Kinder 3', first: '1B' };
 const CLASSMATE_CODE_PATTERN = /^DEMO-/i;
 const STAFF_EXCLUDED_ROLES = ['parent', 'student', 'super_admin'];
-const PUSH_DELAYS_MS = [60 * 1000, 2 * 60 * 1000, 3 * 60 * 1000];
+const PUSH_DELAYS_MS = [60 * 1000, 5 * 60 * 1000, 15 * 60 * 1000];
 
 const SCHOOL_LEVEL_COLLECTIONS = [
   'academicfeeconfigurations',
@@ -732,14 +732,25 @@ async function scheduleDemoWelcomePushes({ schoolId, userId }) {
     },
   ];
 
-  await DemoScheduledPush.insertMany(messages.map((message, index) => ({
-    ...message,
+  const existingKinds = await DemoScheduledPush.distinct('kind', {
     demoLeadId: claimed._id,
-    schoolId,
-    parentUserId: claimed.parentUserId,
-    studentId: firstChild?.studentId || null,
-    sendAt: new Date(now + PUSH_DELAYS_MS[index]),
-  })));
+    status: { $in: ['pending', 'sent'] },
+  });
+  const toInsert = messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) => !existingKinds.includes(message.kind))
+    .map(({ message, index }) => ({
+      ...message,
+      demoLeadId: claimed._id,
+      schoolId,
+      parentUserId: claimed.parentUserId,
+      studentId: firstChild?.studentId || null,
+      sendAt: new Date(now + PUSH_DELAYS_MS[index]),
+    }));
+
+  if (toInsert.length) {
+    await DemoScheduledPush.insertMany(toInsert);
+  }
   return true;
 }
 
