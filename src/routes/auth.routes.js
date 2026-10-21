@@ -7,6 +7,7 @@ const {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } = require('@simplewebauthn/server');
+const { isoUint8Array } = require('@simplewebauthn/server/helpers');
 
 const authMiddleware = require('../middleware/authMiddleware');
 const { findOneAcrossTenantSchoolDbs, listTenantSchoolContexts, runWithSchoolContext, resolveRegisteredModel } = require('../config/db');
@@ -1151,7 +1152,7 @@ router.post('/biometric/register/options', authMiddleware, async (req, res) => {
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
-      userID: String(user._id),
+      userID: isoUint8Array.fromUTF8String(String(user._id)),
       userName: user.username,
       userDisplayName: user.name || user.username,
       timeout: 60000,

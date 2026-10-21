@@ -7,17 +7,49 @@ import './index.css';
 import App from './App.jsx';
 import { queryClient } from './lib/queryClient.js';
 import { cleanupDevServiceWorkers } from './lib/devServiceWorkerCleanup.js';
+import { LOGIN_PATH } from './lib/authNavigation.js';
+
+function ensureNativeShellOpensLogin() {
+  if (typeof window === 'undefined' || !Capacitor.isNativePlatform()) {
+    return;
+  }
+
+  const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (normalizedPath !== '/') {
+    return;
+  }
+
+  window.location.replace(`${LOGIN_PATH.replace(/\/+$/, '')}/`);
+}
+
+ensureNativeShellOpensLogin();
 
 const platform = Capacitor?.getPlatform?.() || 'web';
 const shouldPreventZoomGestures = platform === 'ios';
 
 let lastTouchEndAt = 0;
 
+document.documentElement.classList.remove('native-boot-pending');
 document.documentElement.classList.add(`platform-${platform}`);
 document.body.classList.add(`platform-${platform}`);
 
 // Unregister SW/caches before React mounts so Chrome picks up Vite HMR.
 void cleanupDevServiceWorkers();
+
+async function cleanupNativeServiceWorkers() {
+  if (typeof window === 'undefined' || !Capacitor.isNativePlatform() || !('serviceWorker' in navigator)) {
+    return;
+  }
+
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  } catch {
+    // ignore
+  }
+}
+
+void cleanupNativeServiceWorkers();
 
 
 const preventGestureZoom = (event) => {

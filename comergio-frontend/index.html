@@ -12,8 +12,85 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Comergio</title>
     <!-- Bold checkout is loaded lazily by BoldPaymentButton.jsx — never block app boot. -->
+    <style>
+      html.native-boot-pending,
+      html.native-boot-pending body {
+        margin: 0;
+        min-height: 100%;
+        background: #00122e;
+      }
+
+      #native-boot-splash {
+        display: none;
+        min-height: 100dvh;
+        place-items: center;
+        padding: 2rem;
+        color: #eef6ff;
+        font-family: Manrope, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+
+      html.native-boot-pending #native-boot-splash {
+        display: grid;
+      }
+
+      html.native-boot-pending #root:empty {
+        display: none;
+      }
+    </style>
+    <script>
+      (function nativeBootRedirect() {
+        var redirected = false;
+
+        function isNativeCapacitorShell() {
+          try {
+            return Boolean(
+              window.Capacitor
+              && typeof window.Capacitor.isNativePlatform === 'function'
+              && window.Capacitor.isNativePlatform()
+            );
+          } catch (error) {
+            return false;
+          }
+        }
+
+        function markBootPending() {
+          document.documentElement.classList.add('native-boot-pending');
+        }
+
+        function redirectNativeToLoginIfNeeded() {
+          if (redirected || !isNativeCapacitorShell()) {
+            return Boolean(redirected) || !isNativeCapacitorShell();
+          }
+
+          var path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+          if (path !== '/' && path !== '/landing') {
+            return true;
+          }
+
+          redirected = true;
+          window.location.replace('/login/');
+          return true;
+        }
+
+        markBootPending();
+
+        if (redirectNativeToLoginIfNeeded()) {
+          return;
+        }
+
+        var attempts = 0;
+        var timer = window.setInterval(function () {
+          attempts += 1;
+          if (redirectNativeToLoginIfNeeded() || attempts >= 60) {
+            window.clearInterval(timer);
+          }
+        }, 50);
+      }());
+    </script>
   </head>
   <body>
+    <div id="native-boot-splash" aria-live="polite">Cargando Comergio…</div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

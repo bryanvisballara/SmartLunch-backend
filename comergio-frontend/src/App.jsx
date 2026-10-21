@@ -18,6 +18,7 @@ import { useAndroidNavInset } from './hooks/useAndroidNavInset';
 import Login from './pages/Login';
 import StudentDevPreviewLogin from './pages/StudentDevPreviewLogin';
 import LandingPage from './pages/LandingPage';
+import SchoolPresentationPage from './pages/SchoolPresentationPage';
 import POS from './pages/POS';
 import Wallet from './pages/Wallet';
 import Orders from './pages/Orders';
@@ -170,11 +171,15 @@ function App() {
     : '/';
   const userRole = user?.role || '';
   const isAuthenticated = Boolean(token && userRole);
+  const isNativeShell = Capacitor.isNativePlatform();
   const isLandingRoute = normalizedPathname === '/landing';
+  const isPresentationRoute = normalizedPathname === '/' && !isNativeShell;
   const isPrimerContactoRoute = normalizedPathname === '/berckleyprimercontacto'
     || normalizedPathname === '/millenniumprimercontacto';
   const isInterviewRoute = normalizedPathname === '/interview';
-  const isLoginRoute = normalizedPathname === '/';
+  const isLoginRoute = normalizedPathname === '/login'
+    || normalizedPathname.startsWith('/login/')
+    || (isNativeShell && normalizedPathname === '/');
   const isRegisterRoute = normalizedPathname === '/register' || normalizedPathname === '/register/next-step';
   const isAuthFlowRoute = isLoginRoute || isRegisterRoute;
   const pushAttemptKeyRef = useRef('');
@@ -232,6 +237,7 @@ function App() {
   const isCampusTeacherRoute = normalizedPathname === '/campus/teacher' || normalizedPathname.startsWith('/campus/teacher/');
   const showStaffSupportWhatsAppFab = isAuthenticated && (isStaffPortalChromeRoute || isCampusTeacherRoute);
   const showNavbar =
+    !isPresentationRoute &&
     !isLandingRoute &&
     !isPrimerContactoRoute &&
     !isInterviewRoute &&
@@ -249,6 +255,7 @@ function App() {
     !normalizedPathname.startsWith('/student') &&
     !['/privacy', '/contact'].includes(normalizedPathname);
   const hideFooter =
+    isPresentationRoute ||
     isLandingRoute ||
     isPrimerContactoRoute ||
     isInterviewRoute ||
@@ -319,7 +326,7 @@ function App() {
   }, [isAuthFlowRoute]);
 
   useEffect(() => {
-    if (!isAuthenticated || isLoginRoute) {
+    if (!isAuthenticated || isLoginRoute || isPresentationRoute) {
       return undefined;
     }
 
@@ -330,10 +337,10 @@ function App() {
     return () => {
       registerPushNotificationNavigation(null);
     };
-  }, [isAuthenticated, isLoginRoute, navigate]);
+  }, [isAuthenticated, isLoginRoute, isPresentationRoute, navigate]);
 
   useEffect(() => {
-    if (!isAuthenticated || isLoginRoute) {
+    if (!isAuthenticated || isLoginRoute || isPresentationRoute) {
       return;
     }
 
@@ -379,7 +386,7 @@ function App() {
         window.clearTimeout(timerId);
       }
     };
-  }, [isAuthenticated, isLoginRoute, isNativeAndroid, token, userRole]);
+  }, [isAuthenticated, isLoginRoute, isNativeAndroid, isPresentationRoute, token, userRole]);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
@@ -485,18 +492,26 @@ function App() {
     const recoverIfBlank = () => {
       if (cancelled) return;
       const root = document.getElementById('root');
-      const hasUi = Boolean(root?.querySelector('form, main, .login-page-auth, .campus-app-main, .parent-mobile-page, .staff-teacher-chrome__frame'));
+      const hasUi = Boolean(root?.querySelector(
+        'form, main, .login-page, .login-page-auth, .sp, .campus-app-main, .campus-page, .campus-parent-mobile-app, .parent-mobile-page, .staff-teacher-chrome__frame, .login-boot-splash',
+      ));
       if (!hasUi) {
         console.warn('[NATIVE_BLANK_RECOVERY] reloading shell');
+        const loginPath = '/login/';
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.replace(loginPath);
+          return;
+        }
         window.location.reload();
       }
     };
 
-    const bootTimer = window.setTimeout(recoverIfBlank, 5000);
+    const bootTimer = window.setTimeout(recoverIfBlank, 2500);
 
     CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       if (isActive) {
-        window.setTimeout(recoverIfBlank, 700);
+        window.setTimeout(recoverIfBlank, 400);
+        window.setTimeout(recoverIfBlank, 1800);
       }
     })
       .then((handle) => {
@@ -515,9 +530,14 @@ function App() {
     <AppErrorBoundary>
     <div>
       {showNavbar ? <Navbar /> : null}
-      <main className={isInterviewRoute ? 'interview-app-main' : isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isStaffPortalChromeRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
+      <main className={isPresentationRoute ? 'presentation-app-main' : isInterviewRoute ? 'interview-app-main' : isAuthFlowRoute ? 'login-shell-main' : isLandingRoute || isPrimerContactoRoute ? 'landing-app-main' : isCampusLikeRoute || isParentRoute || isStudentRoute || isStaffPortalChromeRoute ? 'campus-app-main' : `container ${isFullWidthRoute ? 'container-full' : ''}`}>
         <Routes>
-          <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/" />
+          <Route
+            element={isNativeShell
+              ? <AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />
+              : <SchoolPresentationPage />}
+            path="/"
+          />
           <Route element={<LandingPage />} path="/landing" />
           <Route element={<PrimerContactoPage />} path="/berckleyprimercontacto" />
           <Route element={<SchoolInterviewPage />} path="/interview" />
@@ -532,7 +552,7 @@ function App() {
               path="/dev/student/oliver-visbal"
             />
           ) : null}
-          <Route element={<Navigate replace to={LOGIN_PATH} />} path="/login" />
+          <Route element={<AppHomeEntry isAuthenticated={isAuthenticated} userRole={userRole} />} path="/login" />
           <Route
             element={(
               <RequireRole allowedRoles={['teacher', 'admin', 'rectoria', 'direccion']} isAuthenticated={isAuthenticated} userRole={userRole}>

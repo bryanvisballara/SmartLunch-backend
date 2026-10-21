@@ -578,7 +578,8 @@ body {
 .platform-android body.login-route-active:not(.login-boot-active),
 .platform-android body.login-route-active:not(.login-boot-active) #root,
 .platform-android body.login-route-active:not(.login-boot-active) #root > div,
-.platform-android body.login-route-active:not(.login-boot-active) main.container {
+.platform-android body.login-route-active:not(.login-boot-active) main.container,
+.platform-android body.login-route-active:not(.login-boot-active) main.login-shell-main {
   height: 100vh;
   height: 100svh;
   height: 100dvh;
@@ -646,7 +647,8 @@ body {
 .platform-ios body.login-route-active:not(.login-boot-active),
 .platform-ios body.login-route-active:not(.login-boot-active) #root,
 .platform-ios body.login-route-active:not(.login-boot-active) #root > div,
-.platform-ios body.login-route-active:not(.login-boot-active) main.container {
+.platform-ios body.login-route-active:not(.login-boot-active) main.container,
+.platform-ios body.login-route-active:not(.login-boot-active) main.login-shell-main {
   height: 100vh;
   height: 100svh;
   height: 100dvh;
@@ -675,7 +677,8 @@ html.login-route-active:not(.login-boot-active),
 body.login-route-active:not(.login-boot-active),
 body.login-route-active:not(.login-boot-active) #root,
 body.login-route-active:not(.login-boot-active) #root > div,
-body.login-route-active:not(.login-boot-active) main.container {
+body.login-route-active:not(.login-boot-active) main.container,
+body.login-route-active:not(.login-boot-active) main.login-shell-main {
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
@@ -704,7 +707,8 @@ html.login-route-active.login-boot-active,
 body.login-route-active.login-boot-active,
 body.login-route-active.login-boot-active #root,
 body.login-route-active.login-boot-active #root > div,
-body.login-route-active.login-boot-active main.container {
+body.login-route-active.login-boot-active main.container,
+body.login-route-active.login-boot-active main.login-shell-main {
   min-height: 100vh;
   min-height: 100dvh;
   max-width: none;
@@ -716,6 +720,15 @@ body.login-route-active.login-boot-active main.container {
 
 .login-page.login-page-auth {
   background: transparent;
+}
+
+.login-shell-main {
+  width: 100%;
+  max-width: none;
+  min-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow-x: clip;
 }
 
 .login-page-auth.page-center {

@@ -10,22 +10,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private let appShellBackgroundColor = UIColor(red: 245.0 / 255.0, green: 247.0 / 255.0, blue: 251.0 / 255.0, alpha: 1.0)
     private let webCacheRevisionKey = "comergio.webCacheRevision"
-    private let requiredWebCacheRevision = "2026080716"
-
-    override init() {
-        super.init()
-        NSLog("[Comergio][AppDelegate] init start")
-        configureFirebaseIfNeeded()
-        NSLog("[Comergio][AppDelegate] init end firebaseConfigured=\(FirebaseApp.app() != nil)")
-    }
+    private let requiredWebCacheRevision = "2026102117"
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        NSLog("[Comergio][AppDelegate] didFinishLaunching start firebaseConfigured=\(FirebaseApp.app() != nil)")
-        clearRemoteWebCacheIfNeeded()
+        NSLog("[Comergio][AppDelegate] didFinishLaunching start")
         configureFirebaseIfNeeded()
-        applyAppShellAppearance()
+        markWebCacheRevisionIfNeeded()
         NSLog("[Comergio][AppDelegate] didFinishLaunching end firebaseConfigured=\(FirebaseApp.app() != nil)")
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        configurationForConnecting connectingSceneSession: UISceneSession,
+        options: UIScene.ConnectionOptions
+    ) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+        configuration.delegateClass = SceneDelegate.self
+        configuration.storyboard = UIStoryboard(name: "Main", bundle: nil)
+        return configuration
+    }
+
+    func application(_ application: UIApplication, didDiscardSceneSessions sceneSessions: Set<UISceneSession>) {
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -43,7 +49,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
         applyAppShellAppearance()
     }
 
@@ -81,26 +86,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return false
     }
 
-    private func clearRemoteWebCacheIfNeeded() {
+    private func markWebCacheRevisionIfNeeded() {
         let storedRevision = UserDefaults.standard.string(forKey: webCacheRevisionKey)
         if storedRevision == requiredWebCacheRevision {
             return
         }
 
-        NSLog("[Comergio][WebCache] clearing remote shell cache revision=\(requiredWebCacheRevision)")
-        URLCache.shared.removeAllCachedResponses()
-
-        let dataStore = WKWebsiteDataStore.default()
-        let allTypes = WKWebsiteDataStore.allWebsiteDataTypes()
-        let semaphore = DispatchSemaphore(value: 0)
-
-        dataStore.removeData(ofTypes: allTypes, modifiedSince: Date(timeIntervalSince1970: 0)) {
-            UserDefaults.standard.set(self.requiredWebCacheRevision, forKey: self.webCacheRevisionKey)
-            NSLog("[Comergio][WebCache] cleared WKWebsiteDataStore revision=\(self.requiredWebCacheRevision)")
-            semaphore.signal()
-        }
-
-        _ = semaphore.wait(timeout: .now() + 5)
+        UserDefaults.standard.set(requiredWebCacheRevision, forKey: webCacheRevisionKey)
+        NSLog("[Comergio][WebCache] revision=\(requiredWebCacheRevision) (runtime cache wipe disabled; iOS uses embedded shell)")
     }
 
     private func configureFirebaseIfNeeded() {
@@ -122,14 +115,18 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         NSLog("[Comergio][Firebase] configured from default lookup")
     }
 
-    private func applyAppShellAppearance() {
+    func applyAppShellAppearance() {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            self.window?.backgroundColor = self.appShellBackgroundColor
-            self.window?.rootViewController?.view.backgroundColor = self.appShellBackgroundColor
+            guard let activeWindow = self.resolveActiveWindow() else {
+                return
+            }
 
-            guard let bridgeViewController = self.findBridgeViewController(from: self.window?.rootViewController) else {
+            activeWindow.backgroundColor = self.appShellBackgroundColor
+            activeWindow.rootViewController?.view.backgroundColor = self.appShellBackgroundColor
+
+            guard let bridgeViewController = self.findBridgeViewController(from: activeWindow.rootViewController) else {
                 return
             }
 
@@ -148,7 +145,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             if #available(iOS 15.0, *) {
                 webView.underPageBackgroundColor = self.appShellBackgroundColor
             }
+
+            #if DEBUG
+            if #available(iOS 16.4, *) {
+                webView.isInspectable = true
+            }
+            #endif
         }
+    }
+
+    private func resolveActiveWindow() -> UIWindow? {
+        if let window = window {
+            return window
+        }
+
+        let sceneWindows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+
+        return sceneWindows.first(where: \.isKeyWindow) ?? sceneWindows.first
     }
 
     private func findBridgeViewController(from viewController: UIViewController?) -> CAPBridgeViewController? {

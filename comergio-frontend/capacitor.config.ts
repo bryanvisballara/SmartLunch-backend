@@ -2,7 +2,7 @@
 
 import type { CapacitorConfig } from '@capacitor/cli';
 
-const DEFAULT_REMOTE_SERVER_URL = 'https://comergio.com';
+const DEFAULT_REMOTE_SERVER_URL = 'https://comergio.com/login';
 
 function isTruthy(value: string | undefined): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
@@ -21,7 +21,9 @@ function normalizeServerUrl(value: string | undefined): string | undefined {
   return normalized;
 }
 
-const useEmbeddedShell = isTruthy(process.env.CAPACITOR_USE_EMBEDDED);
+const syncPlatform = String(process.env.CAPACITOR_SYNC_PLATFORM || '').trim().toLowerCase();
+const useEmbeddedShell = isTruthy(process.env.CAPACITOR_USE_EMBEDDED)
+  || syncPlatform === 'ios';
 const remoteServerUrl = normalizeServerUrl(process.env.CAPACITOR_SERVER_URL)
   || normalizeServerUrl(process.env.VITE_APP_URL)
   || DEFAULT_REMOTE_SERVER_URL;
@@ -30,7 +32,7 @@ const config: CapacitorConfig = {
   appId: 'com.comergio.app',
   appName: 'Comergio',
   webDir: 'dist',
-  // Default: live web shell from comergio.com (same as iOS).
+  // Default: live web shell opens the login. comergio.com stays the school presentation.
   // Opt into offline APK assets only with CAPACITOR_USE_EMBEDDED=true.
   server: useEmbeddedShell
     ? {

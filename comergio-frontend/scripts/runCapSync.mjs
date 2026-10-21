@@ -57,14 +57,27 @@ if (!process.env.CAPACITOR_SERVER_URL && process.env.VITE_APP_URL) {
 }
 
 if (!process.env.CAPACITOR_SERVER_URL) {
-  process.env.CAPACITOR_SERVER_URL = 'https://comergio.com';
+  process.env.CAPACITOR_SERVER_URL = 'https://comergio.com/login';
 }
 
-const useEmbeddedShell = ['1', 'true', 'yes', 'on'].includes(String(process.env.CAPACITOR_USE_EMBEDDED || '').trim().toLowerCase());
+const syncArgs = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
+const syncPlatform = syncArgs[0] || '';
+if (syncPlatform) {
+  process.env.CAPACITOR_SYNC_PLATFORM = syncPlatform;
+}
+
+const forceRemoteIos = ['1', 'true', 'yes', 'on'].includes(String(process.env.CAPACITOR_FORCE_REMOTE_IOS || '').trim().toLowerCase());
+if (syncPlatform === 'ios' && !forceRemoteIos && !process.env.CAPACITOR_USE_EMBEDDED) {
+  process.env.CAPACITOR_USE_EMBEDDED = 'true';
+  console.log('[mobile] iOS sync uses embedded dist (set CAPACITOR_FORCE_REMOTE_IOS=true to load comergio.com in WebView).');
+}
+
+const useEmbeddedShell = ['1', 'true', 'yes', 'on'].includes(String(process.env.CAPACITOR_USE_EMBEDDED || '').trim().toLowerCase())
+  || syncPlatform === 'ios';
 const remoteServerUrl = String(process.env.CAPACITOR_SERVER_URL || '').trim().replace(/\/+$/, '');
 
 if (useEmbeddedShell) {
-  console.log('[mobile] Capacitor shell mode: embedded dist');
+  console.log(`[mobile] Capacitor shell mode: embedded dist${syncPlatform ? ` (${syncPlatform})` : ''}`);
 } else if (remoteServerUrl) {
   console.log(`[mobile] Capacitor shell mode: remote ${remoteServerUrl}`);
 } else {

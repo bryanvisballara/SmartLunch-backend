@@ -8,6 +8,8 @@ const DIST_DEPLOY_DIR = path.resolve(process.cwd(), 'dist-deploy');
 const LEGACY_BROKEN_ENTRY_ALIASES = [
   'index-DtEcVJMf.js',
   'index-BgUrQoOJ.js',
+  'index-BTW2iEP6.js',
+  'index-BuzBIGov.js',
 ];
 
 // Fallback directories for hosting providers where SPA rewrites are ignored.
