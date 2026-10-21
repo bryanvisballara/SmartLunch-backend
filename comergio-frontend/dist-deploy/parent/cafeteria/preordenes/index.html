@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <script type="module" crossorigin src="/assets/polyfills-KZslP_SH.js"></script>
+    <script type="module" crossorigin src="/assets/polyfills-DdfJd5Rr.js"></script>
 
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
@@ -14,15 +14,102 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Comergio</title>
     <!-- Bold checkout is loaded lazily by BoldPaymentButton.jsx — never block app boot. -->
-    <script type="module" crossorigin src="/assets/index-CxxnckBH.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DAeL9XCz.css">
+    <style>
+      html.native-boot-pending,
+      html.native-boot-pending body {
+        margin: 0;
+        min-height: 100%;
+        background: #00122e;
+      }
+
+      #native-boot-splash {
+        display: none;
+        min-height: 100dvh;
+        place-items: center;
+        padding: 2rem;
+        color: #eef6ff;
+        font-family: Manrope, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+
+      html.native-boot-pending #native-boot-splash {
+        display: grid;
+      }
+
+      html.native-boot-pending #root:empty {
+        display: none;
+      }
+    </style>
+    <script>
+      (function nativeBootRedirect() {
+        var redirected = false;
+
+        function isNativeCapacitorShell() {
+          try {
+            return Boolean(
+              window.Capacitor
+              && typeof window.Capacitor.isNativePlatform === 'function'
+              && window.Capacitor.isNativePlatform()
+            );
+          } catch (error) {
+            return false;
+          }
+        }
+
+        function markBootPending() {
+          document.documentElement.classList.add('native-boot-pending');
+        }
+
+        function redirectNativeToLoginIfNeeded() {
+          if (redirected || !isNativeCapacitorShell()) {
+            return Boolean(redirected) || !isNativeCapacitorShell();
+          }
+
+          var path = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+          if (path !== '/' && path !== '/landing') {
+            return true;
+          }
+
+          redirected = true;
+          window.location.replace('/login/');
+          return true;
+        }
+
+        if (!isNativeCapacitorShell()) {
+          return;
+        }
+
+        var bootPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+        var needsNativeLoginRedirect = bootPath === '/' || bootPath === '/landing';
+        if (!needsNativeLoginRedirect) {
+          return;
+        }
+
+        markBootPending();
+
+        if (redirectNativeToLoginIfNeeded()) {
+          return;
+        }
+
+        var attempts = 0;
+        var timer = window.setInterval(function () {
+          attempts += 1;
+          if (redirectNativeToLoginIfNeeded() || attempts >= 60) {
+            window.clearInterval(timer);
+          }
+        }, 50);
+      }());
+    </script>
+    <script type="module" crossorigin src="/assets/index-xQ-H8HJu.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-mn_8PgRU.css">
     <script type="module">import.meta.url;import("_").catch(()=>1);(async function*(){})().next();window.__vite_is_modern_browser=true</script>
     <script type="module">!function(){if(window.__vite_is_modern_browser)return;console.warn("vite: loading legacy chunks, syntax error above and the same error below should be ignored");var e=document.getElementById("vite-legacy-polyfill"),n=document.createElement("script");n.src=e.src,n.onload=function(){System.import(document.getElementById('vite-legacy-entry').getAttribute('data-src'))},document.body.appendChild(n)}();</script>
   </head>
   <body>
+    <div id="native-boot-splash" aria-live="polite">Cargando Comergio…</div>
     <div id="root"></div>
     <script nomodule>!function(){var e=document,t=e.createElement("script");if(!("noModule"in t)&&"onbeforeload"in t){var n=!1;e.addEventListener("beforeload",(function(e){if(e.target===t)n=!0;else if(!e.target.hasAttribute("nomodule")||!n)return;e.preventDefault()}),!0),t.type="module",t.src=".",e.head.appendChild(t),t.remove()}}();</script>
-    <script nomodule crossorigin id="vite-legacy-polyfill" src="/assets/polyfills-legacy-Z7bJNyEz.js"></script>
-    <script nomodule crossorigin id="vite-legacy-entry" data-src="/assets/index-legacy-Czn1fii0.js">System.import(document.getElementById('vite-legacy-entry').getAttribute('data-src'))</script>
+    <script nomodule crossorigin id="vite-legacy-polyfill" src="/assets/polyfills-legacy-iV3sdPot.js"></script>
+    <script nomodule crossorigin id="vite-legacy-entry" data-src="/assets/index-legacy-A5a2ZcVT.js">System.import(document.getElementById('vite-legacy-entry').getAttribute('data-src'))</script>
   </body>
 </html>

@@ -157,6 +157,7 @@ async function sendDueFollowUpEmails() {
       }
       try {
         await sendDemoFollowUpEmail(day, {
+          leadId: lead._id,
           email: lead.email,
           contactName: lead.contactName,
           schoolName: lead.schoolName,

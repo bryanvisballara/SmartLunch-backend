@@ -30,6 +30,8 @@ export const saveSuperAdminRectoriaUser = (schoolId, data) => (
 
 export const listSuperAdminDemos = () => api.get('/super-admin/demos');
 
+export const getSuperAdminDemo = (leadId) => api.get(`/super-admin/demos/${encodeURIComponent(leadId)}`);
+
 export const deleteSuperAdminDemo = (leadId) => (
   api.delete(`/super-admin/demos/${encodeURIComponent(leadId)}`)
 );

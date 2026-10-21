@@ -20,6 +20,8 @@ const dianInvoicingService = require('../services/dianInvoicing.service');
 const { sendBrevoEmail } = require('../services/brevo.service');
 const DemoLead = require('../models/demoLead.model');
 const { deleteDemo, isDemoSchoolId } = require('../services/demoSchool.service');
+const { buildDemoEmailCatalog } = require('../services/demoEmails.service');
+const salesCrmRoutes = require('./salesCrm.routes');
 const multer = require('multer');
 
 const NATIVE_APP_PLATFORMS = ['ios', 'android'];
@@ -48,6 +50,7 @@ const SUBSCRIPTION_STATUSES = new Set(['subscribed', 'trial', 'paused', 'disable
 
 router.use(authMiddleware);
 router.use(roleMiddleware('super_admin'));
+router.use('/sales-crm', salesCrmRoutes);
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -266,28 +269,58 @@ async function getSchoolSummary(tenantContext) {
   });
 }
 
+function serializeDemoLeadSummary(lead) {
+  return {
+    _id: String(lead._id),
+    schoolName: lead.schoolName,
+    city: lead.city,
+    contactName: lead.contactName,
+    email: lead.email,
+    phone: lead.phone,
+    children: (lead.children || []).map((child) => ({ name: child.name, gradeLabel: child.gradeLabel })),
+    demoSchoolId: lead.demoSchoolId,
+    status: lead.status,
+    errorMessage: lead.errorMessage || '',
+    loginCount: lead.loginCount || 0,
+    firstLoginAt: lead.firstLoginAt,
+    lastLoginAt: lead.lastLoginAt,
+    expiresAt: lead.expiresAt,
+    deletedAt: lead.deletedAt,
+    createdAt: lead.createdAt,
+    welcomeEmailSentAt: lead.welcomeEmailSentAt || null,
+    followUpUnsubscribedAt: lead.followUpUnsubscribedAt || null,
+    emailSummary: buildDemoEmailCatalog(lead).map(({ key, label, sentAt, openedAt, openCount }) => ({
+      key,
+      label,
+      sent: Boolean(sentAt),
+      sentAt,
+      opened: Boolean(openedAt),
+      openedAt,
+      openCount: openCount || 0,
+    })),
+  };
+}
+
 router.get('/demos', async (_req, res) => {
   try {
     const leads = await DemoLead.find({}).sort({ createdAt: -1 }).limit(500).lean();
     return res.status(200).json({
-      demos: leads.map((lead) => ({
-        _id: String(lead._id),
-        schoolName: lead.schoolName,
-        city: lead.city,
-        contactName: lead.contactName,
-        email: lead.email,
-        phone: lead.phone,
-        children: (lead.children || []).map((child) => ({ name: child.name, gradeLabel: child.gradeLabel })),
-        demoSchoolId: lead.demoSchoolId,
-        status: lead.status,
-        errorMessage: lead.errorMessage || '',
-        loginCount: lead.loginCount || 0,
-        firstLoginAt: lead.firstLoginAt,
-        lastLoginAt: lead.lastLoginAt,
-        expiresAt: lead.expiresAt,
-        deletedAt: lead.deletedAt,
-        createdAt: lead.createdAt,
-      })),
+      demos: leads.map(serializeDemoLeadSummary),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+});
+
+router.get('/demos/:leadId', async (req, res) => {
+  try {
+    const lead = await DemoLead.findById(req.params.leadId).lean();
+    if (!lead) {
+      return res.status(404).json({ message: 'Demo no encontrada' });
+    }
+    return res.status(200).json({
+      demo: serializeDemoLeadSummary(lead),
+      emails: buildDemoEmailCatalog(lead),
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });

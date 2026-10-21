@@ -20,7 +20,7 @@ const PROGRESS_MESSAGES = [
 ];
 
 const EMPTY_FORM = {
-  schoolName: '',
+  schoolName: 'International Berckley School',
   city: '',
   contactName: '',
   email: '',
@@ -135,7 +135,7 @@ export default function DemoSignupPage() {
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = 'Prueba la demo gratis · Comergio';
+    document.title = 'Probar 7 días sin costo · Comergio';
     document.documentElement.classList.add('school-presentation-active');
 
     const fontLink = document.createElement('link');
@@ -221,7 +221,6 @@ export default function DemoSignupPage() {
         ) : (
           <>
             <header className="demo-intro">
-              <p className="demo-intro__eyebrow">Demo gratis · lista en menos de un minuto</p>
               <h1>Vive Comergio como lo vivirán tus familias.</h1>
               <p>
                 Creamos un colegio de prueba con tu nombre: pensiones, cafetería, notas, enfermería y
@@ -234,7 +233,7 @@ export default function DemoSignupPage() {
                 <legend><span className="demo-step">1</span>Datos del colegio</legend>
                 <label>
                   <span>Nombre del colegio</span>
-                  <input required maxLength={90} value={form.schoolName} onChange={updateField('schoolName')} placeholder="Colegio San José" />
+                  <input required maxLength={90} value={form.schoolName} onChange={updateField('schoolName')} placeholder="International Berckley School" />
                 </label>
                 <label>
                   <span>Ciudad</span>

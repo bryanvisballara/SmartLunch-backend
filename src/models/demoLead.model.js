@@ -32,8 +32,15 @@ const demoLeadSchema = new mongoose.Schema(
     loginCount: { type: Number, default: 0 },
     pushesScheduledAt: { type: Date, default: null },
     welcomeEmailSentAt: { type: Date, default: null },
+    welcomeEmailOpenedAt: { type: Date, default: null },
+    welcomeEmailOpenCount: { type: Number, default: 0 },
     followUpEmails: {
-      type: [{ day: Number, sentAt: Date }],
+      type: [{
+        day: Number,
+        sentAt: Date,
+        openedAt: { type: Date, default: null },
+        openCount: { type: Number, default: 0 },
+      }],
       default: [],
     },
     followUpUnsubscribedAt: { type: Date, default: null },

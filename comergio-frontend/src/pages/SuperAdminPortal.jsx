@@ -14,6 +14,7 @@ import {
 import { PortalBootSplash } from '../components/PortalBootSplash';
 import SuperAdminDianPanel from './SuperAdminDianPanel';
 import SuperAdminDemosPanel from './SuperAdminDemosPanel';
+import SalesCrmDashboard from './SalesCrmDashboard';
 import InformaPanel from '../components/comergio-academy/InformaPanel';
 import InformaDraftsPanel from '../components/comergio-academy/InformaDraftsPanel';
 import TriviaAdminPanel from '../components/games/trivia/TriviaAdminPanel';
@@ -27,10 +28,14 @@ import './SuperAdminPortal.css';
 const SA_SECTIONS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'schools', label: 'Colegios' },
-  { id: 'demos', label: 'Demos' },
   { id: 'publications', label: 'Publicaciones' },
   { id: 'trivia', label: 'Trivia global' },
   { id: 'billing', label: 'Facturación' },
+];
+
+const SA_CRM_SECTIONS = [
+  { id: 'crm-demos', label: 'Demos' },
+  { id: 'crm-prospects', label: 'Seguimiento clientes' },
 ];
 
 const featureOptions = [
@@ -173,11 +178,19 @@ function SaNavIcon({ id }) {
       </svg>
     );
   }
-  if (id === 'demos') {
+  if (id === 'demos' || id === 'crm-demos') {
     return (
       <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
         <path d="M8 4.5h8M10 4.5v5.2L5.6 17.4A1.5 1.5 0 0 0 6.9 19.5h10.2a1.5 1.5 0 0 0 1.3-2.1L14 9.7V4.5" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
         <path d="M7.8 14.5h8.4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+  if (id === 'crm' || id === 'crm-prospects') {
+    return (
+      <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+        <path d="M4.5 19.5V8.5L12 4.5l7.5 4v11" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+        <path d="M9 10h6M9 13.5h4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
       </svg>
     );
   }
@@ -203,6 +216,7 @@ function SuperAdminPortal() {
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
   const [activeSection, setActiveSection] = useState('dashboard');
+  const [crmNavOpen, setCrmNavOpen] = useState(true);
   const [summary, setSummary] = useState({ totals: {}, schools: [] });
   const [selectedSchoolId, setSelectedSchoolId] = useState('');
   const [draftsBySchool, setDraftsBySchool] = useState({});
@@ -622,7 +636,10 @@ function SuperAdminPortal() {
     navigate(LOGIN_PATH, { replace: true });
   };
 
-  const sectionTitle = SA_SECTIONS.find((section) => section.id === activeSection)?.label || 'Dashboard';
+  const sectionTitle = SA_CRM_SECTIONS.find((section) => section.id === activeSection)?.label
+    || SA_SECTIONS.find((section) => section.id === activeSection)?.label
+    || (activeSection.startsWith('crm-') ? 'CRM Ventas' : 'Dashboard');
+  const isCrmSection = activeSection.startsWith('crm-');
   const userInitials = getSchoolInitials(user?.name || user?.username || 'AS');
 
   if (loading && !(summary.schools || []).length) {
@@ -643,7 +660,45 @@ function SuperAdminPortal() {
         <div>
           <p className="sa-sidebar__nav-label">Gerencia Comergio</p>
           <nav className="sa-sidebar__nav">
-            {SA_SECTIONS.map((section) => (
+            {SA_SECTIONS.slice(0, 2).map((section) => (
+              <button
+                key={section.id}
+                className={`sa-sidebar__link${activeSection === section.id ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+              >
+                <SaNavIcon id={section.id} />
+                {section.label}
+              </button>
+            ))}
+            <button
+              className={`sa-sidebar__link sa-sidebar__link--group${isCrmSection ? ' is-active' : ''}`}
+              type="button"
+              onClick={() => {
+                setCrmNavOpen((open) => !open);
+                if (!isCrmSection) {
+                  setActiveSection('crm-demos');
+                }
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <SaNavIcon id="crm" />
+                CRM Ventas
+              </span>
+              <span className="sa-sidebar__crm-chevron" aria-hidden="true">{crmNavOpen ? '▾' : '▸'}</span>
+            </button>
+            {crmNavOpen ? SA_CRM_SECTIONS.map((section) => (
+              <button
+                key={section.id}
+                className={`sa-sidebar__link sa-sidebar__link--sub${activeSection === section.id ? ' is-active' : ''}`}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+              >
+                <SaNavIcon id={section.id} />
+                {section.label}
+              </button>
+            )) : null}
+            {SA_SECTIONS.slice(2).map((section) => (
               <button
                 key={section.id}
                 className={`sa-sidebar__link${activeSection === section.id ? ' is-active' : ''}`}
@@ -679,7 +734,8 @@ function SuperAdminPortal() {
             <p>
               {activeSection === 'dashboard' && 'KPIs consolidados de toda la red de colegios.'}
               {activeSection === 'schools' && 'Consulta, edita y administra cada colegio suscrito.'}
-              {activeSection === 'demos' && 'Leads que crearon un colegio de prueba desde la página web.'}
+              {activeSection === 'crm-demos' && 'Leads de demo y seguimiento de correos (pixel de apertura).'}
+              {activeSection === 'crm-prospects' && 'Pipeline comercial: etapas, eventos y agenda como admisiones.'}
               {activeSection === 'publications' && 'Borradores y publicaciones de Comergio Informa.'}
               {activeSection === 'trivia' && 'Preguntas globales y moderación de Comergio Trivia.'}
               {activeSection === 'billing' && 'Proyección de cobro y facturación electrónica por colegio.'}
@@ -1185,7 +1241,8 @@ function SuperAdminPortal() {
             </section>
           ) : null}
 
-          {activeSection === 'demos' ? <SuperAdminDemosPanel /> : null}
+          {activeSection === 'crm-demos' ? <SuperAdminDemosPanel /> : null}
+          {activeSection === 'crm-prospects' ? <SalesCrmDashboard /> : null}
 
           {activeSection === 'trivia' ? (
             <TriviaAdminPanel api={triviaAdminApi} />

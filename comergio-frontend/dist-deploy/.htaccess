@@ -2,10 +2,9 @@
   RewriteEngine On
   RewriteBase /
 
-  # Canonical host and legacy login path.
+  # Canonical host. / is the school presentation; /login is the app entry.
   RewriteCond %{HTTP_HOST} ^www\.comergio\.com$ [NC]
   RewriteRule ^(.*)$ https://comergio.com/$1 [R=301,L]
-  RewriteRule ^login/?$ / [R=301,L]
 
   # Keep direct access to index, game audio, and uploaded assets untouched.
   RewriteRule ^index\.html$ - [L]

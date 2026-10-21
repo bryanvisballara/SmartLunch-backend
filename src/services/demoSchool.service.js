@@ -632,6 +632,7 @@ async function createDemoSchool({
     await lead.save();
 
     sendDemoWelcomeEmail({
+      leadId: lead._id,
       email: normalizedEmail,
       contactName: normalizedContactName,
       schoolName: normalizedSchoolName,

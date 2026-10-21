@@ -16,6 +16,48 @@ function signUnsubscribeToken(leadId) {
   return `${id}.${signature}`;
 }
 
+function signEmailOpenToken(leadId, messageKey) {
+  const id = String(leadId);
+  const key = String(messageKey || '').trim().slice(0, 32);
+  const signature = crypto
+    .createHmac('sha256', String(process.env.JWT_SECRET || 'comergio-demo'))
+    .update(`demo-open:${id}:${key}`)
+    .digest('base64url')
+    .slice(0, 24);
+  return `${id}.${key}.${signature}`;
+}
+
+function verifyEmailOpenToken(token) {
+  const parts = String(token || '').split('.');
+  const id = parts[0] || '';
+  const key = parts[1] || '';
+  const sig = parts[2] || '';
+  if (!/^[a-f0-9]{24}$/i.test(id) || !key || !sig) {
+    return null;
+  }
+  const expected = signEmailOpenToken(id, key);
+  const received = `${id}.${key}.${sig}`;
+  if (expected.length !== received.length) {
+    return null;
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received))) {
+    return null;
+  }
+  return { leadId: id, messageKey: key };
+}
+
+function buildEmailOpenUrl(leadId, messageKey) {
+  const base = String(
+    process.env.BACKEND_PUBLIC_URL || process.env.PUBLIC_BACKEND_URL || process.env.API_PUBLIC_URL || 'https://api.comergio.com',
+  ).trim().replace(/\/+$/, '');
+  return `${base}/public/demo/email-open/${signEmailOpenToken(leadId, messageKey)}`;
+}
+
+function trackingPixelHtml(openUrl) {
+  if (!openUrl) return '';
+  return `<img src="${escapeHtml(openUrl)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;margin:0;padding:0;" />`;
+}
+
 function verifyUnsubscribeToken(token) {
   const [id = ''] = String(token || '').split('.');
   if (!/^[a-f0-9]{24}$/i.test(id)) {
@@ -54,7 +96,7 @@ function button(href, label, { background = '#16a34a' } = {}) {
   `;
 }
 
-function buildDemoEmailShell({ eyebrow, title, intro, body, ctaHref, ctaLabel, unsubscribeUrl = '' }) {
+function buildDemoEmailShell({ eyebrow, title, intro, body, ctaHref, ctaLabel, unsubscribeUrl = '', trackingPixelUrl = '' }) {
   return `
     <div style="margin:0;padding:0;background:#eaf1fb;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#eaf1fb;padding:24px 12px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
@@ -89,15 +131,82 @@ function buildDemoEmailShell({ eyebrow, title, intro, body, ctaHref, ctaLabel, u
           </td>
         </tr>
       </table>
+      ${trackingPixelHtml(trackingPixelUrl)}
     </div>
   `;
+}
+
+const FOLLOW_UP_EMAIL_LABELS = {
+  1: 'Seguimiento día 1 · Pagos',
+  2: 'Seguimiento día 2 · Comunicación',
+  3: 'Seguimiento día 3 · Académico',
+  4: 'Seguimiento día 4 · Cafetería',
+  5: 'Seguimiento día 5 · Gestión del colegio',
+  6: 'Seguimiento día 6 · Último día de demo',
+};
+
+function buildDemoEmailCatalog(lead = {}) {
+  const followUps = Array.isArray(lead.followUpEmails) ? lead.followUpEmails : [];
+  const emails = [{
+    key: 'welcome',
+    label: 'Correo de bienvenida (acceso a la demo)',
+    sentAt: lead.welcomeEmailSentAt || null,
+    openedAt: lead.welcomeEmailOpenedAt || null,
+    openCount: lead.welcomeEmailOpenCount || 0,
+  }];
+  FOLLOW_UP_DAYS.forEach((day) => {
+    const entry = followUps.find((item) => Number(item.day) === day);
+    emails.push({
+      key: `follow_${day}`,
+      label: FOLLOW_UP_EMAIL_LABELS[day] || `Seguimiento día ${day}`,
+      day,
+      sentAt: entry?.sentAt || null,
+      openedAt: entry?.openedAt || null,
+      openCount: entry?.openCount || 0,
+    });
+  });
+  return emails;
+}
+
+async function recordDemoEmailOpen({ leadId, messageKey }) {
+  const DemoLead = require('../models/demoLead.model');
+  const now = new Date();
+  if (messageKey === 'welcome') {
+    const lead = await DemoLead.findById(leadId).select('welcomeEmailOpenedAt').lean();
+    const update = { $inc: { welcomeEmailOpenCount: 1 } };
+    if (!lead?.welcomeEmailOpenedAt) {
+      update.$set = { welcomeEmailOpenedAt: now };
+    }
+    await DemoLead.updateOne({ _id: leadId }, update);
+    return;
+  }
+  const dayMatch = /^follow_(\d+)$/.exec(messageKey);
+  if (!dayMatch) {
+    return;
+  }
+  const day = Number(dayMatch[1]);
+  const lead = await DemoLead.findById(leadId).select('followUpEmails').lean();
+  const entry = (lead?.followUpEmails || []).find((item) => Number(item.day) === day);
+  if (!entry) {
+    return;
+  }
+  const update = {
+    $inc: { 'followUpEmails.$.openCount': 1 },
+  };
+  if (!entry.openedAt) {
+    update.$set = { 'followUpEmails.$.openedAt': now };
+  }
+  await DemoLead.updateOne(
+    { _id: leadId, 'followUpEmails.day': day },
+    update,
+  );
 }
 
 function firstName(name) {
   return String(name || '').trim().split(/\s+/)[0] || '';
 }
 
-async function sendDemoWelcomeEmail({ email, contactName, schoolName, children = [] }) {
+async function sendDemoWelcomeEmail({ leadId, email, contactName, schoolName, children = [] }) {
   const name = firstName(contactName);
   const childrenLabel = children.map((child) => `${child.name} (${child.gradeLabel})`).join(', ');
   const whatsappUrl = buildWhatsappUrl(`Hola, soy ${contactName} de ${schoolName}. Creé una demo de Comergio y quiero probar los portales del colegio.`);
@@ -141,6 +250,7 @@ async function sendDemoWelcomeEmail({ email, contactName, schoolName, children =
       body,
       ctaHref: whatsappUrl,
       ctaLabel: 'Quiero probar los portales del colegio',
+      trackingPixelUrl: leadId ? buildEmailOpenUrl(leadId, 'welcome') : '',
     }),
     textContent: [
       `Hola ${name},`,
@@ -307,7 +417,7 @@ function buildFollowUpContent(day, { name, schoolName }) {
   }
 }
 
-function buildDemoFollowUpEmail(day, { email, contactName, schoolName, unsubscribeUrl = '' }) {
+function buildDemoFollowUpEmail(day, { leadId, email, contactName, schoolName, unsubscribeUrl = '' }) {
   const name = firstName(contactName);
   const content = buildFollowUpContent(day, { name, schoolName });
   if (!content) {
@@ -326,6 +436,7 @@ function buildDemoFollowUpEmail(day, { email, contactName, schoolName, unsubscri
       ctaHref,
       ctaLabel: content.ctaLabel,
       unsubscribeUrl,
+      trackingPixelUrl: leadId ? buildEmailOpenUrl(leadId, `follow_${day}`) : '',
     }),
     textContent: [
       content.title,
@@ -354,6 +465,10 @@ module.exports = {
   FOLLOW_UP_DAYS,
   buildUnsubscribeUrl,
   verifyUnsubscribeToken,
+  buildEmailOpenUrl,
+  verifyEmailOpenToken,
+  buildDemoEmailCatalog,
+  recordDemoEmailOpen,
   buildDemoEmailShell,
   buildDemoFollowUpEmail,
   buildWhatsappUrl,

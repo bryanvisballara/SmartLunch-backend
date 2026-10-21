@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { deleteSuperAdminDemo, listSuperAdminDemos } from '../services/superAdmin.service';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { deleteSuperAdminDemo, getSuperAdminDemo, listSuperAdminDemos } from '../services/superAdmin.service';
 
 const STATUS_LABELS = {
   provisioning: 'Creando',
@@ -30,11 +30,20 @@ function whatsappHref(phone) {
   return `https://wa.me/${digits.length === 10 ? `57${digits}` : digits}`;
 }
 
+function EmailStatusPill({ yes, labelYes = 'Sí', labelNo = 'No' }) {
+  return (
+    <span className={`sa-email-pill${yes ? ' is-yes' : ' is-no'}`}>{yes ? labelYes : labelNo}</span>
+  );
+}
+
 export default function SuperAdminDemosPanel() {
   const [demos, setDemos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deletingId, setDeletingId] = useState('');
+  const [selectedId, setSelectedId] = useState('');
+  const [selectedDetail, setSelectedDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +68,27 @@ export default function SuperAdminDemosPanel() {
     loggedIn: demos.filter((demo) => demo.loginCount > 0).length,
   }), [demos]);
 
+  const openDemo = async (demo) => {
+    const id = demo._id;
+    if (selectedId === id) {
+      setSelectedId('');
+      setSelectedDetail(null);
+      return;
+    }
+    setSelectedId(id);
+    setDetailLoading(true);
+    try {
+      const { data } = await getSuperAdminDemo(id);
+      setSelectedDetail(data);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'No se pudo cargar el detalle.');
+      setSelectedId('');
+      setSelectedDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   const onDelete = async (demo) => {
     if (!window.confirm(`¿Eliminar la demo de ${demo.schoolName}? El lead se conserva.`)) {
       return;
@@ -66,6 +96,10 @@ export default function SuperAdminDemosPanel() {
     setDeletingId(demo._id);
     try {
       await deleteSuperAdminDemo(demo._id);
+      if (selectedId === demo._id) {
+        setSelectedId('');
+        setSelectedDetail(null);
+      }
       await load();
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo eliminar la demo.');
@@ -73,6 +107,8 @@ export default function SuperAdminDemosPanel() {
       setDeletingId('');
     }
   };
+
+  const emails = selectedDetail?.emails || selectedDetail?.demo?.emailSummary || [];
 
   return (
     <>
@@ -98,7 +134,7 @@ export default function SuperAdminDemosPanel() {
         <div className="sa-panel__head">
           <div>
             <h2>Demos</h2>
-            <p>Colegios creados desde “Prueba la demo gratis” en comergio.com.</p>
+            <p>Colegios creados desde “Probar 7 días sin costo”. Toca un lead para ver correos de seguimiento.</p>
           </div>
           <div className="sa-actions">
             <button className="sa-btn is-secondary" disabled={loading} onClick={load} type="button">Actualizar</button>
@@ -119,6 +155,7 @@ export default function SuperAdminDemosPanel() {
                   <th>Hijos</th>
                   <th>Creada</th>
                   <th>Sesión</th>
+                  <th>Correos</th>
                   <th>Estado</th>
                   <th>Expira</th>
                   <th aria-label="Acciones" />
@@ -128,50 +165,99 @@ export default function SuperAdminDemosPanel() {
                 {demos.map((demo) => {
                   const isLive = demo.status === 'ready' || demo.status === 'failed' || demo.status === 'provisioning';
                   const waHref = whatsappHref(demo.phone);
+                  const sentCount = (demo.emailSummary || []).filter((e) => e.sent).length;
+                  const openCount = (demo.emailSummary || []).filter((e) => e.opened).length;
+                  const isSelected = selectedId === demo._id;
                   return (
-                    <tr key={demo._id}>
-                      <td>
-                        <strong>{demo.schoolName}</strong>
-                        <small>{demo.city}</small>
-                      </td>
-                      <td>
-                        <strong>{demo.contactName}</strong>
-                        <small><a href={`mailto:${demo.email}`}>{demo.email}</a></small>
-                        <small>{waHref ? <a href={waHref} target="_blank" rel="noreferrer">{demo.phone}</a> : demo.phone}</small>
-                      </td>
-                      <td>
-                        {demo.children.map((child) => (
-                          <small key={`${child.name}-${child.gradeLabel}`}>{child.name} · {child.gradeLabel}</small>
-                        ))}
-                      </td>
-                      <td>{formatDate(demo.createdAt)}</td>
-                      <td>
-                        {demo.loginCount > 0 ? (
-                          <>
-                            <strong>{demo.loginCount} {demo.loginCount === 1 ? 'vez' : 'veces'}</strong>
-                            <small>Última: {formatDate(demo.lastLoginAt)}</small>
-                          </>
-                        ) : <span className="sa-muted">No ha entrado</span>}
-                      </td>
-                      <td>
-                        <span className={`sa-demo-status is-${demo.status}`} title={demo.errorMessage || ''}>
-                          {STATUS_LABELS[demo.status] || demo.status}
-                        </span>
-                      </td>
-                      <td>{demo.deletedAt ? formatDate(demo.deletedAt) : formatDate(demo.expiresAt)}</td>
-                      <td>
-                        {isLive ? (
-                          <button
-                            className="sa-btn is-danger"
-                            disabled={deletingId === demo._id}
-                            onClick={() => onDelete(demo)}
-                            type="button"
-                          >
-                            {deletingId === demo._id ? 'Eliminando…' : 'Eliminar'}
-                          </button>
-                        ) : null}
-                      </td>
-                    </tr>
+                    <Fragment key={demo._id}>
+                      <tr
+                        className={isSelected ? 'is-selected' : ''}
+                        onClick={() => openDemo(demo)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td>
+                          <strong>{demo.schoolName}</strong>
+                          <small>{demo.city}</small>
+                        </td>
+                        <td>
+                          <strong>{demo.contactName}</strong>
+                          <small><a href={`mailto:${demo.email}`} onClick={(e) => e.stopPropagation()}>{demo.email}</a></small>
+                          <small>{waHref ? <a href={waHref} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{demo.phone}</a> : demo.phone}</small>
+                        </td>
+                        <td>
+                          {demo.children.map((child) => (
+                            <small key={`${child.name}-${child.gradeLabel}`}>{child.name} · {child.gradeLabel}</small>
+                          ))}
+                        </td>
+                        <td>{formatDate(demo.createdAt)}</td>
+                        <td>
+                          {demo.loginCount > 0 ? (
+                            <>
+                              <strong>{demo.loginCount} {demo.loginCount === 1 ? 'vez' : 'veces'}</strong>
+                              <small>Última: {formatDate(demo.lastLoginAt)}</small>
+                            </>
+                          ) : <span className="sa-muted">No ha entrado</span>}
+                        </td>
+                        <td>
+                          <small>{sentCount} enviados · {openCount} abiertos</small>
+                        </td>
+                        <td>
+                          <span className={`sa-demo-status is-${demo.status}`} title={demo.errorMessage || ''}>
+                            {STATUS_LABELS[demo.status] || demo.status}
+                          </span>
+                        </td>
+                        <td>{demo.deletedAt ? formatDate(demo.deletedAt) : formatDate(demo.expiresAt)}</td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          {isLive ? (
+                            <button
+                              className="sa-btn is-danger"
+                              disabled={deletingId === demo._id}
+                              onClick={() => onDelete(demo)}
+                              type="button"
+                            >
+                              {deletingId === demo._id ? 'Eliminando…' : 'Eliminar'}
+                            </button>
+                          ) : null}
+                        </td>
+                      </tr>
+                      {isSelected ? (
+                        <tr key={`${demo._id}-detail`}>
+                          <td colSpan="9">
+                            <section className="sa-demo-emails">
+                              {detailLoading ? <p>Cargando correos…</p> : null}
+                              {!detailLoading && emails.length ? (
+                                <>
+                                  <h3>Correos de seguimiento</h3>
+                                  {selectedDetail?.demo?.followUpUnsubscribedAt ? (
+                                    <p className="sa-muted">Se dio de baja de seguimiento el {formatDate(selectedDetail.demo.followUpUnsubscribedAt)}.</p>
+                                  ) : null}
+                                  <table>
+                                    <thead>
+                                      <tr>
+                                        <th>Correo</th>
+                                        <th>Enviado</th>
+                                        <th>Abierto</th>
+                                        <th>Aperturas</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {emails.map((row) => (
+                                        <tr key={row.key}>
+                                          <td>{row.label}</td>
+                                          <td><EmailStatusPill yes={Boolean(row.sentAt)} labelYes={formatDate(row.sentAt)} labelNo="Pendiente" /></td>
+                                          <td><EmailStatusPill yes={Boolean(row.openedAt)} labelYes={formatDate(row.openedAt)} labelNo="Sin abrir" /></td>
+                                          <td>{row.openCount || 0}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </>
+                              ) : null}
+                            </section>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>

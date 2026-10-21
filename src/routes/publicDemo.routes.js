@@ -2,7 +2,9 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const DemoLead = require('../models/demoLead.model');
 const { createDemoSchool } = require('../services/demoSchool.service');
-const { verifyUnsubscribeToken } = require('../services/demoEmails.service');
+const { verifyUnsubscribeToken, verifyEmailOpenToken, recordDemoEmailOpen } = require('../services/demoEmails.service');
+
+const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 
 const router = express.Router();
 
@@ -89,6 +91,21 @@ function renderUnsubscribePage({ title, body, form = '' }) {
 ${form}
 </div></body></html>`;
 }
+
+router.get('/email-open/:token', async (req, res) => {
+  const parsed = verifyEmailOpenToken(req.params.token);
+  res.set({
+    'Content-Type': 'image/gif',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    Pragma: 'no-cache',
+  });
+  if (parsed) {
+    recordDemoEmailOpen(parsed).catch((error) => {
+      console.warn(`[DEMO_EMAIL_OPEN] failed lead=${parsed.leadId}: ${error.message || error}`);
+    });
+  }
+  return res.status(200).send(TRANSPARENT_GIF);
+});
 
 router.get('/unsubscribe/:token', (req, res) => {
   if (!verifyUnsubscribeToken(req.params.token)) {

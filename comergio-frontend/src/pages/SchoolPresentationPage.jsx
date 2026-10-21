@@ -1,4 +1,12 @@
-import { useEffect, useId, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { Link } from 'react-router-dom';
 import colibriLogo from '../assets/colibrisinfondo.png';
 import './SchoolPresentationPage.css';
@@ -79,7 +87,7 @@ const STEPS = [
     n: '01',
     icon: 'contact',
     title: 'Crea tu colegio en segundos',
-    text: 'Empieza el alta guiada, sin instalar servidores.',
+    text: 'Presiona el botón «Probar 7 días sin costo» y crea tu colegio en segundos.',
   },
   {
     n: '02',
@@ -100,16 +108,34 @@ const MODULES = [
     group: 'La app de la familia',
     items: [
       {
+        title: 'Comunicaciones',
+        text: 'Avisos oficiales con recordatorios, no un chat más.',
+        videoSrc: '/presentation/comunicados-demo.mp4',
+      },
+      {
         title: 'Pagos',
         text: 'La pensión pendiente se ve y se paga desde el celular.',
+        videoSrc: '/presentation/pagos-demo.mp4',
+      },
+      {
+        title: 'Academia',
+        text: 'Cursos, tareas y el seguimiento que la familia consulta desde la app.',
+        videoSrc: '/presentation/academico-demo.mp4',
       },
       {
         title: 'Cafetería',
         text: 'Saldo, preórdenes y tope diario, con rastro para el acudiente.',
+        videoSrc: '/presentation/cafeteria-demo.mp4',
       },
       {
-        title: 'Comunicados',
-        text: 'Avisos oficiales con recordatorios, no un chat más.',
+        title: 'Convivencia',
+        text: 'Enfermería, bienestar y convivencia: lo que ocurre en el colegio llega al acudiente.',
+        videoSrc: '/presentation/enfermeria-bienestar-demo.mp4',
+      },
+      {
+        title: 'Rutas',
+        text: 'Seguimiento del transporte: paradas, recorridos y tranquilidad para la familia en el camino.',
+        videoSrc: '/presentation/ruta-escolar-demo.mp4',
       },
     ],
   },
@@ -118,15 +144,21 @@ const MODULES = [
     items: [
       {
         title: 'Portal académico',
-        text: 'Cursos, tareas y el seguimiento que la familia consulta.',
+        text: 'Libro de notas, tareas y seguimiento por curso, desde la operación del colegio.',
+        videoSrc: '/presentation/portal-academico-docente-demo.mov',
+        videoFrame: 'desktop',
       },
       {
         title: 'Enfermería y bienestar',
         text: 'Lo que pasa en la jornada queda registrado y llega a casa.',
+        videoSrc: '/presentation/enfermeria-bienestar-campus-demo.mov',
+        videoFrame: 'desktop',
       },
       {
         title: 'Admisiones',
         text: 'Del primer interés a la matrícula, sin hojas sueltas.',
+        videoSrc: '/presentation/admisiones-demo.mov',
+        videoFrame: 'desktop',
       },
     ],
   },
@@ -270,7 +302,7 @@ function BrandMark({ compact = false }) {
   );
 }
 
-function CreateCta({ className = '', children = 'Prueba la demo gratis' }) {
+function CreateCta({ className = '', children = 'Probar 7 días sin costo' }) {
   return (
     <Link className={`sp-cta ${className}`.trim()} to={DEMO_PATH}>
       {children}
@@ -283,6 +315,336 @@ function ContactCta({ className = '' }) {
     <a className={`sp-cta sp-cta--ghost ${className}`.trim()} href={WHATSAPP_HREF} target="_blank" rel="noreferrer">
       Contáctanos
     </a>
+  );
+}
+
+const MODULE_VIDEO_PREVIEW_MS = 7000;
+
+const ModuleVideosContext = createContext(null);
+
+function ModuleVideoPlayButton({ title, onPlay }) {
+  return (
+    <button
+      type="button"
+      className="sp-module-media__play"
+      aria-label={`Reproducir demo de ${title}`}
+      onClick={onPlay}
+    >
+      <span className="sp-module-media__play-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+          <path d="M8 5.14v13.72L19 12 8 5.14z" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
+function ModuleVideoHintBubble({ copy, onDismiss }) {
+  return (
+    <div className="sp-video-hint" role="status">
+      <div className="sp-video-hint__bubble">
+        <p>{copy}</p>
+        <button
+          type="button"
+          className="sp-video-hint__close"
+          aria-label="Cerrar indicaciones"
+          onClick={onDismiss}
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <span className="sp-video-hint__caret" aria-hidden="true" />
+    </div>
+  );
+}
+
+function ModuleMediaScreen({ src, title, mediaKey, isDesktop, hintCopy }) {
+  const ctx = useContext(ModuleVideosContext);
+  const videoRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  useEffect(() => {
+    if (!ctx) return undefined;
+    return ctx.registerVideo(mediaKey, videoRef);
+  }, [ctx, mediaKey]);
+
+  const activeKey = ctx?.activeKey ?? null;
+
+  useEffect(() => {
+    setIsPlaying(activeKey === mediaKey);
+  }, [activeKey, mediaKey]);
+
+  const showControls = ctx?.showManualControls;
+
+  const screenInner = (
+    <>
+      <video
+        ref={videoRef}
+        src={src}
+        muted
+        playsInline
+        preload="metadata"
+        aria-label={`Demo de ${title} en Comergio`}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false);
+          ctx?.onVideoEnded(mediaKey);
+        }}
+      />
+      {showControls && !isPlaying ? (
+        <ModuleVideoPlayButton
+          title={title}
+          onPlay={() => ctx?.toggleVideoPlayback(mediaKey)}
+        />
+      ) : null}
+      {showControls && isPlaying ? (
+        <button
+          type="button"
+          className="sp-module-media__screen-tap"
+          aria-label={`Pausar demo de ${title}`}
+          onClick={() => ctx?.toggleVideoPlayback(mediaKey)}
+        />
+      ) : null}
+    </>
+  );
+
+  const hint = hintCopy && ctx?.showChooseHint && !isPlaying ? (
+    <ModuleVideoHintBubble copy={hintCopy} onDismiss={() => ctx.dismissChooseHint()} />
+  ) : null;
+
+  if (isDesktop) {
+    return (
+      <div className="sp-desktop">
+        <div className="sp-desktop__monitor">
+          <div className="sp-module-media__screen sp-desktop__screen">{screenInner}</div>
+          {hint}
+        </div>
+        <div className="sp-desktop__stand" aria-hidden="true">
+          <span className="sp-desktop__neck" />
+          <span className="sp-desktop__base" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sp-phone">
+      <div className="sp-phone__shell">
+        <div className="sp-phone__notch" aria-hidden="true" />
+        <div className="sp-module-media__screen sp-phone__screen">{screenInner}</div>
+        {hint}
+      </div>
+    </div>
+  );
+}
+
+function ModuleMediaVideo({ item, mediaKey, hintCopy }) {
+  return (
+    <ModuleMediaScreen
+      src={item.videoSrc}
+      title={item.title}
+      mediaKey={mediaKey}
+      isDesktop={item.videoFrame === 'desktop'}
+      hintCopy={hintCopy}
+    />
+  );
+}
+
+function ModuleVideosProvider({ sectionRef, children }) {
+  const videosRef = useRef(new Map());
+  const previewTimerRef = useRef(null);
+  const hasPreviewStartedRef = useRef(false);
+  const [phase, setPhase] = useState('idle');
+  const [activeKey, setActiveKey] = useState(null);
+  const [chooseHintDismissed, setChooseHintDismissed] = useState(false);
+
+  const pauseAll = useCallback(() => {
+    videosRef.current.forEach((ref) => {
+      ref.current?.pause();
+    });
+  }, []);
+
+  const playAllPreview = useCallback(() => {
+    videosRef.current.forEach((ref) => {
+      const video = ref.current;
+      if (!video) return;
+      video.currentTime = 0;
+      video.muted = true;
+      video.play().catch(() => {});
+    });
+  }, []);
+
+  const registerVideo = useCallback((key, ref) => {
+    videosRef.current.set(key, ref);
+    return () => {
+      videosRef.current.delete(key);
+    };
+  }, []);
+
+  const toggleVideoPlayback = useCallback((key) => {
+    const ref = videosRef.current.get(key);
+    const video = ref?.current;
+    if (!video) return;
+
+    if (!video.paused && activeKey === key) {
+      video.pause();
+      setActiveKey(null);
+      return;
+    }
+
+    pauseAll();
+    videosRef.current.forEach((entryRef, entryKey) => {
+      const entryVideo = entryRef.current;
+      if (!entryVideo) return;
+      if (entryKey !== key) {
+        entryVideo.pause();
+        return;
+      }
+      if (entryVideo.ended) {
+        entryVideo.currentTime = 0;
+      }
+      entryVideo.muted = true;
+      entryVideo.play().catch(() => {});
+      setActiveKey(key);
+    });
+  }, [activeKey, pauseAll]);
+
+  const onVideoEnded = useCallback((key) => {
+    setActiveKey((current) => (current === key ? null : current));
+  }, []);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return undefined;
+
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReducedMotion) {
+      setPhase('manual');
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting || hasPreviewStartedRef.current) return;
+        hasPreviewStartedRef.current = true;
+        setPhase('preview');
+      },
+      { threshold: 0.22, rootMargin: '0px 0px -8% 0px' },
+    );
+
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [sectionRef]);
+
+  useEffect(() => {
+    if (phase !== 'preview') return undefined;
+
+    playAllPreview();
+    previewTimerRef.current = window.setTimeout(() => {
+      pauseAll();
+      videosRef.current.forEach((ref) => {
+        const video = ref.current;
+        if (video) video.currentTime = 0;
+      });
+      setActiveKey(null);
+      setPhase('manual');
+    }, MODULE_VIDEO_PREVIEW_MS);
+
+    return () => {
+      if (previewTimerRef.current) {
+        window.clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+    };
+  }, [phase, pauseAll, playAllPreview]);
+
+  const showManualControls = phase === 'manual';
+  const showChooseHint = showManualControls && !chooseHintDismissed;
+
+  const dismissChooseHint = useCallback(() => {
+    setChooseHintDismissed(true);
+  }, []);
+
+  useEffect(() => {
+    if (activeKey) {
+      setChooseHintDismissed(true);
+    }
+  }, [activeKey]);
+
+  const value = {
+    registerVideo,
+    toggleVideoPlayback,
+    onVideoEnded,
+    activeKey,
+    showManualControls,
+    showChooseHint,
+    dismissChooseHint,
+  };
+
+  return (
+    <ModuleVideosContext.Provider value={value}>
+      {children}
+    </ModuleVideosContext.Provider>
+  );
+}
+
+const MODULE_GROUP_HINT_COPY = {
+  'La app de la familia':
+    'Presiona la sección que tú elijas para seguir viendo cómo lo usan los padres.',
+  'El campus del colegio':
+    'Presiona la sección que tú elijas para seguir viendo cómo lo usa el staff del colegio.',
+};
+
+function SpModulesSection() {
+  const sectionRef = useRef(null);
+
+  return (
+    <section ref={sectionRef} className="sp-modules" id="modulos" aria-labelledby="sp-modules-title">
+      <ModuleVideosProvider sectionRef={sectionRef}>
+        <div className="sp-wrap">
+          <header data-reveal="up">
+            <h2 id="sp-modules-title">Así se vive la experiencia en un colegio moderno.</h2>
+            <p>Cada pieza es un flujo real: la app de la familia y la operación del campus.</p>
+          </header>
+          {MODULES.map((group) => (
+            <div key={group.group} className="sp-modules__group">
+              <h3 data-reveal="up">{group.group}</h3>
+              <ul data-reveal-stagger>
+                {group.items.map((item, index) => {
+                  const mediaKey = `${group.group}-${item.title}`;
+                  const firstVideoIndex = group.items.findIndex((entry) => Boolean(entry.videoSrc));
+                  const hintCopy = index === firstVideoIndex ? MODULE_GROUP_HINT_COPY[group.group] : '';
+                  return (
+                    <li
+                      key={mediaKey}
+                      className={[
+                        item.videoSrc ? 'sp-modules__item--media' : '',
+                        hintCopy ? 'sp-modules__item--hinted' : '',
+                      ].filter(Boolean).join(' ') || undefined}
+                      data-reveal-item
+                      style={{ '--i': index }}
+                    >
+                      {item.videoSrc ? (
+                        <ModuleMediaVideo item={item} mediaKey={mediaKey} hintCopy={hintCopy} />
+                      ) : null}
+                      <h4>{item.title}</h4>
+                      <p>{item.text}</p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+          <div className="sp-cta-row">
+            <CreateCta />
+            <ContactCta />
+          </div>
+        </div>
+      </ModuleVideosProvider>
+    </section>
   );
 }
 
@@ -547,7 +909,7 @@ export default function SchoolPresentationPage() {
             </div>
             <div className="sp-guide__copy">
               <h2 id="sp-guide-title">
-                No estás solo: Muchos colegios viven la misma tensión — Difícil manejo de cobros, lograr
+                No estás sola: Muchos colegios viven la misma tensión — Difícil manejo de cobros, lograr
                 que las familias lean los comunicados y demasiada información interna dispersa.
               </h2>
               <p>Comergio nació acompañando por más de 10 años a colegios en Colombia.</p>
@@ -609,32 +971,7 @@ export default function SchoolPresentationPage() {
         </div>
       </section>
 
-      <section className="sp-modules" id="modulos" aria-labelledby="sp-modules-title">
-        <div className="sp-wrap">
-          <header data-reveal="up">
-            <p className="sp-kicker">El día a día</p>
-            <h2 id="sp-modules-title">Así se vive la experiencia en un colegio conectado.</h2>
-            <p>Cada pieza es un flujo real: la app de la familia y la operación del campus.</p>
-          </header>
-          {MODULES.map((group) => (
-            <div key={group.group} className="sp-modules__group">
-              <h3 data-reveal="up">{group.group}</h3>
-              <ul data-reveal-stagger>
-                {group.items.map((item, index) => (
-                  <li key={item.title} data-reveal-item style={{ '--i': index }}>
-                    <h4>{item.title}</h4>
-                    <p>{item.text}</p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          <div className="sp-cta-row">
-            <CreateCta />
-            <ContactCta />
-          </div>
-        </div>
-      </section>
+      <SpModulesSection />
 
       <footer className="sp-foot">
         <div className="sp-foot__grid">

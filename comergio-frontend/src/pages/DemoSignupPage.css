@@ -13,18 +13,6 @@
   margin-bottom: 1.75rem;
 }
 
-.demo-intro__eyebrow {
-  display: inline-block;
-  margin: 0 0 0.85rem;
-  padding: 0.35rem 0.85rem;
-  border-radius: 999px;
-  background: rgba(14, 143, 98, 0.1);
-  border: 1px solid rgba(14, 143, 98, 0.22);
-  color: var(--green-deep);
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
 .demo-intro h1,
 .demo-success h1 {
   margin: 0 0 0.75rem;

@@ -73,6 +73,16 @@
           return true;
         }
 
+        if (!isNativeCapacitorShell()) {
+          return;
+        }
+
+        var bootPath = (window.location.pathname || '/').replace(/\/+$/, '') || '/';
+        var needsNativeLoginRedirect = bootPath === '/' || bootPath === '/landing';
+        if (!needsNativeLoginRedirect) {
+          return;
+        }
+
         markBootPending();
 
         if (redirectNativeToLoginIfNeeded()) {

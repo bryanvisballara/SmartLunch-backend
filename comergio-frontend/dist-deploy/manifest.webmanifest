@@ -1,7 +1,7 @@
 {
   "name": "Comergio",
   "short_name": "Comergio",
-  "start_url": "/",
+  "start_url": "/login",
   "scope": "/",
   "display": "standalone",
   "background_color": "#102739",

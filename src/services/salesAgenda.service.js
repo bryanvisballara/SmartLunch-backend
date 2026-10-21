@@ -1,0 +1,304 @@
+const SalesAgendaSettings = require('../models/salesAgendaSettings.model');
+
+const SLOT_DURATION_MINUTES = 30;
+const RANGE_START_MINUTES = 6 * 60;
+const RANGE_END_MINUTES = 20 * 60;
+const LEGACY_WINDOWS = [
+  { start: '09:00', end: '11:00' },
+  { start: '14:00', end: '16:00' },
+];
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function timeToMinutes(time) {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(time || '').trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return null;
+  return (hour * 60) + minute;
+}
+
+function minutesToTime(minutes) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function formatTimeLabel(time) {
+  const minutes = timeToMinutes(time);
+  if (minutes === null) return time;
+  const hour24 = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const suffix = hour24 >= 12 ? 'p. m.' : 'a. m.';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${pad2(minute)} ${suffix}`;
+}
+
+function buildSlotsForWindow(start, end, durationMinutes = SLOT_DURATION_MINUTES) {
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  if (startMinutes === null || endMinutes === null || endMinutes - startMinutes < durationMinutes) return [];
+  const slots = [];
+  for (let cursor = startMinutes; cursor + durationMinutes <= endMinutes; cursor += durationMinutes) {
+    slots.push(minutesToTime(cursor));
+  }
+  return slots;
+}
+
+function resolveWindows(settings) {
+  const customWindows = (Array.isArray(settings?.windows) ? settings.windows : [])
+    .map((window) => ({
+      start: String(window?.start || '').trim(),
+      end: String(window?.end || '').trim(),
+    }))
+    .filter((window) => window.start && window.end);
+  if (settings?.usesCustomRange && customWindows.length) {
+    return customWindows;
+  }
+  if (settings?.usesCustomRange && settings.availableFrom && settings.availableTo) {
+    return [{ start: settings.availableFrom, end: settings.availableTo }];
+  }
+  return LEGACY_WINDOWS.map((window) => ({ ...window }));
+}
+
+function resolveSlotTimes(settings) {
+  const seen = new Set();
+  const times = [];
+  resolveWindows(settings).forEach((window) => {
+    buildSlotsForWindow(window.start, window.end).forEach((time) => {
+      if (seen.has(time)) return;
+      seen.add(time);
+      times.push(time);
+    });
+  });
+  return times;
+}
+
+function normalizeClosedDates(settings) {
+  return [...new Set((Array.isArray(settings?.closedDates) ? settings.closedDates : [])
+    .map((date) => String(date || '').trim())
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
+}
+
+function isDateClosed(settings, dateKey) {
+  return normalizeClosedDates(settings).includes(String(dateKey || ''));
+}
+
+function isSlotBlocked(settings, dateKey, time) {
+  if (isDateClosed(settings, dateKey)) return true;
+  return (Array.isArray(settings?.blocks) ? settings.blocks : []).some((block) => {
+    if (String(block?.time || '') !== String(time || '')) return false;
+    if (block.scope === 'weekday') return true;
+    return block.scope === 'date' && String(block.date || '') === String(dateKey || '');
+  });
+}
+
+function describeWindows(windows) {
+  return (Array.isArray(windows) ? windows : [])
+    .map((window) => `${formatTimeLabel(window.start)} – ${formatTimeLabel(window.end)}`)
+    .join(' y ');
+}
+
+function serializeAgendaSettings(settings) {
+  const source = settings || {};
+  const windows = resolveWindows(source);
+  const slotTimes = resolveSlotTimes(source);
+  const blocks = (Array.isArray(source.blocks) ? source.blocks : []).map((block) => ({
+    id: String(block._id || block.id || ''),
+    scope: block.scope,
+    date: block.date || '',
+    time: block.time,
+    label: formatTimeLabel(block.time),
+  }));
+
+  return {
+    usesCustomRange: Boolean(source.usesCustomRange),
+    availableFrom: windows[0]?.start || '09:00',
+    availableTo: windows[0]?.end || '11:00',
+    slotDurationMinutes: SLOT_DURATION_MINUTES,
+    windows,
+    slotTimes,
+    publishedLabel: describeWindows(windows),
+    blocks,
+    closedDates: normalizeClosedDates(source),
+  };
+}
+
+function assertValidRange(availableFrom, availableTo) {
+  const start = timeToMinutes(availableFrom);
+  const end = timeToMinutes(availableTo);
+  if (start === null || end === null || start % SLOT_DURATION_MINUTES !== 0 || end % SLOT_DURATION_MINUTES !== 0) {
+    const error = new Error('Elige horas en intervalos de 30 minutos.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (start < RANGE_START_MINUTES || end > RANGE_END_MINUTES) {
+    const error = new Error('El horario debe estar entre las 6:00 a. m. y las 8:00 p. m.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (end - start < SLOT_DURATION_MINUTES) {
+    const error = new Error('El rango debe cubrir al menos 30 minutos.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    availableFrom: minutesToTime(start),
+    availableTo: minutesToTime(end),
+  };
+}
+
+const SALES_AGENDA_SCOPE = 'global';
+
+async function findSalesAgendaSettings() {
+  return SalesAgendaSettings.findOne({ scopeKey: SALES_AGENDA_SCOPE });
+}
+
+async function getSalesAgendaSettings() {
+  const settings = await findSalesAgendaSettings();
+  return serializeAgendaSettings(settings);
+}
+
+function assertValidWindows(windows) {
+  if (!Array.isArray(windows) || !windows.length) {
+    const error = new Error('Agrega al menos un horario.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (windows.length > 6) {
+    const error = new Error('Puedes guardar hasta 6 horarios.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const normalized = windows
+    .map((window) => {
+      const range = assertValidRange(window?.start || window?.availableFrom, window?.end || window?.availableTo);
+      return { start: range.availableFrom, end: range.availableTo };
+    })
+    .sort((left, right) => left.start.localeCompare(right.start));
+  normalized.forEach((window, index) => {
+    const previous = normalized[index - 1];
+    if (previous && window.start < previous.end) {
+      const error = new Error('Los horarios no pueden cruzarse. Déjalos uno después del otro.');
+      error.statusCode = 400;
+      throw error;
+    }
+  });
+  return normalized;
+}
+
+async function saveSalesAgendaWindows(_unused, windows) {
+  const normalizedWindows = assertValidWindows(windows);
+  const nextSlotTimes = new Set(normalizedWindows.flatMap((window) => buildSlotsForWindow(window.start, window.end)));
+  let settings = await findSalesAgendaSettings();
+  if (!settings) {
+    settings = new SalesAgendaSettings({ scopeKey: SALES_AGENDA_SCOPE });
+  }
+  settings.usesCustomRange = true;
+  settings.windows = normalizedWindows;
+  settings.availableFrom = normalizedWindows[0].start;
+  settings.availableTo = normalizedWindows[normalizedWindows.length - 1].end;
+  settings.blocks = (settings.blocks || []).filter((block) => nextSlotTimes.has(block.time));
+  settings.markModified('windows');
+  settings.markModified('blocks');
+  await settings.save();
+  return serializeAgendaSettings(settings);
+}
+
+function assertBlockPayload(settings, { scope, date, time } = {}) {
+  const normalizedScope = scope === 'weekday' ? 'weekday' : scope === 'date' ? 'date' : '';
+  const minutes = timeToMinutes(time);
+  const normalizedTime = minutes === null ? '' : minutesToTime(minutes);
+  const slotTimes = resolveSlotTimes(settings);
+  if (!normalizedScope) {
+    const error = new Error('Indica si el bloqueo es de un día o de todos los días.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!slotTimes.includes(normalizedTime)) {
+    const error = new Error('Esa hora no está dentro del horario disponible.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const normalizedDate = String(date || '').trim();
+  if (normalizedScope === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    const error = new Error('Elige el día que quieres bloquear.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return {
+    scope: normalizedScope,
+    date: normalizedScope === 'date' ? normalizedDate : '',
+    time: normalizedTime,
+  };
+}
+
+async function addSalesAgendaBlock(_unused, payload, createdByName = '') {
+  let settings = await findSalesAgendaSettings();
+  if (!settings) {
+    settings = new SalesAgendaSettings({ scopeKey: SALES_AGENDA_SCOPE });
+    await settings.save();
+  }
+  const block = assertBlockPayload(settings, payload);
+  const exists = (settings.blocks || []).some((item) => (
+    item.scope === block.scope && item.time === block.time && (item.date || '') === block.date
+  ));
+  if (!exists) {
+    settings.blocks.push({
+      ...block,
+      createdByName: String(createdByName || '').trim(),
+    });
+    await settings.save();
+  }
+  return serializeAgendaSettings(settings);
+}
+
+async function removeSalesAgendaBlock(_unused, blockId) {
+  const settings = await findSalesAgendaSettings();
+  if (!settings) return serializeAgendaSettings(null);
+  const targetId = String(blockId || '');
+  settings.blocks = (settings.blocks || []).filter((block) => String(block._id) !== targetId);
+  settings.markModified('blocks');
+  await settings.save();
+  return serializeAgendaSettings(settings);
+}
+
+async function setSalesAgendaClosedDate(_unused, date, closed) {
+  const normalizedDate = String(date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+    const error = new Error('Elige un día válido para bloquear.');
+    error.statusCode = 400;
+    throw error;
+  }
+  let settings = await findSalesAgendaSettings();
+  if (!settings) {
+    settings = new SalesAgendaSettings({ scopeKey: SALES_AGENDA_SCOPE });
+  }
+  const closedDates = new Set(normalizeClosedDates(settings));
+  if (closed) closedDates.add(normalizedDate);
+  else closedDates.delete(normalizedDate);
+  settings.closedDates = [...closedDates].sort();
+  settings.markModified('closedDates');
+  await settings.save();
+  return serializeAgendaSettings(settings);
+}
+
+module.exports = {
+  SLOT_DURATION_MINUTES,
+  LEGACY_WINDOWS,
+  timeToMinutes,
+  formatTimeLabel,
+  resolveWindows,
+  resolveSlotTimes,
+  isDateClosed,
+  isSlotBlocked,
+  serializeAgendaSettings,
+  getSalesAgendaSettings,
+  saveSalesAgendaWindows,
+  addSalesAgendaBlock,
+  removeSalesAgendaBlock,
+  setSalesAgendaClosedDate,
+};
