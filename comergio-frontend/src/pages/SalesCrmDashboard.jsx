@@ -20,6 +20,25 @@ const VIEWS = [
   { key: 'agenda', label: 'Agenda' },
 ];
 
+/** Keep in sync with backend `salesStageTemplates` (src/routes/salesCrm.routes.js). */
+const SALES_CRM_STAGE_TEMPLATES = [
+  { key: 'creado', code: 'E1', label: 'Creado' },
+  { key: 'intento-contacto', code: 'E2', label: 'Intento de contacto' },
+  { key: 'contactado', code: 'E3', label: 'Contactado' },
+  { key: 'agendado', code: 'E4', label: 'Agendado' },
+  { key: 'seguimiento-post-reunion', code: 'E5', label: 'Seguimiento post reunión' },
+  { key: 'contratado', code: 'E6', label: 'Contratado' },
+  { key: 'en-produccion', code: 'E7', label: 'En producción' },
+];
+
+function resolveStageTemplates(apiTemplates) {
+  const apiList = Array.isArray(apiTemplates) ? apiTemplates : [];
+  if (apiList[0]?.key === 'creado') {
+    return apiList;
+  }
+  return SALES_CRM_STAGE_TEMPLATES;
+}
+
 const APPOINTMENT_TYPES = [
   { value: 'virtual', label: 'Cita virtual' },
   { value: 'phone', label: 'Llamada telefónica' },
@@ -137,7 +156,7 @@ export default function SalesCrmDashboard() {
     try {
       const { data } = await getSalesCrm(nextFilters);
       setProspects(data?.prospects || []);
-      setStageTemplates(data?.stageTemplates || []);
+      setStageTemplates(resolveStageTemplates(data?.stageTemplates));
       setContactMethodOptions(data?.contactMethodOptions || []);
       setMetrics(data?.metrics || {});
       setStageCounts(data?.stageCounts || {});
