@@ -128,6 +128,13 @@
   color: #fff;
 }
 
+.admissions-detail-metadata a {
+  color: #1d6972;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+
 .sales-crm-table-wrap {
   -webkit-overflow-scrolling: touch;
 }

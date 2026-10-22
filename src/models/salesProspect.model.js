@@ -44,6 +44,8 @@ const salesProspectSchema = new mongoose.Schema({
   contactName: { type: String, default: '', trim: true },
   contactEmail: { type: String, default: '', trim: true, lowercase: true },
   contactPhone: { type: String, default: '', trim: true },
+  instagram: { type: String, default: '', trim: true },
+  website: { type: String, default: '', trim: true },
   currentStageKey: {
     type: String,
     default: 'creado',

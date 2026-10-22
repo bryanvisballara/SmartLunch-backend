@@ -55,6 +55,8 @@ const emptyProspectForm = {
   contactName: '',
   contactEmail: '',
   contactPhone: '',
+  instagram: '',
+  website: '',
 };
 
 const emptyEventForm = {
@@ -109,6 +111,22 @@ function formatAppointmentDateTime(appointment = {}) {
   if (appointment?.scheduledAt) return formatDateTime(appointment.scheduledAt);
   if (appointment?.date && appointment?.time) return `${formatDate(appointment.date)} ${appointment.time}`;
   return '-';
+}
+
+function externalWebsiteHref(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw.replace(/^\/+/, '')}`;
+}
+
+function externalInstagramHref(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const handle = raw.replace(/^@/, '').replace(/^www\./i, '').replace(/^instagram\.com\//i, '').replace(/\/+$/, '');
+  if (!handle) return '';
+  return `https://www.instagram.com/${handle}/`;
 }
 
 function whatsappHref(phone) {
@@ -282,6 +300,8 @@ export default function SalesCrmDashboard() {
       contactName: prospectForm.contactName.trim(),
       contactEmail: prospectForm.contactEmail.trim(),
       contactPhone: prospectForm.contactPhone.trim(),
+      instagram: prospectForm.instagram.trim(),
+      website: prospectForm.website.trim(),
     };
     await runAction(async () => {
       await createSalesProspect(payload);
@@ -635,6 +655,30 @@ export default function SalesCrmDashboard() {
                   ) : null}
                 </div>
                 <div><span>Correo</span><strong>{selectedProspect.contactEmail || '-'}</strong></div>
+                <div>
+                  <span>Instagram</span>
+                  {selectedProspect.instagram && externalInstagramHref(selectedProspect.instagram) ? (
+                    <strong>
+                      <a href={externalInstagramHref(selectedProspect.instagram)} rel="noreferrer" target="_blank">
+                        {selectedProspect.instagram}
+                      </a>
+                    </strong>
+                  ) : (
+                    <strong>-</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Página web</span>
+                  {selectedProspect.website && externalWebsiteHref(selectedProspect.website) ? (
+                    <strong>
+                      <a href={externalWebsiteHref(selectedProspect.website)} rel="noreferrer" target="_blank">
+                        {selectedProspect.website}
+                      </a>
+                    </strong>
+                  ) : (
+                    <strong>-</strong>
+                  )}
+                </div>
                 <div><span>Registrado</span><strong>{formatDate(selectedProspect.createdAt)}</strong></div>
                 <div><span>Última actualización</span><strong>{formatDateTime(selectedProspect.updatedAt)}</strong></div>
               </div>
@@ -763,6 +807,8 @@ export default function SalesCrmDashboard() {
                 <label>Contacto <span className="sales-crm-optional">(opcional)</span><input value={prospectForm.contactName} onChange={(e) => setProspectForm((f) => ({ ...f, contactName: e.target.value }))} /></label>
                 <label>Correo <span className="sales-crm-optional">(opcional)</span><input type="text" inputMode="email" autoComplete="email" placeholder="Si aún no lo tienes, déjalo vacío" value={prospectForm.contactEmail} onChange={(e) => setProspectForm((f) => ({ ...f, contactEmail: e.target.value }))} /></label>
                 <label>Teléfono <span className="sales-crm-optional">(opcional)</span><input type="tel" value={prospectForm.contactPhone} onChange={(e) => setProspectForm((f) => ({ ...f, contactPhone: e.target.value }))} /></label>
+                <label>Instagram <span className="sales-crm-optional">(opcional)</span><input type="text" placeholder="@colegioejemplo" value={prospectForm.instagram} onChange={(e) => setProspectForm((f) => ({ ...f, instagram: e.target.value }))} /></label>
+                <label>Página web <span className="sales-crm-optional">(opcional)</span><input type="text" placeholder="https://www.micolegio.edu.co" value={prospectForm.website} onChange={(e) => setProspectForm((f) => ({ ...f, website: e.target.value }))} /></label>
               </div>
               <div className="admissions-modal-actions">
                 <button className="secondary-button" type="button" onClick={() => setShowProspectForm(false)}>Cancelar</button>

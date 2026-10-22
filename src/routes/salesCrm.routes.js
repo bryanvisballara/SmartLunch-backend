@@ -117,6 +117,8 @@ function buildProspectPayload(body = {}, existing = null) {
     contactName: normalizeOptionalContactField(body.contactName ?? existing?.contactName),
     contactEmail: normalizeOptionalContactEmail(body.contactEmail ?? existing?.contactEmail),
     contactPhone: normalizeOptionalContactField(body.contactPhone ?? existing?.contactPhone),
+    instagram: normalizeOptionalContactField(body.instagram ?? existing?.instagram),
+    website: normalizeOptionalContactField(body.website ?? existing?.website),
     currentStageKey: normalizeStageKey(body.currentStageKey ?? body.stageKey ?? existing?.currentStageKey),
   };
 }
@@ -134,6 +136,8 @@ function serializeProspect(prospect) {
     contactName: source.contactName || '',
     contactEmail: source.contactEmail || '',
     contactPhone: source.contactPhone || '',
+    instagram: source.instagram || '',
+    website: source.website || '',
     currentStageKey: source.currentStageKey || 'creado',
     salesStages: source.salesStages || [],
     salesEvents: (source.salesEvents || []).map((event) => ({
