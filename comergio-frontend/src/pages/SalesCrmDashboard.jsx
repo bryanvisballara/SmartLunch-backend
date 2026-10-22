@@ -12,12 +12,14 @@ import {
   updateSalesEvent,
   updateSalesProspect,
 } from '../services/salesCrm.service';
+import SalesCrmContactTemplatesPanel from './SalesCrmContactTemplatesPanel';
 import './AdmissionsDashboard.css';
 import './SalesCrmDashboard.css';
 
 const VIEWS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'clientes', label: 'Clientes' },
+  { key: 'plantillas', label: 'Plantillas' },
   { key: 'agenda', label: 'Agenda' },
 ];
 
@@ -170,6 +172,7 @@ export default function SalesCrmDashboard() {
   const [selectedAgendaDate, setSelectedAgendaDate] = useState(getLocalDateKey());
   const [drilldownStage, setDrilldownStage] = useState('');
   const [editingEventId, setEditingEventId] = useState('');
+  const [templateContactHint, setTemplateContactHint] = useState(null);
 
   const load = useCallback(async (nextFilters = filters, { keepSelection = true, prospectsOnly = false } = {}) => {
     if (prospectsOnly) {
@@ -473,7 +476,12 @@ export default function SalesCrmDashboard() {
             key={item.key}
             className={`sales-crm-tab${view === item.key ? ' is-active' : ''}`}
             type="button"
-            onClick={() => { setView(item.key); setDrilldownStage(''); closeProspect(); }}
+            onClick={() => {
+              setView(item.key);
+              setDrilldownStage('');
+              closeProspect();
+              if (item.key !== 'plantillas') setTemplateContactHint(null);
+            }}
           >
             {item.label}
           </button>
@@ -643,6 +651,10 @@ export default function SalesCrmDashboard() {
         </section>
       ) : null}
 
+      {!showProspectDetail && view === 'plantillas' ? (
+        <SalesCrmContactTemplatesPanel contactHint={templateContactHint} />
+      ) : null}
+
       {!showProspectDetail && view === 'agenda' ? (
         <section className="dashboard-card admissions-agenda-card">
           <h2>Agenda comercial</h2>
@@ -690,6 +702,21 @@ export default function SalesCrmDashboard() {
               onClick={() => openEditProspectForm(selectedProspect)}
             >
               Editar datos
+            </button>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                setTemplateContactHint({
+                  schoolName: selectedProspect.schoolName,
+                  contactPhone: selectedProspect.contactPhone,
+                  contactEmail: selectedProspect.contactEmail,
+                });
+                closeProspect();
+                setView('plantillas');
+              }}
+            >
+              Plantillas de contacto
             </button>
           </div>
 

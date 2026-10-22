@@ -163,6 +163,128 @@
   min-height: 44px;
 }
 
+.sales-crm-templates-panel .admin-panel-heading {
+  align-items: flex-start;
+}
+
+.sales-crm-templates-loading,
+.sales-crm-templates-empty {
+  margin: 8px 0 0;
+}
+
+.sales-crm-templates-grid {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.sales-crm-templates-grid li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sales-crm-template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 14px 14px 36px;
+  background: #f8fafc;
+  cursor: pointer;
+  min-height: 120px;
+}
+
+.sales-crm-template-card:hover {
+  border-color: #0e8f62;
+  background: #fff;
+}
+
+.sales-crm-template-channel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.sales-crm-template-card strong {
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.sales-crm-template-card small {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.sales-crm-template-card-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.sales-crm-template-card-actions button {
+  border: none;
+  background: #fff;
+  border-radius: 8px;
+  min-width: 32px;
+  min-height: 32px;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px #e2e8f0;
+}
+
+.sales-crm-template-viewer .sales-crm-template-body {
+  margin: 12px 0;
+  padding: 14px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: min(50vh, 360px);
+  overflow: auto;
+}
+
+.sales-crm-template-viewer-meta {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.sales-crm-template-viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sales-crm-email-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sales-crm-template-hint {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
 @media (max-width: 860px) {
   .sales-crm-root .admin-panel-heading {
     flex-direction: column;
@@ -177,7 +299,7 @@
 
   .sales-crm-tabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
 

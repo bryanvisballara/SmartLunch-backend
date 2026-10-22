@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 
 const SalesProspect = require('../models/salesProspect.model');
+const SalesContactTemplate = require('../models/salesContactTemplate.model');
 const {
   getSalesAgendaSettings,
   saveSalesAgendaWindows,
@@ -364,6 +365,112 @@ router.delete('/agenda-settings/blocks/:blockId', async (req, res) => {
     return res.status(200).json(settings);
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo quitar el bloqueo.' });
+  }
+});
+
+const CONTACT_TEMPLATE_CHANNELS = new Set(['whatsapp', 'email', 'both']);
+
+function serializeContactTemplate(doc) {
+  const source = doc?.toObject?.() || doc || {};
+  return {
+    id: String(source._id || ''),
+    name: source.name || '',
+    body: source.body || '',
+    channel: CONTACT_TEMPLATE_CHANNELS.has(source.channel) ? source.channel : 'both',
+    sortOrder: Number(source.sortOrder) || 0,
+    createdAt: source.createdAt,
+    updatedAt: source.updatedAt,
+  };
+}
+
+function normalizeContactTemplateChannel(value) {
+  const raw = normalizeText(value).toLowerCase();
+  return CONTACT_TEMPLATE_CHANNELS.has(raw) ? raw : 'both';
+}
+
+router.get('/contact-templates', async (_req, res) => {
+  try {
+    const templates = await SalesContactTemplate.find({ deletedAt: null })
+      .sort({ sortOrder: 1, name: 1, createdAt: -1 })
+      .limit(200);
+    return res.status(200).json({ templates: templates.map(serializeContactTemplate) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron cargar las plantillas.' });
+  }
+});
+
+router.post('/contact-templates', async (req, res) => {
+  try {
+    const name = normalizeText(req.body?.name);
+    const body = normalizeText(req.body?.body);
+    if (!name) {
+      return res.status(400).json({ message: 'El nombre de la plantilla es requerido.' });
+    }
+    if (!body) {
+      return res.status(400).json({ message: 'El mensaje de la plantilla es requerido.' });
+    }
+    const template = await SalesContactTemplate.create({
+      name,
+      body,
+      channel: normalizeContactTemplateChannel(req.body?.channel),
+      sortOrder: Number(req.body?.sortOrder) || 0,
+    });
+    return res.status(201).json({ template: serializeContactTemplate(template) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo crear la plantilla.' });
+  }
+});
+
+router.patch('/contact-templates/:templateId', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.templateId)) {
+      return res.status(400).json({ message: 'Plantilla no válida.' });
+    }
+    const template = await SalesContactTemplate.findOne({ _id: req.params.templateId, deletedAt: null });
+    if (!template) {
+      return res.status(404).json({ message: 'Plantilla no encontrada.' });
+    }
+    if (req.body?.name !== undefined) {
+      const name = normalizeText(req.body.name);
+      if (!name) {
+        return res.status(400).json({ message: 'El nombre de la plantilla es requerido.' });
+      }
+      template.name = name;
+    }
+    if (req.body?.body !== undefined) {
+      const body = normalizeText(req.body.body);
+      if (!body) {
+        return res.status(400).json({ message: 'El mensaje de la plantilla es requerido.' });
+      }
+      template.body = body;
+    }
+    if (req.body?.channel !== undefined) {
+      template.channel = normalizeContactTemplateChannel(req.body.channel);
+    }
+    if (req.body?.sortOrder !== undefined) {
+      template.sortOrder = Number(req.body.sortOrder) || 0;
+    }
+    await template.save();
+    return res.status(200).json({ template: serializeContactTemplate(template) });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo actualizar la plantilla.' });
+  }
+});
+
+router.delete('/contact-templates/:templateId', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.templateId)) {
+      return res.status(400).json({ message: 'Plantilla no válida.' });
+    }
+    const template = await SalesContactTemplate.findOne({ _id: req.params.templateId, deletedAt: null });
+    if (!template) {
+      return res.status(404).json({ message: 'Plantilla no encontrada.' });
+    }
+    template.deletedAt = new Date();
+    await template.save();
+    return res.status(200).json({ message: 'Plantilla eliminada.' });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo eliminar la plantilla.' });
   }
 });
 

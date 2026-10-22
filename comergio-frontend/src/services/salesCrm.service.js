@@ -27,3 +27,12 @@ export const unblockSalesAgendaSlot = (blockId) => api.delete(`${basePath}/agend
 export const setSalesAgendaClosedDate = (date, closed) => (
   api.post(`${basePath}/agenda-settings/closed-dates`, { date, closed })
 );
+
+export const getSalesContactTemplates = () => api.get(`${basePath}/contact-templates`);
+export const createSalesContactTemplate = (data) => api.post(`${basePath}/contact-templates`, data);
+export const updateSalesContactTemplate = (templateId, data) => (
+  api.patch(`${basePath}/contact-templates/${templateId}`, data)
+);
+export const deleteSalesContactTemplate = (templateId) => (
+  api.delete(`${basePath}/contact-templates/${templateId}`)
+);
