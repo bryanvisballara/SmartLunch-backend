@@ -13,6 +13,32 @@ import './SchoolPresentationPage.css';
 
 const DEMO_PATH = '/demo';
 const WHATSAPP_HREF = `https://wa.me/573016214806?text=${encodeURIComponent('Hola, quiero conocer Comergio para mi colegio.')}`;
+
+const PRESENTATION_OG = {
+  title: 'Comergio · Tu colegio y jardín, en una sola plataforma',
+  description: 'Paga pensiones, consulta lo académico y gestiona servicios escolares desde la app. Prueba 7 días sin costo.',
+  image: 'https://www.comergio.com/presentation/og-share.jpg',
+};
+
+function upsertHeadMeta(attr, key, content) {
+  if (!content) return () => {};
+  let node = document.querySelector(`meta[${attr}="${key}"]`);
+  const created = !node;
+  if (!node) {
+    node = document.createElement('meta');
+    node.setAttribute(attr, key);
+    document.head.appendChild(node);
+  }
+  const previous = node.getAttribute('content') || '';
+  node.setAttribute('content', content);
+  return () => {
+    if (created) {
+      node.remove();
+      return;
+    }
+    node.setAttribute('content', previous);
+  };
+}
 const APP_STORE_URL = 'https://apps.apple.com/app/id6760672707';
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.comergio.app&hl=es_CO';
 
@@ -827,13 +853,22 @@ export default function SchoolPresentationPage() {
       document.head.appendChild(meta);
     }
     const previousDescription = meta.getAttribute('content') || '';
-    meta.setAttribute('content', 'Comergio conecta a las familias y al colegio: pensiones, cafetería, académico, enfermería y admisiones en una sola plataforma.');
+    meta.setAttribute('content', PRESENTATION_OG.description);
+
+    const restoreOgTags = [
+      upsertHeadMeta('property', 'og:title', PRESENTATION_OG.title),
+      upsertHeadMeta('property', 'og:description', PRESENTATION_OG.description),
+      upsertHeadMeta('property', 'og:image', PRESENTATION_OG.image),
+      upsertHeadMeta('property', 'og:url', 'https://www.comergio.com/'),
+      upsertHeadMeta('name', 'twitter:image', PRESENTATION_OG.image),
+    ];
 
     return () => {
       document.title = previousTitle;
       document.documentElement.lang = previousLang;
       document.documentElement.classList.remove('school-presentation-active');
       fontLink.remove();
+      restoreOgTags.forEach((restore) => restore());
       if (createdMeta) {
         meta.remove();
       } else {
