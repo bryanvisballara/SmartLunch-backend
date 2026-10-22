@@ -147,6 +147,7 @@ function whatsappHref(phone) {
 export default function SalesCrmDashboard() {
   const [view, setView] = useState('dashboard');
   const [loading, setLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -170,18 +171,24 @@ export default function SalesCrmDashboard() {
   const [drilldownStage, setDrilldownStage] = useState('');
   const [editingEventId, setEditingEventId] = useState('');
 
-  const load = useCallback(async (nextFilters = filters, { keepSelection = true } = {}) => {
-    setLoading(true);
+  const load = useCallback(async (nextFilters = filters, { keepSelection = true, prospectsOnly = false } = {}) => {
+    if (prospectsOnly) {
+      setListLoading(true);
+    } else {
+      setLoading(true);
+    }
     setError('');
     try {
       const { data } = await getSalesCrm(nextFilters);
       setProspects(data?.prospects || []);
-      setStageTemplates(resolveStageTemplates(data?.stageTemplates));
-      setContactMethodOptions(data?.contactMethodOptions || []);
-      setMetrics(data?.metrics || {});
-      setStageCounts(data?.stageCounts || {});
-      setGlobalEvents(data?.globalEvents || []);
-      setScheduledEvents(data?.scheduledEvents || []);
+      if (!prospectsOnly) {
+        setStageTemplates(resolveStageTemplates(data?.stageTemplates));
+        setContactMethodOptions(data?.contactMethodOptions || []);
+        setMetrics(data?.metrics || {});
+        setStageCounts(data?.stageCounts || {});
+        setGlobalEvents(data?.globalEvents || []);
+        setScheduledEvents(data?.scheduledEvents || []);
+      }
       if (keepSelection && selectedProspect?.id) {
         const still = (data?.prospects || []).find((p) => p.id === selectedProspect.id);
         if (still) {
@@ -194,13 +201,25 @@ export default function SalesCrmDashboard() {
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo cargar el CRM.');
     } finally {
-      setLoading(false);
+      if (prospectsOnly) {
+        setListLoading(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [filters, selectedProspect?.id]);
 
   useEffect(() => {
     load(filters, { keepSelection: false });
   }, []);
+
+  useEffect(() => {
+    if (view !== 'clientes' || selectedProspect) return undefined;
+    const timer = window.setTimeout(() => {
+      load(filters, { keepSelection: false, prospectsOnly: true });
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [filters, view, selectedProspect, load]);
 
   useEffect(() => {
     if (view !== 'agenda') return undefined;
@@ -575,16 +594,15 @@ export default function SalesCrmDashboard() {
               <option value="">Todos los canales</option>
               {contactMethodOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-            <button className="secondary-button" type="button" onClick={() => load(filters)}>Filtrar</button>
           </div>
           <div className="tracking-table-wrap sales-crm-table-wrap">
             <table className="tracking-data-table sales-crm-table">
               <thead><tr><th>Colegio</th><th>Ciudad</th><th>Dirección</th><th>Contacto</th><th>Canal</th><th>Etapa</th><th /></tr></thead>
               <tbody>
-                {loading ? (
-                  <tr><td className="sales-crm-table-empty" colSpan="7">Cargando…</td></tr>
+                {loading || listLoading ? (
+                  <tr><td className="sales-crm-table-empty" colSpan="7">{loading ? 'Cargando…' : 'Filtrando…'}</td></tr>
                 ) : null}
-                {!loading && prospects.map((p) => (
+                {!loading && !listLoading && prospects.map((p) => (
                   <tr
                     key={p.id}
                     className={selectedProspect?.id === p.id ? 'is-selected' : ''}
