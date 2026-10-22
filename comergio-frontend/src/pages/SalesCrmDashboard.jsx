@@ -277,8 +277,14 @@ export default function SalesCrmDashboard() {
 
   const submitProspect = async (event) => {
     event.preventDefault();
+    const payload = {
+      ...prospectForm,
+      contactName: prospectForm.contactName.trim(),
+      contactEmail: prospectForm.contactEmail.trim(),
+      contactPhone: prospectForm.contactPhone.trim(),
+    };
     await runAction(async () => {
-      await createSalesProspect(prospectForm);
+      await createSalesProspect(payload);
       setShowProspectForm(false);
       setProspectForm(emptyProspectForm);
     }, 'Cliente agregado.');
@@ -754,9 +760,9 @@ export default function SalesCrmDashboard() {
                     {contactMethodOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </label>
-                <label>Contacto<input value={prospectForm.contactName} onChange={(e) => setProspectForm((f) => ({ ...f, contactName: e.target.value }))} /></label>
-                <label>Correo<input type="email" value={prospectForm.contactEmail} onChange={(e) => setProspectForm((f) => ({ ...f, contactEmail: e.target.value }))} /></label>
-                <label>Teléfono<input value={prospectForm.contactPhone} onChange={(e) => setProspectForm((f) => ({ ...f, contactPhone: e.target.value }))} /></label>
+                <label>Contacto <span className="sales-crm-optional">(opcional)</span><input value={prospectForm.contactName} onChange={(e) => setProspectForm((f) => ({ ...f, contactName: e.target.value }))} /></label>
+                <label>Correo <span className="sales-crm-optional">(opcional)</span><input type="text" inputMode="email" autoComplete="email" placeholder="Si aún no lo tienes, déjalo vacío" value={prospectForm.contactEmail} onChange={(e) => setProspectForm((f) => ({ ...f, contactEmail: e.target.value }))} /></label>
+                <label>Teléfono <span className="sales-crm-optional">(opcional)</span><input type="tel" value={prospectForm.contactPhone} onChange={(e) => setProspectForm((f) => ({ ...f, contactPhone: e.target.value }))} /></label>
               </div>
               <div className="admissions-modal-actions">
                 <button className="secondary-button" type="button" onClick={() => setShowProspectForm(false)}>Cancelar</button>

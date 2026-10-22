@@ -1,3 +1,11 @@
+.sales-crm-optional {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .sales-crm-root {
   display: flex;
   flex-direction: column;

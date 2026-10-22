@@ -51,6 +51,22 @@ function isValidEmail(value) {
   return Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
 }
 
+function normalizeOptionalContactField(value) {
+  const text = normalizeText(value);
+  if (!text || text === '-' || text === '—') {
+    return '';
+  }
+  return text;
+}
+
+function normalizeOptionalContactEmail(value) {
+  const email = normalizeEmail(value);
+  if (!email || email === '-' || email === '—') {
+    return '';
+  }
+  return isValidEmail(email) ? email : '';
+}
+
 function normalizeStageKey(value) {
   const requestedKey = normalizeText(value).toLowerCase();
   return salesStageTemplates.some((stage) => stage.key === requestedKey)
@@ -98,9 +114,9 @@ function buildProspectPayload(body = {}, existing = null) {
     city: normalizeText(body.city ?? existing?.city),
     address: normalizeText(body.address ?? existing?.address),
     contactMethod,
-    contactName: normalizeText(body.contactName ?? existing?.contactName),
-    contactEmail: normalizeEmail(body.contactEmail ?? existing?.contactEmail),
-    contactPhone: normalizeText(body.contactPhone ?? existing?.contactPhone),
+    contactName: normalizeOptionalContactField(body.contactName ?? existing?.contactName),
+    contactEmail: normalizeOptionalContactEmail(body.contactEmail ?? existing?.contactEmail),
+    contactPhone: normalizeOptionalContactField(body.contactPhone ?? existing?.contactPhone),
     currentStageKey: normalizeStageKey(body.currentStageKey ?? body.stageKey ?? existing?.currentStageKey),
   };
 }
