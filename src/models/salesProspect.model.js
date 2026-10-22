@@ -46,7 +46,7 @@ const salesProspectSchema = new mongoose.Schema({
   contactPhone: { type: String, default: '', trim: true },
   currentStageKey: {
     type: String,
-    default: 'intento-contacto',
+    default: 'creado',
     index: true,
     trim: true,
   },

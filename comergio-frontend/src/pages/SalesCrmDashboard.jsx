@@ -198,11 +198,18 @@ export default function SalesCrmDashboard() {
   };
 
   const openProspect = async (prospect) => {
-    setDrilldownStage('');
+    if (!prospect?.id) return;
+    setMessage('');
+    setError('');
     try {
       const { data } = await getSalesProspect(prospect.id);
-      setSelectedProspect(data?.prospect || prospect);
-      setEventForm({ ...emptyEventForm, stageKey: (data?.prospect || prospect).currentStageKey, contactEmail: (data?.prospect || prospect).contactEmail });
+      const fullProspect = data?.prospect || prospect;
+      setSelectedProspect(fullProspect);
+      setEventForm({
+        ...emptyEventForm,
+        stageKey: fullProspect.currentStageKey,
+        contactEmail: fullProspect.contactEmail,
+      });
     } catch {
       setSelectedProspect(prospect);
     }
@@ -377,7 +384,7 @@ export default function SalesCrmDashboard() {
         <>
           <section className="admin-metrics-grid" aria-label="Métricas CRM">
             <article className="metric-card admin-metric-card"><span>Clientes</span><strong>{metrics.total || 0}</strong><p>Colegios en seguimiento.</p></article>
-            <article className="metric-card admin-metric-card"><span>En proceso</span><strong>{metrics.inProcess || 0}</strong><p>E2 a E4 activos.</p></article>
+            <article className="metric-card admin-metric-card"><span>En proceso</span><strong>{metrics.inProcess || 0}</strong><p>E3 a E6 activos.</p></article>
             <article className="metric-card admin-metric-card"><span>Contratados</span><strong>{metrics.contracted || 0}</strong><p>Paso a producción pendiente.</p></article>
             <article className="metric-card admin-metric-card"><span>En producción</span><strong>{metrics.inProduction || 0}</strong><p>Implementación en curso.</p></article>
           </section>
@@ -393,19 +400,23 @@ export default function SalesCrmDashboard() {
           </section>
           <section className="dashboard-card tracking-table-card admin-events-card">
             <div className="admin-panel-heading"><div><h2>Últimos eventos</h2></div></div>
-            <div className="tracking-table-wrap">
-              <table className="tracking-data-table">
+            <div className="tracking-table-wrap sales-crm-table-wrap">
+              <table className="tracking-data-table sales-crm-table">
                 <thead><tr><th>Fecha</th><th>Colegio</th><th>Etapa</th><th>Título</th><th>Contacto</th></tr></thead>
                 <tbody>
                   {globalEvents.length ? globalEvents.map((ev) => (
                     <tr key={`${ev.prospectId}-${ev._id}`} onClick={() => openProspect({ id: ev.prospectId, schoolName: ev.schoolName })}>
-                      <td>{formatDateTime(ev.updatedAt || ev.createdAt)}</td>
-                      <td>{ev.schoolName}</td>
-                      <td>{ev.stageLabel}</td>
-                      <td>{ev.title}</td>
-                      <td>{ev.contactName || '—'}</td>
+                      <td data-label="Fecha">{formatDateTime(ev.updatedAt || ev.createdAt)}</td>
+                      <td data-label="Colegio">{ev.schoolName}</td>
+                      <td data-label="Etapa">{ev.stageLabel}</td>
+                      <td data-label="Título">{ev.title}</td>
+                      <td data-label="Contacto">{ev.contactName || '—'}</td>
                     </tr>
-                  )) : <tr><td colSpan="5"><div className="empty-state">Sin eventos recientes.</div></td></tr>}
+                  )) : (
+                    <tr>
+                      <td className="sales-crm-table-empty" colSpan="5"><div className="empty-state">Sin eventos recientes.</div></td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -419,17 +430,41 @@ export default function SalesCrmDashboard() {
             <button className="secondary-button admissions-back-button" type="button" onClick={() => setDrilldownStage('')}>← Volver</button>
           </div>
           <h2>{getStageLabel(stageTemplates, drilldownStage)}</h2>
-          <div className="tracking-table-wrap">
-            <table className="tracking-data-table">
+          <div className="tracking-table-wrap sales-crm-table-wrap">
+            <table className="tracking-data-table sales-crm-table">
               <thead><tr><th>Colegio</th><th>Ciudad</th><th>Contacto</th><th>Canal</th><th>Acción</th></tr></thead>
               <tbody>
                 {filteredByDrilldown.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.schoolName}</td>
-                    <td>{p.city || '—'}</td>
-                    <td>{p.contactName || p.contactEmail || '—'}</td>
-                    <td>{p.contactMethodLabel || '—'}</td>
-                    <td><button className="tracking-icon-button" type="button" onClick={() => openProspect(p)}>→</button></td>
+                  <tr
+                    key={p.id}
+                    className={selectedProspect?.id === p.id ? 'is-selected' : ''}
+                    onClick={() => openProspect(p)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openProspect(p);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <td data-label="Colegio">{p.schoolName}</td>
+                    <td data-label="Ciudad">{p.city || '—'}</td>
+                    <td data-label="Contacto">{p.contactName || p.contactEmail || '—'}</td>
+                    <td data-label="Canal">{p.contactMethodLabel || '—'}</td>
+                    <td className="tracking-actions-cell" data-label="Acción">
+                      <button
+                        className="tracking-icon-button"
+                        type="button"
+                        aria-label={`Ver detalle de ${p.schoolName}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProspect(p);
+                        }}
+                      >
+                        →
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -457,20 +492,46 @@ export default function SalesCrmDashboard() {
             </select>
             <button className="secondary-button" type="button" onClick={() => load(filters)}>Filtrar</button>
           </div>
-          <div className="tracking-table-wrap">
-            <table className="tracking-data-table">
+          <div className="tracking-table-wrap sales-crm-table-wrap">
+            <table className="tracking-data-table sales-crm-table">
               <thead><tr><th>Colegio</th><th>Ciudad</th><th>Dirección</th><th>Contacto</th><th>Canal</th><th>Etapa</th><th /></tr></thead>
               <tbody>
-                {loading ? <tr><td colSpan="7">Cargando…</td></tr> : null}
+                {loading ? (
+                  <tr><td className="sales-crm-table-empty" colSpan="7">Cargando…</td></tr>
+                ) : null}
                 {!loading && prospects.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.schoolName}</td>
-                    <td>{p.city || '—'}</td>
-                    <td>{p.address || '—'}</td>
-                    <td>{p.contactName}<br /><small>{p.contactEmail}</small></td>
-                    <td>{p.contactMethodLabel || '—'}</td>
-                    <td>{getStageLabel(stageTemplates, p.currentStageKey)}</td>
-                    <td><button className="tracking-icon-button" type="button" onClick={() => openProspect(p)}>→</button></td>
+                  <tr
+                    key={p.id}
+                    className={selectedProspect?.id === p.id ? 'is-selected' : ''}
+                    onClick={() => openProspect(p)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openProspect(p);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <td data-label="Colegio">{p.schoolName}</td>
+                    <td data-label="Ciudad">{p.city || '—'}</td>
+                    <td data-label="Dirección">{p.address || '—'}</td>
+                    <td data-label="Contacto">{p.contactName}<br /><small>{p.contactEmail}</small></td>
+                    <td data-label="Canal">{p.contactMethodLabel || '—'}</td>
+                    <td data-label="Etapa">{getStageLabel(stageTemplates, p.currentStageKey)}</td>
+                    <td className="tracking-actions-cell" data-label="Acción">
+                      <button
+                        className="tracking-icon-button"
+                        type="button"
+                        aria-label={`Ver detalle de ${p.schoolName}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProspect(p);
+                        }}
+                      >
+                        →
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -513,7 +574,13 @@ export default function SalesCrmDashboard() {
       {showProspectDetail && selectedProspect ? (
         <section className="admissions-detail-page">
           <div className="admissions-detail-toolbar">
-            <button className="secondary-button admissions-back-button" type="button" onClick={closeProspect}>← Volver</button>
+            <button
+              className="secondary-button admissions-back-button"
+              type="button"
+              onClick={closeProspect}
+            >
+              ← Volver{drilldownStage ? ` a ${getStageLabel(stageTemplates, drilldownStage)}` : ''}
+            </button>
           </div>
 
           <div className="admissions-detail-overview-grid">
@@ -586,8 +653,8 @@ export default function SalesCrmDashboard() {
           <div className="admissions-detail-work-grid">
             <article className="dashboard-card admissions-detail-events-card">
               <h2>Eventos recientes</h2>
-              <div className="tracking-table-wrap">
-                <table className="tracking-data-table admissions-detail-events-table">
+              <div className="tracking-table-wrap sales-crm-table-wrap">
+                <table className="tracking-data-table admissions-detail-events-table sales-crm-table">
                   <thead>
                     <tr><th>Fecha</th><th>Etapa</th><th>Título</th><th>Descripción</th><th>Cita</th><th>Acciones</th></tr>
                   </thead>
@@ -596,23 +663,27 @@ export default function SalesCrmDashboard() {
                       const eventId = eventItem._id || eventItem.id || '';
                       return (
                         <tr key={eventId}>
-                          <td>{formatDateTime(eventItem.updatedAt || eventItem.createdAt)}</td>
-                          <td>{getStageCode(stageTemplates, eventItem.stageKey)}</td>
-                          <td>{eventItem.title}</td>
-                          <td>{eventItem.notes || '-'}</td>
-                          <td>
+                          <td data-label="Fecha">{formatDateTime(eventItem.updatedAt || eventItem.createdAt)}</td>
+                          <td data-label="Etapa">{getStageCode(stageTemplates, eventItem.stageKey)}</td>
+                          <td data-label="Título">{eventItem.title}</td>
+                          <td data-label="Descripción">{eventItem.notes || '-'}</td>
+                          <td data-label="Cita">
                             {eventItem.appointment?.type
                               ? `${eventItem.appointment.label || getAppointmentTypeLabel(eventItem.appointment.type)} · ${formatAppointmentDateTime(eventItem.appointment)}`
                               : '-'}
                           </td>
-                          <td className="tracking-actions-cell">
+                          <td className="tracking-actions-cell" data-label="Acciones">
                             <button onClick={() => editEvent(eventItem)} type="button">✎</button>
                             <button onClick={() => removeEvent(eventId)} type="button">×</button>
                           </td>
                         </tr>
                       );
                     })}
-                    {!detailEvents.length ? <tr><td colSpan="6"><div className="empty-state">Sin eventos.</div></td></tr> : null}
+                    {!detailEvents.length ? (
+                      <tr>
+                        <td className="sales-crm-table-empty" colSpan="6"><div className="empty-state">Sin eventos.</div></td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

@@ -1,19 +1,20 @@
 const SalesProspect = require('../models/salesProspect.model');
 
 const SALES_STAGE_TEMPLATES = [
-  { key: 'intento-contacto', code: 'E1', label: 'Intento de contacto' },
-  { key: 'contactado', code: 'E2', label: 'Contactado' },
-  { key: 'agendado', code: 'E3', label: 'Agendado' },
-  { key: 'seguimiento-post-reunion', code: 'E4', label: 'Seguimiento post reunión' },
-  { key: 'contratado', code: 'E5', label: 'Contratado' },
-  { key: 'en-produccion', code: 'E6', label: 'En producción' },
+  { key: 'creado', code: 'E1', label: 'Creado' },
+  { key: 'intento-contacto', code: 'E2', label: 'Intento de contacto' },
+  { key: 'contactado', code: 'E3', label: 'Contactado' },
+  { key: 'agendado', code: 'E4', label: 'Agendado' },
+  { key: 'seguimiento-post-reunion', code: 'E5', label: 'Seguimiento post reunión' },
+  { key: 'contratado', code: 'E6', label: 'Contratado' },
+  { key: 'en-produccion', code: 'E7', label: 'En producción' },
 ];
 
 function getStageIndex(stageKey) {
   return SALES_STAGE_TEMPLATES.findIndex((stage) => stage.key === stageKey);
 }
 
-function buildDefaultStages(currentStageKey = 'intento-contacto', existingStages = []) {
+function buildDefaultStages(currentStageKey = 'creado', existingStages = []) {
   const existingByKey = new Map((Array.isArray(existingStages) ? existingStages : []).map((stage) => [String(stage?.key || ''), stage]));
   const currentIndex = Math.max(0, getStageIndex(currentStageKey));
 
@@ -51,7 +52,7 @@ async function ensureSalesProspectFromDemoLead(lead) {
     return existing;
   }
 
-  const stageKey = 'intento-contacto';
+  const stageKey = 'creado';
   const stage = getStageTemplate(stageKey);
 
   return SalesProspect.create({

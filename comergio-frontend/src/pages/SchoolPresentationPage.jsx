@@ -320,6 +320,47 @@ function ContactCta({ className = '' }) {
 
 const MODULE_VIDEO_PREVIEW_MS = 7000;
 
+function prefersCoarseOrMobileViewport() {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(max-width: 720px), (pointer: coarse)').matches;
+}
+
+function playVideoForPreview(video) {
+  if (!video) return;
+  video.muted = true;
+  const attemptPlay = () => {
+    try {
+      if (video.currentTime > 0.05) {
+        video.currentTime = 0;
+      }
+    } catch {
+      /* ignore seek errors on iOS */
+    }
+    const playPromise = video.play();
+    if (playPromise?.catch) {
+      playPromise.catch(() => {});
+    }
+  };
+
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    attemptPlay();
+    return;
+  }
+
+  const onReady = () => {
+    video.removeEventListener('loadeddata', onReady);
+    video.removeEventListener('canplay', onReady);
+    attemptPlay();
+  };
+  video.addEventListener('loadeddata', onReady, { once: true });
+  video.addEventListener('canplay', onReady, { once: true });
+  try {
+    video.load();
+  } catch {
+    /* already loading */
+  }
+}
+
 const ModuleVideosContext = createContext(null);
 
 function ModuleVideoPlayButton({ title, onPlay }) {
@@ -378,6 +419,18 @@ function ModuleMediaScreen({ src, title, mediaKey, isDesktop, hintCopy }) {
 
   const showControls = ctx?.showManualControls;
 
+  const primeFirstFrame = useCallback((event) => {
+    const video = event.currentTarget;
+    if (video.readyState < 2) return;
+    try {
+      if (video.currentTime < 0.001) {
+        video.currentTime = 0.01;
+      }
+    } catch {
+      /* iOS may reject seek before metadata; ignore */
+    }
+  }, []);
+
   const screenInner = (
     <>
       <video
@@ -385,8 +438,9 @@ function ModuleMediaScreen({ src, title, mediaKey, isDesktop, hintCopy }) {
         src={src}
         muted
         playsInline
-        preload="metadata"
+        preload="auto"
         aria-label={`Demo de ${title} en Comergio`}
+        onLoadedData={primeFirstFrame}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={() => {
@@ -468,12 +522,11 @@ function ModuleVideosProvider({ sectionRef, children }) {
   }, []);
 
   const playAllPreview = useCallback(() => {
-    videosRef.current.forEach((ref) => {
-      const video = ref.current;
-      if (!video) return;
-      video.currentTime = 0;
-      video.muted = true;
-      video.play().catch(() => {});
+    const entries = [...videosRef.current.values()];
+    const staggerMs = prefersCoarseOrMobileViewport() ? 140 : 0;
+
+    entries.forEach((ref, index) => {
+      window.setTimeout(() => playVideoForPreview(ref.current), index * staggerMs);
     });
   }, []);
 
@@ -526,13 +579,16 @@ function ModuleVideosProvider({ sectionRef, children }) {
       return undefined;
     }
 
+    const mobileViewport = prefersCoarseOrMobileViewport();
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry?.isIntersecting || hasPreviewStartedRef.current) return;
         hasPreviewStartedRef.current = true;
         setPhase('preview');
       },
-      { threshold: 0.22, rootMargin: '0px 0px -8% 0px' },
+      mobileViewport
+        ? { threshold: 0.12, rootMargin: '0px 0px 4% 0px' }
+        : { threshold: 0.22, rootMargin: '0px 0px -8% 0px' },
     );
 
     observer.observe(section);
@@ -542,7 +598,10 @@ function ModuleVideosProvider({ sectionRef, children }) {
   useEffect(() => {
     if (phase !== 'preview') return undefined;
 
-    playAllPreview();
+    const mobileViewport = prefersCoarseOrMobileViewport();
+    const previewLeadMs = mobileViewport ? 400 : 0;
+    const startTimer = window.setTimeout(() => playAllPreview(), previewLeadMs);
+
     previewTimerRef.current = window.setTimeout(() => {
       pauseAll();
       videosRef.current.forEach((ref) => {
@@ -551,9 +610,10 @@ function ModuleVideosProvider({ sectionRef, children }) {
       });
       setActiveKey(null);
       setPhase('manual');
-    }, MODULE_VIDEO_PREVIEW_MS);
+    }, MODULE_VIDEO_PREVIEW_MS + previewLeadMs);
 
     return () => {
+      window.clearTimeout(startTimer);
       if (previewTimerRef.current) {
         window.clearTimeout(previewTimerRef.current);
         previewTimerRef.current = null;
@@ -561,7 +621,7 @@ function ModuleVideosProvider({ sectionRef, children }) {
     };
   }, [phase, pauseAll, playAllPreview]);
 
-  const showManualControls = phase === 'manual';
+  const showManualControls = phase === 'manual' || phase === 'idle';
   const showChooseHint = showManualControls && !chooseHintDismissed;
 
   const dismissChooseHint = useCallback(() => {
@@ -823,16 +883,19 @@ export default function SchoolPresentationPage() {
         </Link>
         <div className="sp-nav__end">
           <Link className="sp-nav__login" to="/login">Iniciar sesión</Link>
-          <CreateCta className="sp-cta--nav" />
+          <CreateCta className="sp-cta--nav">
+            <span className="sp-nav-cta-long">Probar 7 días sin costo</span>
+            <span className="sp-nav-cta-short">Probar gratis</span>
+          </CreateCta>
         </div>
       </header>
 
       <section className="sp-hero" aria-labelledby="sp-hero-title">
         <div className="sp-hero__bg" aria-hidden="true" />
         <div className="sp-hero__copy">
-          <p className="sp-hero__eyebrow">Colegios</p>
+          <p className="sp-hero__eyebrow">Colegio/jardín</p>
           <h1 id="sp-hero-title">Transforma la experiencia de comunicación con las familias.</h1>
-          <p className="sp-hero__lead">Sé parte de la nueva generación de colegios modernos.</p>
+          <p className="sp-hero__lead">Sé parte de la nueva generación de colegios y jardines modernos.</p>
           <CreateCta className="sp-cta--light" />
         </div>
         <ul className="sp-values" aria-label="Beneficios">

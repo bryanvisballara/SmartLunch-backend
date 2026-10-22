@@ -167,6 +167,7 @@ async function main() {
   await fs.rm(zipPath, { force: true });
   // Zip contents at archive root (not nested in dist-deploy/) so Hostinger
   // public_html gets /index.html and /assets/* directly.
+  // Keep /presentation/* demo videos; still omit heavy tour virtual assets.
   execSync(
     [
       'zip -rq ../dist-deploy.zip .',
@@ -180,7 +181,7 @@ async function main() {
 
   console.log(`[route-fallbacks] generated ${ROUTE_FALLBACKS.length} fallback routes in dist/ and dist-deploy/`);
   console.log(`[route-fallbacks] aliased ${LEGACY_BROKEN_ENTRY_ALIASES.length} stale entry bundles to the current build`);
-  console.log('[route-fallbacks] packaged dist-deploy.zip (tourvirtualberckley and landing excluded)');
+  console.log('[route-fallbacks] packaged dist-deploy.zip (tour virtual and landing excluded; presentation videos included)');
 }
 
 main().catch((error) => {

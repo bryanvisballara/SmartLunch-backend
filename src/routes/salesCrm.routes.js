@@ -13,12 +13,13 @@ const {
 const router = express.Router();
 
 const salesStageTemplates = [
-  { key: 'intento-contacto', code: 'E1', label: 'Intento de contacto' },
-  { key: 'contactado', code: 'E2', label: 'Contactado' },
-  { key: 'agendado', code: 'E3', label: 'Agendado' },
-  { key: 'seguimiento-post-reunion', code: 'E4', label: 'Seguimiento post reunión' },
-  { key: 'contratado', code: 'E5', label: 'Contratado' },
-  { key: 'en-produccion', code: 'E6', label: 'En producción' },
+  { key: 'creado', code: 'E1', label: 'Creado' },
+  { key: 'intento-contacto', code: 'E2', label: 'Intento de contacto' },
+  { key: 'contactado', code: 'E3', label: 'Contactado' },
+  { key: 'agendado', code: 'E4', label: 'Agendado' },
+  { key: 'seguimiento-post-reunion', code: 'E5', label: 'Seguimiento post reunión' },
+  { key: 'contratado', code: 'E6', label: 'Contratado' },
+  { key: 'en-produccion', code: 'E7', label: 'En producción' },
 ];
 
 const contactMethodLabels = {
@@ -65,7 +66,7 @@ function getStageTemplate(stageKey) {
   return salesStageTemplates.find((stage) => stage.key === stageKey) || salesStageTemplates[0];
 }
 
-function buildDefaultStages(currentStageKey = 'intento-contacto', existingStages = []) {
+function buildDefaultStages(currentStageKey = 'creado', existingStages = []) {
   const existingByKey = new Map((Array.isArray(existingStages) ? existingStages : []).map((stage) => [String(stage?.key || ''), stage]));
   const currentIndex = Math.max(0, getStageIndex(currentStageKey));
 
@@ -117,7 +118,7 @@ function serializeProspect(prospect) {
     contactName: source.contactName || '',
     contactEmail: source.contactEmail || '',
     contactPhone: source.contactPhone || '',
-    currentStageKey: source.currentStageKey || 'intento-contacto',
+    currentStageKey: source.currentStageKey || 'creado',
     salesStages: source.salesStages || [],
     salesEvents: (source.salesEvents || []).map((event) => ({
       ...event,
@@ -259,7 +260,7 @@ async function buildSalesSummary() {
       stageCounts[prospect.currentStageKey] += 1;
     }
     const stageIndex = getStageIndex(prospect.currentStageKey);
-    if (stageIndex >= 1 && stageIndex <= 4) metrics.inProcess += 1;
+    if (stageIndex >= 2 && stageIndex <= 5) metrics.inProcess += 1;
     if (prospect.currentStageKey === 'contratado') metrics.contracted += 1;
     if (prospect.currentStageKey === 'en-produccion') metrics.inProduction += 1;
   });
@@ -371,7 +372,7 @@ router.post('/', async (req, res) => {
     if (!payload.schoolName) {
       return res.status(400).json({ message: 'El nombre del colegio es requerido.' });
     }
-    const stageKey = payload.currentStageKey || 'intento-contacto';
+    const stageKey = payload.currentStageKey || 'creado';
     const prospect = await SalesProspect.create({
       ...payload,
       salesStages: buildDefaultStages(stageKey),

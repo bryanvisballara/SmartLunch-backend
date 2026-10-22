@@ -82,6 +82,7 @@ html.school-presentation-active body {
 }
 
 .sp-nav {
+  --sp-nav-height: 3.35rem;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -89,15 +90,27 @@ html.school-presentation-active body {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  min-height: var(--sp-nav-height);
   padding: 0.75rem 1.25rem;
   background: rgba(7, 24, 40, 0.94);
   backdrop-filter: blur(12px);
 }
 
+.sp-nav__brand {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
 .sp-nav__end {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.85rem;
+  min-width: 0;
+}
+
+.sp-cta--nav .sp-nav-cta-short {
+  display: none;
 }
 
 .sp-nav__login {
@@ -168,54 +181,63 @@ html.school-presentation-active body {
 
 .sp-hero {
   position: relative;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 8.5fr) minmax(0, 1.5fr);
   overflow: hidden;
-  min-height: clamp(560px, 82vh, 760px);
+  min-height: calc(100dvh - var(--sp-nav-height, 3.35rem));
+  min-height: calc(100svh - var(--sp-nav-height, 3.35rem));
   color: #f7f4ee;
   background: var(--navy);
 }
 
 .sp-hero__bg {
-  position: absolute;
-  inset: 0;
+  grid-row: 1;
+  grid-column: 1;
+  position: relative;
   z-index: 0;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
   background:
     linear-gradient(
       180deg,
-      rgba(7, 24, 40, 0.82) 0%,
-      rgba(7, 24, 40, 0.52) 38%,
-      rgba(7, 24, 40, 0.68) 72%,
-      rgba(7, 24, 40, 0.88) 100%
+      rgba(7, 24, 40, 0.78) 0%,
+      rgba(7, 24, 40, 0.45) 40%,
+      rgba(7, 24, 40, 0.62) 72%,
+      rgba(7, 24, 40, 0.9) 100%
     ),
-    url('/presentation/hero-families.jpg') center 42% / cover no-repeat;
-  transform: scale(1.04);
+    url('/presentation/hero-families.jpg') center 62% / cover no-repeat;
+  transform: scale(1.12);
+  transform-origin: center 58%;
   animation: sp-hero-bg-settle 1.35s ease forwards;
 }
 
 @keyframes sp-hero-bg-settle {
   from {
-    transform: scale(1.08);
+    transform: scale(1.18);
   }
 
   to {
-    transform: scale(1.04);
+    transform: scale(1.12);
   }
 }
 
 .sp-hero__copy {
+  grid-row: 1;
+  grid-column: 1;
   position: relative;
   z-index: 1;
   display: flex;
-  flex: 1;
   flex-direction: column;
   align-items: center;
+  align-self: center;
   justify-content: center;
+  justify-self: center;
   gap: 0.85rem;
   width: min(1120px, calc(100% - 2rem));
   container-type: inline-size;
   margin: 0 auto;
-  padding: clamp(4.5rem, 12vh, 6.5rem) 0 clamp(3rem, 8vh, 4.5rem);
+  padding: clamp(1.5rem, 4vh, 3rem) 0;
   text-align: center;
 }
 
@@ -231,49 +253,122 @@ html.school-presentation-active body {
 .sp-hero h1 {
   margin: 0;
   width: 100%;
-  font-size: clamp(0.82rem, 4.45cqi, 2.45rem);
-  line-height: 1.08;
+  max-width: 16em;
+  font-size: clamp(1.85rem, 4.2vw + 0.85rem, 2.75rem);
+  line-height: 1.1;
   letter-spacing: -0.015em;
-  white-space: nowrap;
+  white-space: normal;
+  text-wrap: balance;
   text-shadow: 0 2px 28px rgba(0, 0, 0, 0.45);
 }
 
 @media (max-width: 720px) {
   .sp-hero__copy {
-    width: calc(100% - 0.5rem);
+    width: calc(100% - 1.25rem);
+    gap: 0.65rem;
+    padding-top: clamp(3.5rem, 10vh, 5rem);
   }
 
   .sp-hero h1 {
-    font-size: clamp(0.68rem, 2.95vw, 0.82rem);
+    max-width: none;
+    font-size: clamp(1.55rem, 7.2vw, 2.05rem);
+    line-height: 1.14;
     letter-spacing: -0.02em;
+  }
+
+  .sp-hero__lead {
+    font-size: clamp(0.95rem, 3.9vw, 1.08rem);
+    line-height: 1.4;
+    font-family: Manrope, "Segoe UI", sans-serif;
+    font-weight: 600;
+    color: rgba(247, 244, 238, 0.88);
   }
 
   .sp-risks h2 {
-    font-size: clamp(0.62rem, 2.75vw, 0.78rem);
+    max-width: none;
+    font-size: clamp(1.45rem, 6.8vw, 2rem);
+    line-height: 1.14;
+    margin-bottom: 1.15rem;
     letter-spacing: -0.02em;
   }
 
+  .sp-risks__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .sp-risks__grid span {
+    width: 40px;
+    height: 40px;
+    margin-bottom: 0.45rem;
+  }
+
+  .sp-risks__grid svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .sp-risks__grid strong {
+    display: block;
+    overflow: visible;
+    font-size: clamp(0.68rem, 3vw, 0.82rem);
+    line-height: 1.25;
+    margin-bottom: 0.35rem;
+    -webkit-line-clamp: unset;
+  }
+
+  .sp-risks__grid p {
+    display: block;
+    overflow: visible;
+    max-width: none;
+    font-size: clamp(0.62rem, 2.65vw, 0.76rem);
+    line-height: 1.4;
+    -webkit-line-clamp: unset;
+    text-wrap: pretty;
+  }
+
+  .sp-value header {
+    padding: 0 0.25rem;
+  }
+
   .sp-value h2 {
-    font-size: clamp(0.58rem, 2.45vw, 0.76rem);
+    max-width: none;
+    font-size: clamp(1.55rem, 7.2vw, 2.05rem);
+    line-height: 1.12;
+    margin: 0 auto 0.75rem;
     letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .sp-value header p {
+    margin: 0 auto 1.35rem;
+    font-size: clamp(0.86rem, 3.55vw, 0.96rem);
+    line-height: 1.45;
   }
 }
 
 .sp-hero__lead {
-  margin: 0.2rem 0 0.45rem;
-  font-size: clamp(1.05rem, 2vw, 1.3rem);
-  color: rgba(247, 244, 238, 0.92);
+  margin: 0.15rem 0 0.45rem;
+  max-width: 22em;
+  font-family: Manrope, "Segoe UI", sans-serif;
+  font-size: clamp(1rem, 1.6vw + 0.55rem, 1.22rem);
+  font-weight: 600;
+  line-height: 1.38;
+  color: rgba(247, 244, 238, 0.9);
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.4);
 }
 
 .sp-values {
+  grid-row: 2;
+  grid-column: 1;
   position: relative;
   z-index: 1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: center;
   gap: 0.75rem;
   margin: 0;
-  padding: 0.95rem 1.25rem;
+  padding: 0.65rem 1.25rem;
   list-style: none;
   background: #e4e8e4;
   color: var(--ink);
@@ -340,23 +435,27 @@ html.school-presentation-active body {
 .sp-risks h2 {
   margin: 0 auto 1.4rem;
   width: 100%;
-  max-width: none;
+  max-width: 18em;
   text-align: center;
-  font-size: clamp(0.78rem, 4.2cqi, 2.35rem);
-  line-height: 1.08;
+  font-size: clamp(1.75rem, 3.8vw + 0.65rem, 2.45rem);
+  font-weight: 700;
+  line-height: 1.1;
   letter-spacing: -0.015em;
-  white-space: nowrap;
+  white-space: normal;
+  text-wrap: balance;
 }
 
 .sp-value h2 {
-  margin: 0 auto 1.4rem;
+  margin: 0 auto 0.85rem;
   width: 100%;
-  max-width: none;
+  max-width: 16em;
   text-align: center;
-  font-size: clamp(0.72rem, 3.85cqi, 2.35rem);
-  line-height: 1.08;
+  font-size: clamp(1.85rem, 4vw + 0.65rem, 2.5rem);
+  font-weight: 700;
+  line-height: 1.1;
   letter-spacing: -0.015em;
-  white-space: nowrap;
+  white-space: normal;
+  text-wrap: balance;
 }
 
 .sp-modules h2 {
@@ -368,6 +467,48 @@ html.school-presentation-active body {
   white-space: nowrap;
 }
 
+@media (min-width: 721px) {
+  .sp-hero__copy {
+    width: min(1180px, calc(100% - 2rem));
+  }
+
+  .sp-hero h1 {
+    max-width: none;
+    font-size: clamp(1.35rem, 4.35cqi, 2.75rem);
+    line-height: 1.08;
+    white-space: nowrap;
+    text-wrap: nowrap;
+  }
+
+  .sp-hero__lead {
+    max-width: none;
+    font-size: clamp(0.95rem, 2.05cqi, 1.28rem);
+    white-space: nowrap;
+    text-wrap: nowrap;
+  }
+
+  .sp-risks h2,
+  .sp-value h2 {
+    max-width: none;
+    font-size: clamp(1.15rem, 4.05cqi, 2.45rem);
+    line-height: 1.08;
+    white-space: nowrap;
+    text-wrap: nowrap;
+  }
+
+  .sp-modules .sp-wrap {
+    container-type: inline-size;
+    width: min(1120px, calc(100% - 2rem));
+  }
+
+  .sp-modules h2 {
+    width: 100%;
+    font-size: clamp(1.35rem, 3.75cqi, 3rem);
+    white-space: nowrap;
+    text-wrap: nowrap;
+  }
+}
+
 .sp-value header {
   width: 100%;
   align-self: stretch;
@@ -376,11 +517,13 @@ html.school-presentation-active body {
 .sp-value header p,
 .sp-modules header p {
   max-width: 46rem;
-  margin: -0.4rem auto 1.8rem;
+  margin: 0.25rem auto 1.8rem;
   text-align: center;
   color: var(--muted);
-  font-size: 1.05rem;
-  line-height: 1.55;
+  font-family: Manrope, "Segoe UI", sans-serif;
+  font-size: clamp(0.92rem, 0.85vw + 0.72rem, 1.05rem);
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .sp-risks__grid,
@@ -501,18 +644,16 @@ html.school-presentation-active body {
 }
 
 .sp-risks__grid strong {
-  display: -webkit-box;
+  display: block;
   width: 100%;
   margin: 0 0 0.6rem;
-  overflow: hidden;
+  overflow: visible;
   font-family: Manrope, "Segoe UI", sans-serif;
   font-size: clamp(1.02rem, 1.35vw + 0.55rem, 1.32rem);
   font-weight: 800;
   line-height: 1.22;
   letter-spacing: -0.02em;
   color: var(--ink);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
   text-wrap: balance;
 }
 
@@ -526,15 +667,14 @@ html.school-presentation-active body {
 }
 
 .sp-risks__grid p {
-  display: -webkit-box;
-  margin: 0 auto;
-  max-width: 22rem;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
+  margin: 0;
+  max-width: none;
+  overflow: visible;
   color: var(--muted);
   font-size: clamp(0.92rem, 1vw + 0.72rem, 1.02rem);
   line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .sp-value p,
@@ -1076,6 +1216,7 @@ html.school-presentation-active body {
 
 .sp-module-media__screen {
   position: relative;
+  isolation: isolate;
 }
 
 .sp-module-media__play {
@@ -1133,11 +1274,14 @@ html.school-presentation-active body {
 }
 
 .sp-phone__screen video {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: top center;
+  background: #000;
 }
 
 .sp-desktop {
@@ -1166,11 +1310,14 @@ html.school-presentation-active body {
 }
 
 .sp-desktop__screen video {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: top center;
+  background: #000;
 }
 
 .sp-desktop__stand {
@@ -1300,29 +1447,242 @@ html.school-presentation-active body {
   transition-delay: calc(var(--i, 0) * 80ms);
 }
 
+/* iOS Safari often paints <video> black inside transformed reveal ancestors */
+.sp-modules__item--media[data-reveal-item] {
+  opacity: 1;
+  transform: none;
+}
+
 @media (max-width: 720px) {
-  .sp-risks__grid,
   .sp-value__grid,
-  .sp-modules__group ul,
-  .sp-steps ol,
-  .sp-foot__grid,
-  .sp-download__stores {
+  .sp-modules__group ul {
     grid-template-columns: 1fr;
+  }
+
+  .sp-foot {
+    padding: 1.5rem 0.75rem 0.85rem;
+  }
+
+  .sp-foot__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 0.75rem;
+  }
+
+  .sp-foot__grid > section:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .sp-foot__grid > section:first-child > p {
+    font-size: 0.82rem;
+    line-height: 1.4;
+    max-width: 22rem;
+  }
+
+  .sp-foot__qr {
+    display: none;
+  }
+
+  .sp-foot h2 {
+    font-size: 0.7rem;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.06em;
+  }
+
+  .sp-foot p,
+  .sp-foot strong,
+  .sp-foot a {
+    font-size: 0.78rem;
+  }
+
+  .sp-foot strong {
+    font-size: 0.86rem;
+  }
+
+  .sp-foot ul {
+    gap: 0.45rem;
+  }
+
+  .sp-foot li,
+  .sp-foot__stores {
+    font-size: 0.74rem;
+    line-height: 1.35;
+  }
+
+  .sp-foot nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.65rem;
+  }
+
+  .sp-foot nav a {
+    font-size: 0.76rem;
+  }
+
+  .sp-foot .sp-brand__mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .sp-foot .sp-brand__word {
+    font-size: 1.05rem;
+  }
+
+  .sp-foot__copy {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    font-size: 0.72rem;
+    text-align: center;
+  }
+
+  .sp-steps ol {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+    align-items: stretch;
+  }
+
+  .sp-steps li {
+    padding: 0.7rem 0.4rem 0.8rem;
+    border-radius: 14px;
+  }
+
+  .sp-steps__icon {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 0.35rem;
+    border-radius: 10px;
+  }
+
+  .sp-steps__icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .sp-steps__n {
+    font-size: 0.62rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .sp-steps h3 {
+    font-size: clamp(0.64rem, 2.85vw, 0.78rem);
+    line-height: 1.25;
+    margin-bottom: 0.3rem;
+  }
+
+  .sp-steps p {
+    font-size: clamp(0.58rem, 2.45vw, 0.72rem);
+    line-height: 1.35;
+    text-wrap: pretty;
+  }
+
+  .sp-steps .sp-kicker {
+    font-size: 0.72rem;
+    padding: 0.4rem 0.75rem;
+    margin-bottom: 1rem;
+    letter-spacing: 0.14em;
+  }
+
+  .sp-download__stores {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .sp-download__stores > div {
+    gap: 0.45rem;
+  }
+
+  .sp-download__stores img:not(.sp-download__qr) {
+    width: min(100%, 118px);
+  }
+
+  .sp-download__qr {
+    width: clamp(84px, 22vw, 108px) !important;
+    height: clamp(84px, 22vw, 108px) !important;
+  }
+
+  .sp-download .sp-cta--small {
+    min-height: auto;
+    padding: 0.48rem 0.35rem;
+    font-size: clamp(0.58rem, 2.5vw, 0.72rem);
+    line-height: 1.2;
+  }
+
+  .sp-download h3 {
+    font-size: clamp(1rem, 4.2vw, 1.2rem);
+    margin-bottom: 0.75rem;
+  }
+
+  .sp-guide .sp-download__stores img:not(.sp-download__qr) {
+    width: min(100%, 104px);
+  }
+
+  .sp-guide .sp-download__qr {
+    width: clamp(76px, 20vw, 96px) !important;
+    height: clamp(76px, 20vw, 96px) !important;
   }
 
   .sp-values {
-    grid-template-columns: 1fr;
-    justify-items: start;
-    padding-left: 1.4rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+    padding: 0.75rem 0.55rem;
+  }
+
+  .sp-values li {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.35rem;
+    font-size: clamp(0.62rem, 2.8vw, 0.78rem);
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .sp-values svg {
+    width: 22px;
+    height: 22px;
   }
 
   .sp-nav {
-    align-items: flex-start;
+    align-items: center;
+    padding: 0.55rem 0.65rem;
+    gap: 0.5rem;
   }
 
   .sp-nav__end {
-    flex-direction: column;
-    align-items: flex-end;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .sp-nav__login {
+    font-size: 0.72rem;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .sp-cta--nav {
+    min-height: 36px;
+    padding: 0.4rem 0.62rem;
+    font-size: 0.72rem;
+    line-height: 1.15;
+    box-shadow: 0 6px 16px rgba(27, 111, 232, 0.22);
+    white-space: nowrap;
+  }
+
+  .sp-cta--nav .sp-nav-cta-long {
+    display: none;
+  }
+
+  .sp-cta--nav .sp-nav-cta-short {
+    display: inline;
+  }
+
+  .sp-brand--compact .sp-brand__mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .sp-brand--compact .sp-brand__word {
+    font-size: 1.05rem;
   }
 
   .sp-modules h2 {
@@ -1336,7 +1696,7 @@ html.school-presentation-active body {
 @media (prefers-reduced-motion: reduce) {
   .sp-hero__bg {
     animation: none;
-    transform: scale(1.04);
+    transform: scale(1.12);
   }
 
   .sp-module-media__play {
@@ -1345,11 +1705,6 @@ html.school-presentation-active body {
 
   .sp-video-hint {
     animation: none;
-  }
-
-  .sp-phone__screen video,
-  .sp-desktop__screen video {
-    display: none;
   }
 
   [data-reveal],

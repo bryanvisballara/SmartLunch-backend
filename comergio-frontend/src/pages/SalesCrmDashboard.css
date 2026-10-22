@@ -119,3 +119,261 @@
   background: #1ebe57;
   color: #fff;
 }
+
+.sales-crm-table-wrap {
+  -webkit-overflow-scrolling: touch;
+}
+
+.sales-crm-table tbody tr {
+  cursor: pointer;
+}
+
+.sales-crm-table .tracking-actions-cell {
+  cursor: default;
+}
+
+.sales-crm-table .tracking-actions-cell button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (max-width: 860px) {
+  .sales-crm-root .admin-panel-heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sales-crm-root .admin-panel-heading .primary-button,
+  .sales-crm-root .admin-panel-heading .secondary-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .sales-crm-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .sales-crm-tab {
+    padding: 10px 8px;
+    font-size: 13px;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .sales-crm-root .tracking-search-grid .secondary-button,
+  .sales-crm-root .tracking-search-grid .primary-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .sales-crm-root .admissions-stage-toolbar,
+  .sales-crm-root .admissions-detail-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: -4px 0 8px;
+    padding: 8px 0;
+    background: linear-gradient(180deg, #f8fafc 70%, transparent);
+  }
+
+  .sales-crm-root .admissions-back-button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .sales-crm-root .stage-distribution-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sales-crm-root .stage-distribution-item {
+    min-height: 88px;
+    padding: 12px 10px;
+  }
+
+  .sales-crm-root .admissions-detail-title-block h1 {
+    font-size: clamp(1.25rem, 5vw, 1.65rem);
+    line-height: 1.15;
+  }
+
+  .sales-crm-root .admissions-detail-transition-actions .secondary-button,
+  .sales-crm-root .admissions-detail-secondary-actions .primary-button {
+    width: 100%;
+  }
+
+  .sales-crm-root .admissions-detail-timeline-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sales-crm-root .admissions-detail-timeline-item {
+    min-height: 92px;
+  }
+
+  .sales-crm-root .sales-crm-calendar .admissions-calendar-grid {
+    min-width: 0;
+  }
+
+  .sales-crm-root .sales-crm-calendar .admissions-calendar-day {
+    min-height: 72px;
+    padding: 6px;
+    grid-template-rows: auto minmax(40px, 1fr);
+  }
+
+  .sales-crm-root .sales-crm-calendar .admissions-calendar-day small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    line-height: 1.2;
+  }
+
+  .sales-crm-root .admissions-agenda-window {
+    gap: 10px;
+  }
+
+  .sales-crm-root .admissions-create-modal {
+    width: 100%;
+    max-width: none;
+    border-radius: 16px 16px 0 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .sales-crm-root {
+    gap: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .sales-crm-root .admin-metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .sales-crm-root .admin-metric-card {
+    padding: 14px 12px;
+  }
+
+  .sales-crm-root .admin-metric-card strong {
+    font-size: 1.45rem;
+  }
+
+  .sales-crm-root .tracking-table-wrap {
+    overflow: visible;
+  }
+
+  .sales-crm-root .sales-crm-table,
+  .sales-crm-root .admissions-detail-events-table {
+    min-width: 0;
+    table-layout: auto;
+    text-transform: none;
+  }
+
+  .sales-crm-root .sales-crm-table thead {
+    display: none;
+  }
+
+  .sales-crm-root .sales-crm-table tbody tr {
+    display: block;
+    margin-bottom: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  }
+
+  .sales-crm-root .sales-crm-table tbody tr:nth-child(even) td {
+    background: transparent;
+  }
+
+  .sales-crm-root .sales-crm-table tbody tr:hover td,
+  .sales-crm-root .sales-crm-table tbody tr.is-selected td {
+    background: transparent;
+  }
+
+  .sales-crm-root .sales-crm-table td {
+    display: grid;
+    grid-template-columns: minmax(88px, 34%) 1fr;
+    gap: 8px 12px;
+    align-items: start;
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 0.88rem;
+    text-transform: none;
+  }
+
+  .sales-crm-root .sales-crm-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .sales-crm-root .sales-crm-table td::before {
+    content: attr(data-label);
+    color: #64748b;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    line-height: 1.3;
+    text-transform: uppercase;
+  }
+
+  .sales-crm-root .sales-crm-table td.sales-crm-table-empty,
+  .sales-crm-root .sales-crm-table td[colspan] {
+    display: block;
+    grid-template-columns: none;
+    padding: 18px 14px;
+    text-align: center;
+  }
+
+  .sales-crm-root .sales-crm-table td.sales-crm-table-empty::before,
+  .sales-crm-root .sales-crm-table td[colspan]::before {
+    content: none;
+    display: none;
+  }
+
+  .sales-crm-root .sales-crm-table .tracking-actions-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .sales-crm-root .sales-crm-table .tracking-actions-cell::before {
+    margin-right: auto;
+  }
+
+  .sales-crm-root .sales-crm-table .tracking-icon-button {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 12px;
+    font-size: 1.25rem;
+  }
+
+  .sales-crm-root .stage-distribution-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-crm-root .admissions-detail-metadata {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-crm-root .admissions-detail-timeline-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-crm-root .admissions-detail-event-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 400px) {
+  .sales-crm-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-crm-root .admin-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
