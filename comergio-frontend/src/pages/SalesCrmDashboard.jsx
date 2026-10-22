@@ -10,6 +10,7 @@ import {
   setSalesProspectStage,
   transitionSalesProspectStage,
   updateSalesEvent,
+  updateSalesProspect,
 } from '../services/salesCrm.service';
 import './AdmissionsDashboard.css';
 import './SalesCrmDashboard.css';
@@ -159,6 +160,7 @@ export default function SalesCrmDashboard() {
   const [filters, setFilters] = useState({ search: '', city: '', stage: '', contactMethod: '' });
   const [selectedProspect, setSelectedProspect] = useState(null);
   const [showProspectForm, setShowProspectForm] = useState(false);
+  const [editingProspectId, setEditingProspectId] = useState('');
   const [prospectForm, setProspectForm] = useState(emptyProspectForm);
   const [eventForm, setEventForm] = useState(emptyEventForm);
   const [agendaSettings, setAgendaSettings] = useState(null);
@@ -293,21 +295,59 @@ export default function SalesCrmDashboard() {
     );
   };
 
+  const closeProspectForm = () => {
+    setShowProspectForm(false);
+    setEditingProspectId('');
+    setProspectForm(emptyProspectForm);
+  };
+
+  const openCreateProspectForm = () => {
+    setEditingProspectId('');
+    setProspectForm(emptyProspectForm);
+    setShowProspectForm(true);
+  };
+
+  const openEditProspectForm = (prospect) => {
+    if (!prospect?.id) return;
+    setEditingProspectId(prospect.id);
+    setProspectForm({
+      schoolName: prospect.schoolName || '',
+      city: prospect.city || '',
+      address: prospect.address || '',
+      contactMethod: prospect.contactMethod || '',
+      contactName: prospect.contactName || '',
+      contactEmail: prospect.contactEmail || '',
+      contactPhone: prospect.contactPhone || '',
+      instagram: prospect.instagram || '',
+      website: prospect.website || '',
+    });
+    setShowProspectForm(true);
+  };
+
+  const buildProspectPayload = () => ({
+    ...prospectForm,
+    contactName: prospectForm.contactName.trim(),
+    contactEmail: prospectForm.contactEmail.trim(),
+    contactPhone: prospectForm.contactPhone.trim(),
+    instagram: prospectForm.instagram.trim(),
+    website: prospectForm.website.trim(),
+  });
+
   const submitProspect = async (event) => {
     event.preventDefault();
-    const payload = {
-      ...prospectForm,
-      contactName: prospectForm.contactName.trim(),
-      contactEmail: prospectForm.contactEmail.trim(),
-      contactPhone: prospectForm.contactPhone.trim(),
-      instagram: prospectForm.instagram.trim(),
-      website: prospectForm.website.trim(),
-    };
+    const payload = buildProspectPayload();
+    const isEditing = Boolean(editingProspectId);
     await runAction(async () => {
-      await createSalesProspect(payload);
-      setShowProspectForm(false);
-      setProspectForm(emptyProspectForm);
-    }, 'Cliente agregado.');
+      if (isEditing) {
+        const { data } = await updateSalesProspect(editingProspectId, payload);
+        if (data?.prospect) {
+          setSelectedProspect(data.prospect);
+        }
+      } else {
+        await createSalesProspect(payload);
+      }
+      closeProspectForm();
+    }, isEditing ? 'Cliente actualizado.' : 'Cliente agregado.');
   };
 
   const submitEvent = async (event) => {
@@ -522,7 +562,7 @@ export default function SalesCrmDashboard() {
         <section className="dashboard-card tracking-selector-panel">
           <div className="admin-panel-heading">
             <div><h2>Seguimiento clientes</h2><p>Colegios prospecto fuera de la demo automática.</p></div>
-            <button className="primary-button admissions-primary" type="button" onClick={() => setShowProspectForm(true)}>+ Cliente</button>
+            <button className="primary-button admissions-primary" type="button" onClick={openCreateProspectForm}>+ Cliente</button>
           </div>
           <div className="tracking-search-grid">
             <input placeholder="Buscar colegio o contacto" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} />
@@ -618,13 +658,20 @@ export default function SalesCrmDashboard() {
 
       {showProspectDetail && selectedProspect ? (
         <section className="admissions-detail-page">
-          <div className="admissions-detail-toolbar">
+          <div className="admissions-detail-toolbar sales-crm-detail-toolbar">
             <button
               className="secondary-button admissions-back-button"
               type="button"
               onClick={closeProspect}
             >
               ← Volver{drilldownStage ? ` a ${getStageLabel(stageTemplates, drilldownStage)}` : ''}
+            </button>
+            <button
+              className="primary-button admissions-primary"
+              type="button"
+              onClick={() => openEditProspectForm(selectedProspect)}
+            >
+              Editar datos
             </button>
           </div>
 
@@ -790,9 +837,9 @@ export default function SalesCrmDashboard() {
       ) : null}
 
       {showProspectForm ? (
-        <div className="admissions-modal-backdrop" role="presentation" onClick={() => setShowProspectForm(false)}>
+        <div className="admissions-modal-backdrop" role="presentation" onClick={closeProspectForm}>
           <section className="dashboard-card admissions-create-modal" role="dialog" onClick={(e) => e.stopPropagation()}>
-            <h2>Nuevo cliente</h2>
+            <h2>{editingProspectId ? 'Editar cliente' : 'Nuevo cliente'}</h2>
             <form onSubmit={submitProspect}>
               <div className="tracking-search-grid">
                 <label>Colegio<input required value={prospectForm.schoolName} onChange={(e) => setProspectForm((f) => ({ ...f, schoolName: e.target.value }))} /></label>
@@ -811,8 +858,8 @@ export default function SalesCrmDashboard() {
                 <label>Página web <span className="sales-crm-optional">(opcional)</span><input type="text" placeholder="https://www.micolegio.edu.co" value={prospectForm.website} onChange={(e) => setProspectForm((f) => ({ ...f, website: e.target.value }))} /></label>
               </div>
               <div className="admissions-modal-actions">
-                <button className="secondary-button" type="button" onClick={() => setShowProspectForm(false)}>Cancelar</button>
-                <button className="primary-button" disabled={busy} type="submit">Guardar</button>
+                <button className="secondary-button" type="button" onClick={closeProspectForm}>Cancelar</button>
+                <button className="primary-button" disabled={busy} type="submit">{editingProspectId ? 'Guardar cambios' : 'Guardar'}</button>
               </div>
             </form>
           </section>

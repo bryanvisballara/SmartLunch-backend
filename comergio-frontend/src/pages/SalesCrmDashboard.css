@@ -135,6 +135,17 @@
   word-break: break-word;
 }
 
+.sales-crm-detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sales-crm-detail-toolbar .primary-button {
+  min-height: 40px;
+}
+
 .sales-crm-table-wrap {
   -webkit-overflow-scrolling: touch;
 }
@@ -191,6 +202,16 @@
     margin: -4px 0 8px;
     padding: 8px 0;
     background: linear-gradient(180deg, #f8fafc 70%, transparent);
+  }
+
+  .sales-crm-detail-toolbar .admissions-back-button {
+    width: auto;
+    flex: 1 1 12rem;
+  }
+
+  .sales-crm-detail-toolbar .primary-button {
+    flex: 1 1 10rem;
+    min-height: 44px;
   }
 
   .sales-crm-root .admissions-back-button {
