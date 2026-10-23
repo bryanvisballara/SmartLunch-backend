@@ -264,8 +264,8 @@ function normalizeBlocks(rawBlocks, gradeSubjects, teachers = []) {
       return {
         kind: block?.kind === 'topic' ? 'topic' : 'dimension',
         name,
-        teacherUserId: needsTeacher && teacher ? teacher.id : null,
-        teacherName: needsTeacher && teacher ? teacher.name : '',
+        teacherUserId: teacher ? teacher.id : null,
+        teacherName: teacher ? teacher.name : '',
         indicators,
       };
     })
