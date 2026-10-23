@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import './LandingPage.css';
 import { LOGIN_PATH } from '../lib/authNavigation';
 
-const FRAMES_CACHE_VERSION = 56;
+const FRAMES_CACHE_VERSION = 57;
 const VIDEO1_SRC = `/landing/hero-scroll.mp4?v=${FRAMES_CACHE_VERSION}`;
 const VIDEO2_SRC = `/landing/hero-scroll-section2.mp4?v=${FRAMES_CACHE_VERSION}`;
 const VIDEO3_SRC = `/landing/hero-scroll-section3.mp4?v=${FRAMES_CACHE_VERSION}`;
