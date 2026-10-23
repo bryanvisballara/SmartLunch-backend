@@ -46,6 +46,12 @@ const campusGeneralReportCardSchema = new mongoose.Schema(
       default: 'draft',
       index: true,
     },
+    reportFormat: {
+      type: String,
+      enum: ['standard', 'preschool'],
+      default: 'standard',
+      index: true,
+    },
     subjectReportIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'CampusSubjectReportCard' }],
     students: { type: [campusGeneralReportStudentSchema], default: [] },
     headroomSignatureDataUrl: { type: String, default: '' },

@@ -17,7 +17,7 @@ const WHATSAPP_HREF = `https://wa.me/573016214806?text=${encodeURIComponent('Hol
 const PRESENTATION_OG = {
   title: 'Comergio · Tu colegio y jardín, en una sola plataforma',
   description: 'Paga pensiones, consulta lo académico y gestiona servicios escolares desde la app. Prueba 7 días sin costo.',
-  image: 'https://www.comergio.com/presentation/og-share.jpg',
+  image: 'https://www.comergio.com/presentation/og-share.jpg?v=20251022',
 };
 
 function upsertHeadMeta(attr, key, content) {
@@ -47,6 +47,11 @@ const HERO_VALUES = [
   { label: 'Familias más conectadas', icon: 'contact' },
   { label: 'Mejor educación', icon: 'campus' },
 ];
+
+const RISKS_PROMO_VIDEO = {
+  src: '/presentation/comergio-web.mov',
+  poster: '/presentation/comergio-web-cover.jpg',
+};
 
 const RISK_ITEMS = [
   {
@@ -403,6 +408,54 @@ function ModuleVideoPlayButton({ title, onPlay }) {
         </svg>
       </span>
     </button>
+  );
+}
+
+function RisksPromoVideo() {
+  const videoRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  };
+
+  return (
+    <figure className="sp-risks__video">
+      <div className="sp-risks__video-frame">
+        <video
+          ref={videoRef}
+          src={RISKS_PROMO_VIDEO.src}
+          poster={RISKS_PROMO_VIDEO.poster}
+          playsInline
+          controls={isPlaying}
+          preload="metadata"
+          aria-label="Video: los papás están cansados — Comergio para colegios"
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+        />
+        {!isPlaying ? (
+          <button
+            type="button"
+            className="sp-risks__video-play"
+            aria-label="Reproducir video"
+            onClick={togglePlay}
+          >
+            <span aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                <path d="M8 5.14v13.72L19 12 8 5.14z" />
+              </svg>
+            </span>
+          </button>
+        ) : null}
+      </div>
+    </figure>
   );
 }
 
@@ -944,18 +997,25 @@ export default function SchoolPresentationPage() {
       </section>
 
       <section className="sp-risks" id="riesgos" aria-labelledby="sp-risks-title">
-        <div className="sp-wrap">
-          <h2 id="sp-risks-title" data-reveal="up">El precio de seguir gestionando tu colegio como antes.</h2>
-          <ul className="sp-risks__grid" data-reveal-stagger>
-            {RISK_ITEMS.map((item, index) => (
-              <li key={item.title} data-reveal-item style={{ '--i': index }}>
-                <span aria-hidden="true"><Icon name={item.icon} /></span>
-                <strong>{item.title}</strong>
-                <p>{item.note}</p>
-              </li>
-            ))}
-          </ul>
-          <CreateCta />
+        <div className="sp-wrap sp-risks__layout">
+          <div className="sp-risks__stack">
+            <h2 id="sp-risks-title" className="sp-risks__layout-title" data-reveal="up">
+              El precio de seguir gestionando tu colegio como antes.
+            </h2>
+            <ul className="sp-risks__grid sp-risks__grid--promo" data-reveal-stagger>
+              {RISK_ITEMS.map((item, index) => (
+                <li key={item.title} data-reveal-item style={{ '--i': index }}>
+                  <span aria-hidden="true"><Icon name={item.icon} /></span>
+                  <div className="sp-risks__item-copy">
+                    <strong>{item.title}</strong>
+                    <p>{item.note}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <CreateCta className="sp-risks__layout-cta" />
+          </div>
+          <RisksPromoVideo />
         </div>
       </section>
 

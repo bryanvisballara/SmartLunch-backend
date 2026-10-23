@@ -72,6 +72,7 @@ import { formatGradeSectionDisplayLabel } from '../../lib/gradeSectionDisplay';
 import { mockTeacherWorkspace } from '../mockCampusContext';
 import ReportCardSignaturePad from '../components/ReportCardSignaturePad';
 import HeadroomPreschoolBulletinView from '../components/HeadroomPreschoolBulletinView';
+import HeadroomPreschoolGeneralPdfPanel from '../components/HeadroomPreschoolGeneralPdfPanel';
 import TeacherPreschoolBulletinPanel from '../components/TeacherPreschoolBulletinPanel';
 import '../campus.css';
 
@@ -11865,7 +11866,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                     <h2 className="campus-teacher__classroom-title">Boletín general</h2>
                     <p className="campus-teacher__classroom-subtitle">
                       {selectedHeadroomSection?.preschoolBulletin
-                        ? 'Elige un estudiante y califica cada indicador: Iniciando proceso (IP), En proceso (EP) o Indicador alcanzado (IA). El comentario es opcional.'
+                        ? 'Califica indicadores de preescolar, revisa el estado de cada materia y genera el PDF del boletín general por estudiante cuando quieras revisarlo.'
                         : 'Cuando todas las materias hayan enviado su boletín, consolida promedios, convivencia escolar y tus observaciones como director de grupo.'}
                     </p>
                   </div>
@@ -11917,32 +11918,56 @@ function TeacherCampusHome({ forcePreview = false }) {
                       </span>
                     </div>
 
-                    {selectedHeadroomSection.preschoolBulletin ? (
-                      <HeadroomPreschoolBulletinView
-                        bulletin={selectedHeadroomSection.preschoolBulletin}
-                        onNotice={setNotice}
-                        onSaved={() => headroomReportCardsQuery.refetch()}
-                        teacherUserId={authUser?.id}
-                      />
-                    ) : (
+                    {(selectedHeadroomSection.subjects || []).length ? (
                       <div className="campus-teacher__report-card-checklist">
-                        <h3>Materias</h3>
+                        <h3>Materias del curso</h3>
+                        <p className="campus-panel__meta">
+                          {selectedHeadroomSection.preschoolBulletin
+                            ? 'En preescolar también se califican dimensiones e indicadores. Aquí ves el estado de los boletines por materia.'
+                            : 'Estado de envío del boletín de cada materia hacia el director de grupo.'}
+                        </p>
                         <ul>
                           {(selectedHeadroomSection.subjects || []).map((subjectItem) => (
-                            <li key={subjectItem.campusCourseId} className={subjectItem.submitted ? 'is-ready' : subjectItem.partial ? 'is-partial' : 'is-pending'}>
+                            <li
+                              key={subjectItem.campusCourseId}
+                              className={
+                                subjectItem.submitted || subjectItem.preschoolDraftReady
+                                  ? 'is-ready'
+                                  : subjectItem.partial
+                                    ? 'is-partial'
+                                    : 'is-pending'
+                              }
+                            >
                               <strong>{subjectItem.subject}</strong>
                               <span>
                                 {subjectItem.submitted
                                   ? 'Boletín enviado'
-                                  : subjectItem.partial
-                                    ? `Envío parcial (${subjectItem.includedStudentCount || 0}/${subjectItem.rosterStudentCount || '?'})`
-                                    : 'Pendiente'}
+                                  : subjectItem.preschoolDraftReady
+                                    ? 'Calificado'
+                                    : subjectItem.partial
+                                      ? (subjectItem.preschoolTracked
+                                        ? 'Calificación en progreso'
+                                        : `Envío parcial (${subjectItem.includedStudentCount || 0}/${subjectItem.rosterStudentCount || '?'})`)
+                                      : 'Pendiente'}
                               </span>
                             </li>
                           ))}
                         </ul>
                       </div>
-                    )}
+                    ) : null}
+
+                    {selectedHeadroomSection.preschoolBulletin ? (
+                      <>
+                        <h3 className="campus-teacher__report-card-section-title">Indicadores de preescolar</h3>
+                        <HeadroomPreschoolBulletinView
+                          bulletin={selectedHeadroomSection.preschoolBulletin}
+                          directorGroupView
+                          onNotice={setNotice}
+                          onSaved={() => headroomReportCardsQuery.refetch()}
+                          teacherUserId={authUser?.id}
+                        />
+                      </>
+                    ) : null}
 
                     <div className="campus-teacher__report-card-signatures">
                       <h3>Firma del director de grupo</h3>
@@ -11979,6 +12004,44 @@ function TeacherCampusHome({ forcePreview = false }) {
                         {saveHeadroomSignatureMutation.isPending ? 'Guardando firma...' : 'Guardar firma'}
                       </button>
                     </div>
+
+                    {selectedHeadroomSection.preschoolBulletin ? (
+                      <HeadroomPreschoolGeneralPdfPanel
+                        academicPeriodKey={selectedHeadroomPeriodKey}
+                        bulletin={selectedHeadroomSection.preschoolBulletin}
+                        canPublishToParents={
+                          selectedHeadroomSection.allSubjectsSubmitted
+                          && selectedHeadroomSection.preschoolBulletin.allSubmitted
+                          && selectedHeadroomSection.preschoolBulletin.allStudentsGraded
+                        }
+                        isPublished={selectedHeadroomSection.generalReport?.status === 'published'}
+                        onNotice={setNotice}
+                        onPublished={() => headroomReportCardsQuery.refetch()}
+                        publishHint={
+                          !selectedHeadroomSection.preschoolBulletin.allStudentsGraded
+                            ? 'Faltan indicadores por calificar para algún estudiante del curso.'
+                            : !selectedHeadroomSection.preschoolBulletin.allSubmitted
+                              ? 'Faltan dimensiones o docentes por enviar su boletín de preescolar.'
+                              : !selectedHeadroomSection.allSubjectsSubmitted
+                                ? 'Faltan materias del curso por marcar boletín enviado.'
+                                : !headroomSignatureDataUrl
+                                  ? 'Guarda tu firma de director de grupo para publicar.'
+                                  : ''
+                        }
+                        coordinatorSignatureDataUrl={selectedHeadroomSection.generalReport?.coordinatorSignatureDataUrl || ''}
+                        coordinatorSignerName={selectedHeadroomSection.generalReport?.coordinatorSignerName || ''}
+                        schoolId={authUser?.schoolId || ''}
+                        schoolName={schoolName}
+                        signatureDataUrl={headroomSignatureDataUrl}
+                        signerName={
+                          selectedHeadroomSection.generalReport?.headroomSignerName
+                          || selectedHeadroomSection.generalReport?.headroomTeacherName
+                          || authUser?.name
+                          || ''
+                        }
+                        sourceCourseKey={selectedHeadroomSection.sourceCourseKey}
+                      />
+                    ) : null}
 
                     {!selectedHeadroomSection.preschoolBulletin && selectedHeadroomSection.allSubjectsSubmitted ? (
                       <>

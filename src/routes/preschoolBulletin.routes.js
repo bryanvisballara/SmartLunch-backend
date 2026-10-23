@@ -522,7 +522,12 @@ router.get('/teacher/workspace', async (req, res) => {
           performanceLabel: normalizeText(entry.performanceLabel),
           score: entry.score === null || entry.score === undefined ? null : Number(entry.score),
         })),
-      } : { status: 'draft', submittedAt: null, entries: [] },
+        blockComments: (report.blockComments || []).map((item) => ({
+          studentId: String(item.studentId),
+          blockId: normalizeText(item.blockId),
+          comment: normalizeText(item.comment),
+        })),
+      } : { status: 'draft', submittedAt: null, entries: [], blockComments: [] },
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -569,6 +574,12 @@ router.post('/teacher/workspace', async (req, res) => {
     if (!allowedIndicatorIds.size) {
       return res.status(403).json({ message: 'No tienes indicadores asignados en este grado.' });
     }
+    const allowedBlockIds = new Set(
+      serializeTemplate(activeTemplate).blocks
+        .filter((block) => (block.indicators || []).some((indicator) => allowedIndicatorIds.has(indicator.id)))
+        .map((block) => normalizeText(block.id))
+        .filter(Boolean)
+    );
     const matchedCourse = courses.find((course) => (
       valuesMatch(course.studentGradeKey, grade.key) || valuesMatch(course.gradeLevel, grade.key)
     ));
@@ -590,6 +601,23 @@ router.post('/teacher/workspace', async (req, res) => {
       })
       .filter((entry) => mongoose.Types.ObjectId.isValid(entry.studentId) && allowedIndicatorIds.has(entry.indicatorId));
 
+    const blockComments = (Array.isArray(req.body?.blockComments) ? req.body.blockComments : [])
+      .map((item) => ({
+        studentId: normalizeText(item?.studentId),
+        blockId: normalizeText(item?.blockId),
+        comment: normalizeText(item?.comment),
+      }))
+      .filter((item) => (
+        mongoose.Types.ObjectId.isValid(item.studentId)
+        && allowedBlockIds.has(item.blockId)
+        && item.comment
+      ))
+      .map((item) => ({
+        studentId: item.studentId,
+        blockId: item.blockId,
+        comment: item.comment,
+      }));
+
     if (status === 'submitted' && entries.every((entry) => !entry.performanceKey)) {
       return res.status(400).json({ message: 'Califica al menos un indicador antes de generar el boletín.' });
     }
@@ -607,6 +635,7 @@ router.post('/teacher/workspace', async (req, res) => {
           teacherName: normalizeText(name),
           status,
           entries,
+          blockComments,
           submittedAt: status === 'submitted' ? new Date() : null,
         },
         $setOnInsert: {

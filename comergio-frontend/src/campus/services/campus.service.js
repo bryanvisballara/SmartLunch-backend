@@ -165,6 +165,10 @@ export function saveCampusTeacherHeadroomReportCard(payload) {
   return api.post('/campus/teacher/headroom/report-cards', payload).then((response) => response.data);
 }
 
+export function publishCampusTeacherPreschoolHeadroomReportCard(payload) {
+  return api.post('/campus/teacher/headroom/report-cards/publish-preschool', payload).then((response) => response.data);
+}
+
 export function saveCampusTeacherHeadroomReportCardSignature(payload) {
   return api.post('/campus/teacher/headroom/report-cards/signature', payload).then((response) => response.data);
 }

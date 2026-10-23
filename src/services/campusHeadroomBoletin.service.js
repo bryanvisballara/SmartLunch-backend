@@ -206,6 +206,104 @@ function enrichHeadroomSubjectChecklist({
   ));
 }
 
+function mapPreschoolBlocksBySubjectSlug(blocks = [], subjectChecklist = []) {
+  const bySlug = new Map();
+  const teacherSubjectSlugs = new Map();
+  subjectChecklist.forEach((item) => {
+    const slug = normalizeHeadroomSubjectSlug(item?.subject);
+    const teacherUserId = String(item?.teacherUserId || '');
+    if (!slug || !teacherUserId) return;
+    if (!teacherSubjectSlugs.has(teacherUserId)) teacherSubjectSlugs.set(teacherUserId, new Set());
+    teacherSubjectSlugs.get(teacherUserId).add(slug);
+  });
+
+  blocks.forEach((block) => {
+    const slugs = new Set();
+    (Array.isArray(block?.indicators) ? block.indicators : []).forEach((indicator) => {
+      const slug = normalizeHeadroomSubjectSlug(indicator.subjectLabel, indicator.subjectKey);
+      if (slug) slugs.add(slug);
+    });
+    if (!slugs.size) {
+      const teacherUserId = String(block?.teacherUserId || '');
+      const teacherSlugs = teacherSubjectSlugs.get(teacherUserId);
+      if (teacherSlugs) teacherSlugs.forEach((slug) => slugs.add(slug));
+    }
+    if (!slugs.size) return;
+    slugs.forEach((slug) => {
+      if (!bySlug.has(slug)) bySlug.set(slug, []);
+      bySlug.get(slug).push(block);
+    });
+  });
+  return bySlug;
+}
+
+function isPreschoolBulletinFullyGradedForAllStudents(preschoolBulletin = null) {
+  const blocks = Array.isArray(preschoolBulletin?.blocks) ? preschoolBulletin.blocks : [];
+  const students = Array.isArray(preschoolBulletin?.students) ? preschoolBulletin.students : [];
+  const entries = Array.isArray(preschoolBulletin?.entries) ? preschoolBulletin.entries : [];
+  if (!blocks.length || !students.length) return false;
+  return blocks.every((block) => isPreschoolBlockFullyGraded(block, students, entries));
+}
+
+function isPreschoolBlockFullyGraded(block, students = [], entries = []) {
+  const indicatorIds = (Array.isArray(block?.indicators) ? block.indicators : [])
+    .map((indicator) => normalizeText(indicator?.id))
+    .filter(Boolean);
+  if (!indicatorIds.length || !students.length) return false;
+  return students.every((student) => (
+    indicatorIds.every((indicatorId) => (
+      entries.some((entry) => (
+        String(entry.studentId) === String(student.id)
+        && normalizeText(entry.indicatorId) === indicatorId
+        && normalizeText(entry.performanceKey)
+      ))
+    ))
+  ));
+}
+
+function applyPreschoolStatusToHeadroomSubjectChecklist(subjectChecklist = [], preschoolBulletin = null) {
+  if (!preschoolBulletin?.blocks?.length) return subjectChecklist;
+  const blocksBySubjectSlug = mapPreschoolBlocksBySubjectSlug(preschoolBulletin.blocks, subjectChecklist);
+  const students = Array.isArray(preschoolBulletin.students) ? preschoolBulletin.students : [];
+  const entries = Array.isArray(preschoolBulletin.entries) ? preschoolBulletin.entries : [];
+
+  return subjectChecklist.map((item) => {
+    const slug = normalizeHeadroomSubjectSlug(item.subject);
+    const relatedBlocks = blocksBySubjectSlug.get(slug);
+    if (!relatedBlocks?.length) return item;
+
+    const submitted = relatedBlocks.every((block) => block.submitted === true);
+    if (submitted) {
+      return { ...item, submitted: true, partial: false, preschoolTracked: true, preschoolDraftReady: false };
+    }
+
+    const fullyGraded = relatedBlocks.every((block) => isPreschoolBlockFullyGraded(block, students, entries));
+    if (fullyGraded) {
+      return {
+        ...item,
+        submitted: false,
+        partial: true,
+        preschoolTracked: true,
+        preschoolDraftReady: true,
+      };
+    }
+
+    const relatedIndicatorIds = new Set(
+      relatedBlocks.flatMap((block) => (
+        (block.indicators || []).map((indicator) => normalizeText(indicator.id)).filter(Boolean)
+      ))
+    );
+    const started = entries.some((entry) => (
+      relatedIndicatorIds.has(normalizeText(entry.indicatorId)) && normalizeText(entry.performanceKey)
+    ));
+    if (started) {
+      return { ...item, submitted: false, partial: true, preschoolTracked: true, preschoolDraftReady: false };
+    }
+
+    return { ...item, submitted: false, partial: false, preschoolTracked: true, preschoolDraftReady: false };
+  });
+}
+
 module.exports = {
   normalizeReportSignatureDataUrl,
   normalizeHeadroomSubjectSlug,
@@ -214,4 +312,6 @@ module.exports = {
   listHeadroomSubjectAssignmentsForSection,
   listExpectedHeadroomSubjectsForSection,
   enrichHeadroomSubjectChecklist,
+  applyPreschoolStatusToHeadroomSubjectChecklist,
+  isPreschoolBulletinFullyGradedForAllStudents,
 };

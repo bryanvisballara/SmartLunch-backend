@@ -46,6 +46,8 @@ const {
   listHeadroomSubjectAssignmentsForSection,
   listExpectedHeadroomSubjectsForSection,
   enrichHeadroomSubjectChecklist,
+  applyPreschoolStatusToHeadroomSubjectChecklist,
+  isPreschoolBulletinFullyGradedForAllStudents,
   normalizeReportSignatureDataUrl,
 } = require('../services/campusHeadroomBoletin.service');
 const ParentStudentLink = require('../models/parentStudentLink.model');
@@ -8536,6 +8538,7 @@ function serializeGeneralReportCard(report) {
     coordinatorSignatureDataUrl: normalizeReportSignatureDataUrl(report.coordinatorSignatureDataUrl),
     coordinatorSignatureSignedAt: report.coordinatorSignatureSignedAt || null,
     coordinatorSignerName: normalizeText(report.coordinatorSignerName),
+    reportFormat: normalizeText(report.reportFormat) || 'standard',
     publishedAt: report.publishedAt || null,
     createdAt: report.createdAt || null,
     updatedAt: report.updatedAt || null,
@@ -8903,6 +8906,15 @@ async function loadPreschoolBulletinForHeadroom({ schoolId, gradeKey, periodKey 
     }))
   )).filter((entry) => entry.studentId && entry.indicatorId);
 
+  const blockComments = reports.flatMap((report) => (
+    (Array.isArray(report.blockComments) ? report.blockComments : []).map((item) => ({
+      studentId: String(item.studentId || ''),
+      blockId: normalizeText(item.blockId),
+      comment: normalizeText(item.comment),
+      teacherUserId: String(report.teacherUserId || ''),
+    }))
+  )).filter((item) => item.studentId && item.blockId && item.comment);
+
   const gradingContext = await loadCampusGradingContext(schoolId);
   const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, {
     studentGradeKey: template.gradeKey,
@@ -8923,8 +8935,128 @@ async function loadPreschoolBulletinForHeadroom({ schoolId, gradeKey, periodKey 
     blocks,
     students: roster,
     entries,
+    blockComments,
     performanceLevels,
     allSubmitted: blocks.every((block) => block.submitted),
+    allStudentsGraded: isPreschoolBulletinFullyGradedForAllStudents({
+      blocks,
+      students: roster,
+      entries,
+    }),
+  };
+}
+
+async function resolveHeadroomSectionSubjectsStatus({
+  schoolId,
+  academicStructure,
+  guidanceCourse,
+  academicPeriodKey = '',
+}) {
+  const sectionKey = normalizeText(guidanceCourse.sourceCourseKey).toUpperCase();
+  const gradeKey = normalizeText(guidanceCourse.studentGradeKey || guidanceCourse.gradeLevel);
+
+  let subjectCourses = await CampusCourse.find({
+    schoolId,
+    status: 'active',
+    courseType: { $ne: 'guidance_routine' },
+    sourceCourseKey: sectionKey,
+    ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
+  }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+
+  try {
+    await ensureHeadroomSectionSubjectCoursesReady({
+      schoolId,
+      academicStructure,
+      guidanceCourse,
+      subjectCourses,
+    });
+  } catch (syncError) {
+    console.warn(`[CAMPUS_HEADROOM_SYNC] ${syncError.message}`);
+  }
+
+  subjectCourses = await CampusCourse.find({
+    schoolId,
+    status: 'active',
+    courseType: { $ne: 'guidance_routine' },
+    sourceCourseKey: sectionKey,
+    ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
+  }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+
+  const periodOptions = new Map();
+  subjectCourses.forEach((course) => {
+    getCourseAcademicPeriods(course).forEach((period) => {
+      const key = normalizeText(period.key);
+      if (!key || periodOptions.has(key)) return;
+      periodOptions.set(key, { key, name: normalizeText(period.name) });
+    });
+  });
+
+  const selectedPeriodKey = normalizeText(academicPeriodKey) || Array.from(periodOptions.keys())[0] || '';
+  const subjectReports = selectedPeriodKey
+    ? await CampusSubjectReportCard.find({
+      schoolId,
+      sourceCourseKey: sectionKey,
+      academicPeriodKey: selectedPeriodKey,
+    }).lean()
+    : [];
+  const reportsByCourseId = new Map(subjectReports.map((report) => [String(report.campusCourseId), report]));
+  subjectCourses = dedupeHeadroomSubjectCourses(subjectCourses, reportsByCourseId);
+
+  let subjectChecklist = subjectCourses.map((course) => {
+    const report = reportsByCourseId.get(String(course._id));
+    const reportStatus = normalizeText(report?.status);
+    const includedCount = subjectReportStudentsVisibleToHeadroom(report).length;
+    const rosterCount = Array.isArray(report?.students) ? report.students.length : 0;
+    return {
+      campusCourseId: String(course._id),
+      subject: normalizeText(course.subject) || normalizeText(course.title),
+      teacherUserId: String(course.teacherUserId || ''),
+      report: report ? serializeSubjectReportCard(report) : null,
+      submitted: reportStatus === 'submitted',
+      partial: reportStatus === 'partial',
+      includedStudentCount: includedCount,
+      rosterStudentCount: rosterCount,
+    };
+  });
+
+  const expectedSubjects = listExpectedHeadroomSubjectsForSection(academicStructure, gradeKey, sectionKey);
+  subjectChecklist = enrichHeadroomSubjectChecklist({
+    subjectChecklist,
+    expectedSubjects,
+    subjectCourses,
+    reportsByCourseId,
+    serializeSubjectReportCard,
+    countVisibleReportStudents: subjectReportStudentsVisibleToHeadroom,
+  });
+
+  const subjectAssignments = listHeadroomSubjectAssignmentsForSection(academicStructure, gradeKey, sectionKey);
+  subjectChecklist = subjectChecklist.map((item) => {
+    if (normalizeText(item.teacherUserId)) return item;
+    const slug = normalizeHeadroomSubjectSlug(item.subject);
+    const assignment = subjectAssignments.find((entry) => entry.slug === slug);
+    if (!assignment?.teacherUserId) return item;
+    return { ...item, teacherUserId: assignment.teacherUserId };
+  });
+
+  const preschoolBulletin = selectedPeriodKey
+    ? await loadPreschoolBulletinForHeadroom({
+      schoolId,
+      gradeKey,
+      periodKey: selectedPeriodKey,
+    })
+    : null;
+  subjectChecklist = applyPreschoolStatusToHeadroomSubjectChecklist(subjectChecklist, preschoolBulletin);
+
+  const allSubjectsSubmitted = subjectChecklist.length > 0 && subjectChecklist.every((item) => item.submitted);
+
+  return {
+    sectionKey,
+    gradeKey,
+    subjectChecklist,
+    preschoolBulletin,
+    allSubjectsSubmitted,
+    periods: Array.from(periodOptions.values()),
+    selectedPeriodKey,
   };
 }
 
@@ -8971,43 +9103,18 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         });
         continue;
       }
-      let subjectCourses = await CampusCourse.find({
+      const {
+        subjectChecklist,
+        preschoolBulletin,
+        allSubjectsSubmitted: allSubmitted,
+        periods,
+        selectedPeriodKey,
+      } = await resolveHeadroomSectionSubjectsStatus({
         schoolId,
-        status: 'active',
-        courseType: { $ne: 'guidance_routine' },
-        sourceCourseKey: sectionKey,
-        ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
-      }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
-
-      try {
-        await ensureHeadroomSectionSubjectCoursesReady({
-          schoolId,
-          academicStructure,
-          guidanceCourse,
-          subjectCourses,
-        });
-      } catch (syncError) {
-        console.warn(`[CAMPUS_HEADROOM_SYNC] ${syncError.message}`);
-      }
-
-      subjectCourses = await CampusCourse.find({
-        schoolId,
-        status: 'active',
-        courseType: { $ne: 'guidance_routine' },
-        sourceCourseKey: sectionKey,
-        ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
-      }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
-
-      const periodOptions = new Map();
-      subjectCourses.forEach((course) => {
-        getCourseAcademicPeriods(course).forEach((period) => {
-          const key = normalizeText(period.key);
-          if (!key || periodOptions.has(key)) return;
-          periodOptions.set(key, { key, name: normalizeText(period.name) });
-        });
+        academicStructure,
+        guidanceCourse,
+        academicPeriodKey,
       });
-
-      const selectedPeriodKey = academicPeriodKey || Array.from(periodOptions.keys())[0] || '';
       const subjectReports = selectedPeriodKey
         ? await CampusSubjectReportCard.find({
           schoolId,
@@ -9015,37 +9122,6 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
           academicPeriodKey: selectedPeriodKey,
         }).lean()
         : [];
-      const reportsByCourseId = new Map(subjectReports.map((report) => [String(report.campusCourseId), report]));
-      subjectCourses = dedupeHeadroomSubjectCourses(subjectCourses, reportsByCourseId);
-
-      let subjectChecklist = subjectCourses.map((course) => {
-        const report = reportsByCourseId.get(String(course._id));
-        const reportStatus = normalizeText(report?.status);
-        const includedCount = subjectReportStudentsVisibleToHeadroom(report).length;
-        const rosterCount = Array.isArray(report?.students) ? report.students.length : 0;
-        return {
-          campusCourseId: String(course._id),
-          subject: normalizeText(course.subject) || normalizeText(course.title),
-          teacherUserId: String(course.teacherUserId || ''),
-          report: report ? serializeSubjectReportCard(report) : null,
-          submitted: reportStatus === 'submitted',
-          partial: reportStatus === 'partial',
-          includedStudentCount: includedCount,
-          rosterStudentCount: rosterCount,
-        };
-      });
-
-      const expectedSubjects = listExpectedHeadroomSubjectsForSection(academicStructure, gradeKey, sectionKey);
-      subjectChecklist = enrichHeadroomSubjectChecklist({
-        subjectChecklist,
-        expectedSubjects,
-        subjectCourses,
-        reportsByCourseId,
-        serializeSubjectReportCard,
-        countVisibleReportStudents: subjectReportStudentsVisibleToHeadroom,
-      });
-
-      const allSubmitted = subjectChecklist.length > 0 && subjectChecklist.every((item) => item.submitted);
       const generalReport = selectedPeriodKey
         ? await CampusGeneralReportCard.findOne({
           schoolId,
@@ -9054,12 +9130,6 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
           headroomTeacherUserId: userId,
         }).lean()
         : null;
-      const preschoolBulletin = await loadPreschoolBulletinForHeadroom({
-        schoolId,
-        gradeKey,
-        periodKey: selectedPeriodKey,
-      });
-
       const gradingContext = await loadCampusGradingContext(schoolId);
       const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, guidanceCourse);
       const studentIdSet = new Set();
@@ -9100,7 +9170,7 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         studentGradeKey: gradeKey,
         sectionLabel,
         guidanceCourseId: String(guidanceCourse._id),
-        periods: Array.from(periodOptions.values()),
+        periods,
         academicPeriodKey: selectedPeriodKey,
         subjects: subjectChecklist,
         allSubjectsSubmitted: allSubmitted,
@@ -9114,6 +9184,150 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
     return res.status(200).json({ sections });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo cargar el boletín general.' });
+  }
+});
+
+router.post('/teacher/headroom/report-cards/publish-preschool', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const sourceCourseKey = normalizeText(req.body?.sourceCourseKey).toUpperCase();
+    const academicPeriodKey = normalizeText(req.body?.academicPeriodKey);
+
+    if (!sourceCourseKey || !academicPeriodKey) {
+      return res.status(400).json({ message: 'Debes indicar el curso y el periodo del boletín general.' });
+    }
+
+    const guidanceCourse = await CampusCourse.findOne({
+      schoolId,
+      teacherUserId: userId,
+      status: 'active',
+      courseType: 'guidance_routine',
+      sourceCourseKey,
+    }).lean();
+    if (!guidanceCourse) {
+      return res.status(403).json({ message: 'No eres director de grupo de este curso.' });
+    }
+
+    const academicStructure = await AcademicStructure.findOne({ schoolId })
+      .select('gradeSchedules grades subjects levels classroomGroups')
+      .lean();
+    const {
+      gradeKey,
+      subjectChecklist,
+      preschoolBulletin,
+      allSubjectsSubmitted,
+    } = await resolveHeadroomSectionSubjectsStatus({
+      schoolId,
+      academicStructure,
+      guidanceCourse,
+      academicPeriodKey,
+    });
+
+    if (!preschoolBulletin) {
+      return res.status(400).json({ message: 'Este curso no tiene boletín de preescolar configurado para este periodo.' });
+    }
+
+    const pendingSubjects = subjectChecklist.filter((item) => !item.submitted);
+    if (pendingSubjects.length) {
+      return res.status(400).json({
+        message: `Aún faltan materias por enviar: ${pendingSubjects.map((item) => item.subject).join(', ')}.`,
+      });
+    }
+
+    if (!preschoolBulletin.allSubmitted) {
+      const pendingBlocks = preschoolBulletin.blocks.filter((block) => !block.submitted);
+      return res.status(400).json({
+        message: `Aún faltan dimensiones por enviar: ${pendingBlocks.map((block) => block.name).join(', ')}.`,
+      });
+    }
+
+    if (!preschoolBulletin.allStudentsGraded) {
+      return res.status(400).json({
+        message: 'Aún faltan indicadores por calificar para algún estudiante. Completa todo el curso antes de subir el boletín general a padres.',
+      });
+    }
+
+    const existingReport = await CampusGeneralReportCard.findOne({
+      schoolId,
+      sourceCourseKey,
+      academicPeriodKey,
+    }).lean();
+    if (existingReport?.status === 'published') {
+      return res.status(400).json({ message: 'El boletín general de este periodo ya fue publicado a padres.' });
+    }
+
+    const incomingHeadroomSignature = Object.prototype.hasOwnProperty.call(req.body || {}, 'headroomSignatureDataUrl')
+      ? normalizeReportSignatureDataUrl(req.body.headroomSignatureDataUrl)
+      : null;
+    const resolvedHeadroomSignature = incomingHeadroomSignature !== null
+      ? incomingHeadroomSignature
+      : normalizeReportSignatureDataUrl(existingReport?.headroomSignatureDataUrl);
+
+    if (!resolvedHeadroomSignature) {
+      return res.status(400).json({
+        message: 'Debes firmar como director de grupo antes de subir el boletín general a padres.',
+      });
+    }
+
+    const headroomSignatureUpdate = {};
+    if (incomingHeadroomSignature !== null && incomingHeadroomSignature) {
+      headroomSignatureUpdate.headroomSignatureDataUrl = incomingHeadroomSignature;
+      headroomSignatureUpdate.headroomSignatureSignedAt = new Date();
+      headroomSignatureUpdate.headroomSignerName = normalizeText(name);
+    } else if (resolvedHeadroomSignature) {
+      headroomSignatureUpdate.headroomSignatureDataUrl = resolvedHeadroomSignature;
+      headroomSignatureUpdate.headroomSignatureSignedAt = existingReport?.headroomSignatureSignedAt || new Date();
+      headroomSignatureUpdate.headroomSignerName = normalizeText(existingReport?.headroomSignerName) || normalizeText(name);
+    }
+
+    const students = (preschoolBulletin.students || []).map((student) => ({
+      studentId: student.id,
+      studentName: normalizeText(student.name),
+      studentSchoolCode: normalizeText(student.schoolCode),
+      subjectLines: [],
+      overallAverage: null,
+      headroomObservation: '',
+      coexistenceScore: null,
+      coexistenceTotalDeducted: null,
+      coexistenceObservationCount: 0,
+      coexistencePerformanceLabel: '',
+      coexistenceObservation: '',
+    }));
+
+    const periodName = normalizeText(preschoolBulletin.academicPeriodLabel) || academicPeriodKey;
+    const report = await CampusGeneralReportCard.findOneAndUpdate(
+      {
+        schoolId,
+        sourceCourseKey,
+        academicPeriodKey,
+      },
+      {
+        $set: {
+          schoolId,
+          sourceCourseKey,
+          studentGradeKey: gradeKey,
+          sectionLabel: normalizeText(guidanceCourse.section) || sourceCourseKey,
+          academicPeriodKey,
+          academicPeriodName: periodName,
+          headroomTeacherUserId: userId,
+          headroomTeacherName: normalizeText(name),
+          status: 'published',
+          reportFormat: 'preschool',
+          subjectReportIds: [],
+          students,
+          publishedAt: new Date(),
+          ...headroomSignatureUpdate,
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+
+    return res.status(201).json({
+      report: serializeGeneralReportCard(report),
+      message: 'Boletín general publicado. Las familias lo verán en Academia si la cartera está al día.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo publicar el boletín general de preescolar.' });
   }
 });
 

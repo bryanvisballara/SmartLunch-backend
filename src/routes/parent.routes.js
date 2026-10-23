@@ -8196,18 +8196,41 @@ router.get('/portal/children/:studentId/bulletins', roleMiddleware('parent', 'ad
       }).lean()
       : [];
 
+    const publishedPreschoolGenerals = await CampusGeneralReportCard.find({
+      schoolId,
+      status: 'published',
+      reportFormat: 'preschool',
+      studentGradeKey: { $in: gradeKeys },
+    }).select('academicPeriodKey studentGradeKey publishedAt').lean();
+    const publishedPreschoolKeySet = new Set(
+      publishedPreschoolGenerals.map((item) => (
+        `${normalizeText(item.studentGradeKey)}::${normalizeText(item.academicPeriodKey)}`
+      ))
+    );
+
     const preschoolBulletins = [];
     const periods = [...new Set(preschoolReports.map((report) => report.academicPeriodKey).filter(Boolean))];
     periods.forEach((periodKey) => {
       const template = gradeTemplates.find((item) => item.academicPeriodKey === periodKey && item.blocks?.length);
       if (!template) return;
+      const publicationKey = `${normalizeText(template.gradeKey)}::${normalizeText(periodKey)}`;
+      if (!publishedPreschoolKeySet.has(publicationKey)) return;
       const periodReports = preschoolReports.filter((report) => report.academicPeriodKey === periodKey && report.gradeKey === template.gradeKey);
       if (!periodReports.length) return;
+      const blockCommentsForPeriod = periodReports.flatMap((report) => (
+        Array.isArray(report.blockComments) ? report.blockComments : []
+      ));
       const blocks = (template.blocks || []).map((block) => ({
         id: String(block._id || ''),
         kind: block.kind === 'topic' ? 'topic' : 'dimension',
         name: String(block.name || '').trim(),
         teacherName: String(block.teacherName || '').trim(),
+        dimensionComment: String(
+          blockCommentsForPeriod.find((item) => (
+            String(item.blockId) === String(block._id || '')
+            && String(item.studentId) === String(student._id)
+          ))?.comment || ''
+        ).trim(),
         indicators: (block.indicators || []).map((indicator) => {
           const indicatorId = String(indicator._id || '');
           const entry = periodReports.flatMap((report) => report.entries || []).find((item) => (

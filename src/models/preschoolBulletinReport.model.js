@@ -13,6 +13,15 @@ const preschoolBulletinEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const preschoolBlockCommentSchema = new mongoose.Schema(
+  {
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
+    blockId: { type: String, trim: true, required: true },
+    comment: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
 const preschoolBulletinReportSchema = new mongoose.Schema(
   {
     schoolId: { type: String, required: true, index: true, trim: true },
@@ -23,6 +32,7 @@ const preschoolBulletinReportSchema = new mongoose.Schema(
     teacherName: { type: String, trim: true, default: '' },
     status: { type: String, enum: ['draft', 'submitted'], default: 'draft', index: true },
     entries: { type: [preschoolBulletinEntrySchema], default: [] },
+    blockComments: { type: [preschoolBlockCommentSchema], default: [] },
     submittedAt: { type: Date, default: null },
   },
   { timestamps: true }

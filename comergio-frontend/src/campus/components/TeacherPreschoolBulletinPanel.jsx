@@ -85,6 +85,7 @@ export default function TeacherPreschoolBulletinPanel({ onNotice }) {
             blocks: workspace.assignment.blocks || [],
             students: workspace.students || [],
             entries: workspace.report?.entries || [],
+            blockComments: workspace.report?.blockComments || [],
             performanceLevels: workspace.performanceLevels || [],
           }}
           onNotice={onNotice}

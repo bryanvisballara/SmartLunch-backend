@@ -5,6 +5,10 @@ function entryKey(studentId, indicatorId) {
   return `${studentId}:${indicatorId}`;
 }
 
+function blockCommentKey(studentId, blockId) {
+  return `${studentId}:${blockId}`;
+}
+
 function emptyMark() {
   return { observation: '', performanceKey: '' };
 }
@@ -14,9 +18,12 @@ export default function HeadroomPreschoolBulletinView({
   teacherUserId = '',
   onNotice,
   onSaved,
+  directorGroupView = false,
 }) {
   const [studentId, setStudentId] = useState('');
   const [marks, setMarks] = useState({});
+  const [blockComments, setBlockComments] = useState({});
+  const [openIndicatorComments, setOpenIndicatorComments] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
 
   const levels = bulletin?.performanceLevels || [];
@@ -26,25 +33,41 @@ export default function HeadroomPreschoolBulletinView({
     return blocks.filter((block) => String(block.teacherUserId || '') === String(teacherUserId));
   }, [bulletin, teacherUserId]);
 
+  const ownedBlockIds = useMemo(() => new Set(ownedBlocks.map((block) => block.id)), [ownedBlocks]);
+
   const ownedIndicatorIds = useMemo(() => new Set(
     ownedBlocks.flatMap((block) => (block.indicators || []).map((indicator) => indicator.id))
   ), [ownedBlocks]);
 
   useEffect(() => {
-    const next = {};
+    const nextMarks = {};
+    const nextOpenComments = new Set();
     (bulletin?.entries || []).forEach((entry) => {
       if (!ownedIndicatorIds.has(entry.indicatorId)) return;
       if (teacherUserId && String(entry.teacherUserId || '') !== String(teacherUserId)) return;
-      next[entryKey(entry.studentId, entry.indicatorId)] = {
+      nextMarks[entryKey(entry.studentId, entry.indicatorId)] = {
         observation: entry.observation || '',
         performanceKey: entry.performanceKey || '',
       };
+      if (entry.observation) {
+        nextOpenComments.add(entryKey(entry.studentId, entry.indicatorId));
+      }
     });
-    setMarks(next);
+
+    const nextBlockComments = {};
+    (bulletin?.blockComments || []).forEach((item) => {
+      if (!ownedBlockIds.has(item.blockId)) return;
+      if (teacherUserId && String(item.teacherUserId || '') !== String(teacherUserId)) return;
+      nextBlockComments[blockCommentKey(item.studentId, item.blockId)] = item.comment || '';
+    });
+
+    setMarks(nextMarks);
+    setBlockComments(nextBlockComments);
+    setOpenIndicatorComments(nextOpenComments);
     setStudentId((current) => (
       (bulletin?.students || []).some((student) => student.id === current) ? current : ''
     ));
-  }, [bulletin, ownedIndicatorIds, teacherUserId]);
+  }, [bulletin, ownedBlockIds, ownedIndicatorIds, teacherUserId]);
 
   const selectedStudent = (bulletin?.students || []).find((student) => student.id === studentId) || null;
 
@@ -63,6 +86,34 @@ export default function HeadroomPreschoolBulletinView({
       ...current,
       [key]: { ...emptyMark(), ...(current[key] || {}), ...patch },
     }));
+  };
+
+  const setBlockComment = (blockId, comment) => {
+    if (!selectedStudent) return;
+    const key = blockCommentKey(selectedStudent.id, blockId);
+    setBlockComments((current) => ({ ...current, [key]: comment }));
+  };
+
+  const toggleIndicatorComment = (indicatorId) => {
+    if (!selectedStudent) return;
+    const key = entryKey(selectedStudent.id, indicatorId);
+    setOpenIndicatorComments((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const buildPayloadBlockComments = () => {
+    const students = bulletin.students || [];
+    return students.flatMap((student) => (
+      ownedBlocks.map((block) => ({
+        studentId: student.id,
+        blockId: block.id,
+        comment: (blockComments[blockCommentKey(student.id, block.id)] || '').trim(),
+      }))
+    ));
   };
 
   const onSave = async (status) => {
@@ -87,11 +138,12 @@ export default function HeadroomPreschoolBulletinView({
         periodKey: bulletin.academicPeriodKey,
         status,
         entries,
+        blockComments: buildPayloadBlockComments(),
       });
       onNotice?.({
         type: 'success',
         text: status === 'submitted'
-          ? 'Boletín generado. La familia podrá verlo en Academia si está al día en cartera.'
+          ? 'Calificaciones enviadas al director de grupo.'
           : 'Borrador del boletín guardado.',
       });
       await onSaved?.();
@@ -142,7 +194,9 @@ export default function HeadroomPreschoolBulletinView({
           <section key={block.id}>
             <h4>{block.kind === 'topic' ? 'Tópico' : 'Dimensión'}: {block.name}</h4>
             {(block.indicators || []).map((indicator) => {
-              const mark = marks[entryKey(selectedStudent.id, indicator.id)] || emptyMark();
+              const markKey = entryKey(selectedStudent.id, indicator.id);
+              const mark = marks[markKey] || emptyMark();
+              const showIndicatorComment = openIndicatorComments.has(markKey) || Boolean(mark.observation);
               return (
                 <article key={indicator.id}>
                   <strong>{indicator.text}</strong>
@@ -164,26 +218,70 @@ export default function HeadroomPreschoolBulletinView({
                       );
                     })}
                   </div>
-                  <label>
-                    Comentario
-                    <textarea
+                  {!showIndicatorComment ? (
+                    <button
+                      className="campus-preschool-grade__comment-toggle"
                       disabled={saving}
-                      placeholder="Comentario opcional"
-                      rows={2}
-                      value={mark.observation}
-                      onChange={(event) => setMark(indicator.id, { observation: event.target.value })}
-                    />
-                  </label>
+                      onClick={() => toggleIndicatorComment(indicator.id)}
+                      type="button"
+                    >
+                      Agregar comentario de indicador (opcional)
+                    </button>
+                  ) : (
+                    <div className="campus-preschool-grade__indicator-comment">
+                      <label>
+                        Comentario del indicador
+                        <textarea
+                          disabled={saving}
+                          placeholder="Comentario opcional"
+                          rows={2}
+                          value={mark.observation}
+                          onChange={(event) => setMark(indicator.id, { observation: event.target.value })}
+                        />
+                      </label>
+                      <button
+                        className="campus-preschool-grade__comment-toggle"
+                        disabled={saving}
+                        onClick={() => {
+                          setMark(indicator.id, { observation: '' });
+                          toggleIndicatorComment(indicator.id);
+                        }}
+                        type="button"
+                      >
+                        Quitar comentario
+                      </button>
+                    </div>
+                  )}
                 </article>
               );
             })}
+            <label className="campus-preschool-grade__dimension-comment">
+              Comentario general de la dimensión
+              <textarea
+                disabled={saving}
+                placeholder="Observación general para esta dimensión (opcional)"
+                rows={3}
+                value={blockComments[blockCommentKey(selectedStudent.id, block.id)] || ''}
+                onChange={(event) => setBlockComment(block.id, event.target.value)}
+              />
+            </label>
           </section>
         ))
       )}
 
-      <div className="campus-preschool-grade__actions">
-        <button disabled={saving} onClick={() => onSave('draft')} type="button">Guardar borrador</button>
-        <button disabled={saving} onClick={() => onSave('submitted')} type="button">Generar boletín</button>
+      <div className="campus-preschool-grade__actions campus-preschool-grade__actions--split">
+        <button className="campus-teacher__ghost-btn" disabled={saving} onClick={() => onSave('draft')} type="button">
+          Guardar borrador
+        </button>
+        {!directorGroupView ? (
+          <button className="campus-teacher__action-btn" disabled={saving} onClick={() => onSave('submitted')} type="button">
+            Enviar calificaciones al director
+          </button>
+        ) : (
+          <p className="campus-panel__meta campus-preschool-grade__director-hint">
+            El PDF del boletín general y el envío a padres están más abajo, cuando todo el curso esté calificado.
+          </p>
+        )}
       </div>
     </div>
   );

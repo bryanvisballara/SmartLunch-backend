@@ -17806,10 +17806,59 @@ button.campus-teacher__home-kpi-card:focus-visible {
   gap: 0.6rem;
 }
 
-.campus-preschool-grade__actions button:last-child {
+.campus-preschool-grade__actions button:last-child,
+.campus-preschool-grade__actions--split .campus-teacher__action-btn {
   background: #0f766e;
   border-color: #0f766e;
   color: #fff;
+}
+
+.campus-teacher__report-card-section-title {
+  margin: 1.25rem 0 0.65rem;
+  font-size: 1.05rem;
+}
+
+.campus-preschool-grade__comment-toggle {
+  border: none;
+  background: none;
+  color: #0f766e;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.campus-preschool-grade__indicator-comment {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.campus-preschool-grade__dimension-comment {
+  margin-top: 0.75rem;
+}
+
+.campus-teacher__report-card-general-pdf {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.campus-teacher__report-card-general-pdf label {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 28rem;
+}
+
+.campus-teacher__report-card-general-pdf__actions {
+  margin-top: 0.35rem;
+}
+
+.campus-preschool-grade__director-hint {
+  flex: 1 1 100%;
+  margin: 0;
 }
 
 .campus-teacher__report-card-checklist {

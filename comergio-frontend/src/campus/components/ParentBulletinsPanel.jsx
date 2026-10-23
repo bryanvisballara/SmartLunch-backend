@@ -47,6 +47,7 @@ function BulletinSheet({ bulletin, schoolName, student }) {
           <section key={block.id}>
             <h4>{block.kind === 'topic' ? 'Tópico' : 'Dimensión'}: {block.name}</h4>
             {block.teacherName ? <p>Docente: {block.teacherName}</p> : null}
+            {block.dimensionComment ? <p>Comentario general: {block.dimensionComment}</p> : null}
             <ul>
               {(block.indicators || []).map((indicator) => (
                 <li key={indicator.id}>
