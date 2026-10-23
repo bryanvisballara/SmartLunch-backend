@@ -209,8 +209,16 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(morgan('dev'));
+function applyCorsOriginHeader(req, res) {
+  const origin = String(req.headers.origin || '').trim();
+  if (origin && isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+}
+
 app.use(async (req, res, next) => {
-  if (req.path === '/health') {
+  if (req.path === '/health' || req.method === 'OPTIONS') {
     return next();
   }
 
@@ -220,6 +228,7 @@ app.use(async (req, res, next) => {
     }
     return next();
   } catch (error) {
+    applyCorsOriginHeader(req, res);
     return res.status(503).json({
       message: 'Base de datos no disponible. Si acabas de pasar el cluster a M10, actualiza MONGO_URI en Render con el connection string nuevo de Atlas y redespliega.',
       detail: error.message,
