@@ -10,29 +10,31 @@ const { ensureBootstrapData: ensureWwtecnoBootstrap } = require('./routes/wwtecn
 
 const PORT = process.env.PORT || 4000;
 
-async function startServer() {
-  try {
-    const connection = await connectDB();
-    console.log(`MongoDB connected (${connection.name})`);
-
-    try {
-      await ensureWwtecnoBootstrap();
-      console.log('WW Tecno Capital bootstrap ready (gerencia@wwtecno.com)');
-    } catch (bootstrapError) {
-      console.warn(`WW Tecno bootstrap skipped: ${bootstrapError.message}`);
-    }
-
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      startAutoDebitWorker();
-      startInformaAutoWorker();
-      startTriviaTurnExpiryWorker();
-      startDemoSchoolWorker();
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error.message);
-    process.exit(1);
-  }
+function startBackgroundWorkers() {
+  startAutoDebitWorker();
+  startInformaAutoWorker();
+  startTriviaTurnExpiryWorker();
+  startDemoSchoolWorker();
 }
 
-startServer();
+async function connectMongoAndBootstrap() {
+  const connection = await connectDB();
+  console.log(`MongoDB connected (${connection.name})`);
+
+  try {
+    await ensureWwtecnoBootstrap();
+    console.log('WW Tecno Capital bootstrap ready (gerencia@wwtecno.com)');
+  } catch (bootstrapError) {
+    console.warn(`WW Tecno bootstrap skipped: ${bootstrapError.message}`);
+  }
+
+  startBackgroundWorkers();
+}
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  connectMongoAndBootstrap().catch((error) => {
+    console.error(`MongoDB bootstrap failed: ${error.message}`);
+    console.error('API will return 503 until MongoDB is available.');
+  });
+});

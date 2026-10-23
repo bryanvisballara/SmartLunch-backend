@@ -60,9 +60,11 @@ const app = express();
 // Render/Cloudflare health checks must stay fast even if Mongo is reconnecting.
 app.set('trust proxy', 1);
 app.get('/health', (req, res) => {
+  const mongoReady = mongoose.connection.readyState === 1;
   res.status(200).json({
     status: 'ok',
     service: 'comergio-api',
+    mongoReady,
     time: new Date(),
     nodeEnv: process.env.NODE_ENV || '',
     render: String(process.env.RENDER || '').trim() === 'true',
