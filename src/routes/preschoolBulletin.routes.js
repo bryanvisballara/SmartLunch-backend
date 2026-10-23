@@ -160,8 +160,11 @@ function courseMatchesSubject(course, subjectKey, subjectLabel) {
 }
 
 function indicatorVisibleToTeacher(indicator, block, teacherUserId, courses, gradeSubjects, gradeKey) {
+  if (String(block.teacherUserId || '') === String(teacherUserId || '')) {
+    return true;
+  }
   if (!normalizeText(indicator.subjectKey)) {
-    return String(block.teacherUserId || '') === String(teacherUserId || '');
+    return false;
   }
 
   const gradeCourses = (Array.isArray(courses) ? courses : []).filter((course) => (
