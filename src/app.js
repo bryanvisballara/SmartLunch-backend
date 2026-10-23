@@ -57,6 +57,21 @@ const { ensureBootstrapData: ensureWwtecnoBootstrap } = require('./routes/wwtecn
 
 const app = express();
 
+// Render/Cloudflare health checks must stay fast even if Mongo is reconnecting.
+app.set('trust proxy', 1);
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'comergio-api',
+    time: new Date(),
+    nodeEnv: process.env.NODE_ENV || '',
+    render: String(process.env.RENDER || '').trim() === 'true',
+    cloudinaryEnabled: isCloudinaryEnabled(),
+    feedUploadVersion: 3,
+    campusMaterialsDbServe: true,
+  });
+});
+
 const uploadsRootPath = String(process.env.UPLOADS_ROOT_PATH || '').trim() || path.resolve(process.cwd(), 'public', 'assets');
 const bundledAssetsRootPath = path.resolve(process.cwd(), 'public', 'assets');
 const staticAssetRootPaths = Array.from(new Set([
@@ -95,9 +110,6 @@ function setStaticAssetHeaders(res) {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Access-Control-Allow-Origin', '*');
 }
-
-// Render runs behind a proxy; trust first hop so rate-limit/IP detection works.
-app.set('trust proxy', 1);
 
 // API responses should be fresh to avoid browser conditional caching (304),
 // which can break Axios flows expecting 2xx payloads.
@@ -196,6 +208,10 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(morgan('dev'));
 app.use(async (req, res, next) => {
+  if (req.path === '/health') {
+    return next();
+  }
+
   try {
     if (mongoose.connection.readyState !== 1) {
       await connectDB();
@@ -383,19 +399,6 @@ for (const staticAssetRootPath of staticAssetRootPaths) {
     })
   );
 }
-
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    service: 'comergio-api',
-    time: new Date(),
-    nodeEnv: process.env.NODE_ENV || '',
-    render: String(process.env.RENDER || '').trim() === 'true',
-    cloudinaryEnabled: isCloudinaryEnabled(),
-    feedUploadVersion: 3,
-    campusMaterialsDbServe: true,
-  });
-});
 
 app.use('/auth', limiter, authRoutes);
 app.use('/students', studentRoutes);

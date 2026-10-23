@@ -104,6 +104,25 @@ function extractSchoolIdFromRequest(req) {
   return '';
 }
 
+let connectInFlight = null;
+
+function bindMongoConnectionHooks() {
+  if (mongoose.connection._comergioDisconnectHookBound) {
+    return;
+  }
+
+  mongoose.connection._comergioDisconnectHookBound = true;
+  mongoose.connection.on('disconnected', () => {
+    console.warn('[mongo] disconnected — will reconnect on next request');
+  });
+  mongoose.connection.on('error', (error) => {
+    console.warn(`[mongo] connection error: ${error.message}`);
+  });
+  mongoose.connection.on('reconnected', () => {
+    console.log('[mongo] reconnected');
+  });
+}
+
 async function connectDB() {
   const mongoUri = process.env.MONGO_URI;
 
@@ -115,27 +134,23 @@ async function connectDB() {
     return mongoose.connection;
   }
 
-  await mongoose.connect(mongoUri, {
-    dbName: getControlDbName(),
-    serverSelectionTimeoutMS: 20000,
-    // Survive Atlas tier changes / brief network blips on Render.
-    maxPoolSize: 20,
-  });
-
-  if (!mongoose.connection._comergioDisconnectHookBound) {
-    mongoose.connection._comergioDisconnectHookBound = true;
-    mongoose.connection.on('disconnected', () => {
-      console.warn('[mongo] disconnected — will reconnect on next request');
-    });
-    mongoose.connection.on('error', (error) => {
-      console.warn(`[mongo] connection error: ${error.message}`);
-    });
-    mongoose.connection.on('reconnected', () => {
-      console.log('[mongo] reconnected');
-    });
+  if (connectInFlight) {
+    return connectInFlight;
   }
 
-  return mongoose.connection;
+  connectInFlight = mongoose.connect(mongoUri, {
+    dbName: getControlDbName(),
+    serverSelectionTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+    maxPoolSize: 20,
+  }).then(() => {
+    bindMongoConnectionHooks();
+    return mongoose.connection;
+  }).finally(() => {
+    connectInFlight = null;
+  });
+
+  return connectInFlight;
 }
 
 async function ensureRootConnectionAsync() {
