@@ -12,11 +12,13 @@ import colibriLogo from '../assets/colibrisinfondo.png';
 import './SchoolPresentationPage.css';
 
 const DEMO_PATH = '/demo';
+const DEMO_CTA_LABEL = 'Vive la experiencia como un padre';
+const DEMO_CTA_LABEL_SHORT = 'Como un padre';
 const WHATSAPP_HREF = `https://wa.me/573016214806?text=${encodeURIComponent('Hola, quiero conocer Comergio para mi colegio.')}`;
 
 const PRESENTATION_OG = {
   title: 'Comergio · Tu colegio y jardín, en una sola plataforma',
-  description: 'Paga pensiones, consulta lo académico y gestiona servicios escolares desde la app. Prueba 7 días sin costo.',
+  description: 'Paga pensiones, consulta lo académico y gestiona servicios escolares desde la app. Vive la experiencia como un padre.',
   image: 'https://www.comergio.com/presentation/og-share.jpg?v=20251022',
 };
 
@@ -47,6 +49,9 @@ const HERO_VALUES = [
   { label: 'Familias más conectadas', icon: 'contact' },
   { label: 'Mejor educación', icon: 'campus' },
 ];
+
+const HERO_HEADLINE = 'Transforma la experiencia de comunicación con las familias.';
+const HERO_HEADLINE_WORDS = HERO_HEADLINE.split(/\s+/).filter(Boolean);
 
 const RISKS_PROMO_VIDEO = {
   src: '/presentation/comergio-web.mov',
@@ -118,7 +123,7 @@ const STEPS = [
     n: '01',
     icon: 'contact',
     title: 'Crea tu colegio en segundos',
-    text: 'Presiona el botón «Probar 7 días sin costo» y crea tu colegio en segundos.',
+    text: `Presiona el botón «${DEMO_CTA_LABEL}» y crea tu colegio en segundos.`,
   },
   {
     n: '02',
@@ -333,7 +338,7 @@ function BrandMark({ compact = false }) {
   );
 }
 
-function CreateCta({ className = '', children = 'Probar 7 días sin costo' }) {
+function CreateCta({ className = '', children = DEMO_CTA_LABEL }) {
   return (
     <Link className={`sp-cta ${className}`.trim()} to={DEMO_PATH}>
       {children}
@@ -972,19 +977,40 @@ export default function SchoolPresentationPage() {
         <div className="sp-nav__end">
           <Link className="sp-nav__login" to="/login">Iniciar sesión</Link>
           <CreateCta className="sp-cta--nav">
-            <span className="sp-nav-cta-long">Probar 7 días sin costo</span>
-            <span className="sp-nav-cta-short">Probar gratis</span>
+            <span className="sp-nav-cta-long">{DEMO_CTA_LABEL}</span>
+            <span className="sp-nav-cta-short">{DEMO_CTA_LABEL_SHORT}</span>
           </CreateCta>
         </div>
       </header>
 
       <section className="sp-hero" aria-labelledby="sp-hero-title">
         <div className="sp-hero__bg" aria-hidden="true" />
-        <div className="sp-hero__copy">
-          <p className="sp-hero__eyebrow">Colegio/jardín</p>
-          <h1 id="sp-hero-title">Transforma la experiencia de comunicación con las familias.</h1>
-          <p className="sp-hero__lead">Sé parte de la nueva generación de colegios y jardines modernos.</p>
-          <CreateCta className="sp-cta--light" />
+        <div
+          className="sp-hero__copy"
+          data-reveal-stagger
+          style={{ '--hero-word-count': HERO_HEADLINE_WORDS.length }}
+        >
+          <p className="sp-hero__eyebrow" data-reveal-item style={{ '--i': 0 }}>
+            Colegio/jardín
+          </p>
+          <h1 id="sp-hero-title" className="sp-hero__title">
+            {HERO_HEADLINE_WORDS.map((word, index) => (
+              <span
+                key={`${word}-${index}`}
+                className="sp-hero__title-word"
+                style={{ '--w': index }}
+              >
+                {word}
+                {index < HERO_HEADLINE_WORDS.length - 1 ? '\u00a0' : ''}
+              </span>
+            ))}
+          </h1>
+          <p className="sp-hero__lead" data-reveal-item style={{ '--i': 1 }}>
+            Sé parte de la nueva generación de colegios y jardines modernos.
+          </p>
+          <div className="sp-hero__cta-wrap" data-reveal-item style={{ '--i': 2 }}>
+            <CreateCta className="sp-cta--light" />
+          </div>
         </div>
         <ul className="sp-values" aria-label="Beneficios">
           {HERO_VALUES.map((item) => (

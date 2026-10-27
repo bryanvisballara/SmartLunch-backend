@@ -11,9 +11,11 @@ import {
 import {
   getCampusCoordinationCourses,
   getCampusCoordinationGeneralReportCards,
+  getCampusCoordinationMyReportCardSignature,
   getCampusCoordinationTeachers,
   getCampusDisciplineObservations,
   saveCampusCoordinationGeneralReportCardSignature,
+  saveCampusCoordinationMyReportCardSignature,
   updateCampusCoordinationCourse,
 } from '../services/campus.service';
 import ReportCardSignaturePad from '../components/ReportCardSignaturePad';
@@ -122,6 +124,7 @@ function CoordinationCampusHome() {
   const [coordinationReportPeriodKey, setCoordinationReportPeriodKey] = useState('');
   const [coordinationSignatureDrafts, setCoordinationSignatureDrafts] = useState({});
   const [activeCoordinationReportId, setActiveCoordinationReportId] = useState('');
+  const [institutionalSignatureDraft, setInstitutionalSignatureDraft] = useState('');
 
   const teachersQuery = useQuery({
     queryKey: ['campus', 'coordination', 'teachers'],
@@ -173,6 +176,14 @@ function CoordinationCampusHome() {
     enabled: !campusPreviewEnabled,
   });
 
+  const institutionalSignatureQuery = useQuery({
+    queryKey: ['campus', 'coordination', 'me', 'report-card-signature'],
+    queryFn: getCampusCoordinationMyReportCardSignature,
+    retry: false,
+    staleTime: 20_000,
+    enabled: !campusPreviewEnabled,
+  });
+
   const updateCourseMutation = useMutation({
     mutationFn: ({ courseId, payload }) => updateCampusCoordinationCourse(courseId, payload),
     onSuccess: (updatedCourse) => {
@@ -210,6 +221,18 @@ function CoordinationCampusHome() {
     },
     onError: (error) => {
       setNotice({ type: 'error', text: error?.response?.data?.message || 'No fue posible consolidar los planners.' });
+    },
+  });
+
+  const saveInstitutionalSignatureMutation = useMutation({
+    mutationFn: (signatureDataUrl) => saveCampusCoordinationMyReportCardSignature({ signatureDataUrl }),
+    onSuccess: (payload) => {
+      queryClient.invalidateQueries({ queryKey: ['campus', 'coordination', 'me', 'report-card-signature'] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'coordination', 'general-report-cards'] });
+      setNotice({ type: 'success', text: payload?.message || 'Firma institucional guardada.' });
+    },
+    onError: (error) => {
+      setNotice({ type: 'error', text: error?.response?.data?.message || 'No se pudo guardar tu firma institucional.' });
     },
   });
 
@@ -461,6 +484,21 @@ function CoordinationCampusHome() {
       : publishedGeneralReports
   ), [coordinationReportPeriodKey, publishedGeneralReports]);
 
+  useEffect(() => {
+    if (institutionalSignatureQuery.isLoading) {
+      return;
+    }
+    setInstitutionalSignatureDraft(institutionalSignatureQuery.data?.signatureDataUrl || '');
+  }, [institutionalSignatureQuery.data?.signatureDataUrl, institutionalSignatureQuery.isLoading]);
+
+  const onSaveInstitutionalSignature = async () => {
+    if (!institutionalSignatureDraft) {
+      setNotice({ type: 'error', text: 'Dibuja tu firma antes de guardar.' });
+      return;
+    }
+    await saveInstitutionalSignatureMutation.mutateAsync(institutionalSignatureDraft);
+  };
+
   const onSaveCoordinatorSignature = async (reportId) => {
     const signatureDataUrl = coordinationSignatureDrafts[reportId]
       || filteredGeneralReports.find((report) => report.id === reportId)?.coordinatorSignatureDataUrl
@@ -490,10 +528,47 @@ function CoordinationCampusHome() {
           <div className="campus-teacher__panel-head">
             <div>
               <span className="campus-panel__kicker">Boletín general</span>
-              <h2>Firmas de coordinación</h2>
+              <h2>Mi firma institucional</h2>
             </div>
             <p className="campus-panel__meta">
-              Firma los boletines generales publicados por los directores de grupo. Tu firma aparece al pie del boletín impreso.
+              Guárdala una sola vez. Aparecerá en todos los boletines generales de tu nivel (PDF e impresión),
+              sin tener que firmar curso por curso.
+            </p>
+          </div>
+
+          {institutionalSignatureQuery.isLoading ? (
+            <p className="campus-panel__meta">Cargando firma guardada...</p>
+          ) : (
+            <>
+              {institutionalSignatureQuery.data?.signatureDataUrl && !saveInstitutionalSignatureMutation.isPending ? (
+                <div className="campus-coordination__report-signature-done">
+                  <img alt="" src={institutionalSignatureQuery.data.signatureDataUrl} />
+                  <p>{institutionalSignatureQuery.data.signerName || 'Coordinación'}</p>
+                </div>
+              ) : null}
+              <ReportCardSignaturePad
+                ariaLabel="Firma institucional de coordinación"
+                disabled={saveInstitutionalSignatureMutation.isPending}
+                onChange={setInstitutionalSignatureDraft}
+                value={institutionalSignatureDraft}
+              />
+              <button
+                className="campus-coordination__save-button"
+                disabled={saveInstitutionalSignatureMutation.isPending || !institutionalSignatureDraft}
+                onClick={onSaveInstitutionalSignature}
+                type="button"
+              >
+                {saveInstitutionalSignatureMutation.isPending ? 'Guardando...' : 'Guardar firma para todos los boletines'}
+              </button>
+            </>
+          )}
+
+          <div className="campus-teacher__panel-head campus-coordination__subsection-head">
+            <div>
+              <h2>Firmas por curso (opcional)</h2>
+            </div>
+            <p className="campus-panel__meta">
+              Solo si necesitas una firma distinta en un boletín puntual. Si ya guardaste la firma institucional, no es obligatorio.
             </p>
           </div>
 

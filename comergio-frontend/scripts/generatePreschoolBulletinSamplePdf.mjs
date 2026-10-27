@@ -9,11 +9,17 @@ const {
   createPreschoolBulletinStudentPdfDocument,
 } = await import(pdfModuleUrl);
 
-const logoPath = join(__dirname, '../src/assets/millennium-school-crest.png');
-const schoolLogoDataUrl = `data:image/png;base64,${readFileSync(logoPath).toString('base64')}`;
+const logoPath = join(__dirname, '../src/assets/millennium-preschool-discovery-logo.jpg');
+const schoolLogoDataUrl = `data:image/jpeg;base64,${readFileSync(logoPath).toString('base64')}`;
 
 const sample = buildSamplePreschoolGeneralBulletin();
-const doc = createPreschoolBulletinStudentPdfDocument({ ...sample, schoolLogoDataUrl });
+const doc = createPreschoolBulletinStudentPdfDocument({
+  ...sample,
+  schoolLogoDataUrl,
+  schoolLogoLayout: 'wide',
+  schoolLogoFormat: 'JPEG',
+  hideSchoolNameInHeader: true,
+});
 const outputPath = join(__dirname, '../../tmp/boletin-general-ejemplo-millennium.pdf');
 writeFileSync(outputPath, Buffer.from(doc.output('arraybuffer')));
 console.log(outputPath);

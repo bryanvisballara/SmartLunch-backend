@@ -60,23 +60,39 @@ function drawBulletinHeader(doc, {
   documentTitle,
   bulletin,
   schoolLogoDataUrl = '',
+  schoolLogoLayout = 'square',
+  schoolLogoFormat = 'PNG',
+  hideSchoolNameInHeader = false,
 }) {
-  const headerHeight = 34;
+  const headerHeight = schoolLogoLayout === 'wide' ? 36 : 34;
   doc.setFillColor(248, 250, 252);
   doc.rect(0, 0, pageWidth, headerHeight, 'F');
   doc.setFillColor(15, 118, 110);
   doc.rect(0, headerHeight, pageWidth, 2.8, 'F');
 
-  const logoBox = 22;
   const logoX = margin;
   const logoY = 6;
+  const isWideLogo = schoolLogoLayout === 'wide';
+  const logoBox = isWideLogo ? 58 : 22;
+  const logoBoxHeight = isWideLogo ? 20 : 22;
+
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(logoX, logoY, logoBox, logoBox, 2, 2, 'FD');
+  doc.roundedRect(logoX, logoY, logoBox, logoBoxHeight, 2, 2, 'FD');
 
   if (schoolLogoDataUrl) {
     try {
-      doc.addImage(schoolLogoDataUrl, 'PNG', logoX + 1.5, logoY + 1.5, logoBox - 3, logoBox - 3);
+      const imageFormat = String(schoolLogoFormat || 'PNG').toUpperCase();
+      const imagePaddingX = isWideLogo ? 2 : 1.5;
+      const imagePaddingY = isWideLogo ? 2 : 1.5;
+      doc.addImage(
+        schoolLogoDataUrl,
+        imageFormat,
+        logoX + imagePaddingX,
+        logoY + imagePaddingY,
+        logoBox - imagePaddingX * 2,
+        logoBoxHeight - imagePaddingY * 2,
+      );
     } catch {
       doc.setTextColor(148, 163, 184);
       doc.setFont('helvetica', 'bold');
@@ -86,20 +102,24 @@ function drawBulletinHeader(doc, {
   }
 
   const textX = logoX + logoBox + 6;
+  let titleY = 13;
   doc.setTextColor(15, 23, 42);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text(normalizeText(schoolName) || 'Colegio', textX, 13);
+  if (!hideSchoolNameInHeader) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(normalizeText(schoolName) || 'Colegio', textX, titleY);
+    titleY += 6;
+  }
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.setTextColor(15, 118, 110);
-  doc.text(normalizeText(documentTitle), textX, 19);
+  doc.text(normalizeText(documentTitle), textX, hideSchoolNameInHeader ? 14 : 19);
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
   doc.text(
     `${normalizeText(bulletin.academicPeriodLabel || bulletin.academicPeriodKey)} · ${normalizeText(bulletin.gradeLabel || bulletin.gradeKey)}`,
     textX,
-    25,
+    hideSchoolNameInHeader ? 20 : 25,
   );
 
   doc.setFont('helvetica', 'bold');
@@ -198,6 +218,9 @@ export function createPreschoolBulletinStudentPdfDocument({
   student,
   schoolName = 'Colegio',
   schoolLogoDataUrl = '',
+  schoolLogoLayout = 'square',
+  schoolLogoFormat = 'PNG',
+  hideSchoolNameInHeader = false,
   headroomSignatureDataUrl = '',
   headroomSignerName = '',
   coordinatorSignatureDataUrl = '',
@@ -219,6 +242,9 @@ export function createPreschoolBulletinStudentPdfDocument({
     documentTitle,
     bulletin,
     schoolLogoDataUrl,
+    schoolLogoLayout,
+    schoolLogoFormat,
+    hideSchoolNameInHeader,
   });
   doc.setTextColor(15, 23, 42);
   doc.setDrawColor(226, 232, 240);

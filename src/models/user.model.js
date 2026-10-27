@@ -18,6 +18,8 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ['parent', 'student', 'admin', 'rectoria', 'direccion', 'super_admin', 'vendor', 'merienda_operator', 'academic_secretary', 'admissions', 'billing', 'human_resources', 'coordination', 'teacher', 'nursing', 'psychology', 'school_route'], required: true },
     linkedStudentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', default: null, index: true },
     coordinationScope: { type: String, trim: true, default: '' },
+    campusReportCardSignatureDataUrl: { type: String, default: '' },
+    campusReportCardSignatureSignedAt: { type: Date, default: null },
     assignedSubjects: { type: [String], default: [] },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     deletedAt: { type: Date, default: null },

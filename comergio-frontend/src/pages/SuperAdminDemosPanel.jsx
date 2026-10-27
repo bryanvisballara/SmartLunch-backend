@@ -134,7 +134,7 @@ export default function SuperAdminDemosPanel() {
         <div className="sa-panel__head">
           <div>
             <h2>Demos</h2>
-            <p>Colegios creados desde “Probar 7 días sin costo”. Toca un lead para ver correos de seguimiento.</p>
+            <p>Colegios creados desde “Vive la experiencia como un padre”. Toca un lead para ver correos de seguimiento.</p>
           </div>
           <div className="sa-actions">
             <button className="sa-btn is-secondary" disabled={loading} onClick={load} type="button">Actualizar</button>

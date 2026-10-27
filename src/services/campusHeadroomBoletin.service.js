@@ -165,6 +165,36 @@ function listExpectedHeadroomSubjectsForSection(academicStructure, gradeKey, sec
   ));
 }
 
+function mergePreschoolTemplateSubjectsIntoExpected(expectedSubjects = [], blocks = []) {
+  const bySlug = new Map(
+    (Array.isArray(expectedSubjects) ? expectedSubjects : []).map((item) => [item.slug, item]),
+  );
+
+  (Array.isArray(blocks) ? blocks : []).forEach((block) => {
+    (Array.isArray(block?.indicators) ? block.indicators : []).forEach((indicator) => {
+      const subjectLabel = normalizeText(indicator?.subjectLabel || indicator?.subjectKey);
+      const subjectKey = normalizeText(indicator?.subjectKey);
+      const slug = normalizeHeadroomSubjectSlug(subjectLabel, subjectKey);
+      if (!slug || bySlug.has(slug)) return;
+      bySlug.set(slug, {
+        slug,
+        subjectKey,
+        subjectLabel: subjectLabel || subjectKey,
+      });
+    });
+  });
+
+  return Array.from(bySlug.values()).sort((left, right) => (
+    left.subjectLabel.localeCompare(right.subjectLabel, 'es')
+  ));
+}
+
+function isPreschoolSpecialtySubjectSlug(slug = '') {
+  const normalized = normalizeText(slug);
+  if (!normalized) return false;
+  return /(musica|danza|deporte|edfisica|educacionfisica|artes)/.test(normalized);
+}
+
 function enrichHeadroomSubjectChecklist({
   subjectChecklist = [],
   expectedSubjects = [],
@@ -311,6 +341,8 @@ module.exports = {
   dedupeStudentSubjectLines,
   listHeadroomSubjectAssignmentsForSection,
   listExpectedHeadroomSubjectsForSection,
+  mergePreschoolTemplateSubjectsIntoExpected,
+  isPreschoolSpecialtySubjectSlug,
   enrichHeadroomSubjectChecklist,
   applyPreschoolStatusToHeadroomSubjectChecklist,
   isPreschoolBulletinFullyGradedForAllStudents,

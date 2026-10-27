@@ -17565,6 +17565,10 @@ button.campus-teacher__home-kpi-card:focus-visible {
   color: #172033;
 }
 
+.campus-coordination__subsection-head {
+  margin-top: 1.5rem;
+}
+
 .campus-coordination__report-signatures {
   grid-column: 1 / -1;
 }

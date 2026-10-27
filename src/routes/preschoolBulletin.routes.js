@@ -154,29 +154,56 @@ function collectGradeSubjects(academicStructure, gradeKey) {
   return options.sort((left, right) => left.label.localeCompare(right.label, 'es', { sensitivity: 'base' }));
 }
 
+const PRESCHOOL_SUBJECT_ALIAS_GROUPS = [
+  ['musica', 'music'],
+  ['danza', 'dance'],
+  ['deporte', 'edfisica', 'educacionfisica'],
+];
+
+function subjectCompactTokens(subjectKey, subjectLabel) {
+  const tokens = new Set([compactKey(subjectKey), compactKey(subjectLabel)].filter(Boolean));
+  PRESCHOOL_SUBJECT_ALIAS_GROUPS.forEach((group) => {
+    const hit = group.some((part) => [...tokens].some((token) => token.includes(part) || part.includes(token)));
+    if (hit) group.forEach((part) => tokens.add(part));
+  });
+  return tokens;
+}
+
+function subjectsAlign(leftKey, leftLabel, rightKey, rightLabel) {
+  if (valuesMatch(leftKey, rightKey) || valuesMatch(leftKey, rightLabel)
+    || valuesMatch(leftLabel, rightKey) || valuesMatch(leftLabel, rightLabel)) {
+    return true;
+  }
+  const leftTokens = subjectCompactTokens(leftKey, leftLabel);
+  const rightTokens = subjectCompactTokens(rightKey, rightLabel);
+  return [...leftTokens].some((token) => rightTokens.has(token));
+}
+
 function courseMatchesSubject(course, subjectKey, subjectLabel) {
-  const candidates = [course?.subject, course?.title].map(normalizeText).filter(Boolean);
-  return candidates.some((value) => valuesMatch(value, subjectKey) || valuesMatch(value, subjectLabel));
+  const courseKeys = [course?.subjectKey, course?.subject, course?.title].map(normalizeText).filter(Boolean);
+  return courseKeys.some((value) => subjectsAlign(value, value, subjectKey, subjectLabel));
 }
 
 function indicatorVisibleToTeacher(indicator, block, teacherUserId, courses, gradeSubjects, gradeKey) {
   if (String(block.teacherUserId || '') === String(teacherUserId || '')) {
     return true;
   }
-  if (!normalizeText(indicator.subjectKey)) {
+  const indicatorKey = normalizeText(indicator.subjectKey) || normalizeText(indicator.subjectLabel);
+  const indicatorLabel = normalizeText(indicator.subjectLabel) || indicatorKey;
+  if (!indicatorKey) {
     return false;
   }
 
   const gradeCourses = (Array.isArray(courses) ? courses : []).filter((course) => (
     valuesMatch(course.studentGradeKey, gradeKey) || valuesMatch(course.gradeLevel, gradeKey)
   ));
-  if (gradeCourses.some((course) => courseMatchesSubject(course, indicator.subjectKey, indicator.subjectLabel))) {
+  if (gradeCourses.some((course) => courseMatchesSubject(course, indicatorKey, indicatorLabel))) {
     return true;
   }
 
   return (Array.isArray(gradeSubjects) ? gradeSubjects : []).some((subject) => (
     String(subject.teacherUserId || '') === String(teacherUserId || '')
-    && (valuesMatch(subject.key, indicator.subjectKey) || valuesMatch(subject.label, indicator.subjectLabel))
+    && subjectsAlign(subject.key, subject.label, indicatorKey, indicatorLabel)
   ));
 }
 
@@ -186,23 +213,33 @@ async function loadCatalog(schoolId) {
       .select('grades subjects gradeSchedules academicPeriods')
       .lean(),
     CampusCourse.find({ schoolId, status: 'active' })
-      .select('subject studentGradeKey gradeLevel')
+      .select('subject subjectKey studentGradeKey gradeLevel teacherUserId')
       .lean(),
   ]);
   const grades = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
     .filter((grade) => normalizeText(grade?.status || 'active') !== 'archived')
     .map((grade) => {
       const subjects = collectGradeSubjects(academicStructure, grade.key);
-      const seen = new Set(subjects.map((subject) => compactKey(subject.key)));
+      const byCompact = new Map(subjects.map((subject) => [compactKey(subject.key), subject]));
       courses
         .filter((course) => valuesMatch(course.studentGradeKey, grade.key) || valuesMatch(course.gradeLevel, grade.key) || valuesMatch(course.gradeLevel, grade.label))
         .forEach((course) => {
           const label = normalizeText(course.subject);
-          const compact = compactKey(label);
-          if (!label || !compact || seen.has(compact)) return;
+          const key = normalizeText(course.subjectKey) || label;
+          const compact = compactKey(key) || compactKey(label);
+          if (!label || !compact) return;
           if (valuesMatch(label, grade.key) || valuesMatch(label, grade.label)) return;
-          seen.add(compact);
-          subjects.push({ key: label, label, teacherUserId: '' });
+          const teacherUserId = course.teacherUserId ? String(course.teacherUserId) : '';
+          const existing = byCompact.get(compact);
+          if (existing) {
+            if (!existing.teacherUserId && teacherUserId) {
+              existing.teacherUserId = teacherUserId;
+            }
+            return;
+          }
+          const entry = { key, label, teacherUserId };
+          byCompact.set(compact, entry);
+          subjects.push(entry);
         });
       subjects.sort((left, right) => left.label.localeCompare(right.label, 'es', { sensitivity: 'base' }));
       return {
@@ -250,11 +287,16 @@ function normalizeBlocks(rawBlocks, gradeSubjects, teachers = []) {
           const text = normalizeText(indicator?.text);
           if (!text) return null;
           const subjectKey = normalizeText(indicator?.subjectKey);
-          const subject = gradeSubjects.find((item) => valuesMatch(item.key, subjectKey) || valuesMatch(item.label, subjectKey));
+          const subjectLabelRaw = normalizeText(indicator?.subjectLabel);
+          const subject = gradeSubjects.find((item) => (
+            subjectsAlign(item.key, item.label, subjectKey, subjectLabelRaw || subjectKey)
+          ));
+          const resolvedKey = subject ? subject.key : subjectKey;
+          const resolvedLabel = subject ? subject.label : (subjectLabelRaw || subjectKey);
           return {
             text,
-            subjectKey: subject ? subject.key : '',
-            subjectLabel: subject ? subject.label : '',
+            subjectKey: resolvedKey,
+            subjectLabel: resolvedLabel,
           };
         })
         .filter(Boolean);
@@ -555,7 +597,7 @@ router.post('/teacher/workspace', async (req, res) => {
     const [catalog, courses] = await Promise.all([
       loadCatalog(schoolId),
       CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
-        .select('subject studentGradeKey gradeLevel')
+        .select('subject subjectKey studentGradeKey gradeLevel')
         .lean(),
     ]);
     const grade = findCatalogGrade(catalog.grades, activeTemplate.gradeKey) || { key: activeTemplate.gradeKey, subjects: [] };

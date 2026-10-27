@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import colibriLogo from '../assets/colibrisinfondo.png';
+import { trackGtagEvent } from '../lib/gtag';
 import { createDemoSchool } from '../services/demo.service';
 import './SchoolPresentationPage.css';
 import './DemoSignupPage.css';
@@ -20,7 +21,7 @@ const PROGRESS_MESSAGES = [
 ];
 
 const EMPTY_FORM = {
-  schoolName: 'International Berckley School',
+  schoolName: '',
   city: '',
   contactName: '',
   email: '',
@@ -78,6 +79,24 @@ function CopyField({ label, value, secret = false }) {
 }
 
 function DemoSuccess({ demo, password }) {
+  useEffect(() => {
+    const leadId = String(demo?.leadId || '').trim();
+    const dedupeKey = leadId ? `demo-ads-conversion:${leadId}` : 'demo-ads-conversion';
+    try {
+      if (sessionStorage.getItem(dedupeKey)) {
+        return;
+      }
+      sessionStorage.setItem(dedupeKey, '1');
+    } catch {
+      // sessionStorage unavailable — still attempt the conversion once per mount
+    }
+
+    trackGtagEvent('ads_conversion_PURCHASE_1', {
+      transaction_id: leadId || undefined,
+      school_name: demo?.schoolName || undefined,
+    });
+  }, [demo]);
+
   return (
     <section className="demo-success" aria-labelledby="demo-success-title">
       <div className="demo-success__hero">
@@ -135,7 +154,7 @@ export default function DemoSignupPage() {
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = 'Probar 7 días sin costo · Comergio';
+    document.title = 'Vive la experiencia como un padre · Comergio';
     document.documentElement.classList.add('school-presentation-active');
 
     const fontLink = document.createElement('link');
@@ -233,7 +252,7 @@ export default function DemoSignupPage() {
                 <legend><span className="demo-step">1</span>Datos del colegio</legend>
                 <label>
                   <span>Nombre del colegio</span>
-                  <input required maxLength={90} value={form.schoolName} onChange={updateField('schoolName')} placeholder="International Berckley School" />
+                  <input required maxLength={90} value={form.schoolName} onChange={updateField('schoolName')} placeholder="Ej. Colegio Los Pinos" />
                 </label>
                 <label>
                   <span>Ciudad</span>

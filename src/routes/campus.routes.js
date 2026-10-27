@@ -45,6 +45,8 @@ const {
   dedupeStudentSubjectLines,
   listHeadroomSubjectAssignmentsForSection,
   listExpectedHeadroomSubjectsForSection,
+  mergePreschoolTemplateSubjectsIntoExpected,
+  isPreschoolSpecialtySubjectSlug,
   enrichHeadroomSubjectChecklist,
   applyPreschoolStatusToHeadroomSubjectChecklist,
   isPreschoolBulletinFullyGradedForAllStudents,
@@ -434,6 +436,66 @@ async function resolveCampusCoordinationGradeKeys(schoolId, coordinationScope = 
     .filter((grade) => levelKeys.has(normalizeText(grade?.levelKey)))
     .map((grade) => normalizeCampusGradeKey(grade?.key || grade?.label))
     .filter(Boolean));
+}
+
+async function resolveDefaultCoordinatorSignatureForGradeKey(schoolId, studentGradeKey = '') {
+  const normalizedGradeKey = normalizeCampusGradeKey(studentGradeKey);
+  if (!normalizedGradeKey) {
+    return null;
+  }
+
+  const coordinators = await User.find({
+    schoolId,
+    role: 'coordination',
+    status: 'active',
+    campusReportCardSignatureDataUrl: { $nin: ['', null] },
+  })
+    .select('name coordinationScope campusReportCardSignatureDataUrl campusReportCardSignatureSignedAt')
+    .lean();
+
+  for (const coordinator of coordinators) {
+    const gradeKeys = await resolveCampusCoordinationGradeKeys(schoolId, coordinator.coordinationScope);
+    if (!gradeKeys.has(normalizedGradeKey)) {
+      continue;
+    }
+
+    const signatureDataUrl = normalizeReportSignatureDataUrl(coordinator.campusReportCardSignatureDataUrl);
+    if (!signatureDataUrl) {
+      continue;
+    }
+
+    return {
+      coordinatorUserId: String(coordinator._id),
+      coordinatorSignatureDataUrl: signatureDataUrl,
+      coordinatorSignatureSignedAt: coordinator.campusReportCardSignatureSignedAt || null,
+      coordinatorSignerName: normalizeText(coordinator.name),
+    };
+  }
+
+  return null;
+}
+
+async function attachCoordinatorSignatureFallback(schoolId, serializedReport) {
+  if (!serializedReport || serializedReport.coordinatorSignatureDataUrl) {
+    return serializedReport;
+  }
+
+  const fallback = await resolveDefaultCoordinatorSignatureForGradeKey(
+    schoolId,
+    serializedReport.studentGradeKey,
+  );
+  if (!fallback) {
+    return serializedReport;
+  }
+
+  return {
+    ...serializedReport,
+    coordinatorUserId: fallback.coordinatorUserId || serializedReport.coordinatorUserId,
+    coordinatorSignatureDataUrl: fallback.coordinatorSignatureDataUrl,
+    coordinatorSignatureSignedAt: fallback.coordinatorSignatureSignedAt || serializedReport.coordinatorSignatureSignedAt,
+    coordinatorSignerName: fallback.coordinatorSignerName || serializedReport.coordinatorSignerName,
+    coordinatorSignatureSource: 'profile',
+  };
 }
 
 function normalizeGradeKey(value) {
@@ -8982,6 +9044,28 @@ async function resolveHeadroomSectionSubjectsStatus({
     ...(gradeKey ? { studentGradeKey: gradeKey } : {}),
   }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
 
+  const gradeMeta = (Array.isArray(academicStructure?.grades) ? academicStructure.grades : [])
+    .find((grade) => (
+      normalizeText(grade?.key) === gradeKey || preschoolMatchKey(grade?.key) === preschoolMatchKey(gradeKey)
+    ));
+  const gradeLevelKey = preschoolMatchKey(gradeMeta?.levelKey);
+  const isPreschoolGrade = gradeLevelKey.includes('preescolar') || gradeLevelKey.includes('preschool');
+  if (isPreschoolGrade && gradeKey) {
+    const gradeWideCourses = await CampusCourse.find({
+      schoolId,
+      status: 'active',
+      courseType: { $ne: 'guidance_routine' },
+      studentGradeKey: gradeKey,
+    }).select('_id title subject subjectKey teacherUserId studentGradeKey sourceCourseKey section academicPeriods').lean();
+    const mergedById = new Map(subjectCourses.map((course) => [String(course._id), course]));
+    gradeWideCourses.forEach((course) => {
+      const slug = normalizeHeadroomSubjectSlug(course.subject, course.subjectKey);
+      if (!isPreschoolSpecialtySubjectSlug(slug)) return;
+      mergedById.set(String(course._id), course);
+    });
+    subjectCourses = Array.from(mergedById.values());
+  }
+
   const periodOptions = new Map();
   subjectCourses.forEach((course) => {
     getCourseAcademicPeriods(course).forEach((period) => {
@@ -9019,7 +9103,18 @@ async function resolveHeadroomSectionSubjectsStatus({
     };
   });
 
-  const expectedSubjects = listExpectedHeadroomSubjectsForSection(academicStructure, gradeKey, sectionKey);
+  const preschoolBulletin = selectedPeriodKey
+    ? await loadPreschoolBulletinForHeadroom({
+      schoolId,
+      gradeKey,
+      periodKey: selectedPeriodKey,
+    })
+    : null;
+
+  let expectedSubjects = listExpectedHeadroomSubjectsForSection(academicStructure, gradeKey, sectionKey);
+  if (preschoolBulletin?.blocks?.length) {
+    expectedSubjects = mergePreschoolTemplateSubjectsIntoExpected(expectedSubjects, preschoolBulletin.blocks);
+  }
   subjectChecklist = enrichHeadroomSubjectChecklist({
     subjectChecklist,
     expectedSubjects,
@@ -9038,13 +9133,6 @@ async function resolveHeadroomSectionSubjectsStatus({
     return { ...item, teacherUserId: assignment.teacherUserId };
   });
 
-  const preschoolBulletin = selectedPeriodKey
-    ? await loadPreschoolBulletinForHeadroom({
-      schoolId,
-      gradeKey,
-      periodKey: selectedPeriodKey,
-    })
-    : null;
   subjectChecklist = applyPreschoolStatusToHeadroomSubjectChecklist(subjectChecklist, preschoolBulletin);
 
   const allSubjectsSubmitted = subjectChecklist.length > 0 && subjectChecklist.every((item) => item.submitted);
@@ -9177,7 +9265,10 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         preschoolBulletin,
         gradingScale,
         coexistenceByStudentId,
-        generalReport: serializeGeneralReportCard(generalReport),
+        generalReport: await attachCoordinatorSignatureFallback(
+          schoolId,
+          serializeGeneralReportCard(generalReport),
+        ),
       });
     }
 
@@ -9626,6 +9717,64 @@ router.post('/teacher/headroom/report-cards/signature', requireCampusTeacherAcce
   }
 });
 
+router.get('/coordination/me/report-card-signature', requireCampusCoordinationAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const user = await User.findOne({ _id: userId, schoolId, role: 'coordination', status: 'active' })
+      .select('name campusReportCardSignatureDataUrl campusReportCardSignatureSignedAt')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario de coordinación no encontrado.' });
+    }
+
+    return res.status(200).json({
+      signatureDataUrl: normalizeReportSignatureDataUrl(user.campusReportCardSignatureDataUrl),
+      signedAt: user.campusReportCardSignatureSignedAt || null,
+      signerName: normalizeText(user.name),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo cargar tu firma institucional.' });
+  }
+});
+
+router.post('/coordination/me/report-card-signature', requireCampusCoordinationAccess, async (req, res) => {
+  try {
+    const { schoolId, userId, name } = req.user;
+    const signatureDataUrl = normalizeReportSignatureDataUrl(req.body?.signatureDataUrl);
+
+    if (!signatureDataUrl) {
+      return res.status(400).json({ message: 'Dibuja tu firma antes de guardar.' });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { _id: userId, schoolId, role: 'coordination', status: 'active' },
+      {
+        $set: {
+          campusReportCardSignatureDataUrl: signatureDataUrl,
+          campusReportCardSignatureSignedAt: new Date(),
+        },
+      },
+      { new: true },
+    )
+      .select('name campusReportCardSignatureDataUrl campusReportCardSignatureSignedAt')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario de coordinación no encontrado.' });
+    }
+
+    return res.status(200).json({
+      signatureDataUrl: normalizeReportSignatureDataUrl(user.campusReportCardSignatureDataUrl),
+      signedAt: user.campusReportCardSignatureSignedAt || null,
+      signerName: normalizeText(user.name) || normalizeText(name),
+      message: 'Firma institucional guardada. Aparecerá en los boletines generales de tu nivel.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo guardar tu firma institucional.' });
+  }
+});
+
 router.get('/coordination/general-report-cards', requireCampusCoordinationAccess, async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -9643,8 +9792,15 @@ router.get('/coordination/general-report-cards', requireCampusCoordinationAccess
       .sort({ academicPeriodKey: -1, sectionLabel: 1, sourceCourseKey: 1 })
       .lean();
 
+    const serializedReports = await Promise.all(
+      reports.map((report) => attachCoordinatorSignatureFallback(
+        schoolId,
+        serializeGeneralReportCard(report),
+      )),
+    );
+
     return res.status(200).json({
-      reports: reports.map((report) => serializeGeneralReportCard(report)),
+      reports: serializedReports,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudieron cargar los boletines generales.' });

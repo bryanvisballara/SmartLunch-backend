@@ -12031,7 +12031,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                         coordinatorSignatureDataUrl={selectedHeadroomSection.generalReport?.coordinatorSignatureDataUrl || ''}
                         coordinatorSignerName={selectedHeadroomSection.generalReport?.coordinatorSignerName || ''}
                         schoolId={authUser?.schoolId || ''}
-                        schoolName={schoolName}
+                        schoolName={schoolDisplayName}
                         signatureDataUrl={headroomSignatureDataUrl}
                         signerName={
                           selectedHeadroomSection.generalReport?.headroomSignerName

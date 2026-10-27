@@ -223,6 +223,7 @@ html.school-presentation-active body {
 }
 
 .sp-hero__copy {
+  --hero-word-count: 8;
   grid-row: 1;
   grid-column: 1;
   position: relative;
@@ -250,7 +251,8 @@ html.school-presentation-active body {
   color: rgba(247, 244, 238, 0.82);
 }
 
-.sp-hero h1 {
+.sp-hero h1,
+.sp-hero__title {
   margin: 0;
   width: 100%;
   max-width: 16em;
@@ -260,6 +262,38 @@ html.school-presentation-active body {
   white-space: normal;
   text-wrap: balance;
   text-shadow: 0 2px 28px rgba(0, 0, 0, 0.45);
+}
+
+.sp-hero__title-word {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(0.45em);
+  filter: blur(8px);
+  will-change: opacity, transform, filter;
+}
+
+.sp-hero__copy.is-in .sp-hero__title-word {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  transition:
+    opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: calc(140ms + var(--w, 0) * 48ms);
+}
+
+.sp-hero__copy.is-in .sp-hero__lead[data-reveal-item] {
+  transition-delay: calc(140ms + var(--hero-word-count, 8) * 48ms + 120ms);
+}
+
+.sp-hero__copy.is-in .sp-hero__cta-wrap[data-reveal-item] {
+  transition-delay: calc(140ms + var(--hero-word-count, 8) * 48ms + 280ms);
+}
+
+.sp-hero__cta-wrap {
+  display: flex;
+  justify-content: center;
 }
 
 @media (max-width: 720px) {
@@ -2015,5 +2049,11 @@ html.school-presentation-active body {
   [data-reveal-item] {
     opacity: 1;
     transform: none;
+  }
+
+  .sp-hero__title-word {
+    opacity: 1;
+    transform: none;
+    filter: none;
   }
 }
