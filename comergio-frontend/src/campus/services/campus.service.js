@@ -177,6 +177,10 @@ export function getCampusCoordinationGeneralReportCards(params = {}) {
   return api.get('/campus/coordination/general-report-cards', { params }).then((response) => response.data);
 }
 
+export function getCampusCoordinationReportCardSignaturesOverview() {
+  return api.get('/campus/coordination/report-card-signatures/overview').then((response) => response.data);
+}
+
 export function getCampusCoordinationMyReportCardSignature() {
   return api.get('/campus/coordination/me/report-card-signature').then((response) => response.data);
 }

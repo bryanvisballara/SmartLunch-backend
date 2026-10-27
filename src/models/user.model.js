@@ -20,6 +20,14 @@ const userSchema = new mongoose.Schema(
     coordinationScope: { type: String, trim: true, default: '' },
     campusReportCardSignatureDataUrl: { type: String, default: '' },
     campusReportCardSignatureSignedAt: { type: Date, default: null },
+    campusReportCardSignaturesByLevel: {
+      type: [{
+        levelKey: { type: String, trim: true, default: '' },
+        signatureDataUrl: { type: String, default: '' },
+        signedAt: { type: Date, default: null },
+      }],
+      default: [],
+    },
     assignedSubjects: { type: [String], default: [] },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     deletedAt: { type: Date, default: null },

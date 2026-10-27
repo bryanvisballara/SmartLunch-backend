@@ -4,14 +4,20 @@ import DismissibleNotice from '../../components/DismissibleNotice';
 import {
   getCampusCoordinationGeneralReportCards,
   getCampusCoordinationMyReportCardSignature,
+  getCampusCoordinationReportCardSignaturesOverview,
   saveCampusCoordinationGeneralReportCardSignature,
   saveCampusCoordinationMyReportCardSignature,
 } from '../services/campus.service';
+import useAuthStore from '../../store/auth.store';
 import ReportCardSignaturePad from './ReportCardSignaturePad';
 import '../campus.css';
 
 export default function CoordinationReportCardSignaturePanel({ className = '' }) {
   const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const userRole = String(user?.role || '');
+  const isCoordinationUser = userRole === 'coordination';
+  const isInstitutionalViewer = ['admin', 'rectoria', 'direccion'].includes(userRole);
   const [notice, setNotice] = useState({ type: 'info', text: '' });
   const [coordinationReportPeriodKey, setCoordinationReportPeriodKey] = useState('');
   const [coordinationSignatureDrafts, setCoordinationSignatureDrafts] = useState({});
@@ -25,6 +31,14 @@ export default function CoordinationReportCardSignaturePanel({ className = '' })
     ),
     retry: false,
     staleTime: 20_000,
+    enabled: isCoordinationUser,
+  });
+
+  const overviewQuery = useQuery({
+    queryKey: ['campus', 'coordination', 'report-card-signatures', 'overview'],
+    queryFn: getCampusCoordinationReportCardSignaturesOverview,
+    retry: false,
+    staleTime: 20_000,
   });
 
   const institutionalSignatureQuery = useQuery({
@@ -32,12 +46,18 @@ export default function CoordinationReportCardSignaturePanel({ className = '' })
     queryFn: getCampusCoordinationMyReportCardSignature,
     retry: false,
     staleTime: 20_000,
+    enabled: isCoordinationUser,
   });
+
+  const levelLabel = institutionalSignatureQuery.data?.levelLabel
+    || institutionalSignatureQuery.data?.coordinationScope
+    || 'tu nivel educativo';
 
   const saveInstitutionalSignatureMutation = useMutation({
     mutationFn: (signatureDataUrl) => saveCampusCoordinationMyReportCardSignature({ signatureDataUrl }),
     onSuccess: (payload) => {
       queryClient.invalidateQueries({ queryKey: ['campus', 'coordination', 'me', 'report-card-signature'] });
+      queryClient.invalidateQueries({ queryKey: ['campus', 'coordination', 'report-card-signatures', 'overview'] });
       queryClient.invalidateQueries({ queryKey: ['campus', 'coordination', 'general-report-cards'] });
       setNotice({ type: 'success', text: payload?.message || 'Firma institucional guardada.' });
     },
@@ -121,41 +141,88 @@ export default function CoordinationReportCardSignaturePanel({ className = '' })
       <div className="campus-teacher__panel-head">
         <div>
           <span className="campus-panel__kicker">Boletín general</span>
-          <h2>Mi firma institucional</h2>
+          <h2>Firmas por nivel educativo</h2>
         </div>
         <p className="campus-panel__meta">
-          Guárdala una sola vez. Aparecerá en todos los boletines generales de tu nivel (PDF e impresión),
-          sin tener que firmar curso por curso.
+          Cada coordinador (preescolar, primaria, secundaria) guarda su firma una vez.
+          En cada boletín se usa la firma del nivel donde está el estudiante.
         </p>
       </div>
 
-      {institutionalSignatureQuery.isLoading ? (
-        <p className="campus-panel__meta">Cargando firma guardada...</p>
-      ) : (
-        <>
-          {institutionalSignatureQuery.data?.signatureDataUrl && !saveInstitutionalSignatureMutation.isPending ? (
-            <div className="campus-coordination__report-signature-done">
-              <img alt="" src={institutionalSignatureQuery.data.signatureDataUrl} />
-              <p>{institutionalSignatureQuery.data.signerName || 'Coordinación'}</p>
-            </div>
-          ) : null}
-          <ReportCardSignaturePad
-            ariaLabel="Firma institucional de coordinación"
-            disabled={saveInstitutionalSignatureMutation.isPending}
-            onChange={setInstitutionalSignatureDraft}
-            value={institutionalSignatureDraft}
-          />
-          <button
-            className="campus-coordination__save-button"
-            disabled={saveInstitutionalSignatureMutation.isPending || !institutionalSignatureDraft}
-            onClick={onSaveInstitutionalSignature}
-            type="button"
-          >
-            {saveInstitutionalSignatureMutation.isPending ? 'Guardando...' : 'Guardar firma para todos los boletines'}
-          </button>
-        </>
-      )}
+      {overviewQuery.isLoading ? (
+        <p className="campus-panel__meta">Cargando niveles...</p>
+      ) : null}
 
+      {(overviewQuery.data?.levels || []).length ? (
+        <div className="campus-coordination__report-signature-list campus-coordination__level-signature-overview">
+          {overviewQuery.data.levels.map((level) => (
+            <div className="campus-coordination__report-signature-card" key={level.levelKey}>
+              <div>
+                <strong>{level.levelLabel}</strong>
+                <span>{level.coordinatorName || 'Sin coordinador asignado'}</span>
+                <small>
+                  {level.signatureDataUrl ? 'Firma registrada' : 'Pendiente: el coordinador debe firmar en su portal'}
+                </small>
+              </div>
+              {level.signatureDataUrl ? (
+                <div className="campus-coordination__report-signature-done">
+                  <img alt="" src={level.signatureDataUrl} />
+                  <p>{level.coordinatorName || 'Coordinación'}</p>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {isCoordinationUser ? (
+        <>
+          <div className="campus-teacher__panel-head campus-coordination__subsection-head">
+            <div>
+              <h2>Mi firma · {levelLabel}</h2>
+            </div>
+            <p className="campus-panel__meta">
+              Esta firma se imprimirá en los boletines generales de {levelLabel} (PDF e impresión).
+            </p>
+          </div>
+
+          {institutionalSignatureQuery.isLoading ? (
+            <p className="campus-panel__meta">Cargando firma guardada...</p>
+          ) : (
+            <>
+              {institutionalSignatureQuery.data?.signatureDataUrl && !saveInstitutionalSignatureMutation.isPending ? (
+                <div className="campus-coordination__report-signature-done">
+                  <img alt="" src={institutionalSignatureQuery.data.signatureDataUrl} />
+                  <p>{institutionalSignatureQuery.data.signerName || 'Coordinación'}</p>
+                </div>
+              ) : null}
+              <ReportCardSignaturePad
+                ariaLabel={`Firma de coordinación de ${levelLabel}`}
+                disabled={saveInstitutionalSignatureMutation.isPending}
+                onChange={setInstitutionalSignatureDraft}
+                value={institutionalSignatureDraft}
+              />
+              <button
+                className="campus-coordination__save-button"
+                disabled={saveInstitutionalSignatureMutation.isPending || !institutionalSignatureDraft}
+                onClick={onSaveInstitutionalSignature}
+                type="button"
+              >
+                {saveInstitutionalSignatureMutation.isPending ? 'Guardando...' : `Guardar firma de ${levelLabel}`}
+              </button>
+            </>
+          )}
+        </>
+      ) : null}
+
+      {isInstitutionalViewer && !isCoordinationUser ? (
+        <p className="campus-panel__meta">
+          Cada coordinador de nivel ingresa con su usuario y guarda su firma en Configuración institucional → Firma en boletines.
+        </p>
+      ) : null}
+
+      {isCoordinationUser ? (
+      <>
       <div className="campus-teacher__panel-head campus-coordination__subsection-head">
         <div>
           <h2>Firmas por curso (opcional)</h2>
@@ -235,6 +302,8 @@ export default function CoordinationReportCardSignaturePanel({ className = '' })
           );
         })}
       </div>
+      </>
+      ) : null}
     </article>
   );
 }
