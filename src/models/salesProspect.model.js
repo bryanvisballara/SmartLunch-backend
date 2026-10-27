@@ -52,12 +52,23 @@ const salesProspectSchema = new mongoose.Schema({
     index: true,
     trim: true,
   },
+  salesStatus: {
+    type: String,
+    enum: ['active', 'withdrawn'],
+    default: 'active',
+    index: true,
+    trim: true,
+  },
+  withdrawnAt: { type: Date, default: null },
+  withdrawnReason: { type: String, default: '', trim: true },
+  withdrawnFromStageKey: { type: String, default: '', trim: true },
   salesStages: { type: [salesStageSchema], default: [] },
   salesEvents: { type: [salesEventSchema], default: [] },
   deletedAt: { type: Date, default: null, index: true },
 }, { timestamps: true });
 
 salesProspectSchema.index({ currentStageKey: 1, deletedAt: 1 });
+salesProspectSchema.index({ salesStatus: 1, deletedAt: 1 });
 salesProspectSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.models.SalesProspect || mongoose.model('SalesProspect', salesProspectSchema);

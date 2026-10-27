@@ -68,6 +68,12 @@ function normalizeOptionalContactEmail(value) {
   return isValidEmail(email) ? email : '';
 }
 
+const SALES_PROSPECT_STATUS_WITHDRAWN = 'withdrawn';
+
+function isWithdrawnProspect(prospect) {
+  return normalizeText(prospect?.salesStatus).toLowerCase() === SALES_PROSPECT_STATUS_WITHDRAWN;
+}
+
 function normalizeStageKey(value) {
   const requestedKey = normalizeText(value).toLowerCase();
   return salesStageTemplates.some((stage) => stage.key === requestedKey)
@@ -140,6 +146,10 @@ function serializeProspect(prospect) {
     instagram: source.instagram || '',
     website: source.website || '',
     currentStageKey: source.currentStageKey || 'creado',
+    salesStatus: source.salesStatus || 'active',
+    withdrawnAt: source.withdrawnAt || null,
+    withdrawnReason: source.withdrawnReason || '',
+    withdrawnFromStageKey: source.withdrawnFromStageKey || '',
     salesStages: source.salesStages || [],
     salesEvents: (source.salesEvents || []).map((event) => ({
       ...event,
@@ -227,6 +237,13 @@ function buildQuery(req) {
   const contactMethod = normalizeContactMethod(req.query.contactMethod);
   const from = normalizeText(req.query.from);
   const to = normalizeText(req.query.to);
+  const status = normalizeText(req.query.status).toLowerCase();
+
+  if (status === SALES_PROSPECT_STATUS_WITHDRAWN) {
+    query.salesStatus = SALES_PROSPECT_STATUS_WITHDRAWN;
+  } else {
+    query.salesStatus = { $ne: SALES_PROSPECT_STATUS_WITHDRAWN };
+  }
 
   if (search) {
     query.$or = [
@@ -274,9 +291,14 @@ function getProspectEvents(prospect) {
 async function buildSalesSummary() {
   const prospects = await SalesProspect.find({ deletedAt: null }).sort({ updatedAt: -1 }).limit(500).lean();
   const stageCounts = salesStageTemplates.reduce((accumulator, stage) => ({ ...accumulator, [stage.key]: 0 }), {});
-  const metrics = { total: prospects.length, inProcess: 0, contracted: 0, inProduction: 0 };
+  const metrics = { total: 0, inProcess: 0, contracted: 0, inProduction: 0, withdrawn: 0 };
 
   prospects.forEach((prospect) => {
+    if (isWithdrawnProspect(prospect)) {
+      metrics.withdrawn += 1;
+      return;
+    }
+    metrics.total += 1;
     if (stageCounts[prospect.currentStageKey] !== undefined) {
       stageCounts[prospect.currentStageKey] += 1;
     }
@@ -286,14 +308,23 @@ async function buildSalesSummary() {
     if (prospect.currentStageKey === 'en-produccion') metrics.inProduction += 1;
   });
 
-  const globalEvents = prospects.flatMap(getProspectEvents).slice(0, 12);
-  const scheduledEvents = prospects
+  const activeProspects = prospects.filter((prospect) => !isWithdrawnProspect(prospect));
+  const globalEvents = activeProspects.flatMap(getProspectEvents).slice(0, 12);
+  const scheduledEvents = activeProspects
     .flatMap(getProspectEvents)
     .filter((event) => event?.appointment?.scheduledAt)
     .sort((left, right) => new Date(left.appointment.scheduledAt || 0) - new Date(right.appointment.scheduledAt || 0))
     .slice(0, 120);
 
   return { metrics, stageCounts, globalEvents, scheduledEvents };
+}
+
+function assertProspectCanMoveStages(prospect) {
+  if (isWithdrawnProspect(prospect)) {
+    const error = new Error('Este cliente está marcado como desistido. No puedes cambiar su etapa.');
+    error.statusCode = 409;
+    throw error;
+  }
 }
 
 async function findProspect(req, res) {
@@ -545,10 +576,53 @@ router.delete('/:prospectId', async (req, res) => {
   }
 });
 
+router.patch('/:prospectId/withdraw', async (req, res) => {
+  try {
+    const prospect = await findProspect(req, res);
+    if (!prospect) return null;
+    if (isWithdrawnProspect(prospect)) {
+      return res.status(409).json({ message: 'Este cliente ya está marcado como desistido.' });
+    }
+    if (prospect.currentStageKey !== 'contactado') {
+      return res.status(400).json({
+        message: 'Solo puedes marcar como desistido a clientes en etapa Contactado (E3).',
+      });
+    }
+    const reason = normalizeText(req.body?.reason || req.body?.withdrawnReason);
+    if (!reason) {
+      return res.status(400).json({ message: 'Indica el motivo del desistimiento.' });
+    }
+    const fromStage = getStageTemplate(prospect.currentStageKey);
+    prospect.salesStatus = SALES_PROSPECT_STATUS_WITHDRAWN;
+    prospect.withdrawnAt = new Date();
+    prospect.withdrawnReason = reason;
+    prospect.withdrawnFromStageKey = prospect.currentStageKey;
+    prospect.salesEvents.push({
+      title: 'Cliente desistido',
+      notes: reason,
+      stageKey: fromStage.key,
+      stageLabel: fromStage.label,
+      responsible: normalizeText(req.user?.name || req.user?.username),
+      completed: true,
+      inProgress: false,
+      createdByName: normalizeText(req.user?.name || req.user?.username),
+    });
+    await prospect.save();
+    return res.status(200).json({
+      prospect: serializeProspect(prospect),
+      summary: await buildSalesSummary(),
+      message: 'Cliente marcado como desistido.',
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo marcar como desistido.' });
+  }
+});
+
 router.patch('/:prospectId/stages/:stageKey', async (req, res) => {
   try {
     const prospect = await findProspect(req, res);
     if (!prospect) return null;
+    assertProspectCanMoveStages(prospect);
     const previousStageIndex = getStageIndex(prospect.currentStageKey);
     const stageKey = normalizeStageKey(req.params.stageKey);
     const nextStage = getStageTemplate(stageKey);
@@ -573,7 +647,7 @@ router.patch('/:prospectId/stages/:stageKey', async (req, res) => {
     await prospect.save();
     return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
-    return res.status(500).json({ message: error.message || 'No se pudo actualizar la etapa.' });
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo actualizar la etapa.' });
   }
 });
 
@@ -581,6 +655,7 @@ router.patch('/:prospectId/stage-transition', async (req, res) => {
   try {
     const prospect = await findProspect(req, res);
     if (!prospect) return null;
+    assertProspectCanMoveStages(prospect);
     const direction = normalizeText(req.body.direction || 'next');
     const currentIndex = Math.max(0, getStageIndex(prospect.currentStageKey));
     const nextIndex = Math.min(salesStageTemplates.length - 1, Math.max(0, currentIndex + (direction === 'previous' ? -1 : 1)));
@@ -600,7 +675,7 @@ router.patch('/:prospectId/stage-transition', async (req, res) => {
     await prospect.save();
     return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
-    return res.status(500).json({ message: error.message || 'No se pudo mover la etapa.' });
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo mover la etapa.' });
   }
 });
 
@@ -608,6 +683,7 @@ router.post('/:prospectId/events', async (req, res) => {
   try {
     const prospect = await findProspect(req, res);
     if (!prospect) return null;
+    assertProspectCanMoveStages(prospect);
     const eventPayload = buildEventPayload(req.body, req);
     if (!eventPayload.title) {
       return res.status(400).json({ message: 'El título del evento es requerido.' });

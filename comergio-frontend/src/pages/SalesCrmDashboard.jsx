@@ -11,6 +11,7 @@ import {
   transitionSalesProspectStage,
   updateSalesEvent,
   updateSalesProspect,
+  withdrawSalesProspect,
 } from '../services/salesCrm.service';
 import SalesCrmContactTemplatesPanel from './SalesCrmContactTemplatesPanel';
 import './AdmissionsDashboard.css';
@@ -19,9 +20,14 @@ import './SalesCrmDashboard.css';
 const VIEWS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'clientes', label: 'Clientes' },
+  { key: 'desistidos', label: 'Desistidos' },
   { key: 'plantillas', label: 'Plantillas' },
   { key: 'agenda', label: 'Agenda' },
 ];
+
+function isWithdrawnProspect(prospect) {
+  return String(prospect?.salesStatus || '') === 'withdrawn';
+}
 
 /** Keep in sync with backend `salesStageTemplates` (src/routes/salesCrm.routes.js). */
 const SALES_CRM_STAGE_TEMPLATES = [
@@ -173,8 +179,10 @@ export default function SalesCrmDashboard() {
   const [drilldownStage, setDrilldownStage] = useState('');
   const [editingEventId, setEditingEventId] = useState('');
   const [templateContactHint, setTemplateContactHint] = useState(null);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawReasonDraft, setWithdrawReasonDraft] = useState('');
 
-  const load = useCallback(async (nextFilters = filters, { keepSelection = true, prospectsOnly = false } = {}) => {
+  const load = useCallback(async (nextFilters = filters, { keepSelection = true, prospectsOnly = false, listStatus = 'active' } = {}) => {
     if (prospectsOnly) {
       setListLoading(true);
     } else {
@@ -182,7 +190,11 @@ export default function SalesCrmDashboard() {
     }
     setError('');
     try {
-      const { data } = await getSalesCrm(nextFilters);
+      const queryParams = {
+        ...nextFilters,
+        status: listStatus === 'withdrawn' ? 'withdrawn' : '',
+      };
+      const { data } = await getSalesCrm(queryParams);
       setProspects(data?.prospects || []);
       if (!prospectsOnly) {
         setStageTemplates(resolveStageTemplates(data?.stageTemplates));
@@ -217,9 +229,13 @@ export default function SalesCrmDashboard() {
   }, []);
 
   useEffect(() => {
-    if (view !== 'clientes' || selectedProspect) return undefined;
+    if ((view !== 'clientes' && view !== 'desistidos') || selectedProspect) return undefined;
     const timer = window.setTimeout(() => {
-      load(filters, { keepSelection: false, prospectsOnly: true });
+      load(filters, {
+        keepSelection: false,
+        prospectsOnly: true,
+        listStatus: view === 'desistidos' ? 'withdrawn' : 'active',
+      });
     }, 320);
     return () => window.clearTimeout(timer);
   }, [filters, view, selectedProspect, load]);
@@ -249,7 +265,7 @@ export default function SalesCrmDashboard() {
     try {
       await action();
       setMessage(successMessage);
-      await load(filters);
+      await load(filters, { listStatus: view === 'desistidos' ? 'withdrawn' : 'active' });
       await refreshSelected();
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo completar la acción.');
@@ -310,7 +326,7 @@ export default function SalesCrmDashboard() {
   };
 
   const jumpToStage = (stageKey) => {
-    if (!selectedProspect?.id) return;
+    if (!selectedProspect?.id || isWithdrawnProspect(selectedProspect)) return;
     runAction(
       () => setSalesProspectStage(selectedProspect.id, stageKey),
       'Etapa actualizada.',
@@ -397,11 +413,26 @@ export default function SalesCrmDashboard() {
   };
 
   const moveStage = (direction) => {
-    if (!selectedProspect?.id) return;
+    if (!selectedProspect?.id || isWithdrawnProspect(selectedProspect)) return;
     runAction(
       () => transitionSalesProspectStage(selectedProspect.id, { direction }),
       direction === 'previous' ? 'Etapa anterior.' : 'Siguiente etapa.',
     );
+  };
+
+  const submitWithdraw = async (event) => {
+    event.preventDefault();
+    if (!selectedProspect?.id) return;
+    const reason = withdrawReasonDraft.trim();
+    if (!reason) {
+      setError('Indica el motivo del desistimiento.');
+      return;
+    }
+    await runAction(async () => {
+      await withdrawSalesProspect(selectedProspect.id, { reason });
+      setShowWithdrawModal(false);
+      setWithdrawReasonDraft('');
+    }, 'Cliente marcado como desistido.');
   };
 
   const filteredByDrilldown = useMemo(() => {
@@ -463,8 +494,12 @@ export default function SalesCrmDashboard() {
   const activeStageKey = selectedProspect?.currentStageKey || stageTemplates[0]?.key || '';
   const currentStageIndex = stageTemplates.findIndex((stage) => stage.key === activeStageKey);
   const isFinalStage = activeStageKey === 'en-produccion';
-  const activeStageDisplay = `${getStageCode(stageTemplates, activeStageKey)} - ${getStageLabel(stageTemplates, activeStageKey)}`;
-  const showAppointmentScheduler = activeStageKey === 'agendado' || eventForm.stageKey === 'agendado';
+  const prospectWithdrawn = isWithdrawnProspect(selectedProspect);
+  const canMarkWithdrawn = !prospectWithdrawn && activeStageKey === 'contactado';
+  const activeStageDisplay = prospectWithdrawn
+    ? 'Desistido'
+    : `${getStageCode(stageTemplates, activeStageKey)} - ${getStageLabel(stageTemplates, activeStageKey)}`;
+  const showAppointmentScheduler = !prospectWithdrawn && (activeStageKey === 'agendado' || eventForm.stageKey === 'agendado');
   const showProspectDetail = Boolean(selectedProspect);
 
   return (
@@ -499,6 +534,19 @@ export default function SalesCrmDashboard() {
             <article className="metric-card admin-metric-card"><span>En proceso</span><strong>{metrics.inProcess || 0}</strong><p>E3 a E6 activos.</p></article>
             <article className="metric-card admin-metric-card"><span>Contratados</span><strong>{metrics.contracted || 0}</strong><p>Paso a producción pendiente.</p></article>
             <article className="metric-card admin-metric-card"><span>En producción</span><strong>{metrics.inProduction || 0}</strong><p>Implementación en curso.</p></article>
+            <button
+              className="metric-card admin-metric-card sales-crm-metric-link"
+              type="button"
+              onClick={() => {
+                setView('desistidos');
+                setDrilldownStage('');
+                closeProspect();
+              }}
+            >
+              <span>Desistidos</span>
+              <strong>{metrics.withdrawn || 0}</strong>
+              <p>No interesados tras contacto (E3).</p>
+            </button>
           </section>
           <section className="dashboard-card admin-distribution-card">
             <div className="admin-panel-heading"><div><h2>Distribución por etapa</h2><p>Pipeline comercial de Comergio.</p></div></div>
@@ -564,6 +612,69 @@ export default function SalesCrmDashboard() {
                     <td data-label="Ciudad">{p.city || '—'}</td>
                     <td data-label="Contacto">{p.contactName || p.contactEmail || '—'}</td>
                     <td data-label="Canal">{p.contactMethodLabel || '—'}</td>
+                    <td className="tracking-actions-cell" data-label="Acción">
+                      <button
+                        className="tracking-icon-button"
+                        type="button"
+                        aria-label={`Ver detalle de ${p.schoolName}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProspect(p);
+                        }}
+                      >
+                        →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {!showProspectDetail && view === 'desistidos' ? (
+        <section className="dashboard-card tracking-selector-panel">
+          <div className="admin-panel-heading">
+            <div>
+              <h2>Clientes desistidos</h2>
+              <p>Colegios que respondieron en E3 pero no continúan en el pipeline comercial.</p>
+            </div>
+          </div>
+          <div className="tracking-search-grid">
+            <input placeholder="Buscar colegio o contacto" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} />
+            <input placeholder="Ciudad" value={filters.city} onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))} />
+          </div>
+          <div className="tracking-table-wrap sales-crm-table-wrap">
+            <table className="tracking-data-table sales-crm-table">
+              <thead><tr><th>Colegio</th><th>Ciudad</th><th>Contacto</th><th>Etapa al desistir</th><th>Motivo</th><th>Fecha</th><th /></tr></thead>
+              <tbody>
+                {loading || listLoading ? (
+                  <tr><td className="sales-crm-table-empty" colSpan="7">{loading ? 'Cargando…' : 'Filtrando…'}</td></tr>
+                ) : null}
+                {!loading && !listLoading && !prospects.length ? (
+                  <tr><td className="sales-crm-table-empty" colSpan="7"><div className="empty-state">No hay clientes desistidos con esos filtros.</div></td></tr>
+                ) : null}
+                {!loading && !listLoading && prospects.map((p) => (
+                  <tr
+                    key={p.id}
+                    className={selectedProspect?.id === p.id ? 'is-selected' : ''}
+                    onClick={() => openProspect(p)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openProspect(p);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <td data-label="Colegio">{p.schoolName}</td>
+                    <td data-label="Ciudad">{p.city || '—'}</td>
+                    <td data-label="Contacto">{p.contactName || p.contactEmail || '—'}</td>
+                    <td data-label="Etapa">{getStageLabel(stageTemplates, p.withdrawnFromStageKey || p.currentStageKey)}</td>
+                    <td data-label="Motivo">{p.withdrawnReason || '—'}</td>
+                    <td data-label="Fecha">{formatDate(p.withdrawnAt || p.updatedAt)}</td>
                     <td className="tracking-actions-cell" data-label="Acción">
                       <button
                         className="tracking-icon-button"
@@ -725,7 +836,9 @@ export default function SalesCrmDashboard() {
               <div className="admissions-detail-title-block">
                 <h1>{selectedProspect.schoolName}</h1>
                 <span>{activeStageDisplay}</span>
-                <b>En seguimiento comercial</b>
+                <b className={prospectWithdrawn ? 'sales-crm-status-withdrawn' : ''}>
+                  {prospectWithdrawn ? 'Desistido del pipeline' : 'En seguimiento comercial'}
+                </b>
               </div>
               <div className="admissions-detail-metadata">
                 <div><span>Ciudad</span><strong>{selectedProspect.city || '-'}</strong></div>
@@ -773,19 +886,48 @@ export default function SalesCrmDashboard() {
                 </div>
                 <div><span>Registrado</span><strong>{formatDate(selectedProspect.createdAt)}</strong></div>
                 <div><span>Última actualización</span><strong>{formatDateTime(selectedProspect.updatedAt)}</strong></div>
+                {prospectWithdrawn ? (
+                  <>
+                    <div><span>Motivo del desistimiento</span><strong>{selectedProspect.withdrawnReason || '—'}</strong></div>
+                    <div><span>Fecha de desistimiento</span><strong>{formatDateTime(selectedProspect.withdrawnAt)}</strong></div>
+                    <div><span>Etapa al desistir</span><strong>{getStageLabel(stageTemplates, selectedProspect.withdrawnFromStageKey || activeStageKey)}</strong></div>
+                  </>
+                ) : null}
               </div>
             </article>
 
             <article className="dashboard-card admissions-detail-transition-card">
-              <h2>Transición de etapa</h2>
-              <div className="admissions-detail-transition-actions">
-                <button className="secondary-button" disabled={busy || currentStageIndex <= 0} onClick={() => moveStage('previous')} type="button">← Anterior</button>
-                <button className="secondary-button" disabled={busy || isFinalStage} onClick={() => moveStage('next')} type="button">Siguiente →</button>
-              </div>
-              <p>Puedes avanzar o retroceder libremente. La etapa actual queda en proceso.</p>
-              <div className="admissions-detail-secondary-actions">
-                <button className="primary-button" disabled={busy || isFinalStage} onClick={() => jumpToStage('en-produccion')} type="button">Marcar en producción</button>
-              </div>
+              <h2>{prospectWithdrawn ? 'Estado comercial' : 'Transición de etapa'}</h2>
+              {prospectWithdrawn ? (
+                <p>Este colegio ya no cuenta en el pipeline activo. Queda en la lista de desistidos con el motivo registrado.</p>
+              ) : (
+                <>
+                  <div className="admissions-detail-transition-actions">
+                    <button className="secondary-button" disabled={busy || currentStageIndex <= 0} onClick={() => moveStage('previous')} type="button">← Anterior</button>
+                    <button className="secondary-button" disabled={busy || isFinalStage} onClick={() => moveStage('next')} type="button">Siguiente →</button>
+                  </div>
+                  <p>Puedes avanzar o retroceder libremente. La etapa actual queda en proceso.</p>
+                  <div className="admissions-detail-secondary-actions sales-crm-detail-secondary-actions">
+                    {canMarkWithdrawn ? (
+                      <button
+                        className="secondary-button sales-crm-withdraw-btn"
+                        disabled={busy}
+                        onClick={() => {
+                          setWithdrawReasonDraft('');
+                          setShowWithdrawModal(true);
+                        }}
+                        type="button"
+                      >
+                        Marcar como desistido
+                      </button>
+                    ) : null}
+                    <button className="primary-button" disabled={busy || isFinalStage} onClick={() => jumpToStage('en-produccion')} type="button">Marcar en producción</button>
+                  </div>
+                  {canMarkWithdrawn ? (
+                    <p className="sales-crm-withdraw-hint">Usa desistido cuando el colegio respondió en E3 pero no quiere continuar.</p>
+                  ) : null}
+                </>
+              )}
             </article>
           </div>
 
@@ -799,6 +941,7 @@ export default function SalesCrmDashboard() {
                   <button
                     key={stage.key}
                     className={`admissions-detail-timeline-item ${isCompleted ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''} ${!isCompleted && !isCurrent ? 'is-pending' : ''}`}
+                    disabled={prospectWithdrawn || busy}
                     type="button"
                     onClick={() => jumpToStage(stage.key)}
                   >
@@ -850,6 +993,7 @@ export default function SalesCrmDashboard() {
               </div>
             </article>
 
+            {!prospectWithdrawn ? (
             <form className="dashboard-card admissions-detail-new-event-card" onSubmit={submitEvent}>
               <h2>{editingEventId ? 'Editar evento' : 'Nuevo evento'}</h2>
               <label><span>Título</span><input placeholder="Título" required={!showAppointmentScheduler} value={eventForm.title} onChange={(event) => updateEventForm('title', event.target.value)} /></label>
@@ -877,8 +1021,34 @@ export default function SalesCrmDashboard() {
                 <button className="primary-button" disabled={busy} type="submit">{editingEventId ? 'Actualizar' : '+ Registrar'}</button>
               </div>
             </form>
+            ) : null}
           </div>
         </section>
+      ) : null}
+
+      {showWithdrawModal ? (
+        <div className="admissions-modal-backdrop" role="presentation" onClick={() => !busy && setShowWithdrawModal(false)}>
+          <section className="dashboard-card admissions-create-modal sales-crm-withdraw-modal" role="dialog" aria-labelledby="sales-crm-withdraw-title" onClick={(e) => e.stopPropagation()}>
+            <h2 id="sales-crm-withdraw-title">Marcar como desistido</h2>
+            <p className="sales-crm-withdraw-hint">El colegio saldrá del pipeline activo y quedará en la lista de desistidos.</p>
+            <form onSubmit={submitWithdraw}>
+              <label>
+                <span>Motivo del desistimiento</span>
+                <textarea
+                  required
+                  placeholder="Ej.: No tienen presupuesto este año, ya tienen otro proveedor, no respondieron interés en reunión…"
+                  rows={4}
+                  value={withdrawReasonDraft}
+                  onChange={(event) => setWithdrawReasonDraft(event.target.value)}
+                />
+              </label>
+              <div className="admissions-modal-actions">
+                <button className="secondary-button" disabled={busy} type="button" onClick={() => setShowWithdrawModal(false)}>Cancelar</button>
+                <button className="primary-button sales-crm-withdraw-btn" disabled={busy} type="submit">{busy ? 'Guardando…' : 'Confirmar desistimiento'}</button>
+              </div>
+            </form>
+          </section>
+        </div>
       ) : null}
 
       {showProspectForm ? (

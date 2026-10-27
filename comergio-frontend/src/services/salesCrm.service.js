@@ -13,6 +13,9 @@ export const setSalesProspectStage = (prospectId, stageKey, data = {}) => (
 export const transitionSalesProspectStage = (prospectId, data) => (
   api.patch(`${basePath}/${prospectId}/stage-transition`, data)
 );
+export const withdrawSalesProspect = (prospectId, data) => (
+  api.patch(`${basePath}/${prospectId}/withdraw`, data)
+);
 export const createSalesEvent = (prospectId, data) => api.post(`${basePath}/${prospectId}/events`, data);
 export const updateSalesEvent = (prospectId, eventId, data) => (
   api.patch(`${basePath}/${prospectId}/events/${eventId}`, data)
