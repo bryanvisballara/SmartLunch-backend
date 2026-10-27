@@ -40,6 +40,7 @@ import useAuthStore from '../store/auth.store';
 import { filterStaffPortalNav } from '../lib/staffFeatures';
 import BrandConfirmModal from '../components/BrandConfirmModal';
 import PreschoolBulletinModelPanel from '../components/preschool/PreschoolBulletinModelPanel';
+import CoordinationReportCardSignaturePanel from '../campus/components/CoordinationReportCardSignaturePanel';
 import { getSchoolDisplayName } from '../lib/schools';
 import { resolveApiAssetUrl } from '../lib/api';
 import { resolvePlayableFeedVideoUrl } from '../lib/feedMedia';
@@ -9827,8 +9828,17 @@ function RectoriaDashboard() {
         />
       ) : null}
 
+      {activeSection === 'report_card_signature' ? (
+        <div className="rectoria-preschool-signature-stack">
+          <CoordinationReportCardSignaturePanel className="rectoria-preschool-signature-stack__panel" />
+        </div>
+      ) : null}
+
       {activeSection === 'preschool_bulletin' ? (
-        <PreschoolBulletinModelPanel />
+        <div className="rectoria-preschool-signature-stack">
+          <CoordinationReportCardSignaturePanel className="rectoria-preschool-signature-stack__panel" />
+          <PreschoolBulletinModelPanel />
+        </div>
       ) : null}
 
       {activeSection === 'overview' ? (

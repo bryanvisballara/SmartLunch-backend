@@ -8583,3 +8583,16 @@ button.rectoria-team-assignment-card.is-active {
     justify-content: center;
   }
 }
+
+.rectoria-preschool-signature-stack {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 920px;
+  margin: 1.5rem auto;
+  padding: 0 1rem 2rem;
+}
+
+.rectoria-preschool-signature-stack__panel {
+  margin: 0;
+  max-width: none;
+}
