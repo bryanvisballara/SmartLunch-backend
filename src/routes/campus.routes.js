@@ -446,18 +446,27 @@ async function resolveCampusCoordinationGradeKeys(schoolId, coordinationScope = 
 }
 
 async function resolveStudentGradeLevelKey(schoolId, studentGradeKey = '') {
-  const normalizedGradeKey = normalizeCampusGradeKey(studentGradeKey);
-  if (!normalizedGradeKey) {
+  const candidates = expandCoordinatorSignatureGradeKeyCandidates(studentGradeKey);
+  if (!candidates.length) {
     return '';
   }
 
   const academicStructure = await AcademicStructure.findOne({ schoolId }).select('grades').lean();
   const grades = Array.isArray(academicStructure?.grades) ? academicStructure.grades : [];
-  const grade = grades.find((item) => (
-    normalizeCampusGradeKey(item?.key) === normalizedGradeKey
-    || normalizeCampusGradeKey(item?.label) === normalizedGradeKey
-  ));
-  return normalizeText(grade?.levelKey);
+  for (const candidate of candidates) {
+    const normalizedGradeKey = normalizeCampusGradeKey(candidate);
+    const compactCandidate = preschoolMatchKey(candidate);
+    const grade = grades.find((item) => (
+      normalizeCampusGradeKey(item?.key) === normalizedGradeKey
+      || normalizeCampusGradeKey(item?.label) === normalizedGradeKey
+      || preschoolMatchKey(item?.key) === compactCandidate
+      || preschoolMatchKey(item?.label) === compactCandidate
+    ));
+    if (grade?.levelKey) {
+      return normalizeText(grade.levelKey);
+    }
+  }
+  return '';
 }
 
 function readCoordinatorSignatureForLevel(user, levelKey = '') {
@@ -474,6 +483,16 @@ function readCoordinatorSignatureForLevel(user, levelKey = '') {
       return {
         signatureDataUrl: fromLevel,
         signedAt: match?.signedAt || null,
+      };
+    }
+  }
+
+  for (const entry of entries) {
+    const fromAnyLevel = normalizeReportSignatureDataUrl(entry?.signatureDataUrl);
+    if (fromAnyLevel) {
+      return {
+        signatureDataUrl: fromAnyLevel,
+        signedAt: entry?.signedAt || null,
       };
     }
   }
@@ -524,7 +543,13 @@ async function resolveDefaultCoordinatorSignatureForGradeKey(schoolId, studentGr
       levelKeys.has(targetLevelKey)
       || coordinatorScopeMatchesLevel(coordinator.coordinationScope, targetLevelKey)
     );
-    const gradeMatch = normalizedGradeKey && gradeKeys.has(normalizedGradeKey);
+    const gradeMatch = normalizedGradeKey && (
+      gradeKeys.has(normalizedGradeKey)
+      || expandCoordinatorSignatureGradeKeyCandidates(studentGradeKey).some((candidate) => (
+        gradeKeys.has(normalizeCampusGradeKey(candidate))
+        || gradeKeys.has(preschoolMatchKey(candidate))
+      ))
+    );
     if (!levelMatch && !gradeMatch) {
       continue;
     }
@@ -563,15 +588,64 @@ async function buildCoordinatorSignatureUpdateForGrade(schoolId, gradeKey, exist
   };
 }
 
-async function attachCoordinatorSignatureFallback(schoolId, serializedReport) {
-  if (!serializedReport || serializedReport.coordinatorSignatureDataUrl) {
+function expandCoordinatorSignatureGradeKeyCandidates(studentGradeKey = '') {
+  const candidates = [];
+  const push = (value) => {
+    const raw = normalizeText(value);
+    if (!raw) return;
+    if (!candidates.includes(raw)) {
+      candidates.push(raw);
+    }
+    const compact = preschoolMatchKey(raw);
+    if (compact && !candidates.includes(compact)) {
+      candidates.push(compact);
+    }
+    const campusKey = normalizeCampusGradeKey(raw);
+    if (campusKey && !candidates.includes(campusKey)) {
+      candidates.push(campusKey);
+    }
+  };
+
+  push(studentGradeKey);
+  normalizeText(studentGradeKey).split(':').forEach((part) => push(part));
+
+  return candidates;
+}
+
+async function attachCoordinatorSignatureFallback(schoolId, serializedReport, studentGradeKey = '') {
+  const gradeKeyCandidates = expandCoordinatorSignatureGradeKeyCandidates(
+    serializedReport?.studentGradeKey || studentGradeKey,
+  );
+  const gradeKeyForLookup = gradeKeyCandidates[0] || '';
+
+  if (serializedReport?.coordinatorSignatureDataUrl) {
     return serializedReport;
   }
 
-  const fallback = await resolveDefaultCoordinatorSignatureForGradeKey(
-    schoolId,
-    serializedReport.studentGradeKey,
-  );
+  let fallback = null;
+  for (const candidate of gradeKeyCandidates) {
+    fallback = await resolveDefaultCoordinatorSignatureForGradeKey(schoolId, candidate);
+    if (fallback?.coordinatorSignatureDataUrl) {
+      break;
+    }
+  }
+
+  if (!serializedReport) {
+    if (!fallback?.coordinatorSignatureDataUrl) {
+      return null;
+    }
+    return {
+      studentGradeKey: gradeKeyForLookup,
+      status: 'draft',
+      students: [],
+      coordinatorUserId: fallback.coordinatorUserId,
+      coordinatorSignatureDataUrl: fallback.coordinatorSignatureDataUrl,
+      coordinatorSignatureSignedAt: fallback.coordinatorSignatureSignedAt,
+      coordinatorSignerName: fallback.coordinatorSignerName,
+      coordinatorSignatureSource: 'profile',
+    };
+  }
+
   if (!fallback) {
     return serializedReport;
   }
@@ -9275,7 +9349,7 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
           preschoolBulletin: null,
           gradingScale: null,
           coexistenceByStudentId: {},
-          generalReport: null,
+          generalReport: await attachCoordinatorSignatureFallback(schoolId, null, gradeKey),
         });
         continue;
       }
@@ -9356,6 +9430,7 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
         generalReport: await attachCoordinatorSignatureFallback(
           schoolId,
           serializeGeneralReportCard(generalReport),
+          preschoolBulletin?.gradeKey || gradeKey,
         ),
       });
     }
