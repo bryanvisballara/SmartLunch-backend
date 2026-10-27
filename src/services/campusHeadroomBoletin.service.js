@@ -192,7 +192,7 @@ function mergePreschoolTemplateSubjectsIntoExpected(expectedSubjects = [], block
 function isPreschoolSpecialtySubjectSlug(slug = '') {
   const normalized = normalizeText(slug);
   if (!normalized) return false;
-  return /(musica|danza|deporte|edfisica|educacionfisica|artes)/.test(normalized);
+  return /(musica|danza|deporte|edfisica|educacionfisica|artes|sports|sport)/.test(normalized);
 }
 
 function enrichHeadroomSubjectChecklist({

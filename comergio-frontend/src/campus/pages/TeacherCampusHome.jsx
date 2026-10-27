@@ -145,6 +145,7 @@ const teacherNavGroups = [
       'attendance',
       'guidance_routine',
       'general_report_card',
+      'preschool_bulletin',
       'school_coexistence',
       'family_feed',
       'social_publications',

@@ -157,7 +157,7 @@ function collectGradeSubjects(academicStructure, gradeKey) {
 const PRESCHOOL_SUBJECT_ALIAS_GROUPS = [
   ['musica', 'music'],
   ['danza', 'dance'],
-  ['deporte', 'edfisica', 'educacionfisica'],
+  ['deporte', 'edfisica', 'educacionfisica', 'sports', 'sport'],
 ];
 
 function subjectCompactTokens(subjectKey, subjectLabel) {
@@ -184,7 +184,20 @@ function courseMatchesSubject(course, subjectKey, subjectLabel) {
   return courseKeys.some((value) => subjectsAlign(value, value, subjectKey, subjectLabel));
 }
 
-function indicatorVisibleToTeacher(indicator, block, teacherUserId, courses, gradeSubjects, gradeKey) {
+function courseAppliesToGrade(course, gradeKey, gradeLabel = '') {
+  if (valuesMatch(course?.studentGradeKey, gradeKey) || valuesMatch(course?.gradeLevel, gradeKey)) {
+    return true;
+  }
+  const titleHaystack = compactKey([
+    course?.title,
+    course?.section,
+    course?.subject,
+  ].filter(Boolean).join(' '));
+  const gradeTokens = [compactKey(gradeKey), compactKey(gradeLabel)].filter(Boolean);
+  return gradeTokens.some((token) => token && titleHaystack.includes(token));
+}
+
+function indicatorVisibleToTeacher(indicator, block, teacherUserId, courses, gradeSubjects, gradeKey, gradeLabel = '') {
   if (String(block.teacherUserId || '') === String(teacherUserId || '')) {
     return true;
   }
@@ -194,9 +207,15 @@ function indicatorVisibleToTeacher(indicator, block, teacherUserId, courses, gra
     return false;
   }
 
-  const gradeCourses = (Array.isArray(courses) ? courses : []).filter((course) => (
-    valuesMatch(course.studentGradeKey, gradeKey) || valuesMatch(course.gradeLevel, gradeKey)
-  ));
+  const teacherCourses = Array.isArray(courses) ? courses : [];
+  if (teacherCourses.some((course) => (
+    courseMatchesSubject(course, indicatorKey, indicatorLabel)
+    && courseAppliesToGrade(course, gradeKey, gradeLabel)
+  ))) {
+    return true;
+  }
+
+  const gradeCourses = teacherCourses.filter((course) => courseAppliesToGrade(course, gradeKey, gradeLabel));
   if (gradeCourses.some((course) => courseMatchesSubject(course, indicatorKey, indicatorLabel))) {
     return true;
   }
@@ -459,7 +478,7 @@ router.get('/teacher/workspace', async (req, res) => {
       schoolId,
       teacherUserId: userId,
       status: 'active',
-    }).select('title subject studentGradeKey gradeLevel section').lean();
+    }).select('title subject subjectKey studentGradeKey gradeLevel section').lean();
     const templates = await PreschoolBulletinTemplate.find({ schoolId }).lean();
     const requestedPeriodKey = normalizeText(req.query.periodKey) || catalog.periods[0]?.key || '';
     const period = findCatalogPeriod(catalog.periods, requestedPeriodKey);
@@ -484,6 +503,7 @@ router.get('/teacher/workspace', async (req, res) => {
             courses,
             grade.subjects,
             grade.key,
+            grade.label,
           )),
         }))
         .filter((block) => block.indicators.length);
@@ -597,10 +617,14 @@ router.post('/teacher/workspace', async (req, res) => {
     const [catalog, courses] = await Promise.all([
       loadCatalog(schoolId),
       CampusCourse.find({ schoolId, teacherUserId: userId, status: 'active' })
-        .select('subject subjectKey studentGradeKey gradeLevel')
+        .select('title subject subjectKey studentGradeKey gradeLevel section')
         .lean(),
     ]);
-    const grade = findCatalogGrade(catalog.grades, activeTemplate.gradeKey) || { key: activeTemplate.gradeKey, subjects: [] };
+    const grade = findCatalogGrade(catalog.grades, activeTemplate.gradeKey) || {
+      key: activeTemplate.gradeKey,
+      label: activeTemplate.gradeLabel,
+      subjects: [],
+    };
     const allowedIndicatorIds = new Set(
       serializeTemplate(activeTemplate).blocks.flatMap((block) => (
         block.indicators.filter((indicator) => indicatorVisibleToTeacher(
@@ -610,6 +634,7 @@ router.post('/teacher/workspace', async (req, res) => {
           courses,
           grade.subjects,
           grade.key,
+          grade.label,
         ))
       )).map((indicator) => indicator.id)
     );
