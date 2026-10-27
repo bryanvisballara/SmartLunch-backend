@@ -8596,3 +8596,10 @@ button.rectoria-team-assignment-card.is-active {
   margin: 0;
   max-width: none;
 }
+
+.rectoria-preschool-signature-stack .campus-coordination__report-signatures--compact {
+  padding: 1.25rem;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}

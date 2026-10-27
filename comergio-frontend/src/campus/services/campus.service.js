@@ -189,6 +189,10 @@ export function saveCampusCoordinationMyReportCardSignature(payload) {
   return api.post('/campus/coordination/me/report-card-signature', payload).then((response) => response.data);
 }
 
+export function deleteCampusCoordinationMyReportCardSignature() {
+  return api.delete('/campus/coordination/me/report-card-signature').then((response) => response.data);
+}
+
 export function saveCampusCoordinationGeneralReportCardSignature(reportId, payload) {
   return api.post(`/campus/coordination/general-report-cards/${reportId}/signature`, payload).then((response) => response.data);
 }

@@ -9911,6 +9911,41 @@ router.get('/coordination/me/report-card-signature', requireCampusCoordinationAc
   }
 });
 
+router.delete('/coordination/me/report-card-signature', requireCampusCoordinationAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const userDoc = await User.findOne({ _id: userId, schoolId, role: 'coordination', status: 'active' });
+    if (!userDoc) {
+      return res.status(404).json({ message: 'Usuario de coordinación no encontrado.' });
+    }
+
+    const { levelKeys, levels } = await resolveCampusCoordinationScope(schoolId, userDoc.coordinationScope);
+    const levelKey = Array.from(levelKeys)[0] || normalizeText(userDoc.coordinationScope);
+    const levelLabel = normalizeText(levels[0]?.label) || levelKey;
+    const normalizedLevel = normalizeCampusScopeMatch(levelKey);
+
+    userDoc.campusReportCardSignaturesByLevel = (Array.isArray(userDoc.campusReportCardSignaturesByLevel)
+      ? userDoc.campusReportCardSignaturesByLevel
+      : []).filter((entry) => normalizeCampusScopeMatch(entry?.levelKey) !== normalizedLevel);
+
+    userDoc.campusReportCardSignatureDataUrl = '';
+    userDoc.campusReportCardSignatureSignedAt = null;
+    await userDoc.save();
+
+    return res.status(200).json({
+      levelKey,
+      levelLabel,
+      coordinationScope: normalizeText(userDoc.coordinationScope),
+      signatureDataUrl: '',
+      signedAt: null,
+      signerName: normalizeText(userDoc.name),
+      message: `Firma eliminada para ${levelLabel || 'tu nivel'}.`,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo eliminar tu firma institucional.' });
+  }
+});
+
 router.post('/coordination/me/report-card-signature', requireCampusCoordinationAccess, async (req, res) => {
   try {
     const { schoolId, userId, name } = req.user;

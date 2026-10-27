@@ -17608,6 +17608,14 @@ button.campus-teacher__home-kpi-card:focus-visible {
   font-weight: 700;
 }
 
+.campus-coordination__signature-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.65rem;
+}
+
 .campus-parent-bulletin,
 .campus-parent-bulletin__locked {
   display: grid;
