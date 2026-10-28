@@ -28,7 +28,26 @@ const SuperAdminSchoolSettings = require('../models/superAdminSchoolSettings.mod
 const { normalizeStaffFeatures } = require('../utils/staffFeatures');
 const { sendRegistrationVerificationEmail, sendPasswordResetCodeEmail } = require('../services/brevo.service');
 const { resolvePrimaryParentEmailForStudent } = require('../utils/studentParentContact');
-const { isDemoSchoolId, recordDemoLogin } = require('../services/demoSchool.service');
+const {
+  isDemoSchoolId,
+  recordDemoLogin,
+  extractRequestIpFromHeaders,
+} = require('../services/demoSchool.service');
+
+function trackDemoLoginIfNeeded(req, user, method = 'password') {
+  if (!user?.schoolId || !isDemoSchoolId(user.schoolId)) {
+    return;
+  }
+  recordDemoLogin({
+    schoolId: user.schoolId,
+    userId: user._id,
+    username: user.username || user.email || '',
+    role: user.role || '',
+    ip: extractRequestIpFromHeaders(req.headers, req.ip),
+    userAgent: String(req.headers['user-agent'] || ''),
+    method,
+  }).catch(() => {});
+}
 const {
   signAccessToken,
   createRefreshToken,
@@ -1072,9 +1091,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    if (isDemoSchoolId(user.schoolId)) {
-      recordDemoLogin({ schoolId: user.schoolId, userId: user._id }).catch(() => {});
-    }
+    trackDemoLoginIfNeeded(req, user, 'password');
 
     return res.status(200).json(await issueAuthResponse(user));
   } catch (error) {
@@ -1369,6 +1386,8 @@ router.post('/biometric/login/verify', async (req, res) => {
       authenticator.lastUsedAt = new Date();
       await user.save();
     });
+
+    trackDemoLoginIfNeeded(req, user, 'biometric');
 
     return res.status(200).json(await issueAuthResponse(user));
   } catch (error) {

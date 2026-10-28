@@ -5,6 +5,7 @@ const DeviceToken = require('../models/deviceToken.model');
 const { queueNotificationsForParents } = require('../services/notification.service');
 const { deleteDemo } = require('../services/demoSchool.service');
 const { FOLLOW_UP_DAYS, buildUnsubscribeUrl, sendDemoFollowUpEmail } = require('../services/demoEmails.service');
+const { sendDueSalesNurtureEmails } = require('../services/salesCrmEmails.service');
 const { bogotaDayNumber, bogotaHour, publishDueDemoFeedPosts } = require('../services/demoDailyFeed.service');
 
 const PUSH_POLL_INTERVAL_MS = Number(process.env.DEMO_PUSH_POLL_MS || 15 * 1000);
@@ -22,6 +23,8 @@ let followUpInProgress = false;
 let followUpTimer = null;
 let feedInProgress = false;
 let feedTimer = null;
+let salesNurtureInProgress = false;
+let salesNurtureTimer = null;
 
 async function sendDuePushes() {
   if (pushInProgress) {
@@ -176,21 +179,37 @@ async function sendDueFollowUpEmails() {
   }
 }
 
+async function runSalesNurtureCycle() {
+  if (salesNurtureInProgress) {
+    return;
+  }
+  salesNurtureInProgress = true;
+  try {
+    await sendDueSalesNurtureEmails();
+  } catch (error) {
+    console.warn(`[SALES_NURTURE] cycle failed: ${error.message || error}`);
+  } finally {
+    salesNurtureInProgress = false;
+  }
+}
+
 function startDemoSchoolWorker() {
   if (!ENABLED || pushTimer) {
     return;
   }
 
-  console.info('[DEMO] worker started (scheduled pushes + daily feed + follow-up emails + expiry)');
+  console.info('[DEMO] worker started (scheduled pushes + daily feed + follow-up emails + sales nurture + expiry)');
   sendDuePushes();
   expireOldDemos();
   sendDueFollowUpEmails();
+  runSalesNurtureCycle();
   publishFeedPosts();
   pushTimer = setInterval(sendDuePushes, PUSH_POLL_INTERVAL_MS);
   expiryTimer = setInterval(expireOldDemos, EXPIRY_POLL_INTERVAL_MS);
   followUpTimer = setInterval(sendDueFollowUpEmails, FOLLOW_UP_POLL_INTERVAL_MS);
+  salesNurtureTimer = setInterval(runSalesNurtureCycle, FOLLOW_UP_POLL_INTERVAL_MS);
   feedTimer = setInterval(publishFeedPosts, FEED_POLL_INTERVAL_MS);
-  [pushTimer, expiryTimer, followUpTimer, feedTimer].forEach((timer) => {
+  [pushTimer, expiryTimer, followUpTimer, salesNurtureTimer, feedTimer].forEach((timer) => {
     if (typeof timer.unref === 'function') {
       timer.unref();
     }

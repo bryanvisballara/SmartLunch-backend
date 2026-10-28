@@ -54,10 +54,25 @@ const salesProspectSchema = new mongoose.Schema({
   },
   salesStatus: {
     type: String,
-    enum: ['active', 'withdrawn'],
+    enum: ['active', 'withdrawn', 'email_nurture'],
     default: 'active',
     index: true,
     trim: true,
+  },
+  emailNurture: {
+    startedAt: { type: Date, default: null },
+    startedByName: { type: String, default: '', trim: true },
+    respondedAt: { type: Date, default: null },
+    respondedByName: { type: String, default: '', trim: true },
+    emails: {
+      type: [{
+        sequence: { type: Number, min: 1, max: 7, required: true },
+        sentAt: { type: Date, default: null },
+        openedAt: { type: Date, default: null },
+        openCount: { type: Number, default: 0 },
+      }],
+      default: [],
+    },
   },
   withdrawnAt: { type: Date, default: null },
   withdrawnReason: { type: String, default: '', trim: true },

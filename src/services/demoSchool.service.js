@@ -662,24 +662,66 @@ async function createDemoSchool({
   }
 }
 
-async function findDemoLeadBySchoolId(schoolId) {
+async function findDemoLeadBySchoolId(schoolId, { forLogin = false } = {}) {
   if (!isDemoSchoolId(schoolId)) {
     return null;
   }
-  return DemoLead.findOne({ demoSchoolId: schoolId, status: 'ready' });
+  const statusFilter = forLogin
+    ? { $in: ['ready', 'expired'] }
+    : 'ready';
+  return DemoLead.findOne({ demoSchoolId: schoolId, status: statusFilter }).sort({ createdAt: -1 });
 }
 
-async function recordDemoLogin({ schoolId, userId }) {
-  const lead = await findDemoLeadBySchoolId(schoolId);
-  if (!lead || String(lead.parentUserId) !== String(userId)) {
+const DEMO_LOGIN_EVENTS_MAX = 100;
+
+function extractRequestIpFromHeaders(headers = {}, fallbackIp = '') {
+  const forwarded = String(headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return forwarded || String(fallbackIp || '').trim();
+}
+
+async function recordDemoLogin({
+  schoolId,
+  userId,
+  username = '',
+  role = '',
+  ip = '',
+  userAgent = '',
+  method = 'password',
+}) {
+  const lead = await findDemoLeadBySchoolId(schoolId, { forLogin: true });
+  if (!lead) {
+    return;
+  }
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  const isParentAccount = String(lead.parentUserId) === String(userId)
+    || (normalizedUsername && normalizedUsername === String(lead.email || '').trim().toLowerCase());
+  if (!isParentAccount) {
     return;
   }
   const now = new Date();
+  const event = {
+    loggedInAt: now,
+    userId: userId || null,
+    username: String(username || '').trim(),
+    role: String(role || '').trim(),
+    ip: String(ip || '').trim().slice(0, 80),
+    userAgent: String(userAgent || '').trim().slice(0, 280),
+    method: String(method || 'password').trim().slice(0, 32),
+  };
   await DemoLead.updateOne(
     { _id: lead._id },
     {
-      $set: { lastLoginAt: now, ...(lead.firstLoginAt ? {} : { firstLoginAt: now }) },
+      $set: {
+        lastLoginAt: now,
+        ...(lead.firstLoginAt ? {} : { firstLoginAt: now }),
+      },
       $inc: { loginCount: 1 },
+      $push: {
+        loginEvents: {
+          $each: [event],
+          $slice: -DEMO_LOGIN_EVENTS_MAX,
+        },
+      },
     },
   );
 }
@@ -787,6 +829,7 @@ module.exports = {
   isDemoSchoolId,
   createDemoSchool,
   recordDemoLogin,
+  extractRequestIpFromHeaders,
   scheduleDemoWelcomePushes,
   deleteDemo,
   DEMO_LIFETIME_DAYS,

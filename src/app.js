@@ -444,6 +444,7 @@ app.use('/academic-secretary/admissions', admissionsRoutes);
 app.use('/public/berckley/primer-contacto', publicPrimerContactoRoutes);
 app.use('/public/school-interview', publicSchoolInterviewRoutes);
 app.use('/public/demo', publicDemoRoutes);
+app.use('/public/sales-crm', require('./routes/publicSalesCrm.routes'));
 app.use('/public/millennium/primer-contacto', require('./routes/publicMillenniumPrimerContacto.routes'));
 app.use('/academic-secretary', academicSecretaryRoutes);
 app.use('/school-creation', limiter, schoolCreationRoutes);

@@ -10,6 +10,20 @@ const {
   removeSalesAgendaBlock,
   setSalesAgendaClosedDate,
 } = require('../services/salesAgenda.service');
+const {
+  SALES_NURTURE_MAX_SEQUENCE,
+  SALES_NURTURE_SENDER_EMAIL,
+  buildEmailNurtureCatalog,
+  nurtureEmailsSentCount,
+  getSalesNurtureEmailPreviewForProspect,
+  sendSalesNurtureEmailForProspect,
+} = require('../services/salesCrmEmails.service');
+const {
+  listSalesNurtureEmailTemplates,
+  updateSalesNurtureEmailTemplate,
+  SALES_NURTURE_SENDER_NAME,
+} = require('../services/salesNurtureTemplate.service');
+const { bogotaDayNumber } = require('../services/demoDailyFeed.service');
 
 const router = express.Router();
 
@@ -69,9 +83,35 @@ function normalizeOptionalContactEmail(value) {
 }
 
 const SALES_PROSPECT_STATUS_WITHDRAWN = 'withdrawn';
+const SALES_PROSPECT_STATUS_EMAIL_NURTURE = 'email_nurture';
 
 function isWithdrawnProspect(prospect) {
   return normalizeText(prospect?.salesStatus).toLowerCase() === SALES_PROSPECT_STATUS_WITHDRAWN;
+}
+
+function isEmailNurtureProspect(prospect) {
+  return normalizeText(prospect?.salesStatus).toLowerCase() === SALES_PROSPECT_STATUS_EMAIL_NURTURE;
+}
+
+async function serializeEmailNurture(prospect) {
+  const source = prospect?.emailNurture || {};
+  const emailsSent = nurtureEmailsSentCount(prospect);
+  const dayIndex = source.startedAt
+    ? bogotaDayNumber(new Date()) - bogotaDayNumber(source.startedAt) + 1
+    : 0;
+  return {
+    startedAt: source.startedAt || null,
+    startedByName: normalizeText(source.startedByName),
+    respondedAt: source.respondedAt || null,
+    respondedByName: normalizeText(source.respondedByName),
+    emailsSent,
+    maxEmails: SALES_NURTURE_MAX_SEQUENCE,
+    pipelineDay: Math.max(0, dayIndex),
+    canWithdraw: emailsSent >= SALES_NURTURE_MAX_SEQUENCE || dayIndex >= SALES_NURTURE_MAX_SEQUENCE,
+    senderEmail: SALES_NURTURE_SENDER_EMAIL,
+    senderName: SALES_NURTURE_SENDER_NAME,
+    emails: await buildEmailNurtureCatalog(prospect),
+  };
 }
 
 function normalizeStageKey(value) {
@@ -130,8 +170,11 @@ function buildProspectPayload(body = {}, existing = null) {
   };
 }
 
-function serializeProspect(prospect) {
+async function serializeProspect(prospect) {
   const source = prospect.toObject?.() || prospect;
+  const emailNurture = (isEmailNurtureProspect(source) || source.emailNurture?.startedAt)
+    ? await serializeEmailNurture(source)
+    : null;
   return {
     id: String(source._id),
     _id: String(source._id),
@@ -150,6 +193,7 @@ function serializeProspect(prospect) {
     withdrawnAt: source.withdrawnAt || null,
     withdrawnReason: source.withdrawnReason || '',
     withdrawnFromStageKey: source.withdrawnFromStageKey || '',
+    emailNurture,
     salesStages: source.salesStages || [],
     salesEvents: (source.salesEvents || []).map((event) => ({
       ...event,
@@ -241,8 +285,10 @@ function buildQuery(req) {
 
   if (status === SALES_PROSPECT_STATUS_WITHDRAWN) {
     query.salesStatus = SALES_PROSPECT_STATUS_WITHDRAWN;
+  } else if (status === SALES_PROSPECT_STATUS_EMAIL_NURTURE) {
+    query.salesStatus = SALES_PROSPECT_STATUS_EMAIL_NURTURE;
   } else {
-    query.salesStatus = { $ne: SALES_PROSPECT_STATUS_WITHDRAWN };
+    query.salesStatus = { $nin: [SALES_PROSPECT_STATUS_WITHDRAWN, SALES_PROSPECT_STATUS_EMAIL_NURTURE] };
   }
 
   if (search) {
@@ -291,11 +337,22 @@ function getProspectEvents(prospect) {
 async function buildSalesSummary() {
   const prospects = await SalesProspect.find({ deletedAt: null }).sort({ updatedAt: -1 }).limit(500).lean();
   const stageCounts = salesStageTemplates.reduce((accumulator, stage) => ({ ...accumulator, [stage.key]: 0 }), {});
-  const metrics = { total: 0, inProcess: 0, contracted: 0, inProduction: 0, withdrawn: 0 };
+  const metrics = {
+    total: 0,
+    inProcess: 0,
+    contracted: 0,
+    inProduction: 0,
+    withdrawn: 0,
+    emailNurture: 0,
+  };
 
   prospects.forEach((prospect) => {
     if (isWithdrawnProspect(prospect)) {
       metrics.withdrawn += 1;
+      return;
+    }
+    if (isEmailNurtureProspect(prospect)) {
+      metrics.emailNurture += 1;
       return;
     }
     metrics.total += 1;
@@ -308,7 +365,9 @@ async function buildSalesSummary() {
     if (prospect.currentStageKey === 'en-produccion') metrics.inProduction += 1;
   });
 
-  const activeProspects = prospects.filter((prospect) => !isWithdrawnProspect(prospect));
+  const activeProspects = prospects.filter((prospect) => (
+    !isWithdrawnProspect(prospect) && !isEmailNurtureProspect(prospect)
+  ));
   const globalEvents = activeProspects.flatMap(getProspectEvents).slice(0, 12);
   const scheduledEvents = activeProspects
     .flatMap(getProspectEvents)
@@ -322,6 +381,11 @@ async function buildSalesSummary() {
 function assertProspectCanMoveStages(prospect) {
   if (isWithdrawnProspect(prospect)) {
     const error = new Error('Este cliente está marcado como desistido. No puedes cambiar su etapa.');
+    error.statusCode = 409;
+    throw error;
+  }
+  if (isEmailNurtureProspect(prospect)) {
+    const error = new Error('Este cliente está en el pipeline de correos. Márcalo como respondido o espera a completar la secuencia.');
     error.statusCode = 409;
     throw error;
   }
@@ -346,7 +410,7 @@ router.get('/', async (req, res) => {
     const prospects = await SalesProspect.find(query).sort({ updatedAt: -1, createdAt: -1 }).limit(250);
     const summary = await buildSalesSummary();
     return res.status(200).json({
-      prospects: prospects.map(serializeProspect),
+      prospects: await Promise.all(prospects.map((item) => serializeProspect(item))),
       stageTemplates: salesStageTemplates,
       contactMethodOptions: Object.entries(contactMethodLabels).map(([value, label]) => ({ value, label })),
       ...summary,
@@ -514,11 +578,33 @@ router.post('/agenda-settings/closed-dates', async (req, res) => {
   }
 });
 
+router.get('/nurture-email-templates', async (_req, res) => {
+  try {
+    const templates = await listSalesNurtureEmailTemplates();
+    return res.status(200).json({
+      templates,
+      senderEmail: SALES_NURTURE_SENDER_EMAIL,
+      senderName: SALES_NURTURE_SENDER_NAME,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudieron cargar las plantillas de correo.' });
+  }
+});
+
+router.patch('/nurture-email-templates/:sequence', async (req, res) => {
+  try {
+    const template = await updateSalesNurtureEmailTemplate(req.params.sequence, req.body || {});
+    return res.status(200).json({ template });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo guardar la plantilla.' });
+  }
+});
+
 router.get('/:prospectId', async (req, res) => {
   try {
     const prospect = await findProspect(req, res);
     if (!prospect) return null;
-    return res.status(200).json({ prospect: serializeProspect(prospect) });
+    return res.status(200).json({ prospect: await serializeProspect(prospect) });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo cargar el cliente.' });
   }
@@ -544,7 +630,7 @@ router.post('/', async (req, res) => {
         createdByName: normalizeText(req.user?.name || req.user?.username),
       }],
     });
-    return res.status(201).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(201).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo crear el cliente.' });
   }
@@ -558,7 +644,7 @@ router.patch('/:prospectId', async (req, res) => {
     Object.assign(prospect, payload);
     prospect.salesStages = buildDefaultStages(payload.currentStageKey, prospect.salesStages);
     await prospect.save();
-    return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(200).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo actualizar el cliente.' });
   }
@@ -576,6 +662,146 @@ router.delete('/:prospectId', async (req, res) => {
   }
 });
 
+router.patch('/:prospectId/start-email-nurture', async (req, res) => {
+  try {
+    const prospect = await findProspect(req, res);
+    if (!prospect) return null;
+    if (isWithdrawnProspect(prospect)) {
+      return res.status(409).json({ message: 'Este cliente está desistido.' });
+    }
+    if (isEmailNurtureProspect(prospect)) {
+      return res.status(409).json({ message: 'Este cliente ya está en el pipeline de correos.' });
+    }
+    if (prospect.currentStageKey !== 'contactado') {
+      return res.status(400).json({
+        message: 'Solo puedes enviar al pipeline de correos clientes en etapa Contactado (E3).',
+      });
+    }
+    const startedAt = new Date();
+    const startedByName = normalizeText(req.user?.name || req.user?.username);
+    let nurtureNotes = 'Secuencia automática de 7 correos iniciada.';
+    prospect.salesStatus = SALES_PROSPECT_STATUS_EMAIL_NURTURE;
+    prospect.emailNurture = {
+      startedAt,
+      startedByName,
+      respondedAt: null,
+      respondedByName: '',
+      emails: [],
+    };
+    if (isValidEmail(prospect.contactEmail)) {
+      try {
+        await sendSalesNurtureEmailForProspect(prospect, 1);
+        nurtureNotes = 'Secuencia de 7 correos iniciada (correo 1 enviado).';
+      } catch (error) {
+        nurtureNotes = `Secuencia iniciada; el correo 1 no se pudo enviar (${normalizeText(error.message) || 'error de envío'}).`;
+      }
+    } else {
+      nurtureNotes = 'Secuencia iniciada sin envío automático: el contacto no tiene un correo con formato válido. Puedes enviar manualmente después.';
+    }
+    const fromStage = getStageTemplate(prospect.currentStageKey);
+    prospect.salesEvents.push({
+      title: 'Dirigido al pipeline de correos',
+      notes: nurtureNotes,
+      stageKey: fromStage.key,
+      stageLabel: fromStage.label,
+      responsible: startedByName,
+      completed: false,
+      inProgress: true,
+      createdByName: startedByName,
+    });
+    await prospect.save();
+
+    return res.status(200).json({
+      prospect: await serializeProspect(prospect),
+      summary: await buildSalesSummary(),
+      message: 'Cliente en pipeline de correos. Se enviarán hasta 7 correos hasta obtener respuesta.',
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo iniciar el pipeline de correos.' });
+  }
+});
+
+router.get('/:prospectId/nurture-emails/:sequence/preview', async (req, res) => {
+  try {
+    const prospect = await findProspect(req, res);
+    if (!prospect) return null;
+    const sequence = Number(req.params.sequence);
+    const preview = await getSalesNurtureEmailPreviewForProspect(prospect, sequence);
+    return res.status(200).json({ preview });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo cargar la vista previa.' });
+  }
+});
+
+router.post('/:prospectId/nurture-emails/:sequence/send', async (req, res) => {
+  try {
+    const prospect = await findProspect(req, res);
+    if (!prospect) return null;
+    if (!isEmailNurtureProspect(prospect)) {
+      return res.status(400).json({ message: 'Este cliente no está en el pipeline de correos.' });
+    }
+    const sequence = Number(req.params.sequence);
+    const forceResend = Boolean(req.body?.forceResend);
+    const senderName = normalizeText(req.user?.name || req.user?.username);
+    await sendSalesNurtureEmailForProspect(prospect, sequence, { forceResend });
+    prospect.salesEvents.push({
+      title: `Correo ${sequence} enviado`,
+      notes: forceResend ? 'Reenvío manual desde CRM ventas.' : 'Envío manual desde CRM ventas.',
+      stageKey: prospect.currentStageKey,
+      stageLabel: getStageTemplate(prospect.currentStageKey).label,
+      responsible: senderName,
+      completed: true,
+      inProgress: false,
+      createdByName: senderName,
+    });
+    await prospect.save();
+    return res.status(200).json({
+      prospect: await serializeProspect(prospect),
+      summary: await buildSalesSummary(),
+      message: `Correo ${sequence} enviado desde ${SALES_NURTURE_SENDER_EMAIL}.`,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo enviar el correo.' });
+  }
+});
+
+router.patch('/:prospectId/email-nurture/response', async (req, res) => {
+  try {
+    const prospect = await findProspect(req, res);
+    if (!prospect) return null;
+    if (!isEmailNurtureProspect(prospect)) {
+      return res.status(400).json({ message: 'Este cliente no está en el pipeline de correos.' });
+    }
+    if (prospect.emailNurture?.respondedAt) {
+      return res.status(409).json({ message: 'Ya registraste respuesta para este cliente.' });
+    }
+    const notes = normalizeText(req.body?.notes);
+    const responderName = normalizeText(req.user?.name || req.user?.username);
+    prospect.salesStatus = 'active';
+    prospect.emailNurture.respondedAt = new Date();
+    prospect.emailNurture.respondedByName = responderName;
+    const fromStage = getStageTemplate(prospect.currentStageKey);
+    prospect.salesEvents.push({
+      title: 'Respuesta recibida (pipeline de correos)',
+      notes: notes || 'El colegio respondió durante la secuencia de correos.',
+      stageKey: fromStage.key,
+      stageLabel: fromStage.label,
+      responsible: responderName,
+      completed: true,
+      inProgress: false,
+      createdByName: responderName,
+    });
+    await prospect.save();
+    return res.status(200).json({
+      prospect: await serializeProspect(prospect),
+      summary: await buildSalesSummary(),
+      message: 'Respuesta registrada. El cliente vuelve al pipeline activo en E3.',
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo registrar la respuesta.' });
+  }
+});
+
 router.patch('/:prospectId/withdraw', async (req, res) => {
   try {
     const prospect = await findProspect(req, res);
@@ -583,7 +809,18 @@ router.patch('/:prospectId/withdraw', async (req, res) => {
     if (isWithdrawnProspect(prospect)) {
       return res.status(409).json({ message: 'Este cliente ya está marcado como desistido.' });
     }
-    if (prospect.currentStageKey !== 'contactado') {
+    if (isEmailNurtureProspect(prospect)) {
+      const sent = nurtureEmailsSentCount(prospect);
+      const startedAt = prospect.emailNurture?.startedAt;
+      const dayIndex = startedAt
+        ? bogotaDayNumber(new Date()) - bogotaDayNumber(startedAt) + 1
+        : 0;
+      if (sent < SALES_NURTURE_MAX_SEQUENCE && dayIndex < SALES_NURTURE_MAX_SEQUENCE) {
+        return res.status(400).json({
+          message: `En pipeline de correos solo puedes desistir tras 7 días o 7 correos enviados (${sent}/${SALES_NURTURE_MAX_SEQUENCE} correos, día ${Math.max(0, dayIndex)}/7).`,
+        });
+      }
+    } else if (prospect.currentStageKey !== 'contactado') {
       return res.status(400).json({
         message: 'Solo puedes marcar como desistido a clientes en etapa Contactado (E3).',
       });
@@ -609,7 +846,7 @@ router.patch('/:prospectId/withdraw', async (req, res) => {
     });
     await prospect.save();
     return res.status(200).json({
-      prospect: serializeProspect(prospect),
+      prospect: await serializeProspect(prospect),
       summary: await buildSalesSummary(),
       message: 'Cliente marcado como desistido.',
     });
@@ -645,7 +882,7 @@ router.patch('/:prospectId/stages/:stageKey', async (req, res) => {
       });
     }
     await prospect.save();
-    return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(200).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo actualizar la etapa.' });
   }
@@ -673,7 +910,7 @@ router.patch('/:prospectId/stage-transition', async (req, res) => {
       createdByName: normalizeText(req.user?.name || req.user?.username),
     });
     await prospect.save();
-    return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(200).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo mover la etapa.' });
   }
@@ -694,7 +931,7 @@ router.post('/:prospectId/events', async (req, res) => {
       prospect.salesStages = buildDefaultStages(eventPayload.stageKey, prospect.salesStages);
     }
     await prospect.save();
-    return res.status(201).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(201).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo registrar el evento.' });
   }
@@ -723,7 +960,7 @@ router.patch('/:prospectId/events/:eventId', async (req, res) => {
     }
     prospect.markModified('salesEvents');
     await prospect.save();
-    return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(200).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'No se pudo actualizar el evento.' });
   }
@@ -735,7 +972,7 @@ router.delete('/:prospectId/events/:eventId', async (req, res) => {
     if (!prospect) return null;
     prospect.salesEvents = (prospect.salesEvents || []).filter((item) => String(item._id) !== String(req.params.eventId));
     await prospect.save();
-    return res.status(200).json({ prospect: serializeProspect(prospect), summary: await buildSalesSummary() });
+    return res.status(200).json({ prospect: await serializeProspect(prospect), summary: await buildSalesSummary() });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo eliminar el evento.' });
   }

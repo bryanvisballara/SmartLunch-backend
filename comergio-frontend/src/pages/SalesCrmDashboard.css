@@ -68,6 +68,212 @@
   line-height: 1.45;
 }
 
+.sales-crm-status-email-nurture {
+  color: #0369a1;
+}
+
+.sales-crm-email-nurture-btn {
+  border-color: #7dd3fc;
+  color: #0c4a6e;
+}
+
+.sales-crm-email-nurture-list {
+  margin: 12px 0 16px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sales-crm-email-nurture-list li,
+.sales-crm-email-nurture-list__item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sales-crm-email-nurture-list__preview-trigger {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.sales-crm-email-nurture-list__preview-trigger:hover .sales-crm-email-nurture-list__preview-hint {
+  text-decoration: underline;
+  color: #0369a1;
+}
+
+.sales-crm-email-nurture-list__preview-hint {
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.sales-crm-nurture-preview-modal {
+  width: min(920px, 96vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sales-crm-nurture-preview-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sales-crm-nurture-preview-modal__meta {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.sales-crm-nurture-preview-modal__frame {
+  width: 100%;
+  min-height: 420px;
+  flex: 1;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.sales-crm-email-nurture-list li.is-sent {
+  border-color: #bae6fd;
+  background: #f0f9ff;
+}
+
+.sales-crm-email-nurture-list li span {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.sales-crm-email-nurture-list li small {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.sales-crm-email-nurture-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sales-crm-open-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+}
+
+.sales-crm-open-badge.is-opened {
+  border-color: #86efac;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.sales-crm-open-badge.is-not_opened {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.sales-crm-open-badge.is-not_sent {
+  border-color: #e2e8f0;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.sales-crm-email-nurture-list__actions {
+  margin-top: 6px;
+}
+
+.sales-crm-nurture-templates__layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+@media (max-width: 860px) {
+  .sales-crm-nurture-templates__layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.sales-crm-nurture-templates__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sales-crm-nurture-templates__nav-item {
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sales-crm-nurture-templates__nav-item small {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.sales-crm-nurture-templates__nav-item.is-active {
+  border-color: #7dd3fc;
+  background: #f0f9ff;
+}
+
+.sales-crm-nurture-templates__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sales-crm-nurture-templates__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #334155;
+}
+
+.sales-crm-nurture-templates__form input,
+.sales-crm-nurture-templates__form textarea {
+  font: inherit;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.sales-crm-nurture-templates__checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
 .sales-crm-withdraw-modal textarea {
   width: 100%;
   min-height: 96px;

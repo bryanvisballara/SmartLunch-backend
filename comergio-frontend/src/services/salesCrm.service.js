@@ -16,6 +16,22 @@ export const transitionSalesProspectStage = (prospectId, data) => (
 export const withdrawSalesProspect = (prospectId, data) => (
   api.patch(`${basePath}/${prospectId}/withdraw`, data)
 );
+export const startSalesProspectEmailNurture = (prospectId) => (
+  api.patch(`${basePath}/${prospectId}/start-email-nurture`, {})
+);
+export const markSalesProspectEmailNurtureResponse = (prospectId, data = {}) => (
+  api.patch(`${basePath}/${prospectId}/email-nurture/response`, data)
+);
+export const getSalesNurtureEmailTemplates = () => api.get(`${basePath}/nurture-email-templates`);
+export const updateSalesNurtureEmailTemplate = (sequence, data) => (
+  api.patch(`${basePath}/nurture-email-templates/${sequence}`, data)
+);
+export const sendSalesProspectNurtureEmail = (prospectId, sequence, data = {}) => (
+  api.post(`${basePath}/${prospectId}/nurture-emails/${sequence}/send`, data)
+);
+export const getSalesProspectNurtureEmailPreview = (prospectId, sequence) => (
+  api.get(`${basePath}/${prospectId}/nurture-emails/${sequence}/preview`)
+);
 export const createSalesEvent = (prospectId, data) => api.post(`${basePath}/${prospectId}/events`, data);
 export const updateSalesEvent = (prospectId, eventId, data) => (
   api.patch(`${basePath}/${prospectId}/events/${eventId}`, data)

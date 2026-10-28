@@ -30,6 +30,18 @@ const demoLeadSchema = new mongoose.Schema(
     firstLoginAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
     loginCount: { type: Number, default: 0 },
+    loginEvents: {
+      type: [{
+        loggedInAt: { type: Date, required: true },
+        userId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        username: { type: String, trim: true, default: '' },
+        role: { type: String, trim: true, default: '' },
+        ip: { type: String, trim: true, default: '' },
+        userAgent: { type: String, trim: true, default: '' },
+        method: { type: String, trim: true, default: 'password' },
+      }],
+      default: [],
+    },
     pushesScheduledAt: { type: Date, default: null },
     welcomeEmailSentAt: { type: Date, default: null },
     welcomeEmailOpenedAt: { type: Date, default: null },

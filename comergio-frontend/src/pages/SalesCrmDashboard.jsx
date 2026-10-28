@@ -12,21 +12,38 @@ import {
   updateSalesEvent,
   updateSalesProspect,
   withdrawSalesProspect,
+  startSalesProspectEmailNurture,
+  markSalesProspectEmailNurtureResponse,
+  sendSalesProspectNurtureEmail,
+  getSalesProspectNurtureEmailPreview,
 } from '../services/salesCrm.service';
 import SalesCrmContactTemplatesPanel from './SalesCrmContactTemplatesPanel';
+import SalesCrmNurtureEmailTemplatesPanel from './SalesCrmNurtureEmailTemplatesPanel';
 import './AdmissionsDashboard.css';
 import './SalesCrmDashboard.css';
 
 const VIEWS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'clientes', label: 'Clientes' },
+  { key: 'correos', label: 'Dirigidos al correo' },
   { key: 'desistidos', label: 'Desistidos' },
-  { key: 'plantillas', label: 'Plantillas' },
+  { key: 'plantillas', label: 'Plantillas contacto' },
+  { key: 'secuencia-correos', label: 'Secuencia 7 correos' },
   { key: 'agenda', label: 'Agenda' },
 ];
 
+function nurtureOpenStatusLabel(openStatus) {
+  if (openStatus === 'opened') return 'Abierto';
+  if (openStatus === 'not_opened') return 'No abierto';
+  return 'No enviado';
+}
+
 function isWithdrawnProspect(prospect) {
   return String(prospect?.salesStatus || '') === 'withdrawn';
+}
+
+function isEmailNurtureProspect(prospect) {
+  return String(prospect?.salesStatus || '') === 'email_nurture';
 }
 
 /** Keep in sync with backend `salesStageTemplates` (src/routes/salesCrm.routes.js). */
@@ -181,6 +198,13 @@ export default function SalesCrmDashboard() {
   const [templateContactHint, setTemplateContactHint] = useState(null);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawReasonDraft, setWithdrawReasonDraft] = useState('');
+  const [nurturePreview, setNurturePreview] = useState(null);
+
+  const resolveListStatus = (viewKey) => {
+    if (viewKey === 'desistidos') return 'withdrawn';
+    if (viewKey === 'correos') return 'email_nurture';
+    return 'active';
+  };
 
   const load = useCallback(async (nextFilters = filters, { keepSelection = true, prospectsOnly = false, listStatus = 'active' } = {}) => {
     if (prospectsOnly) {
@@ -192,7 +216,7 @@ export default function SalesCrmDashboard() {
     try {
       const queryParams = {
         ...nextFilters,
-        status: listStatus === 'withdrawn' ? 'withdrawn' : '',
+        status: listStatus === 'active' ? '' : listStatus,
       };
       const { data } = await getSalesCrm(queryParams);
       setProspects(data?.prospects || []);
@@ -229,12 +253,12 @@ export default function SalesCrmDashboard() {
   }, []);
 
   useEffect(() => {
-    if ((view !== 'clientes' && view !== 'desistidos') || selectedProspect) return undefined;
+    if ((view !== 'clientes' && view !== 'desistidos' && view !== 'correos') || selectedProspect) return undefined;
     const timer = window.setTimeout(() => {
       load(filters, {
         keepSelection: false,
         prospectsOnly: true,
-        listStatus: view === 'desistidos' ? 'withdrawn' : 'active',
+        listStatus: resolveListStatus(view),
       });
     }, 320);
     return () => window.clearTimeout(timer);
@@ -265,7 +289,7 @@ export default function SalesCrmDashboard() {
     try {
       await action();
       setMessage(successMessage);
-      await load(filters, { listStatus: view === 'desistidos' ? 'withdrawn' : 'active' });
+      await load(filters, { listStatus: resolveListStatus(view) });
       await refreshSelected();
     } catch (requestError) {
       setError(requestError?.response?.data?.message || 'No se pudo completar la acción.');
@@ -296,6 +320,7 @@ export default function SalesCrmDashboard() {
     setSelectedProspect(null);
     setEventForm(emptyEventForm);
     setEditingEventId('');
+    setNurturePreview(null);
   };
 
   const updateEventForm = (key, value) => {
@@ -326,7 +351,7 @@ export default function SalesCrmDashboard() {
   };
 
   const jumpToStage = (stageKey) => {
-    if (!selectedProspect?.id || isWithdrawnProspect(selectedProspect)) return;
+    if (!selectedProspect?.id || isWithdrawnProspect(selectedProspect) || isEmailNurtureProspect(selectedProspect)) return;
     runAction(
       () => setSalesProspectStage(selectedProspect.id, stageKey),
       'Etapa actualizada.',
@@ -413,12 +438,54 @@ export default function SalesCrmDashboard() {
   };
 
   const moveStage = (direction) => {
-    if (!selectedProspect?.id || isWithdrawnProspect(selectedProspect)) return;
+    if (!selectedProspect?.id || isWithdrawnProspect(selectedProspect) || isEmailNurtureProspect(selectedProspect)) return;
     runAction(
       () => transitionSalesProspectStage(selectedProspect.id, { direction }),
       direction === 'previous' ? 'Etapa anterior.' : 'Siguiente etapa.',
     );
   };
+
+  const startEmailNurture = () => {
+    if (!selectedProspect?.id) return;
+    runAction(
+      () => startSalesProspectEmailNurture(selectedProspect.id),
+      'Cliente movido al pipeline de correos.',
+    );
+  };
+
+  const markEmailNurtureResponse = () => {
+    if (!selectedProspect?.id) return;
+    runAction(
+      () => markSalesProspectEmailNurtureResponse(selectedProspect.id, {}),
+      'Respuesta registrada. El cliente vuelve al pipeline activo.',
+    );
+  };
+
+  const sendNurtureEmailNow = (sequence, { forceResend = false } = {}) => {
+    if (!selectedProspect?.id) return;
+    runAction(
+      () => sendSalesProspectNurtureEmail(selectedProspect.id, sequence, { forceResend }),
+      forceResend ? `Correo ${sequence} reenviado.` : `Correo ${sequence} enviado.`,
+    );
+  };
+
+  const openNurtureEmailPreview = async (sequence) => {
+    if (!selectedProspect?.id) return;
+    setNurturePreview({ sequence, loading: true, data: null, error: '' });
+    try {
+      const { data } = await getSalesProspectNurtureEmailPreview(selectedProspect.id, sequence);
+      setNurturePreview({ sequence, loading: false, data: data?.preview || null, error: '' });
+    } catch (requestError) {
+      setNurturePreview({
+        sequence,
+        loading: false,
+        data: null,
+        error: requestError?.response?.data?.message || 'No se pudo cargar la vista previa.',
+      });
+    }
+  };
+
+  const closeNurturePreview = () => setNurturePreview(null);
 
   const submitWithdraw = async (event) => {
     event.preventDefault();
@@ -495,11 +562,22 @@ export default function SalesCrmDashboard() {
   const currentStageIndex = stageTemplates.findIndex((stage) => stage.key === activeStageKey);
   const isFinalStage = activeStageKey === 'en-produccion';
   const prospectWithdrawn = isWithdrawnProspect(selectedProspect);
-  const canMarkWithdrawn = !prospectWithdrawn && activeStageKey === 'contactado';
+  const prospectEmailNurture = isEmailNurtureProspect(selectedProspect);
+  const emailNurtureSent = Number(selectedProspect?.emailNurture?.emailsSent || 0);
+  const canStartEmailNurture = !prospectWithdrawn && !prospectEmailNurture && activeStageKey === 'contactado';
+  const canMarkWithdrawn = (
+    !prospectWithdrawn
+    && activeStageKey === 'contactado'
+    && !prospectEmailNurture
+  ) || (
+    prospectEmailNurture && Boolean(selectedProspect?.emailNurture?.canWithdraw)
+  );
   const activeStageDisplay = prospectWithdrawn
     ? 'Desistido'
-    : `${getStageCode(stageTemplates, activeStageKey)} - ${getStageLabel(stageTemplates, activeStageKey)}`;
-  const showAppointmentScheduler = !prospectWithdrawn && (activeStageKey === 'agendado' || eventForm.stageKey === 'agendado');
+    : prospectEmailNurture
+      ? `Pipeline correos (${emailNurtureSent}/7)`
+      : `${getStageCode(stageTemplates, activeStageKey)} - ${getStageLabel(stageTemplates, activeStageKey)}`;
+  const showAppointmentScheduler = !prospectWithdrawn && !prospectEmailNurture && (activeStageKey === 'agendado' || eventForm.stageKey === 'agendado');
   const showProspectDetail = Boolean(selectedProspect);
 
   return (
@@ -546,6 +624,19 @@ export default function SalesCrmDashboard() {
               <span>Desistidos</span>
               <strong>{metrics.withdrawn || 0}</strong>
               <p>No interesados tras contacto (E3).</p>
+            </button>
+            <button
+              className="metric-card admin-metric-card sales-crm-metric-link"
+              type="button"
+              onClick={() => {
+                setView('correos');
+                setDrilldownStage('');
+                closeProspect();
+              }}
+            >
+              <span>Dirigidos al correo</span>
+              <strong>{metrics.emailNurture || 0}</strong>
+              <p>Secuencia de 7 correos desde E3.</p>
             </button>
           </section>
           <section className="dashboard-card admin-distribution-card">
@@ -612,6 +703,68 @@ export default function SalesCrmDashboard() {
                     <td data-label="Ciudad">{p.city || '—'}</td>
                     <td data-label="Contacto">{p.contactName || p.contactEmail || '—'}</td>
                     <td data-label="Canal">{p.contactMethodLabel || '—'}</td>
+                    <td className="tracking-actions-cell" data-label="Acción">
+                      <button
+                        className="tracking-icon-button"
+                        type="button"
+                        aria-label={`Ver detalle de ${p.schoolName}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProspect(p);
+                        }}
+                      >
+                        →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {!showProspectDetail && view === 'correos' ? (
+        <section className="dashboard-card tracking-selector-panel">
+          <div className="admin-panel-heading">
+            <div>
+              <h2>Dirigidos al correo</h2>
+              <p>Clientes en secuencia automática de 7 correos (desde etapa E3).</p>
+            </div>
+          </div>
+          <div className="tracking-search-grid">
+            <input placeholder="Buscar colegio o contacto" value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))} />
+            <input placeholder="Ciudad" value={filters.city} onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))} />
+          </div>
+          <div className="tracking-table-wrap sales-crm-table-wrap">
+            <table className="tracking-data-table sales-crm-table">
+              <thead><tr><th>Colegio</th><th>Correo</th><th>Contacto</th><th>Correos enviados</th><th>Inicio</th><th /></tr></thead>
+              <tbody>
+                {loading || listLoading ? (
+                  <tr><td className="sales-crm-table-empty" colSpan="6">{loading ? 'Cargando…' : 'Filtrando…'}</td></tr>
+                ) : null}
+                {!loading && !listLoading && !prospects.length ? (
+                  <tr><td className="sales-crm-table-empty" colSpan="6"><div className="empty-state">No hay clientes en pipeline de correos.</div></td></tr>
+                ) : null}
+                {!loading && !listLoading && prospects.map((p) => (
+                  <tr
+                    key={p.id}
+                    className={selectedProspect?.id === p.id ? 'is-selected' : ''}
+                    onClick={() => openProspect(p)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openProspect(p);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <td data-label="Colegio">{p.schoolName}</td>
+                    <td data-label="Correo">{p.contactEmail || '—'}</td>
+                    <td data-label="Contacto">{p.contactName || '—'}</td>
+                    <td data-label="Enviados">{p.emailNurture?.emailsSent || 0} / 7</td>
+                    <td data-label="Inicio">{formatDate(p.emailNurture?.startedAt || p.updatedAt)}</td>
                     <td className="tracking-actions-cell" data-label="Acción">
                       <button
                         className="tracking-icon-button"
@@ -766,6 +919,10 @@ export default function SalesCrmDashboard() {
         <SalesCrmContactTemplatesPanel contactHint={templateContactHint} />
       ) : null}
 
+      {!showProspectDetail && view === 'secuencia-correos' ? (
+        <SalesCrmNurtureEmailTemplatesPanel />
+      ) : null}
+
       {!showProspectDetail && view === 'agenda' ? (
         <section className="dashboard-card admissions-agenda-card">
           <h2>Agenda comercial</h2>
@@ -836,8 +993,12 @@ export default function SalesCrmDashboard() {
               <div className="admissions-detail-title-block">
                 <h1>{selectedProspect.schoolName}</h1>
                 <span>{activeStageDisplay}</span>
-                <b className={prospectWithdrawn ? 'sales-crm-status-withdrawn' : ''}>
-                  {prospectWithdrawn ? 'Desistido del pipeline' : 'En seguimiento comercial'}
+                <b className={prospectWithdrawn ? 'sales-crm-status-withdrawn' : prospectEmailNurture ? 'sales-crm-status-email-nurture' : ''}>
+                  {prospectWithdrawn
+                    ? 'Desistido del pipeline'
+                    : prospectEmailNurture
+                      ? 'Secuencia de 7 correos en curso'
+                      : 'En seguimiento comercial'}
                 </b>
               </div>
               <div className="admissions-detail-metadata">
@@ -900,6 +1061,83 @@ export default function SalesCrmDashboard() {
               <h2>{prospectWithdrawn ? 'Estado comercial' : 'Transición de etapa'}</h2>
               {prospectWithdrawn ? (
                 <p>Este colegio ya no cuenta en el pipeline activo. Queda en la lista de desistidos con el motivo registrado.</p>
+              ) : prospectEmailNurture ? (
+                <>
+                  <p>
+                    Remitente: <strong>{selectedProspect.emailNurture?.senderEmail || 'alianzaseducativas@comergio.com'}</strong>.
+                    Un correo por día (9:00 a. m. Colombia) o envío manual. Enviados: <strong>{emailNurtureSent}/7</strong>.
+                  </p>
+                  <ul className="sales-crm-email-nurture-list">
+                    {(selectedProspect.emailNurture?.emails || []).map((item) => (
+                      <li
+                        key={item.sequence}
+                        className={`sales-crm-email-nurture-list__item ${item.sentAt ? 'is-sent' : 'is-pending'} open-${item.openStatus || 'not_sent'}`}
+                      >
+                        <button
+                          className="sales-crm-email-nurture-list__preview-trigger"
+                          type="button"
+                          onClick={() => openNurtureEmailPreview(item.sequence)}
+                        >
+                          <div className="sales-crm-email-nurture-list__head">
+                            <span>{item.label || `Correo ${item.sequence}`}</span>
+                            <span className={`sales-crm-open-badge is-${item.openStatus || 'not_sent'}`}>
+                              {nurtureOpenStatusLabel(item.openStatus)}
+                            </span>
+                          </div>
+                          <small>
+                            {item.sentAt ? `Enviado ${formatDateTime(item.sentAt)}` : 'Pendiente de envío'}
+                            {item.openedAt ? ` · Primera apertura ${formatDateTime(item.openedAt)}` : ''}
+                            {item.openCount > 1 ? ` · ${item.openCount} aperturas` : ''}
+                            {' · '}
+                            <span className="sales-crm-email-nurture-list__preview-hint">Ver contenido</span>
+                          </small>
+                        </button>
+                        <div className="sales-crm-email-nurture-list__actions">
+                          {!item.sentAt ? (
+                            <button
+                              className="secondary-button"
+                              disabled={busy}
+                              onClick={() => sendNurtureEmailNow(item.sequence)}
+                              type="button"
+                            >
+                              Enviar ahora
+                            </button>
+                          ) : (
+                            <button
+                              className="secondary-button"
+                              disabled={busy}
+                              onClick={() => sendNurtureEmailNow(item.sequence, { forceResend: true })}
+                              type="button"
+                            >
+                              Reenviar
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="admissions-detail-secondary-actions sales-crm-detail-secondary-actions">
+                    <button className="primary-button" disabled={busy} onClick={markEmailNurtureResponse} type="button">
+                      Marcar respuesta recibida
+                    </button>
+                    {canMarkWithdrawn ? (
+                      <button
+                        className="secondary-button sales-crm-withdraw-btn"
+                        disabled={busy}
+                        onClick={() => {
+                          setWithdrawReasonDraft('');
+                          setShowWithdrawModal(true);
+                        }}
+                        type="button"
+                      >
+                        Marcar como desistido
+                      </button>
+                    ) : null}
+                  </div>
+                  {!canMarkWithdrawn ? (
+                    <p className="sales-crm-withdraw-hint">Podrás marcar como desistido cuando se haya enviado el 7.º correo.</p>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <div className="admissions-detail-transition-actions">
@@ -908,6 +1146,16 @@ export default function SalesCrmDashboard() {
                   </div>
                   <p>Puedes avanzar o retroceder libremente. La etapa actual queda en proceso.</p>
                   <div className="admissions-detail-secondary-actions sales-crm-detail-secondary-actions">
+                    {canStartEmailNurture ? (
+                      <button
+                        className="secondary-button sales-crm-email-nurture-btn"
+                        disabled={busy}
+                        onClick={startEmailNurture}
+                        type="button"
+                      >
+                        Dirigido al correo
+                      </button>
+                    ) : null}
                     {canMarkWithdrawn ? (
                       <button
                         className="secondary-button sales-crm-withdraw-btn"
@@ -923,7 +1171,12 @@ export default function SalesCrmDashboard() {
                     ) : null}
                     <button className="primary-button" disabled={busy || isFinalStage} onClick={() => jumpToStage('en-produccion')} type="button">Marcar en producción</button>
                   </div>
-                  {canMarkWithdrawn ? (
+                  {canStartEmailNurture ? (
+                    <p className="sales-crm-withdraw-hint">
+                      Mueve el cliente al pipeline de 7 correos. Si el email no es válido para envío, igual puedes avanzar y corregirlo después en Editar datos.
+                    </p>
+                  ) : null}
+                  {canMarkWithdrawn && !canStartEmailNurture ? (
                     <p className="sales-crm-withdraw-hint">Usa desistido cuando el colegio respondió en E3 pero no quiere continuar.</p>
                   ) : null}
                 </>
@@ -941,7 +1194,7 @@ export default function SalesCrmDashboard() {
                   <button
                     key={stage.key}
                     className={`admissions-detail-timeline-item ${isCompleted ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''} ${!isCompleted && !isCurrent ? 'is-pending' : ''}`}
-                    disabled={prospectWithdrawn || busy}
+                    disabled={prospectWithdrawn || prospectEmailNurture || busy}
                     type="button"
                     onClick={() => jumpToStage(stage.key)}
                   >
@@ -993,7 +1246,7 @@ export default function SalesCrmDashboard() {
               </div>
             </article>
 
-            {!prospectWithdrawn ? (
+            {!prospectWithdrawn && !prospectEmailNurture ? (
             <form className="dashboard-card admissions-detail-new-event-card" onSubmit={submitEvent}>
               <h2>{editingEventId ? 'Editar evento' : 'Nuevo evento'}</h2>
               <label><span>Título</span><input placeholder="Título" required={!showAppointmentScheduler} value={eventForm.title} onChange={(event) => updateEventForm('title', event.target.value)} /></label>
@@ -1024,6 +1277,49 @@ export default function SalesCrmDashboard() {
             ) : null}
           </div>
         </section>
+      ) : null}
+
+      {nurturePreview ? (
+        <div className="admissions-modal-backdrop" role="presentation" onClick={closeNurturePreview}>
+          <section
+            className="dashboard-card admissions-create-modal sales-crm-nurture-preview-modal"
+            role="dialog"
+            aria-labelledby="sales-crm-nurture-preview-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sales-crm-nurture-preview-modal__header">
+              <div>
+                <h2 id="sales-crm-nurture-preview-title">
+                  {nurturePreview.data?.label || `Correo ${nurturePreview.sequence}`}
+                </h2>
+                {nurturePreview.data ? (
+                  <p className="sales-crm-nurture-preview-modal__meta">
+                    <strong>Asunto:</strong> {nurturePreview.data.subject}
+                    {' · '}
+                    <strong>Para:</strong> {nurturePreview.data.toEmail || '(sin correo en ficha)'}
+                    {' · '}
+                    <strong>De:</strong> {nurturePreview.data.senderEmail}
+                  </p>
+                ) : null}
+              </div>
+              <button className="secondary-button" type="button" onClick={closeNurturePreview}>Cerrar</button>
+            </div>
+            {nurturePreview.loading ? (
+              <p className="campus-panel__meta">Cargando vista previa…</p>
+            ) : null}
+            {nurturePreview.error ? (
+              <p className="admissions-feedback is-error" role="alert"><span>{nurturePreview.error}</span></p>
+            ) : null}
+            {!nurturePreview.loading && nurturePreview.data?.htmlContent ? (
+              <iframe
+                className="sales-crm-nurture-preview-modal__frame"
+                title={`Vista previa correo ${nurturePreview.sequence}`}
+                sandbox=""
+                srcDoc={nurturePreview.data.htmlContent}
+              />
+            ) : null}
+          </section>
+        </div>
       ) : null}
 
       {showWithdrawModal ? (

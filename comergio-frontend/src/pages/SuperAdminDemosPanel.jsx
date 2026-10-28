@@ -65,7 +65,8 @@ export default function SuperAdminDemosPanel() {
   const totals = useMemo(() => ({
     total: demos.length,
     active: demos.filter((demo) => demo.status === 'ready').length,
-    loggedIn: demos.filter((demo) => demo.loginCount > 0).length,
+    loggedIn: demos.filter((demo) => demo.hasLoggedIn || demo.loginCount > 0).length,
+    neverLoggedIn: demos.filter((demo) => !(demo.hasLoggedIn || demo.loginCount > 0)).length,
   }), [demos]);
 
   const openDemo = async (demo) => {
@@ -109,6 +110,8 @@ export default function SuperAdminDemosPanel() {
   };
 
   const emails = selectedDetail?.emails || selectedDetail?.demo?.emailSummary || [];
+  const loginEvents = selectedDetail?.demo?.loginEvents || [];
+  const selectedDemo = selectedDetail?.demo || demos.find((item) => item._id === selectedId);
 
   return (
     <>
@@ -127,6 +130,11 @@ export default function SuperAdminDemosPanel() {
           <span>Iniciaron sesión</span>
           <strong>{totals.loggedIn}</strong>
           <p>Entraron a la app al menos una vez</p>
+        </article>
+        <article className="sa-kpi-card">
+          <span>Sin entrar aún</span>
+          <strong>{totals.neverLoggedIn}</strong>
+          <p>No han iniciado sesión en su demo</p>
         </article>
       </section>
 
@@ -191,12 +199,18 @@ export default function SuperAdminDemosPanel() {
                         </td>
                         <td>{formatDate(demo.createdAt)}</td>
                         <td>
-                          {demo.loginCount > 0 ? (
+                          {demo.hasLoggedIn || demo.loginCount > 0 ? (
                             <>
-                              <strong>{demo.loginCount} {demo.loginCount === 1 ? 'vez' : 'veces'}</strong>
-                              <small>Última: {formatDate(demo.lastLoginAt)}</small>
+                              <EmailStatusPill yes labelYes="Sí entró" />
+                              <small>1.ª vez: {formatDate(demo.firstLoginAt || demo.lastLoginAt)}</small>
+                              <small>Última: {formatDate(demo.lastLoginAt)} · {demo.loginCount || 0} inicio{(demo.loginCount || 0) === 1 ? '' : 's'}</small>
                             </>
-                          ) : <span className="sa-muted">No ha entrado</span>}
+                          ) : (
+                            <>
+                              <EmailStatusPill yes={false} labelNo="No ha entrado" />
+                              <small className="sa-muted">Esperando primer login</small>
+                            </>
+                          )}
                         </td>
                         <td>
                           <small>{sentCount} enviados · {openCount} abiertos</small>
@@ -224,7 +238,49 @@ export default function SuperAdminDemosPanel() {
                         <tr key={`${demo._id}-detail`}>
                           <td colSpan="9">
                             <section className="sa-demo-emails">
-                              {detailLoading ? <p>Cargando correos…</p> : null}
+                              {detailLoading ? <p>Cargando detalle…</p> : null}
+                              {!detailLoading && selectedDemo ? (
+                                <>
+                                  <h3>Sesiones en la demo</h3>
+                                  <p className="sa-muted">
+                                    Cuenta padre: <strong>{selectedDemo.email}</strong>
+                                    {selectedDemo.demoSchoolId ? ` · Colegio demo: ${selectedDemo.demoSchoolId}` : ''}
+                                  </p>
+                                  {selectedDemo.hasLoggedIn || selectedDemo.loginCount > 0 ? (
+                                    <p className="sa-muted">
+                                      Primera sesión: <strong>{formatDate(selectedDemo.firstLoginAt || selectedDemo.lastLoginAt)}</strong>
+                                      {' · '}
+                                      Última: <strong>{formatDate(selectedDemo.lastLoginAt)}</strong>
+                                    </p>
+                                  ) : (
+                                    <p className="sa-muted">Aún no ha iniciado sesión con su correo y contraseña de demo.</p>
+                                  )}
+                                  {loginEvents.length ? (
+                                    <table>
+                                      <thead>
+                                        <tr>
+                                          <th>Fecha y hora</th>
+                                          <th>Usuario</th>
+                                          <th>Método</th>
+                                          <th>IP</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {[...loginEvents].reverse().map((row, index) => (
+                                          <tr key={`${row.loggedInAt}-${index}`}>
+                                            <td>{formatDate(row.loggedInAt)}</td>
+                                            <td>{row.username || selectedDemo.email}</td>
+                                            <td>{row.method === 'biometric' ? 'Biometría' : 'Contraseña'}</td>
+                                            <td><small>{row.ip || '—'}</small></td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  ) : (
+                                    <p className="sa-muted">No hay historial detallado (solo aplica a logins nuevos).</p>
+                                  )}
+                                </>
+                              ) : null}
                               {!detailLoading && emails.length ? (
                                 <>
                                   <h3>Correos de seguimiento</h3>
