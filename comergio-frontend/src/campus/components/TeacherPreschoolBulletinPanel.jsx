@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getTeacherPreschoolBulletinWorkspace } from '../../services/preschoolBulletin.service';
 import HeadroomPreschoolBulletinView from './HeadroomPreschoolBulletinView';
+
+const EMPTY_BULLETIN_ENTRIES = [];
+const EMPTY_BULLETIN_BLOCK_COMMENTS = [];
 
 export default function TeacherPreschoolBulletinPanel({ onNotice }) {
   const [workspace, setWorkspace] = useState(null);
@@ -35,6 +38,26 @@ export default function TeacherPreschoolBulletinPanel({ onNotice }) {
     };
   }, [gradeKey, periodKey, reloadKey]);
 
+  const periodName = useMemo(
+    () => (workspace?.periods || []).find((period) => period.key === periodKey)?.name || '',
+    [workspace?.periods, periodKey],
+  );
+
+  const bulletin = useMemo(() => {
+    if (!workspace?.assignment) return null;
+    return {
+      gradeKey: workspace.assignment.gradeKey,
+      gradeLabel: workspace.assignment.gradeLabel,
+      academicPeriodKey: periodKey,
+      academicPeriodLabel: periodName,
+      blocks: workspace.assignment.blocks || [],
+      students: workspace.students || [],
+      entries: workspace.report?.entries ?? EMPTY_BULLETIN_ENTRIES,
+      blockComments: workspace.report?.blockComments ?? EMPTY_BULLETIN_BLOCK_COMMENTS,
+      performanceLevels: workspace.performanceLevels || [],
+    };
+  }, [periodKey, periodName, workspace]);
+
   if (loading && !workspace) {
     return <p className="campus-panel__meta">Cargando boletín de preescolar...</p>;
   }
@@ -42,8 +65,6 @@ export default function TeacherPreschoolBulletinPanel({ onNotice }) {
   if (!workspace?.assignments?.length) {
     return <p className="campus-panel__meta">Todavía no tienes indicadores de preescolar asignados. Aparecen cuando rectoría, dirección o coordinación publican el modelo de tu grado.</p>;
   }
-
-  const periodName = (workspace.periods || []).find((period) => period.key === periodKey)?.name || '';
 
   return (
     <article className="campus-teacher__embedded-panel">
@@ -75,19 +96,9 @@ export default function TeacherPreschoolBulletinPanel({ onNotice }) {
         <span>{workspace.report?.status === 'submitted' ? 'Generado' : 'Borrador'}</span>
       </div>
 
-      {workspace.assignment ? (
+      {bulletin ? (
         <HeadroomPreschoolBulletinView
-          bulletin={{
-            gradeKey: workspace.assignment.gradeKey,
-            gradeLabel: workspace.assignment.gradeLabel,
-            academicPeriodKey: periodKey,
-            academicPeriodLabel: periodName,
-            blocks: workspace.assignment.blocks || [],
-            students: workspace.students || [],
-            entries: workspace.report?.entries || [],
-            blockComments: workspace.report?.blockComments || [],
-            performanceLevels: workspace.performanceLevels || [],
-          }}
+          bulletin={bulletin}
           onNotice={onNotice}
           onSaved={() => setReloadKey((current) => current + 1)}
         />

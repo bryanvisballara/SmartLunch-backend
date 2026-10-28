@@ -73,6 +73,7 @@ import { mockTeacherWorkspace } from '../mockCampusContext';
 import ReportCardSignaturePad from '../components/ReportCardSignaturePad';
 import HeadroomPreschoolBulletinView from '../components/HeadroomPreschoolBulletinView';
 import HeadroomPreschoolGeneralPdfPanel from '../components/HeadroomPreschoolGeneralPdfPanel';
+import HeadroomGeneralPdfPanel from '../components/HeadroomGeneralPdfPanel';
 import TeacherPreschoolBulletinPanel from '../components/TeacherPreschoolBulletinPanel';
 import '../campus.css';
 
@@ -132,6 +133,25 @@ function buildHeadroomStudentRowsForSection(section) {
         : null,
     };
   });
+}
+
+function buildHeadroomStudentOptionsForSection(section) {
+  const rows = buildHeadroomStudentRowsForSection(section);
+  if (rows.length) return rows;
+  const byStudent = new Map();
+  (section?.subjects || []).forEach((subjectItem) => {
+    (subjectItem.report?.students || []).forEach((student) => {
+      const studentId = String(student.studentId || '');
+      if (!studentId || byStudent.has(studentId)) return;
+      byStudent.set(studentId, {
+        studentId,
+        studentName: student.studentName || 'Estudiante',
+        subjectLines: [],
+        overallAverage: null,
+      });
+    });
+  });
+  return Array.from(byStudent.values());
 }
 
 const teacherNavGroups = [
@@ -4926,6 +4946,22 @@ function TeacherCampusHome({ forcePreview = false }) {
     ]
   );
 
+  const headroomStudentPdfOptions = useMemo(
+    () => buildHeadroomStudentOptionsForSection(selectedHeadroomSection),
+    [
+      selectedHeadroomSection,
+      selectedHeadroomSection?.sourceCourseKey,
+      selectedHeadroomSection?.generalReport?.updatedAt,
+      selectedHeadroomSection?.subjects,
+    ]
+  );
+
+  const selectedHeadroomPeriodName = useMemo(() => {
+    const periods = selectedHeadroomSection?.periods || [];
+    const match = periods.find((period) => period.key === selectedHeadroomPeriodKey);
+    return match?.name || selectedHeadroomPeriodKey || '';
+  }, [selectedHeadroomSection?.periods, selectedHeadroomPeriodKey]);
+
   useEffect(() => {
     if (!subjectReportPeriods.length) return;
     if (!reportCardPeriodKey || !subjectReportPeriods.some((period) => period.key === reportCardPeriodKey)) {
@@ -5023,6 +5059,30 @@ function TeacherCampusHome({ forcePreview = false }) {
       observationCount: fromReport?.coexistenceObservationCount ?? fromApi?.observationCount ?? 0,
       performanceLabel: fromReport?.coexistencePerformanceLabel || fromApi?.performanceLabel || performanceLevel?.label || '',
       performanceColor: fromApi?.performanceColor || performanceLevel?.color || '',
+    };
+  };
+
+  const resolveHeadroomBulletinForPdf = (studentRow) => {
+    const studentId = String(studentRow?.studentId || '');
+    const coexistence = resolveHeadroomCoexistenceForStudent(studentId, studentRow);
+    return {
+      subjectLines: studentRow?.subjectLines || [],
+      overallAverage: studentRow?.overallAverage ?? null,
+      periodName: selectedHeadroomPeriodName,
+      headroomObservation: Object.prototype.hasOwnProperty.call(headroomObservations, studentId)
+        ? headroomObservations[studentId]
+        : (studentRow?.headroomObservation || ''),
+      coexistenceScore: coexistence.score,
+      coexistenceTotalDeducted: coexistence.totalDeducted,
+      coexistenceObservationCount: coexistence.observationCount,
+      coexistencePerformanceLabel: coexistence.performanceLabel,
+      coexistenceObservation: Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, studentId)
+        ? headroomCoexistenceObservations[studentId]
+        : (studentRow?.coexistenceObservation || ''),
+      headroomTeacherName: selectedHeadroomSection?.generalReport?.headroomTeacherName
+        || selectedHeadroomSection?.generalReport?.headroomSignerName
+        || authUser?.name
+        || '',
     };
   };
 
@@ -11868,7 +11928,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                     <p className="campus-teacher__classroom-subtitle">
                       {selectedHeadroomSection?.preschoolBulletin
                         ? 'Califica indicadores de preescolar, revisa el estado de cada materia y genera el PDF del boletín general por estudiante cuando quieras revisarlo.'
-                        : 'Cuando todas las materias hayan enviado su boletín, consolida promedios, convivencia escolar y tus observaciones como director de grupo.'}
+                        : 'Revisa el estado de cada materia, genera el PDF del boletín general por estudiante cuando quieras, y publica cuando todas las materias hayan enviado su boletín.'}
                     </p>
                   </div>
                 </header>
@@ -12005,6 +12065,47 @@ function TeacherCampusHome({ forcePreview = false }) {
                         {saveHeadroomSignatureMutation.isPending ? 'Guardando firma...' : 'Guardar firma'}
                       </button>
                     </div>
+
+                    {!selectedHeadroomSection.preschoolBulletin ? (
+                      <HeadroomGeneralPdfPanel
+                        canPublishToParents={
+                          selectedHeadroomSection.allSubjectsSubmitted
+                          && Boolean(headroomSignatureDataUrl)
+                        }
+                        coordinatorSignatureDataUrl={selectedHeadroomSection.generalReport?.coordinatorSignatureDataUrl || ''}
+                        coordinatorSignerName={selectedHeadroomSection.generalReport?.coordinatorSignerName || ''}
+                        gradeLabel={selectedHeadroomSection.studentGradeKey || selectedHeadroomSection.sectionLabel || ''}
+                        gradingScale={selectedHeadroomSection.gradingScale}
+                        headroomTeacherName={
+                          selectedHeadroomSection.generalReport?.headroomTeacherName
+                          || authUser?.name
+                          || ''
+                        }
+                        isPublished={selectedHeadroomSection.generalReport?.status === 'published'}
+                        onNotice={setNotice}
+                        onPublishToParents={() => onSubmitHeadroomReportCard('published')}
+                        periodName={selectedHeadroomPeriodName}
+                        publishHint={
+                          !selectedHeadroomSection.allSubjectsSubmitted
+                            ? 'Faltan materias del curso por marcar boletín enviado.'
+                            : !headroomSignatureDataUrl
+                              ? 'Guarda tu firma de director de grupo para publicar.'
+                              : ''
+                        }
+                        resolveStudentBulletin={resolveHeadroomBulletinForPdf}
+                        schoolId={authUser?.schoolId || ''}
+                        schoolName={schoolDisplayName}
+                        sectionLabel={selectedHeadroomSection.sectionLabel || ''}
+                        signatureDataUrl={headroomSignatureDataUrl}
+                        signerName={
+                          selectedHeadroomSection.generalReport?.headroomSignerName
+                          || selectedHeadroomSection.generalReport?.headroomTeacherName
+                          || authUser?.name
+                          || ''
+                        }
+                        students={headroomStudentPdfOptions}
+                      />
+                    ) : null}
 
                     {selectedHeadroomSection.preschoolBulletin ? (
                       <HeadroomPreschoolGeneralPdfPanel
@@ -12184,11 +12285,7 @@ function TeacherCampusHome({ forcePreview = false }) {
                           </div>
                         </div>
                       </>
-                    ) : selectedHeadroomSection.preschoolBulletin ? null : (
-                      <p className="campus-panel__meta">
-                        Cuando todas las materias envíen su boletín de este periodo, podrás generar el boletín general aquí.
-                      </p>
-                    )}
+                    ) : null}
                   </>
                 ) : null}
               </article>

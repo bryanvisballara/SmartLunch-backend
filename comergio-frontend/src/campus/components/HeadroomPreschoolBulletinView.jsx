@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { saveTeacherPreschoolBulletin } from '../../services/preschoolBulletin.service';
 
 function entryKey(studentId, indicatorId) {
@@ -39,35 +39,101 @@ export default function HeadroomPreschoolBulletinView({
     ownedBlocks.flatMap((block) => (block.indicators || []).map((indicator) => indicator.id))
   ), [ownedBlocks]);
 
+  const bulletinSnapshotKey = useMemo(() => {
+    const entryPart = (bulletin?.entries || [])
+      .filter((entry) => ownedIndicatorIds.has(entry.indicatorId))
+      .filter((entry) => !teacherUserId || String(entry.teacherUserId || '') === String(teacherUserId))
+      .map((entry) => `${entry.studentId}:${entry.indicatorId}:${entry.performanceKey || ''}:${entry.observation || ''}`)
+      .sort()
+      .join('|');
+    const blockPart = (bulletin?.blockComments || [])
+      .filter((item) => ownedBlockIds.has(item.blockId))
+      .filter((item) => !teacherUserId || String(item.teacherUserId || '') === String(teacherUserId))
+      .map((item) => `${item.studentId}:${item.blockId}:${item.comment || ''}`)
+      .sort()
+      .join('|');
+    return [
+      bulletin?.gradeKey || '',
+      bulletin?.academicPeriodKey || '',
+      teacherUserId || '',
+      entryPart,
+      blockPart,
+    ].join('::');
+  }, [
+    bulletin?.academicPeriodKey,
+    bulletin?.blockComments,
+    bulletin?.entries,
+    bulletin?.gradeKey,
+    ownedBlockIds,
+    ownedIndicatorIds,
+    teacherUserId,
+  ]);
+
+  const lastAppliedSnapshotKeyRef = useRef('');
+
   useEffect(() => {
-    const nextMarks = {};
-    const nextOpenComments = new Set();
-    (bulletin?.entries || []).forEach((entry) => {
-      if (!ownedIndicatorIds.has(entry.indicatorId)) return;
-      if (teacherUserId && String(entry.teacherUserId || '') !== String(teacherUserId)) return;
-      nextMarks[entryKey(entry.studentId, entry.indicatorId)] = {
-        observation: entry.observation || '',
-        performanceKey: entry.performanceKey || '',
-      };
-      if (entry.observation) {
-        nextOpenComments.add(entryKey(entry.studentId, entry.indicatorId));
-      }
+    if (lastAppliedSnapshotKeyRef.current === bulletinSnapshotKey) {
+      return;
+    }
+    lastAppliedSnapshotKeyRef.current = bulletinSnapshotKey;
+
+    setMarks((current) => {
+      const nextMarks = { ...current };
+      (bulletin?.entries || []).forEach((entry) => {
+        if (!ownedIndicatorIds.has(entry.indicatorId)) return;
+        if (teacherUserId && String(entry.teacherUserId || '') !== String(teacherUserId)) return;
+        const key = entryKey(entry.studentId, entry.indicatorId);
+        const serverMark = {
+          observation: entry.observation || '',
+          performanceKey: entry.performanceKey || '',
+        };
+        const localMark = current[key];
+        const localDirty = Boolean(localMark?.performanceKey || String(localMark?.observation || '').trim());
+        if (!localDirty) {
+          nextMarks[key] = serverMark;
+          return;
+        }
+        if (serverMark.performanceKey && serverMark.performanceKey === localMark.performanceKey) {
+          nextMarks[key] = {
+            performanceKey: localMark.performanceKey,
+            observation: String(localMark.observation || '').trim() ? localMark.observation : serverMark.observation,
+          };
+        }
+      });
+      return nextMarks;
     });
 
-    const nextBlockComments = {};
-    (bulletin?.blockComments || []).forEach((item) => {
-      if (!ownedBlockIds.has(item.blockId)) return;
-      if (teacherUserId && String(item.teacherUserId || '') !== String(teacherUserId)) return;
-      nextBlockComments[blockCommentKey(item.studentId, item.blockId)] = item.comment || '';
+    setBlockComments((current) => {
+      const nextBlockComments = { ...current };
+      (bulletin?.blockComments || []).forEach((item) => {
+        if (!ownedBlockIds.has(item.blockId)) return;
+        if (teacherUserId && String(item.teacherUserId || '') !== String(teacherUserId)) return;
+        const key = blockCommentKey(item.studentId, item.blockId);
+        const serverComment = item.comment || '';
+        const localComment = String(current[key] || '').trim();
+        if (!localComment) {
+          nextBlockComments[key] = serverComment;
+        }
+      });
+      return nextBlockComments;
     });
 
-    setMarks(nextMarks);
-    setBlockComments(nextBlockComments);
-    setOpenIndicatorComments(nextOpenComments);
+    setOpenIndicatorComments((current) => {
+      const nextOpenComments = new Set(current);
+      (bulletin?.entries || []).forEach((entry) => {
+        if (!ownedIndicatorIds.has(entry.indicatorId)) return;
+        if (teacherUserId && String(entry.teacherUserId || '') !== String(teacherUserId)) return;
+        if (entry.observation) {
+          nextOpenComments.add(entryKey(entry.studentId, entry.indicatorId));
+        }
+      });
+      return nextOpenComments;
+    });
+
     setStudentId((current) => (
       (bulletin?.students || []).some((student) => student.id === current) ? current : ''
     ));
-  }, [bulletin, ownedBlockIds, ownedIndicatorIds, teacherUserId]);
+  }, [bulletin?.students, bulletinSnapshotKey, ownedBlockIds, ownedIndicatorIds, teacherUserId]);
 
   const selectedStudent = (bulletin?.students || []).find((student) => student.id === studentId) || null;
 
