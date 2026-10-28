@@ -649,6 +649,41 @@
   background: #fff;
 }
 
+.campus-teacher__convivencia-history-item.status-archived {
+  opacity: 0.72;
+  background: #f8fafc;
+}
+
+.campus-teacher__convivencia-history-item.is-editing {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
+.campus-teacher__convivencia-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.campus-teacher__convivencia-history-actions .is-danger {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.25);
+}
+
+.campus-teacher__convivencia-submit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.campus-teacher__status-pill.is-muted {
+  background: #e2e8f0;
+  color: #475569;
+}
+
 .campus-teacher__convivencia-history-item h4 {
   margin: 0.45rem 0 0.3rem;
   color: #0f2744;
@@ -17493,6 +17528,11 @@ button.campus-teacher__home-kpi-card:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+}
+
+.campus-teacher__report-card-actions--section {
+  justify-content: flex-end;
+  margin-top: 0.75rem;
 }
 
 .campus-teacher__report-card-coexistence {

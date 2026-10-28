@@ -6,6 +6,7 @@ import { LOGIN_PATH } from '../../lib/authNavigation';
 import { getSchoolDisplayName } from '../../lib/schools';
 import { isTeacherSectionEnabled } from '../../lib/staffFeatures';
 import { formatCoexistenceInfractionOption, groupCoexistenceInfractions } from '../../lib/coexistenceInfractions';
+import { resolveCoexistenceBulletinObservationText } from '../../lib/coexistenceBulletinObservations';
 import colibriLogo from '../../assets/colibrisinfondo.png';
 import { ColibriBootSplash } from '../../components/ColibriBootSplash';
 import DismissibleNotice from '../../components/DismissibleNotice';
@@ -31,6 +32,8 @@ import TeacherCameraCapture from '../components/TeacherCameraCapture';
 import {
   createCampusTeacherPost,
   createCampusTeacherDisciplineObservation,
+  updateCampusTeacherDisciplineObservation,
+  archiveCampusTeacherDisciplineObservation,
   createCampusTeacherParentFeedRequest,
   getCampusTeacherAttendance,
   getCampusTeacherCourseDetail,
@@ -567,7 +570,7 @@ function normalizeTeacherPublicationHistoryMedia(item, index) {
 const teacherDisciplineStatusLabels = {
   submitted: 'Enviada',
   reviewed: 'Revisada',
-  archived: 'Archivada',
+  archived: 'Anulada',
 };
 
 const teacherDisciplineDestinationOptions = [
@@ -1013,6 +1016,26 @@ function formatDateLabel(value) {
     year: 'numeric',
     timeZone: 'UTC',
   });
+}
+
+function formatIncidentAtForDisciplineDraft(incidentAt) {
+  if (!incidentAt) {
+    return {
+      incidentDate: getTodayDateInputValue(),
+      incidentTime: getNowTimeInputValue(),
+    };
+  }
+  const parsed = new Date(incidentAt);
+  if (Number.isNaN(parsed.getTime())) {
+    return {
+      incidentDate: getTodayDateInputValue(),
+      incidentTime: getNowTimeInputValue(),
+    };
+  }
+  return {
+    incidentDate: `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`,
+    incidentTime: `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`,
+  };
 }
 
 function getTodayDateInputValue() {
@@ -3700,6 +3723,7 @@ function TeacherCampusHome({ forcePreview = false }) {
   const [teacherSocialMediaUploadProgress, setTeacherSocialMediaUploadProgress] = useState(0);
   const [teacherSocialMediaDragActive, setTeacherSocialMediaDragActive] = useState(false);
   const [teacherDisciplineDraft, setTeacherDisciplineDraft] = useState(createTeacherDisciplineObservationDraft);
+  const [teacherDisciplineEditingId, setTeacherDisciplineEditingId] = useState('');
   const [disciplineStudentSearch, setDisciplineStudentSearch] = useState('');
   const [showDisciplineStudentMenu, setShowDisciplineStudentMenu] = useState(false);
   const [subcomponentDrafts, setSubcomponentDrafts] = useState({});
@@ -4161,11 +4185,24 @@ function TeacherCampusHome({ forcePreview = false }) {
     },
   });
 
+  const invalidateTeacherDisciplineQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'discipline-observations'] });
+    queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'headroom-report-cards'] });
+  };
+
   const createTeacherDisciplineObservationMutation = useMutation({
     mutationFn: createCampusTeacherDisciplineObservation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['campus', 'teacher', 'discipline-observations'] });
-    },
+    onSuccess: invalidateTeacherDisciplineQueries,
+  });
+
+  const updateTeacherDisciplineObservationMutation = useMutation({
+    mutationFn: ({ observationId, payload }) => updateCampusTeacherDisciplineObservation(observationId, payload),
+    onSuccess: invalidateTeacherDisciplineQueries,
+  });
+
+  const archiveTeacherDisciplineObservationMutation = useMutation({
+    mutationFn: archiveCampusTeacherDisciplineObservation,
+    onSuccess: invalidateTeacherDisciplineQueries,
   });
 
   const saveSubjectReportCardMutation = useMutation({
@@ -4924,6 +4961,12 @@ function TeacherCampusHome({ forcePreview = false }) {
   const headroomReportSections = Array.isArray(headroomReportCardsQuery.data?.sections)
     ? headroomReportCardsQuery.data.sections
     : [];
+  const headroomCoexistenceBulletinTemplates = useMemo(
+    () => (Array.isArray(headroomReportCardsQuery.data?.coexistenceBulletinTemplates)
+      ? headroomReportCardsQuery.data.coexistenceBulletinTemplates
+      : []),
+    [headroomReportCardsQuery.data?.coexistenceBulletinTemplates]
+  );
   const selectedHeadroomSection = useMemo(() => {
     if (!headroomReportSections.length) return null;
     return headroomReportSections.find((section) => String(section.sourceCourseKey) === String(headroomReportSectionKey))
@@ -5004,33 +5047,71 @@ function TeacherCampusHome({ forcePreview = false }) {
 
   useEffect(() => {
     const generalStudents = selectedHeadroomSection?.generalReport?.students || [];
-    if (!generalStudents.length) {
+    const rowStudents = buildHeadroomStudentRowsForSection(selectedHeadroomSection);
+    const sourceStudents = generalStudents.length ? generalStudents : rowStudents;
+    if (!sourceStudents.length) {
       setHeadroomObservations({});
       return;
     }
-    const nextObservations = {};
-    generalStudents.forEach((student) => {
-      nextObservations[String(student.studentId)] = String(student.headroomObservation || '');
+    setHeadroomObservations((current) => {
+      const next = { ...current };
+      sourceStudents.forEach((student) => {
+        const id = String(student.studentId);
+        const saved = String(student.headroomObservation || '');
+        if (!Object.prototype.hasOwnProperty.call(current, id)) {
+          next[id] = saved;
+        } else if (saved && !String(current[id] || '').trim()) {
+          next[id] = saved;
+        }
+      });
+      return next;
     });
-    setHeadroomObservations(nextObservations);
-  }, [selectedHeadroomSection?.generalReport?.id, selectedHeadroomSection?.generalReport?.updatedAt, selectedHeadroomSection?.sourceCourseKey, selectedHeadroomPeriodKey]);
-
-  useEffect(() => {
-    const generalStudents = selectedHeadroomSection?.generalReport?.students || [];
-    if (!generalStudents.length) {
-      setHeadroomCoexistenceObservations({});
-      return;
-    }
-    const nextObservations = {};
-    generalStudents.forEach((student) => {
-      nextObservations[String(student.studentId)] = String(student.coexistenceObservation || '');
-    });
-    setHeadroomCoexistenceObservations(nextObservations);
   }, [
     selectedHeadroomSection?.generalReport?.id,
     selectedHeadroomSection?.generalReport?.updatedAt,
     selectedHeadroomSection?.sourceCourseKey,
     selectedHeadroomPeriodKey,
+    selectedHeadroomSection?.subjectReports,
+  ]);
+
+  useEffect(() => {
+    const generalStudents = selectedHeadroomSection?.generalReport?.students || [];
+    const rowStudents = buildHeadroomStudentRowsForSection(selectedHeadroomSection);
+    const sourceStudents = generalStudents.length ? generalStudents : rowStudents;
+    if (!sourceStudents.length) {
+      setHeadroomCoexistenceObservations({});
+      return;
+    }
+    setHeadroomCoexistenceObservations((current) => {
+      const next = { ...current };
+      const useTemplates = headroomCoexistenceBulletinTemplates.length > 0
+        && !selectedHeadroomSection?.preschoolBulletin;
+      sourceStudents.forEach((student) => {
+        const id = String(student.studentId);
+        const saved = String(student.coexistenceObservation || '');
+        const score = selectedHeadroomSection?.coexistenceByStudentId?.[id]?.score ?? student.coexistenceScore;
+        const templateText = useTemplates
+          ? resolveCoexistenceBulletinObservationText(score, headroomCoexistenceBulletinTemplates)
+          : '';
+        if (!Object.prototype.hasOwnProperty.call(current, id)) {
+          next[id] = saved.trim() || templateText || '';
+        } else if (saved.trim() && !String(current[id] || '').trim()) {
+          next[id] = saved.trim();
+        } else if (!String(current[id] || '').trim() && templateText) {
+          next[id] = templateText;
+        }
+      });
+      return next;
+    });
+  }, [
+    selectedHeadroomSection?.generalReport?.id,
+    selectedHeadroomSection?.generalReport?.updatedAt,
+    selectedHeadroomSection?.sourceCourseKey,
+    selectedHeadroomPeriodKey,
+    selectedHeadroomSection?.subjectReports,
+    selectedHeadroomSection?.preschoolBulletin,
+    selectedHeadroomSection?.coexistenceByStudentId,
+    headroomCoexistenceBulletinTemplates,
   ]);
 
   useEffect(() => {
@@ -5043,6 +5124,25 @@ function TeacherCampusHome({ forcePreview = false }) {
     selectedHeadroomSection?.sourceCourseKey,
     selectedHeadroomPeriodKey,
   ]);
+
+  const resolveHeadroomCoexistenceObservationDisplay = (studentId, savedStudent = null) => {
+    const key = String(studentId || '');
+    if (Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, key)) {
+      return headroomCoexistenceObservations[key];
+    }
+    const fromReport = savedStudent || selectedHeadroomSection?.generalReport?.students?.find(
+      (student) => String(student.studentId) === key
+    );
+    const saved = String(fromReport?.coexistenceObservation || savedStudent?.coexistenceObservation || '').trim();
+    if (saved) {
+      return saved;
+    }
+    if (!headroomCoexistenceBulletinTemplates.length || selectedHeadroomSection?.preschoolBulletin) {
+      return '';
+    }
+    const coexistence = resolveHeadroomCoexistenceForStudent(key, savedStudent);
+    return resolveCoexistenceBulletinObservationText(coexistence.score, headroomCoexistenceBulletinTemplates);
+  };
 
   const resolveHeadroomCoexistenceForStudent = (studentId, savedStudent = null) => {
     const key = String(studentId || '');
@@ -5076,9 +5176,7 @@ function TeacherCampusHome({ forcePreview = false }) {
       coexistenceTotalDeducted: coexistence.totalDeducted,
       coexistenceObservationCount: coexistence.observationCount,
       coexistencePerformanceLabel: coexistence.performanceLabel,
-      coexistenceObservation: Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, studentId)
-        ? headroomCoexistenceObservations[studentId]
-        : (studentRow?.coexistenceObservation || ''),
+      coexistenceObservation: resolveHeadroomCoexistenceObservationDisplay(studentId, studentRow),
       headroomTeacherName: selectedHeadroomSection?.generalReport?.headroomTeacherName
         || selectedHeadroomSection?.generalReport?.headroomSignerName
         || authUser?.name
@@ -5136,12 +5234,12 @@ function TeacherCampusHome({ forcePreview = false }) {
     }
   };
 
-  const onSubmitHeadroomReportCard = async (nextStatus) => {
+  const onSubmitHeadroomReportCard = async (nextStatus, options = {}) => {
     if (!selectedHeadroomSection?.sourceCourseKey || !selectedHeadroomPeriodKey) {
       setNotice({ type: 'error', text: 'Selecciona el curso y el periodo del boletín general.' });
       return;
     }
-    if (!selectedHeadroomSection.allSubjectsSubmitted) {
+    if (!selectedHeadroomSection.allSubjectsSubmitted && nextStatus === 'published') {
       setNotice({ type: 'error', text: 'Aún faltan materias por enviar su boletín.' });
       return;
     }
@@ -5150,7 +5248,11 @@ function TeacherCampusHome({ forcePreview = false }) {
       return;
     }
 
-    const baseStudents = headroomStudentRows;
+    const baseStudents = headroomStudentPdfOptions.length ? headroomStudentPdfOptions : headroomStudentRows;
+    if (!baseStudents.length) {
+      setNotice({ type: 'error', text: 'Todavía no hay alumnos con boletines de materia para este periodo.' });
+      return;
+    }
 
     try {
       await saveHeadroomReportCardMutation.mutateAsync({
@@ -5168,7 +5270,7 @@ function TeacherCampusHome({ forcePreview = false }) {
           coexistenceObservation: String(
             Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, student.studentId)
               ? headroomCoexistenceObservations[student.studentId]
-              : (student.coexistenceObservation || '')
+              : resolveHeadroomCoexistenceObservationDisplay(student.studentId, student)
           ).trim(),
         })),
       });
@@ -5176,7 +5278,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         type: 'success',
         text: nextStatus === 'published'
           ? 'Boletín general publicado.'
-          : 'Borrador del boletín general guardado.',
+          : (options.draftSuccessText || 'Borrador del boletín general guardado.'),
       });
       await headroomReportCardsQuery.refetch();
     } catch (error) {
@@ -5798,6 +5900,8 @@ function TeacherCampusHome({ forcePreview = false }) {
     || createTeacherResourceRequestMutation.isPending
     || createTeacherSocialPublicationMutation.isPending
     || createTeacherDisciplineObservationMutation.isPending
+    || updateTeacherDisciplineObservationMutation.isPending
+    || archiveTeacherDisciplineObservationMutation.isPending
     || saveSubjectReportCardMutation.isPending
     || saveHeadroomReportCardMutation.isPending
     || updateCourseFlyLockMutation.isPending
@@ -8295,6 +8399,69 @@ function TeacherCampusHome({ forcePreview = false }) {
     setShowDisciplineStudentMenu(false);
   };
 
+  const resetTeacherDisciplineForm = () => {
+    setTeacherDisciplineEditingId('');
+    setTeacherDisciplineDraft(createTeacherDisciplineObservationDraft());
+    setDisciplineStudentSearch('');
+    setShowDisciplineStudentMenu(false);
+  };
+
+  const onCancelEditTeacherDisciplineObservation = () => {
+    resetTeacherDisciplineForm();
+  };
+
+  const onStartEditTeacherDisciplineObservation = (item) => {
+    if (item.status === 'archived') {
+      return;
+    }
+    const { incidentDate, incidentTime } = formatIncidentAtForDisciplineDraft(item.incidentAt || item.submittedAt);
+    setTeacherDisciplineEditingId(item.id);
+    setTeacherDisciplineDraft({
+      destination: item.destination === 'wellbeing' ? 'wellbeing' : 'coexistence',
+      courseId: item.courseId || '',
+      studentId: item.studentId || '',
+      observation: item.observation || '',
+      infractionKey: item.infractionKey || '',
+      incidentDate,
+      incidentTime,
+    });
+    setDisciplineStudentSearch('');
+    setShowDisciplineStudentMenu(false);
+    document.getElementById('teacher-coexistence-form')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
+
+  const onArchiveTeacherDisciplineObservation = async (item) => {
+    if (!item?.id || item.status === 'archived') {
+      return;
+    }
+    const confirmed = window.confirm(
+      `¿Anular la observación de ${item.studentName || 'este alumno'}? Dejará de descontar puntaje de convivencia.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      if (previewEnabled) {
+        setNotice({ type: 'success', text: 'Observación anulada en vista previa.' });
+        return;
+      }
+      const response = await archiveTeacherDisciplineObservationMutation.mutateAsync(item.id);
+      if (teacherDisciplineEditingId === item.id) {
+        resetTeacherDisciplineForm();
+      }
+      setNotice({
+        type: 'success',
+        text: response?.message || 'Observación anulada.',
+      });
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        text: error?.response?.data?.message || error?.message || 'No se pudo anular la observación.',
+      });
+    }
+  };
+
   const onSubmitTeacherDisciplineObservation = async (event) => {
     event.preventDefault();
 
@@ -8340,7 +8507,7 @@ function TeacherCampusHome({ forcePreview = false }) {
         return;
       }
 
-      await createTeacherDisciplineObservationMutation.mutateAsync({
+      const payload = {
         destination,
         courseId: teacherDisciplineDraft.courseId,
         studentId: teacherDisciplineDraft.studentId,
@@ -8349,13 +8516,28 @@ function TeacherCampusHome({ forcePreview = false }) {
         incidentDate,
         incidentTime,
         incidentAt: incidentAtDate.toISOString(),
-      });
+      };
+
+      if (teacherDisciplineEditingId) {
+        const response = await updateTeacherDisciplineObservationMutation.mutateAsync({
+          observationId: teacherDisciplineEditingId,
+          payload,
+        });
+        resetTeacherDisciplineForm();
+        setNotice({
+          type: 'success',
+          text: response?.message || 'Observación actualizada.',
+        });
+        return;
+      }
+
+      await createTeacherDisciplineObservationMutation.mutateAsync(payload);
+      setTeacherDisciplineEditingId('');
       setTeacherDisciplineDraft((currentDraft) => ({
-        ...currentDraft,
-        observation: '',
-        infractionKey: '',
-        incidentDate: getTodayDateInputValue(),
-        incidentTime: getNowTimeInputValue(),
+        ...createTeacherDisciplineObservationDraft(),
+        courseId: currentDraft.courseId,
+        studentId: currentDraft.studentId,
+        destination: currentDraft.destination,
       }));
       setNotice({
         type: 'success',
@@ -12066,6 +12248,177 @@ function TeacherCampusHome({ forcePreview = false }) {
                       </button>
                     </div>
 
+                    {!selectedHeadroomSection.preschoolBulletin && headroomStudentRows.length ? (
+                      <>
+                        <p className="campus-panel__meta campus-teacher__report-card-observations-intro">
+                          Escribe aquí las observaciones que salen en el boletín general impreso o en PDF.
+                          El puntaje de convivencia se calcula en el módulo Convivencia escolar; en la tabla de abajo va tu comentario como director de grupo.
+                          {!selectedHeadroomSection.allSubjectsSubmitted
+                            ? ' Puedes redactar y guardar borrador ya; publicar a padres requiere que todas las materias envíen su boletín.'
+                            : ''}
+                        </p>
+                        <h3 className="campus-teacher__report-card-section-title">Parte académica</h3>
+                        <div className="campus-teacher__report-card-table-wrap">
+                          <table className="campus-teacher__report-card-table campus-teacher__report-card-table--general">
+                            <thead>
+                              <tr>
+                                <th>Alumno</th>
+                                <th>Materias / comentarios</th>
+                                <th>Promedio</th>
+                                <th>Observación general</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {headroomStudentRows.map((student) => (
+                                <tr key={student.studentId}>
+                                  <td><strong>{student.studentName}</strong></td>
+                                  <td>
+                                    <ul className="campus-teacher__report-card-subject-lines">
+                                      {(student.subjectLines || []).map((line, index) => (
+                                        <li key={`${student.studentId}-${line.subject}-${index}`}>
+                                          <strong>{line.subject}: {line.periodAverage ?? '—'}</strong>
+                                          <span>{line.teacherName ? `${line.teacherName}: ` : ''}{line.teacherObservation || 'Sin observación'}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </td>
+                                  <td>{student.overallAverage ?? '—'}</td>
+                                  <td>
+                                    <textarea
+                                      disabled={selectedHeadroomSection.generalReport?.status === 'published' || saveHeadroomReportCardMutation.isPending}
+                                      onChange={(event) => setHeadroomObservations((current) => ({
+                                        ...current,
+                                        [student.studentId]: event.target.value,
+                                      }))}
+                                      placeholder="Observación general del director de grupo"
+                                      rows={3}
+                                      value={
+                                        Object.prototype.hasOwnProperty.call(headroomObservations, student.studentId)
+                                          ? headroomObservations[student.studentId]
+                                          : (student.headroomObservation || '')
+                                      }
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="campus-teacher__report-card-actions campus-teacher__report-card-actions--section">
+                          <button
+                            className="campus-teacher__action-btn campus-teacher__action-btn--compact"
+                            disabled={isBusy || selectedHeadroomSection.generalReport?.status === 'published'}
+                            onClick={() => onSubmitHeadroomReportCard('draft', {
+                              draftSuccessText: 'Observaciones de la parte académica guardadas.',
+                            })}
+                            type="button"
+                          >
+                            {saveHeadroomReportCardMutation.isPending ? 'Guardando...' : 'Guardar'}
+                          </button>
+                        </div>
+
+                        <div className="campus-teacher__report-card-coexistence">
+                          <h3>Convivencia escolar</h3>
+                          <p className="campus-panel__meta">
+                            El puntaje de convivencia usa la escala de calificaciones del nivel académico del curso.
+                            {headroomCoexistenceBulletinTemplates.length
+                              ? ' El texto de observación se sugiere según la categoría (Aprendiz, Practicante, Competente, Experto); puedes ajustarlo antes de guardar.'
+                              : ' Al publicar el boletín debes dejar una observación de convivencia para cada alumno.'}
+                          </p>
+                          <div className="campus-teacher__report-card-table-wrap">
+                            <table className="campus-teacher__report-card-table campus-teacher__report-card-table--coexistence">
+                              <thead>
+                                <tr>
+                                  <th>Alumno</th>
+                                  <th>Puntaje</th>
+                                  <th>Categoría</th>
+                                  <th>Observación de convivencia</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {headroomStudentRows.map((student) => {
+                                  const coexistence = resolveHeadroomCoexistenceForStudent(student.studentId, student);
+                                  return (
+                                    <tr key={`coexistence-${student.studentId}`}>
+                                      <td><strong>{student.studentName}</strong></td>
+                                      <td>
+                                        {coexistence.score === null || coexistence.score === undefined
+                                          ? '—'
+                                          : `${coexistence.score}%`}
+                                        {Number(coexistence.totalDeducted) > 0 ? (
+                                          <small>−{coexistence.totalDeducted}% por {coexistence.observationCount} observación{coexistence.observationCount === 1 ? '' : 'es'}</small>
+                                        ) : null}
+                                      </td>
+                                      <td>
+                                        {coexistence.performanceLabel ? (
+                                          <span
+                                            className="campus-teacher__report-card-coexistence-pill"
+                                            style={coexistence.performanceColor ? { backgroundColor: coexistence.performanceColor } : undefined}
+                                          >
+                                            {coexistence.performanceLabel}
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                      <td>
+                                        <textarea
+                                          disabled={selectedHeadroomSection.generalReport?.status === 'published' || saveHeadroomReportCardMutation.isPending}
+                                          onChange={(event) => setHeadroomCoexistenceObservations((current) => ({
+                                            ...current,
+                                            [student.studentId]: event.target.value,
+                                          }))}
+                                          placeholder="Comentario del director de grupo sobre la convivencia del alumno en este periodo"
+                                          rows={3}
+                                          value={resolveHeadroomCoexistenceObservationDisplay(student.studentId, student)}
+                                        />
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="campus-teacher__report-card-actions campus-teacher__report-card-actions--section">
+                            <button
+                              className="campus-teacher__action-btn campus-teacher__action-btn--compact"
+                              disabled={isBusy || selectedHeadroomSection.generalReport?.status === 'published'}
+                              onClick={() => onSubmitHeadroomReportCard('draft', {
+                                draftSuccessText: 'Observaciones de convivencia guardadas.',
+                              })}
+                              type="button"
+                            >
+                              {saveHeadroomReportCardMutation.isPending ? 'Guardando...' : 'Guardar'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="campus-teacher__classroom-footer">
+                          <span className="campus-panel__meta">
+                            {selectedHeadroomSection.generalReport?.status === 'published'
+                              ? 'Boletín general publicado.'
+                              : selectedHeadroomSection.allSubjectsSubmitted
+                                ? 'Cuando todo esté listo, publica el boletín general a padres.'
+                                : 'Usa Guardar en cada sección mientras llegan los boletines de materia.'}
+                          </span>
+                          <div className="campus-teacher__report-card-actions">
+                            {selectedHeadroomSection.allSubjectsSubmitted ? (
+                              <button
+                                className="campus-teacher__action-btn"
+                                disabled={
+                                  isBusy
+                                  || selectedHeadroomSection.generalReport?.status === 'published'
+                                  || !headroomSignatureDataUrl
+                                }
+                                onClick={() => onSubmitHeadroomReportCard('published')}
+                                type="button"
+                              >
+                                {saveHeadroomReportCardMutation.isPending ? 'Publicando...' : 'Publicar boletín general'}
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </>
+                    ) : null}
+
                     {!selectedHeadroomSection.preschoolBulletin ? (
                       <HeadroomGeneralPdfPanel
                         canPublishToParents={
@@ -12143,148 +12496,6 @@ function TeacherCampusHome({ forcePreview = false }) {
                         }
                         sourceCourseKey={selectedHeadroomSection.sourceCourseKey}
                       />
-                    ) : null}
-
-                    {!selectedHeadroomSection.preschoolBulletin && selectedHeadroomSection.allSubjectsSubmitted ? (
-                      <>
-                        <h3 className="campus-teacher__report-card-section-title">Parte académica</h3>
-                        <div className="campus-teacher__report-card-table-wrap">
-                          <table className="campus-teacher__report-card-table campus-teacher__report-card-table--general">
-                            <thead>
-                              <tr>
-                                <th>Alumno</th>
-                                <th>Materias / comentarios</th>
-                                <th>Promedio</th>
-                                <th>Observación general</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {headroomStudentRows.map((student) => (
-                                <tr key={student.studentId}>
-                                  <td><strong>{student.studentName}</strong></td>
-                                  <td>
-                                    <ul className="campus-teacher__report-card-subject-lines">
-                                      {(student.subjectLines || []).map((line, index) => (
-                                        <li key={`${student.studentId}-${line.subject}-${index}`}>
-                                          <strong>{line.subject}: {line.periodAverage ?? '—'}</strong>
-                                          <span>{line.teacherName ? `${line.teacherName}: ` : ''}{line.teacherObservation || 'Sin observación'}</span>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </td>
-                                  <td>{student.overallAverage ?? '—'}</td>
-                                  <td>
-                                    <textarea
-                                      disabled={selectedHeadroomSection.generalReport?.status === 'published' || saveHeadroomReportCardMutation.isPending}
-                                      onChange={(event) => setHeadroomObservations((current) => ({
-                                        ...current,
-                                        [student.studentId]: event.target.value,
-                                      }))}
-                                      placeholder="Observación general del director de grupo"
-                                      rows={3}
-                                      value={
-                                        Object.prototype.hasOwnProperty.call(headroomObservations, student.studentId)
-                                          ? headroomObservations[student.studentId]
-                                          : (student.headroomObservation || '')
-                                      }
-                                    />
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div className="campus-teacher__report-card-coexistence">
-                          <h3>Convivencia escolar</h3>
-                          <p className="campus-panel__meta">
-                            El puntaje de convivencia usa la escala de calificaciones del nivel académico del curso.
-                            Al publicar el boletín debes dejar una observación de convivencia para cada alumno.
-                          </p>
-                          <div className="campus-teacher__report-card-table-wrap">
-                            <table className="campus-teacher__report-card-table campus-teacher__report-card-table--coexistence">
-                              <thead>
-                                <tr>
-                                  <th>Alumno</th>
-                                  <th>Puntaje</th>
-                                  <th>Categoría</th>
-                                  <th>Observación de convivencia</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {headroomStudentRows.map((student) => {
-                                  const coexistence = resolveHeadroomCoexistenceForStudent(student.studentId, student);
-                                  return (
-                                    <tr key={`coexistence-${student.studentId}`}>
-                                      <td><strong>{student.studentName}</strong></td>
-                                      <td>
-                                        {coexistence.score === null || coexistence.score === undefined
-                                          ? '—'
-                                          : `${coexistence.score}%`}
-                                        {Number(coexistence.totalDeducted) > 0 ? (
-                                          <small>−{coexistence.totalDeducted}% por {coexistence.observationCount} observación{coexistence.observationCount === 1 ? '' : 'es'}</small>
-                                        ) : null}
-                                      </td>
-                                      <td>
-                                        {coexistence.performanceLabel ? (
-                                          <span
-                                            className="campus-teacher__report-card-coexistence-pill"
-                                            style={coexistence.performanceColor ? { backgroundColor: coexistence.performanceColor } : undefined}
-                                          >
-                                            {coexistence.performanceLabel}
-                                          </span>
-                                        ) : '—'}
-                                      </td>
-                                      <td>
-                                        <textarea
-                                          disabled={selectedHeadroomSection.generalReport?.status === 'published' || saveHeadroomReportCardMutation.isPending}
-                                          onChange={(event) => setHeadroomCoexistenceObservations((current) => ({
-                                            ...current,
-                                            [student.studentId]: event.target.value,
-                                          }))}
-                                          placeholder="Comentario del director de grupo sobre la convivencia del alumno en este periodo"
-                                          rows={3}
-                                          value={
-                                            Object.prototype.hasOwnProperty.call(headroomCoexistenceObservations, student.studentId)
-                                              ? headroomCoexistenceObservations[student.studentId]
-                                              : (student.coexistenceObservation || '')
-                                          }
-                                        />
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        <div className="campus-teacher__classroom-footer">
-                          <span className="campus-panel__meta">
-                            {selectedHeadroomSection.generalReport?.status === 'published'
-                              ? 'Boletín general publicado.'
-                              : 'Puedes guardar borrador o publicar el boletín general.'}
-                          </span>
-                          <div className="campus-teacher__report-card-actions">
-                            <button
-                              className="campus-teacher__ghost-btn"
-                              disabled={isBusy || selectedHeadroomSection.generalReport?.status === 'published'}
-                              onClick={() => onSubmitHeadroomReportCard('draft')}
-                              type="button"
-                            >
-                              {saveHeadroomReportCardMutation.isPending ? 'Guardando...' : 'Guardar borrador'}
-                            </button>
-                            <button
-                              className="campus-teacher__action-btn"
-                              disabled={isBusy || selectedHeadroomSection.generalReport?.status === 'published'}
-                              onClick={() => onSubmitHeadroomReportCard('published')}
-                              type="button"
-                            >
-                              {saveHeadroomReportCardMutation.isPending ? 'Publicando...' : 'Publicar boletín general'}
-                            </button>
-                          </div>
-                        </div>
-                      </>
                     ) : null}
                   </>
                 ) : null}
@@ -12629,14 +12840,16 @@ function TeacherCampusHome({ forcePreview = false }) {
                   </button>
                 </header>
 
-                <form className="campus-teacher__convivencia-card" onSubmit={onSubmitTeacherDisciplineObservation}>
+                <form className="campus-teacher__convivencia-card" id="teacher-coexistence-form" onSubmit={onSubmitTeacherDisciplineObservation}>
                   <div className="campus-teacher__convivencia-card-head">
                     <div>
-                      <h3>Nueva observación</h3>
+                      <h3>{teacherDisciplineEditingId ? 'Editar observación' : 'Nueva observación'}</h3>
                       <p>
-                        {teacherDisciplineDraft.destination === 'wellbeing'
-                          ? 'Bienestar: el reporte llega a Psicología para acompañamiento.'
-                          : 'Convivencia: el reporte llega a Coordinación, Dirección y Rectoría para seguimiento disciplinario.'}
+                        {teacherDisciplineEditingId
+                          ? 'Actualiza el registro. Los cambios recalculan el puntaje de convivencia si aplica.'
+                          : (teacherDisciplineDraft.destination === 'wellbeing'
+                            ? 'Bienestar: el reporte llega a Psicología para acompañamiento.'
+                            : 'Convivencia: el reporte llega a Coordinación, Dirección y Rectoría para seguimiento disciplinario.')}
                       </p>
                     </div>
                     <button
@@ -12873,28 +13086,42 @@ function TeacherCampusHome({ forcePreview = false }) {
                           || 'Selecciona alumno y curso para continuar.'}
                       </span>
                     </div>
-                    <button
-                      className="campus-teacher__action-btn campus-teacher__convivencia-submit"
-                      disabled={
-                        isBusy
-                        || !teacherDisciplineDraft.courseId
-                        || !teacherDisciplineDraft.studentId
-                        || !teacherDisciplineDraft.incidentDate
-                        || !teacherDisciplineDraft.incidentTime
-                        || (
-                          teacherDisciplineDraft.destination === 'coexistence'
-                          && teacherCoexistenceInfractions.length > 0
-                          && !teacherDisciplineDraft.infractionKey
-                        )
-                      }
-                      type="submit"
-                    >
-                      <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
-                        <path d="M4 11.5 20 4l-3.5 16L11 13 4 11.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
-                        <path d="M11 13 20 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
-                      </svg>
-                      {createTeacherDisciplineObservationMutation.isPending ? 'Enviando...' : 'Enviar observación'}
-                    </button>
+                    <div className="campus-teacher__convivencia-submit-actions">
+                      {teacherDisciplineEditingId ? (
+                        <button
+                          className="campus-teacher__ghost-btn"
+                          disabled={isBusy}
+                          onClick={onCancelEditTeacherDisciplineObservation}
+                          type="button"
+                        >
+                          Cancelar edición
+                        </button>
+                      ) : null}
+                      <button
+                        className="campus-teacher__action-btn campus-teacher__convivencia-submit"
+                        disabled={
+                          isBusy
+                          || !teacherDisciplineDraft.courseId
+                          || !teacherDisciplineDraft.studentId
+                          || !teacherDisciplineDraft.incidentDate
+                          || !teacherDisciplineDraft.incidentTime
+                          || (
+                            teacherDisciplineDraft.destination === 'coexistence'
+                            && teacherCoexistenceInfractions.length > 0
+                            && !teacherDisciplineDraft.infractionKey
+                          )
+                        }
+                        type="submit"
+                      >
+                        <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+                          <path d="M4 11.5 20 4l-3.5 16L11 13 4 11.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+                          <path d="M11 13 20 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.7" />
+                        </svg>
+                        {teacherDisciplineEditingId
+                          ? (updateTeacherDisciplineObservationMutation.isPending ? 'Guardando...' : 'Guardar cambios')
+                          : (createTeacherDisciplineObservationMutation.isPending ? 'Enviando...' : 'Enviar observación')}
+                      </button>
+                    </div>
                   </div>
                 </form>
 
@@ -12924,13 +13151,18 @@ function TeacherCampusHome({ forcePreview = false }) {
                   {teacherDisciplineObservations.length > 0 ? (
                     <div className="campus-teacher__convivencia-history-list">
                       {teacherDisciplineObservations.map((item) => (
-                        <article className={`campus-teacher__convivencia-history-item status-${item.status}`} key={item.id}>
+                        <article
+                          className={`campus-teacher__convivencia-history-item status-${item.status}${teacherDisciplineEditingId === item.id ? ' is-editing' : ''}`}
+                          key={item.id}
+                        >
                           <div>
                             <div className="campus-teacher__convivencia-history-pills">
                               <span className={`campus-teacher__status-pill is-destination-${item.destination === 'wellbeing' ? 'wellbeing' : 'coexistence'}`}>
                                 {teacherDisciplineDestinationLabels[item.destination] || 'Convivencia'}
                               </span>
-                              <span className="campus-teacher__status-pill is-active">{teacherDisciplineStatusLabels[item.status] || item.status}</span>
+                              <span className={`campus-teacher__status-pill${item.status === 'archived' ? ' is-muted' : ' is-active'}`}>
+                                {teacherDisciplineStatusLabels[item.status] || item.status}
+                              </span>
                             </div>
                             <h4>{item.studentName}</h4>
                             {item.infractionLabel ? (
@@ -12940,6 +13172,26 @@ function TeacherCampusHome({ forcePreview = false }) {
                               </p>
                             ) : null}
                             <p>{item.observation}</p>
+                            {item.status !== 'archived' ? (
+                              <div className="campus-teacher__convivencia-history-actions">
+                                <button
+                                  className="campus-teacher__ghost-btn campus-teacher__action-btn--compact"
+                                  disabled={isBusy}
+                                  onClick={() => onStartEditTeacherDisciplineObservation(item)}
+                                  type="button"
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  className="campus-teacher__ghost-btn campus-teacher__action-btn--compact is-danger"
+                                  disabled={isBusy}
+                                  onClick={() => onArchiveTeacherDisciplineObservation(item)}
+                                  type="button"
+                                >
+                                  {archiveTeacherDisciplineObservationMutation.isPending ? 'Anulando...' : 'Anular'}
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                           <div className="campus-teacher__convivencia-history-meta">
                             <span>{formatDateTimeLabel(item.incidentAt || item.submittedAt)}</span>

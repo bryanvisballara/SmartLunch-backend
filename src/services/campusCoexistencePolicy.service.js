@@ -5,6 +5,7 @@ const {
   buildMillenniumDisciplineInfractions,
   looksLikeGenericCoexistenceDefaults,
 } = require('../data/millenniumDisciplineChart');
+const { buildMillenniumCoexistenceBulletinTemplates } = require('../data/millenniumCoexistenceBulletinTemplates');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -70,23 +71,99 @@ function getDefaultInfractionsForSchool(schoolId) {
   ];
 }
 
+function serializeBulletinObservationTemplate(item = {}, index = 0) {
+  const minScore = clampPercent(item?.minScore, 0);
+  const maxScore = clampPercent(item?.maxScore, 100);
+  return {
+    key: normalizeText(item.key) || slugifyInfractionKey(item?.label, `nivel_${index + 1}`),
+    label: normalizeText(item.label).slice(0, 120),
+    minScore: Math.min(minScore, maxScore),
+    maxScore: Math.max(minScore, maxScore),
+    text: normalizeText(item.text).slice(0, 4000),
+    active: item.active !== false,
+    order: Number(item.order ?? (index + 1) * 10),
+  };
+}
+
 function serializeCoexistencePolicy(policy) {
   const startingScore = clampPercent(policy?.startingScore ?? 100, 100);
   const infractions = (Array.isArray(policy?.infractions) ? policy.infractions : [])
     .map(serializeInfraction)
     .filter((item) => item.label)
     .sort((left, right) => left.order - right.order || left.code.localeCompare(right.code, 'es') || left.label.localeCompare(right.label, 'es'));
+  const bulletinObservationTemplates = (Array.isArray(policy?.bulletinObservationTemplates)
+    ? policy.bulletinObservationTemplates
+    : [])
+    .map(serializeBulletinObservationTemplate)
+    .filter((item) => item.text)
+    .sort((left, right) => left.order - right.order || left.minScore - right.minScore);
 
   return {
     id: policy?._id ? String(policy._id) : '',
     schoolId: normalizeText(policy?.schoolId),
     startingScore,
     infractions,
+    bulletinObservationTemplates,
     updatedByUserId: policy?.updatedByUserId ? String(policy.updatedByUserId) : '',
     updatedByName: normalizeText(policy?.updatedByName),
     updatedAt: policy?.updatedAt || null,
     createdAt: policy?.createdAt || null,
   };
+}
+
+function getDefaultBulletinObservationTemplatesForSchool(schoolId) {
+  if (isMillenniumSchoolId(schoolId)) {
+    return buildMillenniumCoexistenceBulletinTemplates();
+  }
+  return [];
+}
+
+function normalizeBulletinObservationTemplatesInput(rawTemplates = []) {
+  const list = Array.isArray(rawTemplates) ? rawTemplates : [];
+  const usedKeys = new Set();
+  const normalized = [];
+
+  list.forEach((item, index) => {
+    const text = normalizeText(item?.text);
+    if (!text) {
+      return;
+    }
+
+    let key = slugifyInfractionKey(item?.key || item?.label, `nivel_${index + 1}`);
+    let uniqueKey = key;
+    let suffix = 2;
+    while (usedKeys.has(uniqueKey)) {
+      uniqueKey = `${key}_${suffix}`;
+      suffix += 1;
+    }
+    usedKeys.add(uniqueKey);
+
+    normalized.push(serializeBulletinObservationTemplate({
+      ...item,
+      key: uniqueKey,
+      text,
+    }, index));
+  });
+
+  return normalized.sort((left, right) => left.order - right.order || left.minScore - right.minScore);
+}
+
+function resolveCoexistenceBulletinObservationText(score, templates = []) {
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore)) {
+    return '';
+  }
+
+  const list = (Array.isArray(templates) ? templates : [])
+    .filter((item) => item?.active !== false && normalizeText(item?.text))
+    .sort((left, right) => left.order - right.order);
+
+  const match = list.find((item) => (
+    numericScore >= Number(item.minScore)
+    && numericScore <= Number(item.maxScore)
+  ));
+
+  return normalizeText(match?.text);
 }
 
 async function getOrCreateCoexistencePolicy(schoolId) {
@@ -101,6 +178,20 @@ async function getOrCreateCoexistencePolicy(schoolId) {
         schoolId: normalizedSchoolId,
         startingScore: policy.startingScore ?? 100,
         infractions: buildMillenniumDisciplineInfractions(),
+        bulletinObservationTemplates: policy.bulletinObservationTemplates?.length
+          ? policy.bulletinObservationTemplates
+          : getDefaultBulletinObservationTemplatesForSchool(normalizedSchoolId),
+      });
+    }
+    if (
+      isMillenniumSchoolId(normalizedSchoolId)
+      && !(Array.isArray(policy.bulletinObservationTemplates) && policy.bulletinObservationTemplates.length)
+    ) {
+      return saveCoexistencePolicy({
+        schoolId: normalizedSchoolId,
+        startingScore: policy.startingScore ?? 100,
+        infractions: policy.infractions,
+        bulletinObservationTemplates: getDefaultBulletinObservationTemplatesForSchool(normalizedSchoolId),
       });
     }
     return policy;
@@ -110,6 +201,7 @@ async function getOrCreateCoexistencePolicy(schoolId) {
     schoolId: normalizedSchoolId,
     startingScore: 100,
     infractions: getDefaultInfractionsForSchool(normalizedSchoolId),
+    bulletinObservationTemplates: getDefaultBulletinObservationTemplatesForSchool(normalizedSchoolId),
   });
 
   return policy.toObject ? policy.toObject() : policy;
@@ -157,22 +249,27 @@ async function saveCoexistencePolicy({
   schoolId,
   startingScore,
   infractions,
+  bulletinObservationTemplates,
   updatedByUserId,
   updatedByName,
 }) {
   const normalizedSchoolId = normalizeText(schoolId);
   const nextInfractions = normalizeInfractionsInput(infractions);
+  const update = {
+    schoolId: normalizedSchoolId,
+    startingScore: clampPercent(startingScore, 100),
+    infractions: nextInfractions,
+    updatedByUserId: updatedByUserId || null,
+    updatedByName: normalizeText(updatedByName),
+  };
+
+  if (bulletinObservationTemplates !== undefined) {
+    update.bulletinObservationTemplates = normalizeBulletinObservationTemplatesInput(bulletinObservationTemplates);
+  }
+
   const policy = await CampusCoexistencePolicy.findOneAndUpdate(
     { schoolId: normalizedSchoolId },
-    {
-      $set: {
-        schoolId: normalizedSchoolId,
-        startingScore: clampPercent(startingScore, 100),
-        infractions: nextInfractions,
-        updatedByUserId: updatedByUserId || null,
-        updatedByName: normalizeText(updatedByName),
-      },
-    },
+    { $set: update },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean();
 
@@ -268,6 +365,7 @@ module.exports = {
   computeDisciplineScore,
   buildStudentCoexistenceScore,
   buildStudentCoexistenceScoreForPeriod,
+  resolveCoexistenceBulletinObservationText,
   slugifyInfractionKey,
   clampPercent,
 };

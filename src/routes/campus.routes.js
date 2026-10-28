@@ -38,6 +38,7 @@ const {
   buildStudentCoexistenceScore,
   buildStudentCoexistenceScoreForPeriod,
   computeDisciplineScore,
+  resolveCoexistenceBulletinObservationText,
 } = require('../services/campusCoexistencePolicy.service');
 const {
   normalizeHeadroomSubjectSlug,
@@ -164,7 +165,7 @@ const disciplineObservationRecipientsByDestination = {
   coexistence: ['coordination', 'direccion', 'rectoria'],
 };
 const disciplineObservationViewerRoles = ['admin', 'rectoria', 'direccion', 'coordination', 'psychology'];
-const coexistencePolicyManagerRoles = ['admin', 'rectoria', 'direccion', 'coordination'];
+const coexistencePolicyManagerRoles = ['admin', 'rectoria', 'direccion', 'coordination', 'psychology'];
 const attendanceReportViewerRoles = ['admin', 'rectoria', 'direccion', 'coordination', 'psychology', 'nursing'];
 const schoolRouteOperatorRoles = ['admin', 'rectoria', 'direccion', 'academic_secretary', 'school_route'];
 const schoolRouteConfiguratorRoles = ['admin', 'rectoria', 'direccion', 'academic_secretary'];
@@ -7837,6 +7838,206 @@ router.post('/teacher/discipline-observations', requireCampusTeacherAccess, asyn
   }
 });
 
+async function loadTeacherOwnedDisciplineObservation({ schoolId, userId, observationId }) {
+  if (!isValidObjectId(observationId)) {
+    return { error: { status: 400, message: 'Identificador de observación inválido.' } };
+  }
+
+  const observation = await CampusDisciplineObservation.findOne({
+    _id: observationId,
+    schoolId,
+    teacherUserId: userId,
+  }).lean();
+
+  if (!observation) {
+    return { error: { status: 404, message: 'Observación no encontrada o no puedes modificarla.' } };
+  }
+
+  if (normalizeText(observation.status) === 'archived') {
+    return { error: { status: 400, message: 'Esta observación ya fue anulada y no se puede editar.' } };
+  }
+
+  return { observation };
+}
+
+async function resolveDisciplineInfractionForObservation({ schoolId, destination, infractionKeyRaw }) {
+  if (destination !== 'coexistence') {
+    return { infractionKey: '', infractionLabel: '', deductionPercent: 0 };
+  }
+
+  const policy = await getOrCreateCoexistencePolicy(schoolId);
+  const activeInfractions = (policy.infractions || []).filter((item) => item.active !== false);
+  if (!activeInfractions.length) {
+    return { infractionKey: '', infractionLabel: '', deductionPercent: 0 };
+  }
+
+  const matched = findActiveInfraction(policy, infractionKeyRaw);
+  if (!matched) {
+    return {
+      error: {
+        status: 400,
+        message: 'Selecciona el tipo de falta definido por Rectoría para calificar la convivencia.',
+      },
+    };
+  }
+
+  return {
+    infractionKey: normalizeText(matched.key),
+    infractionLabel: normalizeText(matched.label),
+    deductionPercent: Number(matched.deductionPercent || 0),
+  };
+}
+
+function resolveDisciplineIncidentAtFromBody(body = {}) {
+  const incidentDate = normalizeText(body.incidentDate);
+  const incidentTime = normalizeText(body.incidentTime);
+  const incidentAtRaw = normalizeText(body.incidentAt);
+
+  if (incidentAtRaw) {
+    const incidentAt = parseOptionalDate(incidentAtRaw);
+    if (incidentAt === 'invalid') {
+      return { error: { status: 400, message: 'La fecha y hora del caso no son válidas.' } };
+    }
+    return { incidentAt };
+  }
+
+  if (incidentDate) {
+    const timePart = /^\d{2}:\d{2}$/.test(incidentTime) ? incidentTime : '00:00';
+    const incidentAt = parseOptionalDate(`${incidentDate}T${timePart}:00`);
+    if (incidentAt === 'invalid' || !incidentAt) {
+      return { error: { status: 400, message: 'La fecha y hora del caso no son válidas.' } };
+    }
+    return { incidentAt };
+  }
+
+  return { error: { status: 400, message: 'Indica la fecha y hora del caso.' } };
+}
+
+router.patch('/teacher/discipline-observations/:observationId', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const observationId = normalizeText(req.params.observationId);
+    const loaded = await loadTeacherOwnedDisciplineObservation({ schoolId, userId, observationId });
+    if (loaded.error) {
+      return res.status(loaded.error.status).json({ message: loaded.error.message });
+    }
+
+    const existing = loaded.observation;
+    const destination = disciplineObservationDestinations.includes(normalizeText(req.body?.destination).toLowerCase())
+      ? normalizeText(req.body.destination).toLowerCase()
+      : (normalizeText(existing.destination) === 'wellbeing' ? 'wellbeing' : 'coexistence');
+    const observationText = normalizeText(req.body?.observation).slice(0, 2000);
+    const courseId = normalizeText(req.body?.courseId) || String(existing.courseId || '');
+    const studentId = normalizeText(req.body?.studentId) || String(existing.studentId || '');
+    const infractionKeyRaw = normalizeText(req.body?.infractionKey);
+
+    if (!isValidObjectId(courseId)) {
+      return res.status(400).json({ message: 'courseId is invalid' });
+    }
+    if (!isValidObjectId(studentId)) {
+      return res.status(400).json({ message: 'studentId is invalid' });
+    }
+    if (!observationText || observationText.length < 8) {
+      return res.status(400).json({ message: 'La observacion debe tener al menos 8 caracteres.' });
+    }
+
+    const infractionResult = await resolveDisciplineInfractionForObservation({
+      schoolId,
+      destination,
+      infractionKeyRaw: destination === 'coexistence' ? infractionKeyRaw : '',
+    });
+    if (infractionResult.error) {
+      return res.status(infractionResult.error.status).json({ message: infractionResult.error.message });
+    }
+
+    const incidentResult = resolveDisciplineIncidentAtFromBody(req.body);
+    if (incidentResult.error) {
+      return res.status(incidentResult.error.status).json({ message: incidentResult.error.message });
+    }
+
+    const course = await resolveTeacherAssignedCourse({
+      schoolId,
+      teacherUserId: userId,
+      courseId,
+      sync: true,
+    });
+    if (!course) {
+      return res.status(404).json({ message: 'Curso asignado no encontrado.' });
+    }
+
+    const student = await Student.findOne({
+      _id: studentId,
+      schoolId,
+      deletedAt: null,
+      status: 'active',
+    })
+      .select('name schoolCode grade course')
+      .lean();
+
+    if (!student || !studentBelongsToCourse(student, course)) {
+      return res.status(404).json({ message: 'El alumno no pertenece al grupo asignado a este docente.' });
+    }
+
+    const recipients = disciplineObservationRecipientsByDestination[destination] || disciplineObservationRecipients;
+
+    const updated = await CampusDisciplineObservation.findOneAndUpdate(
+      { _id: existing._id, schoolId, teacherUserId: userId },
+      {
+        $set: {
+          courseId: course._id,
+          courseTitle: normalizeText(course.title),
+          subject: normalizeText(course.subject),
+          studentGradeKey: normalizeText(course.studentGradeKey),
+          studentId: student._id,
+          studentName: normalizeText(student.name),
+          studentSchoolCode: normalizeText(student.schoolCode),
+          studentGrade: normalizeText(student.grade),
+          studentCourse: normalizeText(student.course),
+          observation: observationText,
+          destination,
+          infractionKey: infractionResult.infractionKey,
+          infractionLabel: infractionResult.infractionLabel,
+          deductionPercent: infractionResult.deductionPercent,
+          incidentAt: incidentResult.incidentAt,
+          recipients,
+        },
+      },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json({
+      observation: serializeDisciplineObservation(updated),
+      message: 'Observación actualizada.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo actualizar la observación.' });
+  }
+});
+
+router.post('/teacher/discipline-observations/:observationId/archive', requireCampusTeacherAccess, async (req, res) => {
+  try {
+    const { schoolId, userId } = req.user;
+    const observationId = normalizeText(req.params.observationId);
+    const loaded = await loadTeacherOwnedDisciplineObservation({ schoolId, userId, observationId });
+    if (loaded.error) {
+      return res.status(loaded.error.status).json({ message: loaded.error.message });
+    }
+
+    const updated = await CampusDisciplineObservation.findOneAndUpdate(
+      { _id: loaded.observation._id, schoolId, teacherUserId: userId },
+      { $set: { status: 'archived' } },
+      { new: true }
+    ).lean();
+
+    return res.status(200).json({
+      observation: serializeDisciplineObservation(updated),
+      message: 'Observación anulada. Ya no afecta el puntaje de convivencia.',
+    });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || 'No se pudo anular la observación.' });
+  }
+});
+
 router.get('/discipline-observations', async (req, res) => {
   try {
     const { schoolId } = req.user;
@@ -9331,6 +9532,8 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
       .select('gradeSchedules grades subjects levels classroomGroups')
       .lean();
 
+    const coexistencePolicy = serializeCoexistencePolicy(await getOrCreateCoexistencePolicy(schoolId));
+
     const sections = [];
     for (const guidanceCourse of guidanceCourses) {
       const sectionKey = normalizeText(guidanceCourse.sourceCourseKey).toUpperCase();
@@ -9435,7 +9638,10 @@ router.get('/teacher/headroom/report-cards', requireCampusTeacherAccess, async (
       });
     }
 
-    return res.status(200).json({ sections });
+    return res.status(200).json({
+      sections,
+      coexistenceBulletinTemplates: coexistencePolicy.bulletinObservationTemplates || [],
+    });
   } catch (error) {
     return res.status(500).json({ message: error.message || 'No se pudo cargar el boletín general.' });
   }
@@ -9654,7 +9860,7 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
       schoolId,
       sourceCourseKey,
       academicPeriodKey,
-      status: 'submitted',
+      status: status === 'published' ? 'submitted' : { $in: ['submitted', 'partial'] },
       campusCourseId: { $in: subjectCourses.map((course) => course._id) },
     }).lean();
     const reportsByCourseId = new Map(subjectReportsAll.map((report) => [String(report.campusCourseId), report]));
@@ -9673,7 +9879,7 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
     const missingSubjectReports = expectedSubjectsForPublish.filter(
       (expected) => !submittedSubjectSlugs.has(expected.slug)
     );
-    if (missingSubjectReports.length) {
+    if (status === 'published' && missingSubjectReports.length) {
       return res.status(400).json({
         message: `Aún faltan boletines por enviar: ${missingSubjectReports.map((item) => item.subjectLabel).join(', ')}.`,
       });
@@ -9733,6 +9939,9 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
 
     const gradingContext = await loadCampusGradingContext(schoolId);
     const gradingScale = resolveCampusGradingScaleForCourse(gradingContext, guidanceCourse);
+    const bulletinObservationTemplates = serializeCoexistencePolicy(
+      await getOrCreateCoexistencePolicy(schoolId)
+    ).bulletinObservationTemplates || [];
 
     const students = await Promise.all(Array.from(studentsById.values())
       .map(async (student) => {
@@ -9742,6 +9951,9 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
           academicPeriodKey,
         });
         const performanceLevel = resolvePerformanceLevelForScore(coexistenceSummary.score, gradingScale);
+        const incomingCoexistenceObservation = coexistenceObservationByStudentId.get(String(student.studentId)) || '';
+        const coexistenceObservation = incomingCoexistenceObservation
+          || resolveCoexistenceBulletinObservationText(coexistenceSummary.score, bulletinObservationTemplates);
         return {
           ...student,
           headroomObservation: observationByStudentId.get(String(student.studentId)) || '',
@@ -9749,7 +9961,7 @@ router.post('/teacher/headroom/report-cards', requireCampusTeacherAccess, async 
           coexistenceTotalDeducted: coexistenceSummary.totalDeducted,
           coexistenceObservationCount: coexistenceSummary.observationCount,
           coexistencePerformanceLabel: normalizeText(performanceLevel?.label),
-          coexistenceObservation: coexistenceObservationByStudentId.get(String(student.studentId)) || '',
+          coexistenceObservation,
         };
       }));
 
@@ -10311,6 +10523,7 @@ router.put('/coexistence-policy', async (req, res) => {
       schoolId,
       startingScore: req.body?.startingScore,
       infractions: req.body?.infractions,
+      bulletinObservationTemplates: req.body?.bulletinObservationTemplates,
       updatedByUserId: userId,
       updatedByName: name,
     });

@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { groupCoexistenceInfractions } from '../../lib/coexistenceInfractions';
 
+function createEmptyBulletinTemplate(order = 10) {
+  return {
+    key: '',
+    label: '',
+    minScore: 0,
+    maxScore: 100,
+    text: '',
+    active: true,
+    order,
+  };
+}
+
 function createEmptyInfraction(order = 10) {
   return {
     key: '',
@@ -24,10 +36,24 @@ export default function RectoriaCoexistencePolicyPanel({
 }) {
   const [startingScore, setStartingScore] = useState(100);
   const [infractions, setInfractions] = useState([]);
+  const [bulletinTemplates, setBulletinTemplates] = useState([]);
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
     setStartingScore(Number(policy?.startingScore ?? 100));
+    setBulletinTemplates(
+      Array.isArray(policy?.bulletinObservationTemplates) && policy.bulletinObservationTemplates.length
+        ? policy.bulletinObservationTemplates.map((item, index) => ({
+            key: item.key || '',
+            label: item.label || '',
+            minScore: Number(item.minScore ?? 0),
+            maxScore: Number(item.maxScore ?? 100),
+            text: item.text || '',
+            active: item.active !== false,
+            order: Number(item.order ?? (index + 1) * 10),
+          }))
+        : []
+    );
     setInfractions(
       Array.isArray(policy?.infractions) && policy.infractions.length
         ? policy.infractions.map((item, index) => ({
@@ -73,6 +99,23 @@ export default function RectoriaCoexistencePolicyPanel({
     setInfractions((current) => (current.length <= 1 ? current : current.filter((_, itemIndex) => itemIndex !== index)));
   };
 
+  const onChangeBulletinTemplate = (index, field, value) => {
+    setBulletinTemplates((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )));
+  };
+
+  const onAddBulletinTemplate = () => {
+    setBulletinTemplates((current) => [
+      ...current,
+      createEmptyBulletinTemplate((current.length + 1) * 10),
+    ]);
+  };
+
+  const onRemoveBulletinTemplate = (index) => {
+    setBulletinTemplates((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  };
+
   const onSubmit = async (event) => {
     event.preventDefault();
     setNotice('');
@@ -96,10 +139,27 @@ export default function RectoriaCoexistencePolicyPanel({
       return;
     }
 
+    const cleanedBulletinTemplates = bulletinTemplates
+      .map((item, index) => ({
+        ...item,
+        label: String(item.label || '').trim(),
+        text: String(item.text || '').trim(),
+        minScore: Number(item.minScore ?? 0),
+        maxScore: Number(item.maxScore ?? 100),
+        order: Number(item.order ?? (index + 1) * 10),
+      }))
+      .filter((item) => item.text);
+
+    if (cleanedBulletinTemplates.some((item) => item.minScore < 0 || item.maxScore > 100 || item.minScore > item.maxScore)) {
+      setNotice('Revisa los rangos de puntaje de las observaciones del boletín (0–100).');
+      return;
+    }
+
     try {
       await onSave?.({
         startingScore: Number(startingScore || 100),
         infractions: cleaned,
+        bulletinObservationTemplates: cleanedBulletinTemplates,
       });
       setNotice('Política de convivencia guardada.');
     } catch (error) {
@@ -223,6 +283,96 @@ export default function RectoriaCoexistencePolicyPanel({
             </section>
           ))}
         </div>
+
+        <div className="rectoria-coexistence-policy__list-head rectoria-coexistence-policy__list-head--spaced">
+          <div>
+            <h3>Observaciones del boletín general</h3>
+            <p>
+              Textos predeterminados para primaria y secundaria según el puntaje de convivencia del periodo.
+              El director de grupo los verá sugeridos al armar el boletín.
+            </p>
+          </div>
+          <button className="rectoria-coexistence-policy__add-btn" onClick={onAddBulletinTemplate} type="button">
+            <span aria-hidden="true">+</span>
+            Agregar nivel
+          </button>
+        </div>
+
+        {bulletinTemplates.length ? (
+          <div className="rectoria-coexistence-policy__list rectoria-coexistence-policy__list--bulletin">
+            {bulletinTemplates.map((item, index) => (
+              <article className={`rectoria-coexistence-policy__card${item.active === false ? ' is-inactive' : ''}`} key={`bulletin-${item.key || index}`}>
+                <div className="rectoria-coexistence-policy__card-top">
+                  <span className="rectoria-coexistence-policy__card-index">
+                    {item.label || `Nivel ${index + 1}`}
+                  </span>
+                  <button
+                    aria-label={`Quitar nivel ${item.label || index + 1}`}
+                    className="rectoria-coexistence-policy__remove-btn"
+                    onClick={() => onRemoveBulletinTemplate(index)}
+                    type="button"
+                  >
+                    Quitar
+                  </button>
+                </div>
+                <div className="rectoria-coexistence-policy__card-grid">
+                  <label>
+                    <span>Categoría</span>
+                    <input
+                      onChange={(event) => onChangeBulletinTemplate(index, 'label', event.target.value)}
+                      placeholder="Ej. COMPETENTE"
+                      value={item.label}
+                    />
+                  </label>
+                  <label>
+                    <span>Puntaje mínimo</span>
+                    <input
+                      max={100}
+                      min={0}
+                      onChange={(event) => onChangeBulletinTemplate(index, 'minScore', event.target.value)}
+                      step={1}
+                      type="number"
+                      value={item.minScore}
+                    />
+                  </label>
+                  <label>
+                    <span>Puntaje máximo</span>
+                    <input
+                      max={100}
+                      min={0}
+                      onChange={(event) => onChangeBulletinTemplate(index, 'maxScore', event.target.value)}
+                      step={1}
+                      type="number"
+                      value={item.maxScore}
+                    />
+                  </label>
+                  <label className="rectoria-coexistence-policy__toggle">
+                    <input
+                      checked={item.active !== false}
+                      onChange={(event) => onChangeBulletinTemplate(index, 'active', event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Activa en boletín</span>
+                  </label>
+                </div>
+                <label>
+                  <span>Texto de observación</span>
+                  <textarea
+                    onChange={(event) => onChangeBulletinTemplate(index, 'text', event.target.value)}
+                    placeholder="Texto que aparece en el boletín general para alumnos en este rango."
+                    rows={5}
+                    value={item.text}
+                  />
+                </label>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="campus-panel__meta">
+            Todavía no hay textos configurados. En Millennium se cargan por defecto al abrir esta sección;
+            puedes agregar niveles o editarlos aquí.
+          </p>
+        )}
 
         <footer className="rectoria-coexistence-policy__footer">
           <div className="rectoria-coexistence-policy__footer-actions">

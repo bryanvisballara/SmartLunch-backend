@@ -8134,6 +8134,22 @@ button.rectoria-team-assignment-card.is-active {
   font-size: 0.9rem;
 }
 
+.rectoria-coexistence-policy__list-head--spaced {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.rectoria-coexistence-policy__card textarea {
+  width: 100%;
+  min-height: 6rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #d5deea;
+  border-radius: 10px;
+  font: inherit;
+  resize: vertical;
+}
+
 .rectoria-coexistence-policy__add-btn,
 .rectoria-coexistence-policy__remove-btn,
 .rectoria-coexistence-policy__save-btn {

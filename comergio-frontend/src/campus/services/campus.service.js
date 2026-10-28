@@ -330,6 +330,14 @@ export function createCampusTeacherDisciplineObservation(payload) {
   return api.post('/campus/teacher/discipline-observations', payload).then((response) => response.data);
 }
 
+export function updateCampusTeacherDisciplineObservation(observationId, payload) {
+  return api.patch(`/campus/teacher/discipline-observations/${observationId}`, payload).then((response) => response.data);
+}
+
+export function archiveCampusTeacherDisciplineObservation(observationId) {
+  return api.post(`/campus/teacher/discipline-observations/${observationId}/archive`).then((response) => response.data);
+}
+
 export function getCampusDisciplineObservations(params = {}) {
   return api.get('/campus/discipline-observations', { params })
     .then((response) => response.data)
